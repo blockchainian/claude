@@ -2,14 +2,88 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Default)]
+#[path = "line_edit_selection.rs"]
+mod selection;
+
+/// CSI-u can report an ASCII control code instead of its letter and Control modifier.
+pub(super) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
+    if let KeyCode::Char(character @ '\u{1}'..='\u{1a}') = key.code {
+        key.code = KeyCode::Char(char::from(character as u8 - 1 + b'a'));
+        key.modifiers |= KeyModifiers::CONTROL;
+    }
+    key
+}
+
+#[path = "line_images.rs"]
+mod images;
+
+#[derive(Clone, Default)]
 pub(super) struct LineEdit {
+    images: Vec<images::ImageSpan>,
+    selection: Option<(usize, usize)>,
     text: String,
     /// Byte offset at a grapheme boundary.
     cursor: usize,
+    preferred_column: Option<usize>,
 }
 
 impl LineEdit {
+    /// Caret stops as (byte offset, display column, visual row).
+    pub(super) fn visual_positions(&self, width: usize) -> Vec<(usize, usize, usize)> {
+        let width = width.max(1);
+        let mut positions = Vec::new();
+        let (mut column, mut row) = (0, 0);
+        for (index, grapheme) in self.text.grapheme_indices(true) {
+            let columns = grapheme.width();
+            if column > 0 && column + columns.max(1) > width {
+                row += 1;
+                column = 0;
+            }
+            positions.push((index, column, row));
+            if grapheme == "\n" || grapheme == "\r\n" {
+                row += 1;
+                column = 0;
+            } else {
+                column += columns.min(width);
+            }
+        }
+        if column >= width {
+            row += 1;
+            column = 0;
+        }
+        positions.push((self.text.len(), column, row));
+        positions
+    }
+
+    /// Returns false when the caret is already on the requested boundary row.
+    pub(super) fn move_vertical(&mut self, width: usize, down: bool) -> bool {
+        let positions = self.visual_positions(width);
+        let &(_, column, row) = positions
+            .iter()
+            .find(|p| p.0 == self.cursor)
+            .expect("caret boundary");
+        let target_row = if down {
+            if row == positions.last().expect("end caret").2 {
+                return false;
+            }
+            row + 1
+        } else {
+            let Some(row) = row.checked_sub(1) else {
+                return false;
+            };
+            row
+        };
+        let column = *self.preferred_column.get_or_insert(column);
+        self.cursor = positions
+            .iter()
+            .rfind(|p| p.2 == target_row && p.1 <= column)
+            .or_else(|| positions.iter().find(|p| p.2 == target_row))
+            .expect("visual row has caret")
+            .0;
+        self.cursor = self.caret_boundary(self.cursor, down);
+        true
+    }
+
     pub(super) fn cursor(&self) -> usize {
         self.cursor
     }
@@ -21,58 +95,68 @@ impl LineEdit {
         self.text.is_empty()
     }
     pub(super) fn set_text(&mut self, text: &str) {
+        self.preferred_column = None;
+        self.images.clear();
         self.text = text.into();
         self.end();
+        self.clear_selection();
     }
     pub(super) fn clear(&mut self) {
         self.set_text("");
     }
     pub(super) fn insert(&mut self, text: impl ToString) {
+        if self.selection_range().is_some() {
+            self.replace_selection(text);
+            return;
+        }
+        self.preferred_column = None;
         let text = text.to_string();
-        self.text.insert_str(self.cursor, &text);
-        self.cursor += text.len();
+        let range = self.replace_images(self.cursor..self.cursor, &text);
+        self.cursor = range.start + text.len();
         self.align_cursor();
     }
     // Insertion or deletion can join the graphemes on either side of the edit.
     fn align_cursor(&mut self) {
-        self.cursor = self
-            .text
-            .grapheme_indices(true)
-            .map(|(i, _)| i)
-            .find(|&i| i >= self.cursor)
-            .unwrap_or(self.text.len());
+        self.relabel_images();
+        self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(super) fn left(&mut self) {
+        self.preferred_column = None;
         self.cursor = self.text[..self.cursor]
             .grapheme_indices(true)
             .next_back()
             .map_or(0, |(i, _)| i);
+        self.cursor = self.caret_boundary(self.cursor, false);
     }
     pub(super) fn right(&mut self) {
+        self.preferred_column = None;
         if let Some(g) = self.text[self.cursor..].graphemes(true).next() {
             self.cursor += g.len();
         }
+        self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(super) fn home(&mut self) {
+        self.preferred_column = None;
         self.cursor = 0;
     }
     pub(super) fn end(&mut self) {
+        self.preferred_column = None;
         self.cursor = self.text.len();
     }
     pub(super) fn backspace(&mut self) {
         let end = self.cursor;
         self.left();
-        self.text.drain(self.cursor..end);
+        self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(super) fn delete(&mut self) {
         let start = self.cursor;
         self.right();
-        self.text.drain(start..self.cursor);
-        self.cursor = start;
+        self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
     pub(super) fn word_left(&mut self) {
+        self.preferred_column = None;
         let mut word = false;
         for (i, g) in self.text[..self.cursor].grapheme_indices(true).rev() {
             if g.chars().all(char::is_whitespace) {
@@ -84,8 +168,10 @@ impl LineEdit {
             }
             self.cursor = i;
         }
+        self.cursor = self.caret_boundary(self.cursor, false);
     }
     pub(super) fn word_right(&mut self) {
+        self.preferred_column = None;
         let mut word = false;
         let start = self.cursor;
         for (i, g) in self.text[start..].grapheme_indices(true) {
@@ -98,25 +184,28 @@ impl LineEdit {
             }
             self.cursor = start + i + g.len();
         }
+        self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(super) fn kill_to_end(&mut self) {
-        self.text.truncate(self.cursor);
+        self.preferred_column = None;
+        self.replace_images(self.cursor..self.text.len(), "");
+        self.align_cursor();
     }
     pub(super) fn kill_to_start(&mut self) {
-        self.text.drain(..self.cursor);
+        self.replace_images(0..self.cursor, "");
         self.home();
+        self.align_cursor();
     }
     pub(super) fn kill_word_back(&mut self) {
         let end = self.cursor;
         self.word_left();
-        self.text.drain(self.cursor..end);
+        self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(super) fn kill_word_forward(&mut self) {
         let start = self.cursor;
         self.word_right();
-        self.text.drain(start..self.cursor);
-        self.cursor = start;
+        self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
     pub(super) fn window(&self, available_cols: usize) -> (&str, u16) {

@@ -63,6 +63,21 @@ pub struct BackgroundJob {
     pub needs: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionTask {
+    pub id: String,
+    pub subject: String,
+    pub status: TaskStatus,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Provider-qualified session identity.
@@ -76,6 +91,8 @@ pub struct Session {
     pub title: String,
     /// Latest real user prompt, up to 512 chars, for the details panel.
     pub prompt: String,
+    /// Source record or tool-call identities for activity, update and prompt.
+    pub detail_sources: [Option<String>; 3],
     /// Images attached to `prompt` whose files still exist.
     pub prompt_images: Vec<crate::log::Image>,
     pub queued: Vec<String>,
@@ -83,6 +100,8 @@ pub struct Session {
     pub turn_messages: usize,
     pub last_record_at: Option<DateTime<Utc>>,
     pub model: Option<String>,
+    /// The model's human-readable name, such as "Opus 5.5", when the transcript names it.
+    pub model_label: Option<String>,
     pub effort: Option<String>,
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
@@ -96,8 +115,11 @@ pub struct Session {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub ask: Option<crate::ask::Ask>,
     pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
+    /// The session's own to-do list, replayed from its transcript.
+    pub tasks: Vec<SessionTask>,
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,
     pub transcript: Option<PathBuf>,
@@ -129,7 +151,7 @@ impl Session {
                 .as_ref()
                 .is_some_and(|process| process.label.as_deref() != Some("bg"))
         {
-            Some("Running in a terminal; open it to type")
+            Some("Running in a terminal")
         } else {
             None
         }
@@ -156,6 +178,13 @@ impl Session {
             .filter(|model| !model.is_empty())
             .unwrap_or("Unknown")
     }
+
+    /// The model's human-readable name when known, else its id.
+    pub fn model_label(&self) -> &str {
+        self.model_label
+            .as_deref()
+            .unwrap_or_else(|| self.model_name())
+    }
 }
 
 pub type DraftId = u64;
@@ -163,11 +192,22 @@ pub type DraftId = u64;
 /// What the view asks the app to do; the view never touches processes or files itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
+    Batch(Vec<Action>),
     /// Enter: jump to a live session's terminal, or resume an inactive one.
     Open(SessionKey),
     SendPrompt {
         id: SessionKey,
         text: String,
+    },
+    AnswerQuestions {
+        ask: crate::ask::Ask,
+        answer: crate::ask::Answer,
+    },
+    PasteImage,
+    SendImages {
+        id: SessionKey,
+        text: String,
+        images: Vec<PathBuf>,
     },
     /// `n` or a project heading double click: add a draft in that project.
     NewDraft {
@@ -200,11 +240,17 @@ pub enum Action {
     /// `h`: hide the session until the next launch.
     Hide(SessionKey),
     /// `p`: pin or unpin the session.
-    TogglePin { id: SessionKey, pinned: bool },
+    TogglePin {
+        id: SessionKey,
+        pinned: bool,
+    },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `r`: set the session display name.
-    Rename { id: SessionKey, name: String },
+    Rename {
+        id: SessionKey,
+        name: String,
+    },
     /// Backspace, then confirmation: permanently delete the session transcript.
     Delete(SessionKey),
     /// `a`, then confirmation: archive the session and its child agents.
@@ -221,7 +267,10 @@ pub enum Action {
     Quit,
     /// Double click on an open log event or a details body: copy its text to the
     /// clipboard and confirm with `label`.
-    Copy { text: String, label: String },
+    Copy {
+        text: String,
+        label: String,
+    },
     /// Click on a drawn path, image placeholder or pull request link: open the
     /// file, directory or URL with macOS `open`.
     OpenPath(PathBuf),

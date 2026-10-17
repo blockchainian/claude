@@ -10,6 +10,29 @@ const CHUNK: usize = 8 << 20;
 /// Bytes read per step backward, where the lines wanted usually sit near the end.
 const BACK_CHUNK: u64 = 64 << 10;
 
+/// Detects overwrites at the previously read boundary before treating growth as an append.
+#[derive(Default)]
+pub(crate) struct Boundary {
+    offset: u64,
+    bytes: Vec<u8>,
+}
+
+impl Boundary {
+    pub fn matches(&self, file: &mut File) -> io::Result<bool> {
+        file.seek(SeekFrom::Start(self.offset))?;
+        let mut bytes = vec![0; self.bytes.len()];
+        file.read_exact(&mut bytes)?;
+        Ok(bytes == self.bytes)
+    }
+
+    pub fn capture(&mut self, file: &mut File, end: u64) -> io::Result<()> {
+        self.offset = end.saturating_sub(128);
+        file.seek(SeekFrom::Start(self.offset))?;
+        self.bytes.resize((end - self.offset) as usize, 0);
+        file.read_exact(&mut self.bytes)
+    }
+}
+
 /// Hands `visit` each complete line from `from` on and returns the offset after the last one; an
 /// unterminated last line waits for its newline.
 pub fn read_lines(file: &mut File, from: u64, mut visit: impl FnMut(&[u8])) -> io::Result<u64> {

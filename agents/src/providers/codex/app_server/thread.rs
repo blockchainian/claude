@@ -1,6 +1,9 @@
 use super::Client;
 use serde::{Deserialize, Serialize};
-use std::io;
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,15 +136,36 @@ pub(in crate::providers::codex) fn resume(client: &mut Client, thread_id: &str) 
 #[serde(tag = "type", rename_all = "camelCase")]
 enum UserInput<'a> {
     Text { text: &'a str },
+    LocalImage { path: &'a Path },
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PromptParams<'a> {
     thread_id: &'a str,
-    input: [UserInput<'a>; 1],
+    input: Vec<UserInput<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expected_turn_id: Option<&'a str>,
+}
+
+impl<'a> PromptParams<'a> {
+    fn new(
+        thread_id: &'a str,
+        text: &'a str,
+        images: &'a [PathBuf],
+        expected_turn_id: Option<&'a str>,
+    ) -> Self {
+        let mut input = Vec::new();
+        if !text.is_empty() {
+            input.push(UserInput::Text { text });
+        }
+        input.extend(images.iter().map(|path| UserInput::LocalImage { path }));
+        Self {
+            thread_id,
+            input,
+            expected_turn_id,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -160,14 +184,11 @@ pub(in crate::providers::codex) fn prompt(
     client: &mut Client,
     thread_id: &str,
     text: &str,
+    images: &[PathBuf],
 ) -> io::Result<()> {
     resume(client, thread_id)?;
     let running = running_turn(client, thread_id)?;
-    let params = PromptParams {
-        thread_id,
-        input: [UserInput::Text { text }],
-        expected_turn_id: running.as_deref(),
-    };
+    let params = PromptParams::new(thread_id, text, images, running.as_deref());
     match running.as_deref() {
         Some(expected) => {
             let response: SteerResponse = client.request("turn/steer", params)?;
@@ -183,4 +204,48 @@ pub(in crate::providers::codex) fn prompt(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    #[test]
+    fn image_payloads_carry_local_images_for_start_and_steer() {
+        let paths = vec![
+            PathBuf::from("/tmp/clipboard image.png"),
+            PathBuf::from("/tmp/second.png"),
+        ];
+        for running in [None, Some("turn-123")] {
+            let params = PromptParams::new("thread-123", "describe these", &paths, running);
+            let actual = serde_json::to_value(params).unwrap();
+            assert_eq!(
+                actual["input"],
+                json!([
+                    {"type":"text", "text":"describe these"},
+                    {"type":"localImage", "path":"/tmp/clipboard image.png"},
+                    {"type":"localImage", "path":"/tmp/second.png"}
+                ])
+            );
+            assert_eq!(actual["threadId"], "thread-123");
+            match running {
+                Some(turn) => assert_eq!(actual["expectedTurnId"], turn),
+                None => assert!(actual.get("expectedTurnId").is_none()),
+            }
+        }
+    }
+
+    #[test]
+    fn image_only_payload_has_no_empty_text_input() {
+        let paths = vec![PathBuf::from("/tmp/image.png")];
+        let params = PromptParams::new("thread", "", &paths, None);
+        assert_eq!(
+            serde_json::to_value(params).unwrap()["input"],
+            json!([
+                {"type":"localImage", "path":"/tmp/image.png"}
+            ])
+        );
+    }
 }

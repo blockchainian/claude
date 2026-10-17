@@ -70,7 +70,9 @@ impl View {
                     .fold(0, |bits, column| bits | column);
                 if bits != 0 {
                     let symbol = char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ');
-                    buf[(x, y)].set_char(symbol);
+                    buf[(x, y)]
+                        .set_char(symbol)
+                        .set_style(super::style::timeline_style(self.use_colors));
                 }
             }
         }

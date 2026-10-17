@@ -1,25 +1,25 @@
-  Agent command center  Group: Project  g
-   All 1   Ready 0   Working 1   Needs you 0   Inactive 0                          tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                         Status         Updated  │ Prompt
-  /tmp/project  1                                           │ Task log example
-  › ● Task log example              Working            now  │
-                                                            │ Project
-                                                            │ /tmp/project
-                                                            │
-                                                            │ Model: Unknown
-                                                            │
-                                                            │
-                                                            │
-  Task log example · Running in a terminal; open it to type
-  ──────────────────────────────────────────────────────────────── Working · Task log example ────
-
-       10s Denied    Edit: Dangerous
-       10s Denied    Bash: Safety Check
-       15s Denied    Bash: Create Unsafe Agents
-  11:58:00 User      Please inspect the task
+  Active 1                                                                              Inactive 0
+──────────────────────────────────────────────────┬─────────────── Task log example ────────────────
+                   /tmp/project                   │                     Prompt
+ ● Task log example        Working            now │ Task log example
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
+ Task log example ❮ Running in a terminal
+─╴Unknown ──────────────────────────────────────────────────────────────────────────────────────────
+                                 Please inspect the task                                   11:58:00
+                                Bash: Create Unsafe Agents                                      15s
+                                    Bash: Safety Check                                          10s
+                                     Edit: Dangerous                                            10s
 
 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+                                       Denied Edit                                    10s
 
 
-  ? help  esc back  ↑/↓ move  enter open  n new
+ ↓
+ Reason: The server-side auto mode classifier judged this action dangerous (it gave no explanation)
+
+ ? help  esc back  ↑/↓ move  enter open  n new

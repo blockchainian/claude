@@ -1,24 +1,24 @@
-  Agent command center  Group: Project  g
-   All 3   Ready 1   Working 0   Needs you 1   Inactive 1
-  ────────────────────────────────────────────────────────
-  Task shortcuts
+  Active 2                                      Inactive 1
+────────────────────────────────────────────────────────────
+ Task shortcuts
 
-  Navigate            Tasks
-  ↑      Up           n          New
-  ↓      Down         w          New worktree
-  enter  Open         o          Resume
-  pgup   Page up      f          Fork
-  pgdn   Page down    r          Rename
-  ⌃c     Quit         x          Stop
-  esc    Back         a          Archive
-                      h          Hide
-                      backspace  Delete
-                      p          Pin/unpin
+ Navigate            Tasks
+ ↑      Up           n          New
+ ↓      Down         w          New worktree
+ enter  Open         o          Resume
+ pgup   Page up      f          Fork
+ pgdn   Page down    r          Rename
+ ⌃c     Quit         x          Stop
+ esc    Back         a          Archive
+                     h          Hide
+                     backspace  Delete
+                     p          Pin/unpin
 
-  View                Log
-  tab/⇧tab  Filter    ⌃r  Search
-  f3        Search
-  g         Group
+ View                Log
+ tab/⇧tab  Filter    /                       Search
+ /         Search    2× click top border     Earliest
+ g         Group     2× click bottom border  Latest
 
 
-  esc back
+
+ esc back

@@ -1,6 +1,6 @@
 use super::*;
 use nucleo_matcher::{
-    Config, Matcher, Utf32Str,
+    Config, Matcher, Utf32Str, Utf32String,
     pattern::{Atom, AtomKind, CaseMatching, Normalization, Pattern},
 };
 
@@ -8,7 +8,7 @@ pub(crate) struct LogSearch {
     pub(super) query: line_edit::LineEdit,
     pub editing: bool,
     matches: Vec<usize>,
-    bodies: Vec<String>,
+    bodies: Vec<Utf32String>,
     matcher: RefCell<Matcher>,
 }
 
@@ -33,7 +33,6 @@ impl LogSearch {
         self.query.clear();
         self.editing = false;
         self.matches.clear();
-        self.bodies.clear();
     }
 
     fn pattern(&self) -> Pattern {
@@ -86,26 +85,48 @@ impl View {
                     super::log::kind_label(&event.kind),
                     super::log::body_line(event, usize::MAX, &cwd)
                 )
+                .into()
             })
             .collect();
         self.rematch_log();
     }
 
     pub(crate) fn rematch_log(&mut self) {
+        let full = self
+            .log_selected
+            .and_then(|index| self.log_search.matches.get(index).copied());
+        self.rematch_log_at(full);
+    }
+
+    pub(super) fn rematch_log_at(&mut self, selected_full: Option<usize>) {
+        self.cancel_detail_selection();
         let pattern = self.log_search.pattern();
         let mut matcher = self.log_search.matcher.borrow_mut();
-        let mut buffer = Vec::new();
         self.log_search.matches = self
             .log_search
             .bodies
             .iter()
             .enumerate()
-            .filter_map(|(index, body)| {
-                pattern
-                    .score(Utf32Str::new(body, &mut buffer), &mut matcher)
-                    .map(|_| index)
-            })
+            .filter_map(|(index, body)| pattern.score(body.slice(..), &mut matcher).map(|_| index))
             .collect();
+        drop(matcher);
+        self.log_selected = selected_full
+            .and_then(|full| {
+                self.log_search
+                    .matches
+                    .iter()
+                    .position(|index| *index >= full)
+                    .or_else(|| self.log_search.matches.len().checked_sub(1))
+            })
+            .or_else(|| self.log_search.matches.len().checked_sub(1));
+        let selected = self
+            .log_selected
+            .and_then(|index| self.log_search.matches.get(index).copied());
+        if selected != selected_full {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_detail_layout = None;
+            viewport.log_detail_other_layout = None;
+        }
     }
 
     pub(crate) fn matching_log_count(&self) -> usize {
@@ -122,3 +143,7 @@ impl View {
         !self.log_search.active() || self.log_search.matches.binary_search(&index).is_ok()
     }
 }
+
+#[cfg(test)]
+#[path = "log_search_tests.rs"]
+mod tests;

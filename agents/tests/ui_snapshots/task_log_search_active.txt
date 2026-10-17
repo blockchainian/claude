@@ -1,25 +1,25 @@
-  Agent command center  Group: Project  g
-   All 1   Ready 0   Working 1   Needs you 0   Inactive 0                          tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                         Status         Updated  │ Prompt
-  /tmp/project  1                                           │ Task log example
-  › ● Task log example              Working            now  │
-                                                            │ Project
-                                                            │ /tmp/project
-                                                            │
-                                                            │ Model: Unknown
-                                                            │
-                                                            │
-                                                            │
-  Task log example · Running in a terminal; open it to type
-  ──────────────────────────────────────────────────────────────── Working · Task log example ────
-
-       35s Tool      run tests
-  11:59:00 Queue     Also inspect the tests
+  Active 1                                                                              Inactive 0
+──────────────────────────────────────────────────┬─────────────── Task log example ────────────────
+                   /tmp/project                   │                     Prompt
+ ● Task log example        Working            now │ Task log example
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
+ Task log example ❮ Running in a terminal
+─╴Unknown ──────────────────────────────────────────────────────────────────────────────────────────
+                                  Also inspect the tests                                   11:59:00
+                                        run tests                                               35s
 
 
 
+ Search ❯ tests
+────────────────────────────────────────────────────────────────────────────────────────────────────
+                                        run tests                                     35s
 
 
-  Search › tests
-  esc back  enter keep
+
+
+
+ esc back  enter keep

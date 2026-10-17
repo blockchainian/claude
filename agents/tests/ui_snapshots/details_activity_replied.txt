@@ -1,10 +1,8 @@
-Last message · 3s ago
-Checking the project
-
-Prompt · 42 messages · 1h 10m
+                 Prompt           1h 10m
 Activity task
 
-Project
-/tmp/project
+                 Update           3s ago
+Checking the project
 
-Model: Unknown
+             Last activity        7s ago
+Run checks

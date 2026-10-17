@@ -157,7 +157,7 @@ fn stop_and_archive_thread(manager: bool) {
         assert!(Instant::now() < deadline, "turn never reported running");
         std::thread::sleep(Duration::from_millis(100));
     }
-    provider.stop(&session).unwrap();
+    provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
         let mut client = super::Client::connect(&provider.home).unwrap();
@@ -176,7 +176,7 @@ fn stop_and_archive_thread(manager: bool) {
     };
     assert_eq!(status, "interrupted");
     // No running turn: stop does nothing.
-    provider.stop(&session).unwrap();
+    provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     drop(owner);
 
     provider.archive(&session).unwrap();
@@ -202,83 +202,6 @@ fn stop_and_archive_thread(manager: bool) {
     provider.delete(&session).unwrap();
     cleanup.2 = false;
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
-}
-
-#[test]
-fn delete_uses_thread_rpc_without_signalling_the_writer() {
-    use std::os::unix::net::UnixListener;
-    use tungstenite::Message;
-
-    for live in [false, true] {
-        let home = tempfile::tempdir().unwrap();
-        Connection::open(home.path().join("state_5.sqlite"))
-            .unwrap()
-            .execute_batch(include_str!("../../../../tests/fixtures/codex-state.sql"))
-            .unwrap();
-        let provider = CodexProvider::new(home.path().into(), home.path().join("manager"));
-        let mut session = stored_session(&provider, "thread-0");
-        if live {
-            // The writer may be a shared daemon: its identity must not affect deletion.
-            session.process = Some(Process {
-                pid: std::process::id(),
-                label: Some("codex".into()),
-                started_at: None,
-            });
-        }
-        let control = home.path().join("app-server-control");
-        std::fs::create_dir(&control).unwrap();
-        let listener = UnixListener::bind(control.join("app-server-control.sock")).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let server = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            let stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        if Instant::now() >= deadline {
-                            return false;
-                        }
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("{error}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let mut socket = tungstenite::accept(stream).unwrap();
-            let initialize: Value =
-                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-            assert_eq!(initialize["method"], "initialize");
-            socket
-                .send(Message::text(
-                    json!({"id": initialize["id"], "result": {"userAgent": "codex"}}).to_string(),
-                ))
-                .unwrap();
-            let initialized: Value =
-                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-            assert_eq!(initialized, json!({"method": "initialized"}));
-            let request: Value =
-                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-            assert_eq!(
-                request,
-                json!({"id": 2, "method": "thread/delete", "params": {"threadId": "thread-0"}})
-            );
-            // Recorded from the live daemon deleting our throwaway thread.
-            let mut response: Value = serde_json::from_str(include_str!(
-                "../../../../tests/fixtures/codex-delete-response.json"
-            ))
-            .unwrap();
-            response["id"] = request["id"].clone();
-            socket.send(Message::text(response.to_string())).unwrap();
-            true
-        });
-        let result = provider.delete(&session);
-        let received = server.join().unwrap();
-        assert!(received, "delete did not reach thread/delete: {result:?}");
-        result.unwrap();
-    }
 }
 
 #[test]

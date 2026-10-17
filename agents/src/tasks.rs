@@ -9,6 +9,7 @@ pub struct NewTask {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub prompt: String,
+    pub images: Vec<PathBuf>,
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TaskDefaults {
@@ -74,6 +75,32 @@ fn trunk_ref(root: &Path) -> io::Result<String> {
         "Repository has no origin/HEAD, main or master trunk",
     ))
 }
+pub fn repository_if_present(directory: &Path) -> io::Result<Option<Repository>> {
+    let directory = fs::canonicalize(directory)?;
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .env("LC_ALL", "C")
+        .current_dir(&directory)
+        .output()?;
+    if output.status.success() {
+        return repository(&directory).map(Some);
+    }
+    let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if error == "fatal: not a git repository (or any of the parent directories): .git"
+        || error.starts_with("fatal: not a git repository (or any parent up to mount point")
+    {
+        for ancestor in directory.ancestors() {
+            match fs::symlink_metadata(ancestor.join(".git")) {
+                Ok(_) => return Err(io::Error::other(error)),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        return Ok(None);
+    }
+    Err(io::Error::other(error))
+}
+
 pub fn repository(directory: &Path) -> io::Result<Repository> {
     use std::ffi::OsStr;
     let directory = fs::canonicalize(directory)?;
@@ -420,6 +447,33 @@ mod tests {
             ],
         );
         d
+    }
+    #[test]
+    fn optional_repository_distinguishes_plain_directories_from_git_errors() {
+        let plain = tempfile::tempdir().unwrap();
+        assert_eq!(repository_if_present(plain.path()).unwrap(), None);
+
+        let repository = repo();
+        let found = repository_if_present(&repository.path().join("sub"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.branch, "main");
+        assert_eq!(found.trunk, "main");
+        git(repository.path(), &["branch", "-m", "feature"]);
+        assert!(repository_if_present(repository.path()).is_err());
+
+        let corrupt = tempfile::tempdir().unwrap();
+        fs::create_dir(corrupt.path().join(".git")).unwrap();
+        assert!(repository_if_present(corrupt.path()).is_err());
+        fs::remove_dir(corrupt.path().join(".git")).unwrap();
+        fs::write(corrupt.path().join(".git"), "gitdir: /does-not-exist\n").unwrap();
+        assert!(repository_if_present(corrupt.path()).is_err());
+
+        let missing = plain.path().join("missing");
+        assert!(repository_if_present(&missing).is_err());
+        let file = plain.path().join("file");
+        fs::write(&file, "not a directory").unwrap();
+        assert!(repository_if_present(&file).is_err());
     }
     #[test]
     fn detects_trunk_and_rebases_heading_into_real_worktree() {

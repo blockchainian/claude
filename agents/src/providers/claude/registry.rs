@@ -7,7 +7,7 @@ use std::path::Path;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct Entry {
+pub(in crate::providers) struct Entry {
     pub pid: Option<u32>,
     pub session_id: Option<String>,
     pub cwd: Option<String>,

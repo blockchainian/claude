@@ -14,8 +14,7 @@ pub(super) struct Link {
 struct Supervisor {
     #[serde(rename = "sessionId")]
     session_id: String,
-    #[serde(rename = "pid")]
-    _pid: u32,
+    pid: u32,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +45,7 @@ fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
     }
 }
 
-pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
+pub(super) fn links(home: &Path, claude_config: &Path) -> io::Result<HashMap<String, Link>> {
     let entries = match fs::read_dir(home.join("threads")) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
@@ -62,6 +61,15 @@ pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
         let Some(supervisor) = read::<Supervisor>(&path)? else {
             continue;
         };
+        let parent_id = match crate::processes::parent_pid(supervisor.pid) {
+            Some(pid) => read::<super::super::claude::registry::Entry>(
+                &claude_config.join("sessions").join(format!("{pid}.json")),
+            )?
+            .and_then(|entry| entry.session_id)
+            .filter(|id| !id.is_empty()),
+            None => None,
+        }
+        .unwrap_or_else(|| supervisor.session_id.clone());
         let session_id = supervisor.session_id;
         if !states.contains_key(&session_id) {
             let dir = home.join(&session_id);
@@ -93,7 +101,7 @@ pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
                 Link {
                     parent: SessionKey {
                         provider: ProviderId::Claude,
-                        id: session_id,
+                        id: parent_id,
                     },
                     name: name.clone().filter(|name| !name.trim().is_empty()),
                     needs_input: *needs_input,
@@ -102,4 +110,71 @@ pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
         }
     }
     Ok(links)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn follows_current_claude_session_for_every_thread_and_falls_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("manager");
+        let config = directory.path().join("claude");
+        fs::create_dir_all(home.join("threads")).unwrap();
+        fs::create_dir_all(config.join("sessions")).unwrap();
+        let state = home.join("claude-parent");
+        fs::create_dir_all(&state).unwrap();
+        fs::write(
+            state.join("state.json"),
+            include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json"),
+        )
+        .unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        // Scrubbed real supervisor and PID-keyed registry payload shapes.
+        let mut supervisor: serde_json::Value =
+            serde_json::from_str(r#"{"sessionId":"claude-parent","pid":70792}"#).unwrap();
+        supervisor["pid"] = child.id().into();
+        let registry = config.join(format!("sessions/{}.json", std::process::id()));
+        let mut entry: serde_json::Value =
+            serde_json::from_str(r#"{"pid":70748,"sessionId":"claude-current"}"#).unwrap();
+        entry["pid"] = std::process::id().into();
+        fs::write(&registry, entry.to_string()).unwrap();
+        let mut state_payload: serde_json::Value =
+            serde_json::from_slice(&fs::read(state.join("state.json")).unwrap()).unwrap();
+        let mut thread = state_payload["threads"][0].clone();
+        thread["id"] = "thread-13".into();
+        state_payload["threads"]
+            .as_array_mut()
+            .unwrap()
+            .push(thread);
+        fs::write(state.join("state.json"), state_payload.to_string()).unwrap();
+        for id in ["thread-12", "thread-13"] {
+            fs::write(
+                home.join(format!("threads/{id}.json")),
+                supervisor.to_string(),
+            )
+            .unwrap();
+        }
+        let current = links(&home, &config).unwrap();
+        entry["sessionId"] = "claude-after-another-clear".into();
+        fs::write(&registry, entry.to_string()).unwrap();
+        let after_clear = links(&home, &config).unwrap();
+        fs::remove_file(&registry).unwrap();
+        let missing_registry = links(&home, &config).unwrap();
+        fs::write(&registry, entry.to_string()).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let exited = links(&home, &config).unwrap();
+        for id in ["thread-12", "thread-13"] {
+            assert_eq!(current[id].parent.id, "claude-current");
+            assert_eq!(after_clear[id].parent.id, "claude-after-another-clear");
+            assert_eq!(missing_registry[id].parent.id, "claude-parent");
+            assert_eq!(exited[id].parent.id, "claude-parent");
+            assert_eq!(current[id].name.as_deref(), Some("Managed worker"));
+        }
+    }
 }

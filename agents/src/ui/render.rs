@@ -1,7 +1,6 @@
 use super::formatting::{
     format_duration, format_relative_time, format_session_duration, tail_lines,
 };
-use super::hints::hint_line;
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
 use ratatui::widgets::{Block, Borders};
@@ -48,94 +47,160 @@ pub(super) fn render_input_row(
     buf.set_style(area, Style { fg: None, ..style });
 }
 
+const HORIZONTAL_PADDING: u16 = 1;
+
+/// Fills a list row through both padding cells, stopping before column separators.
+pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
+    if area.is_empty() {
+        return;
+    }
+    let left = area.x.saturating_sub(HORIZONTAL_PADDING);
+    let right = area.right().saturating_add(HORIZONTAL_PADDING);
+    let padded = Rect::new(left, area.y, right - left, area.height).intersection(buf.area);
+    buf.set_style(padded, style);
+}
+
+pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
+
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
     pub(super) list: Rect,
     pub(super) gap: Rect,
     pub(super) details: Rect,
     pub(super) search: Rect,
+    pub(super) usage_chart: Rect,
     pub(super) footer: Rect,
     pub(super) log: Rect,
     pub(super) prompt: Rect,
+    pub(super) log_detail: Rect,
 }
+
 impl View {
-    fn input(&self) -> (&str, &line_edit::LineEdit) {
+    fn input(&self) -> (String, &line_edit::LineEdit) {
         if self.rename_target.is_some() {
-            ("Rename › ", &self.rename)
+            (format!("Rename {PROMPT_MARKER} "), &self.rename)
         } else {
-            ("Search › ", &self.search)
+            (format!("Search {PROMPT_MARKER} "), &self.search)
         }
     }
 
     pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
-        let header_height = if area.height >= 6 { 3 } else { 0 };
+        let header_height = if area.height >= 6 { 2 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
+        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        let prompt_height = self
+            .active_question()
+            .map_or_else(
+                || {
+                    self.input_box.height(
+                        area.width.saturating_sub(2 * HORIZONTAL_PADDING),
+                        &self.input_label(),
+                    )
+                },
+                |question| question.height(area.width.saturating_sub(2 * HORIZONTAL_PADDING)),
+            )
+            .min(area.height.saturating_sub(header_height + footer_height));
         let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
         let log_height = bottom_height.saturating_sub(footer_height).max(10);
-        let log_height = if area.height.saturating_sub(footer_height + log_height)
-            >= header_height + 6
-            && self
-                .selected_row()
-                .is_some_and(|session| session.transcript.is_some())
-        {
-            log_height
+        let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6;
+        // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
+        // The detail rectangle adds its top rule back below; it is not content.
+        let content_height = area
+            .height
+            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
+        let (top_height, list_height, detail_height) = if !show_log {
+            (
+                area.height
+                    .saturating_sub(header_height + footer_height + prompt_height),
+                0,
+                0,
+            )
+        } else if wide {
+            // Give an odd content row to the top; narrow remainders go top, then list.
+            (content_height.div_ceil(2), 0, content_height / 2)
         } else {
-            0
+            (
+                content_height.div_ceil(3),
+                (content_height + 1) / 3,
+                content_height / 3,
+            )
         };
-        let log = row(area, area.height - footer_height - log_height, log_height);
-        let prompt_height = self
-            .input_box
-            .height(area.width.saturating_sub(4), &self.input_label())
-            .min(log.y.saturating_sub(header.bottom()));
+        let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
         let prompt = row(
             area,
-            log.y.saturating_sub(area.y + prompt_height),
+            header_height + top_height + u16::from(show_log),
             prompt_height,
         );
-        let body = row(
-            area,
-            header_height,
-            prompt.y.saturating_sub(header.bottom()),
-        )
-        .inner(Margin::new(2, 0));
+        let log = if show_log && !wide {
+            row(area, prompt.bottom() - area.y + 1, list_height)
+                .inner(Margin::new(HORIZONTAL_PADDING, 0))
+        } else {
+            Rect::default()
+        };
+        let log_detail = if show_log {
+            row(
+                area,
+                header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
+                detail_height + 1,
+            )
+        } else {
+            Rect::default()
+        };
+        let (body, log_list) = if wide && show_log {
+            let column_width = (body.width - 6) / 4;
+            let log_width = body.width - 6 - 2 * column_width;
+            (
+                Rect {
+                    width: body.width - log_width - 3,
+                    ..body
+                },
+                Rect::new(body.right() - log_width, body.y, log_width, body.height),
+            )
+        } else {
+            (body, Rect::default())
+        };
         let [list, gap, details] = if body.width >= 7 {
             let content = Rect {
                 width: body.width - 3,
                 ..body
             };
-            let ratio = if area.width >= 90 { 618 } else { 500 };
-            let [list, mut details] = Layout::horizontal([
-                Constraint::Ratio(ratio, 1000),
-                Constraint::Ratio(1000 - ratio, 1000),
-            ])
-            .areas(content);
+            let [list, mut details] =
+                Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                    .areas(content);
             let gap = Rect::new(list.right(), body.y, 3, body.height);
             details.x += gap.width;
             [list, gap, details]
         } else {
             [body, Rect::default(), Rect::default()]
         };
-        let search = row(
-            list,
-            0,
-            u16::from(self.searching || self.rename_target.is_some()),
-        );
-        let list = row(
-            list,
-            search.height,
-            list.height.saturating_sub(search.height),
-        );
+        // Keep the chart's original canvas and scale when the search row takes list space.
+        let mut usage_chart = list;
+        let (list, search) = if self.rename_target.is_some() {
+            let input = row(list, 0, 1);
+            usage_chart = row(list, input.height, list.height.saturating_sub(input.height));
+            (usage_chart, input)
+        } else if self.searching {
+            let input = log::search_input_rect(list);
+            (
+                row(list, 0, list.height.saturating_sub(input.height)),
+                input,
+            )
+        } else {
+            (list, Rect::default())
+        };
         CenterLayout {
             header,
             list,
             gap,
             details,
             search,
+            usage_chart,
             footer,
-            log,
+            log: if wide && show_log { log_list } else { log },
             prompt,
+            log_detail,
         }
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
@@ -143,12 +208,18 @@ impl View {
             self.center_layout(area)
                 .log
                 .height
-                .saturating_sub(super::log::LOG_TOP + 1),
+                .saturating_sub(u16::from(self.log_search.active())),
         )
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && let Some(question) = self.active_question()
+        {
+            return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
+        }
         if let Some(editor) = &self.branch_editor
             && let Some((rect, _)) = self
                 .viewport
@@ -157,26 +228,32 @@ impl View {
                 .iter()
                 .find(|(_, field)| *field == Field::Branch)
         {
-            let (_, caret) = input_row("Branch › ", &editor.editor, *rect);
+            let (_, caret) = input_row(&format!("Branch {PROMPT_MARKER} "), &editor.editor, *rect);
             return Some((rect.x + caret, rect.y));
         }
         if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
-            return self
-                .input_box
-                .cursor(layout.prompt.inner(Margin::new(2, 0)), &self.input_label());
+            return self.input_box.cursor(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                &self.input_label(),
+            );
         }
         if (self.log_search.editing || self.log_detail_search.editing)
             && !self.help
             && self.confirm_dialog.is_none()
             && !layout.log.is_empty()
         {
-            let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
-            let search = if self.log_open.is_some() {
+            let search_area = if self.log_detail_search.editing && !layout.log_detail.is_empty() {
+                layout.log_detail.inner(Margin::new(HORIZONTAL_PADDING, 0))
+            } else {
+                layout.log
+            };
+            let input = log::search_input_rect(search_area);
+            let search = if self.log_detail_search.editing {
                 &self.log_detail_search
             } else {
                 &self.log_search
             };
-            let (_, caret) = input_row("Search › ", &search.query, input);
+            let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
             return Some((input.x + caret, input.y));
         }
         if !(self.searching || self.rename_target.is_some())
@@ -187,10 +264,11 @@ impl View {
             return None;
         }
         let (prompt, edit) = self.input();
-        let (_, caret) = input_row(prompt, edit, layout.search);
+        let (_, caret) = input_row(&prompt, edit, layout.search);
         Some((layout.search.x + caret, layout.search.y))
     }
 
+    #[cfg(test)]
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }
@@ -208,26 +286,25 @@ impl View {
             viewport.field_targets.clear();
             viewport.details = Rect::default();
             viewport.log = Rect::default();
+            viewport.log_borders = [Rect::default(); 2];
+            viewport.log_detail = Rect::default();
+            viewport.log_detail_jump = Rect::default();
             viewport.details_links.clear();
             viewport.log_links.clear();
         }
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
-        self.input_box.render(
-            layout.prompt.inner(Margin::new(2, 0)),
-            buf,
-            &self.input_label(),
-            self.input_disabled(),
-        );
-        let inset = |area: Rect| area.inner(Margin::new(2, 0));
-        line(
-            vec![
-                "Agent command center".bold(),
-                format!("  Group: {}  g", self.grouping().label()).dim(),
-            ],
-            inset(layout.header),
-            buf,
-        );
+        if let Some(question) = self.active_question() {
+            question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
+        } else {
+            self.input_box.render(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                buf,
+                &self.input_label(),
+                self.input_disabled(),
+            );
+        }
+        let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
         let labels = TASK_FILTERS
             .iter()
             .map(|(label, group)| {
@@ -246,20 +323,7 @@ impl View {
                 format!("{label} {count}")
             })
             .collect::<Vec<_>>();
-        let mut tabs = inset(row(layout.header, 1, 1));
-        let filter_hint = if self.searching || self.rename_target.is_some() {
-            Line::default()
-        } else {
-            hint_line(&[("tab/⇧tab", "filter")])
-        };
-        if tabs.width >= 80 && filter_hint.width() > 0 {
-            let width = filter_hint.width() as u16;
-            filter_hint.render(
-                Rect::new(tabs.right() - width, tabs.y, width, tabs.height),
-                buf,
-            );
-            tabs.width = tabs.width.saturating_sub(width + 2);
-        }
+        let tabs = inset(row(layout.header, 0, 1));
         self.viewport.borrow_mut().tab_bar = tabs;
         self.viewport.borrow_mut().tabs = super::selection_tabs::render_filled_tab_bar(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -267,15 +331,7 @@ impl View {
             tabs,
             buf,
         );
-        line(
-            "─".repeat(usize::from(area.width.saturating_sub(4))).dim(),
-            inset(row(layout.header, 2, 1)),
-            buf,
-        );
-        if self.searching || self.rename_target.is_some() {
-            let (prompt, edit) = self.input();
-            render_input_row(prompt, edit, layout.search, buf);
-        }
+        rule(row(layout.header, 1, 1), buf);
 
         line(self.center_footer_hints(), inset(layout.footer), buf);
         if let Some((label, _)) = &self.copied {
@@ -305,8 +361,20 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
+            for y in layout.log.y..layout.log.bottom() {
+                buf[(layout.log.x.saturating_sub(2), y)]
+                    .set_symbol("│")
+                    .set_style(Style::default().dim());
+            }
+        }
         self.render_center_rows(layout.list, buf, now);
-        self.render_usage_chart(layout.list, buf, now);
+        self.render_usage_chart(layout.usage_chart, buf, now);
+        if self.searching || self.rename_target.is_some() {
+            let (prompt, edit) = self.input();
+            Clear.render(layout.search, buf);
+            render_input_row(&prompt, edit, layout.search, buf);
+        }
         if let Some((notice, _)) = &self.notice
             && !layout.list.is_empty()
         {
@@ -314,42 +382,109 @@ impl View {
             Clear.render(bottom, buf);
             line(notice.clone().dim(), bottom, buf);
         }
-        // The details title sits on the task log's top rule, or on a rule of its own
-        // when the log is hidden.
+        // Activity and task status share the rule immediately above the prompt.
+        let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
+        if !layout.log_detail.is_empty() {
+            rule(middle, buf);
+        }
         let mut details = layout.details;
         let details_rule = if details.is_empty() {
             None
-        } else if layout.log.is_empty() {
+        } else if !layout.log_detail.is_empty() {
+            Some(Rect::new(details.x, middle.y, details.width, 1))
+        } else {
             details.height = details.height.saturating_sub(1);
             Some(row(layout.details, details.height, 1))
-        } else {
-            Some(Rect::new(details.x, layout.log.y, details.width, 1))
         };
         if !details.is_empty() {
             self.render_details(details, buf, now);
         }
-        self.viewport.borrow_mut().log = layout.log;
-        self.render_log(inset(layout.log), buf, now);
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log = layout.log;
+            viewport.log_detail = inset(layout.log_detail);
+        }
+        self.render_log(layout.log, buf, now);
+        if !layout.log_detail.is_empty() {
+            rule(row(layout.log_detail, 0, 1), buf);
+            self.render_log_detail(inset(layout.log_detail), buf, now);
+        }
         if !layout.log.is_empty() {
-            let rule = Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
-                .intersection(inset(layout.log));
+            self.viewport.borrow_mut().log_borders = [
+                Rect::new(
+                    layout.log.x,
+                    layout.log.y.saturating_sub(1),
+                    layout.log.width,
+                    1,
+                ),
+                Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
+            ];
+            let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
+                layout.log.bottom()
+            } else {
+                let border = row(area, layout.prompt.bottom() - area.y, 1);
+                rule(border, buf);
+                border.y
+            };
+            let log_rule = self.viewport.borrow().log_borders[1];
+            self.render_log_jump(log_rule, buf);
+            // The model and effort sit between the separator's joint, or the screen's left
+            // edge in the narrow layout, and the screen's right edge.
+            let left = if area.width >= WIDE_LAYOUT_COLUMNS {
+                layout.log.x.saturating_sub(2)
+            } else {
+                area.x
+            };
+            self.render_log_model(
+                Rect::new(left, model_y, area.right().saturating_sub(left), 1),
+                buf,
+            );
+            let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
-        if let Some(rule) = details_rule {
-            self.render_details_title(rule, buf, now);
+        if let Some(details_rule) = details_rule {
+            // The title and status rules run from the separator's joint on the left to the log's
+            // joint or the screen's right edge.
+            let left = layout.gap.x + 1;
+            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
+                layout.log.x - 1
+            } else {
+                area.right()
+            };
+            if layout.header.height >= 2 {
+                self.render_details_title(
+                    Rect::new(left, layout.header.y + 1, right - left, 1),
+                    buf,
+                    now,
+                );
+            }
+            self.render_details_status(Rect::new(left, details_rule.y, right - left, 1), buf);
         }
-        if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
-            let label = " ↑ Top ";
-            let width = (label.width() as u16).min(layout.list.width);
-            let jump = Rect::new(
-                layout.list.x + layout.list.width.saturating_sub(width) / 2,
+        let mut separators = vec![];
+        if layout.gap.width > 1 {
+            separators.push((layout.gap.x + 1, layout.gap.y, layout.gap.bottom()));
+        }
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
+            separators.push((
+                layout.log.x.saturating_sub(2),
                 layout.log.y,
-                width,
-                1,
-            )
-            .intersection(inset(layout.log));
+                layout.log.bottom(),
+            ));
+        }
+        join_separators(&separators, area, buf);
+        if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
+            let label = " ↑ Top ";
+            let mut jump =
+                super::log::log_content_centered(inset(layout.log_detail), label.width() as u16);
+            let latest = self.viewport.borrow().log_jump;
+            if jump.intersects(latest) {
+                jump.x = latest.right();
+                jump.width = jump
+                    .width
+                    .min(layout.log_detail.right().saturating_sub(jump.x));
+            }
             Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
-            self.viewport.borrow_mut().log_jump = jump;
+            self.viewport.borrow_mut().log_detail_jump = jump;
         }
         self.render_controls(details, buf);
         if let Some(dialog) = &self.confirm_dialog {
@@ -395,7 +530,7 @@ impl View {
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
-                if selected { "›" } else { " " },
+                if selected { PROMPT_MARKER } else { " " },
                 if confirm { 2 } else { 1 }
             );
             lines.push(Line::from(Span::styled(
@@ -415,13 +550,14 @@ impl View {
             height,
         );
         Clear.render(dialog, buf);
+        super::links::cover(&mut self.viewport.borrow_mut().list_links, dialog);
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// Centers the selected task's status, title and elapsed time on the rule row
-    /// `rule`, a space apart from the rule on each side.
+    /// Centers the selected task's title on the rule row `rule`, whose end cells are its
+    /// corners, a space apart from the rule on each side, with the elapsed time at its right end.
     fn render_details_title(
         &self,
         rule: Rect,
@@ -431,19 +567,21 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        // One rule cell and a space on each side.
-        let width = usize::from(rule.width).saturating_sub(4);
-        let (status, _) = Self::status(session);
-        let mut header = Line::from(vec![status.into(), " · ".dim()]);
-        let elapsed = session
-            .started_at
-            .map(|at| format!(" · {}", format_session_duration((now - at).num_seconds())));
-        let elapsed_width = elapsed
-            .as_deref()
-            .map_or(0, unicode_width::UnicodeWidthStr::width);
-        let title_width = width.saturating_sub(header.width() + elapsed_width);
+        self::rule(rule, buf);
+        // The title stays centered on the whole rule, so the time's width is kept clear on both sides.
+        let mut reserved = 0;
+        if let Some(at) = session.started_at {
+            let elapsed = format_session_duration((now - at).num_seconds());
+            // Keep a title cell, its spaces and the rule cells and corners around it.
+            if usize::from(rule.width) >= 2 * (elapsed.width() + 2) + 7 {
+                let (_, area) = render_rule_ends(rule, 0, None, Some(elapsed.dim()), buf);
+                reserved = area.map_or(0, |area| 2 * usize::from(area.width + 2));
+            }
+        }
+        // The corner, one rule cell and a space on each side.
+        let width = usize::from(rule.width).saturating_sub(6 + reserved);
         let title_style = self.title_style(&session.id).bold();
-        let title = if title_width <= 1 {
+        let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))
         } else {
             truncate_line_with_ellipsis_if_overflow(
@@ -451,22 +589,118 @@ impl View {
                     session.display_title().to_owned(),
                     title_style,
                 )),
-                title_width,
+                width,
             )
         };
-        header.spans.extend(title.spans);
-        if let Some(elapsed) = elapsed {
-            header.spans.push(elapsed.dim());
-        }
-        let mut header = truncate_line_to_width(header, width);
+        let mut header = truncate_line_to_width(title, width);
         header.spans.insert(0, " ".into());
         header.spans.push(" ".into());
         let label_width = header.width() as u16;
-        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
         let x = rule.x + rule.width.saturating_sub(label_width) / 2;
         let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
         Clear.render(label, buf);
         line(header, label, buf);
+    }
+    /// Centers the bold status on the rule between its two corner cells, a space apart on each
+    /// side.
+    fn render_details_status(&self, rule: Rect, buf: &mut Buffer) {
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        // The left corner is a joint, or the separator that keeps going down beside the prompt.
+        self::rule(
+            Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(1), 1),
+            buf,
+        );
+        if buf[(rule.x, rule.y)].symbol() == "│" {
+            buf[(rule.x, rule.y)].set_symbol("├");
+        }
+        let (status, _) = Self::status(session);
+        let width = usize::from(rule.width).saturating_sub(4);
+        let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
+        status.spans.insert(0, " ".into());
+        status.spans.push(" ".into());
+        let status_width = (status.width() as u16).min(rule.width);
+        let status_area = Rect::new(
+            rule.x + rule.width.saturating_sub(status_width) / 2,
+            rule.y,
+            status_width,
+            1,
+        );
+        Clear.render(status_area, buf);
+        line(status, status_area, buf);
+        // The pull request on the left and the project folder's name on the right flank the
+        // status.
+        let folder = session.cwd.file_name().map_or_else(
+            || session.cwd.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let pr = session
+            .pr
+            .as_ref()
+            .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)));
+        let (pr_area, folder_area) = render_rule_ends(
+            rule,
+            status_width,
+            pr,
+            Some(Span::styled(folder, style::time_style())),
+            buf,
+        );
+        let mut viewport = self.viewport.borrow_mut();
+        if let Some(area) = folder_area {
+            viewport.details_links.push((area, session.cwd.clone()));
+        }
+        if let (Some(area), Some(pr)) = (pr_area, &session.pr) {
+            let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                .unwrap_or_else(|| pr.url.clone());
+            super::hyperlink::hyperlink(buf, area, &url);
+            viewport.details_links.push((area, PathBuf::from(url)));
+        }
+    }
+
+    /// Writes the selected session's model on the left of the log's border and its effort on
+    /// the right; both open their pickers when clicked.
+    fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        let effort = match session.effort.as_deref() {
+            Some(effort) => Some(effort),
+            None if session.is_live_background()
+                && session.input_disabled_reason().is_none()
+                && self
+                    .input_choices
+                    .get(&session.id.provider)
+                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
+            {
+                Some("Unknown")
+            }
+            None => None,
+        };
+        // The jump centers without the clock column; both end labels must stay outside it.
+        let jump = self.viewport.borrow().log_jump;
+        let center = if jump.intersects(rule) {
+            rule.width
+                .saturating_sub(jump.x.saturating_sub(rule.x).saturating_mul(2))
+        } else {
+            0
+        };
+        let (model_area, effort_area) = render_rule_ends(
+            rule,
+            center,
+            Some(Span::styled(
+                session.model_label().to_owned(),
+                style::time_style(),
+            )),
+            effort.map(|effort| Span::styled(effort.to_owned(), style::time_style())),
+            buf,
+        );
+        let mut viewport = self.viewport.borrow_mut();
+        for (area, field) in [(model_area, Field::Model), (effort_area, Field::Effort)] {
+            if let Some(area) = area {
+                viewport.field_targets.push((area, field));
+            }
+        }
     }
     pub(super) fn render_details(
         &self,
@@ -495,12 +729,22 @@ impl View {
                     "Effort: {}",
                     draft.setup.effort.as_deref().unwrap_or("Default")
                 ),
-                format!("Branch: {}", draft.setup.branch),
+                format!(
+                    "Branch: {}",
+                    if draft.setup.branch.is_empty() {
+                        "—"
+                    } else {
+                        &draft.setup.branch
+                    }
+                ),
             ];
             for (index, text) in lines.into_iter().enumerate() {
                 line(text, row(area, index as u16, 1), buf);
             }
             for (index, field) in [(2, Field::Model), (3, Field::Effort), (4, Field::Branch)] {
+                if field == Field::Branch && draft.setup.branch.is_empty() {
+                    continue;
+                }
                 let rect = row(area, index, 1);
                 if !rect.is_empty() {
                     self.viewport.borrow_mut().field_targets.push((rect, field));
@@ -519,9 +763,9 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, needs attention, the newer of latest
-        // activity and last message, prompt, project, branch, model. The title sits
-        // on the rule below the panel.
+        // Sections top to bottom: prompt, tasks, background, message, activity,
+        // needs attention. The title
+        // sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
@@ -535,151 +779,37 @@ impl View {
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
 
-        // The agent appends an exit marker to the output file when the
-        // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
+        let tasks = [
+            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
+            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
+        ]
+        .into_iter()
+        .flat_map(|(status, indicator)| {
+            session
+                .tasks
+                .iter()
+                .filter(move |task| task.status == status)
+                .map(move |task| (task, indicator))
+        })
+        .collect::<Vec<_>>();
+        let tasks_text = tasks
             .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
-            .filter(|(_, lines)| {
-                !lines
-                    .last()
-                    .is_some_and(|last| last.starts_with("[exited with code"))
-            })
-            .collect::<Vec<_>>();
-        let mut background = items.len()..items.len();
-        let subagents = self.subagents_for(session).collect::<Vec<_>>();
-        if !boxes.is_empty() || !subagents.is_empty() {
-            separate_section(&mut items);
-            items.push("Background".dim().into());
-            let start = items.len();
-            items.extend(
-                boxes
-                    .into_iter()
-                    .map(|(task, output)| Item::Background { task, output }),
-            );
-            items.extend(subagents.into_iter().map(Item::Subagent));
-            // Tasks showing output come first; each group keeps its order.
-            items[start..].sort_by_key(|item| item.height() == 1);
-            background = start..items.len();
-        }
-
-        let needs = session
-            .background_job
-            .as_ref()
-            .and_then(|job| job.needs.as_deref());
-        if session.status == SessionStatus::NeedsInput || needs.is_some() {
-            separate_section(&mut items);
-            let start = items.len();
-            items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
-            if let Some(needs) = needs {
-                items.extend(
-                    textwrap::wrap(needs, width.max(1))
-                        .into_iter()
-                        .map(|text| Line::from(text.into_owned()).into()),
-                );
-            } else if session.pending_questions.is_empty() {
-                items.extend([
-                    "Open task to review.".dim().into(),
-                    "Waiting for your response.".into(),
-                ]);
-            } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            question.clone(),
-                            style::log_styles(&crate::log::Kind::Assistant).1,
-                        )),
-                        width,
-                    )
-                    .into()
-                }));
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key(
-                "Needs attention",
-                &(needs, &session.pending_questions),
-            ));
-            copies.push(None);
-            body_links.push(Vec::new());
-        }
-        item_links.resize(items.len(), Vec::new());
-
-        // Latest activity and Last message share one slot and follow the
-        // clock: whichever of the latest tool call and the last reply is newer.
-        let activity = session.latest_activity();
-        if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
-            let mut label = wrapped
-                .first()
-                .map_or(String::new(), |line| line.to_string());
-            if wrapped.len() > 1 {
-                label.push('…');
-            }
-            separate_section(&mut items);
-            let start = items.len() + 1;
-            items.extend([
-                Line::from(vec![
-                    "Latest activity".dim(),
-                    " · ".dim(),
-                    format_relative_time(now, Some(activity.at)).dim(),
-                ])
-                .into(),
-                truncate_line_with_ellipsis_if_overflow(
-                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
-                    width,
+            .map(|(task, status)| {
+                format!(
+                    "{} {}",
+                    Self::status_indicator(*status).content,
+                    task.subject
                 )
-                .into(),
-            ]);
-            bodies.push(start..items.len());
-            keys.push(body_key("Latest activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
-        }
-        if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
-            let mut header = vec!["Last message".dim()];
-            if let Some(at) = session.last_message_at {
-                header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
-            }
-            separate_section(&mut items);
-            items.push(Line::from(header).into());
-            let start = items.len();
-            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
-            items.extend(
-                wrap_details(message, &session.cwd, width, true)
-                    .into_iter()
-                    .map(|mut line| {
-                        for span in &mut line.spans {
-                            span.style = body_style.patch(span.style);
-                        }
-                        line
-                    })
-                    .map(Item::from),
-            );
-            bodies.push(start..items.len());
-            keys.push(body_key("Last message", message));
-            copies.push(Some((message.as_str(), "Copied last message")));
-            body_links.push(super::links::text_links(message, &session.cwd, &[]));
-        }
-
-        let mut header = vec!["Prompt".dim()];
-        if let Some(start) = session.prompt_at {
-            let end = if session.status == SessionStatus::Working {
-                now
-            } else {
-                session.last_record_at.unwrap_or(start)
-            };
-            let messages = session.turn_messages;
-            let label = if messages == 1 { "message" } else { "messages" };
-            header.extend([
-                " · ".dim(),
-                format!("{messages} {label}").dim(),
-                " · ".dim(),
-                format_duration((end - start).num_seconds().max(0)).dim(),
-            ]);
-        }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+            centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
+        } else {
+            centered_header("Prompt".dim().into(), Line::default(), width)
+        };
         separate_section(&mut items);
-        items.push(Line::from(header).into());
+        items.push(prompt_header.into());
         let prompt_text = match session.prompt.trim() {
             "" => "No prompt available.",
             prompt => prompt,
@@ -723,66 +853,180 @@ impl View {
 
         item_links.resize(items.len(), Vec::new());
 
-        let mut project = vec!["Project".dim()];
-        if let Some(branch) = &session.git_branch {
-            project.extend([
-                " · ".dim(),
-                Span::styled(branch.clone(), self.title_style(&session.id)),
-            ]);
-        }
-        let link = session.pr.as_ref().and_then(|pr| {
-            let label = format!("#{}", pr.number);
-            project.push(" · ".dim());
-            let prefix_width = Line::from(project.clone()).width();
-            let link = line_width_fits(prefix_width + label.len(), width).then(|| {
-                let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                    .unwrap_or_else(|| pr.url.clone());
-                (prefix_width as u16, label.len() as u16, url)
-            });
-            project.push(Span::styled(label, self.title_style(&session.id)));
-            link
-        });
-        let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
-        item_links.extend([
-            Vec::new(),
-            link.iter()
-                .map(|(x, width, url)| (*x..x + width, PathBuf::from(url)))
-                .collect(),
-            vec![(0..cwd.width().min(width) as u16, session.cwd.clone())],
-        ]);
-        items.extend([
-            Line::default().into(),
-            Item::Link {
-                line: Line::from(project),
-                link,
-            },
-            cwd.into(),
-        ]);
-
-        let effort = match session.effort.as_deref() {
-            Some(effort) => Some(effort),
-            None if session.is_live_background()
-                && session.input_disabled_reason().is_none()
-                && self
-                    .input_choices
-                    .get(&session.id.provider)
-                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
-            {
-                Some("Unknown")
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(
+                centered_header(
+                    "Tasks".dim().into(),
+                    format!("{in_progress}/{}", tasks.len()).dim().into(),
+                    width,
+                )
+                .into(),
+            );
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
+                );
             }
-            None => None,
-        };
-        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
-        if let Some(effort) = effort {
-            model.extend([" · ".dim(), effort.to_owned().into()]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
         }
-        let mut model_item = items.len() + 1;
-        // A blank row keeps the model off the bottom rule.
-        items.extend([
-            Line::default().into(),
-            Line::from(model).into(),
-            Line::default().into(),
-        ]);
+
+        // The agent appends an exit marker to the output file when the
+        // command ends, which lands before the completion notification does.
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 1)))
+            .filter(|(_, lines)| {
+                !lines
+                    .last()
+                    .is_some_and(|last| last.starts_with("[exited with code"))
+            })
+            .collect::<Vec<_>>();
+        let mut background = items.len()..items.len();
+        let subagents = self.subagents_for(session).collect::<Vec<_>>();
+        if !boxes.is_empty() || !subagents.is_empty() {
+            separate_section(&mut items);
+            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
+            let start = items.len();
+            items.extend(
+                boxes
+                    .into_iter()
+                    .map(|(task, output)| Item::Background { task, output }),
+            );
+            items.extend(subagents.into_iter().map(Item::Subagent));
+            // Tasks showing output come first; each group keeps its order.
+            items[start..].sort_by_key(|item| item.height() == 1);
+            background = start..items.len();
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        if let Some(message) = session.last_message.as_ref() {
+            let mut header = Line::default();
+            if let Some(at) = session.last_message_at {
+                header =
+                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
+            }
+            separate_section(&mut items);
+            items.push(centered_header("Update".dim().into(), header, width).into());
+            let start = items.len();
+            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
+            items.extend(
+                wrap_details(message, &session.cwd, width, true)
+                    .into_iter()
+                    .map(|mut line| {
+                        for span in &mut line.spans {
+                            span.style = body_style.patch(span.style);
+                        }
+                        line
+                    })
+                    .map(Item::from),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
+            body_links.push(super::links::text_links(message, &session.cwd, &[]));
+        }
+
+        let activity = session.activity.as_ref();
+        if let Some(activity) = activity {
+            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
+            let mut label = wrapped
+                .first()
+                .map_or(String::new(), |line| line.to_string());
+            if wrapped.len() > 1 {
+                label.push('…');
+            }
+            separate_section(&mut items);
+            let start = items.len() + 1;
+            items.extend([
+                centered_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
+                    width,
+                )
+                .into(),
+                truncate_line_with_ellipsis_if_overflow(
+                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
+                    width,
+                )
+                .into(),
+            ]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        let needs = session
+            .background_job
+            .as_ref()
+            .and_then(|job| job.needs.as_deref());
+        if session.status == SessionStatus::NeedsInput || needs.is_some() {
+            separate_section(&mut items);
+            let start = items.len();
+            items.push(
+                centered_header(
+                    Span::styled("Needs attention", style::attention_title_style()).into(),
+                    Line::default(),
+                    width,
+                )
+                .into(),
+            );
+            if let Some(needs) = needs {
+                items.extend(
+                    textwrap::wrap(needs, width.max(1))
+                        .into_iter()
+                        .map(|text| Line::from(text.into_owned()).into()),
+                );
+            } else if session.pending_questions.is_empty() {
+                items.extend([
+                    "Open task to review.".dim().into(),
+                    "Waiting for your response.".into(),
+                ]);
+            } else {
+                items.extend(session.pending_questions.iter().map(|question| {
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(Span::styled(
+                            question.clone(),
+                            style::log_styles(&crate::log::Kind::Assistant).1,
+                        )),
+                        width,
+                    )
+                    .into()
+                }));
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key(
+                "Needs attention",
+                &(needs, &session.pending_questions),
+            ));
+            copies.push(None);
+            body_links.push(Vec::new());
+        }
         item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
@@ -798,7 +1042,7 @@ impl View {
                     _ => unreachable!("copyable bodies contain text rows"),
                 })
                 .collect::<Vec<_>>();
-            let markdown = *label != "Copied latest activity";
+            let markdown = !matches!(*label, "Copied latest activity" | "Copied tasks");
             let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
             for (index, cells) in body.clone().zip(maps) {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
@@ -890,7 +1134,6 @@ impl View {
                         start..start + budget.bodies[i].0 + state.reveal[i]
                     })
                     .collect();
-                model_item = keep[..model_item].iter().filter(|keep| **keep).count();
                 let mut index = 0;
                 items.retain(|_| {
                     let retain = keep[index];
@@ -941,31 +1184,9 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for (item_index, ((item, mapped), links)) in
-            items.into_iter().zip(text_rows).zip(item_links).enumerate()
-        {
+        for ((item, mapped), links) in items.into_iter().zip(text_rows).zip(item_links) {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
-                if item_index == model_item {
-                    let model_width = ("Model: ".width() + session.model_name().width())
-                        .min(usize::from(area.width)) as u16;
-                    self.viewport
-                        .borrow_mut()
-                        .field_targets
-                        .push((Rect::new(area.x, y, model_width, 1), Field::Model));
-                    if let Some(effort) = effort {
-                        let offset =
-                            "Model: ".width() + session.model_name().width() + " · ".width();
-                        let rect = Rect::new(area.x + offset as u16, y, effort.width() as u16, 1)
-                            .intersection(area);
-                        if !rect.is_empty() {
-                            self.viewport
-                                .borrow_mut()
-                                .field_targets
-                                .push((rect, Field::Effort));
-                        }
-                    }
-                }
                 if let Some(mut mapped) = mapped {
                     mapped.y = y;
                     self.viewport.borrow_mut().details_text.rows.push(mapped);
@@ -981,16 +1202,6 @@ impl View {
             let item_area = row(content_area, offset as u16, height as u16);
             match item {
                 Item::Text(text) => line(text, item_area, &mut content),
-                Item::Link { line: text, link } => {
-                    line(text, item_area, &mut content);
-                    if let Some((x, width, url)) = link {
-                        super::hyperlink::hyperlink(
-                            &mut content,
-                            Rect::new(item_area.x + x, item_area.y, width, 1),
-                            &url,
-                        );
-                    }
-                }
                 Item::Background { task, output } => {
                     let start = offset.max(scroll);
                     let end = (offset + height).min(scroll + available);
@@ -1011,9 +1222,13 @@ impl View {
                             usize::from(item_area.width.saturating_sub(2)),
                         )
                     });
-                    let elapsed = child
-                        .started_at
-                        .map(|at| format_duration((now - at).num_seconds().max(0)));
+                    // A known turn uses the same clock as its Prompt. Without a
+                    // turn timestamp, show the child's own age.
+                    let elapsed = turn_elapsed(child, now).or_else(|| {
+                        child
+                            .started_at
+                            .map(|at| format_duration((now - at).num_seconds().max(0)))
+                    });
                     render_background_box(
                         &child.title,
                         elapsed.as_deref(),
@@ -1040,10 +1255,24 @@ impl View {
                 .rows
                 .retain(|row| row.y != last.y);
             drawn_links.retain(|(rect, _)| rect.y != last.y);
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .retain(|(rect, _)| !rect.intersects(last));
         }
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
     }
+}
+
+fn turn_elapsed(session: &Session, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let start = session.prompt_at?;
+    let end = if session.status == SessionStatus::Working {
+        now
+    } else {
+        session.last_record_at.unwrap_or(start)
+    };
+    Some(format_duration((end - start).num_seconds().max(0)))
 }
 
 /// Puts a blank row between a section and the one above it.
@@ -1138,18 +1367,96 @@ fn budget_details(
     })
 }
 
-fn line_width_fits(line_width: usize, width: usize) -> bool {
-    line_width <= width
+/// Centers a section label, fitting its right value into the space after it.
+fn centered_header(label: Line<'static>, value: Line<'static>, width: usize) -> Line<'static> {
+    let label = truncate_line_with_ellipsis_if_overflow(label, width);
+    let start = (width - label.width()) / 2;
+    let available = width.saturating_sub(start + label.width() + 1);
+    let value = truncate_line_with_ellipsis_if_overflow(value, available);
+    let mut header = Line::from(" ".repeat(start).dim());
+    header.spans.extend(label.spans);
+    if value.width() > 0 {
+        header
+            .spans
+            .push(" ".repeat(width - header.width() - value.width()).dim());
+        header.spans.extend(value.spans);
+    }
+    header
+}
+
+/// Joins each vertical separator, given as its column and rows, to the rules above and below it.
+fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer) {
+    for &(x, top, bottom) in separators {
+        for (y, joint) in [(top.checked_sub(1), "┬"), (Some(bottom), "┴")] {
+            let Some(y) = y.filter(|&y| y >= area.y && y < area.bottom()) else {
+                continue;
+            };
+            let cell = &mut buf[(x, y)];
+            match (cell.symbol(), joint) {
+                ("─", _) => {
+                    cell.set_symbol(joint);
+                }
+                ("┬", "┴") | ("┴", "┬") => {
+                    cell.set_symbol("┼");
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Draws a dim rule across `area`'s first row.
+fn rule(area: Rect, buf: &mut Buffer) {
+    line("─".repeat(usize::from(area.width)).dim(), area, buf);
+}
+
+/// Draws end labels with a half line toward their corner and a space toward the center,
+/// keeping clear the `center` columns in the rule's middle. Returns where each text landed.
+fn render_rule_ends(
+    rule: Rect,
+    center: u16,
+    left: Option<Span<'static>>,
+    right: Option<Span<'static>>,
+    buf: &mut Buffer,
+) -> (Option<Rect>, Option<Rect>) {
+    // Each side keeps its corner cell, a space on both sides of its text and a rule cell before
+    // the center.
+    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(4);
+    let mut place = |text: Option<Span<'static>>, from_left: bool| {
+        let style = text.as_ref()?.style;
+        let text = truncate_line_with_ellipsis_if_overflow(Line::from(text?), side);
+        let width = text.width() as u16;
+        if width == 0 {
+            return None;
+        }
+        let x = if from_left {
+            rule.x + 2
+        } else {
+            rule.right() - 2 - width
+        };
+        let area = Rect::new(x, rule.y, width, 1);
+        Clear.render(Rect::new(x - 1, rule.y, width + 2, 1), buf);
+        let (padding, symbol) = if from_left {
+            (x - 1, "╴")
+        } else {
+            (x + width, "╶")
+        };
+        buf[(padding, rule.y)]
+            .set_symbol(symbol)
+            .set_style(Style::default().dim());
+        let mut text = text;
+        for span in &mut text.spans {
+            span.style = style;
+        }
+        text.render(area, buf);
+        Some(area)
+    };
+    (place(left, true), place(right, false))
 }
 
 /// One row-aligned piece of the details panel.
 enum Item<'a> {
     Text(Line<'static>),
-    Link {
-        line: Line<'static>,
-        /// Column offset, width and target of the pull request link.
-        link: Option<(u16, u16, String)>,
-    },
     Subagent(&'a Session),
     Background {
         task: &'a crate::model::BackgroundTask,
@@ -1160,7 +1467,7 @@ enum Item<'a> {
 impl Item<'_> {
     fn height(&self) -> usize {
         match self {
-            Self::Text(_) | Self::Link { .. } => 1,
+            Self::Text(_) => 1,
             Self::Background { output, .. } => box_height(output.len()),
             Self::Subagent(child) => box_height(usize::from(!subagent_line(child).0.is_empty())),
         }
@@ -1216,20 +1523,17 @@ fn render_background_box(
     box_area: Rect,
     buf: &mut Buffer,
 ) {
-    // A rule cell leads the title and a half-width glyph ends the row; a
-    // space keeps the title off both.
-    let title = super::title_rule::title_rule(description, usize::from(box_area.width), elapsed);
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().dim())
-        .title_style(Style::default().not_dim())
-        .title(title);
+        .border_style(Style::default().dim());
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    if box_area.width > 0 {
-        buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
-    }
-    // Output lines up with the title text under the rule.
+    line(
+        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed),
+        row(box_area, 0, 1),
+        buf,
+    );
+    // Keep output indented two cells under the rule.
     let inner = Rect {
         x: inner.x + 2,
         width: inner.width.saturating_sub(2),
@@ -1312,11 +1616,13 @@ mod wrapped_path_tests {
             name: None,
             title: "Path probe".into(),
             prompt: MESSAGE.into(),
+            detail_sources: Default::default(),
             prompt_images: Vec::new(),
             queued: Vec::new(),
             prompt_at: None,
             turn_messages: 0,
             last_record_at: None,
+            model_label: None,
             model: None,
             effort: None,
             git_branch: None,
@@ -1328,9 +1634,11 @@ mod wrapped_path_tests {
             last_message: Some(MESSAGE.into()),
             last_message_at: None,
             activity: None,
+            ask: None,
             pending_questions: Vec::new(),
             background_job: None,
             background: Vec::new(),
+            tasks: Vec::new(),
             last_prompt: None,
             transcript: None,
         };
@@ -1350,7 +1658,7 @@ mod wrapped_path_tests {
                 .count(),
             2
         );
-        assert!(rows.iter().any(|row| row.contains("Last message")));
+        assert!(rows.iter().any(|row| row.contains("Update")));
         assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 
@@ -1367,5 +1675,39 @@ mod wrapped_path_tests {
             ]
         );
         assert!(lines.iter().all(|line| line.width() <= 40));
+    }
+}
+
+#[cfg(test)]
+mod background_title_tests {
+    use super::*;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn background_titles_are_centered_with_optional_time_and_cjk() {
+        for (title, left, right) in [("Check files", 13, 14), ("中文答题卡住", 13, 13)] {
+            for time in [None, Some("35s")] {
+                let area = Rect::new(0, 0, 40, 2);
+                let mut buf = Buffer::empty(area);
+                render_background_box(title, time, vec![Line::from("output")], area, &mut buf);
+                let text: String = buf.content[..40]
+                    .iter()
+                    .enumerate()
+                    .filter(|(x, _)| *x == 0 || buf.content[x - 1].symbol().width() < 2)
+                    .map(|(_, c)| c.symbol())
+                    .collect();
+                let suffix = time.map(|t| format!(" {t}")).unwrap_or_default();
+                assert_eq!(
+                    text,
+                    format!(
+                        "{} {title} {}{suffix}",
+                        "─".repeat(left),
+                        "─".repeat(right - suffix.width())
+                    ),
+                    "{title} {time:?}"
+                );
+                assert_eq!(buf[(2, 1)].symbol(), "o");
+            }
+        }
     }
 }

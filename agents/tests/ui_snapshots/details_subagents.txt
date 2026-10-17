@@ -1,12 +1,7 @@
-Background
-─ Check files · 1m 5s ─────────────────╴
-  Read files
-─ Run checks · 10s ────────────────────╴
-
-Prompt
+                 Prompt
 Parent
 
-Project
-/tmp/project
-
-Model: Unknown
+               Background
+───────────── Check files ──────── 1m 5s
+  Read files
+────────────── Run checks ────────── 10s

@@ -13,6 +13,66 @@ fn fixture() -> (tempfile::TempDir, CodexProvider) {
 }
 
 #[test]
+fn thread_clock_uses_latest_recorded_turn_without_changing_thread_birth() {
+    let (dir, mut provider) = fixture();
+    let path = dir.path().join("clock.jsonl");
+    let records = include_str!("../../../tests/fixtures/codex-thread-clock.jsonl");
+    let manager = dir.path().join("manager");
+    std::fs::create_dir_all(manager.join("threads")).unwrap();
+    std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+    std::fs::write(
+        manager.join("threads/thread-12.json"),
+        include_str!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+    )
+    .unwrap();
+    std::fs::write(
+        manager.join("claude-parent/state.json"),
+        include_str!("../../../tests/fixtures/codex-manager/attached-state.json"),
+    )
+    .unwrap();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute(
+        "UPDATE threads SET rollout_path=?, created_at_ms=1792218925141 WHERE id='thread-12'",
+        [path.to_str().unwrap()],
+    )
+    .unwrap();
+    for count in [1, 2, 3, 4] {
+        std::fs::write(
+            &path,
+            records.lines().take(count).collect::<Vec<_>>().join("\n") + "\n",
+        )
+        .unwrap();
+        let snapshot = provider.refresh(1);
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap();
+        assert_eq!(
+            session.parent,
+            Some(SessionKey {
+                provider: ProviderId::Claude,
+                id: "claude-parent".into(),
+            })
+        );
+        let expected = if count <= 2 {
+            "2026-10-17T06:35:25.554Z"
+        } else {
+            "2026-10-17T15:46:56.983Z"
+        };
+        assert_eq!(
+            session.prompt_at,
+            Some(expected.parse().unwrap()),
+            "{count}"
+        );
+        assert_eq!(
+            session.started_at,
+            DateTime::from_timestamp_millis(1792218925141)
+        );
+    }
+}
+
+#[test]
 fn request_user_input_pending_answered_and_offline() {
     let (dir, mut provider) = fixture();
     let path = dir.path().join("rollout.jsonl");
@@ -555,10 +615,8 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     let mut view = View::new(Grouping::Project, false);
     view.set_capabilities(hub.capabilities());
     view.set_sessions(snapshot.sessions, snapshot.has_more);
-    // Needs you shows the inactive parent as context above its waiting child.
-    for _ in 0..3 {
-        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    }
+    // Active shows the inactive parent as context above its waiting child.
+    // The Active tab includes the waiting child.
     assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render(buffer.area, &mut buffer);
@@ -842,7 +900,7 @@ fn manager_thread_operations_use_the_provider_paths() {
     for result in [
         provider.rename(&session, "probe"),
         provider.archive(&session),
-        provider.stop(&session),
+        provider.send(&session, SessionInput::Interrupt).unwrap()(),
     ] {
         assert_ne!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);
     }
@@ -855,4 +913,52 @@ fn manager_thread_operations_use_the_provider_paths() {
         provider.delete(&session).unwrap_err().to_string(),
         "Codex's app-server daemon isn't running"
     );
+}
+
+#[test]
+fn model_catalog_labels_refresh_only_when_modified() {
+    let (dir, mut provider) = fixture();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute("UPDATE threads SET model='gpt-6.1-sol'", [])
+        .unwrap();
+    let label =
+        |provider: &mut CodexProvider| provider.refresh(1).sessions[0].model_label().to_owned();
+    assert_eq!(label(&mut provider), "gpt-6.1-sol");
+    let path = dir.path().join("models_cache.json");
+    std::fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/codex-models-cache.json"),
+    )
+    .unwrap();
+    assert_eq!(label(&mut provider), "GPT-6.1-Sol");
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    // Invalid content would fail parsing if an unchanged file were read again.
+    std::fs::write(&path, "invalid").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    assert_eq!(label(&mut provider), "GPT-6.1-Sol");
+    let mut catalog: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/codex-models-cache.json"
+    ))
+    .unwrap();
+    catalog["models"].as_array_mut().unwrap().remove(0);
+    std::fs::write(&path, serde_json::to_vec(&catalog).unwrap()).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(
+            std::fs::FileTimes::new().set_modified(modified + std::time::Duration::from_secs(1)),
+        )
+        .unwrap();
+    assert_eq!(label(&mut provider), "gpt-6.1-sol");
+    db.execute("UPDATE threads SET model='gpt-6-astra'", [])
+        .unwrap();
+    assert_eq!(label(&mut provider), "GPT-6-Astra");
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(label(&mut provider), "gpt-6-astra");
 }

@@ -7,4 +7,4 @@ Claude Code 2.1.296 samples copied from local session files on 2026-10-13:
 - `exited.output`, `killed.output`, `detached.output`: complete real output files with terminal footers.
 - `adopt.json`: the shell adoption record for background session `50517e58`.
 
-Tests relocate output paths and compose these records around the queue stopping point. Liveness observations are injected; the opt-in sleep probe uses actual descriptors and PIDs.
+Tests relocate output paths and compose these records around the queue stopping point. Liveness tests use real child processes, output descriptors and PIDs.

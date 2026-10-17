@@ -32,6 +32,13 @@ pub(super) fn fixture() -> (tempfile::TempDir, App) {
     (dir, app)
 }
 
+fn replace_transcript(path: &std::path::Path, content: impl AsRef<[u8]>) {
+    use std::io::Write;
+    let mut replacement = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
+    replacement.write_all(content.as_ref()).unwrap();
+    replacement.persist(path).unwrap();
+}
+
 pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     app.refresh_log(8);
@@ -77,7 +84,7 @@ fn terminal_theme_events_update_background_and_accents() {
     )
     .unwrap();
     app.preferences.theme = Some(file.path().to_owned());
-    app.apply_background(None, true);
+    app.apply_background(true);
     assert!(crate::ui::light_background());
     assert_eq!(
         crate::theme::accent(0),
@@ -102,8 +109,8 @@ fn task_log_cache_rereads_when_event_count_changes() {
     app.refresh_log(8);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
-    for (height, count) in [(24, 7), (40, 11), (60, 19), (19, 0), (24, 7)] {
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
+    for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 18), (24, 18)] {
         app.refresh_log(
             app.view
                 .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
@@ -112,16 +119,104 @@ fn task_log_cache_rereads_when_event_count_changes() {
     }
 }
 
+/// Gives each copy of the captured transcript its own event identities and visible marker.
+fn transcript_copies(payload: &str, copies: usize, first: usize) -> String {
+    let records: Vec<serde_json::Value> = payload
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let mut text = String::new();
+    for copy in first..first + copies {
+        for record in &records {
+            let mut record = record.clone();
+            if let Some(timestamp) = record.get("timestamp").and_then(|value| value.as_str()) {
+                let timestamp = chrono::DateTime::parse_from_rfc3339(timestamp).unwrap()
+                    + chrono::Duration::minutes(copy as i64);
+                record["timestamp"] = timestamp.to_rfc3339().into();
+            }
+            for field in ["uuid", "parentUuid", "leafUuid"] {
+                if let Some(id) = record.get(field).and_then(|value| value.as_str()) {
+                    let (prefix, suffix) = id.split_at(id.len() - 8);
+                    let suffix = u32::from_str_radix(suffix, 16).unwrap() ^ (copy as u32 + 1);
+                    record[field] = format!("{prefix}{suffix:08x}").into();
+                }
+            }
+            if let Some(content) = record.pointer_mut("/message/content") {
+                match content {
+                    serde_json::Value::String(body) => {
+                        *body = format!("Transcript copy {copy}\n\n{body}");
+                    }
+                    serde_json::Value::Array(blocks) => {
+                        let body = blocks
+                            .iter_mut()
+                            .find_map(|block| block.get_mut("text"))
+                            .expect("captured assistant has text");
+                        *body =
+                            format!("Transcript copy {copy}\n\n{}", body.as_str().unwrap()).into();
+                    }
+                    _ => panic!("unexpected captured message content"),
+                }
+            }
+            text.push_str(&serde_json::to_string(&record).unwrap());
+            text.push('\n');
+        }
+    }
+    text
+}
+
+fn log_detail(app: &App) -> String {
+    log_detail_at(app, ratatui::layout::Rect::new(0, 0, 120, 23))
+}
+
+fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    let rule = (0..area.height)
+        .rev()
+        .find(|&y| {
+            (0..area.width)
+                .filter(|&x| buffer[(x, y)].symbol() == "─")
+                .count()
+                > usize::from(area.width / 2)
+        })
+        .expect("log detail has a top rule");
+    (rule + 1..area.height - 1)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
-    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
     app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
         kind,
         column: 2,
-        row: 14,
+        row: 13,
         modifiers: KeyModifiers::NONE,
     }));
+}
+
+pub(super) fn click_log(app: &mut App) {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    for kind in [
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+    ] {
+        app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column: 2,
+            row: 13,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
 }
 
 #[test]
@@ -129,16 +224,16 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(8);
-    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     let wheel = || {
         Input::Terminal(Ok(Event::Mouse(crossterm::event::MouseEvent {
-            kind: crossterm::event::MouseEventKind::ScrollDown,
+            kind: crossterm::event::MouseEventKind::ScrollUp,
             column: 2,
-            row: 14,
+            row: 13,
             modifiers: KeyModifiers::NONE,
         })))
     };
@@ -151,7 +246,10 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             .unwrap()
     );
     assert!(app.receiver.try_recv().is_err());
-    assert_eq!(app.view.log_scroll(), 15);
+    assert_eq!(app.view.log_scroll(), 2);
+    let detail = log_detail(&app);
+    assert!(detail.contains("Transcript copy 17"), "{detail}");
+    assert!(detail.contains("User"), "{detail}");
 }
 
 #[test]
@@ -160,15 +258,23 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(8);
-    scroll_log(&mut app, ScrollDown);
+    for _ in 0..7 {
+        scroll_log(&mut app, ScrollUp);
+    }
     app.refresh_log(8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 11);
-    assert_eq!(app.view.log.len(), 11);
+    assert_eq!(app.view.log_scroll(), 8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 16);
+    assert_eq!(app.view.log.len(), 16);
+    assert!(log_detail(&app).contains("Transcript copy 16"));
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-    std::fs::write(&path, payload.replace("Codex", "CODEX").repeat(20)).unwrap();
+    std::fs::write(
+        &path,
+        transcript_copies(&payload.replace("Codex", "CODEX"), 20, 0),
+    )
+    .unwrap();
     std::fs::File::options()
         .write(true)
         .open(&path)
@@ -177,33 +283,243 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap();
     app.refresh_log(8);
     assert_eq!(app.view.log, cached);
-    scroll_log(&mut app, ScrollUp);
+    for _ in 0..7 {
+        scroll_log(&mut app, ScrollDown);
+    }
     app.refresh_log(8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
-    assert_eq!(app.view.log.len(), 8);
-    assert_ne!(app.view.log, cached[3..]);
+    assert_eq!(app.view.log_scroll(), 8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 16);
+    assert_eq!(app.view.log.len(), 16);
+    assert_eq!(app.view.log, cached);
+    assert!(log_detail(&app).contains("Transcript copy 19"));
 }
 
 #[test]
-fn task_log_growth_keeps_distance_from_end() {
-    use crossterm::event::MouseEventKind::ScrollDown;
+fn task_log_wheel_reverses_across_reloaded_windows() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    for navigation in [None, Some(KeyCode::Down), Some(KeyCode::Char('j'))] {
+        let (_dir, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        let transcript = format!(
+            "{}{}{}",
+            transcript_copies(&payload, 20, 0),
+            include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
+            transcript_copies(&payload, 20, 20)
+        );
+        std::fs::write(&path, transcript).unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+        let visible = app.view.log_event_count(area);
+        let wheel = |app: &mut App, kind| {
+            app.handle_event(Event::Mouse(MouseEvent {
+                kind,
+                column: 134,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }));
+            app.refresh_log(visible);
+            app.view
+                .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        };
+        app.refresh_log(visible);
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        for _ in 0..45 {
+            wheel(&mut app, MouseEventKind::ScrollUp);
+        }
+        let before = log_detail_at(&app, area);
+        if let Some(code) = navigation {
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.handle_event(Event::Mouse(MouseEvent {
+                    kind,
+                    column: 134,
+                    row: 2,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+            // Clicking the selected top row gives keyboard navigation to the log list.
+            for _ in 0..6 {
+                app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+                app.refresh_log(visible);
+                app.view
+                    .render(area, &mut ratatui::buffer::Buffer::empty(area));
+            }
+        } else {
+            for _ in 0..6 {
+                wheel(&mut app, MouseEventKind::ScrollDown);
+            }
+        }
+        let after = log_detail_at(&app, area);
+        assert!(
+            after.contains("Transcript copy 20"),
+            "newer navigation must pass the notification: {after}"
+        );
+        for _ in 0..6 {
+            if let Some(code) = navigation {
+                let code = if code == KeyCode::Down {
+                    KeyCode::Up
+                } else {
+                    KeyCode::Char('k')
+                };
+                app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+                app.refresh_log(visible);
+                app.view
+                    .render(area, &mut ratatui::buffer::Buffer::empty(area));
+            } else {
+                wheel(&mut app, MouseEventKind::ScrollUp);
+            }
+        }
+        assert_eq!(log_detail_at(&app, area), before);
+    }
+}
+
+#[test]
+fn top_border_loads_first_event_of_whole_log() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 200, 0));
     app.refresh_log(8);
-    scroll_log(&mut app, ScrollDown);
-    app.refresh_log(8);
+    assert_eq!(app.view.log.len(), 8);
+    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let visible = app.view.log_event_count(area);
+    let scroll = |app: &mut App, kind| {
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column: 134,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        }));
+    };
+    let click = |app: &mut App, row| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            app.handle_event(Event::Mouse(MouseEvent {
+                kind,
+                column: 134,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }));
+        }
+    };
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    let bottom = (0..45)
+        .find(|&y| {
+            (100..200)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .contains("claude-opus")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{}",
+                (0..45)
+                    .map(|y| (0..200)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        });
+    for latest in [false, true] {
+        click(&mut app, 1);
+        click(&mut app, 1);
+        app.refresh_log(visible);
+        let detail = log_detail_at(&app, area);
+        assert!(detail.contains("Transcript copy 0"), "{detail}");
+        scroll(&mut app, MouseEventKind::ScrollDown);
+        scroll(&mut app, MouseEventKind::ScrollDown);
+        app.refresh_log(visible);
+        assert!(log_detail_at(&app, area).contains("Transcript copy 1"));
+        scroll(&mut app, MouseEventKind::ScrollUp);
+        scroll(&mut app, MouseEventKind::ScrollUp);
+        app.refresh_log(visible);
+        assert!(log_detail_at(&app, area).contains("Transcript copy 0"));
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        if latest {
+            click(&mut app, bottom);
+            click(&mut app, bottom);
+        } else {
+            let mut buffer = ratatui::buffer::Buffer::empty(area);
+            app.view.render(area, &mut buffer);
+            let row = (0..45)
+                .find(|&y| {
+                    (130..200)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                        .contains("↓ Latest")
+                })
+                .unwrap();
+            let line = (0..200)
+                .map(|x| buffer[(x, row)].symbol())
+                .collect::<String>();
+            let column = line.chars().position(|c| c == '↓').unwrap() as u16;
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.handle_event(Event::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+        }
+        app.refresh_log(visible);
+        assert!(log_detail_at(&app, area).contains("Transcript copy 199"));
+        assert_eq!(app.view.log_scroll(), app.view.log_max_scroll());
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    }
+}
+
+#[test]
+fn task_log_growth_keeps_older_selection_and_viewport() {
+    use crossterm::event::MouseEventKind::ScrollUp;
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
+    app.refresh_log(
+        app.view
+            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+    );
+    scroll_log(&mut app, ScrollUp);
+    app.refresh_log(
+        app.view
+            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+    );
     let before = app.view.log.clone();
+    let selected = log_detail(&app);
+    let scroll = app.view.log_scroll();
     std::fs::write(
         &path,
-        payload.repeat(20) + &payload.replace("Codex", "CODEX"),
+        transcript_copies(&payload, 20, 0)
+            + &transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20),
     )
     .unwrap();
-    app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 3);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 11);
+    app.refresh_log(
+        app.view
+            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+    );
+    assert_eq!(app.view.log_scroll(), scroll);
+    assert_eq!(log_detail(&app), selected);
     assert_ne!(app.view.log, before);
+    let detail = log_detail(&app);
+    assert!(detail.contains("Transcript copy 19"), "{detail}");
+    assert!(detail.contains("User"), "{detail}");
+    assert!(!detail.contains("Transcript copy 20"), "{detail}");
 }
 
 #[test]
@@ -212,26 +528,32 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(1);
-    app.view.handle_key(crossterm::event::KeyEvent::new(
-        KeyCode::Char('r'),
-        KeyModifiers::CONTROL,
-    ));
+    click_log(&mut app);
+    key(&mut app, KeyCode::Char('/'));
     app.refresh_log(1);
     for c in "Codex".chars() {
         key(&mut app, KeyCode::Char(c));
     }
+    super::log_search_tests::finish_search(&mut app);
     app.refresh_log(1);
     assert_eq!(app.view.matching_log_count(), 20);
     for _ in 0..30 {
-        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
+        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
     app.refresh_log(1);
-    assert_eq!(app.view.log_scroll(), 19);
+    assert_eq!(app.view.log_scroll(), 0);
+    let detail = log_detail(&app);
+    assert!(detail.contains("Transcript copy 0"), "{detail}");
+    assert!(detail.contains("User"), "{detail}");
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-    std::fs::write(&path, payload.replace("Codex", "other").repeat(20)).unwrap();
+    std::fs::write(
+        &path,
+        transcript_copies(&payload.replace("Codex", "other"), 20, 0),
+    )
+    .unwrap();
     std::fs::File::options()
         .write(true)
         .open(&path)
@@ -249,13 +571,13 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
         .append(true)
         .open(&path)
         .unwrap();
-    writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"Codex timeout"})).unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
     app.refresh_log(1);
-    assert_eq!(app.view.matching_log_count(), 1);
+    assert_eq!(app.view.matching_log_count(), 21);
     assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
     app.refresh_log(1);
-    assert_eq!(app.view.log.len(), 1);
+    assert_eq!(app.view.log.len(), 41);
 }
 
 #[test]
@@ -265,16 +587,16 @@ fn task_log_scroll_clamps_at_transcript_start() {
     assert_eq!(app.view.log.len(), 2);
     app.refresh_log(1);
     for _ in 0..5 {
-        scroll_log(&mut app, ScrollDown);
+        scroll_log(&mut app, ScrollUp);
     }
     app.refresh_log(1);
     assert_eq!(app.view.log.len(), 2);
-    scroll_log(&mut app, ScrollUp);
-    app.refresh_log(1);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
-    assert_eq!(app.view.log.len(), 1);
-    // A transcript shorter than the visible window clamps all the way to zero.
     scroll_log(&mut app, ScrollDown);
+    app.refresh_log(1);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 2);
+    assert_eq!(app.view.log.len(), 2);
+    // A transcript shorter than the visible window clamps all the way to zero.
+    scroll_log(&mut app, ScrollUp);
     app.refresh_log(8);
     app.refresh_log(8);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
@@ -368,10 +690,8 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
     assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
     assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-    app.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('r'),
-        KeyModifiers::CONTROL,
-    )));
+    click_log(&mut app);
+    key(&mut app, KeyCode::Char('/'));
     app.refresh_log(8);
     assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));
@@ -416,6 +736,8 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
     let started_at = chrono::Utc::now();
     app.view.log_session = Some(app.sessions[0].id.clone());
     app.view.log = vec![crate::log::Event {
+        source: None,
+        source_records: Vec::new(),
         sender: None,
         kind: crate::log::Kind::Assistant,
         body: "done".into(),
@@ -815,7 +1137,7 @@ fn manager_thread_fork_reaches_app_launch() {
 fn manager_thread_mutations_reach_app_provider_paths() {
     use crate::providers::{Provider, codex::CodexProvider};
     use ratatui::{buffer::Buffer, layout::Rect};
-    for operation in ["archive", "stop", "delete"] {
+    for operation in ["archive", "delete"] {
         let (dir, mut app) = fixture();
         rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
             .unwrap()
@@ -844,27 +1166,10 @@ fn manager_thread_mutations_reach_app_provider_paths() {
         app.sessions.push(child.clone());
         let action = match operation {
             "archive" => Action::Archive(child.id),
-            "stop" => Action::Stop(child.id),
             "delete" => Action::Delete(child.id),
             _ => unreachable!(),
         };
         assert!(!app.handle_action(Some(action)));
-        if operation == "stop" {
-            let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-            assert!(matches!(
-                &input,
-                Input::Sent {
-                    input: SessionInput::Interrupt,
-                    result: Err(_),
-                    ..
-                }
-            ));
-            let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
-            app.handle_inputs(input, &mut None, &mut schedule).unwrap();
-            assert!(app.pending_inputs.is_empty());
-            assert_eq!(std::fs::read(&state).unwrap(), bytes);
-            continue;
-        }
         let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
         app.view.render(buffer.area, &mut buffer);
         let rendered = buffer
@@ -925,11 +1230,18 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
     ]);
     let claude = app.sessions[0].clone();
     for rows in [vec![claude], vec![thread], vec![]] {
-        let has_project = !rows.is_empty();
         app.view = crate::ui::View::default();
         app.view.set_capabilities(app.hub.capabilities());
         app.view.set_input_choices(app.hub.input_choices());
+        let tab = match rows.first().map(|row| row.status) {
+            Some(SessionStatus::NeedsInput) => 3,
+            Some(SessionStatus::Inactive) => 4,
+            _ => 0,
+        };
         app.view.set_sessions(rows, false);
+        for _ in 0..tab {
+            key(&mut app, KeyCode::Tab);
+        }
         assert!(!key(&mut app, KeyCode::Char('n')));
         assert!(
             app.launch.is_none(),
@@ -946,6 +1258,57 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert_eq!(rendered.contains("New task"), has_project, "{rendered}");
+        assert!(rendered.contains("New task"), "{rendered}");
     }
+}
+
+#[test]
+fn delete_confirmation_removes_real_transcript_through_provider() {
+    let (_dir, mut app) = fixture();
+    let target = app.sessions[0].clone();
+    let path = target.transcript.as_ref().unwrap();
+    let original = std::fs::read(path).unwrap();
+    let keep_id = "00000000-0000-0000-0000-000000000002";
+    let keep = path.parent().unwrap().join(format!("{keep_id}.jsonl"));
+    std::fs::write(&keep, &original).unwrap();
+    let children = path.with_extension("");
+    std::fs::create_dir_all(children.join("subagents")).unwrap();
+    std::fs::write(
+        children.join("subagents/agent-child.jsonl"),
+        include_bytes!("../../../tests/fixtures/subagent.jsonl"),
+    )
+    .unwrap();
+    app.hub
+        .provider(target.id.provider)
+        .rename(&target, "Delete fixture session")
+        .unwrap();
+    assert!(children.join("custom-title.json").is_file());
+    app.refresh();
+    key(&mut app, KeyCode::Home);
+    for _ in 0..app.sessions.len() {
+        if app.view.selected_id() == Some(&target.id) {
+            break;
+        }
+        key(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.view.selected_id(), Some(&target.id));
+
+    let renamed = std::fs::read(path).unwrap();
+    assert!(!key(&mut app, KeyCode::Backspace));
+    assert!(!key(&mut app, KeyCode::Enter));
+    assert_eq!(std::fs::read(path).unwrap(), renamed);
+    assert!(children.is_dir());
+    assert!(app.session(&target.id).is_some());
+
+    assert!(!key(&mut app, KeyCode::Backspace));
+    assert!(!key(&mut app, KeyCode::Down));
+    assert!(!key(&mut app, KeyCode::Enter));
+    assert!(!path.exists());
+    assert!(!children.exists());
+    assert!(app.session(&target.id).is_none());
+    assert_eq!(std::fs::read(&keep).unwrap(), original);
+    assert!(app.session(&session_key(keep_id)).is_some());
+    app.refresh();
+    assert!(app.session(&target.id).is_none());
+    assert_eq!(std::fs::read(keep).unwrap(), original);
 }

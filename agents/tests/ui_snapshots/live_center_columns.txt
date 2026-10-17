@@ -1,22 +1,22 @@
-  Agent command center  Group: Project  g
-   All 6   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                      tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                                               Status         Updated  │ Prompt
-  Pinned  2                                                                                       │ Current task
-  › ○ Current task                                                        Ready              now  │
-    ● Needs an answer                                                     Needs input     2h ago  │ Project
-                                                                                                  │ /tmp/project
-  /tmp/project  4                                                                                 │
-    ○ A longer task title that uses the available column                  Ready           5m ago  │ Model: Unknown
-    ● Failed task                                                         Needs input     1h ago  │
-    ● Working task                                                        Working         1d ago  │
-    ○ Unloaded task                                                       Inactive        2d ago  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │ ────────────────── Ready · Current task ──────────────────
-  Current task ›
-  ? help  esc back  ↑/↓ move  enter open  n new
+  Active 5                                                                                                                                          Inactive 1
+────────────────────────────────────────┬───────────── Current task ─────────────┬──────────────────────────────────────────────────────────────────────────────
+                 Pinned                 │                 Prompt                 │
+ ○ Current task             Ready       │ Current task                           │
+ ● Needs an answer          Needs input │                                        │
+                                        │                                        │
+              /tmp/project              │                                        │
+ ○ A longer task title th…  Ready       │                                        │
+ ● Failed task              Needs input │                                        │
+ ↓                                      │                                        │
+────────────────────────────────────────┴──────────────── Ready ──────── project╶┴╴Unknown ─────────────────────────────────────────────────────────────────────
+ Current task ❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+ ? help  esc back  ↑/↓ move  enter open  n new

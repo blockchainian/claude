@@ -1,0 +1,13 @@
+Multi  ·  question 1/1
+
+Probe multiple choices?
+
+› 1. [ ] Red
+     Red choice
+  2. [ ] Green
+     Green choice
+  3. [ ] Blue
+     Blue choice
+  4. Other
+
+↑/↓ move · Enter to confirm · Esc to close

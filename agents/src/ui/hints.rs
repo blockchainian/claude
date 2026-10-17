@@ -18,6 +18,8 @@ impl View {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
+        } else if self.active_question().is_some() {
+            hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])
         } else if self.log_search.editing || self.log_detail_search.editing {
@@ -85,9 +87,16 @@ impl View {
             ),
             group(
                 "View",
-                &[("tab/⇧tab", "Filter"), ("f3", "Search"), ("g", "Group")],
+                &[("tab/⇧tab", "Filter"), ("/", "Search"), ("g", "Group")],
             ),
-            group("Log", &[("⌃r", "Search")]),
+            group(
+                "Log",
+                &[
+                    ("/", "Search"),
+                    ("2× click top border", "Earliest"),
+                    ("2× click bottom border", "Latest"),
+                ],
+            ),
         ];
         let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];
         for line in super::shortcut_help::group_lines(groups, width) {
@@ -102,5 +111,72 @@ impl View {
             }
         }
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouping_key_works_without_a_footer_hint() {
+        let mut view = View::new(Grouping::Project, false);
+        for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+            assert_eq!(view.grouping(), grouping);
+            assert!(view.center_help_lines(120).iter().any(|line| {
+                let text = line.to_string();
+                text.contains("g") && text.contains("Group")
+            }));
+            assert!(
+                !view.center_footer_hints()
+                    .to_string()
+                    .contains("g group by")
+            );
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+                Some(Action::PersistGrouping(grouping.next()))
+            );
+        }
+    }
+
+    #[test]
+    fn grouping_hint_is_hidden_when_the_grouping_key_is_consumed() {
+        for mode in 0..7 {
+            let mut view = View::new(Grouping::Project, false);
+            let id = SessionKey {
+                provider: ProviderId::Claude,
+                id: "task".into(),
+            };
+            match mode {
+                0 => view.input_box.focused = true,
+                1 => {
+                    view.confirm_dialog = Some(ConfirmDialog {
+                        removal: Removal::Delete,
+                        id,
+                        title: "Task".into(),
+                        confirm: false,
+                    });
+                }
+                2 => view.help = true,
+                3 => view.rename_target = Some(id),
+                4 => view.log_search.editing = true,
+                5 => view.log_detail_search.editing = true,
+                6 => view.searching = true,
+                _ => unreachable!(),
+            }
+            assert!(
+                !view
+                    .center_footer_hints()
+                    .to_string()
+                    .contains("g group by"),
+                "mode {mode}"
+            );
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+                None,
+                "mode {mode}"
+            );
+            assert_eq!(view.grouping(), Grouping::Project, "mode {mode}");
+        }
     }
 }

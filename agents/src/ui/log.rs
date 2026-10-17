@@ -1,25 +1,93 @@
-use super::formatting::{format_duration, format_relative_time};
+use super::formatting::{format_log_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
 use crate::log::{Event, Kind};
 use chrono::{DateTime, Local, Utc};
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
-const CLOCK_WIDTH: usize = 8;
-const KIND_WIDTH: usize = 9;
+pub(super) const CLOCK_WIDTH: usize = 8;
 
-/// Rows above the first event: the top rule and a blank row.
-pub(super) const LOG_TOP: u16 = 2;
+/// Rows above the detail header: the top rule.
+pub(super) const LOG_TOP: u16 = 1;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
     super::render::row(area, area.height.saturating_sub(1), 1)
 }
 
 impl View {
+    pub(super) fn detail_text(&self, event: &Event) -> String {
+        if self.log_detail_raw {
+            match event.raw_text() {
+                Ok(text) => text,
+                Err(error) => format!("Cannot read transcript: {error}"),
+            }
+        } else {
+            open_text(event)
+        }
+    }
+
+    fn selected_detail_layout(
+        &self,
+        event: &Event,
+        width: u16,
+        content_width: u16,
+        wide: bool,
+        cwd: &Path,
+        now: DateTime<Utc>,
+    ) -> DetailLayout {
+        if self.log_detail_raw {
+            let source = self.detail_text(event);
+            let drawn = source.replace('\t', "    ");
+            let mut layout = detail_parts_layout(
+                event,
+                width,
+                content_width,
+                wide,
+                cwd,
+                now,
+                vec![super::tool_detail::Part::raw_json(source)],
+            );
+            if super::highlight::JsonHighlight::enabled(&drawn) {
+                let widest = layout.lines.iter().map(Line::width).max().unwrap_or(0);
+                // Centering was already applied to plain rows by detail_parts_layout.
+                let content_width = super::highlight::plain_lines(&drawn)
+                    .iter()
+                    .map(Line::width)
+                    .max()
+                    .unwrap_or(0);
+                layout.raw = Some(RawHighlight {
+                    source: drawn,
+                    highlighter: super::highlight::JsonHighlight::default(),
+                    row: 0,
+                    padding: widest.saturating_sub(content_width),
+                    style: super::style::log_styles(&event.kind).1,
+                });
+            }
+            layout
+        } else {
+            detail_parts_layout(
+                event,
+                width,
+                content_width,
+                wide,
+                cwd,
+                now,
+                open_parts(event),
+            )
+        }
+    }
+
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         self.viewport.borrow_mut().log_text = text_selection::TextRegion::default();
         if !self.selecting_list(text_selection::Panel::LogList) {
             self.viewport.borrow_mut().log_list_text = text_selection::TextRegion::default();
+        }
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log = area;
+            viewport.log_rows.clear();
+            viewport.log_jump = Rect::default();
+            viewport.log_links.clear();
         }
         if area.is_empty() {
             return;
@@ -27,25 +95,18 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.log_rows.clear();
-            viewport.log_jump = Rect::default();
-            viewport.log_links.clear();
-        }
         if self.log_session.as_ref() != Some(&session.id) {
-            return;
-        }
-        if let Some(event) = &self.log_open {
-            let time = event_time(event, session, self.is_newest_shown(event), now);
-            self.render_open_event(event, &time, area, buf, &session.cwd);
             return;
         }
         if self.log_search.active() && area.height > 1 {
             let input = search_input_rect(area);
             if self.log_search.editing {
-                super::render::render_input_row("Search › ", &self.log_search.query, input, buf);
+                super::render::render_input_row(
+                    &format!("Search {PROMPT_MARKER} "),
+                    &self.log_search.query,
+                    input,
+                    buf,
+                );
             } else {
                 Line::from(self.log_search.query.text().to_owned())
                     .dim()
@@ -53,29 +114,47 @@ impl View {
                     .render(input, buf);
             }
         }
+        let max_scroll = self.log_max_scroll();
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll = viewport.log_scroll.min(max_scroll);
+        }
+        self.reveal_log_selection();
         let scroll = self.log_scroll();
-        self.render_log_jump(area, scroll, buf);
         let matching: Vec<_> = self.shown_log_events().collect();
-        let end = matching.len().saturating_sub(scroll);
-        let start = end.saturating_sub(usize::from(area.height.saturating_sub(LOG_TOP + 1)));
+        let selected_index = self.log_selected;
+        let start = scroll.min(matching.len());
+        let end = (start
+            + usize::from(
+                area.height
+                    .saturating_sub(u16::from(self.log_search.active())),
+            ))
+        .min(matching.len());
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
-        for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
-            let last = scroll == 0 && index == 0;
+        for (index, &(log_index, event)) in matching[start..end].iter().enumerate() {
+            let last = start + index + 1 == matching.len();
             let time = event_time(event, session, last, now);
-            let (cut, links) = render_event(
+            let links = render_event(
                 event,
                 &time,
                 last,
-                super::render::row(area, index as u16 + LOG_TOP, 1),
+                super::render::row(area, index as u16, 1),
                 buf,
                 Some(&self.log_search),
                 &session.cwd,
             );
-            rows.push((log_index, cut));
+            if selected_index == Some(start + index) {
+                super::render::fill_list_row(
+                    super::render::row(area, index as u16, 1),
+                    buf,
+                    super::style::cursor_style(),
+                );
+            }
+            rows.push(log_index);
             drawn_links.extend(links);
         }
-        let text_area = super::render::row(area, LOG_TOP, rows.len() as u16);
+        let text_area = super::render::row(area, 0, rows.len() as u16);
         {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_rows = rows;
@@ -84,36 +163,65 @@ impl View {
         self.capture_list_text(text_selection::Panel::LogList, text_area, scroll, buf);
     }
 
-    /// Draws the button that jumps back to the newest row on the rule, its arrow above the
-    /// rows' bodies, while the log is scrolled off its newest row.
-    fn render_log_jump(&self, area: Rect, scroll: usize, buf: &mut Buffer) {
+    pub(super) fn visible_log_event(&self) -> Option<&Event> {
+        self.log_background_event.as_ref().or_else(|| {
+            self.log_selected
+                .and_then(|index| self.shown_log_events().nth(index).map(|(_, event)| event))
+        })
+    }
+
+    pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+        super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        if self.log_session.as_ref() != Some(&session.id) {
+            return;
+        }
+        let Some(event) = self.visible_log_event() else {
+            return;
+        };
+        let time = event_time(event, session, self.is_newest_shown(), now);
+        let list_links = self.viewport.borrow().log_links.clone();
+        self.render_event_detail(event, &time, area, buf, &session.cwd, now);
+        self.viewport.borrow_mut().log_links.extend(list_links);
+    }
+
+    /// Draws the button that jumps back to the newest row, centered over the rows' content, while
+    /// an older event is selected.
+    pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
-        if scroll == 0 {
+        if self.following_log() {
             viewport.log_unseen = 0;
             return;
         }
         let label = match viewport.log_unseen {
-            0 => " ↑ Latest ".to_owned(),
-            unseen => format!(" ↑ {unseen} New "),
+            0 => " ↓ Latest ".to_owned(),
+            unseen => format!(" ↓ {unseen} New "),
         };
-        let x = area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16;
-        let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
+        let jump = log_content_centered(area, label.width() as u16);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
     }
 
     /// Draws one log event whole: its list row's time and kind, a blank row, then the full body.
-    fn render_open_event(
+    fn render_event_detail(
         &self,
         event: &Event,
         time: &str,
         area: Rect,
         buf: &mut Buffer,
         cwd: &std::path::Path,
+        now: DateTime<Utc>,
     ) {
+        let wide = buf.area.width >= super::render::WIDE_LAYOUT_COLUMNS;
+        let content_width = log_row_areas(self.center_layout(buf.area).log)
+            .0
+            .width
+            .min(area.width);
         let (label_style, _) = super::style::log_styles(&event.kind);
-        let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
-        let mut header = vec![Span::styled(time.to_owned(), time_style), " ".into()];
+        let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
+        let mut header = Vec::new();
         if let Some(sender) = &event.sender {
             header.push(Span::styled(format!("({sender}) "), label_style));
         }
@@ -125,17 +233,49 @@ impl View {
                 header.push(" ".into());
             }
             let title = if event.calls.len() == 1 {
-                event.calls[0].title.clone()
+                if super::tool_detail::input_label(&event.calls[0]).is_some() {
+                    crate::log::display_tool_name(&event.calls[0].name)
+                } else {
+                    event.calls[0].title.clone()
+                }
             } else {
                 event.body.clone()
             };
             header.push(Span::styled(title, label_style));
         }
-        super::render::line(
+        let header_label = match event.calls.as_slice() {
+            [call] if call.name == "task-notification" => {
+                Some(Span::styled(format!("Task {}", call.id), time_style))
+            }
+            [call] => call
+                .agent
+                .as_ref()
+                .and_then(|agent| agent.header.as_ref())
+                .map(|header| Span::styled(header.clone(), time_style)),
+            _ => None,
+        };
+        let description = match event.calls.as_slice() {
+            [call] => super::tool_detail::input_label(call),
+            _ => None,
+        };
+        let header_row = super::render::row(area, LOG_TOP, 1);
+        let bar = detail_block(header_row, content_width, wide);
+        let left = description.unwrap_or_else(|| {
+            header_label.map_or_else(String::new, |label| label.content.into_owned())
+        });
+        let mut title = super::tool_detail::input_title_bar(
+            &left,
             Line::from(header),
-            super::render::row(area, LOG_TOP, 1),
-            buf,
+            usize::from(bar.width),
+            time,
         );
+        if let Some(label) = title.spans.first_mut() {
+            label.style = time_style;
+        }
+        if let Some(time) = title.spans.last_mut() {
+            time.style = time_style;
+        }
+        title.render(bar, buf);
         let mut body_area =
             super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
         if self.log_detail_search.active() {
@@ -143,7 +283,7 @@ impl View {
             let input = search_input_rect(area);
             if self.log_detail_search.editing {
                 super::render::render_input_row(
-                    "Search › ",
+                    &format!("Search {PROMPT_MARKER} "),
                     &self.log_detail_search.query,
                     input,
                     buf,
@@ -157,42 +297,49 @@ impl View {
         }
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
-        let mut layout = match viewport.log_open_layout.take() {
+        viewport.log_detail_wide = wide;
+        let mut layout = match viewport.log_detail_layout.take() {
             Some(layout)
                 if layout.width == area.width
+                    && layout.content_width == content_width
+                    && layout.wide == wide
                     && layout.height == height
                     && layout.theme_generation == super::highlight::theme_generation() =>
             {
                 layout
             }
             _ => {
-                let mut layout = open_layout(event, area.width, cwd);
-                if layout.lines.len() > height && area.width > 1 {
-                    layout = open_layout(event, area.width - 1, cwd);
-                    layout.width = area.width;
-                }
+                let mut layout =
+                    self.selected_detail_layout(event, area.width, content_width, wide, cwd, now);
                 layout.height = height;
                 layout
             }
         };
-        let overflow = layout.lines.len() > height && area.width > 1;
-        if overflow {
-            body_area.width -= 1;
+        for &row in &layout.running {
+            layout.lines[row]
+                .spans
+                .last_mut()
+                .expect("running span exists")
+                .content = super::tool_detail::running_frame(now).into();
         }
+        // The scrollbar sits in the panel's right padding, outside the body.
+        let scrollbar_x = area.right();
+        let overflow = layout.lines.len() > height && scrollbar_x < buf.area.right();
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
-        viewport.log_open_max = layout.lines.len().saturating_sub(height);
-        viewport.log_open_scroll = viewport.log_open_scroll.min(viewport.log_open_max);
-        let scroll = viewport.log_open_scroll;
+        viewport.log_detail_max = layout.lines.len().saturating_sub(height);
+        viewport.log_detail_scroll = viewport.log_detail_scroll.min(viewport.log_detail_max);
+        let scroll = viewport.log_detail_scroll;
+        layout.highlight_raw(scroll + height);
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(layout.lines.len())
                 .max(1)
                 .min(height);
-            let top = scroll * (height - thumb) / viewport.log_open_max.max(1);
+            let top = scroll * (height - thumb) / viewport.log_detail_max.max(1);
             for row in 0..height {
-                buf[(body_area.right(), body_area.y + row as u16)].set_symbol(
+                buf[(scrollbar_x, body_area.y + row as u16)].set_symbol(
                     if (top..top + thumb).contains(&row) {
                         "│"
                     } else {
@@ -228,7 +375,7 @@ impl View {
         let mut visible = layout.lines
             [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
             .to_vec();
-        viewport.log_open_layout = Some(layout);
+        viewport.log_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
             highlight_matches(line, &self.log_detail_search);
@@ -238,100 +385,288 @@ impl View {
     }
 
     pub(super) fn jump_detail_match(&mut self) {
-        let Some(event) = &self.log_open else {
+        let Some(event) = self.visible_log_event() else {
             return;
         };
         if self.log_detail_search.query.is_empty() {
             return;
         }
         let viewport = self.viewport.borrow();
-        let width = viewport.log.inner(Margin::new(2, 0)).width.max(1);
+        let width = viewport.log_detail.width.max(1);
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = open_layout(event, width, cwd);
+        let layout = self.selected_detail_layout(
+            event,
+            width,
+            log_row_areas(viewport.log).0.width.min(width),
+            viewport.log_detail_wide,
+            cwd,
+            DateTime::UNIX_EPOCH,
+        );
         let found = layout
             .lines
             .iter()
             .position(|line| !self.log_detail_search.indices(&line.to_string()).is_empty());
         drop(viewport);
         if let Some(line) = found {
-            self.viewport.borrow_mut().log_open_scroll = line;
+            self.viewport.borrow_mut().log_detail_scroll = line;
         }
     }
 
-    /// Opens `event` in the log panel, or closes the open event, dropping its cached layout.
-    pub(super) fn set_log_open(&mut self, event: Option<Event>) {
-        self.cancel_open_selection();
-        self.log_open = event;
-        self.log_detail_search.clear();
-        self.viewport.borrow_mut().log_open_layout = None;
+    /// Selects an index in the shown list; `None` selects its newest row.
+    pub(super) fn select_log_event(&mut self, index: Option<usize>) {
+        self.log_detail_focused = index.is_some();
+        let background = self.log_background_event.take().is_some();
+        let len = self.matching_log_count();
+        let index = len
+            .checked_sub(1)
+            .map(|last| index.unwrap_or(last).min(last));
+        if self.log_selected != index || background {
+            self.cancel_detail_selection();
+            self.log_selected = index;
+            self.log_detail_search.clear();
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_detail_layout = None;
+            viewport.log_detail_other_layout = None;
+            viewport.log_detail_scroll = 0;
+        }
+        if self.following_log() {
+            self.viewport.borrow_mut().log_unseen = 0;
+        }
     }
 
-    /// Replaces the task log. Off the newest row, or while a mouse button is held, the rows on
-    /// screen stay put and the newer events count toward the jump button.
-    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
-        let newest = self.left_log_newest.take().or_else(|| {
+    #[cfg(test)]
+    pub(super) fn select_fixture_event(&mut self, event: Option<Event>) {
+        let index = event.map(|event| {
+            let full = self
+                .log
+                .iter()
+                .position(|candidate| candidate == &event)
+                .unwrap_or_else(|| {
+                    self.log.push(event);
+                    self.prepare_log_search();
+                    self.log.len() - 1
+                });
             self.shown_log_events()
-                .last()
-                .map(|(_, event)| event.started_at)
+                .position(|(index, _)| index == full)
+                .expect("fixture is shown")
         });
-        self.log = events;
-        self.prepare_log_search();
-        if self.log_background_return.is_none()
-            && let Some(open) = &self.log_open
-            && let Some(current) = self.log.iter().find(|event| {
-                if shows_calls(open) {
-                    event
-                        .calls
-                        .iter()
-                        .any(|call| open.calls.iter().any(|old| old.id == call.id))
-                } else {
-                    event.started_at == open.started_at && event.kind == open.kind
-                }
-            })
-            && current != open
+        self.select_log_event(index);
+    }
+
+    pub(super) fn following_log(&self) -> bool {
+        (self.log_selected.is_none()
+            || self.log_selected == self.matching_log_count().checked_sub(1))
+            && self.log_background_return.is_none()
+    }
+
+    /// Keeps the cursor in view without moving a list being dragged for text selection.
+    fn reveal_log_selection(&self) {
+        if self.mouse_press.is_some()
+            || (self.selecting_list(text_selection::Panel::LogList)
+                && self.text_selection_dragging())
         {
-            let current = current.clone();
-            self.cancel_open_selection();
-            self.log_open = Some(current);
-            self.viewport.borrow_mut().log_open_layout = None;
+            return;
         }
-        let following = self.log_scroll() == 0 && self.mouse_press.is_none();
-        let Some(newest) = newest.filter(|_| !following) else {
+        let Some(selected) = self.log_selected else {
             return;
         };
-        let added = self
-            .shown_log_events()
-            .filter(|(_, event)| event.started_at > newest)
-            .count();
+        let offset = selected;
+        let max = self.log_max_scroll();
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_scroll += added;
-        viewport.log_unseen += added;
-        self.shift_list_selection(text_selection::Panel::LogList, added);
+        let height = usize::from(
+            viewport
+                .log
+                .height
+                .saturating_sub(u16::from(self.log_search.active())),
+        );
+        if height == 0 {
+            return;
+        }
+        viewport.log_scroll = viewport.log_scroll.min(max);
+        if offset < viewport.log_scroll {
+            viewport.log_scroll = offset;
+        } else if offset >= viewport.log_scroll + height {
+            viewport.log_scroll = offset + 1 - height;
+        }
     }
 
-    /// How long until the top log row's time reads differently, or `None` if it never does.
+    pub(super) fn navigate_log(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Up | KeyCode::Down => self.move_log_selection(code == KeyCode::Down),
+            KeyCode::PageUp | KeyCode::PageDown => {
+                let steps = self
+                    .viewport
+                    .borrow()
+                    .log
+                    .height
+                    .saturating_sub(u16::from(self.log_search.active()))
+                    .max(1);
+                for _ in 0..steps {
+                    self.move_log_selection(code == KeyCode::PageDown);
+                }
+            }
+            KeyCode::Home | KeyCode::End => {
+                self.log_pending_older = 0;
+                self.select_log_event(if code == KeyCode::Home { Some(0) } else { None });
+                self.reveal_log_selection();
+            }
+            _ => unreachable!("list navigation action"),
+        }
+    }
+
+    /// Moves one displayed event; App loads older rows at the oldest loaded boundary.
+    pub(super) fn move_log_selection(&mut self, forward: bool) {
+        self.pending_click = None;
+        self.log_background_return = None;
+        self.log_background_event = None;
+        if forward && self.log_pending_older > 0 {
+            self.log_pending_older -= 1;
+            return;
+        }
+        let Some(index) = self.log_selected else {
+            self.show_newest_log();
+            return;
+        };
+        if !forward && index == 0 {
+            if self.log_search.active() {
+                return;
+            }
+            self.log_pending_older += 1;
+            return;
+        }
+        let next = if forward {
+            index.saturating_add(1)
+        } else {
+            index.saturating_sub(1)
+        };
+        self.log_pending_older = 0;
+        self.select_log_event(Some(next));
+        self.reveal_log_selection();
+    }
+
+    pub(crate) fn finish_log_start(&mut self) {
+        if std::mem::take(&mut self.log_start_requested) {
+            self.select_log_event(Some(0));
+            self.reveal_log_selection();
+        }
+    }
+
+    pub(crate) fn log_page_pending(&self) -> bool {
+        self.log_pending_older > 0
+    }
+
+    /// Applies structural changes without comparing row contents.
+    pub(crate) fn apply_log_update(&mut self, update: crate::log::Update) {
+        let following = self.following_log();
+        let selected_index = self
+            .log_background_return
+            .as_ref()
+            .and_then(|saved| saved.event)
+            .or(self.log_selected);
+        let selected_full = selected_index
+            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+        let old_len = self.log.len();
+        let appended_start = update.events.len().saturating_sub(update.appended);
+        self.log = update.events;
+        // Rematching below uses the explicitly shifted full-list position.
+        self.log_selected = None;
+        self.prepare_log_search();
+        let added = self
+            .shown_log_events()
+            .filter(|(full, _)| *full >= appended_start)
+            .count();
+        let prepended = self
+            .shown_log_events()
+            .filter(|(full, _)| *full < update.prepended)
+            .count();
+        let len = self.matching_log_count();
+        self.log_selected = if update.reset || following {
+            len.checked_sub(1)
+        } else {
+            selected_full.and_then(|full| {
+                let full = full
+                    .saturating_add(update.prepended)
+                    .min(self.log.len().saturating_sub(1));
+                self.shown_log_events()
+                    .position(|(index, _)| index >= full)
+                    .or_else(|| len.checked_sub(1))
+            })
+        };
+        if let Some(previous) = &mut self.log_background_return {
+            // Background details retain a list index, independent of their synthetic event.
+            previous.event = self.log_selected;
+        }
+        self.cancel_detail_selection();
+        self.viewport.borrow_mut().log_detail_layout = None;
+        self.viewport.borrow_mut().log_detail_other_layout = None;
+        let max_scroll = self.log_max_scroll();
+        if update.reset {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll = max_scroll;
+            viewport.log_unseen = 0;
+            viewport.log_detail_scroll = 0;
+        } else if !following || self.mouse_press.is_some() {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll += prepended;
+            viewport.log_unseen += added;
+            drop(viewport);
+            self.shift_list_selection(text_selection::Panel::LogList, prepended);
+        } else {
+            self.viewport.borrow_mut().log_scroll = max_scroll;
+        }
+        let pending = std::mem::take(&mut self.log_pending_older);
+        if pending > 0
+            && self.log.len() > old_len
+            && !update.reset
+            && let Some(index) = self.log_selected
+        {
+            self.select_log_event(Some(index.saturating_sub(pending)));
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
+        let appended = events.len().saturating_sub(self.log.len());
+        self.apply_log_update(crate::log::Update {
+            events,
+            appended,
+            ..Default::default()
+        });
+    }
+
+    /// Wake only when an animated tool output is in the visible detail viewport.
+    pub(crate) fn tool_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
+        let viewport = self.viewport.borrow();
+        let layout = viewport.log_detail_layout.as_ref()?;
+        let visible = viewport.log_detail_scroll
+            ..viewport.log_detail_scroll + usize::from(viewport.log_text.area.height);
+        layout
+            .running
+            .iter()
+            .any(|row| visible.contains(row))
+            .then(|| super::tool_detail::running_redraw_in(now))
+    }
+
+    /// How long until the newest visible row's time changes, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
         let session = self.selected_row()?;
         if self.log_session.as_ref() != Some(&session.id) {
             return None;
         }
-        let event = match &self.log_open {
-            Some(event) if self.is_newest_shown(event) => event,
-            Some(_) => return None,
-            None if self.log_scroll() != 0 => return None,
-            None => self.shown_log_events().last()?.1,
-        };
+        let event = self.shown_log_events().last()?.1;
+        if self.viewport.borrow().log.height > 0 && self.log_scroll() < self.log_max_scroll() {
+            return None;
+        }
         row_time_changes_in(&row_time(event, session, true), now)
     }
 
-    /// Whether `event` is the newest log event the search lets through.
-    fn is_newest_shown(&self, event: &Event) -> bool {
-        self.shown_log_events()
-            .last()
-            .is_some_and(|(_, newest)| newest.started_at == event.started_at)
+    fn is_newest_shown(&self) -> bool {
+        self.log_background_event.is_none()
+            && self.log_selected.is_some()
+            && self.log_selected == self.matching_log_count().checked_sub(1)
     }
 
     /// The log events the search lets through, with their index in the log.
@@ -349,7 +684,7 @@ enum RowTime {
     /// The wall-clock time the event started.
     Clock(DateTime<Utc>),
     /// A duration that no longer changes.
-    Settled(i64),
+    Settled(chrono::Duration),
     /// A duration still growing from the given start.
     Running(DateTime<Utc>),
     /// The time elapsed since the given moment, as "12s ago".
@@ -363,7 +698,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         } else if event.kind == Kind::Assistant
             && let Some(reference) = event.previous_end
         {
-            RowTime::Settled((event.started_at - reference).num_seconds().max(0))
+            RowTime::Settled(event.started_at - reference)
         } else {
             RowTime::Clock(event.started_at)
         };
@@ -373,7 +708,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         && let Some(end) = event.ended_at
     {
         return match event.duration {
-            Some(duration) => RowTime::Settled(duration.num_seconds().max(0)),
+            Some(duration) => RowTime::Settled(duration),
             None => RowTime::Clock(end),
         };
     }
@@ -392,14 +727,17 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         }
         None => return RowTime::Running(previous),
     };
-    RowTime::Settled((end - previous).num_seconds().max(0))
+    RowTime::Settled(end - previous)
 }
 
 fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
     match *time {
         RowTime::Clock(at) => at.with_timezone(&Local).format(CLOCK_FORMAT).to_string(),
-        RowTime::Settled(seconds) => format_duration(seconds),
-        RowTime::Running(start) => format_duration((now - start).num_seconds().max(0)),
+        RowTime::Settled(duration) => format_log_duration(duration),
+        RowTime::Running(start) if now - start < chrono::Duration::microseconds(500) => {
+            "0ms".into()
+        }
+        RowTime::Running(start) => format_log_duration(now - start),
         RowTime::Ago(at) => format_relative_time(now, Some(at)),
     }
 }
@@ -426,7 +764,31 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     format_row_time(&row_time(event, session, last), now)
 }
 
-/// Draws one log row and returns whether its body was cut, with the links drawn on it.
+/// Centers a one-row label of `width` over the content beside the clock column, the line log
+/// rows center their text on.
+pub(super) fn log_content_centered(area: Rect, width: u16) -> Rect {
+    let (content, _) = log_row_areas(area);
+    let width = width.min(area.width);
+    Rect::new(
+        content.x + content.width.saturating_sub(width) / 2,
+        area.y,
+        width,
+        1,
+    )
+    .intersection(area)
+}
+
+/// Reserves the same trailing clock column and separator for every row.
+fn log_row_areas(area: Rect) -> (Rect, Rect) {
+    let time_width = (CLOCK_WIDTH as u16).min(area.width);
+    let content_width = area.width.saturating_sub(time_width + 2);
+    (
+        Rect::new(area.x, area.y, content_width, area.height),
+        Rect::new(area.right() - time_width, area.y, time_width, area.height),
+    )
+}
+
+/// Draws one log row and returns its visible links.
 fn render_event(
     event: &Event,
     time: &str,
@@ -435,43 +797,41 @@ fn render_event(
     buf: &mut Buffer,
     search: Option<&super::log_search::LogSearch>,
     cwd: &std::path::Path,
-) -> (bool, Vec<super::links::DrawnLink>) {
+) -> Vec<super::links::DrawnLink> {
     if area.is_empty() {
-        return (false, Vec::new());
+        return Vec::new();
     }
-    let width = usize::from(area.width);
-    let time_width = CLOCK_WIDTH.min(width);
-    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
-    let (label_style, _) = super::style::log_styles(&event.kind);
+    let (content_area, time_area) = log_row_areas(area);
     let time_style = super::style::log_time_style(&event.kind, last);
     Line::from(Span::styled(time.to_owned(), time_style))
         .right_aligned()
         .render(time_area, buf);
-    let content_width = width.saturating_sub(time_width + 1);
+    let content_width = usize::from(content_area.width);
     if content_width == 0 {
-        return (true, Vec::new());
+        return Vec::new();
     }
-    let content_x = area.x + time_width as u16 + 1;
-    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
-    let label_width = label.width().min(content_width);
-    Line::from(Span::styled(label, label_style))
-        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
-    let body_width = content_width.saturating_sub(label_width);
+    let body_width = content_width;
     let fitted = fitted_body_line(event, body_width, cwd);
     let mut body = fitted.line;
-    let cut = fitted.shortened || body.width() > body_width;
-    let body_x = content_x + label_width as u16;
+    let padding = body_width.saturating_sub(body.width()) / 2;
+    let body_x = content_area.x + padding as u16;
+    let clipped = body.width() > body_width;
+    let visible = if clipped {
+        body_width.saturating_sub(1)
+    } else {
+        body_width
+    } as u16;
+    // Match the full row so a match crossing the right edge still highlights its prefix.
+    let indices = search
+        .filter(|search| !search.query.is_empty())
+        .map(|search| search.indices(&body.to_string()));
+    body = truncate_line_with_ellipsis_if_overflow(body, body_width);
     let links = {
-        let links = if is_prose(&event.kind) {
+        let links = if is_prose(&event.kind) || event.kind == Kind::QueuedUser {
             super::links::text_links(&fitted.source, cwd, &event.images)
         } else {
             super::links::path_links(&fitted.source, &fitted.paths, cwd)
         };
-        let visible = if body.width() > body_width {
-            body_width.saturating_sub(1)
-        } else {
-            body_width
-        } as u16;
         let mut maps = super::text_selection_layout::map_lines(
             &fitted.source,
             std::slice::from_ref(&body),
@@ -489,23 +849,44 @@ fn render_event(
             &links,
         )
     };
-    if let Some(search) = search {
-        highlight_matches(&mut body, search);
+    if let Some(indices) = indices {
+        let ellipsis = if clipped { body.spans.pop() } else { None };
+        highlight_indices(&mut body, &indices);
+        if let Some(mut ellipsis) = ellipsis {
+            ellipsis.style = body.spans.last().map(|span| span.style).unwrap_or_default();
+            body.spans.push(ellipsis);
+        }
     }
-    truncate_line_with_ellipsis_if_overflow(body, body_width)
-        .render(Rect::new(body_x, area.y, body_width as u16, 1), buf);
-    (cut, links)
+    body.render(
+        Rect::new(body_x, area.y, (body_width - padding) as u16, 1),
+        buf,
+    );
+    links
 }
 
 /// The screen cells of one drawn line, each with the source bytes it shows.
 type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
 
+/// The raw source prefix colored so far, with its saved grammar and theme state.
+struct RawHighlight {
+    source: String,
+    highlighter: super::highlight::JsonHighlight,
+    row: usize,
+    padding: usize,
+    style: Style,
+}
+
 /// The open log event laid out for one panel size and highlight theme.
-pub(super) struct OpenLayout {
+pub(super) struct DetailLayout {
+    raw: Option<RawHighlight>,
     width: u16,
+    content_width: u16,
+    wide: bool,
     height: usize,
     theme_generation: u64,
     lines: Vec<Line<'static>>,
+    /// Animated output rows, updated without repeating syntax highlighting.
+    running: Vec<usize>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
     sources: Vec<text_selection::Source>,
@@ -513,16 +894,123 @@ pub(super) struct OpenLayout {
     links: Vec<Vec<super::links::Link>>,
 }
 
-fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
+impl DetailLayout {
+    fn highlight_raw(&mut self, end: usize) {
+        let Some(raw) = &mut self.raw else {
+            return;
+        };
+        if raw.row >= end.min(self.lines.len()) {
+            return;
+        }
+        raw.highlighter.advance(&raw.source, |line| {
+            let mut line = line;
+            for span in &mut line.spans {
+                span.style = raw.style.patch(span.style);
+            }
+            if raw.padding > 0 {
+                line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
+            }
+            self.lines[raw.row] = line;
+            raw.row += 1;
+            raw.row < end
+        });
+    }
+}
+
+#[cfg(test)]
+fn detail_layout(
+    event: &Event,
+    width: u16,
+    cwd: &std::path::Path,
+    now: DateTime<Utc>,
+) -> DetailLayout {
+    detail_parts_layout(
+        event,
+        width,
+        log_row_areas(Rect::new(0, 0, width, 1)).0.width,
+        width >= super::render::WIDE_LAYOUT_COLUMNS,
+        cwd,
+        now,
+        open_parts(event),
+    )
+}
+
+/// Detail content differs between modes only in its horizontal placement.
+fn detail_block(area: Rect, width: u16, wide: bool) -> Rect {
+    let width = width.min(area.width);
+    Rect::new(
+        area.x + if wide { (area.width - width) / 2 } else { 0 },
+        area.y,
+        width,
+        area.height,
+    )
+}
+
+fn detail_parts_layout(
+    event: &Event,
+    width: u16,
+    content_width: u16,
+    wide: bool,
+    cwd: &Path,
+    now: DateTime<Utc>,
+    parts: Vec<super::tool_detail::Part>,
+) -> DetailLayout {
     let theme_generation = super::highlight::theme_generation();
     let body_style = super::style::log_styles(&event.kind).1;
-    let parts: Vec<_> = open_parts(event)
+    let rendered: Vec<_> = parts
         .into_iter()
         .map(|part| {
+            let lines = part.lines(usize::from(content_width), body_style, now);
+            (part, lines)
+        })
+        .collect();
+    let mut group_widths = vec![[0; 2]; rendered.len()];
+    for (part, lines) in &rendered {
+        if let Some(group) = part.group {
+            let widest = lines.iter().map(Line::width).max().unwrap_or(0);
+            let kind = part.content_kind() as usize;
+            group_widths[group][kind] = group_widths[group][kind].max(widest);
+        }
+    }
+    let parts: Vec<_> = rendered
+        .into_iter()
+        .map(|(part, mut lines)| {
             let markdown = part.markdown();
-            let lines = part.lines(usize::from(width), body_style);
-            let maps = part.maps(&lines);
-            let links = if markdown || (!shows_calls(event) && is_prose(&event.kind)) {
+            let mut maps = part.maps(&lines);
+            let block_width = part.group.map_or_else(
+                || lines.iter().map(Line::width).max().unwrap_or(0),
+                |group| {
+                    let widths = group_widths[group];
+                    let widest = *widths.iter().max().expect("content kinds exist");
+                    if widest > usize::from(content_width) {
+                        widths[part.content_kind() as usize]
+                    } else {
+                        widest
+                    }
+                },
+            );
+            let padding = usize::from(
+                detail_block(
+                    Rect::new(0, 0, width, 1),
+                    block_width.min(usize::from(u16::MAX)) as u16,
+                    wide,
+                )
+                .x,
+            );
+            if padding > 0 {
+                // Every row keeps its position within the section, including its source cell map.
+                for (line, cells) in lines.iter_mut().zip(&mut maps) {
+                    line.spans.insert(0, Span::raw(" ".repeat(padding)));
+                    for (range, _) in cells {
+                        range.start += padding as u16;
+                        range.end += padding as u16;
+                    }
+                }
+            }
+            let links = if markdown
+                || (!shows_calls(event)
+                    && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
+            {
                 let images = if shows_calls(event) {
                     &[][..]
                 } else {
@@ -537,19 +1025,26 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
                 };
                 super::links::path_links(&part.source, &paths, cwd)
             };
-            (part.source, lines, maps, links)
+            (part.running(), part.source, lines, maps, links)
         })
         .collect();
-    let mut layout = OpenLayout {
+    let mut layout = DetailLayout {
+        raw: None,
         width,
+        content_width,
+        wide,
         height: 0,
         theme_generation,
         lines: Vec::new(),
+        running: Vec::new(),
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
     };
-    for (id, (source, lines, mut maps, links)) in parts.into_iter().enumerate() {
+    for (id, (running, source, lines, mut maps, links)) in parts.into_iter().enumerate() {
+        if running {
+            layout.running.push(layout.lines.len());
+        }
         for cells in &mut maps {
             cells.retain(|(range, _)| range.end <= width);
         }
@@ -570,7 +1065,12 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
 /// Whether an event draws its tool calls when open, which makes its row open on click even
 /// when its body fits the row.
 pub(super) fn shows_calls(event: &Event) -> bool {
-    matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) && !event.calls.is_empty()
+    !event.calls.is_empty()
+        && (matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied)
+            || event
+                .calls
+                .iter()
+                .any(|call| call.name == "AskUserQuestion"))
 }
 
 /// The full text an open log event shows below its header.
@@ -585,8 +1085,12 @@ pub(super) fn open_text(event: &Event) -> String {
 fn open_parts(event: &Event) -> Vec<super::tool_detail::Part> {
     if shows_calls(event) {
         super::tool_detail::parts(event)
+    } else if event.kind == Kind::Tool {
+        Vec::new()
     } else if is_prose(&event.kind) {
-        vec![super::tool_detail::Part::text(event.body.clone(), true)]
+        vec![super::tool_detail::Part::prose(event.body.clone(), true)]
+    } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
+        super::tool_detail::Part::prose_parts(event.body.clone(), false)
     } else {
         super::tool_detail::Part::text_parts(event.body.clone(), false)
     }
@@ -600,6 +1104,7 @@ pub(super) fn copied_label(event: &Event) -> String {
 pub(super) fn kind_label(kind: &Kind) -> &'static str {
     match kind {
         Kind::User => "User",
+        Kind::Compaction => "Compaction",
         Kind::Assistant => "Assistant",
         Kind::Agent => "Agent",
         Kind::Session => "Session",
@@ -612,7 +1117,10 @@ pub(super) fn kind_label(kind: &Kind) -> &'static str {
 
 /// Whether an event's body is prose the log renders as Markdown.
 fn is_prose(kind: &Kind) -> bool {
-    matches!(kind, Kind::User | Kind::Assistant | Kind::Agent)
+    matches!(
+        kind,
+        Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
+    )
 }
 
 pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> Line<'static> {
@@ -622,8 +1130,6 @@ pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path)
 /// An event's body as one log row, with paths shortened to fit the row.
 struct FittedBody {
     line: Line<'static>,
-    /// Whether any path was shortened.
-    shortened: bool,
     /// The text the row was drawn from, before any shortening: the event's prose with
     /// its whitespace collapsed, or its tool text with home paths shown as `~`.
     source: String,
@@ -684,7 +1190,6 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         }
         FittedBody {
             line: Line::from(spans),
-            shortened: shortened != body,
             source: body,
             paths: Vec::new(),
         }
@@ -692,7 +1197,6 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         let (text, paths) = display_paths(event, cwd);
         let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
         FittedBody {
-            shortened: shortened != collapse_whitespace(event.body.trim()),
             line: Line::from(Span::styled(shortened, body_style)),
             source: text,
             paths,
@@ -753,6 +1257,12 @@ fn collapse_whitespace(text: &str) -> String {
 fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSearch) {
     if !search.query.is_empty() {
         let indices = search.indices(&line.to_string());
+        highlight_indices(line, &indices);
+    }
+}
+
+fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
+    if !indices.is_empty() {
         let mut offset = 0u32;
         line.spans = std::mem::take(&mut line.spans)
             .into_iter()
@@ -777,14 +1287,163 @@ fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSe
 }
 
 #[cfg(test)]
-mod log_markdown {
+pub(super) mod log_markdown {
     use super::*;
     use ratatui::style::Modifier;
 
+    #[test]
+    fn queued_pasted_image_links_in_the_list_and_detail() {
+        let delivery: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        let text = &delivery["attachment"]["prompt"][0]["text"];
+        let enqueue = serde_json::json!({
+            "type": "queue-operation", "operation": "enqueue", "content": text,
+            "timestamp": delivery["timestamp"]
+        });
+        let remove = serde_json::json!({
+            "type": "queue-operation", "operation": "remove", "content": text,
+            "commandUuid": delivery["attachment"]["source_uuid"],
+            "timestamp": delivery["timestamp"]
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, format!("{enqueue}\n{remove}\n{delivery}\n")).unwrap();
+        let events = crate::providers::claude::log::tail(&transcript, 20).unwrap();
+        let event = &events[0];
+        let image = &event.images[0];
+        let layout = detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
+        assert!(
+            layout
+                .links
+                .iter()
+                .flatten()
+                .any(|link| link.target == image.path)
+        );
+        let area = Rect::new(0, 0, 200, 1);
+        let links = render_event(
+            event,
+            "19:58:06",
+            false,
+            area,
+            &mut Buffer::empty(area),
+            None,
+            dir.path(),
+        );
+        assert!(links.iter().any(|(_, target)| target == &image.path));
+    }
+
+    #[test]
+    fn task_notifications_show_output_content_without_repeating_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = notification_events(dir.path(), Some("all 3 tests passed"));
+        assert_eq!(events.len(), 1);
+        for event in events {
+            let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+            assert_eq!(event.kind, Kind::Tool);
+            assert_eq!(event.body, summary);
+            assert_eq!(event.calls[0].title, summary);
+            assert_eq!(event.calls[0].id, "b9wi31ww0");
+            let body = open_text(&event);
+            assert!(body.contains("all 3 tests passed"), "{body}");
+            assert!(!body.contains("task-id"), "{body}");
+            assert!(!body.contains("status"), "{body}");
+            assert!(!body.contains("output-file"), "{body}");
+            assert!(!body.contains(summary), "{body}");
+            assert!(!body.contains("tool-use-id"), "{body}");
+        }
+    }
+
+    #[test]
+    fn task_notifications_keep_a_linked_path_once_the_output_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("b9wi31ww0.output");
+        for event in notification_events(dir.path(), None) {
+            let body = open_text(&event);
+            assert!(
+                body.contains(&format!("output-file: {}", output.display())),
+                "{body}"
+            );
+            std::fs::write(&output, "done").unwrap();
+            let layout = detail_layout(&event, 120, dir.path(), DateTime::UNIX_EPOCH);
+            assert!(
+                layout
+                    .links
+                    .iter()
+                    .flatten()
+                    .any(|link| link.target == output)
+            );
+            std::fs::remove_file(&output).unwrap();
+        }
+    }
+
+    /// The notification fixture's events, with its output file inside `dir` holding `output`.
+    pub(in crate::ui) fn notification_events(
+        dir: &std::path::Path,
+        output: Option<&str>,
+    ) -> Vec<Event> {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-task-notifications.jsonl");
+        let file = dir.join("b9wi31ww0.output");
+        if let Some(output) = output {
+            std::fs::write(&file, output).unwrap();
+        }
+        let transcript = dir.join("transcript.jsonl");
+        std::fs::write(
+            &transcript,
+            std::fs::read_to_string(fixture).unwrap().replace(
+                "/tmp/agents-notification/tasks/b9wi31ww0.output",
+                &file.display().to_string(),
+            ),
+        )
+        .unwrap();
+        crate::providers::claude::log::tail(&transcript, 10).unwrap()
+    }
+
+    #[test]
+    fn tool_without_calls_has_no_body_below_its_title() {
+        let event = &Event {
+            source: None,
+            source_records: Vec::new(),
+            sender: None,
+            kind: Kind::Tool,
+            body: "finished".into(),
+            paths: Vec::new(),
+            started_at: Utc::now(),
+            ended_at: None,
+            duration: None,
+            previous_end: None,
+            images: Vec::new(),
+            calls: Vec::new(),
+        };
+        assert!(event.calls.is_empty());
+        assert!(open_parts(event).is_empty());
+        assert!(open_text(event).is_empty());
+        assert_eq!(
+            detail_layout(event, 100, std::path::Path::new("/"), DateTime::UNIX_EPOCH).height,
+            0
+        );
+    }
+
+    #[test]
+    fn running_times_keep_zero_milliseconds() {
+        let now = Utc::now();
+        for nanos in [-1, 0, 499_999, 500_000] {
+            let start = now - chrono::Duration::nanoseconds(nanos);
+            assert_eq!(
+                format_row_time(&RowTime::Running(start), now),
+                if nanos < 500_000 { "0ms" } else { "1ms" }
+            );
+        }
+    }
+
     fn body_buffer(kind: Kind, body: &str, width: u16) -> Buffer {
-        let area = Rect::new(0, 0, width + 19, 1);
+        let area = Rect::new(0, 0, width + 10, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
+            source: None,
+            source_records: Vec::new(),
             sender: None,
             kind,
             body: body.into(),
@@ -808,13 +1467,66 @@ mod log_markdown {
         buffer
     }
 
+    fn body_padding(buffer: &Buffer) -> usize {
+        (0..buffer.area.width)
+            .position(|x| buffer[(x, 0)].symbol() != " ")
+            .unwrap_or(0)
+    }
+
     fn body_text(buffer: &Buffer) -> String {
-        buffer.content[19..]
+        buffer.content[..buffer.content.len() - 10]
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
             .trim_end()
             .to_owned()
+    }
+
+    #[test]
+    fn real_transcript_subsecond_tool_time_is_right_aligned_in_milliseconds() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut store = crate::providers::claude::ClaudeProvider::new(dir.path().to_owned());
+        let mut session = crate::providers::Provider::refresh(&mut store, 1)
+            .sessions
+            .remove(0);
+        session.id.provider = crate::providers::ProviderId::Codex;
+        session.transcript = Some(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/codex-inner/inline-array.jsonl"),
+        );
+        let provider = crate::providers::codex::CodexProvider::new(
+            std::path::PathBuf::new(),
+            std::path::PathBuf::new(),
+        );
+        let events = crate::providers::Provider::log(&provider, &session, 100, false).unwrap();
+        let event = &events[1];
+        assert_eq!(event.kind, Kind::Tool);
+        assert_eq!(
+            event.started_at.to_rfc3339(),
+            "2026-10-14T00:08:29.800660750+00:00"
+        );
+        assert_eq!(
+            event.ended_at.unwrap().to_rfc3339(),
+            "2026-10-14T00:08:30.171+00:00"
+        );
+        assert_eq!(
+            event.duration,
+            Some(chrono::Duration::nanoseconds(370_339_250))
+        );
+        let time = event_time(event, &session, true, event.ended_at.unwrap());
+        assert_eq!(time, "370ms");
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buffer = Buffer::empty(area);
+        render_event(event, &time, true, area, &mut buffer, None, &session.cwd);
+        let column: String = (32..40).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert_eq!(column, "   370ms");
     }
 
     #[test]
@@ -905,7 +1617,10 @@ mod log_markdown {
         assert_eq!(row_time_changes_in(&ago(125), now), secs(55));
         assert_eq!(row_time_changes_in(&ago(7300), now), secs(3500));
         assert_eq!(row_time_changes_in(&RowTime::Running(now), now), secs(1));
-        assert_eq!(row_time_changes_in(&RowTime::Settled(5), now), None);
+        assert_eq!(
+            row_time_changes_in(&RowTime::Settled(chrono::Duration::seconds(5)), now),
+            None
+        );
         assert_eq!(row_time_changes_in(&RowTime::Clock(now), now), None);
     }
 
@@ -919,23 +1634,25 @@ mod log_markdown {
                 "plain `code` **bold** [link](https://example.com)",
                 80,
             );
-            assert_eq!(body_text(&buffer), "plain code bold link");
-            assert_eq!(buffer[(19, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert_eq!(buffer[(25, 0)].fg, crate::theme::inline_code_color());
-            assert_eq!(buffer[(30, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(buffer[(30, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(35, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(35, 0)].modifier.contains(Modifier::UNDERLINED));
+            let x = body_padding(&buffer) as u16;
+            assert_eq!(body_text(&buffer).trim(), "plain code bold link");
+            assert_eq!(buffer[(x, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert_eq!(buffer[(x + 6, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buffer[(x + 11, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(buffer[(x + 11, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(x + 16, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(x + 16, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
 
     #[test]
     fn prose_blocks_keep_their_own_styles_on_one_row() {
         let buffer = body_buffer(Kind::User, "# Title\n\nplain  text\n- item", 80);
-        assert_eq!(body_text(&buffer), "Title plain text • item");
-        assert!(buffer[(19, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(25, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(25, 0)].modifier.contains(Modifier::BOLD));
+        let x = body_padding(&buffer) as u16;
+        assert_eq!(body_text(&buffer).trim(), "Title plain text • item");
+        assert!(buffer[(x, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(x + 6, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(x + 6, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -950,9 +1667,10 @@ mod log_markdown {
         ] {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
-            assert_eq!(body_text(&buffer), "`code` **bold** [link](url)");
-            assert_eq!(buffer[(19, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(19, 0)].modifier.contains(Modifier::BOLD));
+            let x = body_padding(&buffer) as u16;
+            assert_eq!(body_text(&buffer).trim(), "`code` **bold** [link](url)");
+            assert_eq!(buffer[(x, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(x, 0)].modifier.contains(Modifier::BOLD));
         }
     }
 
@@ -986,6 +1704,8 @@ mod log_markdown {
         let body = format!("改了 src/ui/log.rs 和 {}，已发送", report.display());
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
+                source: None,
+                source_records: Vec::new(),
                 sender: None,
                 kind: kind.clone(),
                 body: body.clone(),
@@ -1022,14 +1742,14 @@ mod log_markdown {
         for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             let buffer = body_buffer(kind, "ok `abcdefghijklmnop`", 10);
             assert_eq!(body_text(&buffer), "ok abcdef…");
-            for x in 22..29 {
+            for x in 3..10 {
                 assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }
     }
 
     /// A row merging an Edit and a Read call, fitted to `width`.
-    fn merged_tool_row(width: usize) -> (String, bool) {
+    fn merged_tool_row(width: usize) -> String {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for (id, name, path) in [
             ("a", "Edit", "/opt/work/agents/src/ui/tests.rs"),
@@ -1045,30 +1765,26 @@ mod log_markdown {
         }
         let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
         let fitted = fitted_body_line(&events[0], width, std::path::Path::new("/"));
-        let (line, cut) = (fitted.line, fitted.shortened);
-        let text = line
+        fitted
+            .line
             .spans
             .iter()
             .map(|span| span.content.as_ref())
-            .collect();
-        (text, cut)
+            .collect()
     }
 
     #[test]
     fn merged_tool_row_abbreviates_every_path() {
         assert_eq!(
             merged_tool_row(70),
-            (
-                "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs".into(),
-                true
-            )
+            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs"
         );
     }
 
     #[test]
     fn merged_tool_row_keeps_every_file_name_whole() {
         assert_eq!(
-            merged_tool_row(40).0,
+            merged_tool_row(40),
             "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/c…/tests.rs"
         );
     }
@@ -1098,3 +1814,7 @@ mod log_markdown {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "log_reading_tests.rs"]
+mod reading_tests;

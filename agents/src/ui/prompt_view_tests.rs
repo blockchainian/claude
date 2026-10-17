@@ -1,23 +1,7 @@
 use super::*;
 
 #[test]
-fn input_sits_between_top_panels_and_full_width_log() {
-    let (view, _) = log_fixture();
-    for width in [120, 90, 80, 40] {
-        let layout = view.center_layout(Rect::new(0, 0, width, 40));
-        assert!(!layout.list.is_empty());
-        assert!(!layout.details.is_empty());
-        assert!(layout.list.right() <= layout.details.x);
-        assert!(layout.list.bottom() <= layout.prompt.y);
-        assert!(layout.details.bottom() <= layout.prompt.y);
-        assert_eq!(layout.prompt.height, 1);
-        assert_eq!(layout.prompt.bottom(), layout.log.y);
-        assert_eq!(layout.log.width, width);
-    }
-}
-
-#[test]
-fn task_double_click_focuses_prompt_but_enter_still_opens() {
+fn task_double_click_keeps_task_focus_and_enter_opens() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 120, 40, now);
     view.rows[view.selected].process = None;
@@ -26,9 +10,8 @@ fn task_double_click_focuses_prompt_but_enter_still_opens() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y);
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
-    key(&mut view, KeyCode::Esc);
     assert!(!view.input_box.focused);
+    assert!(view.mouse_focus == Panel::TaskList);
     assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Open(id)));
 }
 
@@ -67,91 +50,81 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
 }
 
 #[test]
-fn right_click_leaves_input_before_closing_log_detail() {
+fn right_click_leaves_input_on_press_and_shows_newest_on_release() {
     let (mut view, now) = log_fixture();
-    view.set_log_open(Some(view.log[0].clone()));
-    let expected = view.log_open.clone();
+    view.select_fixture_event(Some(view.log[0].clone()));
+    let expected = view.log_selected;
     log_screen(&view, 120, 40, now);
     view.input_box.focused = true;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
+    assert!(!view.input_box.focused);
+    assert_eq!(view.log_selected, expected);
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
     assert!(!view.input_box.focused);
-    assert_eq!(view.log_open, expected);
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
-fn terminal_session_disables_input_with_open_hint() {
-    let (mut view, now) = log_fixture();
-    let registry: serde_json::Value =
-        serde_json::from_str(include_str!("../../tests/fixtures/registry.json")).unwrap();
-    assert_eq!(registry["kind"], "interactive");
-    view.rows[view.selected].process = Some(crate::model::Process {
-        pid: std::process::id(),
-        label: registry["kind"].as_str().map(str::to_owned),
-        started_at: None,
-    });
-    let rendered = log_screen(&view, 160, 40, now);
-    assert!(rendered.contains("Running in a terminal; open it to type"));
-    let input = view.center_layout(Rect::new(0, 0, 160, 40)).prompt;
-    click_mouse(
-        &mut view,
-        mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            input.x + 2,
-            input.y,
-        ),
-    );
-    assert!(!view.input_box.focused);
-    view.handle_paste("must not type");
-    assert!(view.input_box.editor.is_empty());
-}
-
-#[test]
-fn whole_log_row_double_click_focuses_input_without_opening_detail() {
-    let (mut view, now) = log_fixture();
-    view.rows[view.selected].process = None;
-    log_screen(&view, 160, 40, now);
-    let (x, y) = {
+fn whole_log_row_double_click_keeps_log_focus_and_detail() {
+    for width in [120, 200] {
+        let (mut view, now) = log_fixture();
+        view.rows[view.selected].process = None;
+        log_screen(&view, width, 60, now);
+        let (x, y, expected) = {
+            let viewport = view.viewport.borrow();
+            let row = view
+                .log
+                .iter()
+                .position(|event| !log::shows_calls(event))
+                .unwrap();
+            assert!(row < viewport.log_rows.len());
+            (
+                viewport.log.x + 11,
+                viewport.log.y + row as u16,
+                view.log[row].clone(),
+            )
+        };
+        let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(
+            view.flush_pending_click(Instant::now() + view.double_click_interval),
+            None
+        );
+        assert_eq!(view.visible_log_event(), Some(&expected));
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert!(!view.input_box.focused);
+        assert!(view.mouse_focus == Panel::LogList);
+        assert_eq!(view.visible_log_event(), Some(&expected));
+        log_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();
-        let row = viewport
-            .log_rows
-            .iter()
-            .position(|(index, cut)| !cut && !log::shows_calls(&view.log[*index]))
-            .unwrap();
-        (
-            viewport.log.x + 21,
-            viewport.log.y + log::LOG_TOP + row as u16,
-        )
+        assert!(!viewport.log_rows.is_empty());
+        if expected.kind == crate::log::Kind::Tool && expected.calls.is_empty() {
+            assert!(viewport.log_text.rows.is_empty());
+        } else {
+            assert!(!viewport.log_text.rows.is_empty());
+        }
+    }
+}
+
+#[test]
+fn successful_input_keeps_prompt_while_another_task_is_selected() {
+    let prompt = |view: &View| {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buffer = Buffer::empty(area);
+        view.input_box.render(area, &mut buffer, "Task", None);
+        buffer
     };
-    let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + view.double_click_interval),
-        None
-    );
-    assert!(view.log_open.is_none());
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
-    assert!(view.log_open.is_none());
-}
-
-#[test]
-fn offset_layout_keeps_prompt_above_log() {
-    let (view, _) = log_fixture();
-    let layout = view.center_layout(Rect::new(5, 7, 120, 40));
-    assert_eq!(layout.prompt.bottom(), layout.log.y);
-    assert!(layout.list.bottom() <= layout.prompt.y);
-}
-
-#[test]
-fn completed_input_updates_its_task_while_another_task_is_selected() {
     let mut view = fixture();
+    let before = prompt(&view);
     let first = view.selected;
     let first_id = view.selected_id().unwrap().clone();
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.input_box.editor.set_text(text);
-    view.input_sending(&first_id);
+    view.input_sending(
+        &first_id,
+        &crate::providers::SessionInput::Prompt(text.into()),
+    );
     let second = view
         .selectable_indices()
         .into_iter()
@@ -167,8 +140,9 @@ fn completed_input_updates_its_task_while_another_task_is_selected() {
     assert_eq!(view.input_box.editor.text(), "another task");
     assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
     view.select(first);
-    assert_eq!(view.input_box.state, prompt_box::SendState::Sent);
     assert!(view.input_box.editor.is_empty());
+    assert_eq!(prompt(&view), before);
+    assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
 }
 
 #[test]
@@ -177,7 +151,7 @@ fn input_completion_keeps_text_edited_during_the_send() {
     let id = view.selected_id().unwrap().clone();
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.input_box.editor.set_text(text);
-    view.input_sending(&id);
+    view.input_sending(&id, &crate::providers::SessionInput::Prompt(text.into()));
     view.input_box.editor.insert("next");
     let edited = view.input_box.editor.text().to_owned();
     view.input_complete(
@@ -199,4 +173,61 @@ fn input_completion_keeps_text_edited_during_the_send() {
         view.input_box.state,
         prompt_box::SendState::Failed("attach timed out".into())
     );
+}
+
+#[test]
+fn failed_prompt_restores_submitted_text_without_losing_the_next_draft() {
+    for next in ["", "next draft"] {
+        let mut view = fixture();
+        let id = view.selected_id().unwrap().clone();
+        let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+        view.input_box.editor.set_text(text);
+        view.input_sending(&id, &crate::providers::SessionInput::Prompt(text.into()));
+        view.input_box.editor.set_text(next);
+        view.input_complete(
+            &id,
+            &crate::providers::SessionInput::Prompt(text.into()),
+            Err(std::io::Error::other("attach timed out")),
+        );
+        let expected = if next.is_empty() {
+            text.to_owned()
+        } else {
+            format!("{text}\n{next}")
+        };
+        assert_eq!(view.input_box.editor.text(), expected);
+        assert_eq!(
+            view.notice.as_ref().map(|(text, _)| text.as_str()),
+            Some("attach timed out")
+        );
+        assert_eq!(
+            view.input_box.state,
+            prompt_box::SendState::Failed("attach timed out".into())
+        );
+    }
+}
+
+#[test]
+fn pending_prompt_clears_next_frame_and_blocks_repeated_enter() {
+    let mut view = fixture();
+    let id = view.selected_id().unwrap().clone();
+    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.input_box.focused = true;
+    view.input_box.editor.set_text(text);
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::SendPrompt {
+            id: id.clone(),
+            text: text.into()
+        })
+    );
+    view.input_sending(&id, &crate::providers::SessionInput::Prompt(text.into()));
+    assert!(view.input_box.editor.is_empty());
+    view.input_box.paste(text);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    view.input_complete(
+        &id,
+        &crate::providers::SessionInput::Prompt(text.into()),
+        Ok(()),
+    );
+    assert_eq!(view.input_box.editor.text(), text);
 }

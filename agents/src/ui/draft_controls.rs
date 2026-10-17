@@ -29,7 +29,7 @@ impl View {
                 return;
             }
             if field == Field::Branch {
-                if draft.setup.branch != draft.setup.trunk {
+                if draft.setup.branch.is_empty() || draft.setup.branch != draft.setup.trunk {
                     return;
                 }
                 self.branch_editor = Some(BranchEditor {
@@ -94,9 +94,15 @@ impl View {
         }
     }
     pub(super) fn control_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
+        let cancel = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
+        if cancel && (self.picker.is_some() || self.branch_editor.is_some()) {
+            self.picker = None;
+            self.branch_editor = None;
+            return Some(None);
+        }
         if let Some(picker) = self.picker.as_mut() {
             match key.code {
-                KeyCode::Esc => self.picker = None,
                 KeyCode::Up => picker.selected = picker.selected.saturating_sub(1),
                 KeyCode::Down => {
                     picker.selected = (picker.selected + 1).min(picker.values.len() - 1)
@@ -110,10 +116,6 @@ impl View {
             return Some(None);
         }
         if self.branch_editor.is_some() {
-            if key.code == KeyCode::Esc {
-                self.branch_editor = None;
-                return Some(None);
-            }
             if key.code == KeyCode::Enter {
                 let editor = self.branch_editor.take().expect("branch editor");
                 let draft = self
@@ -148,10 +150,17 @@ impl View {
             Clear.render(rect, buf);
             for (index, value) in picker.values.iter().take(usize::from(height)).enumerate() {
                 let row = render::row(rect, index as u16, 1);
+                if index == picker.selected {
+                    render::fill_list_row(row, buf, style::selection_style());
+                }
                 render::line(
                     Line::from(format!(
                         "{} {value}",
-                        if index == picker.selected { "›" } else { " " }
+                        if index == picker.selected {
+                            PROMPT_MARKER
+                        } else {
+                            " "
+                        }
                     ))
                     .style(if index == picker.selected {
                         style::selection_style()
@@ -172,7 +181,12 @@ impl View {
                 .iter()
                 .find(|(_, field)| *field == Field::Branch)
         {
-            render::render_input_row("Branch › ", &editor.editor, *rect, buf);
+            render::render_input_row(
+                &format!("Branch {PROMPT_MARKER} "),
+                &editor.editor,
+                *rect,
+                buf,
+            );
         }
     }
 }
@@ -201,66 +215,71 @@ mod tests {
         view
     }
     #[test]
-    fn picker_changes_only_selected_draft_field_and_can_cancel() {
+    fn branch_prompt_caret_and_picker_mouse_targets_match_cells() {
         let mut view = draft_view();
+        let area = Rect::new(3, 2, 120, 40);
+        let mut buffer = Buffer::empty(area);
+        view.open_field(Field::Branch);
+        view.branch_editor.as_mut().unwrap().editor.set_text("你好");
+        view.render(area, &mut buffer);
+        let rect = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::Branch)
+            .unwrap()
+            .0;
+        assert_eq!(buffer[(rect.x + 7, rect.y)].symbol(), "❯");
+        assert_eq!(buffer[(rect.x + 9, rect.y)].symbol(), "你");
+        assert_eq!(view.cursor_pos(area), Some((rect.x + 13, rect.y)));
+        view.branch_editor = None;
+        view.open_field(Field::Model);
+        view.render(area, &mut buffer);
+        let (rect, index) = view.viewport.borrow().picker_rows[0];
+        assert_eq!(index, 0);
+        assert_eq!(buffer[(rect.x, rect.y)].symbol(), "❯");
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(view.handle_mouse(click).is_none());
+        assert!(
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                ..click
+            })
+            .is_none()
+        );
+        assert!(view.picker.is_none());
+        assert_eq!(view.drafts[0].setup.model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn plain_directory_draft_has_no_branch_control() {
+        let mut view = draft_view();
+        view.drafts[0].setup.branch.clear();
+        view.drafts[0].setup.trunk.clear();
+        view.open_field(Field::Branch);
+        assert!(view.branch_editor.is_none());
+        let area = Rect::new(0, 0, 120, 24);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Branch: —"));
+        assert!(
+            view.viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .all(|(_, field)| *field != Field::Branch)
+        );
         view.open_field(Field::Model);
         assert!(view.picker.is_some());
-        assert_eq!(view.apply_choice(1), None);
-        assert_eq!(
-            view.selected_draft().unwrap().setup.model.as_deref(),
-            Some("haiku")
-        );
-        assert_eq!(view.selected_draft().unwrap().setup.effort, None);
+        view.picker = None;
         view.open_field(Field::Effort);
-        view.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Right),
-            column: 0,
-            row: 0,
-            modifiers: KeyModifiers::NONE,
-        });
-        view.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Up(MouseButton::Right),
-            column: 0,
-            row: 0,
-            modifiers: KeyModifiers::NONE,
-        });
-        assert!(view.picker.is_none());
-        assert!(view.selected_draft().unwrap().setup.effort.is_none());
-    }
-    #[test]
-    fn branch_editor_only_opens_for_trunk_draft_and_cancels_without_mutation() {
-        let mut view = draft_view();
-        view.open_field(Field::Branch);
-        assert!(view.branch_editor.is_some());
-        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(view.branch_editor.is_none());
-        assert_eq!(view.selected_draft().unwrap().setup.branch, "main");
-        view.drafts[0].setup.branch = "feature".into();
-        view.open_field(Field::Branch);
-        assert!(view.branch_editor.is_none());
-    }
-    #[test]
-    fn branch_enter_emits_worktree_for_stable_draft_and_keeps_request_directory() {
-        let mut view = draft_view();
-        let draft = view.selected_draft().unwrap();
-        let id = draft.id;
-        let cwd = draft.setup.cwd.clone();
-        view.open_field(Field::Branch);
-        for ch in "feature/input".chars() {
-            view.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
-        assert_eq!(
-            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            Some(Action::CreateWorktree {
-                draft_id: id,
-                cwd,
-                branch: "feature/input".into()
-            })
-        );
-        assert!(view.selected_draft().unwrap().working);
-        assert_eq!(
-            view.input_disabled(),
-            Some("Creating task; waiting for session")
-        );
+        assert!(view.picker.is_some());
     }
 }

@@ -81,17 +81,25 @@ pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> 
     if light {
         Style::default()
             .bold()
-            .fg(Color::Indexed(18))
+            .fg(crate::theme::text_accent_for(true))
             .bg(Color::Indexed(111))
     } else {
         Style::default()
             .bold()
-            .fg(Color::Indexed(24))
+            .fg(crate::theme::text_accent_for(false))
             .bg(Color::Indexed(233))
     }
 }
 pub(super) fn active_tab_style() -> Style {
     selection_style()
+}
+
+/// Highlights a cursor row without replacing its cells' foreground colors.
+pub(super) fn cursor_style() -> Style {
+    Style {
+        fg: None,
+        ..selection_style()
+    }
 }
 pub(super) fn inactive_tab_style() -> Style {
     Style {
@@ -106,23 +114,36 @@ pub(super) fn thread_color(slot: usize) -> Color {
     crate::theme::accent(slot)
 }
 
-/// Label and body styles for transcript events, using terminal palette colors.
+/// Label and body styles for transcript events, with the theme accent on tools.
 pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
     use crate::log::Kind;
     let body = match kind {
-        Kind::User | Kind::QueuedUser => Style::default(),
+        Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
         Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
-        Kind::Tool | Kind::QueuedSystem => Style::default().fg(Color::Blue),
+        Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
         Kind::Error | Kind::Denied => Style::default().fg(Color::Red),
     };
     (body.bold(), body)
+}
+
+pub(super) fn time_style() -> Style {
+    Style::default().dim()
+}
+
+/// The braille dots in the usage chart and activity strip.
+pub(super) fn timeline_style(use_colors: bool) -> Style {
+    if use_colors {
+        Style::default().fg(crate::theme::inline_code_color())
+    } else {
+        Style::default()
+    }
 }
 
 pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
     if last {
         log_styles(kind).1.bold()
     } else {
-        Style::default()
+        time_style()
     }
 }
 

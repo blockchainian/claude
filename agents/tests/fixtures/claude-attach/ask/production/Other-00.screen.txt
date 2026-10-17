@@ -1,0 +1,31 @@
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Haiku 5.5 with low effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/.tmpc55jZY · /rc
+
+⚠ Safe mode: all customizations are disabled (CLAUDE.md, skills, plugins, hooks, MCP, agents, and more)
+  Run /stop, then claude --resume from your shell to re-enable
+
+❯ This is an isolated terminal answer transport probe. Use ONLY AskUserQuestion. Make exactly FIVE calls in order and wait for each answer before the next. Do not answer yourself. Use exact
+  question/header text. Every question has options Red (description Red choice), Green (description Green choice), Blue (description Blue choice). Call 1: one question question='Transport single?'
+  header='Single' multiSelect=false. Call 2: one question question='Transport multi?' header='Multi' multiSelect=true. Call 3: two questions in ONE call: question='Transport first?' header='First'
+  multiSelect=false and question='Transport second?' header='Second' multiSelect=false. Call 4: one question question='Transport other?' header='Other' multiSelect=false. Call 5: one question
+  question='Transport multi Other?' header='MultiOther' multiSelect=true. After all answers reply DONE and stop. This explicitly requests testing interactive question behavior.
+
+⏺ Calling 4 tools…
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Other
+
+Transport other?
+
+❯ 1. Red
+     Red choice
+  2. Green
+     Green choice
+  3. Blue
+     Blue choice
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

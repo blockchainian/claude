@@ -8,6 +8,9 @@ mod drafts;
 use draft_controls::{BranchEditor, Field, Picker};
 mod formatting;
 pub(crate) use drafts::DraftSetup;
+#[cfg(test)]
+mod chronological_log_tests;
+mod content;
 mod highlight;
 mod hints;
 mod hyperlink;
@@ -21,9 +24,12 @@ mod markdown;
 mod navigation;
 mod paths;
 mod prompt_box;
+mod question_flow;
+mod question_view;
 mod render;
 mod rows;
 mod selection_tabs;
+mod shell_commands;
 mod shortcut_help;
 mod style;
 mod text_selection;
@@ -61,19 +67,18 @@ use std::{
 };
 use unicode_width::UnicodeWidthStr;
 
+const PROMPT_MARKER: &str = "❯";
+const DISABLED_PROMPT_MARKER: &str = "❮";
+
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     (
-        "All",
+        "Active",
         &[
             SessionStatus::Working,
             SessionStatus::Ready,
             SessionStatus::NeedsInput,
-            SessionStatus::Inactive,
         ],
     ),
-    ("Ready", &[SessionStatus::Ready]),
-    ("Working", &[SessionStatus::Working]),
-    ("Needs you", &[SessionStatus::NeedsInput]),
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
@@ -86,10 +91,9 @@ const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
 fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
     match status {
         Some(status) if TASK_FILTERS[current_tab].1.contains(&status) => current_tab,
-        Some(SessionStatus::Ready) => 1,
-        Some(SessionStatus::Working) => 2,
-        Some(SessionStatus::NeedsInput) => 3,
-        Some(SessionStatus::Inactive) | None => 0,
+        Some(SessionStatus::Ready | SessionStatus::Working | SessionStatus::NeedsInput) => 0,
+        Some(SessionStatus::Inactive) => 1,
+        None => 0,
     }
 }
 
@@ -103,21 +107,27 @@ struct Viewport {
     list_rows: Rect,
     first_entry: usize,
     log: Rect,
+    log_detail: Rect,
+    log_detail_wide: bool,
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
+    /// Index of the first visible event in the chronological shown log.
     log_scroll: usize,
-    /// Events that arrived above the rows on screen since the log left its newest row.
+    /// Events that arrived below the rows on screen since the log left its newest row.
     log_unseen: usize,
     /// Where the last render drew the button that jumps back to the newest log row.
     log_jump: Rect,
-    /// Index into the task log of each drawn log row, top down, and whether its body was cut.
-    log_rows: Vec<(usize, bool)>,
-    /// Lines of the open log event scrolled off the top.
-    log_open_scroll: usize,
-    log_open_max: usize,
-    /// The open log event's layout, built on the first frame after it opens or the width changes.
-    log_open_layout: Option<log::OpenLayout>,
+    log_borders: [Rect; 2],
+    log_detail_jump: Rect,
+    /// Index into the task log of each drawn log row, top down.
+    log_rows: Vec<usize>,
+    /// Lines of the selected event scrolled off the top.
+    log_detail_scroll: usize,
+    log_detail_max: usize,
+    /// The selected event's layout, cached until its content or size changes.
+    log_detail_layout: Option<log::DetailLayout>,
+    log_detail_other_layout: Option<log::DetailLayout>,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
@@ -132,7 +142,7 @@ struct Viewport {
     list_links: Vec<links::DrawnLink>,
     details_links: Vec<links::DrawnLink>,
     log_links: Vec<links::DrawnLink>,
-    /// Screen cell of the selection marker drawn by the last render.
+    /// Screen cell at the start of the selected row in the last render.
     marker: Option<(u16, u16)>,
 }
 
@@ -152,7 +162,8 @@ struct DetailsScroll {
 }
 
 struct BackgroundReturn {
-    event: Option<crate::log::Event>,
+    event: Option<usize>,
+    detail_focused: bool,
     scroll: usize,
     search: log_search::LogSearch,
 }
@@ -163,14 +174,6 @@ struct TaskPanels {
     input_box: prompt_box::PromptBox,
     details_scroll: DetailsScroll,
     log_search: log_search::LogSearch,
-    log_open: Option<crate::log::Event>,
-    log_background_return: Option<BackgroundReturn>,
-    log_detail_search: log_search::LogSearch,
-    log_scroll: usize,
-    log_unseen: usize,
-    log_open_scroll: usize,
-    /// When the newest log event shown started, if the task's log was loaded.
-    log_newest: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Copy)]
@@ -196,7 +199,20 @@ impl ConfirmDialog {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Panel {
+    #[default]
+    TaskList,
+    LogList,
+    LogDetail,
+    Details,
+    Prompt,
+    Other,
+}
+
 pub struct View {
+    mouse_focus: Panel,
+    startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
     selected_draft: Option<crate::model::DraftId>,
     next_draft: crate::model::DraftId,
@@ -206,11 +222,20 @@ pub struct View {
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_search: log_search::LogSearch,
-    /// The log event shown whole in the log panel, opened by clicking its cut row.
-    log_open: Option<crate::log::Event>,
+    /// The selected event, shared by the list cursor and detail panel.
+    log_selected: Option<usize>,
+    log_background_event: Option<crate::log::Event>,
+    log_detail_focused: bool,
+    log_detail_raw: bool,
+    log_list_focused: bool,
+    /// Older wheel steps waiting for App to extend the loaded transcript window.
+    log_pending_older: usize,
+    pub(crate) log_start_requested: bool,
     log_background_return: Option<BackgroundReturn>,
     log_detail_search: log_search::LogSearch,
     input_box: prompt_box::PromptBox,
+    prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
+    questions: question_flow::Questions,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -239,6 +264,7 @@ pub struct View {
     last_click: Option<(usize, Instant)>,
     double_click_interval: Duration,
     pending_click: Option<input::PendingClick>,
+    last_detail_click: Option<(SessionKey, Option<usize>, Instant)>,
     /// Button, origin and drag state of the held mouse press.
     mouse_press: Option<(MouseButton, u16, u16, bool)>,
     /// Text under the last left click on a copyable body, and when it happened.
@@ -252,9 +278,6 @@ pub struct View {
     panels_task: Option<SessionKey>,
     /// The panels of each task the user left, by task.
     task_panels: HashMap<SessionKey, TaskPanels>,
-    /// The newest log event the shown task had when the user left it, standing in for the
-    /// loaded log's newest until that task's log loads.
-    left_log_newest: Option<DateTime<Utc>>,
     /// The usage bins of the task the app read last.
     usage: Option<(
         SessionKey,
@@ -283,6 +306,14 @@ struct ProjectGroup {
 }
 
 impl ProjectGroup {
+    fn directory(&self) -> Option<&Path> {
+        (!self.heading.as_os_str().is_empty()).then_some(self.heading.as_path())
+    }
+
+    fn key(&self) -> (bool, &(PathBuf, PathBuf)) {
+        (self.directory().is_none(), &self.key)
+    }
+
     fn for_session(session: &Session) -> Self {
         match crate::repository::repository_identity(&session.cwd) {
             Some(identity) => Self {
@@ -316,9 +347,17 @@ impl View {
 
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
+            mouse_focus: Panel::TaskList,
+            startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             log: Vec::new(),
             log_session: None,
-            log_open: None,
+            log_selected: None,
+            log_background_event: None,
+            log_detail_focused: false,
+            log_detail_raw: false,
+            log_list_focused: false,
+            log_pending_older: 0,
+            log_start_requested: false,
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
@@ -329,6 +368,8 @@ impl View {
             picker: None,
             branch_editor: None,
             input_box: prompt_box::PromptBox::default(),
+            prompt_history: Default::default(),
+            questions: question_flow::Questions::default(),
             capabilities: HashMap::new(),
             rows: Vec::new(),
             project_groups: Vec::new(),
@@ -353,6 +394,7 @@ impl View {
             last_click: None,
             double_click_interval: DOUBLE_CLICK_INTERVAL,
             pending_click: None,
+            last_detail_click: None,
             mouse_press: None,
             last_copy_click: None,
             copied: None,
@@ -360,7 +402,6 @@ impl View {
             title_slots: RefCell::new(HashMap::new()),
             panels_task: None,
             task_panels: HashMap::new(),
-            left_log_newest: None,
             usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
             activity: std::collections::BTreeSet::new(),
@@ -377,8 +418,51 @@ impl View {
         self.double_click_interval = Duration::from_millis(milliseconds);
     }
 
+    pub(crate) fn pasting_prompt(&self) -> bool {
+        self.confirm_dialog.is_none()
+            && !self.help
+            && self.picker.is_none()
+            && self.branch_editor.is_none()
+            && self.input_box.focused
+            && !self.input_box.searching_history()
+            && self.input_disabled().is_none()
+    }
+
+    pub(crate) fn attach_image(&mut self, image: crate::images::ImageAttachment) {
+        if self.pasting_prompt() {
+            self.input_box.editor.insert_image(image);
+        }
+    }
+
     pub(crate) fn handle_paste(&mut self, text: &str) {
-        self.input_box.paste(text);
+        if self.confirm_dialog.is_some() || self.help || self.picker.is_some() {
+            return;
+        }
+        if self.question_paste(text) {
+            return;
+        }
+        if let Some(editor) = &mut self.branch_editor {
+            editor.editor.insert(text);
+        } else if self.input_box.focused {
+            self.input_box.paste(text);
+        } else if self.rename_target.is_some() {
+            self.rename.insert(text);
+        } else if self.log_detail_search.editing {
+            self.log_detail_search.query.insert(text);
+            self.jump_detail_match();
+        } else if self.log_search.editing {
+            self.log_search.query.insert(text);
+            self.rematch_log();
+            self.show_newest_log();
+        } else if self.searching {
+            self.search.insert(text);
+            let selected = self
+                .selectable_indices()
+                .first()
+                .copied()
+                .unwrap_or(usize::MAX);
+            self.select(selected);
+        }
     }
 
     fn input_label(&self) -> String {
@@ -415,8 +499,22 @@ impl View {
         }
     }
 
-    pub(crate) fn input_sending(&mut self, id: &SessionKey) {
-        self.task_input(id).state = prompt_box::SendState::Sending;
+    pub(crate) fn input_sending(
+        &mut self,
+        id: &SessionKey,
+        input: &crate::providers::SessionInput,
+    ) {
+        if let crate::providers::SessionInput::Answer { ask, .. } = input {
+            self.questions.begin(ask);
+            return;
+        }
+        let target = self.task_input(id);
+        if let crate::providers::SessionInput::Prompt(text)
+        | crate::providers::SessionInput::PromptWithImages { text, .. } = input
+        {
+            target.begin_send(text);
+        }
+        target.state = prompt_box::SendState::Sending;
     }
 
     pub(crate) fn input_complete(
@@ -425,22 +523,34 @@ impl View {
         input: &crate::providers::SessionInput,
         result: std::io::Result<()>,
     ) {
-        let target = self.task_input(id);
-        target.state = match result {
-            Ok(()) => {
-                if let crate::providers::SessionInput::Prompt(text) = input
-                    && target.editor.text() == text
-                {
-                    target.editor.clear();
-                }
-                prompt_box::SendState::Sent
+        if let crate::providers::SessionInput::Answer { ask, .. } = input {
+            self.questions.complete(ask, &result);
+            if let Err(error) = result {
+                self.set_notice(Some(error.to_string()));
             }
+            return;
+        }
+        let target = self.task_input(id);
+        let error = result.as_ref().err().map(ToString::to_string);
+        if matches!(
+            input,
+            crate::providers::SessionInput::Prompt(_)
+                | crate::providers::SessionInput::PromptWithImages { .. }
+        ) {
+            target.finish_send(result.is_ok());
+        }
+        target.state = match result {
+            Ok(()) => prompt_box::SendState::Ready,
             Err(error) => prompt_box::SendState::Failed(error.to_string()),
         };
+        if let Some(error) = error {
+            self.set_notice(Some(error));
+        }
     }
 
     pub(crate) fn input_failed(&mut self, reason: String) {
-        self.input_box.state = prompt_box::SendState::Failed(reason);
+        self.input_box.state = prompt_box::SendState::Failed(reason.clone());
+        self.set_notice(Some(reason));
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {
@@ -450,6 +560,7 @@ impl View {
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
         let selected = self.selected_id().cloned();
+        let selected_parent = self.selected_row().and_then(|s| s.parent.clone());
         let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;
         sessions.sort_by(|a, b| {
@@ -463,20 +574,25 @@ impl View {
         self.task_panels
             .retain(|id, _| rows.iter().any(|session| &session.id == id));
         self.has_more = has_more;
-        let selected_index = selected
+        let mut selected_index = selected
             .as_ref()
             .and_then(|id| self.rows.iter().position(|s| &s.id == id));
         if selected.is_some()
             && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
         {
             let status = selected_index.map(|index| self.rows[index].status);
-            self.status_filter = if self.rename_target.as_ref() == selected.as_ref()
+            if self.rename_target.as_ref() == selected.as_ref()
                 && status == Some(SessionStatus::Inactive)
             {
-                TASK_FILTERS.len() - 1
+                self.status_filter = TASK_FILTERS.len() - 1;
+            } else if let Some(parent) = selected_parent {
+                selected_index = self
+                    .visible_indices()
+                    .into_iter()
+                    .find(|&index| self.rows[index].id == parent);
             } else {
-                tab_for_status(status, self.status_filter)
-            };
+                self.status_filter = tab_for_status(status, self.status_filter);
+            }
         }
         self.selected = if show_more {
             usize::MAX
@@ -518,7 +634,11 @@ impl View {
     }
     /// Shows `notice` at the task list's bottom-left for `MESSAGE_LIFETIME`.
     pub fn set_notice(&mut self, notice: Option<String>) {
-        self.notice = notice.map(|text| (text, Instant::now() + MESSAGE_LIFETIME));
+        self.set_notice_at(notice, Instant::now());
+    }
+
+    fn set_notice_at(&mut self, notice: Option<String>, now: Instant) {
+        self.notice = notice.map(|text| (text, now + MESSAGE_LIFETIME));
     }
 
     /// Shows `label` at the footer's right end until `MESSAGE_LIFETIME` after `now`.
@@ -533,7 +653,7 @@ impl View {
         let notice = expire(&mut self.notice, now);
         copied.into_iter().chain(notice).min()
     }
-    /// Where the `›` of the selected row was drawn last, so the terminal cursor can rest on it.
+    /// Where the selected row starts, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {
         self.viewport.borrow().marker
     }
@@ -547,11 +667,17 @@ impl View {
         })
     }
     fn subagents_for<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a Session> {
-        self.rows.iter().filter(move |child| {
-            session.parent.is_none()
-                && child.parent.as_ref() == Some(&session.id)
-                && child.status == SessionStatus::Working
-        })
+        let mut children: Vec<_> = self
+            .rows
+            .iter()
+            .filter(|child| {
+                session.parent.is_none()
+                    && child.parent.as_ref() == Some(&session.id)
+                    && child.status == SessionStatus::Working
+            })
+            .collect();
+        children.sort_by_key(|child| (child.started_at, &child.id));
+        children.into_iter()
     }
 
     pub fn selected_id(&self) -> Option<&SessionKey> {
@@ -589,7 +715,9 @@ impl View {
             return self.is_pinned(left) && self.is_pinned(right);
         }
         match grouping {
-            Grouping::Project => self.project_groups[left].key == self.project_groups[right].key,
+            Grouping::Project => {
+                self.project_groups[left].key() == self.project_groups[right].key()
+            }
             Grouping::Status => true,
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
@@ -641,7 +769,7 @@ impl View {
         pinned.sort_by_key(|i| self.pinned.iter().position(|id| *id == self.rows[*i].id));
         match self.grouping {
             Grouping::Project => visible
-                .sort_by_key(|i| (&self.project_groups[*i].key, session_order(&self.rows[*i]))),
+                .sort_by_key(|i| (self.project_groups[*i].key(), session_order(&self.rows[*i]))),
             Grouping::Status => {}
             Grouping::Model => {
                 visible.sort_by_key(|i| (self.rows[*i].model_name(), session_order(&self.rows[*i])))
@@ -683,12 +811,40 @@ impl View {
         viewport.log_scroll = viewport.log_scroll.min(max);
     }
 
-    /// Closes the open log event and scrolls the log back to its newest row.
+    pub(crate) fn log_max_scroll(&self) -> usize {
+        let height = usize::from(
+            self.viewport
+                .borrow()
+                .log
+                .height
+                .saturating_sub(u16::from(self.log_search.active())),
+        );
+        self.matching_log_count().saturating_sub(height)
+    }
+
+    pub(crate) fn log_read_count(&self, visible: usize, has_older: bool) -> usize {
+        let loaded = self.log.len().max(visible);
+        if has_older
+            && (self.log_page_pending() || (self.log_scroll() == 0 && !self.following_log()))
+        {
+            loaded.saturating_add(visible.max(self.log_pending_older).max(1))
+        } else {
+            loaded
+        }
+    }
+
+    /// Selects the newest shown event and resumes following the log.
     fn show_newest_log(&mut self) {
-        self.set_log_open(None);
+        self.select_log_event(None);
+        self.log_detail_search.clear();
+        let max = self.log_max_scroll();
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_scroll = 0;
-        viewport.log_open_scroll = 0;
+        viewport.log_scroll = max;
+        viewport.log_detail_scroll = 0;
+        viewport.log_unseen = 0;
+        self.log_pending_older = 0;
+        self.log_start_requested = false;
+        self.log_background_return = None;
     }
 
     fn set_selected(&mut self, selected: usize) {
@@ -700,31 +856,18 @@ impl View {
     /// Keeps the details and log panels with their task: saves what the task the user left
     /// showed, and shows what the selected task showed when the user last left it.
     fn show_selected_panels(&mut self) {
+        self.sync_questions();
         let selected = self.selected_id().cloned();
         if self.panels_task == selected {
             return;
         }
         self.text_selection.borrow_mut().take();
-        let log_newest = if self.log_session == self.panels_task {
-            self.shown_log_events()
-                .last()
-                .map(|(_, event)| event.started_at)
-        } else {
-            self.left_log_newest
-        };
         let viewport = self.viewport.get_mut();
         self.input_box.focused = false;
         let left = TaskPanels {
             input_box: std::mem::take(&mut self.input_box),
             details_scroll: std::mem::take(&mut viewport.details_scroll),
             log_search: std::mem::take(&mut self.log_search),
-            log_open: self.log_open.take(),
-            log_background_return: self.log_background_return.take(),
-            log_detail_search: std::mem::take(&mut self.log_detail_search),
-            log_scroll: viewport.log_scroll,
-            log_unseen: viewport.log_unseen,
-            log_open_scroll: viewport.log_open_scroll,
-            log_newest,
         };
         if let Some(id) = self.panels_task.take() {
             self.task_panels.insert(id, left);
@@ -737,17 +880,22 @@ impl View {
             shown.details_scroll.left_keys = Some(std::mem::take(&mut shown.details_scroll.keys));
         }
         viewport.details_scroll = shown.details_scroll;
-        viewport.log_scroll = shown.log_scroll;
-        viewport.log_unseen = shown.log_unseen;
-        viewport.log_open_scroll = shown.log_open_scroll;
-        viewport.log_open_layout = None;
+        viewport.log_scroll = 0;
+        viewport.log_unseen = 0;
+        viewport.log_detail_scroll = 0;
+        viewport.log_detail_layout = None;
+        viewport.log_detail_other_layout = None;
         self.input_box = shown.input_box;
         self.log_search = shown.log_search;
-        self.log_open = shown.log_open;
-        self.log_background_return = shown.log_background_return;
-        self.log_detail_search = shown.log_detail_search;
+        self.log_selected = None;
+        self.log_background_event = None;
+        self.log_detail_focused = false;
+        self.log_list_focused = false;
+        self.log_pending_older = 0;
+        self.log_start_requested = false;
+        self.log_background_return = None;
+        self.log_detail_search.clear();
         self.pending_click = None;
-        self.left_log_newest = shown.log_newest.filter(|_| self.log_session != selected);
         self.panels_task = selected;
     }
 
@@ -821,13 +969,18 @@ impl View {
         }
     }
     fn status(session: &Session) -> (&'static str, Span<'static>) {
-        let dot = match session.status {
+        (
+            session.status.label(),
+            Self::status_indicator(session.status),
+        )
+    }
+    fn status_indicator(status: SessionStatus) -> Span<'static> {
+        match status {
             SessionStatus::NeedsInput => "●".red(),
             SessionStatus::Working => "●".green(),
             SessionStatus::Ready => "○".cyan(),
             SessionStatus::Inactive => "○".dim(),
-        };
-        (session.status.label(), dot)
+        }
     }
 }
 
@@ -850,3 +1003,6 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
     }
     left
 }
+
+#[cfg(test)]
+mod background_order_tests;

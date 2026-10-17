@@ -28,6 +28,7 @@ fn fixture() -> (tempfile::TempDir, View) {
     let mut sessions = provider.refresh(1).sessions;
     assert_eq!(sessions.len(), 1);
     sessions[0].cwd = directory.path().into();
+    sessions[0].status = SessionStatus::Ready;
     let mut view = View::default();
     view.set_capabilities(HashMap::from([(
         ProviderId::Claude,
@@ -70,6 +71,37 @@ fn render(view: &View) -> Buffer {
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render_at(buffer.area, &mut buffer, Utc::now());
     buffer
+}
+
+#[test]
+fn draft_shows_under_active_tab() {
+    let (directory, mut view) = fixture();
+    let id = view.add_draft(setup(directory.path()));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    let buffer = render(&view);
+    assert!(
+        buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+            .contains("New task")
+    );
+    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| matches!(entry, navigation::CenterRow::Draft(draft) if *draft == id))
+    );
+    key(&mut view, KeyCode::Esc);
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
+    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
+    assert!(
+        !entries
+            .iter()
+            .any(|entry| matches!(entry, navigation::CenterRow::Draft(_)))
+    );
 }
 
 #[test]
@@ -153,7 +185,7 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
     render(&view);
     let (x, y) = {
         let viewport = view.viewport.borrow();
-        (viewport.list_rows.x, viewport.list_rows.y)
+        (viewport.list_links[0].0.x, viewport.list_links[0].0.y)
     };
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(
@@ -216,42 +248,6 @@ fn draft_navigation_click_tab_and_pending_job_preserve_input_without_keys() {
     assert!(view.input_disabled().is_some());
     key(&mut view, KeyCode::Backspace);
     assert_eq!(view.drafts.len(), 1);
-}
-
-#[test]
-fn live_picker_uses_provider_choices_and_existing_branch_is_inert() {
-    let (_directory, mut view) = fixture();
-    let row = &mut view.rows[0];
-    row.background_job = Some(crate::model::BackgroundJob {
-        id: "e772d00b".into(),
-        needs: None,
-    });
-    row.process = Some(crate::model::Process {
-        pid: std::process::id(),
-        label: Some("bg".into()),
-        started_at: None,
-    });
-    let id = row.id.clone();
-    view.open_field(Field::Model);
-    assert!(view.picker.is_some());
-    let model = view.picker.as_ref().unwrap().values[0].clone();
-    assert_eq!(
-        view.apply_choice(0),
-        Some(Action::SetModel {
-            id: id.clone(),
-            model
-        })
-    );
-    view.open_field(Field::Branch);
-    assert!(view.branch_editor.is_none());
-    view.rows[0].process = None;
-    view.open_field(Field::Effort);
-    assert!(view.picker.is_none());
-    view.rows[0].id.provider = ProviderId::Codex;
-    view.input_choices
-        .insert(ProviderId::Codex, crate::providers::InputChoices::default());
-    view.open_field(Field::Model);
-    assert!(view.picker.is_none());
 }
 
 #[test]
@@ -321,6 +317,70 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
 }
 
 #[test]
+fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts() {
+    let (_directory, mut view) = fixture();
+    view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+    });
+    view.rows[view.selected].process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    view.rows[view.selected].effort = Some("high".into());
+    view.rows[view.selected].model_label = Some("Opus 5.5".into());
+    let model_name = view.rows[view.selected].model_label().to_owned();
+    for width in [149, 150, 200] {
+        let area = Rect::new(0, 0, width, 60);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let targets = view.viewport.borrow().field_targets.clone();
+        let model = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0;
+        let effort = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Effort)
+            .unwrap()
+            .0;
+        let text = |x, y, width| {
+            (x..x + width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        };
+        let log = view.viewport.borrow().log;
+        assert_eq!(text(model.x, model.y, model.width), model_name);
+        assert_eq!(model.x, log.x + u16::from(width < 150));
+        assert_eq!(
+            model.y,
+            if width >= 150 {
+                log.bottom()
+            } else {
+                log.y - 1
+            }
+        );
+        assert_eq!(effort.y, model.y);
+        assert_eq!(effort.right(), log.right() - 1);
+        assert!(model.right() < effort.x);
+        assert!(
+            buffer[(effort.x, model.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
+        assert_eq!(text(effort.x, effort.y, effort.width), "high");
+        for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
+            assert_eq!(click(&mut view, rect.x, rect.y), None);
+            assert_eq!(click(&mut view, rect.x, rect.y), None);
+            assert_eq!(view.picker.as_ref().unwrap().field, field);
+            key(&mut view, KeyCode::Esc);
+        }
+    }
+}
+
+#[test]
 fn live_effort_picker_remains_available_when_transcript_omits_effort() {
     let (_directory, mut view) = fixture();
     let id = view.selected_id().unwrap().clone();
@@ -363,4 +423,132 @@ fn live_effort_picker_remains_available_when_transcript_omits_effort() {
             effort: "high".into()
         })
     );
+}
+
+#[test]
+fn log_model_targets_cover_only_visible_border_value_cells() {
+    let (_directory, mut view) = fixture();
+    let row = &mut view.rows[view.selected];
+    row.background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+    });
+    row.process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    row.model = Some("claude-opus-5-5".into());
+    for effort in [Some("medium"), None] {
+        view.rows[view.selected].effort = effort.map(str::to_owned);
+        // Providers without effort choices show only the model.
+        if effort.is_none() {
+            view.input_choices
+                .get_mut(&ProviderId::Claude)
+                .unwrap()
+                .efforts
+                .clear();
+        }
+        for width in [20, 40, 60, 80, 120, 149, 150, 200] {
+            let frame = Rect::new(0, 0, width, 60);
+            let mut buffer = Buffer::empty(frame);
+            view.render_at(frame, &mut buffer, Utc::now());
+            let area = view.viewport.borrow().log;
+            let rule_left = if width >= 150 { area.x - 2 } else { 0 };
+            let rule = Rect::new(
+                rule_left,
+                if width >= 150 {
+                    area.bottom()
+                } else {
+                    area.y - 1
+                },
+                width - rule_left,
+                1,
+            );
+            let available = (rule.width / 2).saturating_sub(4);
+            let show_effort = effort.is_some() && available > 0;
+            let name_width = available.min("claude-opus-5-5".len() as u16);
+            let start = rule.x + 2;
+            let expected_name = if name_width == 0 {
+                String::new()
+            } else if name_width < "claude-opus-5-5".len() as u16 {
+                format!("{}…", &"claude-opus-5-5"[..usize::from(name_width - 1)])
+            } else {
+                "claude-opus-5-5".into()
+            };
+            let drawn = (start..start + name_width)
+                .map(|x| buffer[(x, rule.y)].symbol())
+                .collect::<String>();
+            assert_eq!(drawn, expected_name, "width={width}");
+            let targets = view.viewport.borrow().field_targets.clone();
+            let y = rule.y;
+            let effort_width = available.min(6);
+            for x in area.x..area.right() {
+                let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
+                    Some(Field::Model)
+                } else if show_effort
+                    && (rule.right() - 2 - effort_width..rule.right() - 2).contains(&x)
+                {
+                    Some(Field::Effort)
+                } else {
+                    None
+                };
+                let actual = targets
+                    .iter()
+                    .find(|(rect, _)| rect.contains((x, y).into()));
+                assert_eq!(
+                    actual.map(|(_, field)| *field),
+                    expected,
+                    "width={width}, x={x}, effort={effort:?}"
+                );
+                if let Some(field) = expected {
+                    let symbol = buffer[(x, y)].symbol();
+                    assert!(!symbol.trim().is_empty());
+                    assert!(
+                        buffer[(x, y)]
+                            .modifier
+                            .contains(ratatui::style::Modifier::DIM)
+                    );
+                    assert_eq!(click(&mut view, x, y), None);
+                    assert_eq!(click(&mut view, x, y), None);
+                    assert_eq!(view.picker.as_ref().unwrap().field, field);
+                    key(&mut view, KeyCode::Esc);
+                }
+            }
+            assert!(targets.iter().all(|(rect, _)| !rect.is_empty()));
+        }
+    }
+}
+
+#[test]
+fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
+    for text in ["describe this", ""] {
+        let (directory, mut view) = fixture();
+        let id = view.add_draft(setup(directory.path()));
+        view.handle_paste(text);
+        view.attach_image(
+            crate::images::ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap(),
+        );
+        let paths = view.input_box.editor.image_paths();
+        let action = key(&mut view, KeyCode::Enter);
+        assert!(
+            matches!(action, Some(Action::CreateTask { draft_id, .. }) if draft_id == id),
+            "{action:?}"
+        );
+        let Some(Action::CreateTask { request, .. }) = action else {
+            unreachable!()
+        };
+        assert_eq!(request.prompt, text);
+        assert_eq!(request.images, paths);
+        assert!(view.drafts[0].working);
+        view.draft_created(id, Err(std::io::Error::other("delivery failed")));
+        assert_eq!(view.selected_draft, Some(id));
+        assert_eq!(view.input_box.editor.prompt_text(), text);
+        assert_eq!(view.input_box.editor.image_paths(), paths);
+        assert_eq!(view.drafts[0].error.as_deref(), Some("delivery failed"));
+        assert!(!view.drafts[0].working);
+    }
 }

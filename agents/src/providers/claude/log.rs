@@ -1,6 +1,10 @@
 use crate::log::{Event, Kind, Section, ToolCall, participant_text};
 use chrono::{DateTime, Utc};
-use std::{io, path::Path};
+use std::{
+    io::{self, Read, Seek, SeekFrom},
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
 
 pub(super) fn tool_hidden(name: &str) -> bool {
     matches!(
@@ -17,6 +21,20 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
     ["description", "file_path", "prompt", "query", "message"]
         .into_iter()
         .find_map(|key| input_text(input, key).map(|text| (key, text)))
+}
+
+fn tool_title(name: &str, input: &serde_json::Value) -> String {
+    if name == "Agent" {
+        return name.to_owned();
+    }
+    let title = crate::log::tool_title(name, input);
+    if name == "Skill"
+        && let Some(args) = input["args"].as_str().filter(|args| !args.is_empty())
+    {
+        format!("{title} {args}")
+    } else {
+        title
+    }
 }
 
 fn tool_detail(name: &str, input: &serde_json::Value) -> String {
@@ -40,7 +58,12 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
                 .or_else(|| input_text(input, "message").and_then(|text| text.lines().next()));
             participant_text(input_text(input, "to"), message.unwrap_or(""))
         }
-        "Agent" | "Task" => participant_text(
+        "Agent" => [input_text(input, "name"), input_text(input, "description")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · "),
+        "Task" => participant_text(
             input_text(input, "name"),
             default_detail(input).map(|(_, text)| text).unwrap_or(""),
         ),
@@ -60,11 +83,16 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
 fn tool_label(name: &str, detail: &str) -> String {
     let name = if name == "SendMessage" { "To" } else { name };
     if detail.is_empty() {
-        name.to_owned()
-    } else if matches!(name, "Bash" | "AskUserQuestion") {
+        crate::log::display_tool_name(name)
+    } else if matches!(name, "Bash" | "AskUserQuestion" | "Agent") {
         detail.to_owned()
     } else {
-        format!("{name} {detail}")
+        let label = crate::log::display_tool_name(name);
+        if label == name {
+            format!("{label} {detail}")
+        } else {
+            [label.as_str(), detail].join(" · ")
+        }
     }
 }
 
@@ -81,7 +109,10 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     {
         Some(tool_label(name, &tool_detail(name, input)))
     } else {
-        Some(input_text(input, "description").unwrap_or(name).to_owned())
+        Some(
+            input_text(input, "description")
+                .map_or_else(|| crate::log::display_tool_name(name), str::to_owned),
+        )
     }
 }
 
@@ -90,16 +121,30 @@ pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     tail_session(path, count, false)
 }
 
+#[cfg(test)]
 pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
-    let mut log = Log::default();
-    super::transcript::walk_records(&mut file, len, Vec::new(), sidechains, |record| {
+    let mut log = Log {
+        path: Some(path.to_path_buf()),
+        ..Log::default()
+    };
+    crate::jsonl::read_lines_back(&mut file, len, |offset, line| {
+        let Ok(record) = serde_json::from_slice::<serde_json::Value>(line) else {
+            return true;
+        };
+        if !sidechains && record["isSidechain"] == true {
+            return true;
+        }
+        log.offset = offset;
         log.record(record, count)
     })?;
+    if let Some(error) = log.error {
+        return Err(error);
+    }
     let mut events: Vec<_> = log.entries.into_iter().map(|entry| entry.event).collect();
     events.reverse();
     let mut previous_end = None;
@@ -116,9 +161,326 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     Ok(events.into_iter().skip(skip).collect())
 }
 
+/// Retains decoded records and parsed rows between file notifications.
+/// Only the suffix affected by a new call, result or image companion is replayed.
+pub(crate) struct Reader {
+    path: PathBuf,
+    sidechains: bool,
+    identity: Option<(u64, u64)>,
+    modified: Option<std::time::SystemTime>,
+    oldest_offset: u64,
+    read_offset: u64,
+    pending: Vec<u8>,
+    records: Vec<(u64, serde_json::Value)>,
+    entries: Vec<Entry>,
+    shown: usize,
+    boundary: crate::jsonl::Boundary,
+    #[cfg(test)]
+    replayed_records: usize,
+}
+
+impl Reader {
+    pub fn new(path: PathBuf, sidechains: bool) -> Self {
+        Self {
+            path,
+            sidechains,
+            identity: None,
+            modified: None,
+            oldest_offset: 0,
+            read_offset: 0,
+            pending: Vec::new(),
+            records: Vec::new(),
+            entries: Vec::new(),
+            shown: 0,
+            boundary: crate::jsonl::Boundary::default(),
+            #[cfg(test)]
+            replayed_records: 0,
+        }
+    }
+
+    fn decode(&self, bytes: &[u8], start: u64) -> Vec<(u64, serde_json::Value)> {
+        let mut offset = start;
+        bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .filter_map(|line| {
+                let position = offset;
+                offset += line.len() as u64;
+                let record = serde_json::from_slice::<serde_json::Value>(line).ok()?;
+                (self.sidechains || record["isSidechain"] != true).then_some((position, record))
+            })
+            .collect()
+    }
+
+    fn replay(&mut self, start: u64) -> io::Result<usize> {
+        let retained = self.entries.partition_point(|entry| entry.offset < start);
+        let replaced = self.entries.len() - retained;
+        self.entries.truncate(retained);
+        let mut log = Log {
+            path: Some(self.path.clone()),
+            ..Log::default()
+        };
+        for (offset, record) in self
+            .records
+            .iter()
+            .rev()
+            .take_while(|(offset, _)| *offset >= start)
+        {
+            #[cfg(test)]
+            {
+                self.replayed_records += 1;
+            }
+            log.offset = *offset;
+            log.record(record.clone(), usize::MAX);
+        }
+        if let Some(error) = log.error {
+            return Err(error);
+        }
+        self.entries.extend(log.entries.into_iter().rev());
+        let mut previous_end = None;
+        for entry in &mut self.entries {
+            let event = &mut entry.event;
+            if event.kind != Kind::Assistant || event.previous_end.is_none() {
+                event.previous_end = previous_end;
+            }
+            previous_end = match event.kind {
+                Kind::Tool | Kind::Error | Kind::Denied => event.ended_at,
+                _ => Some(event.started_at),
+            };
+        }
+        Ok(replaced)
+    }
+
+    fn affected_start(&self, appended: &[(u64, serde_json::Value)]) -> u64 {
+        let mut group = None;
+        let mut key = None;
+        let mut requests = std::collections::HashMap::new();
+        let mut prompts = std::collections::HashMap::new();
+        let mut queued = std::collections::HashMap::new();
+        for (offset, record) in &self.records {
+            if record["type"] == "queue-operation"
+                && record["operation"] == "enqueue"
+                && let Some(text) = record["content"].as_str()
+            {
+                queued.entry(text).or_insert(*offset);
+            }
+            if record["type"] == "assistant" {
+                let next = record["message"]["id"]
+                    .as_str()
+                    .or_else(|| record["requestId"].as_str())
+                    .or_else(|| record["uuid"].as_str());
+                if next.is_none() || next != key {
+                    group = Some(*offset);
+                    key = next;
+                }
+                for block in record["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    if block["type"] == "tool_use"
+                        && let Some(id) = block["id"].as_str()
+                    {
+                        requests.insert(id, group.unwrap_or(*offset));
+                    }
+                }
+            }
+            if record["type"] == "user"
+                && record["isMeta"] != true
+                && let Some(id) = record["promptId"].as_str()
+            {
+                prompts.insert(id, *offset);
+            }
+        }
+        let mut start = group.unwrap_or(self.read_offset);
+        for (_, record) in appended {
+            if super::images::queued_prompt(record).is_some()
+                && let Some(id) = record["attachment"]["source_uuid"].as_str()
+                && let Some(text) =
+                    self.records
+                        .iter()
+                        .chain(appended.iter())
+                        .rev()
+                        .find_map(|(_, removal)| {
+                            (removal["type"] == "queue-operation"
+                                && removal["operation"] == "remove"
+                                && removal["commandUuid"] == id)
+                                .then(|| removal["content"].as_str())
+                                .flatten()
+                        })
+                && let Some(offset) = queued.get(text)
+            {
+                start = start.min(*offset);
+            }
+            for block in record["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                if block["type"] == "tool_result"
+                    && let Some(offset) = block["tool_use_id"]
+                        .as_str()
+                        .and_then(|id| requests.get(id))
+                {
+                    start = start.min(*offset);
+                }
+            }
+            if record["turnCompanion"] == true
+                && let Some(offset) = record["promptId"].as_str().and_then(|id| prompts.get(id))
+            {
+                start = start.min(*offset);
+            }
+        }
+        start
+    }
+
+    fn older_page(&mut self, file: &mut std::fs::File) -> io::Result<u64> {
+        let end = self.oldest_offset;
+        let mut start = end.saturating_sub(64 * 1024);
+        let (bytes, skip) = loop {
+            file.seek(SeekFrom::Start(start))?;
+            let mut bytes = vec![0; (end - start) as usize];
+            file.read_exact(&mut bytes)?;
+            let skip = if start == 0 {
+                Some(0)
+            } else {
+                bytes
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .map(|index| index + 1)
+            };
+            if let Some(skip) = skip.filter(|skip| *skip < bytes.len() || start == 0) {
+                break (bytes, skip);
+            }
+            start = start.saturating_sub(64 * 1024);
+        };
+        self.oldest_offset = start + skip as u64;
+        let complete = if end == self.read_offset && self.records.is_empty() {
+            let complete = bytes
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(skip, |index| index + 1);
+            self.pending = bytes[complete..].to_vec();
+            complete
+        } else {
+            bytes.len()
+        };
+        let mut records = self.decode(&bytes[skip..complete], self.oldest_offset);
+        if complete < bytes.len() {
+            records.extend(self.decode(&bytes[complete..], start + complete as u64));
+        }
+        records.append(&mut self.records);
+        self.records = records;
+        Ok((bytes.len() - skip) as u64)
+    }
+
+    pub fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        let mut file = std::fs::File::open(&self.path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        let modified = metadata.modified().ok();
+        let reset = self.identity != Some(identity)
+            || metadata.len() < self.read_offset
+            || (metadata.len() == self.read_offset && modified != self.modified)
+            || (metadata.len() > self.read_offset && !self.boundary.matches(&mut file)?);
+        self.modified = modified;
+        if reset {
+            self.identity = Some(identity);
+            self.records.clear();
+            self.entries.clear();
+            self.shown = 0;
+            self.pending.clear();
+            self.oldest_offset = metadata.len();
+            self.read_offset = metadata.len();
+        }
+        let before = self.entries.len();
+        let shown_before = self.shown;
+        let mut parsed_bytes = 0;
+        let mut replaced = 0;
+        if !reset && metadata.len() > self.read_offset {
+            file.seek(SeekFrom::Start(self.read_offset))?;
+            let start = self.read_offset - self.pending.len() as u64;
+            let mut bytes = std::mem::take(&mut self.pending);
+            (&mut file)
+                .take(metadata.len() - self.read_offset)
+                .read_to_end(&mut bytes)?;
+            self.read_offset = metadata.len();
+            let complete = bytes
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(0, |index| index + 1);
+            self.pending = bytes[complete..].to_vec();
+            let mut appended = self.decode(&bytes[..complete], start);
+            if complete < bytes.len() {
+                appended.extend(self.decode(&bytes[complete..], start + complete as u64));
+            }
+            parsed_bytes += bytes.len() as u64;
+            let previous_eof = self
+                .records
+                .last()
+                .is_some_and(|(offset, _)| *offset == start);
+            if !appended.is_empty() || previous_eof {
+                let affected = self.affected_start(&appended).min(start);
+                if previous_eof {
+                    self.records.pop();
+                }
+                self.records.extend(appended);
+                replaced = self.replay(affected)?;
+            }
+        }
+        let after_append = self.entries.len();
+        let parsed_before_older = parsed_bytes;
+        while self.oldest_offset > 0 && self.entries.len() < requested {
+            parsed_bytes += self.older_page(&mut file)?;
+            // Full history has no intermediate row-count boundary to inspect.
+            if requested != usize::MAX || self.oldest_offset == 0 {
+                self.replay(self.oldest_offset)?;
+            }
+        }
+        if parsed_bytes > parsed_before_older {
+            replaced = replaced.max(shown_before);
+        }
+        let appended = after_append.saturating_sub(before);
+        self.shown = self
+            .shown
+            .saturating_add(appended)
+            .max(requested)
+            .min(self.entries.len());
+        let prepended = self
+            .shown
+            .saturating_sub(shown_before)
+            .saturating_sub(appended);
+        self.boundary.capture(&mut file, metadata.len())?;
+        Ok(crate::log::Update {
+            events: self
+                .entries
+                .iter()
+                .skip(self.entries.len() - self.shown)
+                .map(|entry| entry.event.clone())
+                .collect(),
+            prepended: if reset { 0 } else { prepended },
+            appended: if reset { self.shown } else { appended },
+            replaced: replaced.min(shown_before),
+            reset,
+            parsed_bytes,
+            oldest_offset: self.oldest_offset,
+            read_offset: self.read_offset,
+        })
+    }
+}
+
+impl crate::log::Reader for Reader {
+    fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        Reader::refresh(self, requested)
+    }
+}
+
 #[derive(Default)]
 struct Log {
+    path: Option<PathBuf>,
+    offset: u64,
+    companions: std::collections::HashMap<String, Vec<crate::log::SourceRecord>>,
     images: super::images::Companions,
+    error: Option<io::Error>,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
     assistant: Option<String>,
@@ -126,12 +488,14 @@ struct Log {
     sequence: usize,
 }
 struct Entry {
+    offset: u64,
     event: Event,
     missing: bool,
     background: bool,
     last_result: Option<usize>,
 }
 struct ResultAt {
+    source_records: Vec<crate::log::SourceRecord>,
     at: DateTime<Utc>,
     sequence: usize,
     error: bool,
@@ -146,8 +510,11 @@ fn result_text(value: &serde_json::Value) -> String {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|block| block["type"] == "text")
-            .filter_map(|block| block["text"].as_str())
+            .filter_map(|block| match block["type"].as_str() {
+                Some("text") => block["text"].as_str(),
+                Some("tool_reference") => block["tool_name"].as_str(),
+                _ => None,
+            })
             .collect::<Vec<_>>()
             .join("\n")
     })
@@ -217,6 +584,28 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         .unwrap_or("");
     let value = result.map(|result| &result.value);
     let mut sections = match name {
+        "AskUserQuestion" => {
+            let mut lines = Vec::new();
+            for question in input["questions"].as_array().into_iter().flatten() {
+                let Some(text) = question["question"].as_str() else {
+                    continue;
+                };
+                let suffix = if question["multiSelect"] == true {
+                    " (multi-select)"
+                } else {
+                    ""
+                };
+                lines.push(format!("• {text}{suffix}"));
+                for option in question["options"].as_array().into_iter().flatten() {
+                    if let (Some(label), Some(description)) =
+                        (option["label"].as_str(), option["description"].as_str())
+                    {
+                        lines.push(format!("  • {label}: {description}"));
+                    }
+                }
+            }
+            vec![text_section("questions", &lines.join("\n"))]
+        }
         "Bash" => vec![code_section(
             "command",
             "bash",
@@ -233,10 +622,13 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         // The diff's label shows the path.
         "Edit" => Vec::new(),
         "WebFetch" => vec![fields(input, &["url", "prompt"])],
-        "Agent" | "Task" => vec![Section::Markdown {
-            label: "prompt".to_owned(),
-            text: input["prompt"].as_str().unwrap_or("").to_owned(),
-        }],
+        "Agent" | "Task" => vec![
+            Section::Markdown {
+                label: "prompt".to_owned(),
+                text: input["prompt"].as_str().unwrap_or("").to_owned(),
+            },
+            fields(input, &["name"]),
+        ],
         "SendMessage" => vec![Section::Markdown {
             label: "message".to_owned(),
             text: input["message"].as_str().unwrap_or("").to_owned(),
@@ -296,6 +688,19 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     let output = result.map(|result| {
         let fallback = || vec![text_section("output", &result.content)];
         let value = &result.value;
+        if name == "AskUserQuestion"
+            && result.error
+            && let Some((explanation, questions)) = result.content.split_once("Questions asked:")
+        {
+            return vec![text_section(
+                "output",
+                &format!(
+                    "Questions asked:{}\n\n{}",
+                    questions.trim_end(),
+                    explanation.trim_end()
+                ),
+            )];
+        }
         if result.error {
             return fallback();
         }
@@ -351,23 +756,86 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             _ => fallback(),
         }
     });
+    crate::log::include_description(&mut sections, input);
     ToolCall {
+        agent: None,
         id: String::new(),
-        title: crate::log::tool_title(name, input),
+        title: tool_title(name, input),
         name: name.to_owned(),
         input: sections,
         output,
+        exit_code: None,
         is_error: result.is_some_and(|result| result.error),
+        duration: None,
     }
 }
 
 impl Log {
+    fn agent_model(&self, input: &serde_json::Value, result: Option<&ResultAt>) -> Option<String> {
+        let value = result.map(|result| &result.value);
+        let child = self
+            .path
+            .as_ref()
+            .zip(value.and_then(|v| input_text(v, "agentId")))
+            .filter(|(_, id)| id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+            .map(|(path, id)| {
+                path.with_extension("")
+                    .join("subagents")
+                    .join(format!("agent-{id}.jsonl"))
+            });
+        let summary = child.as_ref().and_then(|path| {
+            let len = std::fs::metadata(path).ok()?.len();
+            super::transcript::read_subagent_cached(path, len, None).ok()
+        });
+        let model = value
+            .and_then(|v| input_text(v, "resolvedModel"))
+            .or_else(|| input_text(input, "model"))
+            .or_else(|| summary.as_ref().and_then(|s| s.model.as_deref()))?;
+        Some(
+            summary
+                .as_ref()
+                .and_then(|s| s.model_identities.get(model))
+                .cloned()
+                .unwrap_or_else(|| model.to_owned()),
+        )
+    }
+
+    fn source_records(&self) -> Vec<crate::log::SourceRecord> {
+        self.path
+            .as_ref()
+            .map(|path| crate::log::SourceRecord {
+                path: path.clone(),
+                offset: self.offset,
+            })
+            .into_iter()
+            .collect()
+    }
+
     fn ready(&self, count: usize) -> bool {
         self.entries.len() > count && self.batch.is_none_or(|index| index > count)
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
+        match self.record_result(record, count) {
+            Ok(keep_reading) => keep_reading,
+            Err(error) => {
+                self.error = Some(error);
+                false
+            }
+        }
+    }
+
+    fn record_result(&mut self, record: serde_json::Value, count: usize) -> io::Result<bool> {
         self.images.record(&record);
+        if record["turnCompanion"] == true
+            && let Some(id) = record["promptId"].as_str()
+        {
+            let source_records = self.source_records();
+            self.companions
+                .entry(id.to_owned())
+                .or_default()
+                .extend(source_records);
+        }
         self.sequence += 1;
         if record["type"] == "assistant" {
             let key = record["message"]["id"]
@@ -379,7 +847,7 @@ impl Log {
                 self.batch = None;
                 self.assistant = key;
                 if self.ready(count) {
-                    return false;
+                    return Ok(false);
                 }
             }
         }
@@ -388,7 +856,7 @@ impl Log {
             .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
             .map(|at| at.with_timezone(&Utc))
         else {
-            return !self.ready(count);
+            return Ok(!self.ready(count));
         };
         let content = &record["message"]["content"];
         match record["type"].as_str() {
@@ -399,7 +867,9 @@ impl Log {
                         if block["type"] == "tool_result"
                             && let Some(id) = block["tool_use_id"].as_str()
                         {
+                            let source_records = self.source_records();
                             let result = self.results.entry(id.to_owned()).or_insert(ResultAt {
+                                source_records: Vec::new(),
                                 at,
                                 sequence: self.sequence,
                                 error: false,
@@ -407,6 +877,7 @@ impl Log {
                                 content: result_text(&block["content"]),
                                 value: record["toolUseResult"].clone(),
                             });
+                            result.source_records.extend(source_records);
                             result.error |= block["is_error"] == true;
                             if block["is_error"] == true {
                                 if record["toolDenialKind"] == "automode-blocked" {
@@ -441,14 +912,35 @@ impl Log {
                 });
                 if record["isMeta"] != true
                     && let Some(text) = text.filter(|text| !text.trim().is_empty())
+                    && !text.trim_start().starts_with("<task-notification>")
                 {
                     if let Some((kind, sender, body)) = wrapped_message(&text) {
                         self.push(kind, body, at);
+                        self.entries.last_mut().unwrap().event.source =
+                            record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
                     } else if !text.trim_start().starts_with('<') {
-                        let images = self.images.take(&record, &text);
-                        self.push(Kind::User, text, at);
+                        let images = self.images.take(&record, &text)?;
+                        let kind = if record["isCompactSummary"] == true {
+                            Kind::Compaction
+                        } else {
+                            Kind::User
+                        };
+                        self.push(kind, text, at);
+                        self.entries.last_mut().unwrap().event.source =
+                            record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.images = images;
+                        if let Some(records) = record["promptId"]
+                            .as_str()
+                            .and_then(|id| self.companions.remove(id))
+                        {
+                            self.entries
+                                .last_mut()
+                                .unwrap()
+                                .event
+                                .source_records
+                                .extend(records);
+                        }
                     }
                 }
                 // A hidden turn starter is still the immediately preceding event.
@@ -465,11 +957,14 @@ impl Log {
             }
             Some("assistant") => {
                 if let Some(blocks) = content.as_array() {
-                    for block in blocks.iter().rev() {
+                    for (index, block) in blocks.iter().enumerate().rev() {
                         match block["type"].as_str() {
                             Some("text") => {
                                 if let Some(text) = block["text"].as_str() {
                                     self.push(Kind::Assistant, text.to_owned(), at);
+                                    self.entries.last_mut().unwrap().event.source = record["uuid"]
+                                        .as_str()
+                                        .map(|uuid| format!("{uuid}:text:{index}"));
                                 }
                             }
                             Some("tool_use") => self.tool(block, at),
@@ -480,24 +975,10 @@ impl Log {
             }
             Some("queue-operation") if record["operation"] == "enqueue" => {
                 if let Some(text) = record["content"].as_str() {
-                    let (kind, body) = if let Some(notification) = text
-                        .trim()
-                        .strip_prefix("<task-notification>")
-                        .and_then(|text| text.strip_suffix("</task-notification>"))
-                    {
-                        let summary = notification
-                            .split_once("<summary>")
-                            .and_then(|(_, text)| text.split_once("</summary>"))
-                            .map(|(summary, _)| summary.trim())
-                            .unwrap_or_else(|| {
-                                notification
-                                    .lines()
-                                    .map(str::trim)
-                                    .find(|line| !line.is_empty())
-                                    .unwrap_or("")
-                            });
-                        (Kind::Tool, summary)
-                    } else if text.starts_with('<') {
+                    if self.notification(text, at, record["uuid"].as_str()) {
+                        return Ok(!self.ready(count));
+                    }
+                    let (kind, body) = if text.starts_with('<') {
                         (Kind::QueuedSystem, text)
                     } else {
                         (Kind::QueuedUser, text)
@@ -505,19 +986,77 @@ impl Log {
                     let (sender, body) = wrapped_message(body)
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
+                    let images = self.images.take(&record, &body)?;
                     self.push(kind, body, at);
+                    self.entries.last_mut().unwrap().event.images = images;
+                    self.entries.last_mut().unwrap().event.source =
+                        record["uuid"].as_str().map(str::to_owned);
                     self.entries.last_mut().unwrap().event.sender = sender;
                 }
             }
             _ => {}
         }
-        !self.ready(count)
+        Ok(!self.ready(count))
+    }
+
+    fn notification(&mut self, text: &str, at: DateTime<Utc>, source: Option<&str>) -> bool {
+        let Some(notification) = text
+            .trim()
+            .strip_prefix("<task-notification>")
+            .and_then(|text| {
+                text.split_once("</task-notification>")
+                    .map(|(body, _)| body)
+            })
+        else {
+            return false;
+        };
+        let field = |key: &str| {
+            notification
+                .split_once(&format!("<{key}>"))
+                .and_then(|(_, text)| text.split_once(&format!("</{key}>")))
+                .map(|(value, _)| value.trim())
+        };
+        let summary = field("summary").unwrap_or_else(|| {
+            notification
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("")
+        });
+        // The output file's content, or its path once the file is gone.
+        let output = field("output-file").map(|path| match std::fs::read_to_string(path) {
+            Ok(text) => Section::Text {
+                label: String::new(),
+                text,
+            },
+            Err(_) => Section::Fields(vec![("output-file".to_owned(), path.to_owned())]),
+        });
+        self.push(Kind::Tool, summary.to_owned(), at);
+        let event = &mut self.entries.last_mut().unwrap().event;
+        event.source = source.map(str::to_owned);
+        if field("task-id").is_some() || output.is_some() {
+            event.calls.push(ToolCall {
+                agent: None,
+                id: field("task-id").unwrap_or("").to_owned(),
+                title: summary.to_owned(),
+                name: "task-notification".to_owned(),
+                input: Vec::new(),
+                output: Some(output.into_iter().collect()),
+                exit_code: None,
+                is_error: false,
+                duration: None,
+            });
+        }
+        true
     }
 
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
         self.entries.push(Entry {
+            offset: self.offset,
             event: Event {
+                source: None,
+                source_records: self.source_records(),
                 sender: None,
                 kind,
                 body,
@@ -551,10 +1090,17 @@ impl Log {
             .filter(|_| result.is_none_or(|result| result.denial.is_none()))
             .map(|(_, path)| path);
         let detail = tool_detail(name, input);
+        let display_name = crate::log::display_tool_name(name);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
-            format!("{name}: {reason}")
+            if display_name == name {
+                format!("{display_name}: {reason}")
+            } else {
+                tool_label(name, reason)
+            }
+        } else if matches!(name, "AskUserQuestion" | "Skill") {
+            tool_title(name, input)
         } else if let Some(path) = path {
-            format!("{name} {path}")
+            tool_label(name, path)
         } else {
             tool_label(name, &detail)
         };
@@ -568,7 +1114,10 @@ impl Log {
             self.entries.remove(index)
         } else {
             Entry {
+                offset: self.offset,
                 event: Event {
+                    source: None,
+                    source_records: self.source_records(),
                     sender: None,
                     kind,
                     body: String::new(),
@@ -585,23 +1134,45 @@ impl Log {
                 last_result: None,
             }
         };
+        entry.offset = self.offset;
+        entry.event.source_records.extend(self.source_records());
+        if let Some(result) = result {
+            entry
+                .event
+                .source_records
+                .extend(result.source_records.clone());
+        }
+        entry
+            .event
+            .source_records
+            .sort_by_key(|record| record.offset);
+        entry.event.source_records.dedup();
         let body = entry
             .event
             .body
             .strip_suffix(" *")
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
-        let path = path.map(|_| name.len() + 1..call.len());
+        let path = path.map(|path| call.len() - path.len()..call.len());
         // A path call followed by a path call of the same tool shares its verb: "Edit a b".
-        let verb = format!("{name} ");
+        let verb = path
+            .as_ref()
+            .map(|range| call[..range.start].to_owned())
+            .unwrap_or_default();
         let shared = path.is_some()
+            && entry
+                .event
+                .calls
+                .first()
+                .is_some_and(|call| call.name == name)
             && body.starts_with(&verb)
             && entry.event.paths.first().map(|range| range.start) == Some(verb.len());
         let (body, call) = if shared {
             for range in &mut entry.event.paths {
                 *range = range.start - verb.len()..range.end - verb.len();
             }
-            (&body[verb.len()..], format!("{call} "))
+            let separator = if display_name == name { " " } else { " · " };
+            (&body[verb.len()..], format!("{call}{separator}"))
         } else if body.is_empty() {
             (body, call)
         } else {
@@ -614,6 +1185,19 @@ impl Log {
         entry.event.body = format!("{call}{body}");
         let mut detail = tool_call(name, input, result);
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
+        detail.duration = result.map(|result| result.at - at);
+        if name == "Agent" {
+            let kind = input_text(input, "subagent_type");
+            let header = if kind == Some("general-purpose") {
+                self.agent_model(input, result)
+            } else {
+                kind.map(str::to_owned)
+            };
+            detail.agent = Some(crate::log::Agent {
+                label: tool_detail(name, input),
+                header,
+            });
+        }
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
@@ -721,6 +1305,413 @@ fn user_text(text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     #[test]
+    fn raw_source_records_include_each_consumed_result_line() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let lines: Vec<_> = include_str!("../../../tests/fixtures/claude-raw-detail.jsonl")
+            .lines()
+            .collect();
+        for line in lines.iter().chain(std::iter::once(&lines[2])) {
+            writeln!(file, "{line}").unwrap();
+        }
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        let expected = [lines[1], lines[2], lines[2]]
+            .into_iter()
+            .map(|line| {
+                serde_json::to_string_pretty(&serde_json::from_str::<Value>(line).unwrap()).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+    }
+
+    #[test]
+    fn raw_source_records_preserve_real_call_and_result_order() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut file,
+            include_bytes!("../../../tests/fixtures/claude-raw-detail.jsonl"),
+        )
+        .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        let rows: Vec<serde_json::Value> =
+            include_str!("../../../tests/fixtures/claude-raw-detail.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let expected = rows[1..]
+            .iter()
+            .map(|row| serde_json::to_string_pretty(row).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+        assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        assert_eq!(
+            update.events[0].raw_text().unwrap(),
+            serde_json::to_string_pretty(&rows[0]).unwrap()
+        );
+    }
+
+    #[test]
+    fn task_notification_delivery_keeps_only_enqueue_rows() {
+        use std::io::Write;
+        let fixture =
+            include_str!("../../../tests/fixtures/claude-task-notification-delivery.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let mut enqueued = Vec::new();
+        for line in fixture.lines() {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            writeln!(file, "{line}").unwrap();
+            if record["type"] == "queue-operation" {
+                enqueued.push(record.clone());
+            }
+            let update = reader.refresh(usize::MAX).unwrap();
+            if record["type"] != "queue-operation" {
+                assert_eq!(update.appended, 0, "delivery must not append a row");
+            }
+            let events = super::tail(file.path(), usize::MAX).unwrap();
+            assert_eq!(update.events, events);
+            assert_eq!(events.len(), enqueued.len(), "delivery must not add a row");
+            for enqueue in &enqueued {
+                let text = enqueue["content"].as_str().unwrap();
+                let id = text
+                    .split_once("<task-id>")
+                    .unwrap()
+                    .1
+                    .split_once("</task-id>")
+                    .unwrap()
+                    .0;
+                let rows: Vec<_> = events
+                    .iter()
+                    .filter(|event| event.calls[0].id == id)
+                    .collect();
+                assert_eq!(rows.len(), 1, "task {id}");
+                let at =
+                    chrono::DateTime::parse_from_rfc3339(enqueue["timestamp"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(rows[0].started_at, at);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires AGENTS_MEASURE_TRANSCRIPT pointing to a real large transcript"]
+    fn measure_incremental_transcript_bytes() {
+        use std::io::Write;
+        let source = std::env::var_os("AGENTS_MEASURE_TRANSCRIPT").unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::copy(&mut std::fs::File::open(source).unwrap(), &mut file).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let initial = reader.refresh(50).unwrap();
+        let notification = include_str!("../../../tests/fixtures/claude-task-notifications.jsonl")
+            .split_inclusive('\n')
+            .find(|line| line.contains("<task-notification>"))
+            .unwrap();
+        file.write_all(notification.as_bytes()).unwrap();
+        super::super::transcript::take_parsed_bytes();
+        let baseline = super::tail(file.path(), 50).unwrap();
+        let before = super::super::transcript::take_parsed_bytes();
+        let after = reader.refresh(50).unwrap();
+        assert_eq!(
+            &after.events[after.events.len() - baseline.len()..],
+            baseline
+        );
+        assert_eq!(after.parsed_bytes, notification.len() as u64);
+        println!(
+            "transcript_bytes={} initial_parsed_bytes={} before_refresh_bytes={} after_refresh_bytes={} appended_record_bytes={} events={}",
+            file.as_file().metadata().unwrap().len(),
+            initial.parsed_bytes,
+            before,
+            after.parsed_bytes,
+            notification.len(),
+            after.events.len()
+        );
+    }
+
+    #[test]
+    fn incremental_older_pages_and_resets_match_real_transcript() {
+        use std::io::Write;
+        let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let tail = reader.refresh(1).unwrap();
+        assert!(tail.oldest_offset > 0);
+        let complete = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(complete.oldest_offset, 0);
+        assert!(complete.replaced >= tail.events.len());
+        assert_eq!(
+            complete.events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+        assert_eq!(
+            complete.prepended,
+            complete.events.len() - tail.events.len()
+        );
+        assert_eq!(
+            tail.parsed_bytes + complete.parsed_bytes,
+            fixture.len() as u64
+        );
+        file.as_file().set_len(0).unwrap();
+        let reset = reader.refresh(usize::MAX).unwrap();
+        assert!(reset.reset);
+        assert!(reset.events.is_empty());
+    }
+
+    #[test]
+    fn full_history_replays_each_retained_record_once() {
+        use std::io::Write;
+        let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let tail = reader.refresh(1).unwrap();
+        assert!(tail.oldest_offset > 0);
+        let replayed = reader.replayed_records;
+        let complete = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(complete.oldest_offset, 0);
+        assert_eq!(
+            reader.replayed_records - replayed,
+            reader.records.len(),
+            "expanding full history must replay retained records only once"
+        );
+        assert_eq!(
+            complete.events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+        assert_eq!(
+            tail.parsed_bytes + complete.parsed_bytes,
+            fixture.len() as u64
+        );
+
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let complete = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(reader.replayed_records, reader.records.len());
+        assert_eq!(
+            complete.events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+    }
+
+    #[test]
+    fn incremental_valid_unterminated_record_is_not_duplicated_by_newline() {
+        use std::io::Write;
+        let lines: Vec<_> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .take(2)
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(lines[0].as_bytes()).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let first = reader.refresh(usize::MAX).unwrap();
+        assert!(!first.events.is_empty());
+        assert_eq!(first.events, super::tail(file.path(), usize::MAX).unwrap());
+        writeln!(file).unwrap();
+        assert_eq!(reader.refresh(usize::MAX).unwrap().events, first.events);
+        file.write_all(lines[1].as_bytes()).unwrap();
+        assert_eq!(
+            reader.refresh(usize::MAX).unwrap().events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+        writeln!(file).unwrap();
+        assert_eq!(
+            reader.refresh(usize::MAX).unwrap().events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+    }
+
+    #[test]
+    fn incremental_partial_record_waits_for_newline() {
+        use std::io::Write;
+        let line = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .split_inclusive('\n')
+            .next()
+            .unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let split = line.len() / 2;
+        file.write_all(&line.as_bytes()[..split]).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        assert!(reader.refresh(usize::MAX).unwrap().events.is_empty());
+        file.write_all(&line.as_bytes()[split..]).unwrap();
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(update.events, super::tail(file.path(), usize::MAX).unwrap());
+        assert_eq!(update.parsed_bytes, line.len() as u64);
+    }
+
+    #[test]
+    fn incremental_real_transcripts_match_full_parse() {
+        use std::io::Write;
+        for fixture in [
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl"),
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl"),
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl"),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut reader = super::Reader::new(file.path().to_owned(), false);
+            for line in fixture.split_inclusive('\n') {
+                file.write_all(line.as_bytes()).unwrap();
+                let update = reader.refresh(usize::MAX).unwrap();
+                assert_eq!(update.events, super::tail(file.path(), usize::MAX).unwrap());
+                assert_eq!(update.parsed_bytes, line.len() as u64);
+            }
+            assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn real_mcp_calls_share_display_names_and_keep_raw_names() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = super::tail(&path, 100).unwrap();
+        let event = events
+            .iter()
+            .find(|event| {
+                event.calls.len() == 2
+                    && event
+                        .calls
+                        .iter()
+                        .all(|call| call.name == "mcp__plugin_codex_codex-manager__start")
+            })
+            .unwrap();
+        assert!(event.body.contains("codex-manager start"));
+        assert!(!event.body.contains("mcp__"));
+        assert!(
+            event
+                .calls
+                .iter()
+                .all(|call| call.title == "codex-manager start")
+        );
+        let record: serde_json::Value =
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .find(|record| record["message"]["content"][0]["id"] == event.calls[0].id)
+                .unwrap();
+        assert_eq!(
+            super::tool_activity(&record["message"]["content"][0]).unwrap(),
+            "codex-manager start"
+        );
+        let input = &record["message"]["content"][0]["input"];
+        let prompt = input["prompt"].as_str().unwrap();
+        assert!(
+            event
+                .body
+                .contains(&format!("codex-manager start · {prompt}"))
+        );
+        assert_eq!(
+            super::tool_label("mcp__plugin_codex_codex-manager__start", ""),
+            "codex-manager start"
+        );
+        assert_eq!(
+            super::tool_label("mcp__tool", prompt),
+            format!("mcp__tool {prompt}")
+        );
+        assert_eq!(
+            super::tool_label("mcp__plugin_codex_codex-manager__send", prompt),
+            format!("codex-manager send · {prompt}")
+        );
+        let url = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| record["message"]["content"][0]["name"] == "WebFetch")
+            .unwrap()["message"]["content"][0]["input"]["url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            super::tool_label("mcp__claude-in-chrome__navigate", &url),
+            format!("claude-in-chrome navigate · {url}")
+        );
+    }
+
+    #[test]
+    fn skill_rows_and_titles_use_name_and_optional_args() {
+        use std::io::Write;
+        let fixture = include_str!("../../../tests/fixtures/claude-skill-call.jsonl");
+        for args in [Some("Visual Studio Code"), Some(""), None] {
+            let mut records: Vec<serde_json::Value> = fixture
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let input = records[0]["message"]["content"][0]["input"]
+                .as_object_mut()
+                .unwrap();
+            match args {
+                Some(args) => {
+                    input.insert("args".to_owned(), args.into());
+                }
+                None => {
+                    input.remove("args");
+                }
+            }
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for record in records {
+                writeln!(file, "{record}").unwrap();
+            }
+            let events = super::tail(file.path(), 100).unwrap();
+            assert_eq!(events.len(), 1);
+            let expected = if args == Some("Visual Studio Code") {
+                "computer-use:capture-window Visual Studio Code"
+            } else {
+                "computer-use:capture-window"
+            };
+            assert_eq!(events[0].body, expected);
+            assert_eq!(events[0].calls[0].title, expected);
+            assert_eq!(events[0].calls[0].name, "Skill");
+        }
+    }
+
+    #[test]
+    fn agent_model_uses_recorded_child_identity_without_an_input_model() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-display.jsonl");
+        let mut records: Vec<Value> = std::fs::read_to_string(&fixture)
+            .unwrap()
+            .lines()
+            .take(2)
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        records[0]["message"]["content"][0]["input"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model");
+        records[1]["toolUseResult"]
+            .as_object_mut()
+            .unwrap()
+            .remove("resolvedModel");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session.jsonl");
+        let child = directory.path().join("session/subagents");
+        std::fs::create_dir_all(&child).unwrap();
+        let id = records[1]["toolUseResult"]["agentId"].as_str().unwrap();
+        let filename = format!("agent-{id}.jsonl");
+        std::fs::copy(
+            fixture.with_extension("").join("subagents").join(&filename),
+            child.join(&filename),
+        )
+        .unwrap();
+        std::fs::write(
+            &path,
+            records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let events = tail(&path, 10).unwrap();
+        assert_eq!(
+            events[0].calls[0].agent.as_ref().unwrap().header.as_deref(),
+            Some("Sonnet 5.5")
+        );
+        std::fs::remove_file(child.join(filename)).unwrap();
+        let events = tail(&path, 10).unwrap();
+        assert_eq!(events[0].calls[0].agent.as_ref().unwrap().header, None);
+    }
+
+    #[test]
     fn real_call_titles_and_ids_match_inputs() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-tool-calls.jsonl");
@@ -730,9 +1721,9 @@ pub(crate) mod tests {
         assert_eq!(bash.title, "改到持久目录");
         assert_eq!(bash.id, "toolu_01XU5dCe5eBxX8ccqC2DwN2G");
         let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
-        assert_eq!(agent.title, "Plan agent 写工具详情计划");
+        assert_eq!(agent.title, "Agent");
         let skill = calls.iter().find(|call| call.name == "Skill").unwrap();
-        assert_eq!(skill.title, "secrets:secrets-manager");
+        assert_eq!(skill.title, "secrets:secrets-manager [scrubbed]");
         assert_eq!(skill.input, vec![super::text_section("args", "[scrubbed]")]);
         let records: Vec<serde_json::Value> =
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
@@ -756,7 +1747,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn tool_inputs_do_not_repeat_titles_or_metadata() {
+    fn calls_time_from_their_request_to_their_result() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = super::tail(&path, 100).unwrap();
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        let call = |id: &str| calls.iter().find(|call| call.id == id).unwrap();
+        assert_eq!(
+            call("toolu_01XU5dCe5eBxX8ccqC2DwN2G").duration,
+            Some(chrono::Duration::milliseconds(46_490))
+        );
+        assert_eq!(call("toolu_01Jj8h2kKJBp4jXGRdtZu6Ys").duration, None);
+    }
+
+    #[test]
+    fn tool_inputs_retain_descriptions_for_detail_headers() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-tool-calls.jsonl");
         let events = super::tail(&path, 100).unwrap();
@@ -766,8 +1771,54 @@ pub(crate) mod tests {
                 .flat_map(|event| &event.calls)
                 .find(|call| call.name == name)
                 .unwrap();
-            assert_eq!(call.input.len(), 1, "{name}");
+
+            assert!(
+                matches!(call.input.last(), Some(Section::Fields(fields)) if fields[0].0 == "description")
+            );
         }
+    }
+
+    #[test]
+    fn queued_prompt_images_follow_delivery_in_incremental_and_tail_reads() {
+        // Transcript e9f4ef31, record 4800; only the PNG and local cwd are reduced.
+        let delivery: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        let text = delivery["attachment"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap();
+        let enqueue = json!({
+            "type": "queue-operation", "operation": "enqueue", "content": text,
+            "timestamp": "2026-10-17T02:58:05.000Z"
+        });
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{enqueue}").unwrap();
+        let mut reader = Reader::new(file.path().to_owned(), false);
+        assert!(reader.refresh(20).unwrap().events[0].images.is_empty());
+        // Queue records identify absorbed commands on removal, not enqueue.
+        let remove = json!({
+            "type": "queue-operation", "operation": "remove", "content": text,
+            "commandUuid": delivery["attachment"]["source_uuid"],
+            "reason": "absorbed_mid_turn", "timestamp": delivery["timestamp"]
+        });
+        writeln!(file, "{remove}").unwrap();
+        reader.refresh(20).unwrap();
+        writeln!(file, "{delivery}").unwrap();
+        let events = reader.refresh(20).unwrap().events;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::QueuedUser);
+        assert_eq!(events[0].body, text);
+        assert_eq!(events[0].images.len(), 1);
+        assert_eq!(events[0].images[0].label, "[Image #1]");
+        let bytes = std::fs::read(&events[0].images[0].path).unwrap();
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(super::tail(file.path(), 20).unwrap(), events);
+        let summary =
+            super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap();
+        assert_eq!(summary.prompt, text);
+        assert_eq!(summary.prompt_images, events[0].images);
     }
 
     #[test]
@@ -946,6 +1997,34 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn tool_reference_results_keep_tool_names_on_separate_lines() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-search.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let name = "mcp__plugin_codex_codex-manager__send";
+        let reference = records[1]["message"]["content"][0]["content"][0].clone();
+        for (content, expected) in [
+            (json!([reference]), name.to_owned()),
+            (json!([reference, reference]), format!("{name}\n{name}")),
+            (
+                json!([{"type":"text","text":"before"}, reference, {"type":"text","text":"after"}]),
+                format!("before\n{name}\nafter"),
+            ),
+        ] {
+            let mut records = records.clone();
+            records[1]["message"]["content"][0]["content"] = content;
+            let events = events_from(records);
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].calls.len(), 1);
+            assert_eq!(
+                events[0].calls[0].output,
+                Some(vec![text_section("output", &expected)])
+            );
+        }
+    }
+
+    #[test]
     fn tool_call_fallbacks_keep_reasons_and_skip_images() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
@@ -953,6 +2032,7 @@ pub(crate) mod tests {
             .collect();
         let bash = &records[0]["message"]["content"][0];
         let mut result = ResultAt {
+            source_records: Vec::new(),
             at: at(1),
             sequence: 1,
             error: false,
@@ -1060,7 +2140,7 @@ pub(crate) mod tests {
             write!(file, "{fixture}").unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, expected);
+            assert_eq!(events[0].body, "AskUserQuestion · 子命令 · cd");
             assert_eq!(events[0].kind, Kind::Assistant);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
@@ -1100,7 +2180,7 @@ pub(crate) mod tests {
     #[test]
     fn real_agent_names_in_log_and_activity() {
         let expected = [
-            "Agent (reviewer) Review files",
+            "reviewer · Review files",
             "SubagentHandback Checks passed.",
             "(worker-id) Checks passed.",
             "(team-lead) Review files.",
@@ -1172,7 +2252,14 @@ pub(crate) mod tests {
             ("SubagentHandback", "SubagentHandback"),
         ] {
             for (participant, expected) in [
-                ("reviewer", format!("{label} (reviewer)")),
+                (
+                    "reviewer",
+                    if name == "Agent" {
+                        "reviewer".to_owned()
+                    } else {
+                        format!("{label} (reviewer)")
+                    },
+                ),
                 (" ", label.to_owned()),
             ] {
                 let mut record = record.clone();
@@ -1522,6 +2609,29 @@ pub(crate) mod tests {
             assert_eq!(tail(file.path(), 1).unwrap()[0].previous_end, Some(at(5)));
         }
     }
+    #[test]
+    fn detail_sources_identify_real_transcript_events() {
+        let file = fixture();
+        let summary =
+            super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        for (index, kind) in [(1, Kind::Assistant), (2, Kind::User)] {
+            let source = summary.detail_sources[index].as_ref().unwrap();
+            assert!(
+                events
+                    .iter()
+                    .any(|event| event.source.as_ref() == Some(source) && event.kind == kind)
+            );
+        }
+        let source = summary.detail_sources[0].as_ref().unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.calls.iter().any(|call| &call.id == source))
+        );
+    }
+
     fn fixture() -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         // Reuse the real prompt and assistant response before the tool records.
@@ -1724,7 +2834,10 @@ pub(crate) mod tests {
             "Bash",
             json!({"description":"inspect files"}),
         );
-        let expected = events_from(vec![bash.clone(), result(3, "bash", false)]);
+        let mut expected = events_from(vec![bash.clone(), result(3, "bash", false)]);
+        for event in &mut expected {
+            event.source_records.clear();
+        }
         assert_eq!(expected.len(), 1);
         for task_first in [false, true] {
             let task = tool(1, "batch", "task", "TaskCreate", json!({}));
@@ -1734,7 +2847,11 @@ pub(crate) mod tests {
                 usize::from(!task_first),
                 task["message"]["content"][0].clone(),
             );
-            assert_eq!(events_from(vec![mixed, result(3, "bash", false)]), expected);
+            let mut actual = events_from(vec![mixed, result(3, "bash", false)]);
+            for event in &mut actual {
+                event.source_records.clear();
+            }
+            assert_eq!(actual, expected);
         }
     }
 
@@ -1864,10 +2981,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(
-            events[0].body,
-            "mcp__plugin_codex_codex-manager__detach，TaskStop"
-        );
+        assert_eq!(events[0].body, "codex-manager detach，TaskStop");
     }
 
     #[test]
@@ -1987,7 +3101,14 @@ pub(crate) mod tests {
         writeln!(file).unwrap();
         file.write_all(&std::fs::read(base.path()).unwrap())
             .unwrap();
-        assert_eq!(tail(file.path(), 2).unwrap(), tail(base.path(), 2).unwrap());
+        let mut actual = tail(file.path(), 2).unwrap();
+        let mut expected = tail(base.path(), 2).unwrap();
+        for (actual, expected) in actual.iter_mut().zip(&mut expected) {
+            assert_eq!(actual.raw_text().unwrap(), expected.raw_text().unwrap());
+            actual.source_records.clear();
+            expected.source_records.clear();
+        }
+        assert_eq!(actual, expected);
     }
     #[test]
     fn shared_walk_reads_only_the_last_chunk_when_events_are_complete() {

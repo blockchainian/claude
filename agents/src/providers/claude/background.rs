@@ -1,7 +1,6 @@
 //! Output files establish liveness; transcripts only supply Bash descriptions.
 use super::transcript;
 use crate::model::{BackgroundTask, Session};
-use chrono::DateTime;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -68,7 +67,6 @@ impl Default for Tasks {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Adoption {
-    written_at_ms: i64,
     shells: Vec<Shell>,
 }
 #[derive(Deserialize)]
@@ -255,24 +253,15 @@ impl Tasks {
         session: &mut Session,
         liveness: &impl Liveness,
     ) -> io::Result<()> {
-        let job = session
-            .background_job
-            .as_ref()
-            .ok_or_else(|| io::Error::other("Background session has no job id"))?;
+        let Some(job) = session.background_job.as_ref() else {
+            return Ok(());
+        };
         let bytes = match fs::read(config.join("jobs").join(&job.id).join("adopt.json")) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
         };
         let adopt: Adoption = serde_json::from_slice(&bytes)?;
-        let started_at = session
-            .process
-            .as_ref()
-            .and_then(|process| process.started_at)
-            .or_else(|| DateTime::from_timestamp_millis(adopt.written_at_ms))
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "invalid adoption timestamp")
-            })?;
         for shell in adopt.shells {
             if shell.task_id.is_empty() {
                 return Err(io::Error::new(
@@ -286,6 +275,12 @@ impl Tasks {
                 Err(error) => return Err(error),
             };
             if !finished && liveness.alive(shell.pid)? {
+                let started_at = crate::processes::start_time(shell.pid).ok_or_else(|| {
+                    io::Error::other(format!(
+                        "cannot read adopted shell {} start time",
+                        shell.pid
+                    ))
+                })?;
                 session.background.push(BackgroundTask {
                     description: shell.description,
                     output: shell.output_path,

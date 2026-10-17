@@ -18,14 +18,21 @@ pub(super) fn send(
     settings_path: &Path,
     input: SessionInput,
 ) -> io::Result<()> {
-    if job_id.is_empty() || job_id.starts_with('-') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid Claude job id",
-        ));
-    }
+    validate_job_id(job_id)?;
     match &input {
         SessionInput::Prompt(text) => validate_text(text)?,
+        SessionInput::PromptWithImages { text, images } => {
+            validate_text(text)?;
+            if images.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "No image attachments",
+                ));
+            }
+            for path in images {
+                image_path(path)?;
+            }
+        }
         SessionInput::SetModel(value) | SessionInput::SetEffort(value) => {
             if value.is_empty() || value.chars().any(char::is_whitespace) {
                 return Err(io::Error::new(
@@ -35,7 +42,7 @@ pub(super) fn send(
             }
             validate_text(value)?;
         }
-        SessionInput::Interrupt => {}
+        SessionInput::Interrupt | SessionInput::Answer { .. } => {}
     }
     let restore = matches!(
         input,
@@ -68,6 +75,19 @@ pub(super) fn inspect(job_id: &str, cwd: &Path) -> io::Result<String> {
     }
 }
 
+fn validate_job_id(job_id: &str) -> io::Result<()> {
+    if job_id.is_empty()
+        || job_id.starts_with('-')
+        || Path::new(job_id).file_name() != Some(std::ffi::OsStr::new(job_id))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid Claude job id",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_text(text: &str) -> io::Result<()> {
     if text
         .chars()
@@ -81,16 +101,145 @@ fn validate_text(text: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// A separate bracketed paste makes Claude load the file as an image attachment.
+fn image_path(path: &Path) -> io::Result<String> {
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Image path is not valid UTF-8")
+    })?;
+    if text.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid image path",
+        ));
+    }
+    let path = path.canonicalize()?;
+    if !path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Image path is not a file",
+        ));
+    }
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Image path is not valid UTF-8")
+    })?;
+    Ok(format!("'{}'", text.replace('\'', "'\\''")))
+}
+
+fn editor_text(screen: &str) -> String {
+    let Some((row, _)) = prompt(screen) else {
+        return String::new();
+    };
+    screen
+        .lines()
+        .skip(row)
+        .take_while(|line| !line.trim_start().starts_with('─'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn image_visible(screen: &str, count: usize) -> bool {
+    editor_text(screen)
+        .split("[Image #")
+        .skip(1)
+        .filter(|suffix| {
+            suffix.split_once(']').is_some_and(|(number, _)| {
+                !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        })
+        .count()
+        == count
+}
+
+#[derive(Default)]
+struct SynchronizedOutput {
+    active: bool,
+}
+
+impl vt100::Callbacks for SynchronizedOutput {
+    fn unhandled_csi(
+        &mut self,
+        _: &mut vt100::Screen,
+        first: Option<u8>,
+        second: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if first == Some(b'?') && second.is_none() && params.iter().any(|param| *param == [2026]) {
+            match command {
+                'h' => self.active = true,
+                'l' => self.active = false,
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Defers screen checks until Claude finishes its synchronized redraw.
+struct OutputScreen {
+    parser: vt100::Parser<SynchronizedOutput>,
+}
+
+impl OutputScreen {
+    fn new() -> Self {
+        Self {
+            parser: vt100::Parser::new_with_callbacks(50, 200, 0, SynchronizedOutput::default()),
+        }
+    }
+
+    fn process(&mut self, bytes: &[u8]) {
+        self.parser.process(bytes);
+    }
+
+    fn contents(&self) -> String {
+        self.parser.screen().contents()
+    }
+
+    fn complete(&self) -> Option<String> {
+        (!self.parser.callbacks().active).then(|| self.contents())
+    }
+}
+
 struct Terminal {
     child: Child,
     master: File,
-    parser: vt100::Parser,
+    parser: OutputScreen,
+    // Attach clients share Claude's cursor and editor. Hold this through detach so
+    // page inspection cannot navigate while another client is answering.
+    _input_lock: File,
     #[cfg(test)]
     raw: Vec<u8>,
 }
 
 impl Terminal {
     fn spawn(job_id: &str, cwd: &Path) -> io::Result<Self> {
+        validate_job_id(job_id)?;
+        let input_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(
+                super::config_dir()
+                    .join("jobs")
+                    .join(job_id)
+                    .join("agents-input.lock"),
+            )?;
+        let deadline = Instant::now() + READY_TIMEOUT;
+        loop {
+            match input_lock.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Claude input is busy in another dashboard",
+                    ));
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+        }
         let mut master = -1;
         let mut slave = -1;
         let mut size = libc::winsize {
@@ -143,23 +292,19 @@ impl Terminal {
         Ok(Self {
             child,
             master,
-            parser: vt100::Parser::new(50, 200, 0),
+            parser: OutputScreen::new(),
+            _input_lock: input_lock,
             #[cfg(test)]
             raw: Vec::new(),
         })
     }
 
     fn screen(&self) -> String {
-        self.parser.screen().contents()
+        self.parser.contents()
     }
 
     fn unexpected(&self, reason: &str) -> io::Error {
-        let screen = self.screen();
-        let first = screen
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("empty screen");
-        io::Error::other(format!("{reason}: {first}"))
+        screen_error(reason, &self.screen())
     }
 
     fn diagnostic(&self, stage: &str, error: io::Error) -> io::Error {
@@ -198,14 +343,15 @@ impl Terminal {
     ) -> io::Result<()> {
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
-            let screen = self.screen();
-            if predicate(&screen) {
-                return Ok(());
-            }
-            if known_dialog(&screen)
-                && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
-            {
-                return Err(self.unexpected("Claude attach needs a response"));
+            if let Some(screen) = self.parser.complete() {
+                if predicate(&screen) {
+                    return Ok(());
+                }
+                if known_dialog(&screen)
+                    && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
+                {
+                    return Err(self.unexpected("Claude attach needs a response"));
+                }
             }
             if self.child.try_wait()?.is_some() {
                 return Err(self.unexpected("Claude attach exited"));
@@ -261,12 +407,19 @@ impl Terminal {
         self.master.flush()
     }
 
-    fn submit(&mut self, text: &str) -> io::Result<String> {
+    fn paste(&mut self, text: &str) -> io::Result<()> {
         self.write(b"\x1b[200~")?;
         self.write(text.as_bytes())?;
-        self.write(b"\x1b[201~")?;
+        self.write(b"\x1b[201~")
+    }
+
+    fn submit(&mut self, text: &str) -> io::Result<String> {
+        let before = editor_text(&self.screen());
+        self.paste(text)?;
         // Observe the paste before Enter, so the unchanged empty prompt cannot acknowledge it.
-        self.wait_at("paste-visible", paste_visible)?;
+        self.wait_at("paste-visible", |screen| {
+            paste_visible(screen) && editor_text(screen) != before
+        })?;
         let screen = self.screen();
         let pasted_input = prompt(&screen)
             .ok_or_else(|| self.unexpected("Claude input disappeared before submission"))?
@@ -277,6 +430,14 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
+        if let SessionInput::Answer {
+            ask,
+            answer,
+            transcript,
+        } = &input
+        {
+            return self.answer_questions(ask, answer, transcript);
+        }
         self.wait_at("initial-ready", ready)?;
         match input {
             SessionInput::Prompt(text) => {
@@ -288,6 +449,26 @@ impl Terminal {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
+            SessionInput::PromptWithImages { text, images } => {
+                for (index, path) in images.iter().enumerate() {
+                    self.paste(&image_path(path)?)?;
+                    self.wait_at("image-attached", |screen| image_visible(screen, index + 1))?;
+                }
+                let pasted_input = if text.is_empty() {
+                    let pasted = prompt(&self.screen())
+                        .ok_or_else(|| self.unexpected("Claude image input disappeared"))?
+                        .1
+                        .to_owned();
+                    self.write(b"\r")?;
+                    pasted
+                } else {
+                    self.submit(&text)?
+                };
+                self.wait_at("image-submission-accepted", |screen| {
+                    prompt_accepted(screen, &pasted_input)
+                })
+            }
+            SessionInput::Answer { .. } => unreachable!("Answers use the question transport"),
             SessionInput::Interrupt => self.write(b"\x1b"),
             SessionInput::SetModel(model) => {
                 self.submit(&format!("/model {model}"))?;
@@ -337,6 +518,24 @@ impl Drop for Terminal {
             }
         }
     }
+}
+
+fn screen_error(reason: &str, screen: &str) -> io::Error {
+    let mut lines: Vec<String> = screen
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.chars().all(|ch| ch == '─'))
+        .rev()
+        .take(4)
+        .map(|line| line.chars().take(160).collect())
+        .collect();
+    lines.reverse();
+    let summary = if lines.is_empty() {
+        "empty screen".into()
+    } else {
+        lines.join(" | ")
+    };
+    io::Error::other(format!("{reason}; screen: {summary}"))
 }
 
 fn prompt(screen: &str) -> Option<(usize, &str)> {
@@ -409,6 +608,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn captured_question_redraw_waits_for_synchronized_output_end() {
+        let raw = include_bytes!(
+            "../../../tests/fixtures/claude-attach/ask/other-submit/two-initial.raw"
+        );
+        let end = raw
+            .windows(8)
+            .position(|bytes| bytes == b"\x1b[?2026l")
+            .unwrap();
+        for chunk_size in [1, 7, 37, 512] {
+            let mut screen = OutputScreen::new();
+            for bytes in raw[..end + 7].chunks(chunk_size) {
+                screen.process(bytes);
+            }
+            assert!(screen.contents().contains("First"));
+            assert!(screen.contents().contains("Enter to select"));
+            assert!(
+                screen.complete().is_none(),
+                "incomplete synchronized redraw accepted with {chunk_size}-byte chunks"
+            );
+            screen.process(&raw[end + 7..]);
+            let complete = screen.complete().expect("completed synchronized redraw");
+            assert!(complete.contains("First"));
+            assert!(complete.contains("Second"));
+        }
+    }
+
+    #[test]
     fn captured_queue_placeholder_accepts_another_input() {
         let screen = include_str!("../../../tests/fixtures/claude-attach/queued.screen.txt");
         let sent_text = screen
@@ -452,13 +678,13 @@ mod tests {
     #[test]
     fn captured_terminal_output_contains_ready_before_detaching() {
         let raw = include_bytes!("../../../tests/fixtures/claude-attach/attach.raw");
-        let mut parser = vt100::Parser::new(50, 200, 0);
+        let mut parser = OutputScreen::new();
         let mut saw_ready = false;
         for chunk in raw.chunks(37) {
             parser.process(chunk);
-            saw_ready |= ready(&parser.screen().contents());
+            saw_ready |= parser.complete().is_some_and(|screen| ready(&screen));
         }
-        let screen = parser.screen().contents();
+        let screen = parser.complete().expect("completed terminal output");
         assert!(
             saw_ready,
             "No empty input appeared in the real terminal capture: {screen}"
@@ -503,4 +729,35 @@ mod tests {
     fn prompt_accepts_multiline_unicode_text() {
         assert!(validate_text("第一行\nsecond line\t✓").is_ok());
     }
+
+    #[test]
+    fn timeout_reports_captured_editor_and_footer_in_one_line() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/idle.screen.txt");
+        let message = screen_error("Claude attach timed out", screen).to_string();
+        assert!(message.starts_with("Claude attach timed out; screen: "));
+        assert!(message.contains("❯"), "{message}");
+        assert!(message.contains("auto mode on"), "{message}");
+        assert!(!message.contains("Claude Code v2.1.299"), "{message}");
+        assert_eq!(message.lines().count(), 1);
+    }
+
+    #[test]
+    fn screen_error_reports_empty_screen() {
+        assert_eq!(
+            screen_error("Claude attach timed out", "\n  \n").to_string(),
+            "Claude attach timed out; screen: empty screen"
+        );
+    }
 }
+
+#[cfg(test)]
+#[path = "attach_input_tests.rs"]
+mod input_tests;
+
+#[cfg(test)]
+#[path = "attach_image_tests.rs"]
+mod image_tests;
+
+#[path = "ask_transport.rs"]
+mod ask_transport;
+pub(super) use ask_transport::pending;

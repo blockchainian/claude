@@ -1,5 +1,7 @@
+use crate::ask::{AskKind, Question, QuestionOption};
+#[cfg(test)]
 use crate::log::question_texts;
-use crate::model::{Activity, BackgroundTask, PullRequest};
+use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -11,6 +13,9 @@ const CHUNK: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
+    pub tasks: Vec<SessionTask>,
+    task_replay: TaskReplay,
+    pub detail_sources: [Option<String>; 3],
     pub started_at: Option<DateTime<Utc>>,
     pub subagent_records: Vec<Value>,
     pub cwd: Option<PathBuf>,
@@ -27,13 +32,188 @@ pub(super) struct Summary {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub ask: Option<PendingAsk>,
     pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
     pub completed_background: HashSet<String>,
     pub background_ids: HashSet<String>,
     pub model: Option<String>,
+    /// Human-readable names keyed by the model ids named in the transcript.
+    pub model_identities: HashMap<String, String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct PendingAsk {
+    pub id: String,
+    pub kind: AskKind,
+    pub since: DateTime<Utc>,
+}
+
+fn pending_ask(id: &str, input: &Value, timestamp: &Value) -> io::Result<PendingAsk> {
+    #[derive(serde::Deserialize)]
+    struct Input {
+        questions: Vec<ClaudeQuestion>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ClaudeQuestion {
+        question: String,
+        header: String,
+        options: Vec<QuestionOption>,
+        #[serde(rename = "multiSelect")]
+        multi: bool,
+    }
+    let input: Input = serde_json::from_value(input.clone())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let since = timestamp
+        .as_str()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "AskUserQuestion missing timestamp",
+            )
+        })?
+        .with_timezone(&Utc);
+    Ok(PendingAsk {
+        id: id.to_owned(),
+        kind: AskKind::Questions {
+            questions: input
+                .questions
+                .into_iter()
+                .map(|question| Question {
+                    id: question.question.clone(),
+                    header: question.header,
+                    text: question.question,
+                    options: question.options,
+                    multi: question.multi,
+                    other: true,
+                    secret: false,
+                })
+                .collect(),
+            blocking: true,
+        },
+        since,
+    })
+}
+
+#[derive(Clone, Debug, Default)]
+struct TaskReplay {
+    offset: u64,
+    creates: HashSet<String>,
+}
+
+impl TaskReplay {
+    fn record(&mut self, record: &Value, tasks: &mut Vec<SessionTask>) {
+        let Some(blocks) = record["message"]["content"].as_array() else {
+            return;
+        };
+        for block in blocks {
+            if record["type"] == "assistant" && block["type"] == "tool_use" {
+                let input = &block["input"];
+                match block["name"].as_str() {
+                    Some("TaskCreate") => {
+                        if let Some(id) = block["id"].as_str() {
+                            self.creates.insert(id.to_owned());
+                        }
+                    }
+                    Some("TaskUpdate") => {
+                        if let Some(id) = input["taskId"].as_str()
+                            && let Some(task) = tasks.iter_mut().find(|task| task.id == id)
+                        {
+                            if let Some(subject) = text(input, "subject") {
+                                task.subject = subject;
+                            }
+                            if let Some(status) = input["status"].as_str().and_then(task_status) {
+                                task.status = status;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if record["type"] == "user"
+                && block["type"] == "tool_result"
+                && block["is_error"] != true
+                && let Some(tool) = block["tool_use_id"].as_str()
+                && self.creates.remove(tool)
+                && let Some(id) = text(&record["toolUseResult"]["task"], "id")
+                && let Some(subject) = text(&record["toolUseResult"]["task"], "subject")
+            {
+                // A fresh successful create can restart numbering within a transcript.
+                if tasks.iter().any(|task| task.id == id) {
+                    tasks.clear();
+                }
+                tasks.push(SessionTask {
+                    id,
+                    subject,
+                    status: TaskStatus::Pending,
+                });
+            }
+        }
+    }
+}
+
+fn task_status(status: &str) -> Option<TaskStatus> {
+    match status {
+        "pending" => Some(TaskStatus::Pending),
+        "in_progress" => Some(TaskStatus::InProgress),
+        "completed" => Some(TaskStatus::Completed),
+        "deleted" => Some(TaskStatus::Deleted),
+        _ => None,
+    }
+}
+
+fn read_history(
+    path: &Path,
+    len: u64,
+    previous: Option<&Summary>,
+    sidechains: bool,
+    summary: &mut Summary,
+) -> io::Result<()> {
+    if let Some(previous) = previous.filter(|previous| previous.task_replay.offset <= len) {
+        summary
+            .model_identities
+            .extend(previous.model_identities.clone());
+        summary.tasks = previous.tasks.clone();
+        summary.task_replay = previous.task_replay.clone();
+    }
+    if previous.is_none() {
+        // Model attachments occur near the start, outside the bounded message tail.
+        let head = BufReader::new(File::open(path)?.take(CHUNK));
+        for line in head.lines().take(32) {
+            let line = line?;
+            if let Ok(record) = serde_json::from_str::<Value>(&line)
+                && (sidechains || record["isSidechain"] != true)
+                && let Some((id, name)) = model_identity(&record)
+            {
+                summary.model_identities.insert(id, name);
+                break;
+            }
+        }
+    }
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(summary.task_replay.offset))?;
+    let mut reader = BufReader::new(file.take(len - summary.task_replay.offset));
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let count = reader.read_until(b'\n', &mut line)?;
+        if count == 0 || line.last() != Some(&b'\n') {
+            break;
+        }
+        summary.task_replay.offset += count as u64;
+        if let Ok(record) = serde_json::from_slice::<Value>(&line)
+            && (sidechains || record["isSidechain"] != true)
+        {
+            summary.task_replay.record(&record, &mut summary.tasks);
+            if let Some((id, name)) = model_identity(&record) {
+                summary.model_identities.insert(id, name);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Reads only through the first timestamped record, including sidechains.
@@ -111,8 +291,12 @@ impl Summary {
     }
 
     fn record_assistant_metadata(&mut self, record: &Value) {
-        self.model = text(record, "requestedModel").or_else(|| text(&record["message"], "model"));
-        self.effort = text(record, "effort");
+        if let Some(model) = assistant_model(record) {
+            self.model = Some(model);
+        }
+        if let Some(effort) = text(record, "effort") {
+            self.effort = Some(effort);
+        }
     }
 
     fn record_pr(&mut self, record: &Value) {
@@ -131,12 +315,35 @@ pub(super) fn printable(text: &str) -> String {
         .collect()
 }
 
+/// The model id and human-readable name of a model attachment, such as "Opus 5.5".
+fn model_identity(record: &Value) -> Option<(String, String)> {
+    let attachment = &record["attachment"];
+    if attachment["type"] != "model" {
+        return None;
+    }
+    let identity = &attachment["identity"];
+    Some((text(identity, "modelId")?, text(identity, "marketingName")?))
+}
+
+fn assistant_model(record: &Value) -> Option<String> {
+    text(record, "requestedModel").or_else(|| text(&record["message"], "model"))
+}
+
 fn text(value: &Value, field: &str) -> Option<String> {
     value
         .get(field)?
         .as_str()
         .map(printable)
         .filter(|text| !text.trim().is_empty())
+}
+
+pub(super) fn message_source(record: &Value) -> Option<String> {
+    let uuid = record["uuid"].as_str()?;
+    let index = record["message"]["content"]
+        .as_array()?
+        .iter()
+        .rposition(|block| block["type"] == "text" && block["text"].is_string())?;
+    Some(format!("{uuid}:text:{index}"))
 }
 
 pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
@@ -156,6 +363,16 @@ pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static PARSED_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_parsed_bytes() -> u64 {
+    PARSED_BYTES.with(|count| count.replace(0))
+}
+
 fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
     records_with_sidechains(bytes, false)
 }
@@ -166,7 +383,11 @@ fn records_with_sidechains(
 ) -> impl DoubleEndedIterator<Item = Value> + '_ {
     bytes
         .split(|byte| *byte == b'\n')
-        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+        .filter_map(|line| {
+            #[cfg(test)]
+            PARSED_BYTES.with(|count| count.set(count.get() + line.len() as u64));
+            serde_json::from_slice::<Value>(line).ok()
+        })
         .filter(move |record| sidechains || record["isSidechain"] != true)
 }
 
@@ -209,10 +430,21 @@ fn prompt_text(record: &Value) -> Option<String> {
             })
         }
         "attachment" => {
-            let attachment = &record["attachment"];
-            (attachment["type"] == "queued_command" && attachment["commandMode"] == "prompt")
-                .then(|| attachment["prompt"].as_str().map(str::to_owned))
-                .flatten()
+            let prompt = super::images::queued_prompt(record)?;
+            prompt
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| {
+                    Some(
+                        prompt
+                            .as_array()?
+                            .iter()
+                            .filter(|block| block["type"] == "text")
+                            .filter_map(|block| block["text"].as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                })
                 .map(typed_text)
         }
         _ => None,
@@ -420,13 +652,22 @@ fn read_messages(
     let mut dequeued_user = None;
     let mut quiet_point = false;
     let mut questions_found = false;
-    let mut assistant_metadata_found = false;
+    let mut model_found = false;
+    let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
+    let mut image_error = None;
+    let mut ask_error = None;
     walk_records(file, start, bytes, sidechains, |record| {
-        if !assistant_metadata_found && record["type"] == "assistant" {
-            summary.record_assistant_metadata(&record);
-            assistant_metadata_found = true;
+        if record["type"] == "assistant" {
+            if !model_found && let Some(model) = assistant_model(&record) {
+                summary.model = Some(model);
+                model_found = true;
+            }
+            if !effort_found && let Some(effort) = text(&record, "effort") {
+                summary.effort = Some(effort);
+                effort_found = true;
+            }
         }
         images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
@@ -444,7 +685,20 @@ fn read_messages(
                 {
                     questions_found = true;
                     if !tool_results.contains(id) {
-                        summary.pending_questions = question_texts(&block["input"]);
+                        match pending_ask(id, &block["input"], &record["timestamp"]) {
+                            Ok(ask) => {
+                                let AskKind::Questions { questions, .. } = &ask.kind;
+                                summary.pending_questions = questions
+                                    .iter()
+                                    .map(|question| question.text.clone())
+                                    .collect();
+                                summary.ask = Some(ask);
+                            }
+                            Err(error) => {
+                                ask_error = Some(error);
+                                return false;
+                            }
+                        }
                     }
                     break;
                 }
@@ -493,8 +747,15 @@ fn read_messages(
             && !prompt.trim().is_empty()
             && !prompt.trim_start().starts_with('<')
         {
+            summary.detail_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
-            summary.prompt_images = images.take(&record, &summary.prompt);
+            match images.take(&record, &summary.prompt) {
+                Ok(images) => summary.prompt_images = images,
+                Err(error) => {
+                    image_error = Some(error);
+                    return false;
+                }
+            }
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -516,6 +777,7 @@ fn read_messages(
                 .filter(|block| block["type"] == "tool_use")
                 .find_map(|block| {
                     super::log::tool_activity(block).map(|label| {
+                        summary.detail_sources[0] = block["id"].as_str().map(str::to_owned);
                         (
                             crate::log::tool_kind(block["name"].as_str().unwrap()),
                             label,
@@ -533,10 +795,13 @@ fn read_messages(
             && record["type"] == "assistant"
             && let Some(message) = content_text(&record, true)
         {
+            summary.detail_sources[1] = message_source(&record);
             summary.last_message = Some(printable(&message));
             summary.last_message_at = at;
         }
         if prompt_found
+            && model_found
+            && effort_found
             && absorbed.is_none()
             && summary.last_message.is_some()
             && summary.activity.is_some()
@@ -548,12 +813,33 @@ fn read_messages(
         }
         true
     })?;
+    if let Some(error) = ask_error {
+        return Err(error);
+    }
+    if let Some(error) = image_error {
+        return Err(error);
+    }
     summary.completed_background = background.completed.clone();
     summary.queued = queued_prompts(operations);
     Ok(background)
 }
 
+#[cfg(test)]
 pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
+    read_cached(path, len, None)
+}
+
+pub(super) fn read_cached(
+    path: &Path,
+    len: u64,
+    previous: Option<&Summary>,
+) -> io::Result<Summary> {
+    let mut summary = read_summary(path, len)?;
+    read_history(path, len, previous, false, &mut summary)?;
+    Ok(summary)
+}
+
+fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     let mut file = File::open(path)?;
     let mut head = Vec::new();
     let mut tail = Vec::new();
@@ -620,8 +906,19 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
 }
 
 /// Reads one tail chunk; subagent files have no queue quiet point to bound a walk.
+#[cfg(test)]
 pub(super) fn read_subagent(path: &Path, len: u64) -> io::Result<Summary> {
-    read_subagent_tail(&mut File::open(path)?, len)
+    read_subagent_cached(path, len, None)
+}
+
+pub(super) fn read_subagent_cached(
+    path: &Path,
+    len: u64,
+    previous: Option<&Summary>,
+) -> io::Result<Summary> {
+    let mut summary = read_subagent_tail(&mut File::open(path)?, len)?;
+    read_history(path, len, previous, true, &mut summary)?;
+    Ok(summary)
 }
 
 pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
@@ -661,11 +958,153 @@ pub(super) mod tests {
     use super::*;
     use std::io::Write;
 
+    #[test]
+    fn model_identity_survives_bounded_reads_and_cached_appends() {
+        for (fixture, subagent, label) in [
+            (
+                include_str!("../../../tests/fixtures/claude-main-model-history.jsonl"),
+                false,
+                "Opus 5.5",
+            ),
+            (
+                include_str!("../../../tests/fixtures/claude-subagent-model-history.jsonl"),
+                true,
+                "Fable 5.1",
+            ),
+        ] {
+            let (identity, messages) = fixture.split_once('\n').unwrap();
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(
+                file,
+                "{identity}\n{}\n{messages}",
+                " ".repeat(CHUNK as usize * 3)
+            )
+            .unwrap();
+            let read = if subagent {
+                read_subagent_cached
+            } else {
+                read_cached
+            };
+            let first = read(file.path(), file.as_file().metadata().unwrap().len(), None).unwrap();
+            let session = super::super::session("test".into(), first.clone(), None, Utc::now());
+            assert_eq!(session.model_label(), label);
+            writeln!(file, "{messages}").unwrap();
+            let appended = read(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                Some(&first),
+            )
+            .unwrap();
+            let session = super::super::session("test".into(), appended, None, Utc::now());
+            assert_eq!(session.model_label(), label);
+        }
+    }
+
+    #[test]
+    fn model_identity_cache_keeps_names_across_model_switches() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let subagent = include_str!("../../../tests/fixtures/claude-subagent-model-history.jsonl");
+        let main = include_str!("../../../tests/fixtures/claude-main-model-history.jsonl");
+        let mut previous = None;
+        for (records, label) in [
+            (subagent, "Fable 5.1"),
+            (main, "Opus 5.5"),
+            (subagent, "Fable 5.1"),
+        ] {
+            writeln!(file, "{records}").unwrap();
+            let summary = read_subagent_cached(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                previous.as_ref(),
+            )
+            .unwrap();
+            let session = super::super::session("test".into(), summary.clone(), None, Utc::now());
+            assert_eq!(session.model_label(), label);
+            previous = Some(summary);
+        }
+        let summary = previous.unwrap();
+        assert_eq!(summary.model_identities["claude-fable-5-1"], "Fable 5.1");
+        assert_eq!(summary.model_identities["claude-opus-5-5"], "Opus 5.5");
+    }
+
+    #[test]
+    fn task_replay_uses_result_ids_and_keeps_creation_order() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!("../../../tests/fixtures/claude-todos.jsonl"))
+            .unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.tasks.len(), 3);
+        assert_eq!(summary.tasks[0].subject, "Task 1");
+        assert_eq!(
+            summary.tasks[0].status,
+            crate::model::TaskStatus::InProgress
+        );
+        assert_eq!(summary.tasks[1].status, crate::model::TaskStatus::Completed);
+        assert_eq!(summary.tasks[2].status, crate::model::TaskStatus::Pending);
+    }
+
+    #[test]
+    fn task_replay_reads_middle_records_and_preserves_compacted_tasks() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"padding", "text":"x".repeat(CHUNK as usize * 3)})
+        )
+        .unwrap();
+        file.write_all(include_bytes!("../../../tests/fixtures/claude-todos.jsonl"))
+            .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"padding", "text":"x".repeat(CHUNK as usize * 3)})
+        )
+        .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"system", "subtype":"compact_boundary"})
+        )
+        .unwrap();
+        let first = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(first.tasks.len(), 3);
+        let update = serde_json::json!({"type":"assistant", "message":{"content":[{"type":"tool_use", "id":"rename", "name":"TaskUpdate", "input":{"taskId":"3", "subject":"Renamed", "status":"deleted"}}]}}).to_string();
+        let split = update.len() / 2;
+        file.write_all(&update.as_bytes()[..split]).unwrap();
+        let partial = read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            Some(&first),
+        )
+        .unwrap();
+        assert_eq!(partial.task_replay.offset, first.task_replay.offset);
+        file.write_all(&update.as_bytes()[split..]).unwrap();
+        file.write_all(b"\n").unwrap();
+        let appended = read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            Some(&partial),
+        )
+        .unwrap();
+        assert_eq!(appended.tasks[2].subject, "Renamed");
+        assert_eq!(appended.tasks[2].status, crate::model::TaskStatus::Deleted);
+        file.write_all(include_bytes!("../../../tests/fixtures/claude-todos.jsonl"))
+            .unwrap();
+        let restarted = read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            Some(&appended),
+        )
+        .unwrap();
+        assert_eq!(restarted.tasks.len(), 3);
+        assert_eq!(restarted.tasks[2].subject, "Task 3");
+    }
+
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
 
     pub(in crate::providers::claude) fn image_fixture() -> (tempfile::TempDir, Vec<Value>) {
         let dir = tempfile::tempdir().unwrap();
-        let mut records: Vec<Value> =
+        let records: Vec<Value> =
             include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
                 .lines()
                 .map(|line| {
@@ -674,11 +1113,6 @@ pub(super) mod tests {
                     serde_json::from_str(&line).unwrap()
                 })
                 .collect();
-        // Pair by paste id even when companion text blocks arrive in another order.
-        records[7]["message"]["content"]
-            .as_array_mut()
-            .unwrap()
-            .reverse();
         std::fs::create_dir(dir.path().join("images")).unwrap();
         for number in [6, 8, 9] {
             std::fs::write(
@@ -1415,7 +1849,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn latest_visited_assistant_does_not_inherit_older_effort() {
+    fn background_metadata_keeps_last_known_values_per_field() {
         let fixture = include_str!("../../../tests/fixtures/claude-bg-metadata.jsonl");
         let mut rows: Vec<Value> = fixture
             .lines()
@@ -1425,16 +1859,36 @@ pub(super) mod tests {
             .iter()
             .position(|row| row["type"] == "assistant")
             .unwrap();
-        let older = rows[index].clone();
-        rows[index].as_object_mut().unwrap().remove("effort");
-        rows.insert(index, older);
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        for row in rows {
-            writeln!(file, "{row}").unwrap();
+        let known = rows[index].clone();
+        let mut model_only = known.clone();
+        model_only.as_object_mut().unwrap().remove("effort");
+        let mut without_metadata = known.clone();
+        without_metadata.as_object_mut().unwrap().remove("effort");
+        without_metadata
+            .as_object_mut()
+            .unwrap()
+            .remove("requestedModel");
+        without_metadata["message"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model");
+        rows.splice(index..=index, [known, model_only, without_metadata]);
+        for oversized_attachment in [false, true] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let end = rows.len() - usize::from(!oversized_attachment);
+            for row in &rows[..end] {
+                writeln!(file, "{row}").unwrap();
+            }
+            let len = file.as_file().metadata().unwrap().len();
+            let summary = read(file.path(), len).unwrap();
+            assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+            assert_eq!(summary.effort.as_deref(), Some("low"));
+            if !oversized_attachment {
+                let summary = read_subagent(file.path(), len).unwrap();
+                assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+                assert_eq!(summary.effort.as_deref(), Some("low"));
+            }
         }
-        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-        assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
-        assert_eq!(summary.effort, None);
     }
 
     #[test]
@@ -1446,9 +1900,8 @@ pub(super) mod tests {
         let expected = read_fixture();
         assert_eq!(summary.prompt, expected.prompt);
         assert_eq!(summary.last_message, expected.last_message);
-        // The latest tool-only assistant has no metadata; do not infer it from the older reply.
-        assert_eq!(summary.model, None);
-        assert_eq!(summary.effort, None);
+        assert_eq!(summary.model, expected.model);
+        assert_eq!(summary.effort, expected.effort);
         assert_eq!(
             summary.timestamp.unwrap().to_rfc3339(),
             "2026-10-12T11:00:00+00:00"

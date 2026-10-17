@@ -19,6 +19,30 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - src/ui/ -- rendering, prompt input, drafts and the task log panel
 - tests/ -- real payload fixtures and rendered UI snapshots
 
+## Task tabs
+
+- `Active` lists every non-inactive status; `Inactive` lists inactive tasks. Tab and Shift-Tab cycle the two tabs.
+- Each provider initially loads its ten most recently updated inactive tasks; `Show more` loads another page per provider. Tab counts include only loaded tasks.
+- Selection follows a top-level task to Inactive; a child leaving the tab selects its visible parent, otherwise the usual fallback.
+- Tabs start on Active; saved fields for removed status tabs are ignored.
+
+## Details panel
+
+- The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
+- The activity section is `Last activity`.
+
+## Log panels
+
+- The last clicked panel owns keyboard focus, even if it accepts no keys; clicking the prompt returns focus to its input.
+
+- The log list selects one event, oldest first, newest at the bottom; the detail shows that event.
+- Selected rows use the task cursor style across the column, including both padding cells.
+- A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. The detail wheel scrolls only its content.
+- Selecting the newest event follows arriving events. Older selections stay on their event and show the border's Latest/New jump; clicking it selects newest and follows again.
+- Switching tasks resets the log selection to newest and resumes following.
+- Double click, text selection and list/detail search remain independent of following.
+- Detail titles and body blocks use the log list message-column width; center them in wide layouts and left-align them in narrow layouts.
+
 ## Development
 
 - A rendering change updates the snapshots it moves in `tests/ui_snapshots/`.

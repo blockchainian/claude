@@ -1,26 +1,109 @@
 use crate::log::{Event, Image, Kind, Section, ToolCall, participant_text, question_texts};
-use crate::model::Activity;
+use crate::model::{Activity, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const CHUNK: u64 = 64 * 1024;
 
 #[derive(Default)]
 pub(super) struct Summary {
+    pub prompt_at: Option<DateTime<Utc>>,
+    pub detail_sources: [Option<String>; 3],
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
     pub updated_at: Option<DateTime<Utc>>,
     pub turn_ended: bool,
     pub pending_questions: Vec<String>,
+    pub tasks: Vec<SessionTask>,
+}
+
+/// Retains the last complete plan while reading only appended transcript lines.
+#[derive(Default)]
+pub(super) struct Tasks {
+    offset: u64,
+    identity: Option<(u64, u64)>,
+    tasks: Vec<SessionTask>,
+}
+
+impl Tasks {
+    pub(super) fn summary(&mut self, path: &Path) -> io::Result<Summary> {
+        let mut result = summary(path)?;
+        result.tasks = self.read(path)?;
+        Ok(result)
+    }
+
+    fn read(&mut self, path: &Path) -> io::Result<Vec<SessionTask>> {
+        use std::os::unix::fs::MetadataExt;
+        let mut file = File::open(path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        if self.identity != Some(identity) || metadata.len() < self.offset {
+            self.offset = 0;
+            self.tasks.clear();
+        }
+        self.identity = Some(identity);
+        let mut error = None;
+        let offset = crate::jsonl::read_lines(&mut file, self.offset, |line| {
+            if error.is_some() {
+                return;
+            }
+            let Ok(record) = serde_json::from_slice::<Value>(line) else {
+                return;
+            };
+            let payload = &record["payload"];
+            if record["type"] != "response_item"
+                || payload["type"] != "function_call"
+                || payload["name"]
+                    .as_str()
+                    .and_then(|name| name.rsplit('.').next())
+                    != Some("update_plan")
+            {
+                return;
+            }
+            match plan_tasks(payload) {
+                Ok(tasks) => self.tasks = tasks,
+                Err(invalid) => error = Some(invalid),
+            }
+        })?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        self.offset = offset;
+        Ok(self.tasks.clone())
+    }
+}
+
+fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid Codex update_plan");
+    let arguments = tool_arguments(payload).ok_or_else(invalid)?;
+    arguments["plan"]
+        .as_array()
+        .ok_or_else(invalid)?
+        .iter()
+        .enumerate()
+        .map(|(index, task)| {
+            let status = match task["status"].as_str() {
+                Some("pending") => TaskStatus::Pending,
+                Some("in_progress") => TaskStatus::InProgress,
+                Some("completed") => TaskStatus::Completed,
+                _ => return Err(invalid()),
+            };
+            Ok(SessionTask {
+                id: index.to_string(),
+                subject: task["step"].as_str().ok_or_else(invalid)?.to_owned(),
+                status,
+            })
+        })
+        .collect()
 }
 
 /// Walk complete JSON records newest first, retaining records spanning chunks.
-fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Result<()> {
+fn walk(path: &Path, mut visit: impl FnMut(Value, u64) -> io::Result<bool>) -> io::Result<()> {
     let mut file = File::open(path)?;
     let mut position = file.metadata()?.len();
     let mut remainder = Vec::new();
@@ -39,9 +122,12 @@ fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Re
             remainder = bytes;
             continue;
         };
+        let mut end = bytes.len();
         for line in bytes[first..].split(|b| *b == b'\n').rev() {
-            if let Ok(record) = serde_json::from_slice(line)
-                && !visit(record)?
+            let start = end - line.len();
+            end = start.saturating_sub(1);
+            if let Ok(record) = serde_json::from_slice::<Value>(line)
+                && !visit(record, position + start as u64)?
             {
                 return Ok(());
             }
@@ -49,6 +135,27 @@ fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Re
         remainder = bytes[..first].to_vec();
     }
     Ok(())
+}
+
+fn source(record: &Value, offset: u64) -> String {
+    let payload = &record["payload"];
+    payload["item"]["id"]
+        .as_str()
+        .or_else(|| payload["id"].as_str())
+        .or_else(|| payload["call_id"].as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("offset:{offset}"))
+}
+
+fn assistant_source(record: &Value, offset: u64) -> Option<String> {
+    let payload = &record["payload"];
+    ((record["type"] == "response_item"
+        && payload["type"] == "message"
+        && payload["role"] == "assistant")
+        || (record["type"] == "event_msg"
+            && payload["type"] == "item_completed"
+            && payload["item"]["type"] == "AgentMessage"))
+        .then(|| source(record, offset))
 }
 
 fn timestamp(record: &Value) -> Option<DateTime<Utc>> {
@@ -339,7 +446,7 @@ fn text_section(label: &str, text: &str) -> Section {
 }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
-    let input = if payload["type"] == "custom_tool_call" {
+    let mut input = if payload["type"] == "custom_tool_call" {
         vec![text_section(
             "input",
             payload["input"].as_str().unwrap_or(""),
@@ -377,7 +484,11 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
             _ => vec![text_section("input", raw)],
         }
     };
+    if let Some(arguments) = tool_arguments(payload) {
+        crate::log::include_description(&mut input, &arguments);
+    }
     ToolCall {
+        agent: None,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
         title: crate::log::tool_title(
             payload["name"].as_str().unwrap_or(""),
@@ -386,7 +497,9 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         name: payload["name"].as_str().unwrap_or("").to_owned(),
         input,
         output: output.map(|text| vec![text_section("output", text)]),
+        exit_code: None,
         is_error: false,
+        duration: None,
     }
 }
 
@@ -396,19 +509,13 @@ fn result_section(text: &str) -> Section {
 
 fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
-    let (name, input, output) = match item_type {
+    let (name, mut input, output) = match item_type {
         "CommandExecution" => {
-            let mut input = vec![Section::Code {
+            let input = vec![Section::Code {
                 label: "command".to_owned(),
                 lang: "bash".to_owned(),
                 text: command.unwrap(),
             }];
-            if let Some(code) = item["exit_code"].as_i64().filter(|code| *code != 0) {
-                input.push(Section::Fields(vec![(
-                    "exit code".to_owned(),
-                    code.to_string(),
-                )]));
-            }
             (
                 "exec_command".to_owned(),
                 input,
@@ -480,6 +587,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             None,
         ),
     };
+    crate::log::include_description(&mut input, &item["arguments"]);
     let title = if name == "exec_command" {
         if let Some(Section::Code { text, .. }) = input.first() {
             crate::log::tool_title(&name, &serde_json::json!({ "command": text }))
@@ -490,12 +598,17 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         crate::log::tool_title(&name, &item["arguments"])
     };
     ToolCall {
+        agent: None,
         id: item["id"].as_str().unwrap_or("").to_owned(),
         title,
         name,
         input,
         output,
+        exit_code: item["exit_code"]
+            .as_i64()
+            .filter(|code| item_type == "CommandExecution" && *code != 0),
         is_error: item["status"] == "failed" || item["result"]["isError"] == true,
+        duration: None,
     }
 }
 
@@ -560,7 +673,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
             if let Some(code) = optional::<i32>(item, "exit_code")?
                 && code != 0
             {
-                body.push_str(&format!(" (exit {code})"));
+                body.push_str(&format!(" → {code}"));
             }
             body
         }
@@ -648,6 +761,8 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         None => ended_at,
     };
     Ok(Some(Event {
+        source: None,
+        source_records: Vec::new(),
         sender: None,
         kind: Kind::Tool,
         body,
@@ -663,14 +778,21 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
 
 /// Read only through the SQLite prompt and its following completed item.
 /// Prompt text itself comes from SQLite; rollout records supply attachments.
-pub(super) fn first_prompt_images(path: &Path, first_user_message: &str) -> io::Result<Vec<Image>> {
-    let mut lines = io::BufReader::new(File::open(path)?).lines();
+pub(super) fn first_prompt(
+    path: &Path,
+    first_user_message: &str,
+) -> io::Result<(Vec<Image>, Option<String>)> {
+    let mut lines = io::BufReader::new(File::open(path)?).split(b'\n');
+    let mut offset = 0u64;
     for line in lines.by_ref() {
-        let Ok(record) = serde_json::from_str::<Value>(&line?) else {
+        let line = line?;
+        let start = offset;
+        offset += line.len() as u64 + 1;
+        let Ok(record) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
         if completed_user(&record) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), None));
         }
         let payload = &record["payload"];
         if record["type"] != "response_item"
@@ -690,24 +812,28 @@ pub(super) fn first_prompt_images(path: &Path, first_user_message: &str) -> io::
             continue;
         }
         if prompt.attachments.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Some(source(&record, start))));
         }
         let completed = lines
             .next()
             .transpose()?
-            .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+            .and_then(|line| serde_json::from_slice::<Value>(&line).ok())
             .filter(completed_user);
-        return Ok(prompt_images(&prompt, payload, completed.as_ref()));
+        return Ok((
+            prompt_images(&prompt, payload, completed.as_ref()),
+            Some(source(&record, start)),
+        ));
     }
-    Ok(Vec::new())
+    Ok((Vec::new(), None))
 }
 
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
     let mut boundary = false;
+    let mut message_source_closed = false;
     let mut outputs = HashSet::new();
     let mut pending = Vec::new();
-    walk(path, |record| {
+    walk(path, |record, offset| {
         let Some(at) = timestamp(&record) else {
             return Ok(true);
         };
@@ -736,25 +862,39 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                 _ => {}
             }
         }
+        if record["type"] == "event_msg" && payload["type"] == "task_started" {
+            summary.prompt_at.get_or_insert(at);
+            message_source_closed = true;
+        }
         if !boundary && record["type"] == "event_msg" {
             match payload["type"].as_str() {
                 Some("task_complete" | "turn_aborted") => {
                     summary.turn_ended = true;
                     boundary = true;
                 }
-                Some("task_started") => boundary = true,
+                Some("task_started") => {
+                    boundary = true;
+                }
                 _ => {}
             }
         }
+        let message = assistant_text(&record)?;
         if summary.last_message.is_none()
-            && let Some(text) = assistant_text(&record)?
+            && let Some(text) = message.as_ref()
         {
-            summary.last_message = Some(printable(&text));
+            summary.detail_sources[1] = assistant_source(&record, offset);
+            summary.last_message = Some(printable(text));
             summary.last_message_at = Some(at);
+        }
+        // Completion notifications repeat the reply but have no log row. Keep
+        // the identity of the latest message record in that turn instead.
+        if summary.detail_sources[1].is_none() && !message_source_closed && message.is_some() {
+            summary.detail_sources[1] = assistant_source(&record, offset);
         }
         if summary.activity.is_none()
             && let Some(event) = completed_tool(&record)?
         {
+            summary.detail_sources[0] = Some(source(&record, offset));
             summary.activity = Some(Activity {
                 kind: event.kind,
                 label: event.body,
@@ -773,39 +913,292 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                 _ => None,
             };
             if let Some((kind, label)) = activity {
+                summary.detail_sources[0] = Some(source(&record, offset));
                 summary.activity = Some(Activity { kind, label, at });
             }
         }
-        Ok(!(boundary && summary.last_message.is_some() && summary.activity.is_some()))
+        Ok(!(boundary
+            && summary.prompt_at.is_some()
+            && summary.last_message.is_some()
+            && summary.activity.is_some()
+            && (summary.detail_sources[1].is_some() || message_source_closed)))
     })?;
     summary.pending_questions = pending.into_iter().rev().flatten().collect();
     Ok(summary)
 }
 
+/// Parsed rollout records and the byte range retained for backward paging.
+pub(crate) struct Reader {
+    path: PathBuf,
+    identity: Option<(u64, u64)>,
+    observed_len: u64,
+    modified: Option<std::time::SystemTime>,
+    oldest: u64,
+    read: u64,
+    pending_offset: Option<u64>,
+    pending_bytes: Vec<u8>,
+    records: Vec<(u64, Value)>,
+    entries: Vec<(u64, Event)>,
+    dependencies: HashMap<String, u64>,
+    latest_prompt: Option<u64>,
+    shown: usize,
+    boundary: crate::jsonl::Boundary,
+}
+
+impl Reader {
+    pub fn new(path: PathBuf, _sidechains: bool) -> Self {
+        Self {
+            path,
+            identity: None,
+            observed_len: 0,
+            modified: None,
+            oldest: 0,
+            read: 0,
+            pending_offset: None,
+            pending_bytes: Vec::new(),
+            records: Vec::new(),
+            entries: Vec::new(),
+            dependencies: HashMap::new(),
+            latest_prompt: None,
+            shown: 0,
+            boundary: crate::jsonl::Boundary::default(),
+        }
+    }
+
+    fn dependency(&mut self, record: &Value, offset: u64) -> u64 {
+        let payload = &record["payload"];
+        let mut affected = offset;
+        for id in [
+            payload["id"].as_str(),
+            payload["call_id"].as_str(),
+            payload["item"]["id"].as_str(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            affected = affected.min(*self.dependencies.entry(id.to_owned()).or_insert(offset));
+        }
+        if completed_user(record) {
+            affected = affected.min(self.latest_prompt.unwrap_or(offset));
+        }
+        if record["type"] == "response_item"
+            && payload["type"] == "message"
+            && payload["role"] == "user"
+        {
+            self.latest_prompt = Some(offset);
+        }
+        affected
+    }
+
+    fn read_pending(&mut self, file: &mut File) -> io::Result<u64> {
+        file.seek(SeekFrom::Start(self.read))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        if let Ok(record) = serde_json::from_slice::<Value>(&bytes) {
+            self.pending_offset = Some(self.read);
+            self.pending_bytes = bytes.clone();
+            self.records.push((self.read, record));
+            Ok(bytes.len() as u64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        use std::os::unix::fs::MetadataExt;
+        let mut file = File::open(&self.path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        let modified = metadata.modified()?;
+        let reset = self.identity != Some(identity)
+            || metadata.len() < self.read
+            || (metadata.len() == self.observed_len && self.modified != Some(modified))
+            || (metadata.len() > self.observed_len && !self.boundary.matches(&mut file)?);
+        let changed = self.observed_len != metadata.len() || self.modified != Some(modified);
+        self.observed_len = metadata.len();
+        self.modified = Some(modified);
+        let old_shown = self.shown;
+        let mut parsed_bytes = 0;
+        let mut appended = 0;
+        let mut replaced = 0;
+        if reset {
+            self.identity = Some(identity);
+            self.read = crate::jsonl::complete_end(&mut file)?;
+            self.oldest = self.read;
+            self.records.clear();
+            self.entries.clear();
+            self.dependencies.clear();
+            self.latest_prompt = None;
+            self.shown = 0;
+            self.pending_offset = None;
+            parsed_bytes += self.read_pending(&mut file)?;
+            self.entries = events(&self.path, &self.records, usize::MAX)?;
+        } else if changed && metadata.len() > self.read {
+            let pending = self.pending_offset.take();
+            let pending_bytes = std::mem::take(&mut self.pending_bytes);
+            let pending_record =
+                pending.and_then(|_| self.records.last().map(|(_, record)| record.clone()));
+            let mut reused = 0;
+            if let Some(pending) = pending {
+                self.records.truncate(
+                    self.records
+                        .partition_point(|(offset, _)| *offset < pending),
+                );
+            }
+            let mut offset = self.read;
+            let mut incoming = Vec::new();
+            let end = crate::jsonl::read_lines(&mut file, self.read, |line| {
+                if pending == Some(offset) && line == pending_bytes {
+                    if let Some(record) = &pending_record {
+                        incoming.push((offset, record.clone()));
+                        reused += line.len() as u64;
+                    }
+                } else if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    incoming.push((offset, record));
+                }
+                offset += line.len() as u64 + 1;
+            })?;
+            parsed_bytes += end - self.read - reused;
+            self.read = end;
+            let mut affected = pending.unwrap_or(end);
+            for (offset, record) in &incoming {
+                affected = affected.min(self.dependency(record, *offset));
+            }
+            self.records.extend(incoming);
+            parsed_bytes += self.read_pending(&mut file)?;
+            if let Some((offset, record)) = self.records.last().cloned() {
+                affected = affected.min(self.dependency(&record, offset));
+            }
+            let prefix = self
+                .entries
+                .partition_point(|(offset, _)| *offset < affected);
+            let start = self
+                .records
+                .partition_point(|(offset, _)| *offset < affected);
+            let mut suffix = events(&self.path, &self.records[start..], usize::MAX)?;
+            if let Some((_, previous)) = prefix
+                .checked_sub(1)
+                .and_then(|index| self.entries.get(index))
+                && let Some((_, first)) = suffix.first_mut()
+            {
+                first.previous_end = Some(previous.ended_at.unwrap_or(previous.started_at));
+            }
+            let previous = self.entries.len() - prefix;
+            appended = suffix.len().saturating_sub(previous);
+            replaced = previous;
+            self.entries.truncate(prefix);
+            self.entries.extend(suffix);
+        }
+        let parsed_before_older = parsed_bytes;
+        while self.entries.len() < requested && self.oldest > 0 {
+            let end = self.oldest;
+            let target = end.saturating_sub(CHUNK);
+            let mut older = Vec::new();
+            let mut oldest = end;
+            crate::jsonl::read_lines_back(&mut file, end, |offset, line| {
+                oldest = offset;
+                parsed_bytes += line.len() as u64 + 1;
+                if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    older.push((offset, record));
+                }
+                offset > target
+            })?;
+            self.oldest = oldest;
+            older.reverse();
+            older.append(&mut self.records);
+            self.records = older;
+            self.entries = events(&self.path, &self.records, usize::MAX)?;
+            self.dependencies.clear();
+            self.latest_prompt = None;
+            // Rebuild dependency positions only when the retained range expands backward.
+            for index in 0..self.records.len() {
+                let (offset, record) = self.records[index].clone();
+                self.dependency(&record, offset);
+            }
+        }
+        if parsed_bytes > parsed_before_older {
+            replaced = replaced.max(old_shown);
+        }
+        let shown = self
+            .entries
+            .len()
+            .min(requested.max(self.shown.saturating_add(appended)));
+        let prepended = if reset {
+            0
+        } else {
+            shown.saturating_sub(old_shown + appended)
+        };
+        self.shown = shown;
+        let skip = self.entries.len() - shown;
+        let events = self.entries[skip..]
+            .iter()
+            .map(|(_, event)| event.clone())
+            .collect();
+        self.boundary.capture(&mut file, metadata.len())?;
+        Ok(crate::log::Update {
+            events,
+            prepended,
+            appended: if reset { 0 } else { appended },
+            replaced,
+            reset,
+            parsed_bytes,
+            oldest_offset: self.oldest,
+            read_offset: self.read,
+        })
+    }
+}
+
+impl crate::log::Reader for Reader {
+    fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        Reader::refresh(self, requested)
+    }
+}
+
+#[cfg(test)]
 pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
+    let mut records = Vec::new();
+    walk(path, |record, offset| {
+        records.push((offset, record));
+        Ok(true)
+    })?;
+    records.reverse();
+    Ok(events(path, &records, count)?
+        .into_iter()
+        .map(|(_, event)| event)
+        .collect())
+}
+
+fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
     let mut completed_prompt = None;
-    walk(path, |record| {
-        let Some(at) = timestamp(&record) else {
+    let mut visit = |record: &Value, offset: u64| -> io::Result<bool> {
+        let Some(at) = timestamp(record) else {
             return Ok(true);
         };
-        if completed_user(&record) {
-            completed_prompt = Some(record);
+        if completed_user(record) {
+            completed_prompt = Some((offset, record.clone()));
             return Ok(true);
         }
         let payload = &record["payload"];
         let mut images = Vec::new();
         let mut calls = Vec::new();
-        if let Some(event) = completed_tool(&record)? {
+        let reference = |offset| crate::log::SourceRecord {
+            path: path.to_path_buf(),
+            offset,
+        };
+        let mut source_records = vec![reference(offset)];
+        if let Some(mut event) = completed_tool(record)? {
+            event.source = Some(source(record, offset));
+            event.source_records = source_records;
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
             }
-            entries.push(event);
+            entries.push((offset, event));
             return Ok(entries.len() <= count);
         }
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
@@ -823,7 +1216,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                             .collect::<Vec<_>>()
                             .join("\n")
                     };
-                    results.insert(id.to_owned(), (at, output));
+                    results.insert(id.to_owned(), (at, output, offset));
                 }
                 return Ok(true);
             }
@@ -841,12 +1234,15 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                     .and_then(|id| results.remove(id));
                 calls.push(response_tool_call(
                     payload,
-                    ended.as_ref().map(|(_, text)| text.as_str()),
+                    ended.as_ref().map(|(_, text, _)| text.as_str()),
                 ));
+                if let Some((_, _, offset)) = &ended {
+                    source_records.insert(0, reference(*offset));
+                }
                 (
                     crate::log::tool_kind(payload["name"].as_str().unwrap()),
                     body,
-                    ended.map(|(at, _)| at),
+                    ended.map(|(at, _, _)| at),
                 )
             }
             (Some("response_item"), Some("message")) => {
@@ -862,7 +1258,14 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                 };
                 let Some(body) = (if kind == Kind::User {
                     let prompt = user_prompt(&payload["content"]);
-                    images = prompt_images(&prompt, payload, completed.as_ref());
+                    if let Some((offset, _)) = &completed {
+                        source_records.push(reference(*offset));
+                    }
+                    images = prompt_images(
+                        &prompt,
+                        payload,
+                        completed.as_ref().map(|(_, record)| record),
+                    );
                     prompt.body()
                 } else {
                     content_text(&payload["content"])
@@ -893,23 +1296,35 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             }
             _ => return Ok(true),
         };
-        entries.push(Event {
-            sender: None,
-            kind,
-            body,
-            paths: Vec::new(),
-            started_at: at,
-            ended_at,
-            duration: ended_at.map(|end| end - at),
-            previous_end: None,
-            images,
-            calls,
-        });
+        entries.push((
+            offset,
+            Event {
+                source: Some(source(record, offset)),
+                source_records,
+                sender: None,
+                kind,
+                body,
+                paths: Vec::new(),
+                started_at: at,
+                ended_at,
+                duration: ended_at.map(|end| end - at),
+                previous_end: None,
+                images,
+                calls,
+            },
+        ));
         Ok(entries.len() <= count)
-    })?;
+    };
+    for (offset, record) in records.iter().rev() {
+        if !visit(record, *offset)? {
+            break;
+        }
+    }
     entries.reverse();
     let mut previous_end = None;
-    for entry in &mut entries {
+    for (_, entry) in &mut entries {
+        entry.source_records.sort_by_key(|record| record.offset);
+        entry.source_records.dedup();
         entry.previous_end = previous_end;
         previous_end = Some(entry.ended_at.unwrap_or(entry.started_at));
     }
@@ -918,6 +1333,34 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raw_source_records_preserve_real_call_and_result_order() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut file,
+            include_bytes!("../../../tests/fixtures/codex-raw-detail.jsonl"),
+        )
+        .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        let rows: Vec<serde_json::Value> =
+            include_str!("../../../tests/fixtures/codex-raw-detail.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let expected = rows[1..]
+            .iter()
+            .map(|row| serde_json::to_string_pretty(row).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+        assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        assert_eq!(
+            update.events[0].raw_text().unwrap(),
+            serde_json::to_string_pretty(&rows[0]).unwrap()
+        );
+    }
+
     use super::*;
     use crate::log::Kind;
     use std::io::Write;
@@ -929,6 +1372,204 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn reader_extends_real_fixture_without_reparsing_bytes() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        for name in [
+            "codex-tool-calls.jsonl",
+            "codex-rollout.jsonl",
+            "codex-inner/command.jsonl",
+            "codex-inner/file-change.jsonl",
+            "codex-images/wrapped.jsonl",
+            "codex-images/fallback.jsonl",
+        ] {
+            let bytes = std::fs::read(root.join(name)).unwrap();
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut reader = Reader::new(file.path().to_path_buf(), false);
+            let mut parsed = 0;
+            for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+                for chunk in line.chunks(137) {
+                    file.write_all(chunk).unwrap();
+                    parsed += reader.refresh(usize::MAX).unwrap().parsed_bytes;
+                }
+                let update = reader.refresh(usize::MAX).unwrap();
+                assert_eq!(
+                    format!("{:?}", update.events),
+                    format!("{:?}", tail(file.path(), usize::MAX).unwrap()),
+                    "{name}"
+                );
+            }
+            assert_eq!(parsed, bytes.len() as u64, "{name}");
+            assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn reader_expands_backwards_and_resets_on_truncation() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/codex-tool-calls.jsonl"
+        ))
+        .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let first = reader.refresh(1).unwrap();
+        assert!(first.reset);
+        let expanded = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(
+            expanded.events.len(),
+            tail(file.path(), usize::MAX).unwrap().len()
+        );
+        assert_eq!(
+            expanded.prepended,
+            expanded.events.len() - first.events.len()
+        );
+        file.as_file_mut().set_len(0).unwrap();
+        let reset = reader.refresh(1).unwrap();
+        assert!(reset.reset);
+        assert!(reset.events.is_empty());
+    }
+
+    #[test]
+    fn reader_resets_when_source_file_is_replaced() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        std::fs::copy(fixture(), &path).unwrap();
+        let mut reader = Reader::new(path.clone(), false);
+        reader.refresh(usize::MAX).unwrap();
+        let replacement = directory.path().join("replacement.jsonl");
+        std::fs::copy(fixture(), &replacement).unwrap();
+        std::fs::rename(replacement, &path).unwrap();
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert!(update.reset);
+        assert_eq!(
+            format!("{:?}", update.events),
+            format!("{:?}", tail(&path, usize::MAX).unwrap())
+        );
+    }
+
+    #[test]
+    fn reader_resets_on_same_length_overwrite() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let bytes = std::fs::read(fixture()).unwrap();
+        file.write_all(&bytes).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        reader.refresh(usize::MAX).unwrap();
+        let before = file.as_file().metadata().unwrap().modified().unwrap();
+        let changed = String::from_utf8(bytes)
+            .unwrap()
+            .replace("Checks passed.", "Checks failed.");
+        file.as_file_mut().seek(SeekFrom::Start(0)).unwrap();
+        file.write_all(changed.as_bytes()).unwrap();
+        file.as_file()
+            .set_modified(before + std::time::Duration::from_secs(1))
+            .unwrap();
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert!(update.reset);
+        assert_eq!(update.events.last().unwrap().body, "Checks failed.");
+        assert!(!reader.refresh(usize::MAX).unwrap().reset);
+    }
+
+    #[test]
+    fn reader_keeps_valid_unterminated_record_when_newline_arrives() {
+        let text = std::fs::read_to_string(fixture()).unwrap();
+        let end = text
+            .lines()
+            .scan(0usize, |offset, line| {
+                *offset += line.len() + 1;
+                let record: Value = serde_json::from_str(line).unwrap();
+                Some((*offset, record))
+            })
+            .find(|(_, record)| record["payload"]["role"] == "assistant")
+            .unwrap()
+            .0;
+        let bytes = text[..end].strip_suffix('\n').unwrap().as_bytes();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(bytes).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let initial = reader.refresh(usize::MAX).unwrap();
+        let expected = tail(file.path(), usize::MAX).unwrap();
+        assert_eq!(format!("{:?}", initial.events), format!("{expected:?}"));
+        assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        file.write_all(b"\n").unwrap();
+        let completed = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(format!("{:?}", completed.events), format!("{expected:?}"));
+        assert_eq!(completed.appended, 0);
+    }
+
+    #[test]
+    fn plans_replace_previous_tasks_incrementally() {
+        let records: Vec<_> = include_str!("../../../tests/fixtures/codex-todos.jsonl")
+            .lines()
+            .collect();
+        assert!(records.len() >= 2);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut tasks = Tasks::default();
+        writeln!(file, "{}", records[0]).unwrap();
+        let first = tasks.read(file.path()).unwrap();
+        assert_eq!(first.len(), 3);
+        assert_eq!(first[0].subject, "Inspect input");
+        assert_eq!(first[0].status, TaskStatus::InProgress);
+        assert_eq!(first[1].status, TaskStatus::Pending);
+        assert_eq!(first[2].status, TaskStatus::Pending);
+        let offset = tasks.offset;
+        assert_eq!(tasks.read(file.path()).unwrap(), first);
+        assert_eq!(tasks.offset, offset);
+        for record in &records[1..] {
+            writeln!(file, "{record}").unwrap();
+        }
+        let last = tasks.read(file.path()).unwrap();
+        assert_eq!(last.len(), 3);
+        assert!(last.iter().all(|task| task.status == TaskStatus::Completed));
+        assert_eq!(tasks.summary(file.path()).unwrap().tasks, last);
+    }
+
+    #[test]
+    fn plans_wait_for_complete_lines_and_reset_on_truncation() {
+        let record = include_str!("../../../tests/fixtures/codex-todos.jsonl")
+            .lines()
+            .next()
+            .unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut tasks = Tasks::default();
+        write!(file, "{record}").unwrap();
+        assert!(tasks.read(file.path()).unwrap().is_empty());
+        writeln!(file).unwrap();
+        assert_eq!(tasks.read(file.path()).unwrap().len(), 3);
+        file.as_file_mut().set_len(0).unwrap();
+        assert!(tasks.read(file.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn detail_sources_identify_real_rollout_events() {
+        let path = fixture();
+        let details = summary(&path).unwrap();
+        let (_, prompt) = first_prompt(&path, "Check the dashboard.").unwrap();
+        let events = tail(&path, usize::MAX).unwrap();
+        for (source, kind) in [
+            (details.detail_sources[1].as_ref(), Kind::Assistant),
+            (prompt.as_ref(), Kind::User),
+        ] {
+            let source = source.unwrap_or_else(|| panic!("fixture source {kind:?}"));
+            let event = events
+                .iter()
+                .find(|event| event.source.as_ref() == Some(source))
+                .unwrap();
+            assert_eq!(event.kind, kind);
+        }
+        let tool_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner/command.jsonl");
+        let tool_summary = summary(&tool_path).unwrap();
+        let tool_events = tail(&tool_path, usize::MAX).unwrap();
+        let source = tool_summary.detail_sources[0].as_ref().unwrap();
+        assert!(
+            tool_events
+                .iter()
+                .any(|event| event.source.as_ref() == Some(source))
+        );
+        let short = tail(&path, 1).unwrap();
+        assert!(!short.iter().any(|event| event.source == prompt));
     }
 
     #[test]
@@ -1077,10 +1718,8 @@ mod tests {
             .clone();
         command["payload"]["item"]["exit_code"] = 2.into();
         let event = completed_tool(&command).unwrap().unwrap();
-        assert_eq!(
-            event.calls[0].input[1],
-            Section::Fields(vec![("exit code".to_owned(), "2".to_owned())])
-        );
+        assert_eq!(event.calls[0].input.len(), 1);
+        assert_eq!(event.calls[0].exit_code, Some(2));
     }
 
     #[test]

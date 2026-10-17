@@ -2,17 +2,16 @@ mod app_server;
 #[cfg(test)]
 mod inner_tests;
 mod manager;
-mod rollout;
+pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;
 #[cfg(test)]
 mod tests;
 
 use super::{Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot};
-use crate::{
-    log,
-    model::{Action, Process, Session, SessionStatus},
-};
+#[cfg(test)]
+use crate::log;
+use crate::model::{Action, Process, Session, SessionStatus};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, Row};
 use std::{
@@ -21,6 +20,8 @@ use std::{
     io::{self, BufRead},
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
+    time::SystemTime,
 };
 
 const PAGE_SIZE: usize = 10;
@@ -28,11 +29,18 @@ const PAGE_SIZE: usize = 10;
 pub struct CodexProvider {
     home: PathBuf,
     manager_home: PathBuf,
+    tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
+    models: Mutex<ModelCatalog>,
 }
 
 impl CodexProvider {
     pub fn new(home: PathBuf, manager_home: PathBuf) -> Self {
-        Self { manager_home, home }
+        Self {
+            manager_home,
+            home,
+            tasks: Mutex::new(HashMap::new()),
+            models: Mutex::new(ModelCatalog::default()),
+        }
     }
 
     pub fn from_config() -> io::Result<Self> {
@@ -72,7 +80,7 @@ impl CodexProvider {
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
-        let manager = manager::links(&self.manager_home)?;
+        let manager = manager::links(&self.manager_home, &super::claude::config_dir())?;
         let names = indexed_names(&self.home)?;
         let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
@@ -92,9 +100,19 @@ impl CodexProvider {
                 Ok(session)
             })
             .map_err(io::Error::other)?;
+        let mut models = self
+            .models
+            .lock()
+            .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?;
+        models.refresh(&self.home.join("models_cache.json"))?;
         let mut sessions = Vec::new();
         for row in rows {
             if let Some(mut session) = row.map_err(io::Error::other)? {
+                session.model_label = session
+                    .model
+                    .as_ref()
+                    .and_then(|slug| models.labels.get(slug))
+                    .cloned();
                 if let Some(pid) = live.get(&session.id.id) {
                     session.process = Some(Process {
                         pid: *pid,
@@ -114,6 +132,7 @@ impl CodexProvider {
                 sessions.push(session);
             }
         }
+        drop(models);
         sessions.sort_by(|a, b| {
             b.updated_at
                 .cmp(&a.updated_at)
@@ -154,11 +173,15 @@ impl CodexProvider {
             }
         }
         sessions.retain(|s| selected.contains(&s.id));
+        let mut tasks = self
+            .tasks
+            .lock()
+            .map_err(|_| io::Error::other("Codex task cache lock poisoned"))?;
         for session in &mut sessions {
             let summary = match session
                 .transcript
                 .as_deref()
-                .map(rollout::summary)
+                .map(|path| tasks.entry(path.to_owned()).or_default().summary(path))
                 .transpose()
             {
                 Ok(summary) => summary,
@@ -167,7 +190,8 @@ impl CodexProvider {
             };
             if let Some(summary) = summary {
                 if let Some(path) = session.transcript.as_deref() {
-                    session.prompt_images = rollout::first_prompt_images(path, &session.prompt)?;
+                    (session.prompt_images, session.detail_sources[2]) =
+                        rollout::first_prompt(path, &session.prompt)?;
                 }
                 apply_rollout(session, summary);
             } else {
@@ -184,7 +208,49 @@ impl CodexProvider {
     }
 }
 
+#[derive(Default)]
+struct ModelCatalog {
+    modified: Option<SystemTime>,
+    labels: HashMap<String, String>,
+}
+
+impl ModelCatalog {
+    fn refresh(&mut self, path: &Path) -> io::Result<()> {
+        let modified = match std::fs::metadata(path) {
+            Ok(metadata) => metadata.modified()?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.modified = None;
+                self.labels.clear();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        if self.modified == Some(modified) {
+            return Ok(());
+        }
+        #[derive(serde::Deserialize)]
+        struct Catalog {
+            models: Vec<Model>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Model {
+            slug: String,
+            display_name: String,
+        }
+        let catalog: Catalog = serde_json::from_reader(io::BufReader::new(File::open(path)?))?;
+        self.labels = catalog
+            .models
+            .into_iter()
+            .map(|model| (model.slug, model.display_name))
+            .collect();
+        self.modified = Some(modified);
+        Ok(())
+    }
+}
+
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
+    session.prompt_at = summary.prompt_at;
+    session.detail_sources[..2].clone_from_slice(&summary.detail_sources[..2]);
     session.last_message = summary.last_message;
     session.last_message_at = summary.last_message_at;
     session.last_record_at = summary.updated_at;
@@ -193,6 +259,7 @@ fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
         session.updated_at = session.updated_at.max(at);
     }
     session.status = status(session.process.is_some(), summary.turn_ended);
+    session.tasks = summary.tasks;
     session.pending_questions = summary.pending_questions;
     if session.process.is_some() && !session.pending_questions.is_empty() {
         session.status = SessionStatus::NeedsInput;
@@ -258,11 +325,13 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         },
         title,
         prompt: prompt.chars().take(512).collect(),
+        detail_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: vec![],
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
+        model_label: None,
         model: column(row, "model")?,
         effort: column(row, "reasoning_effort")?,
         git_branch: column(row, "git_branch")?,
@@ -275,7 +344,9 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         last_message: None,
         last_message_at: None,
         activity: None,
+        ask: None,
         pending_questions: vec![],
+        tasks: vec![],
         background: vec![],
         last_prompt: None,
         transcript: column::<String>(row, "rollout_path")?
@@ -417,6 +488,7 @@ impl Provider for CodexProvider {
             }
         })
     }
+    #[cfg(test)]
     fn log(&self, session: &Session, count: usize, _: bool) -> io::Result<Vec<log::Event>> {
         session
             .transcript
@@ -452,7 +524,7 @@ impl Provider for CodexProvider {
         if !session.can_resume()
             || matches!(
                 input,
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_)
+                SessionInput::SetModel(_) | SessionInput::SetEffort(_) | SessionInput::Answer { .. }
             )
         {
             return None;
@@ -462,14 +534,19 @@ impl Provider for CodexProvider {
         Some(Box::new(move || {
             let mut client = app_server::Client::connect(&home)?;
             match input {
-                SessionInput::Prompt(text) => app_server::thread::prompt(&mut client, &id, &text),
+                SessionInput::Prompt(text) => {
+                    app_server::thread::prompt(&mut client, &id, &text, &[])
+                }
+                SessionInput::PromptWithImages { text, images } => {
+                    app_server::thread::prompt(&mut client, &id, &text, &images)
+                }
                 SessionInput::Interrupt => {
                     match app_server::thread::running_turn(&mut client, &id)? {
                         Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),
                         None => Ok(()),
                     }
                 }
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_) => {
+                SessionInput::SetModel(_) | SessionInput::SetEffort(_) | SessionInput::Answer { .. } => {
                     Err(io::ErrorKind::Unsupported.into())
                 }
             }
@@ -488,16 +565,6 @@ impl Provider for CodexProvider {
         }
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::archive(&mut client, &session.id.id)
-    }
-    fn stop(&self, session: &Session) -> io::Result<()> {
-        if !session.can_resume() {
-            return Err(io::ErrorKind::Unsupported.into());
-        }
-        let mut client = app_server::Client::connect(&self.home)?;
-        match app_server::thread::running_turn(&mut client, &session.id.id)? {
-            Some(turn) => app_server::thread::interrupt(&mut client, &session.id.id, &turn),
-            None => Ok(()),
-        }
     }
     fn delete(&self, session: &Session) -> io::Result<()> {
         if !session.can_resume() {

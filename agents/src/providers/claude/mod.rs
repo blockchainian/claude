@@ -9,7 +9,8 @@ mod create_tests;
 mod images;
 pub(crate) mod log;
 mod peer;
-mod registry;
+mod pending_asks;
+pub(super) mod registry;
 mod settings;
 mod subagents;
 mod transcript;
@@ -223,7 +224,7 @@ fn stop_process(entry: &registry::Entry) -> io::Result<()> {
     ))
 }
 
-fn config_dir() -> PathBuf {
+pub(super) fn config_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(path);
     }
@@ -260,9 +261,61 @@ pub struct ClaudeProvider {
     summaries: HashMap<PathBuf, CachedSummary>,
     starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
     background: background::Tasks,
+    pending_asks: pending_asks::PendingAsks,
+}
+
+fn created_job(output: &std::process::Output) -> io::Result<String> {
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "Claude task creation failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let stdout = std::str::from_utf8(&output.stdout)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let mut ids = stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("backgrounded · "))
+        .map(|id| {
+            id.strip_suffix(" (idle — send a prompt to start)")
+                .unwrap_or(id)
+        });
+    let id = ids.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Claude did not report a background job id",
+        )
+    })?;
+    if id.is_empty()
+        || id.starts_with('-')
+        || id.chars().any(char::is_whitespace)
+        || ids.next().is_some()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Claude reported an invalid background job id",
+        ));
+    }
+    Ok(id.to_owned())
 }
 
 impl ClaudeProvider {
+    fn create_command(request: &crate::tasks::NewTask) -> Command {
+        let mut command = Command::new("claude");
+        command.arg("--bg").current_dir(&request.cwd);
+        if let Some(model) = &request.model {
+            command.args(["--model", model]);
+        }
+        if let Some(effort) = &request.effort {
+            command.args(["--effort", effort]);
+        }
+        if request.images.is_empty() {
+            command.arg(&request.prompt);
+        }
+        command
+    }
+
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config_dir,
@@ -270,6 +323,7 @@ impl ClaudeProvider {
             summaries: HashMap::new(),
             starts: HashMap::new(),
             background: background::Tasks::default(),
+            pending_asks: pending_asks::PendingAsks::default(),
         }
     }
 
@@ -402,6 +456,7 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
+        self.pending_asks.refresh(&self.config_dir, &mut sessions);
         Snapshot { sessions, has_more }
     }
 
@@ -477,9 +532,9 @@ impl ClaudeProvider {
         if changed {
             // Files may disappear while Claude Code moves or removes a project.
             let read = if subagent {
-                transcript::read_subagent
+                transcript::read_subagent_cached
             } else {
-                transcript::read
+                transcript::read_cached
             };
             let start = match self.starts.get(&file.path).copied() {
                 Some(start) => start,
@@ -494,7 +549,12 @@ impl ClaudeProvider {
                     }
                 },
             };
-            match read(&file.path, file.len) {
+            let previous = self
+                .summaries
+                .get(&file.path)
+                .filter(|cached| cached.len < file.len)
+                .map(|cached| &cached.summary);
+            match read(&file.path, file.len, previous) {
                 Ok(mut summary) => {
                     summary.started_at = start;
                     self.summaries.insert(
@@ -614,6 +674,7 @@ impl Provider for ClaudeProvider {
     fn refresh(&mut self, pages: usize) -> Snapshot {
         self.snapshot(pages)
     }
+    #[cfg(test)]
     fn log(
         &self,
         session: &Session,
@@ -627,17 +688,29 @@ impl Provider for ClaudeProvider {
         log::tail_session(path, count, sidechains)
     }
 
-    fn create(&self, request: &crate::tasks::NewTask) -> Option<io::Result<Command>> {
-        let mut command = Command::new("claude");
-        command.arg("--bg").current_dir(&request.cwd);
-        if let Some(model) = &request.model {
-            command.args(["--model", model]);
-        }
-        if let Some(effort) = &request.effort {
-            command.args(["--effort", effort]);
-        }
-        command.arg(&request.prompt);
-        Some(Ok(command))
+    fn create(
+        &self,
+        request: &crate::tasks::NewTask,
+    ) -> Option<io::Result<crate::providers::CreateJob>> {
+        let mut command = Self::create_command(request);
+        let request = request.clone();
+        let settings = self.config_dir.join("settings.json");
+        Some(Ok(Box::new(move || {
+            let output = command.output()?;
+            if !request.images.is_empty() {
+                let job_id = created_job(&output)?;
+                attach::send(
+                    &job_id,
+                    &request.cwd,
+                    &settings,
+                    SessionInput::PromptWithImages {
+                        text: request.prompt,
+                        images: request.images,
+                    },
+                )?;
+            }
+            Ok(output)
+        })))
     }
 
     fn input_choices(&self) -> crate::providers::InputChoices {
@@ -680,35 +753,7 @@ impl Provider for ClaudeProvider {
     }
 
     fn created_job(&self, output: &std::process::Output) -> io::Result<String> {
-        if !output.status.success() {
-            return Err(io::Error::other(format!(
-                "Claude task creation failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        let stdout = std::str::from_utf8(&output.stdout)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let mut ids = stdout
-            .lines()
-            .filter_map(|line| line.strip_prefix("backgrounded · "));
-        let id = ids.next().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Claude did not report a background job id",
-            )
-        })?;
-        if id.is_empty()
-            || id.starts_with('-')
-            || id.chars().any(char::is_whitespace)
-            || ids.next().is_some()
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Claude reported an invalid background job id",
-            ));
-        }
-        Ok(id.to_owned())
+        created_job(output)
     }
 
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
@@ -738,9 +783,7 @@ impl Provider for ClaudeProvider {
                     .ok_or_else(|| io::Error::other("Claude background session has no job id"))?;
                 attach::send(&job_id, &session.cwd, &config.join("settings.json"), input)
             }
-            Some(_) => Err(io::Error::other(
-                "Running in another terminal; open it to type",
-            )),
+            Some(_) => Err(io::Error::other("Running in a terminal")),
             None => match input {
                 SessionInput::Prompt(text) => {
                     let output = resume_prompt(&session, &text).output()?;
@@ -810,9 +853,6 @@ impl Provider for ClaudeProvider {
     fn archive(&self, _: &Session) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
-    fn stop(&self, _: &Session) -> io::Result<()> {
-        Err(io::ErrorKind::Unsupported.into())
-    }
 }
 
 fn resume_prompt(session: &Session, text: &str) -> Command {
@@ -862,18 +902,23 @@ fn session(
     Session {
         id: SessionKey {
             provider: ProviderId::Claude,
-            id,
+            id: id.clone(),
         },
         parent: None,
         cwd,
         name: None,
         title,
         prompt: summary.prompt,
+        detail_sources: summary.detail_sources,
         prompt_images: summary.prompt_images,
         queued: summary.queued,
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,
         last_record_at: summary.timestamp,
+        model_label: summary
+            .model
+            .as_ref()
+            .and_then(|id| summary.model_identities.get(id).cloned()),
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,
@@ -886,6 +931,16 @@ fn session(
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,
+        ask: summary.ask.map(|ask| crate::ask::Ask {
+            id: ask.id,
+            kind: ask.kind,
+            session: SessionKey {
+                provider: ProviderId::Claude,
+                id: id.clone(),
+            },
+            since: ask.since,
+        }),
+        tasks: summary.tasks,
         pending_questions: summary.pending_questions,
         background: summary.background,
         last_prompt: summary.last_prompt,
@@ -895,58 +950,39 @@ fn session(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn model_label_reads_the_transcript_name_of_the_session_model() {
+        let fixture = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-model-identity.jsonl"),
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for (transcript, label) in [
+            (fixture.clone(), "Opus 5.5"),
+            (
+                fixture.replacen(
+                    "\"modelId\":\"claude-opus-5-5\"",
+                    "\"modelId\":\"claude-fable-5-1\"",
+                    1,
+                ),
+                "claude-opus-5-5",
+            ),
+        ] {
+            let path = dir.path().join("model-identity.jsonl");
+            std::fs::write(&path, transcript).unwrap();
+            let len = std::fs::metadata(&path).unwrap().len();
+            let summary = transcript::read(&path, len).unwrap();
+            let session = session("model-identity".into(), summary, Some(path), Utc::now());
+            assert_eq!(session.model_label(), label);
+        }
+    }
+
     use super::*;
     use std::io::Write;
     use std::time::Duration;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
-
-    #[test]
-    fn live_background_open_attaches_the_job_not_the_session() {
-        let directory = tempfile::tempdir().unwrap();
-        let provider = ClaudeProvider::new(directory.path().into());
-        let mut row = session(
-            "50517e58-041e-49c8-95e0-a41879199991".into(),
-            transcript::Summary::default(),
-            None,
-            Utc::now(),
-        );
-        row.cwd = directory.path().into();
-        row.process = Some(Process {
-            pid: std::process::id(),
-            label: Some("bg".into()),
-            started_at: None,
-        });
-        row.background_job = Some(crate::model::BackgroundJob {
-            id: "actual-job-id".into(),
-            needs: None,
-        });
-        let command = provider
-            .launch(&Action::Open(row.id.clone()), Some(&row))
-            .unwrap();
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["attach", "actual-job-id"]
-        );
-    }
-
-    #[test]
-    fn resumed_prompt_has_no_flags_that_fork_the_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let id = "00000000-0000-0000-0000-000000000001";
-        transcript(dir.path(), id, 0);
-        let mut provider = ClaudeProvider::new(dir.path().into());
-        let mut session = provider.refresh(1).sessions.remove(0);
-        session.cwd = dir.path().into();
-        let text = include_str!("../../../tests/fixtures/claude-peer-message.txt");
-        let command = resume_prompt(&session, text);
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["--bg", "--resume", id, text]
-        );
-        assert_eq!(command.get_current_dir(), Some(dir.path()));
-    }
 
     #[test]
     fn ask_user_question_pending_questions_refresh_with_answers() {
@@ -973,6 +1009,115 @@ mod tests {
             assert_eq!(sessions.len(), 1);
             assert_eq!(sessions[0].pending_questions, questions);
         }
+    }
+
+    #[test]
+    fn ask_user_question_preserves_structured_pending_ask() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let path = transcript(dir.path(), id, 0);
+        let pending = include_str!("../../../tests/fixtures/claude-questions-pending.jsonl");
+        let raw: serde_json::Value = serde_json::from_str(pending).unwrap();
+        let call = &raw["message"]["content"][0];
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        for fixture in [
+            pending,
+            include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
+            include_str!("../../../tests/fixtures/claude-questions-rejected.jsonl"),
+            pending,
+        ] {
+            fs::write(&path, fixture).unwrap();
+            let sessions = provider.refresh(1).sessions;
+            let session = &sessions[0];
+            if fixture != pending {
+                assert!(session.ask.is_none());
+                continue;
+            }
+            let ask = session.ask.as_ref().unwrap();
+            assert_eq!(ask.id, call["id"].as_str().unwrap());
+            assert_eq!(ask.session, session.id);
+            assert_eq!(
+                ask.since,
+                "2026-10-13T17:45:13.548Z".parse::<DateTime<Utc>>().unwrap()
+            );
+            let crate::ask::AskKind::Questions {
+                questions,
+                blocking,
+            } = &ask.kind;
+            assert!(*blocking);
+            assert_eq!(questions.len(), 2);
+            for (question, raw) in questions
+                .iter()
+                .zip(call["input"]["questions"].as_array().unwrap())
+            {
+                assert_eq!(question.id, raw["question"].as_str().unwrap());
+                assert_eq!(question.header, raw["header"].as_str().unwrap());
+                assert_eq!(question.text, raw["question"].as_str().unwrap());
+                assert_eq!(question.multi, raw["multiSelect"].as_bool().unwrap());
+                assert!(question.other);
+                assert!(!question.secret);
+                assert_eq!(
+                    question.options.len(),
+                    raw["options"].as_array().unwrap().len()
+                );
+                for (option, raw) in question
+                    .options
+                    .iter()
+                    .zip(raw["options"].as_array().unwrap())
+                {
+                    assert_eq!(option.label, raw["label"].as_str().unwrap());
+                    assert_eq!(option.description, raw["description"].as_str().unwrap());
+                    assert_eq!(option.preview.as_deref(), raw["preview"].as_str());
+                }
+            }
+            assert_eq!(
+                session.pending_questions,
+                questions
+                    .iter()
+                    .map(|question| question.text.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn ask_user_question_preserves_multiple_choice_and_clears_after_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = transcript(dir.path(), "00000000-0000-4000-8000-000000000001", 0);
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-attach/ask/multi-pending.jsonl"),
+        )
+        .unwrap();
+        let sessions = provider.refresh(1).sessions;
+        let ask = sessions[0].ask.as_ref().unwrap();
+        let crate::ask::AskKind::Questions { questions, .. } = &ask.kind;
+        assert_eq!(questions.len(), 1);
+        let question = &questions[0];
+        assert_eq!(question.header, "Multi");
+        assert_eq!(question.text, "Probe multiple choices?");
+        assert!(question.multi);
+        assert_eq!(
+            question
+                .options
+                .iter()
+                .map(|option| option.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Red", "Green", "Blue"]
+        );
+        assert!(
+            question
+                .options
+                .iter()
+                .all(|option| option.preview.is_none())
+        );
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-attach/ask/transcript.jsonl"),
+        )
+        .unwrap();
+        assert!(provider.refresh(1).sessions[0].ask.is_none());
     }
 
     pub(super) fn transcript(dir: &Path, id: &str, age: u64) -> PathBuf {

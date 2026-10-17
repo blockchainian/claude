@@ -1,15 +1,10 @@
-Background
-─ A very long description A very… · 0s ╴
-  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-─ Waiting for output · 0s ─────────────╴
-
-Last message
-Checking the project
-
-Prompt
+                 Prompt
 Background task
 
-Project
-/tmp/project
+               Background
+──── A very long description A ver… ─ 0s
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+────────── Waiting for output ─────── 0s
 
-Model: Unknown
+                 Update
+Checking the project

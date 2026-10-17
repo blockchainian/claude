@@ -1,0 +1,23 @@
+                 Prompt
+Session title
+
+                 Tasks               1/2
+● Working first
+○ Pending first
+
+                 Update
+Task update
+
+            Needs attention
+Open task to review.
+Waiting for your response.
+
+
+
+
+
+
+
+
+
+

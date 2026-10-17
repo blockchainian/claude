@@ -1,0 +1,13 @@
+First  ·  question 1/2
+
+Probe first page?
+
+› 1. Red
+     Red choice
+  2. Green
+     Green choice
+  3. Blue
+     Blue choice
+  4. Other
+
+↑/↓ move · Enter to confirm · Esc to close

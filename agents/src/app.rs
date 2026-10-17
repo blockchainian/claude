@@ -33,6 +33,11 @@ const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 enum Input {
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
+    LogLoaded {
+        token: u64,
+        reader: Box<dyn crate::log::Reader>,
+        result: io::Result<(LogStamp, crate::log::Update)>,
+    },
     Created {
         draft_id: DraftId,
         provider: ProviderId,
@@ -107,6 +112,11 @@ pub struct App {
     last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
+    task_log: Option<(SessionKey, PathBuf, Box<dyn crate::log::Reader>)>,
+    pending_log: Option<PendingLog>,
+    log_request: u64,
+    log_oldest_offset: u64,
+    log_parsed_bytes: u64,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
     /// When each recently active transcript's turns ran.
@@ -120,6 +130,13 @@ struct LogStamp {
     modified: std::time::SystemTime,
     length: u64,
     count: usize,
+}
+
+struct PendingLog {
+    token: u64,
+    session: SessionKey,
+    path: PathBuf,
+    visible: usize,
 }
 
 impl App {
@@ -146,6 +163,11 @@ impl App {
             last_session: None,
             log_stamp: None,
             full_log_stamp: None,
+            task_log: None,
+            pending_log: None,
+            log_request: 0,
+            log_oldest_offset: 0,
+            log_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
             activity: std::collections::HashMap::new(),
         }
@@ -158,10 +180,7 @@ impl App {
             let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
                 .ok()
                 .flatten();
-            self.apply_background(
-                background,
-                background.is_some_and(terminal_background::is_light),
-            );
+            self.apply_background(background.is_some_and(terminal_background::is_light));
             let result = self.event_loop(&mut terminal);
             leave_terminal(terminal)?;
             result?;
@@ -227,69 +246,111 @@ impl App {
                 self.view.tick_text_selection();
                 selection_tick = Instant::now();
             }
-            let action = self.view.flush_pending_click(Instant::now());
-            if self.handle_action(action) {
-                return Ok(());
-            }
             self.view.expire_messages(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
             }
             self.view.set_cell_aspect(cell_aspect());
-            terminal.draw(|frame| {
-                let area = frame.area();
-                self.refresh_log(self.view.log_event_count(area));
-                self.refresh_usage();
-                self.refresh_activity(area.width);
-                self.view.render(area, frame.buffer_mut());
-                self.view.underline_links(frame.buffer_mut());
-                if let Some((x, y)) = self.view.cursor_pos(area) {
-                    frame.set_cursor_position((x, y));
-                }
-            })?;
-            // The hidden cursor otherwise rests wherever the last repainted cell was, and a
-            // terminal's cursor-line guide follows it there; park it on the selected row's marker.
-            if self.view.cursor_pos(terminal.get_frame().area()).is_none()
-                && let Some((x, y)) = self.view.marker_pos()
-            {
-                terminal.set_cursor_position((x, y))?;
+            self.draw(terminal)?;
+            if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
+                return Ok(());
             }
-            let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
-            let timeout = self
-                .view
-                .log_redraw_in(chrono::Utc::now())
-                .map_or(timeout, |log| timeout.min(log));
-            let timeout = self
-                .view
-                .expire_messages(Instant::now())
-                .map_or(timeout, |message| timeout.min(message));
-            let timeout = self
-                .view
-                .pending_click_in(Instant::now())
-                .map_or(timeout, |click| timeout.min(click));
-            let timeout = self
-                .view
-                .timeline_redraw_in(chrono::Utc::now())
-                .map_or(timeout, |usage| timeout.min(usage));
-            let timeout =
-                crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
-            let timeout = if self.view.text_selection_dragging() {
-                timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
-            } else {
-                timeout
-            };
-            match self.receiver.recv_timeout(timeout) {
-                Ok(input) => {
-                    if self.handle_inputs(input, &mut watcher, &mut schedule)? {
-                        return Ok(());
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(io::Error::other("event readers disconnected"));
+        }
+    }
+
+    fn draw<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<(), B::Error> {
+        self.draw_at(terminal, chrono::Utc::now())
+    }
+
+    fn draw_at<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), B::Error> {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            self.refresh_log(self.view.log_event_count(area));
+            self.refresh_usage();
+            self.refresh_activity(area.width, now);
+            self.view.render_at(area, frame.buffer_mut(), now);
+            self.view.underline_links(frame.buffer_mut());
+            if let Some((x, y)) = self.view.cursor_pos(area) {
+                frame.set_cursor_position((x, y));
+            }
+        })?;
+        // The hidden cursor otherwise rests wherever the last repainted cell was, and a
+        // terminal's cursor-line guide follows it there; park it on the selected row's marker.
+        if self.view.cursor_pos(terminal.get_frame().area()).is_none()
+            && let Some((x, y)) = self.view.marker_pos()
+        {
+            terminal.set_cursor_position((x, y))?;
+        }
+        Ok(())
+    }
+
+    fn wait_for_input(
+        &mut self,
+        watcher: &mut Option<notify::RecommendedWatcher>,
+        schedule: &mut RefreshSchedule,
+        selection_tick: Instant,
+    ) -> io::Result<bool> {
+        let timeout =
+            self.input_timeout(schedule, selection_tick, Instant::now(), chrono::Utc::now());
+        match self.receiver.recv_timeout(timeout) {
+            Ok(input) => {
+                if self.handle_inputs(input, watcher, schedule)? {
+                    return Ok(true);
                 }
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(io::Error::other("event readers disconnected"));
+            }
+        }
+        let action = self.view.flush_pending_click(Instant::now());
+        Ok(self.handle_action(action))
+    }
+
+    fn input_timeout(
+        &mut self,
+        schedule: &RefreshSchedule,
+        selection_tick: Instant,
+        now: Instant,
+        wall_now: chrono::DateTime<chrono::Utc>,
+    ) -> Duration {
+        let timeout = schedule.redraw_timeout(now, self.view.has_background());
+        let timeout = self
+            .view
+            .log_redraw_in(wall_now)
+            .map_or(timeout, |log| timeout.min(log));
+        let timeout = self
+            .view
+            .tool_redraw_in(wall_now)
+            .map_or(timeout, |tool| timeout.min(tool));
+        let timeout = self
+            .view
+            .expire_messages(now)
+            .map_or(timeout, |message| timeout.min(message));
+        let timeout = self
+            .view
+            .pending_click_in(now)
+            .map_or(timeout, |click| timeout.min(click));
+        let timeout = self
+            .view
+            .timeline_redraw_in(wall_now)
+            .map_or(timeout, |usage| timeout.min(usage));
+        let timeout = crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
+        if self.view.text_selection_dragging() {
+            timeout.min(
+                Duration::from_millis(50)
+                    .saturating_sub(now.saturating_duration_since(selection_tick)),
+            )
+        } else {
+            timeout
         }
     }
 
@@ -319,6 +380,13 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::LogLoaded {
+                    token,
+                    reader,
+                    result,
+                } => {
+                    self.finish_log_load(token, reader, result);
+                }
                 Input::Created {
                     draft_id,
                     provider,
@@ -334,17 +402,22 @@ impl App {
                 }
                 Input::Sent { id, input, result } => {
                     self.pending_inputs.remove(&id);
-                    self.view.input_complete(&id, &input, result);
+                    if matches!(input, SessionInput::Interrupt) {
+                        self.refresh();
+                        if let Err(error) = result {
+                            self.input_error(&input, error.to_string());
+                        }
+                    } else {
+                        self.view.input_complete(&id, &input, result);
+                    }
                 }
             }
         }
         Ok(false)
     }
 
-    /// `background` is the terminal's reported color, when known.
-    fn apply_background(&mut self, background: Option<(u8, u8, u8)>, light: bool) {
+    fn apply_background(&mut self, light: bool) {
         crate::ui::set_light_background(light);
-        crate::theme::set_background(background, light);
         crate::theme::use_default_accents(light);
         if let Some(path) = &self.preferences.theme
             && let Err(error) = crate::theme::use_theme_file(path, light)
@@ -372,11 +445,19 @@ impl App {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::Paste(text) => {
-                self.view.handle_paste(&text);
+                if self.view.pasting_prompt() {
+                    match crate::images::ImageAttachment::from_paste(&text) {
+                        Ok(Some(image)) => self.view.attach_image(image),
+                        Ok(None) => self.view.handle_paste(&text),
+                        Err(error) => self.view.set_notice(Some(error.to_string())),
+                    }
+                } else {
+                    self.view.handle_paste(&text);
+                }
                 return false;
             }
             Event::ThemeChanged(theme) => {
-                self.apply_background(None, theme == Theme::Light);
+                self.apply_background(theme == Theme::Light);
                 return false;
             }
             _ => return false,
@@ -385,108 +466,170 @@ impl App {
     }
 
     fn refresh_log(&mut self, visible: usize) {
-        let count = visible.saturating_add(self.view.log_scroll());
+        let count = if self.view.log_start_requested || self.view.log_search.active() {
+            usize::MAX
+        } else {
+            self.view.log_read_count(visible, self.log_oldest_offset > 0)
+        };
         let selected = self
             .view
             .selected_id()
             .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
-            .and_then(|session| {
-                Some((
-                    session.id.clone(),
-                    session.transcript.clone()?,
-                    session.clone(),
-                ))
-            });
-        let Some((session, path, selected_session)) = selected else {
+            .cloned();
+        let Some(selected) = selected.filter(|session| session.transcript.is_some()) else {
             self.log_stamp = None;
             self.full_log_stamp = None;
+            self.task_log = None;
+            self.pending_log = None;
+            self.log_oldest_offset = 0;
             self.view.log.clear();
             self.view.log_session = None;
             return;
         };
-        if self.view.log_search.active() {
-            let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
-                let metadata = std::fs::metadata(&path)?;
-                let stamp = LogStamp {
-                    session: session.clone(),
-                    path: path.clone(),
-                    modified: metadata.modified()?,
-                    length: metadata.len(),
-                    count: usize::MAX,
-                };
-                if self.full_log_stamp.as_ref() == Some(&stamp) {
-                    return Ok(None);
-                }
-                let events = self.hub.provider(session.provider).log(
-                    &selected_session,
-                    usize::MAX,
-                    selected_session.parent.is_some(),
-                )?;
-                Ok(Some((stamp, events)))
-            };
-            match load() {
-                Ok(loaded) => {
-                    if let Some((stamp, events)) = loaded {
-                        self.full_log_stamp = Some(stamp);
-                        self.view.set_log(events);
+        let path = selected.transcript.as_ref().expect("transcript checked");
+        if let Some(pending) = &self.pending_log {
+            if pending.session == selected.id && &pending.path == path {
+                return;
+            }
+            self.pending_log = None;
+        }
+        if self
+            .task_log
+            .as_ref()
+            .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path)
+        {
+            match crate::providers::log_reader(&selected) {
+                Ok(reader) => {
+                    self.task_log = Some((selected.id.clone(), path.clone(), reader));
+                    self.log_oldest_offset = u64::MAX;
+                    if self.view.log_session.as_ref() != Some(&selected.id) {
+                        self.view.apply_log_update(crate::log::Update {
+                            reset: true,
+                            ..Default::default()
+                        });
+                        self.view.log_session = Some(selected.id.clone());
                     }
-                    self.log_stamp = None;
-                    self.view.log_session = Some(session);
-                    self.view
-                        .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
                 }
                 Err(error) => {
-                    self.full_log_stamp = None;
-                    self.log_stamp = None;
-                    self.view.log.clear();
-                    self.view.prepare_log_search();
-                    self.view.log_session = None;
-                    self.view
-                        .set_notice(Some(format!("Failed to read task log: {error}")));
+                    self.apply_log_result(Err(error), visible);
+                    return;
                 }
             }
+        }
+        if self.view.log_search.active() && self.log_oldest_offset > 0 {
+            let (session, path, mut reader) = self.task_log.take().expect("reader checked");
+            self.log_request += 1;
+            let token = self.log_request;
+            self.pending_log = Some(PendingLog {
+                token,
+                session: session.clone(),
+                path: path.clone(),
+                visible,
+            });
+            let sender = self.sender.clone();
+            thread::spawn(move || {
+                let result = reader.refresh(usize::MAX).and_then(|update| {
+                    let metadata = std::fs::metadata(&path)?;
+                    Ok((
+                        LogStamp {
+                            session,
+                            path,
+                            modified: metadata.modified()?,
+                            length: metadata.len(),
+                            count: usize::MAX,
+                        },
+                        update,
+                    ))
+                });
+                let _ = sender.send(Input::LogLoaded {
+                    token,
+                    reader,
+                    result,
+                });
+            });
             return;
         }
-        self.full_log_stamp = None;
-        let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
-            let metadata = std::fs::metadata(&path)?;
+        let result = (|| -> io::Result<(LogStamp, crate::log::Update)> {
+            let update = self
+                .task_log
+                .as_mut()
+                .expect("reader opened")
+                .2
+                .refresh(count)?;
+            let metadata = std::fs::metadata(path)?;
             let stamp = LogStamp {
-                session: session.clone(),
+                session: selected.id.clone(),
                 path: path.clone(),
                 modified: metadata.modified()?,
                 length: metadata.len(),
                 count,
             };
-            if self.log_stamp.as_ref() == Some(&stamp) {
-                return Ok(None);
-            }
-            let events = self.hub.provider(session.provider).log(
-                &selected_session,
-                count,
-                selected_session.parent.is_some(),
-            )?;
-            Ok(Some((stamp, events)))
+            Ok((stamp, update))
+        })();
+        self.apply_log_result(result, visible);
+    }
+
+    fn finish_log_load(
+        &mut self,
+        token: u64,
+        reader: Box<dyn crate::log::Reader>,
+        result: io::Result<(LogStamp, crate::log::Update)>,
+    ) {
+        let Some(pending) = self
+            .pending_log
+            .as_ref()
+            .filter(|pending| pending.token == token)
+        else {
+            return;
         };
-        match load() {
-            Ok(Some((mut stamp, events))) => {
-                if events.len() < count {
-                    self.view
-                        .clamp_log_scroll(events.len().saturating_sub(visible));
-                    stamp.count = visible.saturating_add(self.view.log_scroll());
+        let current = self.view.selected_id() == Some(&pending.session)
+            && self.sessions.iter().any(|session| {
+                session.id == pending.session && session.transcript.as_ref() == Some(&pending.path)
+            });
+        let pending = self.pending_log.take().expect("request checked");
+        if current {
+            self.task_log = Some((pending.session, pending.path, reader));
+            self.apply_log_result(result, pending.visible);
+        }
+    }
+
+    fn apply_log_result(
+        &mut self,
+        result: io::Result<(LogStamp, crate::log::Update)>,
+        visible: usize,
+    ) {
+        match result {
+            Ok((stamp, update)) => {
+                self.log_parsed_bytes += update.parsed_bytes;
+                self.log_oldest_offset = update.oldest_offset;
+                debug_assert!(update.oldest_offset <= update.read_offset);
+                let changed = self.view.log_page_pending()
+                    || update.reset
+                    || update.prepended > 0
+                    || update.appended > 0
+                    || update.replaced > 0;
+                if changed {
+                    self.view.apply_log_update(update);
                 }
-                self.log_stamp = Some(stamp);
-                let scroll = self.view.log_scroll();
-                self.view.set_log(events);
-                self.view.log_session = Some(session);
-                // Keeping the rows still scrolled further back than the loaded window reaches.
-                if self.view.log_scroll() > scroll {
-                    self.refresh_log(visible);
+                self.view.finish_log_start();
+                self.view.log_session = Some(stamp.session.clone());
+                self.view
+                    .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
+                if self.view.log_search.active() {
+                    self.full_log_stamp = Some(stamp);
+                    self.log_stamp = None;
+                } else {
+                    self.full_log_stamp = None;
+                    self.log_stamp = Some(stamp);
                 }
             }
-            Ok(None) => {}
             Err(error) => {
+                self.task_log = None;
+                self.log_oldest_offset = 0;
                 self.log_stamp = None;
+                self.full_log_stamp = None;
                 self.view.log.clear();
+                self.view.prepare_log_search();
                 self.view.log_session = None;
                 self.view
                     .set_notice(Some(format!("Failed to read task log: {error}")));
@@ -496,8 +639,7 @@ impl App {
 
     /// Reads when each task worked within a timeline `width` cells wide and hands the view the
     /// bins any of them worked in; a task idle since before the timeline is not read.
-    fn refresh_activity(&mut self, width: u16) {
-        let now = chrono::Utc::now();
+    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
         let since = now - chrono::Duration::seconds(crate::ui::timeline_seconds(width));
         let mut bins = std::collections::BTreeSet::new();
         for session in &self.sessions {
@@ -554,15 +696,23 @@ impl App {
     /// Returns true when the dashboard should close.
     fn send_input(&mut self, id: SessionKey, input: SessionInput) {
         let Some(session) = self.session(&id) else {
-            self.view.input_failed("Task is no longer available".into());
+            self.input_error(&input, "Task is no longer available".into());
             return;
         };
         let Some(job) = self.hub.provider(id.provider).send(&session, input.clone()) else {
-            self.view
-                .input_failed("This task cannot receive that input".into());
+            self.input_error(&input, "This task cannot receive that input".into());
             return;
         };
         self.start_input_job(id, input, job);
+    }
+
+    fn input_error(&mut self, input: &SessionInput, error: String) {
+        if matches!(input, SessionInput::Interrupt) {
+            self.view
+                .set_notice(Some(format!("Failed to stop: {error}")));
+        } else {
+            self.view.input_failed(error);
+        }
     }
 
     fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
@@ -571,9 +721,13 @@ impl App {
                 .set_notice(Some("Input is still being sent".into()));
             return false;
         }
-        self.view.input_sending(&id);
+        let interrupt = matches!(input, SessionInput::Interrupt);
+        if !interrupt {
+            self.view.input_sending(&id, &input);
+        }
         let sender = self.sender.clone();
         let target = id.clone();
+        let sent_input = input.clone();
         match thread::Builder::new()
             .name("agents-send".into())
             .spawn(move || {
@@ -581,14 +735,19 @@ impl App {
                     .unwrap_or_else(|_| Err(io::Error::other("Input job panicked")));
                 let _ = sender.send(Input::Sent {
                     id: target,
-                    input,
+                    input: sent_input,
                     result,
                 });
             }) {
             Ok(_) => true,
             Err(error) => {
                 self.pending_inputs.remove(&id);
-                self.view.input_failed(error.to_string());
+                if interrupt {
+                    self.view
+                        .set_notice(Some(format!("Failed to stop: {error}")));
+                } else {
+                    self.view.input_complete(&id, &input, Err(error));
+                }
                 false
             }
         }
@@ -601,14 +760,19 @@ impl App {
                 .task_defaults()
                 .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
             let defaults = defaults?;
-            let repository = crate::tasks::repository(&cwd)?;
+            let cwd = std::fs::canonicalize(cwd)?;
+            let repository = crate::tasks::repository_if_present(&cwd)?;
+            let (cwd, branch, trunk) = match repository {
+                Some(repository) => (repository.directory, repository.branch, repository.trunk),
+                None => (cwd, String::new(), String::new()),
+            };
             Ok(crate::ui::DraftSetup {
                 provider,
-                cwd: repository.directory,
+                cwd,
                 model: defaults.model,
                 effort: defaults.effort,
-                branch: repository.branch,
-                trunk: repository.trunk,
+                branch,
+                trunk,
             })
         })();
         match result {
@@ -627,13 +791,13 @@ impl App {
         provider: ProviderId,
         request: crate::tasks::NewTask,
     ) {
-        let command = self
+        let job = self
             .hub
             .provider(provider)
             .create(&request)
             .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
-        let mut command = match command {
-            Ok(command) => command,
+        let job = match job {
+            Ok(job) => job,
             Err(error) => {
                 self.view.draft_created(draft_id, Err(error));
                 return;
@@ -643,9 +807,8 @@ impl App {
         if let Err(error) = thread::Builder::new()
             .name("agents-create".into())
             .spawn(move || {
-                let result =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| command.output()))
-                        .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
                 let _ = sender.send(Input::Created {
                     draft_id,
                     provider,
@@ -708,6 +871,13 @@ impl App {
             return false;
         }
         match action {
+            Action::Batch(actions) => {
+                for action in actions {
+                    if self.handle_action(Some(action)) {
+                        return true;
+                    }
+                }
+            }
             Action::Quit => return true,
             Action::NewDraft { cwd } => self.new_draft(cwd),
             Action::CreateTask {
@@ -727,6 +897,32 @@ impl App {
             Action::SendPrompt { id, text } => {
                 self.send_input(id, SessionInput::Prompt(text));
             }
+            Action::AnswerQuestions { ask, answer } => {
+                let id = ask.session.clone();
+                if let Some(transcript) = self
+                    .session(&id)
+                    .and_then(|session| session.transcript.clone())
+                {
+                    self.send_input(
+                        id,
+                        SessionInput::Answer {
+                            ask,
+                            answer,
+                            transcript,
+                        },
+                    );
+                } else {
+                    self.view
+                        .set_notice(Some("Session has no transcript".into()));
+                }
+            }
+            Action::SendImages { id, text, images } => {
+                self.send_input(id, SessionInput::PromptWithImages { text, images })
+            }
+            Action::PasteImage => match self.clipboard.image() {
+                Ok(image) => self.view.attach_image(image),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            },
             Action::Back => {
                 let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {
@@ -929,20 +1125,29 @@ impl crossterm::Command for MouseReports {
     }
 }
 
+#[path = "app_keyboard.rs"]
+mod keyboard;
+
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(
         stdout,
         terminal::EnterAlternateScreen,
-        crossterm::event::EnableBracketedPaste
+        crossterm::event::EnableBracketedPaste,
+        crossterm::event::PushKeyboardEnhancementFlags(
+            crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        )
     )?;
+    keyboard::enable_tmux_keys(&mut stdout)?;
     Terminal::new(CrosstermBackend::new(stdout))
 }
 
 fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     let reports = crossterm::execute!(
         terminal.backend_mut(),
+        crossterm::event::PopKeyboardEnhancementFlags,
+        keyboard::ModifyOtherKeys(false),
         crossterm::event::DisableThemeChangeReports,
         crossterm::event::DisableBracketedPaste,
         MouseReports::Disable
@@ -956,6 +1161,10 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 #[cfg(test)]
 #[path = "providers/claude/app_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_overlay_tests.rs"]
+mod overlay_tests;
 
 /// How many times taller than wide one terminal cell is, when the terminal reports its pixels.
 fn cell_aspect() -> Option<f64> {
@@ -971,3 +1180,23 @@ fn cell_aspect() -> Option<f64> {
 #[cfg(test)]
 #[path = "app_input_tests.rs"]
 mod input_tests;
+
+#[cfg(test)]
+#[path = "app_ui_tests.rs"]
+mod ui_tests;
+
+#[cfg(test)]
+#[path = "app_live_tests.rs"]
+pub(crate) mod live_tests;
+
+#[cfg(test)]
+#[path = "app_loop_tests.rs"]
+mod loop_tests;
+
+#[cfg(test)]
+#[path = "app_project_tests.rs"]
+mod project_tests;
+
+#[cfg(test)]
+#[path = "app_log_search_tests.rs"]
+mod log_search_tests;

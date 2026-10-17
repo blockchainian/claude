@@ -14,6 +14,27 @@ pub(super) struct Link {
 /// A link on screen: the cells it covers and what it opens.
 pub(super) type DrawnLink = (Rect, PathBuf);
 
+/// Removes the covered cells of single-row links, keeping their visible ends.
+pub(super) fn cover(links: &mut Vec<DrawnLink>, area: Rect) {
+    *links = links
+        .drain(..)
+        .flat_map(|(rect, target)| {
+            if !rect.intersects(area) {
+                return vec![(rect, target)];
+            }
+            let covered = rect.intersection(area);
+            [
+                Rect::new(rect.x, rect.y, covered.x - rect.x, 1),
+                Rect::new(covered.right(), rect.y, rect.right() - covered.right(), 1),
+            ]
+            .into_iter()
+            .filter(|rect| !rect.is_empty())
+            .map(|rect| (rect, target.clone()))
+            .collect()
+        })
+        .collect();
+}
+
 /// The existing paths in `text`, and the label of each of `images`.
 pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -> Vec<Link> {
     let mut links = markdown_links(text, cwd);
