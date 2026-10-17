@@ -1016,16 +1016,14 @@ impl View {
                     KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
                         dialog.confirm = !dialog.confirm;
                     }
-                    // Codex's number shortcuts: 1 accepts Cancel at once; 2 accepts archive
-                    // at once, while the delete item requires explicit confirmation, so 2
-                    // only selects it.
+                    // Each item's number accepts it at once.
                     KeyCode::Char('1') => self.confirm_dialog = None,
-                    KeyCode::Char('2') if matches!(dialog.removal, Removal::Archive) => {
+                    KeyCode::Char('2') => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         return Some(dialog.action());
                     }
                     KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
-                    KeyCode::End | KeyCode::PageDown | KeyCode::Char('2') => dialog.confirm = true,
+                    KeyCode::End | KeyCode::PageDown => dialog.confirm = true,
                     _ => {}
                 }
             } else if key.modifiers.contains(KeyModifiers::CONTROL) {

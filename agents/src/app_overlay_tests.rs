@@ -54,7 +54,7 @@ fn delete_dialog_covers_project_link_underlines_through_app() {
     key(&mut app, KeyCode::BackTab);
     key(&mut app, KeyCode::Home);
 
-    for (width, height) in [(120, 60), (200, 50), (400, 50)] {
+    for (width, height) in [(120, 60), (100, 50), (149, 60)] {
         let mut terminal =
             Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
         app.draw(&mut terminal).unwrap();

@@ -64,6 +64,8 @@ pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
 
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
+    /// The panels above the prompt, where global dialogs center.
+    pub(super) top: Rect,
     pub(super) list: Rect,
     pub(super) gap: Rect,
     pub(super) details: Rect,
@@ -128,6 +130,7 @@ impl View {
             )
         };
         let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
+        let top = body;
         let prompt = row(
             area,
             header_height + top_height + u16::from(show_log),
@@ -192,6 +195,7 @@ impl View {
         };
         CenterLayout {
             header,
+            top,
             list,
             gap,
             details,
@@ -488,7 +492,7 @@ impl View {
         }
         self.render_controls(details, buf);
         if let Some(dialog) = &self.confirm_dialog {
-            self.render_confirm_dialog(dialog, layout.list, buf);
+            self.render_confirm_dialog(dialog, layout.top, buf);
             self.viewport.borrow_mut().marker = None;
         }
     }
@@ -550,7 +554,14 @@ impl View {
             height,
         );
         Clear.render(dialog, buf);
-        super::links::cover(&mut self.viewport.borrow_mut().list_links, dialog);
+        let viewport = &mut *self.viewport.borrow_mut();
+        for links in [
+            &mut viewport.list_links,
+            &mut viewport.details_links,
+            &mut viewport.log_links,
+        ] {
+            super::links::cover(links, dialog);
+        }
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
         block.render(dialog, buf);

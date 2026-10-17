@@ -2151,7 +2151,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     key(&mut view, KeyCode::Esc);
     assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
-    assert_eq!(key(&mut view, KeyCode::Char('2')), None);
+    assert_eq!(key(&mut view, KeyCode::End), None);
     assert!(view.confirm_dialog.as_ref().unwrap().confirm);
     for code in [
         KeyCode::Char('o'),
@@ -2291,7 +2291,7 @@ fn live_center_delete_dialog() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(
-        buf[(6, 4)]
+        buf[(6, 5)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
@@ -2299,7 +2299,7 @@ fn live_center_delete_dialog() {
     // A painted cell reports unset colours as Reset, so compare against a painted default cell.
     let mut expected = ratatui::buffer::Cell::default();
     expected.set_style(super::style::selection_style());
-    assert_eq!(buf[(6, 10)].style(), expected.style());
+    assert_eq!(buf[(6, 9)].style(), expected.style());
     for width in 0..100 {
         for height in 0..16 {
             let area = Rect::new(5, 8, width, height);
@@ -2309,22 +2309,58 @@ fn live_center_delete_dialog() {
 }
 
 #[test]
-fn delete_dialog_number_shortcuts_follow_codex() {
+fn delete_dialog_number_shortcuts_accept_at_once() {
     let mut view = fixture();
     key(&mut view, KeyCode::Backspace);
     assert!(view.confirm_dialog.is_some());
     assert_eq!(key(&mut view, KeyCode::Char('1')), None);
     assert!(view.confirm_dialog.is_none(), "1 accepts Cancel at once");
     key(&mut view, KeyCode::Backspace);
-    assert_eq!(key(&mut view, KeyCode::Char('2')), None);
-    assert!(
-        view.confirm_dialog.is_some(),
-        "2 only selects the delete item"
-    );
     assert_eq!(
-        key(&mut view, KeyCode::Enter),
+        key(&mut view, KeyCode::Char('2')),
         Some(Action::Delete(session_key("42")))
     );
+    assert!(view.confirm_dialog.is_none());
+}
+
+#[test]
+fn removal_dialog_centers_on_the_panels_above_the_prompt() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Backspace);
+    for width in [120, 200] {
+        let area = Rect::new(0, 0, width, 48);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        let layout = view.center_layout(area);
+        let right = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+            layout.log.right()
+        } else {
+            layout.details.right()
+        };
+        let (left, top) = (0..area.height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .find(|&(x, y)| buf[(x, y)].symbol() == "┌")
+            .expect("dialog border is drawn");
+        let dialog_right = (left..width)
+            .find(|&x| buf[(x, top)].symbol() == "┐")
+            .unwrap()
+            + 1;
+        let bottom = (top..area.height)
+            .find(|&y| buf[(left, y)].symbol() == "└")
+            .unwrap()
+            + 1;
+        assert!(
+            (left - layout.list.x).abs_diff(right - dialog_right) <= 1,
+            "width {width}: {left}..{dialog_right} in {}..{right}",
+            layout.list.x
+        );
+        assert!(
+            (top - layout.list.y).abs_diff(layout.list.bottom() - bottom) <= 1,
+            "width {width}: {top}..{bottom} in {}..{}",
+            layout.list.y,
+            layout.list.bottom()
+        );
+    }
 }
 
 #[test]

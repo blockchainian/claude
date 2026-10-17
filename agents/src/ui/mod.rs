@@ -36,6 +36,7 @@ mod style;
 mod text_selection;
 mod text_selection_layout;
 mod timeline;
+mod title_row;
 mod title_rule;
 mod tool_detail;
 mod usage_chart;
