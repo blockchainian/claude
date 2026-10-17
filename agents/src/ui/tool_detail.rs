@@ -1,11 +1,11 @@
 //! The calls of an open tool row as the parts the log panel draws and copies.
 
 use super::content::{Block, Kind as ContentKind};
+use super::detail_model::{Detail, Group, Section as DetailSection, TitleRow};
 use super::highlight;
 use crate::log::{Event, Kind, Section};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
 
 #[cfg(test)]
 thread_local! {
@@ -29,14 +29,10 @@ fn record_json_scan(bytes: usize) {
 /// how that text turns into lines.
 pub(super) struct Part {
     pub source: String,
-    /// Parts sharing a section use the same horizontal offset.
-    pub group: Option<usize>,
     body: Body,
 }
 
 enum Body {
-    /// A merged call's title and duration, with the event header used to size its rule.
-    TitleRule(Option<String>, String, Option<String>),
     /// A section label, in the given style.
     Label(Style),
     /// An input/output arrow without selectable source bytes.
@@ -66,8 +62,7 @@ impl Body {
     fn content_kind(&self) -> ContentKind {
         match self {
             Self::Markdown | Self::Prose(_) => ContentKind::Prose,
-            Self::TitleRule(..)
-            | Self::Label(_)
+            Self::Label(_)
             | Self::Arrow
             | Self::Running
             | Self::Fields(_)
@@ -86,7 +81,6 @@ impl Part {
     fn new(source: impl Into<String>, body: Body) -> Self {
         Part {
             source: source.into(),
-            group: None,
             body,
         }
     }
@@ -126,9 +120,6 @@ impl Part {
             && let Some(text) = text_boundary(&source[text_start..], text_start > 0, false)
         {
             parts.push(Self::text_fragment(text.into(), markdown));
-        }
-        for part in &mut parts {
-            part.group = Some(0);
         }
         parts
     }
@@ -199,40 +190,7 @@ impl Part {
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
-        if !matches!(self.body, Body::TitleRule(..)) {
-            return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
-        }
-        lines
-            .iter()
-            .map(|line| {
-                if line.spans.len() < 4 {
-                    return Vec::new();
-                }
-                let padding = line.spans[0].width() as u16;
-                let mut content = Line::from(line.spans[1..line.spans.len() - 2].to_vec());
-                let truncated = content.width() > 0
-                    && self.source.replace('\t', "    ").width() > content.width();
-                if truncated {
-                    content.spans.pop(); // The ellipsis selects the remaining title bytes.
-                }
-                let mut maps = super::text_selection_layout::map_lines(
-                    &self.source,
-                    std::slice::from_ref(&content),
-                    false,
-                );
-                let cells = &mut maps[0];
-                if truncated {
-                    let start = cells.last().map_or(0, |(_, bytes)| bytes.end);
-                    let column = content.width() as u16;
-                    cells.push((column..column + 1, start..self.source.len()));
-                }
-                for (range, _) in cells.iter_mut() {
-                    range.start += padding;
-                    range.end += padding;
-                }
-                maps.remove(0)
-            })
-            .collect()
+        super::text_selection_layout::map_lines(&self.source, lines, self.markdown())
     }
 
     /// The decoration drawn in the column left of each line, outside its source map.
@@ -266,7 +224,7 @@ impl Part {
             .into_iter()
             .flat_map(|block| block.layout(options.clone()))
             .collect();
-        if matches!(self.body, Body::TitleRule(..) | Body::Arrow) {
+        if matches!(self.body, Body::Arrow) {
             return lines;
         }
         lines
@@ -288,18 +246,6 @@ impl Part {
         let drawn = self.source.replace('\t', "    ");
         let source = drawn.as_str();
         match &self.body {
-            Body::TitleRule(time, header, summary) => {
-                vec![if let Some(summary) = summary {
-                    input_title_bar(
-                        summary,
-                        Line::from(source.to_owned()),
-                        width,
-                        time.as_deref().unwrap_or(""),
-                    )
-                } else {
-                    call_title_rule(source, width, time.as_deref(), header)
-                }]
-            }
             Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
             Body::Arrow => {
                 let row = if width > 0 { "↓" } else { "" };
@@ -565,101 +511,174 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
     printer.lines
 }
 
-/// Per-call inputs and outputs, with titles for merged calls and display-only rules.
-pub(super) fn parts(event: &Event) -> Vec<Part> {
+/// Build the event title and the sections of aligned input and output groups.
+pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     let label_style = super::style::log_styles(&event.kind).0;
-    let error_style = super::style::log_styles(&Kind::Error).0;
-    let mut parts = Vec::new();
-    for (index, call) in event.calls.iter().enumerate() {
-        if index > 0 {
-            // A blank row ends the previous call's output.
-            parts.push(Part::new("", Body::Text));
+    let mut header = Vec::new();
+    if let Some(sender) = &event.sender {
+        header.push(Span::styled(format!("({sender}) "), label_style));
+    }
+    if event.kind != Kind::Tool {
+        header.push(Span::styled(
+            super::log::kind_label(&event.kind),
+            label_style,
+        ));
+    }
+    if event.kind == Kind::Tool || super::log::shows_calls(event) {
+        if event.kind != Kind::Tool {
+            header.push(Span::raw(" "));
         }
-        if event.calls.len() > 1 {
-            let time = call.duration.map(super::formatting::format_log_duration);
-            let mut header = String::new();
-            if let Some(sender) = &event.sender {
-                header.push_str(&format!("({sender}) "));
+        let title = match event.calls.as_slice() {
+            [call] => call_title(call),
+            _ => event.body.clone(),
+        };
+        header.push(Span::styled(title, label_style));
+    }
+    let left = match event.calls.as_slice() {
+        [call] => left_details(call).0,
+        _ => None,
+    };
+    let sections = if super::log::shows_calls(event) {
+        parts(event)
+    } else if event.kind == Kind::Tool {
+        Vec::new()
+    } else {
+        let parts = if matches!(
+            event.kind,
+            Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
+        ) {
+            vec![Part::prose(event.body.clone(), true)]
+        } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
+            Part::prose_parts(event.body.clone(), false)
+        } else {
+            Part::text_parts(event.body.clone(), false)
+        };
+        vec![DetailSection {
+            title: None,
+            groups: vec![Group { parts }],
+        }]
+    };
+    Detail {
+        title: TitleRow {
+            left,
+            title: Line::from(header),
+            rule: false,
+            time: Some(time),
+            meta_style,
+        },
+        sections,
+    }
+}
+
+fn call_title(call: &crate::log::ToolCall) -> String {
+    if input_label(call).is_some() {
+        crate::log::display_tool_name(&call.name)
+    } else {
+        call.title.clone()
+    }
+}
+
+/// Choose the left slot once for both event and call titles, keeping displaced details.
+fn left_details(call: &crate::log::ToolCall) -> (Option<String>, Vec<Part>) {
+    let input = input_label(call);
+    let task = (call.name == "task-notification").then(|| format!("Task {}", call.id));
+    let header = call.agent.as_ref().and_then(|agent| agent.header.clone());
+    let left = input
+        .clone()
+        .or_else(|| task.clone())
+        .or_else(|| header.clone());
+    let mut body = Vec::new();
+    if let Some(task) = task
+        && left.as_ref() != Some(&task)
+    {
+        body.push(Part::text(task, false));
+    }
+    if let Some(agent) = &call.agent {
+        if input.is_some() {
+            if let Some(header) = header {
+                body.push(Part::text(header, false));
             }
-            if event.kind != Kind::Tool {
-                header.push_str(super::log::kind_label(&event.kind));
-                header.push(' ');
-            }
-            header.push_str(&event.body);
-            parts.push(Part::new(
-                if input_label(call).is_some() {
-                    crate::log::display_tool_name(&call.name)
-                } else {
-                    call.title.clone()
-                },
-                Body::TitleRule(time, header, input_label(call)),
-            ));
-        }
-        if let Some(agent) = &call.agent {
-            if input_label(call).is_some() {
-                if let Some(header) = &agent.header {
-                    parts.push(Part::text(header.clone(), false));
-                }
-            } else {
-                parts.push(Part::text(agent.label.clone(), false));
-            }
-        }
-        let input_start = parts.len();
-        let label_key = input_label_field(call).map(|(key, _)| key);
-        for section in &call.input {
-            if let Section::Fields(fields) = section {
-                let body = Section::Fields(
-                    fields
-                        .iter()
-                        .filter(|(key, _)| Some(key.as_str()) != label_key)
-                        .cloned()
-                        .collect(),
-                );
-                push_section(&mut parts, &body, label_style, false);
-            } else {
-                push_section(&mut parts, section, label_style, false);
-            }
-        }
-        for part in &mut parts[input_start..] {
-            part.group = Some(input_start);
-        }
-        if let Some(code) = call.exit_code {
-            parts.push(Part::new("", Body::Arrow));
-            let status_start = parts.len();
-            push_section(
-                &mut parts,
-                &Section::Fields(vec![("exit code".into(), code.to_string())]),
-                label_style,
-                false,
-            );
-            for part in &mut parts[status_start..] {
-                part.group = Some(status_start);
-            }
-        }
-        // The arrow leads to the output, or to the running animation that the output replaces.
-        parts.push(Part::new("", Body::Arrow));
-        match &call.output {
-            Some(output) => {
-                let output_start = parts.len();
-                if output.is_empty() {
-                    parts.push(Part::new("(no output)", Body::Text));
-                }
-                let style = if call.is_error {
-                    error_style
-                } else {
-                    label_style
-                };
-                for section in output {
-                    push_section(&mut parts, section, style, true);
-                }
-                for part in &mut parts[output_start..] {
-                    part.group = Some(output_start);
-                }
-            }
-            None => parts.push(Part::new("", Body::Running)),
+        } else {
+            body.push(Part::text(agent.label.clone(), false));
         }
     }
-    parts
+    (left, body)
+}
+
+/// One section per call; arrows are independent alignment groups.
+fn parts(event: &Event) -> Vec<DetailSection> {
+    let label_style = super::style::log_styles(&event.kind).0;
+    let error_style = super::style::log_styles(&Kind::Error).0;
+    event
+        .calls
+        .iter()
+        .map(|call| {
+            let (left, mut input) = left_details(call);
+            let title = (event.calls.len() > 1).then(|| TitleRow {
+                left,
+                title: Line::styled(call_title(call), label_style),
+                rule: input_label(call).is_none(),
+                time: call.duration.map(super::formatting::format_log_duration),
+                meta_style: Style::new().dim(),
+            });
+            let label_key = input_label_field(call).map(|(key, _)| key);
+            for section in &call.input {
+                if let Section::Fields(fields) = section {
+                    let body = Section::Fields(
+                        fields
+                            .iter()
+                            .filter(|(key, _)| Some(key.as_str()) != label_key)
+                            .cloned()
+                            .collect(),
+                    );
+                    push_section(&mut input, &body, label_style, false);
+                } else {
+                    push_section(&mut input, section, label_style, false);
+                }
+            }
+            let mut groups = Vec::new();
+            if !input.is_empty() {
+                groups.push(Group { parts: input });
+            }
+            if let Some(code) = call.exit_code {
+                groups.push(Group {
+                    parts: vec![Part::new("", Body::Arrow)],
+                });
+                let mut status = Vec::new();
+                push_section(
+                    &mut status,
+                    &Section::Fields(vec![("exit code".into(), code.to_string())]),
+                    label_style,
+                    false,
+                );
+                groups.push(Group { parts: status });
+            }
+            groups.push(Group {
+                parts: vec![Part::new("", Body::Arrow)],
+            });
+            let mut output_parts = Vec::new();
+            match &call.output {
+                Some(output) => {
+                    if output.is_empty() {
+                        output_parts.push(Part::new("(no output)", Body::Text));
+                    }
+                    let style = if call.is_error {
+                        error_style
+                    } else {
+                        label_style
+                    };
+                    for section in output {
+                        push_section(&mut output_parts, section, style, true);
+                    }
+                }
+                None => output_parts.push(Part::new("", Body::Running)),
+            }
+            groups.push(Group {
+                parts: output_parts,
+            });
+            DetailSection { title, groups }
+        })
+        .collect()
 }
 
 fn free_text(key: &str) -> bool {
@@ -865,6 +884,7 @@ mod tests {
     use super::*;
     use crate::log::ToolCall;
     use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
 
     fn event(calls: Vec<ToolCall>) -> Event {
         Event {
@@ -883,12 +903,128 @@ mod tests {
         }
     }
 
+    fn flattened_parts(event: &Event) -> Vec<Part> {
+        parts(event)
+            .into_iter()
+            .flat_map(|section| section.groups)
+            .flat_map(|group| group.parts)
+            .collect()
+    }
+
     fn texts(parts: &[Part], width: usize) -> Vec<String> {
         parts
             .iter()
             .flat_map(|part| part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH))
             .map(|line| line.to_string())
             .collect()
+    }
+
+    #[test]
+    fn call_details_use_the_same_left_slot_and_keep_displaced_agent_details() {
+        let mut call = ToolCall {
+            agent: Some(crate::log::Agent {
+                label: "Explore source".into(),
+                header: Some("explore".into()),
+            }),
+            id: "call-id".into(),
+            title: "Inspect source".into(),
+            name: "Agent".into(),
+            input: vec![Section::Fields(vec![
+                ("description".into(), "Inspect source".into()),
+                ("prompt".into(), "Find the entry".into()),
+            ])],
+            output: None,
+            exit_code: Some(1),
+            is_error: true,
+            duration: Some(chrono::Duration::seconds(12)),
+        };
+        for count in [1, 2] {
+            let meta_style = Style::new().italic();
+            let detail = detail(
+                &event(vec![call.clone(); count]),
+                "10:11:12".into(),
+                meta_style,
+            );
+            assert_eq!(detail.title.time.as_deref(), Some("10:11:12"));
+            assert_eq!(detail.title.meta_style, meta_style);
+            assert!(!detail.title.rule);
+            let section = &detail.sections[0];
+            let title = if count == 1 {
+                assert!(section.title.is_none());
+                &detail.title
+            } else {
+                section.title.as_ref().unwrap()
+            };
+            assert_eq!(title.left.as_deref(), Some("Inspect source"));
+            assert_eq!(
+                title.title.to_string(),
+                crate::log::display_tool_name("Agent")
+            );
+            assert!(!title.rule);
+            if count > 1 {
+                assert_eq!(title.time.as_deref(), Some("12s"));
+                assert_eq!(title.meta_style, Style::new().dim());
+            }
+            assert_eq!(section.groups.len(), 5);
+            assert_eq!(section.groups[0].parts[0].source, "explore");
+            assert_eq!(section.groups[0].parts[1].source, "Find the entry");
+            assert!(matches!(section.groups[1].parts[0].body, Body::Arrow));
+            assert_eq!(section.groups[2].parts[0].source, "exit code: 1");
+            assert!(matches!(section.groups[3].parts[0].body, Body::Arrow));
+            assert!(section.groups[4].parts[0].running());
+        }
+        call.input.clear();
+        assert_eq!(left_details(&call).0.as_deref(), Some("explore"));
+        assert_eq!(left_details(&call).1[0].source, "Explore source");
+        call.name = "task-notification".into();
+        assert_eq!(left_details(&call).0.as_deref(), Some("Task call-id"));
+    }
+
+    #[test]
+    fn event_details_cover_message_queue_text_and_empty_tools() {
+        for kind in [
+            Kind::User,
+            Kind::Compaction,
+            Kind::Assistant,
+            Kind::Agent,
+            Kind::Session,
+            Kind::Error,
+            Kind::Denied,
+            Kind::QueuedUser,
+            Kind::QueuedSystem,
+            Kind::Tool,
+        ] {
+            let mut event = event(vec![]);
+            event.kind = kind.clone();
+            event.sender = Some("peer".into());
+            event.body = "before {\"ok\":true} after".into();
+            let detail = detail(&event, "event time".into(), Style::new().dim());
+            assert_eq!(detail.title.time.as_deref(), Some("event time"));
+            let expected = if kind == Kind::Tool {
+                format!("(peer) {}", event.body)
+            } else {
+                format!("(peer) {}", super::super::log::kind_label(&kind))
+            };
+            assert_eq!(detail.title.title.to_string(), expected);
+            if kind == Kind::Tool {
+                assert!(detail.sections.is_empty());
+                continue;
+            }
+            assert_eq!(detail.sections.len(), 1);
+            assert!(detail.sections[0].title.is_none());
+            assert_eq!(detail.sections[0].groups.len(), 1);
+            let parts = &detail.sections[0].groups[0].parts;
+            if matches!(
+                kind,
+                Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
+            ) {
+                assert_eq!(parts.len(), 1);
+                assert!(parts[0].markdown());
+            } else {
+                assert_eq!(parts.len(), 3);
+                assert!(matches!(parts[1].body, Body::Json(_)));
+            }
+        }
     }
 
     #[test]
@@ -927,7 +1063,7 @@ mod tests {
 
     #[test]
     fn running_part_has_no_copy_source_or_selectable_cells() {
-        let parts = parts(&event(vec![ToolCall {
+        let parts = flattened_parts(&event(vec![ToolCall {
             agent: None,
             id: "running-copy".into(),
             title: "Bash".into(),
@@ -1356,8 +1492,8 @@ mod tests {
     }
 
     #[test]
-    fn merged_calls_start_with_title_rules_and_end_with_content() {
-        let parts = parts(&event(vec![
+    fn merged_calls_keep_separate_sections_and_groups() {
+        let sections = parts(&event(vec![
             ToolCall {
                 agent: None,
                 id: "Bash-fixture".into(),
@@ -1391,36 +1527,42 @@ mod tests {
                 duration: None,
             },
         ]));
+        assert_eq!(sections.len(), 2);
+        for (section, title) in sections.iter().zip(["Bash", "Read"]) {
+            assert_eq!(section.title.as_ref().unwrap().title.to_string(), title);
+            assert!(section.title.as_ref().unwrap().rule);
+            assert_eq!(section.groups.len(), 3);
+            assert!(matches!(section.groups[1].parts[0].body, Body::Arrow));
+        }
+        let parts: Vec<_> = sections
+            .into_iter()
+            .flat_map(|section| section.groups)
+            .flat_map(|group| group.parts)
+            .collect();
         assert_eq!(
             parts
                 .iter()
                 .map(|part| part.source.as_str())
                 .collect::<Vec<_>>(),
             [
-                "Bash",
                 "cargo test\n",
                 "",
                 "running 3 tests\n...",
-                "",
-                "Read",
                 "agents/src/log.rs:1-40",
                 "",
-                "",
+                ""
             ]
         );
         assert_eq!(
             texts(&parts, 80),
             [
-                &format!("{}─ Bash ─{}", " ".repeat(36), " ".repeat(36)),
                 "cargo test",
                 "↓",
                 "running 3 tests",
                 "...",
-                "",
-                &format!("{}─ Read ─{}", " ".repeat(36), " ".repeat(36)),
                 "agents/src/log.rs:1-40",
                 "↓",
-                "•··",
+                "•··"
             ]
         );
     }
@@ -1442,14 +1584,7 @@ mod tests {
                 };
                 count
             ];
-            let parts = parts(&event(calls));
-            assert_eq!(
-                parts
-                    .iter()
-                    .filter(|part| matches!(part.body, Body::TitleRule(..)))
-                    .count(),
-                if count == 1 { 0 } else { 2 }
-            );
+            let parts = flattened_parts(&event(calls));
             for part in parts.iter().filter(|part| matches!(part.body, Body::Arrow)) {
                 for width in 0..=40 {
                     let lines =
@@ -1465,7 +1600,7 @@ mod tests {
 
     #[test]
     fn wide_code_and_diff_keep_logical_lines() {
-        let parts = parts(&event(vec![ToolCall {
+        let parts = flattened_parts(&event(vec![ToolCall {
             agent: None,
             id: "Edit-fixture".into(),
             title: "Edit".into(),
@@ -1500,7 +1635,7 @@ mod tests {
 
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
-        let parts = parts(&event(vec![ToolCall {
+        let parts = flattened_parts(&event(vec![ToolCall {
             agent: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
