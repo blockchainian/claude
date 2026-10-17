@@ -802,17 +802,23 @@ fn render_event(
     let mut body = fitted.line;
     let padding = body_width.saturating_sub(body.width()) / 2;
     let body_x = content_area.x + padding as u16;
+    let clipped = body.width() > body_width;
+    let visible = if clipped {
+        body_width.saturating_sub(1)
+    } else {
+        body_width
+    } as u16;
+    // Match the full row so a match crossing the right edge still highlights its prefix.
+    let indices = search
+        .filter(|search| !search.query.is_empty())
+        .map(|search| search.indices(&body.to_string()));
+    body = truncate_line_with_ellipsis_if_overflow(body, body_width);
     let links = {
         let links = if is_prose(&event.kind) || event.kind == Kind::QueuedUser {
             super::links::text_links(&fitted.source, cwd, &event.images)
         } else {
             super::links::path_links(&fitted.source, &fitted.paths, cwd)
         };
-        let visible = if body.width() > body_width {
-            body_width.saturating_sub(1)
-        } else {
-            body_width
-        } as u16;
         let mut maps = super::text_selection_layout::map_lines(
             &fitted.source,
             std::slice::from_ref(&body),
@@ -830,10 +836,15 @@ fn render_event(
             &links,
         )
     };
-    if let Some(search) = search {
-        highlight_matches(&mut body, search);
+    if let Some(indices) = indices {
+        let ellipsis = if clipped { body.spans.pop() } else { None };
+        highlight_indices(&mut body, &indices);
+        if let Some(mut ellipsis) = ellipsis {
+            ellipsis.style = body.spans.last().map(|span| span.style).unwrap_or_default();
+            body.spans.push(ellipsis);
+        }
     }
-    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
+    body.render(
         Rect::new(body_x, area.y, (body_width - padding) as u16, 1),
         buf,
     );
@@ -1210,6 +1221,12 @@ fn collapse_whitespace(text: &str) -> String {
 fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSearch) {
     if !search.query.is_empty() {
         let indices = search.indices(&line.to_string());
+        highlight_indices(line, &indices);
+    }
+}
+
+fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
+    if !indices.is_empty() {
         let mut offset = 0u32;
         line.spans = std::mem::take(&mut line.spans)
             .into_iter()
