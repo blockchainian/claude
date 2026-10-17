@@ -497,6 +497,10 @@ impl View {
             if self.branch_editor.is_some() {
                 return None;
             }
+            let details = self.viewport.borrow().details;
+            if self.selected_draft.is_some() && details.contains(position) {
+                return self.browse_click(mouse.row - details.y);
+            }
             let field = self
                 .viewport
                 .borrow()
@@ -758,6 +762,10 @@ impl View {
                     self.move_selection(forward);
                 } else if over_log && self.viewport.borrow().log.contains(position) {
                     self.move_log_selection(forward);
+                } else if over_details && self.selected_draft.is_some() {
+                    for _ in 0..WHEEL_ROWS {
+                        self.scroll_browser(forward);
+                    }
                 } else if over_log || over_details {
                     for _ in 0..WHEEL_ROWS {
                         self.scroll_content_row(forward, over_log, mouse.row);

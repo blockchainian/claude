@@ -1,5 +1,19 @@
 use super::*;
 use crate::providers::Provider;
+use std::process::Command;
+
+fn git(directory: &std::path::Path, arguments: &[&str]) {
+    let output = Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
 fn fixture() -> (tempfile::TempDir, View) {
     let directory = tempfile::tempdir().unwrap();
@@ -455,4 +469,63 @@ fn new_branch_is_typed_in_the_prompt_row_and_rides_with_the_first_prompt() {
     };
     assert_eq!(draft_id, id);
     assert_eq!(branch.as_deref(), Some("feature/probe"));
+}
+
+#[test]
+fn details_browser_walks_up_and_picks_a_sibling_repository() {
+    let (directory, mut view) = fixture();
+    let parent = std::fs::canonicalize(directory.path())
+        .unwrap()
+        .join("code");
+    for (name, branch) in [("a", "main"), ("b", "work")] {
+        let repository = parent.join(name);
+        std::fs::create_dir_all(&repository).unwrap();
+        git(&repository, &["init", "-b", branch]);
+    }
+    view.startup_cwd = parent.join("a");
+    let id = view.add_draft(setup(&parent.join("a")));
+    view.handle_paste("keep this prompt");
+    view.drafts[0].new_branch = Some("feature".into());
+    let area = Rect::new(0, 0, 160, 40);
+    let click_text = |view: &mut View, text: &str| {
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let details = view.center_layout(area).details;
+        let y = (details.top()..details.bottom())
+            .find(|y| {
+                (details.left()..details.right())
+                    .map(|x| buffer[(x, *y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    == text
+            })
+            .unwrap_or_else(|| panic!("missing {text:?}"));
+        click(view, details.x, y)
+    };
+    assert_eq!(click_text(&mut view, ".."), None);
+    let action = click_text(&mut view, "b");
+    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = action else {
+        panic!("{action:?}");
+    };
+    assert_eq!(draft_id, id);
+    assert_eq!(cwd, parent.join("b"));
+    view.draft_directory_changed(id, cwd, "work".into());
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, Utc::now());
+    let text = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("╴feature "), "{text}");
+    assert!(text.contains(" b╶"), "{text}");
+    assert_eq!(view.input_box.editor.text(), "keep this prompt");
+    view.drafts[0].new_branch = None;
+    view.render_at(area, &mut buffer, Utc::now());
+    let text = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("╴work "), "{text}");
 }

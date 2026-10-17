@@ -220,6 +220,11 @@ pub enum Action {
         request: crate::tasks::NewTask,
         branch: Option<String>,
     },
+    /// Moves a new task into another repository.
+    ChangeDraftDirectory {
+        draft_id: DraftId,
+        cwd: PathBuf,
+    },
     SetModel {
         id: SessionKey,
         model: String,

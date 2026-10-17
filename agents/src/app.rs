@@ -142,6 +142,15 @@ struct PendingLog {
     visible: usize,
 }
 
+/// A new task's directory and branch: the repository's current branch, or none outside git.
+fn draft_location(cwd: PathBuf) -> io::Result<(PathBuf, String)> {
+    let cwd = std::fs::canonicalize(cwd)?;
+    Ok(match crate::tasks::repository_if_present(&cwd)? {
+        Some(repository) => (repository.directory, repository.branch),
+        None => (cwd, String::new()),
+    })
+}
+
 impl App {
     pub fn new(hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
@@ -775,12 +784,7 @@ impl App {
                 .task_defaults()
                 .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
             let defaults = defaults?;
-            let cwd = std::fs::canonicalize(cwd)?;
-            let repository = crate::tasks::repository_if_present(&cwd)?;
-            let (cwd, branch) = match repository {
-                Some(repository) => (repository.directory, repository.branch),
-                None => (cwd, String::new()),
-            };
+            let (cwd, branch) = draft_location(cwd)?;
             Ok(crate::ui::DraftSetup {
                 provider,
                 cwd,
@@ -831,6 +835,15 @@ impl App {
             })
         {
             self.view.draft_created(draft_id, Err(error));
+        }
+    }
+
+    fn change_draft_directory(&mut self, draft_id: DraftId, cwd: PathBuf) {
+        match draft_location(cwd) {
+            Ok((cwd, branch)) => self.view.draft_directory_changed(draft_id, cwd, branch),
+            Err(error) => self
+                .view
+                .set_notice(Some(format!("Cannot use that repository: {error}"))),
         }
     }
 
@@ -917,6 +930,9 @@ impl App {
                 request,
                 branch: Some(branch),
             } => self.create_task_in_worktree(draft_id, provider, request, branch),
+            Action::ChangeDraftDirectory { draft_id, cwd } => {
+                self.change_draft_directory(draft_id, cwd)
+            }
             Action::SetModel { id, model } => self.send_input(id, SessionInput::SetModel(model)),
             Action::SetEffort { id, effort } => {
                 self.send_input(id, SessionInput::SetEffort(effort))

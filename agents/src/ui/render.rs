@@ -770,8 +770,13 @@ impl View {
         }
         if let Some(draft) = self.selected_draft() {
             self.viewport.borrow_mut().details = area;
+            self.render_browser(area, buf);
             if let Some(error) = &draft.error {
-                line(error.clone().red(), row(area, 0, 1), buf);
+                line(
+                    error.clone().red(),
+                    row(area, area.height.saturating_sub(1), 1),
+                    buf,
+                );
             }
             return;
         }
