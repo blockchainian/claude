@@ -242,7 +242,11 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
             .lines()
             .last()
             .is_some_and(|line| line.trim() == "? help  esc back  ↑/↓ move  enter open  n new")
+            // Escape discards the empty new task.
+            && !capture.contains("New task ❯")
     });
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.wait_for(|capture| capture.contains("New task ❯"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let (row, line) = capture
         .lines()
