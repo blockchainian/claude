@@ -96,11 +96,7 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
             };
             for (label, value) in [
                 (
-                    if activity {
-                        "Last activity"
-                    } else {
-                        "Update"
-                    },
+                    if activity { "Last activity" } else { "Update" },
                     if activity { "1m ago" } else { "2m ago" },
                 ),
                 ("Prompt", "1m 5s"),
