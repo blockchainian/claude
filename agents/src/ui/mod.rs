@@ -472,8 +472,13 @@ impl View {
     }
 
     fn input_label(&self) -> String {
-        if self.selected_draft().is_some() {
-            return "New task".into();
+        if let Some(draft) = self.selected_draft() {
+            return if draft.name.is_some() {
+                "New task prompt"
+            } else {
+                "New task name"
+            }
+            .into();
         }
         self.selected_row()
             .map(|session| session.display_title().to_owned())

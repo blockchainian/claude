@@ -5,7 +5,7 @@ use super::*;
 fn terminal_prompt_mouse_click_places_caret() {
     let (_directory, tmux, _transcript) = start_probe("prompt-mouse");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    tmux.wait_for(|capture| capture.contains("New task name ❯"));
     tmux.run(&[
         "send-keys",
         "-t",
@@ -20,7 +20,7 @@ fn terminal_prompt_mouse_click_places_caret() {
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("New task ❯"))
+        .find(|(_, line)| line.contains("New task name ❯"))
         .unwrap();
     let x = line[..line.find("写工具详情计划").unwrap()].width();
     tmux.mouse(0, x + 3, row, true);
@@ -35,7 +35,7 @@ fn terminal_prompt_mouse_click_places_caret() {
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let row = capture
         .lines()
-        .position(|line| line.contains("New task ❯"))
+        .position(|line| line.contains("New task name ❯"))
         .unwrap();
     tmux.mouse(0, x + 2, row, false);
     tmux.mouse(32, x + 6, row, false);
@@ -75,7 +75,7 @@ fn terminal_prompt_mouse_click_places_caret() {
     let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let row = before
         .lines()
-        .position(|line| line.contains("New task ❯"))
+        .position(|line| line.contains("New task name ❯"))
         .unwrap();
     tmux.mouse(64, x, row, false);
     tmux.wait_for(|capture| !capture.contains("No reply needed."));

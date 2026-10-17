@@ -117,6 +117,7 @@ impl Live {
             &mut app,
             crate::tasks::NewTask {
                 cwd: cwd.to_owned(),
+                name: None,
                 model: Some("haiku".into()),
                 effort: None,
                 images: Vec::new(),

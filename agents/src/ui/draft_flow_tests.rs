@@ -371,6 +371,7 @@ fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
     for text in ["describe this", ""] {
         let (directory, mut view) = fixture();
         let id = view.add_draft(setup(directory.path()));
+        view.drafts[0].name = Some("probe".into());
         view.handle_paste(text);
         view.attach_image(
             crate::images::ImageAttachment::from_image(
@@ -433,6 +434,7 @@ fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
 fn chosen_branch_rides_with_the_first_prompt() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
+    view.drafts[0].name = Some("probe".into());
     view.drafts[0].branch_choice = Some(crate::tasks::BranchChoice::New("feature/probe".into()));
     view.handle_paste("start the work");
     let action = key(&mut view, KeyCode::Enter);
@@ -511,4 +513,41 @@ fn details_browser_opens_folders_on_click_and_applies_a_repository_on_double_cli
     let selector = view.selector.as_ref().unwrap();
     assert_eq!(selector.field(), Field::Directory);
     assert_eq!(selector.selected, 2);
+}
+
+#[test]
+fn new_task_takes_its_name_then_its_prompt() {
+    let (directory, mut view) = fixture();
+    let id = view.add_draft(setup(directory.path()));
+    assert_eq!(view.input_label(), "New task name");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(view.input_label(), "New task name");
+    view.handle_paste("改 Claude Code 的颜色");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(
+        view.drafts[0].name.as_deref(),
+        Some("改 Claude Code 的颜色")
+    );
+    assert!(view.input_box.editor.is_empty());
+    assert_eq!(view.input_label(), "New task prompt");
+    let text = render(&view)
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains(" Claude Code "), "{text}");
+    view.handle_paste("make it blue");
+    let action = key(&mut view, KeyCode::Enter);
+    let Some(Action::CreateTask {
+        draft_id, request, ..
+    }) = action
+    else {
+        panic!("{action:?}");
+    };
+    assert_eq!(draft_id, id);
+    assert_eq!(request.name.as_deref(), Some("改 Claude Code 的颜色"));
+    assert_eq!(request.prompt, "make it blue");
+    view.input_box.history.borrow().iter().for_each(|entry| {
+        assert_ne!(entry.text(), "改 Claude Code 的颜色");
+    });
 }

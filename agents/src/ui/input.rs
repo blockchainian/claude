@@ -944,7 +944,9 @@ impl View {
             if key.code == KeyCode::Enter
                 && key.modifiers.is_empty()
                 && let Some(id) = self.selected_draft
-                && self.selected_draft().is_some_and(|draft| draft.name.is_none())
+                && self
+                    .selected_draft()
+                    .is_some_and(|draft| draft.name.is_none())
             {
                 let name = self.input_box.editor.text().trim().to_owned();
                 if !name.is_empty() {

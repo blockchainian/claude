@@ -16,7 +16,10 @@ fn terminal_image_path_and_clipboard_are_atomic() {
     let source = directory.path().join("a picture.png");
     std::fs::write(&source, &bytes).unwrap();
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    tmux.wait_for(|capture| capture.contains("New task name ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "-l", "probe"]);
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| capture.contains("New task prompt ❯"));
     let paste = format!("\x1b[200~'{}'\x1b[201~", source.display());
     tmux.run(&["send-keys", "-t", "probe", "-l", &paste]);
     tmux.wait_for(|capture| capture.contains("[Image #1]"));

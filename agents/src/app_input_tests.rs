@@ -358,6 +358,7 @@ fn app_creates_worktree_with_the_task_request() {
         provider: ProviderId::Claude,
         request: crate::tasks::NewTask {
             cwd: repo,
+            name: None,
             model: None,
             effort: None,
             prompt: "probe".into(),

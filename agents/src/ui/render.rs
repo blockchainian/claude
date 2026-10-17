@@ -598,7 +598,12 @@ impl View {
                 session.display_title().to_owned(),
                 self.title_style(&session.id).bold(),
             ),
-            None => ("New task".to_owned(), Style::default().bold()),
+            None => (
+                self.selected_draft()
+                    .and_then(|draft| draft.name.clone())
+                    .unwrap_or_else(|| "New task".to_owned()),
+                Style::default().bold(),
+            ),
         };
         let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))

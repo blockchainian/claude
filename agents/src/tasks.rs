@@ -6,6 +6,8 @@ use std::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewTask {
     pub cwd: PathBuf,
+    /// The session's display name.
+    pub name: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub prompt: String,

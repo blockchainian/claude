@@ -11,6 +11,7 @@ fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
     let directory = tempfile::tempdir().unwrap();
     let mut request = NewTask {
         cwd: directory.path().into(),
+        name: Some("改 Claude Code 的颜色".into()),
         model: Some("haiku".into()),
         effort: Some("high".into()),
         images: Vec::new(),
@@ -23,6 +24,8 @@ fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
         command.get_args().collect::<Vec<_>>(),
         [
             "--bg",
+            "--name",
+            "改 Claude Code 的颜色",
             "--model",
             "haiku",
             "--effort",
@@ -30,6 +33,7 @@ fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
             request.prompt.as_str()
         ]
     );
+    request.name = None;
     request.model = None;
     request.effort = None;
     let command = ClaudeProvider::create_command(&request);
@@ -44,6 +48,7 @@ fn image_creation_starts_idle_with_model_and_effort() {
     let directory = tempfile::tempdir().unwrap();
     let request = NewTask {
         cwd: directory.path().into(),
+        name: None,
         model: Some("haiku".into()),
         effort: Some("high".into()),
         prompt: "describe this".into(),

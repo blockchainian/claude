@@ -308,6 +308,9 @@ impl ClaudeProvider {
     fn create_command(request: &crate::tasks::NewTask) -> Command {
         let mut command = Command::new("claude");
         command.arg("--bg").current_dir(&request.cwd);
+        if let Some(name) = &request.name {
+            command.args(["--name", name]);
+        }
         if let Some(model) = &request.model {
             command.args(["--model", model]);
         }

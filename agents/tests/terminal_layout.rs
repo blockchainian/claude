@@ -159,7 +159,7 @@ fn start_probe_with_transcript(
 fn terminal_prompt_newline_entry() {
     let (_directory, tmux, _transcript) = start_probe("prompt-newlines");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    tmux.wait_for(|capture| capture.contains("New task name ❯"));
     for (name, entry) in [
         ("shift-enter", "first line\x1b[13;2usecond line"),
         ("option-enter", "first line\x1b\rsecond line"),
@@ -172,7 +172,7 @@ fn terminal_prompt_newline_entry() {
         tmux.wait_for(|capture| {
             let rows: Vec<_> = capture.lines().collect();
             rows.windows(2).any(|pair| {
-                pair[0].contains("New task ❯ first line") && pair[1].trim() == "second line"
+                pair[0].contains("New task name ❯ first line") && pair[1].trim() == "second line"
             })
         });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -183,7 +183,9 @@ fn terminal_prompt_newline_entry() {
             path.display()
         );
         tmux.run(&["send-keys", "-t", "probe", "C-c"]);
-        tmux.wait_for(|capture| capture.contains("New task ❯") && !capture.contains("first line"));
+        tmux.wait_for(|capture| {
+            capture.contains("New task name ❯") && !capture.contains("first line")
+        });
     }
 }
 
@@ -235,7 +237,7 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     }
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    tmux.wait_for(|capture| capture.contains("New task name ❯"));
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| {
         capture
@@ -243,24 +245,24 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
             .last()
             .is_some_and(|line| line.trim() == "? help  esc back  ↑/↓ move  enter open  n new")
             // Escape discards the empty new task.
-            && !capture.contains("New task ❯")
+            && !capture.contains("New task name ❯")
     });
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    tmux.wait_for(|capture| capture.contains("New task name ❯"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("New task ❯"))
+        .find(|(_, line)| line.contains("New task name ❯"))
         .unwrap();
     let marker = line[..line.find('❯').unwrap()].width();
     tmux.mouse(0, marker, row, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "你好"]);
-    tmux.wait_for(|capture| capture.contains("New task ❯ 你好"));
+    tmux.wait_for(|capture| capture.contains("New task name ❯ 你好"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let row = capture
         .lines()
-        .position(|line| line.contains("New task ❯ 你好"))
+        .position(|line| line.contains("New task name ❯ 你好"))
         .unwrap();
     let cursor = tmux.run(&[
         "display-message",

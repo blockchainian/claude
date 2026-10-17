@@ -15,6 +15,8 @@ pub(crate) struct DraftSetup {
 pub(super) struct Draft {
     pub id: DraftId,
     pub setup: DraftSetup,
+    /// The task's name, typed before its first prompt.
+    pub name: Option<String>,
     pub input: prompt_box::PromptBox,
     /// The branch the task runs on instead of the repository's checked-out one.
     pub branch_choice: Option<crate::tasks::BranchChoice>,
@@ -43,6 +45,7 @@ impl View {
         self.drafts.push(Draft {
             id,
             setup,
+            name: None,
             input: prompt_box::PromptBox::default(),
             branch_choice: None,
             job: None,
