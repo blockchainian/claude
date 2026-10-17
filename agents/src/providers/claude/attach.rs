@@ -154,12 +154,7 @@ impl Terminal {
     }
 
     fn unexpected(&self, reason: &str) -> io::Error {
-        let screen = self.screen();
-        let first = screen
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("empty screen");
-        io::Error::other(format!("{reason}: {first}"))
+        screen_error(reason, &self.screen())
     }
 
     fn diagnostic(&self, stage: &str, error: io::Error) -> io::Error {
@@ -339,6 +334,24 @@ impl Drop for Terminal {
     }
 }
 
+fn screen_error(reason: &str, screen: &str) -> io::Error {
+    let mut lines: Vec<String> = screen
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.chars().all(|ch| ch == '─'))
+        .rev()
+        .take(4)
+        .map(|line| line.chars().take(160).collect())
+        .collect();
+    lines.reverse();
+    let summary = if lines.is_empty() {
+        "empty screen".into()
+    } else {
+        lines.join(" | ")
+    };
+    io::Error::other(format!("{reason}; screen: {summary}"))
+}
+
 fn prompt(screen: &str) -> Option<(usize, &str)> {
     screen
         .lines()
@@ -502,6 +515,25 @@ mod tests {
     #[test]
     fn prompt_accepts_multiline_unicode_text() {
         assert!(validate_text("第一行\nsecond line\t✓").is_ok());
+    }
+
+    #[test]
+    fn timeout_reports_captured_editor_and_footer_in_one_line() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/idle.screen.txt");
+        let message = screen_error("Claude attach timed out", screen).to_string();
+        assert!(message.starts_with("Claude attach timed out; screen: "));
+        assert!(message.contains("❯"), "{message}");
+        assert!(message.contains("auto mode on"), "{message}");
+        assert!(!message.contains("Claude Code v2.1.299"), "{message}");
+        assert_eq!(message.lines().count(), 1);
+    }
+
+    #[test]
+    fn screen_error_reports_empty_screen() {
+        assert_eq!(
+            screen_error("Claude attach timed out", "\n  \n").to_string(),
+            "Claude attach timed out; screen: empty screen"
+        );
     }
 }
 
