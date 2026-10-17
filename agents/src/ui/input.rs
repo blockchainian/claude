@@ -958,6 +958,14 @@ impl View {
                 }
                 return None;
             }
+            if self
+                .selected_draft()
+                .is_some_and(|draft| draft.working || draft.job.is_some())
+                && key.code == KeyCode::Enter
+                && key.modifiers.is_empty()
+            {
+                return None;
+            }
             self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),

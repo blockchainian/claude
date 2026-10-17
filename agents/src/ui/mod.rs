@@ -485,9 +485,8 @@ impl View {
     }
 
     fn input_disabled(&self) -> Option<&'static str> {
-        if let Some(draft) = self.selected_draft() {
-            return (draft.working || draft.job.is_some())
-                .then_some("Creating task; waiting for session");
+        if self.selected_draft().is_some() {
+            return None;
         }
         match self.selected_row() {
             Some(session) => session.input_disabled_reason(),
@@ -524,7 +523,8 @@ impl View {
         {
             target.begin_send(text);
         }
-        target.state = prompt_box::SendState::Sending;
+        target.state = prompt_box::SendState::Ready;
+        target.submitting = true;
     }
 
     pub(crate) fn input_complete(
@@ -549,6 +549,7 @@ impl View {
         ) {
             target.finish_send(result.is_ok());
         }
+        target.submitting = false;
         target.state = match result {
             Ok(()) => prompt_box::SendState::Ready,
             Err(error) => prompt_box::SendState::Failed(error.to_string()),

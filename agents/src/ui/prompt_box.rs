@@ -18,7 +18,6 @@ mod composer_history;
 pub(super) enum SendState {
     #[default]
     Ready,
-    Sending,
     Failed(String),
 }
 
@@ -36,6 +35,7 @@ pub(super) struct PromptBox {
     pub(super) editor: LineEdit,
     pub(super) focused: bool,
     pub(super) state: SendState,
+    pub(super) submitting: bool,
     pub(super) history: composer_history::History,
     recall: composer_history::Recall,
     search: Option<composer_history::Search>,
@@ -228,9 +228,12 @@ impl PromptBox {
         {
             self.editor.insert('\n');
         } else if key.code == KeyCode::Enter {
-            if !self.editor.is_empty() && self.state != SendState::Sending {
+            if !self.editor.is_empty()
+                && (!self.submitting || matches!(self.state, SendState::Failed(_)))
+            {
                 self.record_submission();
-                self.state = SendState::Sending;
+                self.submitting = true;
+                self.state = SendState::Ready;
                 return Some(PromptAction::Submit(self.editor.prompt_text()));
             }
         } else {
@@ -326,13 +329,16 @@ mod tests {
         assert_eq!(key(&mut editor, KeyCode::Enter), None);
         let text = REAL_TEXT.lines().next().unwrap();
         editor.paste(text);
+        let before = rendered(&editor, 120, None);
         assert_eq!(
             key(&mut editor, KeyCode::Enter),
             Some(PromptAction::Submit(text.into()))
         );
+        assert_eq!(rendered(&editor, 120, None), before);
         assert_eq!(editor.editor.text(), text);
-        assert_eq!(editor.state, SendState::Sending);
+        assert_eq!(editor.state, SendState::Ready);
         assert_eq!(key(&mut editor, KeyCode::Enter), None);
+        assert_eq!(editor.history.borrow().len(), 1);
         editor.state = SendState::Failed("permission denied".into());
         assert_eq!(
             key(&mut editor, KeyCode::Enter),
@@ -377,7 +383,6 @@ mod tests {
         let mut editor = focused();
         for (state, expected) in [
             (SendState::Ready, "Task"),
-            (SendState::Sending, "Task ❯"),
             (SendState::Failed("denied".into()), "Task ❯"),
         ] {
             editor.state = state;
@@ -428,7 +433,7 @@ mod tests {
     fn long_real_target_leaves_room_for_text() {
         let mut editor = focused();
         editor.paste("No reply needed.");
-        editor.state = SendState::Sending;
+        editor.submitting = true;
         let label = REAL_TEXT.lines().next().unwrap();
         assert_eq!(editor.height(60, label), 1);
         let area = Rect::new(0, 0, 60, 1);

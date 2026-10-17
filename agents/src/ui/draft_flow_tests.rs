@@ -134,7 +134,7 @@ fn pending_job_draft_survives_escape_and_leaving_until_its_session_arrives() {
     let id = view.add_draft(setup(directory.path()));
     view.handle_paste("typed prompt");
     view.draft_created(id, Ok("e772d00b".into()));
-    assert!(view.input_disabled().is_some());
+    assert!(view.input_disabled().is_none());
     key(&mut view, KeyCode::Esc);
     assert_eq!(view.selected_draft, Some(id));
     view.input_box.focused = false;
@@ -547,6 +547,16 @@ fn new_task_takes_its_name_then_its_prompt() {
     assert_eq!(draft_id, id);
     assert_eq!(request.name.as_deref(), Some("改 Claude Code 的颜色"));
     assert_eq!(request.prompt, "make it blue");
+    assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    let screen = render(&view)
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(!screen.contains("Creating"), "{screen}");
+    assert!(!screen.contains("waiting for session"), "{screen}");
+    assert!(screen.contains("New task prompt ❯"), "{screen}");
     view.input_box.history.borrow().iter().for_each(|entry| {
         assert_ne!(entry.text(), "改 Claude Code 的颜色");
     });

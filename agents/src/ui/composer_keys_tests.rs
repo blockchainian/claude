@@ -57,10 +57,10 @@ fn newline_keys_preserve_editor_and_release_is_ignored() {
 fn history_recalls_at_visual_boundaries_and_restores_draft() {
     let mut prompt = focused("first prompt", 80);
     press(&mut prompt, KeyCode::Enter, KeyModifiers::NONE);
-    prompt.state = SendState::Ready;
+    prompt.submitting = false;
     prompt.editor.set_text("second prompt");
     press(&mut prompt, KeyCode::Enter, KeyModifiers::NONE);
-    prompt.state = SendState::Ready;
+    prompt.submitting = false;
     prompt.editor.set_text("draft\nlast");
     press(&mut prompt, KeyCode::Up, KeyModifiers::NONE);
     assert_eq!(prompt.editor.text(), "draft\nlast");
@@ -78,10 +78,10 @@ fn history_recalls_at_visual_boundaries_and_restores_draft() {
 fn reverse_search_accepts_without_sending_and_cancel_restores_caret() {
     let mut prompt = focused("cargo test", 80);
     press(&mut prompt, KeyCode::Enter, KeyModifiers::NONE);
-    prompt.state = SendState::Ready;
+    prompt.submitting = false;
     prompt.editor.set_text("git status");
     press(&mut prompt, KeyCode::Enter, KeyModifiers::NONE);
-    prompt.state = SendState::Ready;
+    prompt.submitting = false;
     prompt.editor.set_text("draft");
     press(&mut prompt, KeyCode::Left, KeyModifiers::NONE);
     let cursor = prompt.editor.cursor();
@@ -122,7 +122,7 @@ fn history_search_steps_unique_matches_both_ways_and_handles_paste() {
     let mut prompt = focused("git diff", 80);
     for text in ["git status", "git diff", "cargo test", "git status"] {
         prompt.editor.set_text(text);
-        prompt.state = SendState::Ready;
+        prompt.submitting = false;
         press(&mut prompt, KeyCode::Enter, KeyModifiers::NONE);
     }
     prompt.editor.set_text("draft");
@@ -165,7 +165,7 @@ fn vertical_stops_match_rendered_caret_after_resize_and_exact_wrap() {
 fn enhanced_control_codes_keep_clear_and_history_bindings() {
     let mut prompt = focused("cargo test", 80);
     press(&mut prompt, KeyCode::Enter, KeyModifiers::NONE);
-    prompt.state = SendState::Ready;
+    prompt.submitting = false;
     prompt.editor.set_text("draft");
     press(&mut prompt, KeyCode::Char('\u{12}'), KeyModifiers::NONE);
     prompt.paste("cargo");

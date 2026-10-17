@@ -37,7 +37,7 @@ pub(super) enum SelectorKind {
     Branch {
         draft: DraftId,
         branches: Vec<String>,
-        editor: Option<prompt_box::PromptBox>,
+        saved_input: Option<Box<prompt_box::PromptBox>>,
     },
     Model {
         target: ControlTarget,
@@ -85,7 +85,7 @@ impl Selector {
         matches!(
             &self.kind,
             SelectorKind::Branch {
-                editor: Some(_),
+                saved_input: Some(_),
                 ..
             }
         )
@@ -219,7 +219,7 @@ impl View {
                         SelectorKind::Branch {
                             draft: draft.id,
                             branches,
-                            editor: None,
+                            saved_input: None,
                         },
                         selected,
                     ));
@@ -301,13 +301,13 @@ impl View {
         if let Some(Selector {
             kind:
                 SelectorKind::Branch {
-                    editor: Some(input),
+                    saved_input: Some(input),
                     ..
                 },
             ..
         }) = self.selector.take()
         {
-            self.input_box = input;
+            self.input_box = *input;
         }
         if self.selected_draft.is_some() {
             self.mouse_focus = Panel::Prompt;
@@ -358,10 +358,12 @@ impl View {
                 BrowseEntry::Repository(_) => {}
             },
             SelectorKind::Branch {
-                branches, editor, ..
+                branches,
+                saved_input,
+                ..
             } if index == branches.len() => {
-                if editor.is_none() {
-                    *editor = Some(std::mem::take(&mut self.input_box));
+                if saved_input.is_none() {
+                    *saved_input = Some(Box::new(std::mem::take(&mut self.input_box)));
                 }
                 self.mouse_focus = Panel::Prompt;
                 self.input_box.focused = true;
@@ -709,7 +711,7 @@ mod tests {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    editor: None,
+                    saved_input: None,
                 },
                 1,
             ));
@@ -729,7 +731,7 @@ mod tests {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    editor: None,
+                    saved_input: None,
                 },
                 1,
             ));

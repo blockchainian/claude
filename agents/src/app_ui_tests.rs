@@ -518,11 +518,14 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     draw(&mut app, 180);
     app.handle_event(Event::Paste("feature/paste-route-proof".into()));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    // The details column scrolls the name to keep its end and the caret in view.
-    assert!(rendered.contains("/paste-route-proof"), "{rendered}");
+    assert!(
+        rendered.contains("New branch name ❯ feature/paste-route-proof"),
+        "{rendered}"
+    );
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("╴main "), "{rendered}");
+    assert!(!rendered.contains("╴main "), "{rendered}");
+    assert!(!rendered.contains("New branch name"), "{rendered}");
     assert!(!rendered.contains("paste-route-proof"), "{rendered}");
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])

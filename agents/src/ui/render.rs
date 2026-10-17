@@ -609,14 +609,7 @@ impl View {
         let draft = self.selected_draft();
         let (status, cwd) = match (session, draft) {
             (Some(session), _) => (Self::status(session).0, &session.cwd),
-            (None, Some(draft)) => (
-                if draft.working || draft.job.is_some() {
-                    "Creating"
-                } else {
-                    "New"
-                },
-                &draft.setup.cwd,
-            ),
+            (None, Some(draft)) => ("New", &draft.setup.cwd),
             (None, None) => return,
         };
         // The left corner is a joint, or the separator that keeps going down beside the prompt.
