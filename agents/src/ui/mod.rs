@@ -23,6 +23,7 @@ mod markdown;
 mod navigation;
 mod paths;
 mod prompt_box;
+mod question_view;
 mod render;
 mod rows;
 mod selection_tabs;
