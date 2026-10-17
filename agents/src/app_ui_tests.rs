@@ -434,7 +434,6 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
     app.handle_action(Some(Action::NewDraft {
         cwd: directory.path().to_owned(),
     }));
-    key(&mut app, KeyCode::Esc);
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "Model:");
     click(&mut app, x + 7, y);
@@ -491,7 +490,6 @@ fn rendered_branch_editor_accepts_paste_and_escape_cancels_without_worktree() {
     app.handle_action(Some(Action::NewDraft {
         cwd: repository.clone(),
     }));
-    key(&mut app, KeyCode::Esc);
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "Branch:");
     click(&mut app, x + 8, y);

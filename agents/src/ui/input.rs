@@ -966,6 +966,13 @@ impl View {
             && !self.log_search.editing
             && !self.log_detail_search.editing
         {
+            if key.code == KeyCode::Esc
+                && self.selected_draft.is_some()
+                && self.input_box.editor.is_empty()
+            {
+                self.discard_selected_draft();
+                return None;
+            }
             self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
@@ -1338,17 +1345,8 @@ impl View {
                 }
             }
             KeyCode::Backspace => {
-                if let Some(id) = self.selected_draft {
-                    if self
-                        .selected_draft()
-                        .is_some_and(|draft| draft.working || draft.job.is_some())
-                    {
-                        return None;
-                    }
-                    self.save_draft_input();
-                    self.drafts.retain(|draft| draft.id != id);
-                    self.reconcile_selection();
-                    self.show_selected_panels();
+                if self.selected_draft.is_some() {
+                    self.discard_selected_draft();
                     return None;
                 }
                 if let Some(session) = self.selected_row() {

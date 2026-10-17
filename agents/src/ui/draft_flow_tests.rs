@@ -215,16 +215,14 @@ fn draft_navigation_click_tab_and_pending_job_preserve_input_without_keys() {
     let (directory, mut view) = fixture();
     let session = view.rows[0].id.clone();
     let id = view.add_draft(setup(directory.path()));
+    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.handle_paste(text);
     key(&mut view, KeyCode::Esc);
     render(&view);
     key(&mut view, KeyCode::Home);
     assert_eq!(view.selected_id(), Some(&session));
     key(&mut view, KeyCode::End);
     assert_eq!(view.selected_draft, Some(id));
-    view.focus_input();
-    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
-    view.handle_paste(text);
-    key(&mut view, KeyCode::Esc);
     key(&mut view, KeyCode::Home);
     assert_eq!(view.selected_id(), Some(&session));
     let buffer = render(&view);
@@ -276,7 +274,6 @@ fn prompt_model_label_does_not_become_a_metadata_picker_target() {
 fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    key(&mut view, KeyCode::Esc);
     let area = Rect::new(0, 0, 180, 52);
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
@@ -551,4 +548,27 @@ fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
         assert_eq!(view.drafts[0].error.as_deref(), Some("delivery failed"));
         assert!(!view.drafts[0].working);
     }
+}
+
+#[test]
+fn escape_in_empty_draft_input_discards_draft_and_keeps_typed_one() {
+    let (directory, mut view) = fixture();
+    let session = view.rows[0].id.clone();
+    view.add_draft(setup(directory.path()));
+    assert!(view.input_box.focused);
+    key(&mut view, KeyCode::Esc);
+    assert!(view.drafts.is_empty());
+    assert_eq!(view.selected_draft, None);
+    assert_eq!(view.selected_id(), Some(&session));
+    let rendered = render(&view)
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(!rendered.contains("New task"), "{rendered}");
+    let id = view.add_draft(setup(directory.path()));
+    view.handle_paste("keep this prompt");
+    key(&mut view, KeyCode::Esc);
+    assert_eq!(view.drafts.len(), 1);
+    assert_eq!(view.selected_draft, Some(id));
 }

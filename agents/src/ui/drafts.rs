@@ -107,6 +107,23 @@ impl View {
         }
     }
 
+    /// Removes the selected draft unless its task is already being created.
+    pub(super) fn discard_selected_draft(&mut self) {
+        let Some(id) = self.selected_draft else {
+            return;
+        };
+        if self
+            .selected_draft()
+            .is_some_and(|draft| draft.working || draft.job.is_some())
+        {
+            return;
+        }
+        self.save_draft_input();
+        self.drafts.retain(|draft| draft.id != id);
+        self.reconcile_selection();
+        self.show_selected_panels();
+    }
+
     pub(super) fn select_draft(&mut self, id: DraftId) {
         if self.selected_draft == Some(id) {
             return;
