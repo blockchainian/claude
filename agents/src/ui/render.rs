@@ -68,6 +68,7 @@ pub(super) struct CenterLayout {
     pub(super) gap: Rect,
     pub(super) details: Rect,
     pub(super) search: Rect,
+    pub(super) usage_chart: Rect,
     pub(super) footer: Rect,
     pub(super) log: Rect,
     pub(super) prompt: Rect,
@@ -173,22 +174,37 @@ impl View {
         } else {
             [body, Rect::default(), Rect::default()]
         };
-        let search = row(
-            list,
-            0,
-            u16::from(self.searching || self.rename_target.is_some()),
-        );
-        let list = row(
-            list,
-            search.height,
-            list.height.saturating_sub(search.height),
-        );
+        // Keep the chart's original canvas and scale when the search row takes list space.
+        let mut usage_chart = list;
+        let (list, search) = if self.rename_target.is_some() {
+            let input = row(list, 0, 1);
+            usage_chart = row(list, input.height, list.height.saturating_sub(input.height));
+            (usage_chart, input)
+        } else if self.searching {
+            let entries = self
+                .center_rows(&self.selectable_indices(), self.grouping)
+                .len();
+            let chart_height = self.usage_chart_height(list, entries);
+            let above_chart = row(list, 0, list.height.saturating_sub(chart_height));
+            let input = log::search_input_rect(above_chart);
+            (
+                row(
+                    above_chart,
+                    0,
+                    above_chart.height.saturating_sub(input.height),
+                ),
+                input,
+            )
+        } else {
+            (list, Rect::default())
+        };
         CenterLayout {
             header,
             list,
             gap,
             details,
             search,
+            usage_chart,
             footer,
             log: if wide && show_log { log_list } else { log },
             prompt,
@@ -314,10 +330,6 @@ impl View {
             buf,
         );
         rule(row(layout.header, 1, 1), buf);
-        if self.searching || self.rename_target.is_some() {
-            let (prompt, edit) = self.input();
-            render_input_row(prompt, edit, layout.search, buf);
-        }
 
         line(self.center_footer_hints(), inset(layout.footer), buf);
         if let Some((label, _)) = &self.copied {
@@ -355,7 +367,11 @@ impl View {
             }
         }
         self.render_center_rows(layout.list, buf, now);
-        self.render_usage_chart(layout.list, buf, now);
+        if self.searching || self.rename_target.is_some() {
+            let (prompt, edit) = self.input();
+            render_input_row(prompt, edit, layout.search, buf);
+        }
+        self.render_usage_chart(layout.usage_chart, buf, now);
         if let Some((notice, _)) = &self.notice
             && !layout.list.is_empty()
         {

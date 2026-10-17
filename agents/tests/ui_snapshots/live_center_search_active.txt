@@ -1,8 +1,7 @@
   Active 1                                                                  Inactive 0
 ────────────────────────────────────────────┬────────────── Task to find ───────────────
- Search › find                              │                  Prompt
-                /tmp/project                │ Task to find
- ○ Task to find                 Ready       │
+                /tmp/project                │                  Prompt
+ ○ Task to find                 Ready       │ Task to find
                                             │
                                             │
                                             │
@@ -11,6 +10,7 @@
                                             │
                                             │
                                             │
-                                            ├───────────────── Ready ───────── project╶─
+                                            │
+ Search › find                              ├───────────────── Ready ───────── project╶─
  Task to find ›
  esc back  enter open

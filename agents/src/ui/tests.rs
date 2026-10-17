@@ -1382,7 +1382,7 @@ fn live_center_search_active() {
         screen(&view, 88, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
     );
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 2)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 13)));
 }
 #[test]
 fn show_more_is_only_listed_on_inactive() {
@@ -9083,4 +9083,132 @@ fn claude_agent_display_from_real_records() {
             "{screen}"
         );
     }
+}
+
+#[test]
+fn session_search_sits_above_unchanged_usage_chart() {
+    for (width, height) in [(200, 50), (120, 45), (80, 12), (60, 6)] {
+        let (mut view, now) = log_fixture();
+        view.set_usage(
+            &session_key("log"),
+            [(
+                crate::usage::bin_of(now),
+                crate::usage::Bin {
+                    input: 100,
+                    output: 0,
+                },
+            )]
+            .into(),
+        );
+        let area = Rect::new(0, 0, width, height);
+        let baseline = view.center_layout(area).list;
+        let mut before = Buffer::empty(area);
+        view.render_at(area, &mut before, now);
+        let chart_top = (baseline.y..baseline.bottom())
+            .find(|&y| {
+                (baseline.x..baseline.right()).any(|x| {
+                    before[(x, y)]
+                        .symbol()
+                        .chars()
+                        .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+                })
+            })
+            .unwrap_or(baseline.bottom());
+        view.searching = true;
+        view.search.insert("Task");
+        let layout = view.center_layout(area);
+        assert_eq!(layout.search.bottom(), chart_top, "{width}x{height}");
+        assert_eq!(layout.list.y, baseline.y);
+        assert_eq!(layout.list.bottom(), layout.search.y);
+        let mut after = Buffer::empty(area);
+        view.render_at(area, &mut after, now);
+        for y in chart_top..baseline.bottom() {
+            for x in baseline.x..baseline.right() {
+                assert_eq!(after[(x, y)], before[(x, y)], "{width}x{height} ({x}, {y})");
+            }
+        }
+        assert!(
+            (layout.search.x..layout.search.right()).all(|x| {
+                after[(x, layout.search.y)]
+                    .symbol()
+                    .chars()
+                    .all(|c| !('\u{2801}'..='\u{28ff}').contains(&c))
+            }),
+            "search row must not contain chart dots: {width}x{height}"
+        );
+        assert_eq!(view.cursor_pos(area).unwrap().1, layout.search.y);
+        assert!(
+            !view
+                .viewport
+                .borrow()
+                .list_rows
+                .contains((layout.search.x, layout.search.y).into())
+        );
+    }
+}
+
+#[test]
+fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(
+        (0..20)
+            .map(|i| {
+                session(
+                    &format!("s{i}"),
+                    &format!("Session {i}"),
+                    SessionStatus::Working,
+                    i,
+                )
+            })
+            .collect(),
+        false,
+    );
+    let area = Rect::new(0, 0, 80, 12);
+    view.set_selected(19);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    let baseline = view.center_layout(area).list;
+    view.searching = true;
+    view.render(area, &mut buf);
+    let layout = view.center_layout(area);
+    assert_eq!(layout.search.y, baseline.bottom() - 1);
+    assert_eq!(layout.list.y, baseline.y);
+    assert_eq!(layout.list.height, baseline.height - 1);
+    let viewport = view.viewport.borrow();
+    let entries = view.center_rows(&view.selectable_indices(), view.grouping);
+    let selected = entries.iter().position(|entry| matches!(entry, super::navigation::CenterRow::Task(index) if *index == view.selected)).unwrap();
+    assert!(selected >= viewport.first_entry);
+    assert!(selected < viewport.first_entry + usize::from(viewport.list_rows.height));
+    let target = entries
+        .iter()
+        .enumerate()
+        .skip(viewport.first_entry)
+        .take(usize::from(viewport.list_rows.height))
+        .find_map(|(offset, entry)| match entry {
+            super::navigation::CenterRow::Task(index) => Some((
+                *index,
+                viewport.list_rows.y + (offset - viewport.first_entry) as u16,
+            )),
+            _ => None,
+        })
+        .unwrap();
+    drop(viewport);
+    click_mouse(
+        &mut view,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            layout.list.x,
+            target.1,
+        ),
+    );
+    assert_eq!(view.selected, 19);
+    click_mouse(
+        &mut view,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            layout.search.x,
+            layout.search.y,
+        ),
+    );
+    assert_eq!(view.selected, 19);
 }

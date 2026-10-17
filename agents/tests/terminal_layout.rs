@@ -79,12 +79,19 @@ fn captured_screen(capture: &str, width: u16, height: u16) -> vt100::Parser {
 }
 
 fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
+    start_probe_with_transcript(name, include_str!("fixtures/transcript.jsonl"))
+}
+
+fn start_probe_with_transcript(
+    name: &str,
+    contents: &str,
+) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
     let transcript = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
-    std::fs::write(&transcript, include_str!("fixtures/transcript.jsonl")).unwrap();
+    std::fs::write(&transcript, contents).unwrap();
     let codex = directory.path().join("codex");
     std::fs::create_dir(&codex).unwrap();
     let binary =
@@ -1337,4 +1344,78 @@ fn terminal_detail_right_click_and_double_click_copy() {
     println!(
         "{{\"raw_transcript_copy\":\"pass\",\"note\":\"Copied transcript\",\"width\":200,\"height\":45,\"pbpaste\":\"pretty JSON matches\"}}"
     );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_session_search_above_usage_chart() {
+    // Move the real transcript's usage into the visible time window.
+    let records: Vec<_> = include_str!("fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            record["timestamp"] = chrono::Utc::now().to_rfc3339().into();
+            serde_json::to_string(&record).unwrap()
+        })
+        .collect();
+    let (_directory, tmux, _transcript) =
+        start_probe_with_transcript("session-search", &(records.join("\n") + "\n"));
+    let braille = |text: &str| text.chars().any(|c| ('\u{2801}'..='\u{28ff}').contains(&c));
+    for (width, height) in [(200, 50), (120, 45), (80, 12)] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == height
+                && capture.lines().take(height / 2).any(&braille)
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let list_width = before
+            .lines()
+            .nth(2)
+            .unwrap()
+            .chars()
+            .position(|c| c == '│')
+            .unwrap();
+        let left = |line: &str| line.chars().take(list_width).collect::<String>();
+        let rows: Vec<_> = before.lines().map(left).collect();
+        let chart_top = rows.iter().position(|line| braille(line)).unwrap();
+        tmux.run(&["send-keys", "-t", "probe", "/"]);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
+        tmux.wait_for(|capture| capture.contains("Search › Stop"));
+        let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let searched: Vec<_> = after.lines().map(left).collect();
+        let input = searched
+            .iter()
+            .position(|line| line.contains("Search › Stop"))
+            .unwrap();
+        assert_eq!(input + 1, chart_top, "{width}x{height}: {after}");
+        assert!(
+            !braille(&searched[input]),
+            "chart dots in search row: {after}"
+        );
+        assert!(
+            !searched[2].contains("Search ›")
+                && (searched[2].contains("claude") || searched[2].contains("Codex manager")),
+            "top row must remain the list: {after}"
+        );
+        for (y, row) in rows.iter().enumerate().filter(|(_, line)| braille(line)) {
+            assert_eq!(&searched[y], row, "chart changed at row {y}: {after}");
+        }
+        let path = std::env::temp_dir().join(format!("agents-session-search-{width}x{height}.txt"));
+        std::fs::write(&path, &after).unwrap();
+        println!(
+            "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
+            path.display()
+        );
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| !capture.contains("Search ›"));
+    }
 }
