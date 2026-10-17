@@ -496,6 +496,11 @@ fn text_section(label: &str, text: &str) -> Section {
 }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
+    let is_mcp = ["name", "namespace"].into_iter().any(|key| {
+        payload[key]
+            .as_str()
+            .is_some_and(|name| name.starts_with("mcp__"))
+    });
     let mut input = if payload["type"] == "custom_tool_call" {
         vec![text_section(
             "input",
@@ -504,6 +509,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     } else {
         let raw = payload["arguments"].as_str().unwrap_or("");
         match serde_json::from_str::<Value>(raw) {
+            Ok(value) if is_mcp => crate::providers::tool::json_input(&value),
             Ok(value) if value.is_object() => match payload["name"]
                 .as_str()
                 .unwrap_or("")
@@ -534,7 +540,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
             _ => vec![text_section("input", raw)],
         }
     };
-    if let Some(arguments) = tool_arguments(payload) {
+    if !is_mcp && let Some(arguments) = tool_arguments(payload) {
         crate::providers::tool::include_description(&mut input, &arguments);
     }
     let mut call = ToolCall {
@@ -544,10 +550,14 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         detail_title: String::new(),
         show_details: false,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: tool_title(
-            payload["name"].as_str().unwrap_or(""),
-            &tool_arguments(payload).unwrap_or(Value::Null),
-        ),
+        title: if is_mcp {
+            payload["name"].as_str().unwrap_or("").to_owned()
+        } else {
+            tool_title(
+                payload["name"].as_str().unwrap_or(""),
+                &tool_arguments(payload).unwrap_or(Value::Null),
+            )
+        },
         name: payload["name"].as_str().unwrap_or("").to_owned(),
         input,
         output: output.map(|text| vec![text_section("output", text)]),
@@ -608,13 +618,18 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                 .get("result")
                 .filter(|result| !result.is_null())
                 .map(|result| {
-                    if let Some(blocks) = result["content"].as_array() {
-                        blocks
-                            .iter()
-                            .filter(|block| block["type"] == "text")
-                            .filter_map(|block| block["text"].as_str())
-                            .map(result_section)
-                            .collect()
+                    if result.is_object() {
+                        let mut sections = crate::providers::tool::mcp_content(&result["content"]);
+                        if let Some(structured) = result
+                            .get("structuredContent")
+                            .filter(|value| !value.is_null())
+                        {
+                            sections.push(Section::Json {
+                                label: "output".to_owned(),
+                                text: structured.to_string(),
+                            });
+                        }
+                        sections
                     } else if let Some(text) = result.as_str() {
                         vec![result_section(text)]
                     } else {
@@ -632,11 +647,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                     item["server"].as_str().unwrap(),
                     item["tool"].as_str().unwrap()
                 ),
-                match &item["arguments"] {
-                    Value::Null => Vec::new(),
-                    arguments @ Value::Object(_) => argument_fields(arguments),
-                    arguments => vec![text_section("input", &arguments.to_string())],
-                },
+                crate::providers::tool::json_input(&item["arguments"]),
                 output,
             )
         }
@@ -652,8 +663,12 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             None,
         ),
     };
-    crate::providers::tool::include_description(&mut input, &item["arguments"]);
-    let title = if name == "exec_command" {
+    if item_type != "McpToolCall" {
+        crate::providers::tool::include_description(&mut input, &item["arguments"]);
+    }
+    let title = if item_type == "McpToolCall" {
+        name.clone()
+    } else if name == "exec_command" {
         if let Some(Section::Code { text, .. }) = input.first() {
             tool_title(&name, &serde_json::json!({ "command": text }))
         } else {
@@ -1744,6 +1759,60 @@ mod tests {
     }
 
     #[test]
+    fn mcp_content_blocks_and_structured_results_are_retained() {
+        for source in [
+            include_str!("../../../tests/fixtures/mcp-codex/image.json"),
+            include_str!("../../../tests/fixtures/mcp-codex/resource.json"),
+            include_str!("../../../tests/fixtures/mcp-codex/structured.json"),
+        ] {
+            let record: Value = serde_json::from_str(source).unwrap();
+            let call = &completed_tool(&record).unwrap().unwrap().calls[0];
+            assert_eq!(call.output.as_ref().unwrap().len(), 2, "{}", call.name);
+            assert_eq!(call.input.len(), 1);
+            assert!(matches!(&call.input[0], Section::Json { label, text }
+                if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));
+            let result = &record["payload"]["item"]["result"];
+            assert!(
+                matches!(&call.output.as_ref().unwrap()[0], Section::Text { text, .. }
+                if text == result["content"][0]["text"].as_str().unwrap())
+            );
+            match &call.output.as_ref().unwrap()[1] {
+                Section::Placeholder(text) => {
+                    let mime = if call.name == "cua_repl.js" {
+                        "[image image/png]"
+                    } else {
+                        "[resource text/html]"
+                    };
+                    assert_eq!(text, mime);
+                }
+                Section::Json { label, text } => {
+                    assert_eq!(label, "output");
+                    assert_eq!(
+                        serde_json::from_str::<Value>(text).unwrap(),
+                        result["structuredContent"]
+                    );
+                }
+                section => panic!("unexpected MCP output: {section:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_response_arguments_use_json_for_namespaced_tools() {
+        let record: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/mcp-codex/input.json"))
+                .unwrap();
+        let call = response_tool_call(&record["payload"], None);
+        assert_eq!(
+            call.input,
+            vec![Section::Json {
+                label: "input".into(),
+                text: "{}".into(),
+            }]
+        );
+    }
+
+    #[test]
     fn malformed_arguments_and_completed_mcp_results_keep_details() {
         let records = tool_records();
         let mut call = records
@@ -1766,7 +1835,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(mcp).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].input[0], Section::Fields(fields) if fields == &[("text".to_owned(), "[scrubbed]".to_owned())])
+            matches!(&event.calls[0].input[0], Section::Json {label, text} if label == "input" && serde_json::from_str::<Value>(text).unwrap() == mcp["payload"]["item"]["arguments"])
         );
         assert!(
             matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text == "Delivered to Claude.")
@@ -1826,7 +1895,7 @@ mod tests {
             let event = completed_tool(&record).unwrap().unwrap();
             assert_eq!(
                 event.calls[0].output,
-                Some(vec![result_section("result retained")])
+                Some(vec![text_section("output", "result retained")])
             );
             assert!(event.calls[0].is_error);
         }
@@ -1849,7 +1918,10 @@ mod tests {
             let expected = if arguments.is_null() {
                 Vec::new()
             } else {
-                vec![text_section("input", &arguments.to_string())]
+                vec![Section::Json {
+                    label: "input".into(),
+                    text: arguments.to_string(),
+                }]
             };
             assert_eq!(event.calls[0].input, expected, "{arguments}");
         }

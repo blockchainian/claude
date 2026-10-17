@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-10-08T06:04:50.785Z",
+  "ordinal": 563,
+  "type": "event_msg",
+  "payload": {
+    "type": "item_completed",
+    "thread_id": "[scrubbed]",
+    "turn_id": "[scrubbed]",
+    "item": {
+      "type": "McpToolCall",
+      "id": "[scrubbed]",
+      "server": "cua_repl",
+      "tool": "js",
+      "arguments": {
+        "code": "[scrubbed]",
+        "title": "[scrubbed]"
+      },
+      "pluginId": "unified-computer-use@openai-bundled",
+      "readOnlyHint": true,
+      "status": "completed",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[scrubbed page text]"
+          },
+          {
+            "type": "image",
+            "data": "[scrubbed]",
+            "mimeType": "image/png",
+            "_meta": {
+              "codex/imageDetail": "original"
+            }
+          }
+        ],
+        "isError": false,
+        "_meta": {
+          "browser_use": {
+            "url": "[scrubbed]"
+          },
+          "codex/browserUse": true,
+          "codex/nodeReplExecutionDurationMs": 485,
+          "codex/toolSurface": {
+            "backend": "chrome",
+            "browserFamily": "chrome",
+            "browserId": "[scrubbed]",
+            "extensionInstanceId": "[scrubbed]",
+            "kind": "browserUse",
+            "openTabIds": [
+              "[scrubbed]"
+            ],
+            "openTabs": [
+              {
+                "id": "[scrubbed]",
+                "title": "[scrubbed]",
+                "url": "[scrubbed]"
+              }
+            ],
+            "screenshot": {
+              "pageUrl": "[scrubbed]",
+              "tabId": "[scrubbed]",
+              "url": "[scrubbed]"
+            }
+          }
+        }
+      },
+      "duration": {
+        "secs": 2,
+        "nanos": 248942375
+      }
+    },
+    "started_at_ms": 1791439488535,
+    "completed_at_ms": 1791439490784
+  }
+}

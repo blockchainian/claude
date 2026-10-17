@@ -70,7 +70,7 @@ fn prose_body_kinds_use_the_log_column_width() {
 }
 
 #[test]
-fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
+fn mcp_json_inputs_keep_names_and_fields_in_body() {
     let parsed = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
     let event = parsed
         .iter()
@@ -84,23 +84,21 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
     let mut event = event.clone();
     event.calls = vec![call.clone()];
     let parts = body_parts(&event);
-    assert!(
-        !parts
-            .iter()
-            .take_while(|p| !p.source.is_empty())
-            .any(|p| p.source.starts_with("name: ") || p.source.contains("\nname: "))
-    );
-    assert_eq!(event.calls[0].detail_title, "tool-calls");
-    assert!(parts.iter().any(|p| p.source.starts_with("cwd: ")));
-    assert!(!parts.iter().any(|p| p.source.starts_with("prompt: ")));
+    assert_eq!(event.calls[0].detail_title, "codex-manager start");
+    let input = parts
+        .iter()
+        .find(|part| part.source.contains("\"cwd\":"))
+        .unwrap();
+    assert!(input.source.contains("\"name\": \"tool-calls\""));
+    assert!(input.source.contains("\"prompt\":"));
     for width in [200, 120] {
         let drawn = layout(&event, width);
-        for (segment, source) in drawn.sources.iter().enumerate().filter(|(_, s)| {
-            s.text.starts_with("cwd: ") || s.text.starts_with("Implement workstream")
-        }) {
-            let _ = source;
-            assert_reading_column(&drawn, segment);
-        }
+        let segment = drawn
+            .sources
+            .iter()
+            .position(|source| source.text.as_ref() == input.source)
+            .unwrap();
+        assert_reading_column(&drawn, segment);
     }
     event.calls[0].input = vec![
         crate::log::Section::Fields(vec![("threadId".into(), "abc-123".into())]),

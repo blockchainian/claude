@@ -129,6 +129,10 @@ pub enum Section {
     Label(String),
     /// `key: value` lines, in order.
     Fields(Vec<(String, String)>),
+    /// JSON displayed with indentation, syntax colors and multiline string values.
+    Json { label: String, text: String },
+    /// An unsupported content block, displayed dimly without its payload.
+    Placeholder(String),
     /// Code highlighted by `lang`, a syntax token or file extension such as "bash" or "rs".
     Code {
         label: String,

@@ -162,12 +162,12 @@ fn start_detail_header(width: u16) -> (String, String, super::super::detail_mode
 }
 
 #[test]
-fn start_description_occupies_center_header_without_body_duplicate() {
+fn mcp_start_centers_tool_and_keeps_name_in_json_body() {
     for width in [200, 120, 100] {
         let (header, body, columns) = start_detail_header(width);
-        let title = "Claude 图片链接";
+        let title = "codex-manager start";
         assert_eq!(
-            header[..header.find(title).expect("center description")].width(),
+            header[..header.rfind(title).expect("center tool title")].width(),
             usize::from(super::super::centering::centered_x(
                 columns.panel,
                 columns.text,
@@ -182,8 +182,8 @@ fn start_description_occupies_center_header_without_body_duplicate() {
             header[..header.find("41s").unwrap()].width(),
             usize::from(columns.time.right()) - 3
         );
-        assert!(!body.contains("Claude 图片链接"), "{body}");
-        assert!(body.contains("cwd: /workspace/agents"));
+        assert!(body.contains("\"name\": \"Claude 图片链接\""), "{body}");
+        assert!(body.contains("\"cwd\": \"/workspace/agents\""));
     }
     let (header, body, _) = start_detail_header(200);
     let snapshot = format!(
@@ -204,23 +204,16 @@ fn start_description_occupies_center_header_without_body_duplicate() {
 }
 
 #[test]
-fn start_tool_metadata_truncates_before_center_description_and_time() {
+fn mcp_start_tool_metadata_truncates_before_title_and_time() {
     let (header, body, columns) = start_detail_header(45);
     assert!(header.contains('…'), "{header}");
-    let title = "Claude 图片链接";
-    assert_eq!(
-        header[..header.find(title).unwrap()].width(),
-        usize::from(super::super::centering::centered_x(
-            columns.panel,
-            columns.text,
-            title.width() as u16,
-        ))
-    );
+    assert!(header.contains("codex-manager"), "{header}");
+    assert!(!header.contains("Claude 图片链接"));
     assert_eq!(
         header[..header.find("41s").unwrap()].width(),
         usize::from(columns.time.right()) - 3
     );
-    assert!(!body.contains(title));
+    assert!(body.contains("\"cwd\":"), "{body}");
 }
 
 #[test]
@@ -292,7 +285,7 @@ fn detail_without_description_centers_tool_in_both_modes() {
             screen
                 .lines()
                 .skip(usize::from(detail.y + 2))
-                .any(|line| line.contains("threadId: 01a1489e"))
+                .any(|line| line.contains("\"threadId\": \"01a1489e"))
         );
     }
 }

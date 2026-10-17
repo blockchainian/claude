@@ -659,6 +659,15 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             parts.push(Part::new(cells(&text), body));
             return;
         }
+        Section::Json { text, .. } => {
+            let value = serde_json::from_str(text).expect("provider JSON section is valid");
+            parts.push(Part::json(value));
+            return;
+        }
+        Section::Placeholder(text) => {
+            parts.push(Part::new(text.clone(), Body::Label(Style::new().dim())));
+            return;
+        }
         Section::Code { label, lang, text } => {
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
@@ -1076,6 +1085,41 @@ mod tests {
                 assert_eq!(copied, line.to_string());
             }
         }
+    }
+
+    #[test]
+    fn json_sections_use_multiline_highlighting_and_placeholders_are_dim() {
+        let source = include_str!("../../tests/fixtures/codex-manager-await.jsonl").trim_end();
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Json {
+                label: "input".into(),
+                text: source.into(),
+            },
+            Style::default(),
+            false,
+        );
+        let expected = Part::text_parts(source.into(), false);
+        assert_eq!(parts[0].source, expected[0].source);
+        assert_eq!(
+            parts[0].lines(200, Style::default(), chrono::DateTime::UNIX_EPOCH),
+            expected[0].lines(200, Style::default(), chrono::DateTime::UNIX_EPOCH)
+        );
+        parts.clear();
+        push_section(
+            &mut parts,
+            &Section::Placeholder("[image image/png]".into()),
+            Style::default(),
+            true,
+        );
+        let lines = parts[0].lines(200, Style::default(), chrono::DateTime::UNIX_EPOCH);
+        assert_eq!(lines[0].to_string(), "[image image/png]");
+        assert!(lines[0].spans.iter().all(|span| {
+            span.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::DIM)
+        }));
     }
 
     #[test]

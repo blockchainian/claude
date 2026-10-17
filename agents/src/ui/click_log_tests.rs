@@ -607,7 +607,7 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
     );
     let input = rows
         .iter()
-        .find(|row| row.contains("threadId: 01a1489e"))
+        .find(|row| row.contains("\"threadId\": \"01a1489e"))
         .expect("thread input remains visible");
     assert!(input.len() - input.trim_start().len() > 20);
     let snapshot = rows

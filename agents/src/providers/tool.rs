@@ -1,6 +1,49 @@
 use crate::log::{Section, ToolCall};
 use serde_json::Value;
 
+pub(crate) fn json_input(value: &Value) -> Vec<Section> {
+    if value.is_null() {
+        Vec::new()
+    } else {
+        vec![Section::Json {
+            label: "input".into(),
+            text: value.to_string(),
+        }]
+    }
+}
+
+/// Decode MCP and Anthropic content blocks without exposing binary payloads.
+pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
+    if let Some(text) = content.as_str() {
+        return vec![Section::Text {
+            label: "output".into(),
+            text: text.into(),
+        }];
+    }
+    content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|block| {
+            if let Some(text) = block["text"].as_str().filter(|_| block["type"] == "text") {
+                return Section::Text {
+                    label: "output".into(),
+                    text: text.into(),
+                };
+            }
+            let kind = block["type"].as_str().unwrap_or("unknown");
+            let mime = block["mimeType"]
+                .as_str()
+                .or_else(|| block["source"]["media_type"].as_str())
+                .or_else(|| block["resource"]["mimeType"].as_str());
+            Section::Placeholder(match mime {
+                Some(mime) => format!("[{kind} {mime}]"),
+                None => format!("[{kind}]"),
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn display_tool_name(name: &str) -> String {
     let Some((server, tool)) = name
         .strip_prefix("mcp__")
@@ -205,6 +248,25 @@ fn input_section(section: Section) -> Vec<Section> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unsupported_content_blocks_keep_type_and_mime_without_payload() {
+        let record: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/mcp-codex/image.json"))
+                .unwrap();
+        let image = &record["payload"]["item"]["result"]["content"][1];
+        // These types were absent from local transcripts; vary a captured media block.
+        for kind in ["image", "audio", "resource_link", "future_content"] {
+            let mut block = image.clone();
+            block["type"] = kind.into();
+            assert_eq!(
+                super::mcp_content(&serde_json::Value::Array(vec![block])),
+                vec![crate::log::Section::Placeholder(format!(
+                    "[{kind} image/png]"
+                ))]
+            );
+        }
+    }
+
     #[test]
     fn mcp_titles_show_server_and_tool() {
         for (name, expected) in [

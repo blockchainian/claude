@@ -6,6 +6,9 @@ use unicode_width::UnicodeWidthStr;
 #[path = "support/terminal_questions.rs"]
 mod terminal_questions;
 
+#[path = "support/terminal_mcp.rs"]
+mod terminal_mcp;
+
 #[path = "support/terminal_headings.rs"]
 mod terminal_headings;
 

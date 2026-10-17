@@ -521,6 +521,7 @@ struct ResultAt {
     error: bool,
     denial: Option<String>,
     content: String,
+    raw_content: serde_json::Value,
     value: serde_json::Value,
 }
 
@@ -654,6 +655,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             text: input["message"].as_str().unwrap_or("").to_owned(),
         }],
         "Skill" => vec![text_section("args", input["args"].as_str().unwrap_or(""))],
+        _ if name.starts_with("mcp__") => crate::providers::tool::json_input(input),
         _ => vec![all_fields(input)],
     };
     match name {
@@ -708,6 +710,9 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     let output = result.map(|result| {
         let fallback = || vec![text_section("output", &result.content)];
         let value = &result.value;
+        if name.starts_with("mcp__") {
+            return crate::providers::tool::mcp_content(&result.raw_content);
+        }
         if name == "AskUserQuestion"
             && result.error
             && let Some((explanation, questions)) = result.content.split_once("Questions asked:")
@@ -765,18 +770,12 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
                 label: "output".to_owned(),
                 text: value["result"].as_str().unwrap().to_owned(),
             }],
-            _ if name.starts_with("mcp__") && value.is_array() => value
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|block| block["type"] == "text")
-                .filter_map(|block| block["text"].as_str())
-                .map(|text| text_section("output", text))
-                .collect(),
             _ => fallback(),
         }
     });
-    crate::providers::tool::include_description(&mut sections, input);
+    if !name.starts_with("mcp__") {
+        crate::providers::tool::include_description(&mut sections, input);
+    }
     let mut call = ToolCall {
         detail_left: crate::providers::tool::display_tool_name(name),
         detail_title: String::new(),
@@ -870,6 +869,7 @@ impl Log {
                                 error: false,
                                 denial: None,
                                 content: result_text(&block["content"]),
+                                raw_content: block["content"].clone(),
                                 value: record["toolUseResult"].clone(),
                             });
                             result.source_records.extend(source_records);
@@ -1299,6 +1299,111 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn mcp_real_nested_arguments_are_a_single_json_section() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/mcp-claude/nested.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let input = records[0]["message"]["content"][0]["input"].clone();
+        let events = events_from(records);
+        assert_eq!(
+            events[0].calls[0].input,
+            vec![Section::Json {
+                label: "input".into(),
+                text: input.to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn mcp_arguments_keep_all_json_shapes_and_description() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/mcp-claude/nested.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let query = &records[0]["message"]["content"][0]["input"]["query"];
+        for input in [
+            Value::Null,
+            query["parameters"]["filters"].clone(),
+            query["dry"].clone(),
+            query["limit"].clone(),
+            query["view"].clone(),
+            json!({"description": query["view"]}),
+        ] {
+            let mut records = records.clone();
+            records[0]["message"]["content"][0]["input"] = input.clone();
+            let events = events_from(records);
+            let expected = if input.is_null() {
+                Vec::new()
+            } else {
+                vec![Section::Json {
+                    label: "input".into(),
+                    text: input.to_string(),
+                }]
+            };
+            assert_eq!(events[0].calls[0].input, expected);
+        }
+    }
+
+    #[test]
+    fn mcp_real_image_result_keeps_placeholder_and_text() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/mcp-claude/image.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let content = records[1]["message"]["content"][0]["content"].clone();
+        let expected: Vec<_> = content
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| {
+                if block["type"] == "image" {
+                    Section::Placeholder(format!(
+                        "[image {}]",
+                        block["source"]["media_type"].as_str().unwrap()
+                    ))
+                } else {
+                    text_section("output", block["text"].as_str().unwrap())
+                }
+            })
+            .collect();
+        for copy in [records[1]["toolUseResult"].clone(), Value::Null] {
+            let mut records = records.clone();
+            records[1]["toolUseResult"] = copy;
+            let events = events_from(records);
+            assert_eq!(events[0].calls[0].output, Some(expected.clone()));
+        }
+    }
+
+    #[test]
+    fn mcp_real_results_use_content_without_metadata_duplication() {
+        for source in [
+            include_str!("../../../tests/fixtures/mcp-claude/structured.jsonl"),
+            include_str!("../../../tests/fixtures/mcp-claude/error.jsonl"),
+        ] {
+            let records: Vec<Value> = source
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let content = &records[1]["message"]["content"][0]["content"];
+            let expected = if let Some(text) = content.as_str() {
+                vec![text_section("output", text)]
+            } else {
+                content
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|block| text_section("output", block["text"].as_str().unwrap()))
+                    .collect()
+            };
+            let is_error = records[1]["message"]["content"][0]["is_error"] == true;
+            let events = events_from(records);
+            assert_eq!(events[0].calls[0].output, Some(expected));
+            assert_eq!(events[0].calls[0].is_error, is_error);
+        }
+    }
+
     #[test]
     fn raw_source_records_include_each_consumed_result_line() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -1930,17 +2035,8 @@ pub(crate) mod tests {
         );
         for (call, record) in parallel.calls.iter().zip(&records[16..18]) {
             let input = &record["message"]["content"][0]["input"];
-            assert_eq!(call.detail_title, input["name"].as_str().unwrap());
-            assert_eq!(
-                call.input,
-                vec![
-                    Section::Fields(vec![("cwd".into(), input["cwd"].as_str().unwrap().into())]),
-                    Section::Prose {
-                        text: input["prompt"].as_str().unwrap().into(),
-                        markdown: true
-                    },
-                ]
-            );
+            assert_eq!(call.detail_title, "codex-manager start");
+            assert_eq!(call.input, crate::providers::tool::json_input(input));
         }
         assert!(parallel.calls[1].output.is_none());
         for (name, input_index, output_index) in
@@ -1994,7 +2090,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn tool_call_fallbacks_keep_reasons_and_skip_images() {
+    fn tool_call_fallbacks_keep_reasons() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
@@ -2007,6 +2103,7 @@ pub(crate) mod tests {
             error: false,
             denial: None,
             content: "reason".to_owned(),
+            raw_content: Value::Null,
             value: Value::Null,
         };
         for value in [Value::Null, json!("metadata"), json!(3)] {
@@ -2030,16 +2127,6 @@ pub(crate) mod tests {
         result.value = Value::Null;
         assert!(
             matches!(&tool_call("Agent", &records[10]["message"]["content"][0]["input"], Some(&result)).output.unwrap()[0], Section::Markdown { text, .. } if text == "reason")
-        );
-        result.value = json!([{"type":"image","data":"skipped"},{"type":"text","text":"plain"}]);
-        assert_eq!(
-            tool_call(
-                "mcp__tool",
-                &json!({"flag":true,"nested":{"n":1}}),
-                Some(&result)
-            )
-            .output,
-            Some(vec![text_section("output", "plain")])
         );
         result.value = Value::Null;
         let edit = tool_call(
