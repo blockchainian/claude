@@ -27,15 +27,21 @@ fn codex_exit_event(code: i32) -> crate::log::Event {
 #[test]
 fn codex_nonzero_exit_parts_have_separate_centering_and_copy_sources() {
     let event = codex_exit_event(1);
-    let parts = tool_detail::parts(&event);
+    let parts = detail_parts(&event);
     let lines: Vec<_> = parts
         .iter()
         .flat_map(|part| part.lines(80, Style::default(), event.started_at))
         .map(|line| line.to_string())
         .collect();
     assert_eq!(lines, ["false", "↓", "exit code: 1", "↓", "[scrubbed]"]);
-    assert_ne!(parts[0].group, parts[2].group);
-    assert_ne!(parts[2].group, parts[4].group);
+    let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
+    assert_eq!(detail.sections[0].groups.len(), 5);
+    assert!(
+        detail.sections[0]
+            .groups
+            .iter()
+            .all(|group| group.parts.len() == 1)
+    );
     assert_eq!(parts[2].source, "exit code: 1");
     for index in [1, 3] {
         let lines = parts[index].lines(80, Style::default(), event.started_at);
@@ -57,7 +63,7 @@ fn codex_nonzero_exit_parts_have_separate_centering_and_copy_sources() {
 #[test]
 fn codex_zero_exit_parts_keep_input_arrow_output() {
     let event = codex_exit_event(0);
-    let lines: Vec<_> = tool_detail::parts(&event)
+    let lines: Vec<_> = detail_parts(&event)
         .iter()
         .flat_map(|part| part.lines(80, Style::default(), event.started_at))
         .map(|line| line.to_string())

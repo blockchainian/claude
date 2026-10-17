@@ -1356,7 +1356,12 @@ fn terminal_running_tool_animates_without_input() {
             assert_eq!((x, y), previous, "animation must stay centered");
         }
         position = Some((x, y));
-        assert_eq!(x, 1 + (198 - 3) / 2);
+        let cap = terminal_detail_width::message_width(
+            &tmux.run(&["capture-pane", "-t", "probe", "-p"]),
+            200,
+        );
+        let content_left = 1 + (198 - cap - 10) / 2;
+        assert_eq!(x, content_left + (cap - 3) / 2);
         for offset in 0..3 {
             let cell = screen.cell(y as u16, (x + offset) as u16).unwrap();
             assert!(cell.dim(), "running output stays dim: x={x}, raw={raw:?}");

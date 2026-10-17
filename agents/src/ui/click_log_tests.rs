@@ -66,7 +66,7 @@ fn detail_buffer(view: &View, width: u16, now: chrono::DateTime<Utc>) -> Buffer 
 }
 
 #[test]
-fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
+fn detail_centers_multiline_sections_and_arrow_in_content_column() {
     for width in [80, 81, 160] {
         let (view, now, input, output) = multiline_tool_view();
         let buf = detail_buffer(&view, width, now);
@@ -84,11 +84,7 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
                 .filter(|row| row.segment == source.id)
                 .collect();
             let block_width = text.lines().map(UnicodeWidthStr::width).max().unwrap() as u16;
-            let offset = if buf.area.width >= 150 {
-                (region.area.width - block_width) / 2
-            } else {
-                0
-            };
+            let offset = (region.area.width - block_width) / 2;
             for (row, line) in rows.iter().zip(text.lines()) {
                 let drawn: String = (0..block_width)
                     .map(|x| buf[(region.area.x + offset + x, row.y)].symbol())
@@ -104,12 +100,7 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
         }
         assert_eq!(
             buf[(
-                region.area.x
-                    + if buf.area.width >= 150 {
-                        (width - 1) / 2
-                    } else {
-                        0
-                    },
+                region.area.x + (region.area.width - 1) / 2,
                 region.area.y + 2
             )]
                 .symbol(),
@@ -132,18 +123,19 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             label: "stderr".into(),
             text: output,
         }]);
-        let parts = super::super::tool_detail::parts(&event);
+        let parts = detail_parts(&event);
         let output_start = parts
             .iter()
             .position(|part| part.source == "stderr")
             .unwrap();
         let output_parts = &parts[output_start..];
         assert!(output_parts.len() >= 4);
-        let content_width = view
-            .center_layout(Rect::new(0, 0, width + 4, 42))
-            .log
-            .width
-            .saturating_sub(10);
+        let content_width = super::super::detail_model::detail_columns(
+            Rect::new(2, 1, width, 40),
+            view.center_layout(Rect::new(0, 0, width + 4, 42)).log,
+        )
+        .content
+        .width;
         let widest = output_parts
             .iter()
             .flat_map(|part| {
@@ -156,11 +148,7 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             .map(|line| line.width())
             .max()
             .unwrap() as u16;
-        let offset = if width + 4 >= 150 {
-            (width - widest) / 2
-        } else {
-            0
-        };
+        let offset = (content_width - widest.min(content_width)) / 2;
         view.select_fixture_event(Some(event));
         let buf = detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
@@ -196,6 +184,11 @@ fn detail_centers_all_output_fragments_with_one_offset() {
                 chrono::DateTime::UNIX_EPOCH,
             )[index]
                 .to_string();
+            let line = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                Line::from(line),
+                content_width.into(),
+            )
+            .to_string();
             let mut column = region.area.x + offset;
             for grapheme in
                 unicode_segmentation::UnicodeSegmentation::graphemes(line.as_str(), true)
@@ -208,6 +201,9 @@ fn detail_centers_all_output_fragments_with_one_offset() {
                 column += grapheme.width() as u16;
             }
             for (cells, bytes) in &row.cells {
+                if buf[(region.area.x + cells.start, row.y)].symbol() == "…" {
+                    continue;
+                }
                 assert_eq!(
                     buf[(region.area.x + cells.start, row.y)].symbol(),
                     &part.source[bytes.clone()]
@@ -226,7 +222,7 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
             label: String::new(),
             text: include_str!("../../tests/fixtures/codex-manager-await.jsonl").into(),
         }]);
-        let parts = super::super::tool_detail::parts(&event);
+        let parts = detail_parts(&event);
         let part = parts
             .iter()
             .find(|part| part.source.contains("lastMessage"))
@@ -239,21 +235,25 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .join("\n"),
             include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
         );
-        let content_width = view
-            .center_layout(Rect::new(0, 0, width + 4, 42))
-            .log
-            .width
-            .saturating_sub(10);
+        let content_width = super::super::detail_model::detail_columns(
+            Rect::new(2, 1, width, 40),
+            view.center_layout(Rect::new(0, 0, width + 4, 42)).log,
+        )
+        .content
+        .width;
         let lines = part.lines(
             content_width.into(),
             Style::default(),
             chrono::DateTime::UNIX_EPOCH,
         );
-        let offset = if width + 4 >= 150 {
-            (width as usize - lines.iter().map(Line::width).max().unwrap()) / 2
-        } else {
-            0
-        };
+        let offset = (content_width as usize
+            - lines
+                .iter()
+                .map(Line::width)
+                .max()
+                .unwrap()
+                .min(content_width as usize))
+            / 2;
         let copy = super::super::log::open_text(&event);
         assert!(copy.ends_with(&part.source));
         view.select_fixture_event(Some(event));
@@ -275,7 +275,12 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
             for (row, line) in rows.iter().zip(&lines) {
                 let mut x = region.area.x + offset as u16;
                 for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(
-                    line.to_string().as_str(),
+                    super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                        line.clone(),
+                        content_width.into(),
+                    )
+                    .to_string()
+                    .as_str(),
                     true,
                 ) {
                     assert_eq!(buf[(x, row.y)].symbol(), grapheme);
@@ -608,11 +613,12 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
     view.select_fixture_event(Some(event));
     view.log_detail_raw = true;
     for width in [23, 80, 120] {
-        let content_width = view
-            .center_layout(Rect::new(0, 0, width + 4, 42))
-            .log
-            .width
-            .saturating_sub(10);
+        let content_width = super::super::detail_model::detail_columns(
+            Rect::new(2, 1, width, 40),
+            view.center_layout(Rect::new(0, 0, width + 4, 42)).log,
+        )
+        .content
+        .width;
         let mut expected = super::highlight::code_lines(&source, "json");
         let plain = super::tool_detail::Part::raw_json(source.clone());
         assert_eq!(
@@ -620,15 +626,15 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
             plain.maps(&plain.lines(content_width as usize, body_style, now))
         );
         let widest = expected.iter().map(Line::width).max().unwrap();
-        let padding = if width + 4 >= 150 {
-            (width as usize).saturating_sub(widest) / 2
-        } else {
-            0
-        };
+        let padding = (content_width as usize).saturating_sub(widest) / 2;
         for line in &mut expected {
             for span in &mut line.spans {
                 span.style = body_style.patch(span.style);
             }
+            *line = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                line.clone(),
+                content_width.into(),
+            );
             if padding > 0 {
                 line.spans.insert(0, Span::raw(" ".repeat(padding)));
             }
@@ -637,7 +643,11 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
             view.viewport.borrow_mut().log_detail_scroll = scroll;
             let actual = detail_buffer(&view, width, now);
             let scroll = view.viewport.borrow().log_detail_scroll;
-            let body = Rect::new(2, 4, width, 37);
+            let columns = super::super::detail_model::detail_columns(
+                Rect::new(2, 1, width, 40),
+                view.center_layout(actual.area).log,
+            );
+            let body = Rect::new(columns.content.x, 4, columns.content.width, 37);
             let mut reference = Buffer::empty(actual.area);
             Paragraph::new(
                 expected
@@ -682,7 +692,16 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
         .find(|row| row.contains("codex-manager detach"))
         .expect("detail must retain the log-list tool title");
     let left = title.find("codex-manager detach").unwrap();
-    assert!(left.abs_diff((164 - "codex-manager detach".len()) / 2) <= 1);
+    let viewport = view.viewport.borrow();
+    let columns = super::super::detail_model::detail_columns(
+        viewport.log_detail,
+        view.center_layout(buf.area).log,
+    );
+    assert_eq!(
+        left,
+        columns.content.x as usize
+            + (columns.content.width as usize - "codex-manager detach".len()) / 2
+    );
     let input = rows
         .iter()
         .find(|row| row.contains("threadId: 01a1489e"))

@@ -110,7 +110,6 @@ struct Viewport {
     first_entry: usize,
     log: Rect,
     log_detail: Rect,
-    log_detail_wide: bool,
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,

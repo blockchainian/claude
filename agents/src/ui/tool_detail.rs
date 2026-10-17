@@ -238,10 +238,6 @@ impl Part {
             .collect()
     }
 
-    pub fn content_kind(&self) -> ContentKind {
-        self.body.content_kind()
-    }
-
     fn render_lines(&self, width: usize, now: chrono::DateTime<chrono::Utc>) -> Vec<Line<'static>> {
         let drawn = self.source.replace('\t', "    ");
         let source = drawn.as_str();

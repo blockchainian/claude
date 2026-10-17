@@ -59,7 +59,7 @@ fn ask_question_input_is_a_copyable_bullet_list() {
             .collect::<Vec<_>>()
             .join("\n");
         let event = question_event(&fixture);
-        let parts = tool_detail::parts(&event);
+        let parts = detail_parts(&event);
         let suffix = if multi { " (multi-select)" } else { "" };
         let expected = format!(
             "• 压缩摘要那条在 agents 里怎么处理？{suffix}\n  • 显示成压缩标记 (Recommended): 不当用户消息，日志里出一行“Conversation compacted”之类的系统行\n  • 直接隐藏: 日志里完全不显示这条"
@@ -161,43 +161,25 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
             .join("tests/ui_snapshots")
             .join(name);
         if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
-            std::fs::write(&path, &screen).unwrap();
+            std::fs::write(&path, format!("{}\n", screen.trim_end())).unwrap();
         }
         assert_eq!(
             screen.trim_end(),
             std::fs::read_to_string(path).unwrap().trim_end()
         );
 
-        let parts = tool_detail::parts(&event);
+        let parts = detail_parts(&event);
         let viewport = view.viewport.borrow();
         let region = &viewport.log_text;
-        for group in [
-            parts[0].group.unwrap(),
-            parts.last().unwrap().group.unwrap(),
-        ] {
-            let cells: Vec<_> = region
-                .rows
-                .iter()
-                .filter(|row| parts[row.segment].group == Some(group))
-                .flat_map(|row| &row.cells)
-                .map(|(columns, _)| columns)
-                .collect();
-            let left = cells.iter().map(|columns| columns.start).min().unwrap();
-            let right = cells.iter().map(|columns| columns.end).max().unwrap();
-            assert_eq!(left, 0);
-            let limit = if matches!(
-                parts
+        let columns =
+            super::super::detail_model::detail_columns(area, view.center_layout(area).log);
+        for row in &region.rows {
+            assert_eq!(row.x, columns.content.x);
+            assert!(
+                row.cells
                     .iter()
-                    .find(|part| part.group == Some(group))
-                    .unwrap()
-                    .content_kind(),
-                super::super::content::Kind::Prose
-            ) {
-                view.center_layout(area).log.width.saturating_sub(10)
-            } else {
-                area.width
-            };
-            assert!(right <= limit);
+                    .all(|(cells, _)| cells.end <= columns.content.width)
+            );
         }
         assert_eq!(region.sources[0].text.as_ref(), parts[0].source);
         drop(viewport);

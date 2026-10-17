@@ -1,5 +1,5 @@
-                                                         Claude 图片链接                  codex-manager start                               41s
-                                                         cwd: /workspace/agents                                                                                                                        │
-                                                         Implement workstream A of /workspace/agents/scratchpad/links/plan.md (Claude provider:                                                        │
-                                                         prompt image links). Read the plan's Goal, Shared representation and section A, and                                                           │
-                                                         agents/AGENTS.md.                                                                                                                             │
+                                                    Claude 图片链接                  codex-manager start                                         41s
+                                                    cwd: /workspace/agents                                                                                                                             │
+                                                    Implement workstream A of /workspace/agents/scratchpad/links/plan.md (Claude provider:                                                             │
+                                                    prompt image links). Read the plan's Goal, Shared representation and section A, and                                                                │
+                                                    agents/AGENTS.md.                                                                                                                                  │

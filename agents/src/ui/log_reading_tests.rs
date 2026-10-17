@@ -11,15 +11,24 @@ fn layout(event: &Event, width: u16) -> DetailLayout {
     detail_layout(event, width, Path::new("/"), DateTime::UNIX_EPOCH)
 }
 
-fn assert_reading_column(layout: &DetailLayout, segment: usize, wide: bool) {
+fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
+    super::super::tool_detail::detail(event, String::new(), Style::new().dim())
+        .sections
+        .into_iter()
+        .flat_map(|section| section.groups)
+        .flat_map(|group| group.parts)
+        .collect()
+}
+
+fn assert_reading_column(layout: &DetailLayout, segment: usize) {
     let rows: Vec<_> = layout
         .rows
         .iter()
         .filter(|(id, cells)| *id == segment && !cells.is_empty())
         .collect();
     assert!(!rows.is_empty());
-    let width = layout.content_width;
-    let left = if wide { (layout.width - width) / 2 } else { 0 };
+    let width = layout.columns.content.width;
+    let left = 0;
     for (_, cells) in rows {
         assert!(cells.first().unwrap().0.start >= left);
         assert!(
@@ -46,7 +55,7 @@ fn prose_body_kinds_use_the_log_column_width() {
         event.kind = kind;
         for width in [200, 120] {
             let drawn = layout(&event, width);
-            assert_reading_column(&drawn, 0, width == 200);
+            assert_reading_column(&drawn, 0);
             assert_eq!(drawn.sources[0].text.as_ref(), event.body);
             if width == 120 {
                 assert!(
@@ -85,7 +94,7 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
             _ => None,
         })
         .unwrap();
-    let parts = open_parts(&event);
+    let parts = body_parts(&event);
     assert!(
         !parts
             .iter()
@@ -104,7 +113,7 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
             s.text.starts_with("cwd: ") || s.text.starts_with("Implement workstream")
         }) {
             let _ = source;
-            assert_reading_column(&drawn, segment, width == 200);
+            assert_reading_column(&drawn, segment);
         }
     }
     event.calls[0].input = vec![crate::log::Section::Fields(vec![
@@ -120,7 +129,7 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
         None
     );
     let drawn = layout(&event, 200);
-    assert_reading_column(&drawn, 0, true);
+    assert_reading_column(&drawn, 0);
     assert!(
         drawn
             .sources
@@ -161,7 +170,7 @@ fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
                     .iter()
                     .position(|s| s.text.as_ref() == input)
                     .unwrap();
-                assert_reading_column(&drawn, segment, width == 200);
+                assert_reading_column(&drawn, segment);
             }
         }
     }
@@ -177,11 +186,20 @@ fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
     }]);
     for width in [200, 120] {
         let drawn = layout(&event, width);
-        let rows: Vec<_> = drawn
-            .lines
+        let id = drawn
+            .sources
             .iter()
-            .filter(|line| line.to_string().contains(&output))
+            .position(|source| source.text.as_ref() == output)
+            .unwrap();
+        let rows: Vec<_> = drawn
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, (segment, _))| *segment == id)
+            .map(|(row, _)| &drawn.lines[row])
             .collect();
+        assert!(rows[0].to_string().ends_with('…'));
+        assert_eq!(rows[0].width(), usize::from(drawn.columns.content.width));
         assert_eq!(
             rows.len(),
             1,
@@ -218,8 +236,8 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
         assert!(drawn.sources[0].text.contains("title: Readable task"));
         assert!(drawn.sources[0].text.contains("sessionId: abc"));
         assert!(drawn.sources[0].text.contains("cwd: /workspace"));
-        assert_reading_column(&drawn, 0, true);
-        assert_reading_column(&drawn, 1, true);
+        assert_reading_column(&drawn, 0);
+        assert_reading_column(&drawn, 1);
         assert!(
             drawn
                 .sources
@@ -244,7 +262,7 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
             Some(value.clone())
         );
         assert!(
-            !open_parts(&event)
+            !body_parts(&event)
                 .iter()
                 .any(|part| part.source == format!("name: {value}"))
         );
@@ -281,7 +299,7 @@ fn command_and_all_output_body_formats_keep_their_width() {
         },
         Section::Fields(vec![("prompt".into(), text.clone())]),
     ]);
-    for part in open_parts(&event) {
+    for part in body_parts(&event) {
         for width in [200, 120] {
             let lines = part.lines(width, Style::default(), DateTime::UNIX_EPOCH);
             if part.markdown() {
@@ -300,7 +318,7 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
     event.kind = Kind::QueuedUser;
     event.body = "Read **this** before {\"answer\":[1,2]} and continue".into();
     let expected = super::super::tool_detail::Part::text_parts(event.body.clone(), false);
-    let actual = open_parts(&event);
+    let actual = body_parts(&event);
     assert_eq!(
         actual.iter().map(|p| &p.source).collect::<Vec<_>>(),
         expected.iter().map(|p| &p.source).collect::<Vec<_>>()
@@ -329,23 +347,24 @@ fn merged_calls_keep_descriptions_in_title_bars() {
         .unwrap()
         .clone();
     event.calls = vec![call.clone(), call];
-    let parts = open_parts(&event);
-    assert_eq!(parts[0].source, event.calls[0].title);
+    let detail = super::super::tool_detail::detail(&event, String::new(), Style::new().dim());
+    let title = detail.sections[0].title.as_ref().unwrap();
+    assert_eq!(title.source(), event.calls[0].title);
     let description = super::super::tool_detail::input_label(&event.calls[0]).unwrap();
-    assert!(!parts.iter().any(|part| part.source == description));
+    assert_eq!(title.left.as_deref(), Some(description.as_str()));
     assert!(
-        parts[0].lines(120, Style::default(), DateTime::UNIX_EPOCH)[0]
-            .to_string()
-            .starts_with(&description)
+        !body_parts(&event)
+            .iter()
+            .any(|part| part.source == description)
     );
     for width in [120, 200] {
         assert_centered_blocks(&event, width);
-        let lines = parts[0].lines(width.into(), Style::default(), DateTime::UNIX_EPOCH);
-        let maps = parts[0].maps(&lines);
+        let (line, maps) = title.line(width.into());
+        assert!(line.to_string().starts_with(&description));
+        let source = title.source();
         assert_eq!(
-            maps[0]
-                .iter()
-                .map(|(_, bytes)| &parts[0].source[bytes.clone()])
+            maps.iter()
+                .map(|(_, bytes)| &source[bytes.clone()])
                 .collect::<String>(),
             event.calls[0].title
         );
@@ -374,80 +393,57 @@ fn codex_events(fixture: &str) -> Vec<Event> {
 
 /// Every input/output group has equal outer margins, while preserving its own indentation.
 fn assert_centered_blocks(event: &Event, width: u16) {
-    let parts = open_parts(event);
+    let detail = super::super::tool_detail::detail(event, String::new(), Style::new().dim());
     let drawn = layout(event, width);
-    let mut widths = std::collections::BTreeMap::<usize, usize>::new();
-    for (index, part) in parts.iter().enumerate() {
-        let widest = part
-            .lines(
-                drawn.content_width.into(),
-                Style::default(),
-                DateTime::UNIX_EPOCH,
-            )
-            .iter()
-            .map(Line::width)
-            .max()
-            .unwrap_or(0);
-        let width = widths.entry(part.group.unwrap_or(index)).or_default();
-        *width = (*width).max(widest);
-    }
-    let mut groups = std::collections::BTreeMap::<(usize, usize), Vec<usize>>::new();
-    for (index, part) in parts.iter().enumerate() {
-        let group = part.group.unwrap_or(index);
-        let kind = if widths[&group] > usize::from(drawn.content_width) {
-            part.content_kind() as usize
-        } else {
-            0
-        };
-        groups.entry((group, kind)).or_default().push(index);
-    }
-    for indices in groups.values() {
-        // Merged title rules also carry a right-aligned duration, outside the body blocks.
-        if indices.len() == 1
-            && event.calls.len() > 1
-            && event
-                .calls
+    let cap = usize::from(drawn.columns.content.width);
+    let mut id = 0;
+    for section in detail.sections {
+        id += usize::from(section.title.is_some());
+        for group in section.groups {
+            let start = id;
+            id += group.parts.len();
+            let widest = group
+                .parts
                 .iter()
-                .any(|call| call.title == parts[indices[0]].source)
-        {
-            continue;
+                .flat_map(|part| part.lines(cap, Style::default(), DateTime::UNIX_EPOCH))
+                .map(|line| line.width())
+                .max()
+                .unwrap_or(0)
+                .min(cap);
+            let padding = (cap - widest) / 2;
+            for (row, (segment, cells)) in drawn
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, (segment, _))| (start..id).contains(segment))
+            {
+                assert!(drawn.lines[row].width() <= cap);
+                assert!(
+                    cells
+                        .iter()
+                        .all(|(cells, _)| cells.start as usize >= padding
+                            && cells.end as usize <= cap),
+                    "{} segment {segment}",
+                    event.body
+                );
+                if !drawn.lines[row].to_string().trim().is_empty() {
+                    assert!(
+                        drawn.lines[row]
+                            .to_string()
+                            .starts_with(&" ".repeat(padding))
+                    );
+                }
+            }
+            let actual = drawn
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, (segment, _))| (start..id).contains(segment))
+                .map(|(row, _)| drawn.lines[row].width())
+                .max()
+                .unwrap_or(0);
+            assert_eq!(actual, padding + widest, "{} at {width}", event.body);
         }
-        let rows: Vec<_> = drawn
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, (id, _))| indices.contains(id))
-            .map(|(row, _)| &drawn.lines[row])
-            .collect();
-        let nonempty: Vec<_> = rows
-            .iter()
-            .map(|line| line.to_string())
-            .filter(|text| !text.trim().is_empty())
-            .collect();
-        if nonempty.is_empty() {
-            continue;
-        }
-        let left = nonempty
-            .iter()
-            .map(|text| text.width() - text.trim_start().width())
-            .min()
-            .unwrap();
-        let right = nonempty
-            .iter()
-            .map(|text| usize::from(width).saturating_sub(text.width()))
-            .min()
-            .unwrap();
-        assert!(
-            if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
-                left.abs_diff(right) <= 1
-            } else {
-                left == 0
-            },
-            "{} {:?} group {:?}: margins {left}/{right} at width {width}: {nonempty:#?}",
-            event.body,
-            event.kind,
-            indices
-        );
     }
 }
 
@@ -555,7 +551,7 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
         super::super::tool_detail::input_label(call).as_deref(),
         Some("实测 attach 发提示词")
     );
-    let body = open_parts(event);
+    let body = body_parts(event);
     assert!(body.iter().any(|part| part.source == "name: attach-probe"));
     assert!(
         !body
@@ -581,20 +577,31 @@ fn notification_preformatted_blocks_preserve_logical_lines() {
         .unwrap();
     for width in [200, 90] {
         let drawn = layout(&event, width);
-        for expected in message.lines().filter(|line| !line.is_empty()) {
-            assert!(
-                drawn
-                    .lines
-                    .iter()
-                    .any(|line| line.to_string().contains(expected)),
-                "lost JSON logical line at {width}: {expected}"
-            );
-        }
         let continuation = drawn
             .sources
             .iter()
             .find(|source| source.text.contains("lastMessage"))
             .unwrap();
+        for expected in message.lines().filter(|line| !line.is_empty()) {
+            assert!(continuation.text.contains(expected));
+        }
+        let rows: Vec<_> = drawn
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, (segment, _))| *segment == continuation.id)
+            .collect();
+        assert_eq!(rows.len(), continuation.text.lines().count());
+        for ((row, _), source) in rows.into_iter().zip(continuation.text.lines()) {
+            let expected = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                Line::from(source.to_owned()),
+                drawn.columns.content.width.into(),
+            );
+            assert_eq!(
+                drawn.lines[row].to_string().trim_start(),
+                expected.to_string().trim_start()
+            );
+        }
         assert!(
             continuation.text.contains(&format!("\n  {command_line}")),
             "JSON continuations use structural indent"
@@ -649,11 +656,16 @@ fn recorded_preformatted_block(code: bool) {
         event.calls[0].output = Some(vec![section]);
         for width in [200, 90] {
             let drawn = layout(&event, width);
+            let expected = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                Line::from(command_line.to_owned()),
+                drawn.columns.content.width.into(),
+            )
+            .to_string();
             assert!(
                 drawn
                     .lines
                     .iter()
-                    .any(|line| line.to_string().trim_start() == command_line),
+                    .any(|line| line.to_string().trim_start() == expected),
                 "wrapped command/code at {width}"
             );
         }
@@ -684,4 +696,56 @@ fn notification_preformatted_snapshot() {
         std::fs::write(&path, &snapshot).unwrap();
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}
+
+#[test]
+fn equal_content_width_wraps_prose_identically_in_wide_and_narrow_panels() {
+    let event = events(include_str!("../../tests/fixtures/transcript.jsonl"))
+        .into_iter()
+        .find(|event| event.kind == Kind::Assistant)
+        .unwrap();
+    let narrow = layout(&event, 98);
+    let wide = layout(&event, 200);
+    assert_eq!(narrow.columns.content.width, wide.columns.content.width);
+    assert_eq!(narrow.lines, wide.lines);
+    assert!(
+        narrow
+            .lines
+            .iter()
+            .all(|line| line.width() <= narrow.columns.content.width.into())
+    );
+    assert_centered_blocks(&event, 98);
+    assert_centered_blocks(&event, 200);
+}
+
+#[test]
+fn merged_tool_durations_are_separate_from_content_lines() {
+    let event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+        .into_iter()
+        .find(|event| event.calls.len() > 1)
+        .unwrap();
+    for width in [120, 200] {
+        let drawn = layout(&event, width);
+        let expected: Vec<_> = event
+            .calls
+            .iter()
+            .filter_map(|call| call.duration.map(format_log_duration))
+            .collect();
+        assert!(!expected.is_empty());
+        assert_eq!(
+            drawn
+                .times
+                .iter()
+                .map(|(_, time)| time.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for (row, time) in &drawn.times {
+            assert_eq!(
+                drawn.lines[*row].width(),
+                usize::from(drawn.columns.content.width)
+            );
+            assert!(!drawn.lines[*row].to_string().contains(time));
+        }
+    }
 }

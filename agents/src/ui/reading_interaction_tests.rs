@@ -16,7 +16,15 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let wide = width >= super::super::render::WIDE_LAYOUT_COLUMNS;
-        assert_eq!(view.viewport.borrow().log_detail_wide, wide);
+        assert_eq!(
+            view.viewport.borrow().log_text.area.x,
+            super::super::detail_model::detail_columns(
+                view.viewport.borrow().log_detail,
+                view.viewport.borrow().log
+            )
+            .content
+            .x
+        );
         let assert_maps = |view: &View, buf: &Buffer| {
             let viewport = view.viewport.borrow();
             let region = &viewport.log_text;
@@ -82,7 +90,15 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         let resized = Rect::new(0, 0, if wide { 120 } else { 200 }, 50);
         let mut buf = Buffer::empty(resized);
         view.render_at(resized, &mut buf, now);
-        assert_eq!(view.viewport.borrow().log_detail_wide, !wide);
+        assert_eq!(
+            view.viewport.borrow().log_text.area.x,
+            super::super::detail_model::detail_columns(
+                view.viewport.borrow().log_detail,
+                view.viewport.borrow().log
+            )
+            .content
+            .x
+        );
         assert_maps(&view, &buf);
     }
 }
@@ -131,20 +147,9 @@ fn start_detail_header(width: u16) -> (String, String, usize, usize) {
         .collect::<Vec<_>>()
         .join("\n");
     let detail = view.viewport.borrow().log_detail;
-    let cap = view
-        .center_layout(Rect::new(0, 0, width, 50))
-        .log
-        .width
-        .saturating_sub(10)
-        .min(detail.width);
-    let left = usize::from(
-        detail.x
-            + if width >= 150 {
-                (detail.width - cap) / 2
-            } else {
-                0
-            },
-    );
+    let columns = super::super::detail_model::detail_columns(detail, view.center_layout(area).log);
+    let cap = columns.content.width;
+    let left = usize::from(columns.content.x);
     let header = rendered
         .lines()
         .nth(usize::from(detail.y + 1))
@@ -172,7 +177,7 @@ fn start_summary_occupies_left_header_slot_without_body_duplicate() {
         );
         assert_eq!(
             header[..header.find("41s").unwrap()].width(),
-            left + cap - 3
+            left + cap + 2 + 8 - 3
         );
         assert!(!body.contains("Claude 图片链接"), "{body}");
         assert!(body.contains("cwd: /workspace/agents"));
@@ -205,13 +210,13 @@ fn start_summary_truncates_before_center_title_and_time() {
     );
     assert_eq!(
         header[..header.find("41s").unwrap()].width(),
-        left + cap - 3
+        left + cap + 2 + 8 - 3
     );
     assert!(!body.contains("Claude 图片链接"));
 }
 
 #[test]
-fn preformatted_detail_rows_use_the_viewport_width() {
+fn preformatted_detail_rows_stay_in_content_column() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
     let event = crate::providers::claude::log::tail(&path, usize::MAX)
         .unwrap()
@@ -225,9 +230,12 @@ fn preformatted_detail_rows_use_the_viewport_width() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
-        let limit = viewport.log_detail.width;
-        let wide = width >= super::super::render::WIDE_LAYOUT_COLUMNS;
-        let left = viewport.log_detail.x;
+        let columns = super::super::detail_model::detail_columns(
+            viewport.log_detail,
+            view.center_layout(area).log,
+        );
+        let limit = columns.content.width;
+        let left = columns.content.x;
         for row in &viewport.log_text.rows {
             for (cells, _) in &row.cells {
                 assert!(
@@ -242,9 +250,7 @@ fn preformatted_detail_rows_use_the_viewport_width() {
             .iter()
             .find(|row| !row.cells.is_empty())
             .unwrap();
-        if !wide {
-            assert_eq!(first.x + first.cells[0].0.start, viewport.log_detail.x);
-        }
+        assert!(first.x + first.cells[0].0.start >= columns.content.x);
     }
 }
 
@@ -260,18 +266,12 @@ fn detail_without_description_centers_tool_in_both_modes() {
         view.select_fixture_event(Some(event.clone()));
         let screen = log_screen(&view, width, 50, now);
         let detail = view.viewport.borrow().log_detail;
-        let cap = view
-            .center_layout(Rect::new(0, 0, width, 50))
-            .log
-            .width
-            .saturating_sub(10)
-            .min(detail.width);
-        let left = detail.x
-            + if width >= 150 {
-                (detail.width - cap) / 2
-            } else {
-                0
-            };
+        let columns = super::super::detail_model::detail_columns(
+            detail,
+            view.center_layout(Rect::new(0, 0, width, 50)).log,
+        );
+        let cap = columns.content.width;
+        let left = columns.content.x;
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
         let title = "codex-manager detach";
         assert_eq!(
@@ -284,5 +284,142 @@ fn detail_without_description_centers_tool_in_both_modes() {
                 .skip(usize::from(detail.y + 3))
                 .any(|line| line.contains("threadId: 01a1489e"))
         );
+    }
+}
+
+#[test]
+fn detail_event_and_tool_times_share_the_list_clock_column() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-manager-detach.jsonl");
+    let mut event = crate::providers::claude::log::tail(&path, usize::MAX)
+        .unwrap()
+        .remove(0);
+    event.calls = vec![event.calls[0].clone(); 2];
+    event.calls[0].duration = Some(chrono::Duration::seconds(12));
+    event.calls[1].duration = Some(chrono::Duration::seconds(125));
+    for width in [120, 200] {
+        let (mut view, now) = log_fixture();
+        view.set_log(vec![event.clone()]);
+        view.select_fixture_event(Some(event.clone()));
+        let area = Rect::new(0, 0, width, 100);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let viewport = view.viewport.borrow();
+        let columns = super::super::detail_model::detail_columns(viewport.log_detail, viewport.log);
+        let (_, list_time) = super::super::log::log_row_areas(viewport.log);
+        assert_eq!(columns.time.width, list_time.width);
+        assert_eq!(columns.time.width, super::super::log::CLOCK_WIDTH as u16);
+        if width < super::super::render::WIDE_LAYOUT_COLUMNS {
+            assert_eq!(columns.time.right(), list_time.right());
+        }
+        let clock = |y| {
+            (columns.time.x..columns.time.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        };
+        let header_y = viewport.log_detail.y + super::super::log::LOG_TOP;
+        assert!(!clock(header_y).trim().is_empty());
+        assert_ne!(buf[(columns.time.right() - 1, header_y)].symbol(), " ");
+        let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
+        let mut id = 0;
+        for section in &detail.sections {
+            let title = section.title.as_ref().unwrap();
+            let source = &viewport.log_text.sources[id];
+            assert_eq!(source.text.as_ref(), title.source());
+            id += 1 + section
+                .groups
+                .iter()
+                .map(|group| group.parts.len())
+                .sum::<usize>();
+            let row = viewport
+                .log_text
+                .rows
+                .iter()
+                .find(|row| row.segment == source.id && !row.cells.is_empty())
+                .unwrap();
+            let duration = title.time.as_ref().unwrap();
+            assert_eq!(clock(row.y).trim(), duration);
+            assert_ne!(buf[(columns.time.right() - 1, row.y)].symbol(), " ");
+            assert!(
+                !title
+                    .line(columns.content.width.into())
+                    .0
+                    .to_string()
+                    .contains(duration)
+            );
+        }
+    }
+}
+
+#[test]
+fn clipped_command_and_output_keep_time_empty_and_double_click_copies_original() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let mut event = crate::providers::claude::log::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
+        .unwrap();
+    event.calls.retain(|call| call.name == "Bash");
+    event.calls.truncate(1);
+    let crate::log::Section::Code { text, .. } = &event.calls[0].input[0] else {
+        panic!("recorded Bash command")
+    };
+    let text = text.lines().max_by_key(|line| line.width()).unwrap();
+    let command = text.to_owned();
+    event.calls[0].input = vec![crate::log::Section::Code {
+        label: "command".into(),
+        lang: "bash".into(),
+        text: command.clone(),
+    }];
+    event.calls[0].output = Some(vec![crate::log::Section::Text {
+        label: "stdout".into(),
+        text: command.clone(),
+    }]);
+    for width in [90, 200] {
+        let (mut view, now) = log_fixture();
+        view.set_log(vec![event.clone()]);
+        view.select_fixture_event(Some(event.clone()));
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, 60));
+        view.render_at(buf.area, &mut buf, now);
+        let (x, ys) = {
+            let viewport = view.viewport.borrow();
+            let columns =
+                super::super::detail_model::detail_columns(viewport.log_detail, viewport.log);
+            assert!(command.width() > columns.content.width.into());
+            let rows: Vec<_> = viewport
+                .log_text
+                .rows
+                .iter()
+                .filter(|row| viewport.log_text.sources[row.segment].text.as_ref() == command)
+                .collect();
+            assert_eq!(rows.len(), 2);
+            for row in &rows {
+                assert_eq!(buf[(columns.content.right() - 1, row.y)].symbol(), "…");
+                assert!(
+                    (columns.content.right()..columns.time.right())
+                        .all(|x| buf[(x, row.y)].symbol() == " ")
+                );
+                let (cells, bytes) = row.cells.last().unwrap();
+                assert_eq!(cells.end, columns.content.width);
+                assert_eq!(bytes.end, command.len());
+                assert!(bytes.end - bytes.start > 1);
+            }
+            (
+                columns.content.right() - 1,
+                rows.iter().map(|row| row.y).collect::<Vec<_>>(),
+            )
+        };
+        for y in ys {
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+            view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, y));
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+            assert_eq!(
+                view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, y)),
+                Some(Action::Copy {
+                    text: log::open_text(&event),
+                    label: log::copied_label(&event)
+                })
+            );
+        }
     }
 }

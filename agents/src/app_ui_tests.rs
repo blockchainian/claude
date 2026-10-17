@@ -1071,14 +1071,14 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
             );
             let cap = (width - 1 - left).saturating_sub(10);
             let block_left = 1 + if width >= 150 {
-                (width - 2 - cap) / 2
+                (width - 2 - cap - 10) / 2
             } else {
                 0
             };
             assert_eq!(detail_x, block_left + (cap - "User".len() as u16) / 2);
             assert_eq!(
                 (1..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
-                Some(block_left + cap - 1)
+                Some(block_left + cap + 9)
             );
             assert!(
                 lines(&buffer)[usize::from(detail_y)..]

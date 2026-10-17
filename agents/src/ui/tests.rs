@@ -3533,10 +3533,9 @@ fn background_box_dims_title_rule_but_not_output() {
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.log[7].clone();
     event.calls[0].title = "Run checks".into();
-    let parts = super::tool_detail::parts(&event);
+    let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
-    (&parts[0].lines(40, Style::default(), chrono::DateTime::UNIX_EPOCH)[0])
-        .render(title_buf.area, &mut title_buf);
+    (&detail.sections[0].title.as_ref().unwrap().line(40).0).render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
         .find(|x| title_buf[(*x, 0)].symbol() == "R")
         .unwrap();
@@ -4293,8 +4292,12 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             );
             if wide {
                 let detail = view.viewport.borrow().log_text.area;
-                assert_eq!(detail.x, 1);
-                assert_eq!(detail.right(), width - 1);
+                let columns = super::detail_model::detail_columns(
+                    view.viewport.borrow().log_detail,
+                    view.center_layout(buf.area).log,
+                );
+                assert_eq!(detail.x, columns.content.x);
+                assert_eq!(detail.right(), columns.content.right());
             }
         }
     }
@@ -6696,6 +6699,15 @@ fn task_log_click_keeps_list_and_detail_right_click_keeps_selection() {
     assert_eq!(log_screen(&view, 100, 45, now), open);
 }
 
+fn detail_parts(event: &crate::log::Event) -> Vec<super::tool_detail::Part> {
+    super::tool_detail::detail(event, String::new(), Style::new().dim())
+        .sections
+        .into_iter()
+        .flat_map(|section| section.groups)
+        .flat_map(|group| group.parts)
+        .collect()
+}
+
 /// The calls of a merged Bash + Read row, the Read still running.
 fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
@@ -6754,7 +6766,7 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
-fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
+fn merged_tool_title_rules_copy_only_titles_and_arrows_center_in_content() {
     for (width, title) in [
         (100, "Bash"),
         (99, "看探针结果"),
@@ -6779,7 +6791,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                     region
                         .rows
                         .iter()
-                        .filter(|row| row.segment == source.id)
+                        .filter(|row| row.segment == source.id && !row.cells.is_empty())
                         .cloned()
                         .collect::<Vec<_>>(),
                     region.area,
@@ -6800,8 +6812,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                 assert_eq!(buf[(body.x + start - 2, row.y)].symbol(), "─");
             }
             if end < body.width - 1 {
-                // The Bash call ran 12s; its time ends the rule in the header's time column.
-                let last = " ";
+                let last = "─";
                 assert_eq!(buf[(body.right() - 1, row.y)].symbol(), last);
             }
             if title != "Read" {
@@ -6818,10 +6829,10 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                     .modifier
                     .contains(ratatui::style::Modifier::DIM)
             );
-            let arrow_x = body.x;
+            let arrow_x = body.x + (body.width - 1) / 2;
             let arrow = (body.y..body.bottom())
                 .find(|y| buf[(arrow_x, *y)].symbol() == "↓")
-                .expect("arrow centered on panel");
+                .expect("arrow centered in content column");
             assert!(
                 (body.x..body.right())
                     .filter(|x| *x != arrow_x)
@@ -6880,7 +6891,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             .cloned()
             .collect();
         assert_eq!(rows.len(), 4);
-        let offset = 0;
+        let offset = (region.area.width - "cat /workspace/a".width() as u16) / 2;
         assert!(
             rows.iter()
                 .all(|row| row.cells.first().unwrap().0.start == offset)
@@ -6960,7 +6971,10 @@ fn running_tool_redraws_cached_detail_only_while_visible() {
         let row = region.rows.last().unwrap();
         assert!(row.cells.is_empty());
         let text = screen.lines().nth(usize::from(row.y)).unwrap();
-        assert_eq!(text.find(frame), Some(usize::from(region.area.x)));
+        assert_eq!(
+            text.find(frame),
+            Some(usize::from(region.area.x) + (usize::from(region.area.width) - frame.width()) / 2)
+        );
         drop(viewport);
         assert_eq!(
             view.tool_redraw_in(now),
@@ -7130,7 +7144,7 @@ fn task_log_selected_event_header_centers_kind_and_keeps_time_right() {
         );
         assert_eq!(
             header.find(time),
-            Some(usize::from(detail.x + cap) - time.len())
+            Some(usize::from(detail.x + cap + 10) - time.len())
         );
     }
 }
@@ -7787,7 +7801,7 @@ fn open_tool_layout_titles_and_rules() {
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "↓");
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(x, area.x);
+    assert_eq!(x, area.x + (area.width - 1) / 2);
     assert_eq!(buf[(x, y)].fg, Color::Reset);
     assert!(
         buf[(x, y)]
@@ -7846,12 +7860,13 @@ fn open_view_top_button_and_scrollbar() {
     assert!(!top.contains(" ↑ Top "));
     let area = view.viewport.borrow().log_text.area;
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
-    assert_eq!(area.right() + 1, layout.log_detail.right());
+    assert_eq!(area.right() + 11, layout.log_detail.right());
+    let scrollbar_x = layout.log_detail.right() - 1;
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(area.right(), area.top())].symbol(), "│");
-    assert_eq!(buf[(area.right(), area.top())].fg, Color::Reset);
-    assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), " ");
+    assert_eq!(buf[(scrollbar_x, area.top())].symbol(), "│");
+    assert_eq!(buf[(scrollbar_x, area.top())].fg, Color::Reset);
+    assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), " ");
     for y in area.top()..area.bottom() {
         assert_ne!(buf[(area.right() - 1, y)].symbol(), "│");
     }
@@ -7868,7 +7883,7 @@ fn open_view_top_button_and_scrollbar() {
     );
     assert_eq!(jump.y, layout.log_detail.y);
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "│");
+    assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "│");
     click_text(&mut view, &bottom, " ↑ Top ");
     assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
     assert!(view.log_selected.is_some());
@@ -8079,7 +8094,7 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
     assert!(open.contains("(no output)"));
     assert!(open.lines().any(|line| line.trim() == "↓"));
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(area.width, 98);
+    assert_eq!(area.width, 88);
     let lines: Vec<&str> = open.lines().collect();
     assert!(
         (area.top()..area.bottom()).all(|y| {
@@ -8831,16 +8846,18 @@ fn task_notification_detail_shows_task_id_and_output_content() {
                 text
             })
             .collect();
-        let header = lines
-            .iter()
-            .position(|line| line.contains("Task b9"))
-            .unwrap();
+        let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
+        assert_eq!(detail.title.left.as_deref(), Some("Task b9wi31ww0"));
+        let header = 1;
         assert!(
             !lines[header + 1..]
                 .iter()
                 .any(|line| line.contains(&summary))
         );
-        let label_x = lines[header].find("Task b9").unwrap() as u16;
+        let label_x =
+            super::detail_model::detail_columns(area, view.center_layout(buffer.area).log)
+                .content
+                .x;
         let time_x = lines[header].trim_end().width() as u16 - 1;
         assert_eq!(
             buffer[(label_x, header as u16)].style(),

@@ -1,8 +1,8 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                               Task b9… Background command "等 tab 线程" completed (exi… 11:46:08
+                                          Tas… Background command "等 tab 线程" completed (exit code 0)       11:46:08
 
-                                                                               ↓
-                                                                       all 3 tests passed
+                                                                          ↓
+                                                                  all 3 tests passed
 
 
 

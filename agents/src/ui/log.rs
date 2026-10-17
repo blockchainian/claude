@@ -336,14 +336,14 @@ impl View {
                     .render(time_area, buf);
             }
         }
-        // Each gutter sits one column left of its group's shared content edge.
-        for &(row, column, glyph) in &gutters {
+        // The command gutter stays just outside the content column.
+        for &(row, glyph) in &gutters {
             if let Some(y) = row
                 .checked_sub(scroll)
                 .filter(|&row| row < height)
                 .map(|row| body_area.y + row as u16)
             {
-                buf[(columns.gutter_x() + column, y)]
+                buf[(columns.gutter_x(), y)]
                     .set_symbol(glyph)
                     .set_style(Style::new().dim());
             }
@@ -856,8 +856,8 @@ pub(super) struct DetailLayout {
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
-    /// Each decorated line's row, content column and the glyph drawn one column left of it.
-    gutters: Vec<(usize, u16, &'static str)>,
+    /// Each decorated line's row and its glyph in the content column's left gutter.
+    gutters: Vec<(usize, &'static str)>,
     /// Section title times, drawn separately in the time column.
     times: Vec<(usize, String)>,
 }
@@ -1044,7 +1044,7 @@ fn detail_parts_layout(
                     gutter
                         .into_iter()
                         .enumerate()
-                        .filter_map(|(row, glyph)| Some((first + row, padding as u16, glyph?))),
+                        .filter_map(|(row, glyph)| Some((first + row, glyph?))),
                 );
                 layout.sources.push(text_selection::Source {
                     id,
@@ -1073,7 +1073,10 @@ pub(super) fn shows_calls(event: &Event) -> bool {
 pub(super) fn open_text(event: &Event) -> String {
     let detail = super::tool_detail::detail(event, String::new(), Style::new().dim());
     let mut sources = Vec::new();
-    for section in detail.sections {
+    for (index, section) in detail.sections.into_iter().enumerate() {
+        if index > 0 {
+            sources.push(String::new());
+        }
         if let Some(title) = section.title {
             sources.push(title.source());
         }
