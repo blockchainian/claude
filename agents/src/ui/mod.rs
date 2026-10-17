@@ -91,7 +91,8 @@ fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
     match status {
         Some(status) if TASK_FILTERS[current_tab].1.contains(&status) => current_tab,
         Some(SessionStatus::Ready | SessionStatus::Working | SessionStatus::NeedsInput) => 0,
-        Some(SessionStatus::Inactive) | None => 0,
+        Some(SessionStatus::Inactive) => 1,
+        None => 0,
     }
 }
 
@@ -558,6 +559,7 @@ impl View {
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
         let selected = self.selected_id().cloned();
+        let selected_parent = self.selected_row().and_then(|s| s.parent.clone());
         let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;
         sessions.sort_by(|a, b| {
@@ -571,20 +573,25 @@ impl View {
         self.task_panels
             .retain(|id, _| rows.iter().any(|session| &session.id == id));
         self.has_more = has_more;
-        let selected_index = selected
+        let mut selected_index = selected
             .as_ref()
             .and_then(|id| self.rows.iter().position(|s| &s.id == id));
         if selected.is_some()
             && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
         {
             let status = selected_index.map(|index| self.rows[index].status);
-            self.status_filter = if self.rename_target.as_ref() == selected.as_ref()
+            if self.rename_target.as_ref() == selected.as_ref()
                 && status == Some(SessionStatus::Inactive)
             {
-                TASK_FILTERS.len() - 1
+                self.status_filter = TASK_FILTERS.len() - 1;
+            } else if let Some(parent) = selected_parent {
+                selected_index = self
+                    .visible_indices()
+                    .into_iter()
+                    .find(|&index| self.rows[index].id == parent);
             } else {
-                tab_for_status(status, self.status_filter)
-            };
+                self.status_filter = tab_for_status(status, self.status_filter);
+            }
         }
         self.selected = if show_more {
             usize::MAX

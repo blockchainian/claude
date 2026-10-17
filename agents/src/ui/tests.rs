@@ -1270,7 +1270,7 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
 }
 
 #[test]
-fn refresh_returns_to_active_when_selected_working_session_becomes_inactive() {
+fn refresh_follows_selected_working_session_to_inactive() {
     let mut view = fixture();
     view.select(
         view.rows
@@ -1287,8 +1287,9 @@ fn refresh_returns_to_active_when_selected_working_session_becomes_inactive() {
 
     view.set_sessions(rows, false);
 
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some(&session_key("44")));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+    assert_eq!(view.tab_selections[1], Some(session_key("46")));
 }
 
 #[test]
@@ -1330,7 +1331,7 @@ fn refresh_keeps_selected_session_on_active_when_ready_becomes_working() {
 }
 
 #[test]
-fn refresh_selects_longest_waiting_active_session_when_selection_becomes_inactive() {
+fn refresh_follows_selected_ready_session_to_inactive() {
     let mut view = fixture();
     let mut rows = view.rows.clone();
     rows.iter_mut()
@@ -1340,8 +1341,70 @@ fn refresh_selects_longest_waiting_active_session_when_selection_becomes_inactiv
 
     view.set_sessions(rows, false);
 
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some(&session_key("46")));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
+    assert_eq!(view.tab_selections[1], Some(session_key("42")));
+    key(&mut view, KeyCode::Tab);
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
+}
+
+#[test]
+fn refresh_child_leaving_tab_selects_visible_parent_or_falls_back() {
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for tab in [0, 1] {
+            for removed in [false, true] {
+                for parent_visible in [false, true] {
+                    let mut view = test_view(Grouping::Project, true);
+                    let status = if tab == 0 {
+                        SessionStatus::Ready
+                    } else {
+                        SessionStatus::Inactive
+                    };
+                    let other_status = if tab == 0 {
+                        SessionStatus::Inactive
+                    } else {
+                        SessionStatus::Ready
+                    };
+                    let mut parent = session("parent", "Parent", status, 10);
+                    parent.id.provider = provider;
+                    let mut child = session("child", "Child", status, 20);
+                    child.id.provider = provider;
+                    child.parent = Some(parent.id.clone());
+                    let other = session("other", "Unrelated task", status, 120);
+                    view.status_filter = tab;
+                    view.set_sessions(vec![parent.clone(), child.clone(), other.clone()], false);
+                    let index = view.rows.iter().position(|s| s.id == child.id).unwrap();
+                    view.select(index);
+                    child.status = other_status;
+                    if !parent_visible {
+                        parent.status = other_status;
+                    }
+                    let expected = if parent_visible {
+                        parent.id.clone()
+                    } else {
+                        other.id.clone()
+                    };
+                    let mut rows = vec![parent, other];
+                    if !removed {
+                        rows.push(child);
+                    }
+
+                    view.set_sessions(rows, false);
+
+                    assert_eq!(
+                        view.status_filter, tab,
+                        "{provider:?}, removed={removed}, parent_visible={parent_visible}"
+                    );
+                    assert_eq!(
+                        view.selected_id(),
+                        Some(&expected),
+                        "{provider:?}, tab={tab}, removed={removed}, parent_visible={parent_visible}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -1485,7 +1548,7 @@ fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
         row.status = SessionStatus::Inactive;
     }
     view.set_sessions(rows, true);
-    key(&mut view, KeyCode::BackTab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
     while view.selected_id() != Some(&session_key("45")) {
         key(&mut view, KeyCode::Down);
     }

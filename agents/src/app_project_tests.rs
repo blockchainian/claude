@@ -124,12 +124,6 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
             session.status = status;
         }
         app.view.set_sessions(app.sessions.clone(), false);
-        if status == SessionStatus::Inactive {
-            app.handle_event(Event::Key(KeyEvent::new(
-                KeyCode::BackTab,
-                KeyModifiers::NONE,
-            )));
-        }
         app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         let mut terminal = Terminal::new(TestBackend::new(120, 60)).unwrap();
         app.draw(&mut terminal).unwrap();

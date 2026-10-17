@@ -1267,7 +1267,6 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
         .unwrap();
     assert!(children.join("custom-title.json").is_file());
     app.refresh();
-    key(&mut app, KeyCode::BackTab);
     key(&mut app, KeyCode::Home);
     for _ in 0..app.sessions.len() {
         if app.view.selected_id() == Some(&target.id) {
