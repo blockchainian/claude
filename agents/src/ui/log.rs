@@ -375,12 +375,25 @@ impl View {
         let mut visible = layout.lines
             [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
             .to_vec();
+        let gutters = layout.gutters.clone();
         viewport.log_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
             highlight_matches(line, &self.log_detail_search);
         }
         Paragraph::new(visible).render(body_area, buf);
+        // A gutter column at the body's left edge falls in the panel's left padding.
+        for &(row, column, glyph) in &gutters {
+            if let Some(y) = row
+                .checked_sub(scroll)
+                .filter(|&row| row < height)
+                .map(|row| body_area.y + row as u16)
+            {
+                buf[((body_area.x + column).saturating_sub(1), y)]
+                    .set_symbol(glyph)
+                    .set_style(Style::new().dim());
+            }
+        }
         self.highlight_text_selection(text_selection::Panel::Log, buf);
     }
 
@@ -892,6 +905,8 @@ pub(super) struct DetailLayout {
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
+    /// Each decorated line's row, content column and the glyph drawn one column left of it.
+    gutters: Vec<(usize, u16, &'static str)>,
 }
 
 impl DetailLayout {
@@ -977,6 +992,7 @@ fn detail_parts_layout(
         .map(|(part, mut lines)| {
             let markdown = part.markdown();
             let mut maps = part.maps(&lines);
+            let gutter = part.gutter();
             let block_width = part.group.map_or_else(
                 || lines.iter().map(Line::width).max().unwrap_or(0),
                 |group| {
@@ -1025,7 +1041,15 @@ fn detail_parts_layout(
                 };
                 super::links::path_links(&part.source, &paths, cwd)
             };
-            (part.running(), part.source, lines, maps, links)
+            (
+                part.running(),
+                part.source,
+                lines,
+                maps,
+                links,
+                gutter,
+                padding,
+            )
         })
         .collect();
     let mut layout = DetailLayout {
@@ -1040,8 +1064,11 @@ fn detail_parts_layout(
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
+        gutters: Vec::new(),
     };
-    for (id, (running, source, lines, mut maps, links)) in parts.into_iter().enumerate() {
+    for (id, (running, source, lines, mut maps, links, gutter, padding)) in
+        parts.into_iter().enumerate()
+    {
         if running {
             layout.running.push(layout.lines.len());
         }
@@ -1051,6 +1078,13 @@ fn detail_parts_layout(
         layout
             .rows
             .extend(maps.into_iter().map(|cells| (id, cells)));
+        let first = layout.lines.len();
+        layout.gutters.extend(
+            gutter
+                .into_iter()
+                .enumerate()
+                .filter_map(|(row, glyph)| Some((first + row, padding as u16, glyph?))),
+        );
         layout.lines.extend(lines);
         layout.sources.push(text_selection::Source {
             id,

@@ -6868,23 +6868,17 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             .find(|row| row.segment == fields.id)
             .unwrap();
         assert_eq!(fields_row.cells.first().unwrap().0.start, offset);
-        for row in &rows {
-            for x in region.area.x..region.area.right() {
-                if matches!(buf[(x, row.y)].symbol(), "┐" | "│" | "┘") {
-                    assert!(
-                        !row.cells
-                            .iter()
-                            .any(|(cells, _)| cells.contains(&(x - region.area.x)))
-                    );
-                    assert!(
-                        !viewport
-                            .log_links
-                            .iter()
-                            .any(|link| link.0.contains((x, row.y).into()))
-                    );
-                }
-            }
+        // Brackets sit in the panel padding left of the commands, outside every cell map.
+        let gutter = region.area.x - 1;
+        for (row, glyph) in rows.iter().zip(["┌", "└", "┌", "└"]) {
+            assert_eq!(buf[(gutter, row.y)].symbol(), glyph);
+            assert!(
+                buf[(gutter, row.y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
         }
+        assert!(!viewport.log_links.iter().any(|link| link.0.x <= gutter));
         (region.area, rows)
     };
     let first = &rows[0];
@@ -6936,10 +6930,7 @@ fn running_tool_redraws_cached_detail_only_while_visible() {
         let row = region.rows.last().unwrap();
         assert!(row.cells.is_empty());
         let text = screen.lines().nth(usize::from(row.y)).unwrap();
-        assert_eq!(
-            text.find(frame),
-            Some(usize::from(region.area.x))
-        );
+        assert_eq!(text.find(frame), Some(usize::from(region.area.x)));
         drop(viewport);
         assert_eq!(
             view.tool_redraw_in(now),
@@ -7136,7 +7127,12 @@ fn task_log_click_opens_row_with_shortened_path() {
     );
     assert!(open.contains("report.md"), "{open}");
     assert!(
-        view.viewport.borrow().log_text.sources.iter().any(|source| source.text.contains(path))
+        view.viewport
+            .borrow()
+            .log_text
+            .sources
+            .iter()
+            .any(|source| source.text.contains(path))
     );
 }
 

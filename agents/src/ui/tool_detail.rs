@@ -235,6 +235,14 @@ impl Part {
             .collect()
     }
 
+    /// The decoration drawn in the column left of each line, outside its source map.
+    pub fn gutter(&self) -> Vec<Option<&'static str>> {
+        match &self.body {
+            Body::Shell(commands) => shell_gutter(&self.source, commands),
+            _ => Vec::new(),
+        }
+    }
+
     /// Lay out prose at `width`, preserving logical lines in preformatted blocks.
     pub fn lines(
         &self,
@@ -331,7 +339,7 @@ impl Part {
             }
             Body::RawJson => highlight::plain_lines(source),
             Body::Code(lang) => highlight::code_lines(source, lang),
-            Body::Shell(commands) => shell_lines(&self.source, commands, width),
+            Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Json(value) => json_lines(value),
             Body::Diff => highlight::diff_lines(source),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
@@ -427,69 +435,51 @@ fn shell_part(source: String, prefix: usize) -> Part {
 }
 
 const SHELL_BRACKET: [&str; 3] = [
-    ratatui::symbols::border::PLAIN.top_right,
-    ratatui::symbols::border::PLAIN.vertical_right,
-    ratatui::symbols::border::PLAIN.bottom_right,
+    ratatui::symbols::border::PLAIN.top_left,
+    ratatui::symbols::border::PLAIN.vertical_left,
+    ratatui::symbols::border::PLAIN.bottom_left,
 ];
 
-fn shell_lines(
+fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec<Line<'static>> {
+    commands
+        .iter()
+        .flat_map(|command| {
+            highlight::code_lines(&source[command.range.clone()].replace('\t', "    "), "bash")
+        })
+        .collect()
+}
+
+/// Each run of `&&`-chained commands gets one bracket from its first row's top to its last
+/// row's bottom.
+fn shell_gutter(
     source: &str,
     commands: &[super::shell_commands::Command],
-    width: usize,
-) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let mut rows = Vec::new();
-    for command in commands {
-        let start = lines.len();
-        let text = source[command.range.clone()].replace('\t', "    ");
-        lines.extend(highlight::code_lines(&text, "bash"));
-        rows.push(start..lines.len());
-    }
-    let mut connectors = vec![std::collections::BTreeMap::new(); lines.len()];
-    // Each run of `&&`-chained commands gets one bracket from its first row's top to its
-    // last row's bottom.
+) -> Vec<Option<&'static str>> {
+    let mut gutter = Vec::new();
     let mut first = 0;
     for (index, command) in commands.iter().enumerate() {
         if command.and_next && index + 1 < commands.len() {
             continue;
         }
-        let run = rows[first].start..rows[index].end;
+        let rows: usize = commands[first..=index]
+            .iter()
+            .map(|command| source[command.range.clone()].lines().count())
+            .sum();
         let chained = index > first;
         first = index + 1;
-        if !chained {
-            continue;
-        }
-        let column = lines[run.clone()]
-            .iter()
-            .map(Line::width)
-            .max()
-            .unwrap_or(0)
-            + 1;
-        if width > 0 && column >= width {
-            continue;
-        }
-        for row in run.clone() {
-            let glyph = if row == run.start {
-                SHELL_BRACKET[0]
-            } else if row + 1 == run.end {
-                SHELL_BRACKET[2]
-            } else {
-                SHELL_BRACKET[1]
-            };
-            connectors[row].insert(column, glyph);
-        }
+        gutter.extend((0..rows).map(|row| {
+            chained.then(|| {
+                if row == 0 {
+                    SHELL_BRACKET[0]
+                } else if row + 1 == rows {
+                    SHELL_BRACKET[2]
+                } else {
+                    SHELL_BRACKET[1]
+                }
+            })
+        }));
     }
-    for (line, connectors) in lines.iter_mut().zip(connectors) {
-        for (column, glyph) in connectors {
-            // Decorations have their own dim spans and never receive a source map.
-            let padding = column.saturating_sub(line.width());
-            line.spans.push(Span::styled(
-                format!("{}{glyph}", " ".repeat(padding)),
-                Style::new().dim(),
-            ));
-        }
-    }
-    lines
+    gutter
 }
 
 fn shell_maps(
@@ -507,24 +497,7 @@ fn shell_maps(
         displayed.push_str(&source[command.range.clone()]);
         ranges.push((start..displayed.len(), command.range.start));
     }
-    let content: Vec<_> = lines
-        .iter()
-        .map(|line| {
-            let mut line = line.clone();
-            while line.spans.last().is_some_and(|span| {
-                span.style
-                    .add_modifier
-                    .contains(ratatui::style::Modifier::DIM)
-                    && SHELL_BRACKET
-                        .iter()
-                        .any(|glyph| span.content.ends_with(glyph))
-            }) {
-                line.spans.pop();
-            }
-            line
-        })
-        .collect();
-    let mut maps = super::text_selection_layout::map_lines(&displayed, &content, false);
+    let mut maps = super::text_selection_layout::map_lines(&displayed, lines, false);
     for cells in &mut maps {
         for (_, bytes) in cells {
             let (range, original) = ranges
@@ -1344,36 +1317,20 @@ mod tests {
             assert!(lines[row].to_string().starts_with(command));
             assert_eq!(maps[row].last().unwrap().0.end as usize, command.width());
         }
-        for (run, glyphs) in [(0..3, &['┐', '│', '┘'][..]), (3..5, &['┐', '┘'][..])] {
-            let column = commands[run.clone()]
-                .iter()
-                .map(|command| command.width())
-                .max()
-                .unwrap()
-                + 1;
-            for (row, glyph) in run.zip(glyphs) {
-                assert_eq!(lines[row].to_string().chars().nth(column), Some(*glyph));
-            }
-        }
-        assert_eq!(part.source, SHELL_SAMPLE);
-        assert!(
-            lines
-                .iter()
-                .flat_map(|line| &line.spans)
-                .filter(|span| span.content.contains(['┐', '│', '┘']))
-                .all(|span| span
-                    .style
-                    .add_modifier
-                    .contains(ratatui::style::Modifier::DIM))
-        );
         assert_eq!(
-            command_part("a && bb && cccc")
-                .lines(100, Style::default(), chrono::DateTime::UNIX_EPOCH)
+            part.gutter(),
+            [Some("┌"), Some("│"), Some("└"), Some("┌"), Some("└")]
+        );
+        assert_eq!(part.source, SHELL_SAMPLE);
+        let part = command_part("a && bb && cccc; d");
+        assert_eq!(
+            part.lines(100, Style::default(), chrono::DateTime::UNIX_EPOCH)
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            ["a    ┐", "bb   │", "cccc ┘"]
+            ["a", "bb", "cccc", "d"]
         );
+        assert_eq!(part.gutter(), [Some("┌"), Some("│"), Some("└"), None]);
         assert_eq!(command_part("a && b\n").source, "a && b\n");
     }
 
@@ -1438,10 +1395,8 @@ mod tests {
                 .join("\n"),
             "command: a && bb\ntimeout: 1000"
         );
-        assert_eq!(
-            texts(&parts, 80),
-            ["command: a ┐", "bb         ┘", "timeout: 1000"]
-        );
+        assert_eq!(texts(&parts, 80), ["command: a", "bb", "timeout: 1000"]);
+        assert_eq!(parts[0].gutter(), [Some("┌"), Some("└")]);
         assert_eq!(
             command_part("echo 'broken && next").lines(
                 80,
