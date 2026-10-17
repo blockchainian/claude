@@ -1,45 +1,49 @@
 //! The open log event as the detail panel lays it out: a title row, then sections of
-//! aligned groups of parts, drawn in a content column beside a time column.
+//! aligned groups of parts, drawn left of a time column at the panel's right edge.
 
 use super::tool_detail::Part;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Line;
 
-/// The detail panel's columns, sized like the log list's message and clock columns and
-/// centered as a pair in the panel. Every row draws text only in `content`; `time` holds
-/// only title-row times.
+/// The detail panel's columns, computed from the panel alone exactly like a log list row's:
+/// a time column at the panel's right edge after a two-cell gap, and the text area left of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DetailColumns {
-    pub content: Rect,
+    /// The whole panel; centered text sits on its midline.
+    pub panel: Rect,
+    /// Every row's text area, from the left edge to the time column's gap. Title rows place
+    /// their left and center segments here; body rows use it as the content column.
+    pub text: Rect,
     pub time: Rect,
+    /// The wrap width of free text: the log list's message column width.
+    pub reading_width: u16,
 }
 
 impl DetailColumns {
-    /// The column left of the content, where shell command brackets are drawn.
+    /// The column left of the text area, where shell command brackets are drawn.
     pub fn gutter_x(&self) -> u16 {
-        self.content.x.saturating_sub(1)
+        self.text.x.saturating_sub(1)
     }
 }
 
 /// Columns for a detail `panel` whose log list occupies `list`.
 pub(super) fn detail_columns(panel: Rect, list: Rect) -> DetailColumns {
-    let width = list.width.min(panel.width);
-    let pair = Rect::new(
-        panel.x + (panel.width - width) / 2,
-        panel.y,
-        width,
-        panel.height,
-    );
-    let (content, time) = super::log::log_row_areas(pair);
-    DetailColumns { content, time }
+    let (text, time) = super::log::log_row_areas(panel);
+    DetailColumns {
+        panel,
+        text,
+        time,
+        reading_width: super::log::log_row_areas(list).0.width,
+    }
 }
 
-/// A title row: an optional left label and a centered title inside the content column,
-/// and an optional time in the time column. Events and merged tool calls both use it.
+/// A title row: an optional left label, a title centered on the panel's midline, and an
+/// optional time in the time column. Events and merged tool calls both use it.
 pub(super) struct TitleRow {
     pub left: Option<String>,
-    pub title: Line<'static>,
+    pub title: String,
+    /// The style of the centered title.
+    pub title_style: Style,
     /// Draw the title between dim rules instead of as plain text.
     pub rule: bool,
     pub time: Option<String>,
@@ -53,7 +57,7 @@ pub(super) struct Section {
     pub groups: Vec<Group>,
 }
 
-/// Parts sharing one left edge, centered together in the content column.
+/// Parts sharing one left edge, centered together on the panel's midline.
 pub(super) struct Group {
     pub parts: Vec<Part>,
 }
