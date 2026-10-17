@@ -380,7 +380,7 @@ fn app_creates_worktree_and_applies_completion_to_draft() {
 }
 
 #[test]
-fn registry_background_marker_needs_and_delete_warning_reach_the_screen() {
+fn registry_background_title_needs_and_delete_warning_reach_the_screen() {
     let (directory, mut app, _path, _registry) = registry_app("bg");
     let state_path = directory.path().join("jobs/e772d00b/state.json");
     let mut state: serde_json::Value =
@@ -398,9 +398,23 @@ fn registry_background_marker_needs_and_delete_warning_reach_the_screen() {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(shown.contains("bg "), "{shown}");
+        assert!(!shown.contains("bg "), "{shown}");
         if width == 160 {
             assert!(shown.contains("send a prompt to start"), "{shown}");
+            let title = app.sessions[0].display_title();
+            let row = terminal
+                .backend()
+                .buffer()
+                .content()
+                .chunks(usize::from(width))
+                .map(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>())
+                .find(|row| row.contains(title) && row.contains("Working"))
+                .expect("background task row");
+            let title_and_status = row.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+            assert_eq!(
+                title_and_status,
+                include_str!("../tests/ui_snapshots/background_session_row.txt").trim_end()
+            );
         }
     }
     app.handle_event(Event::Key(KeyEvent::new(

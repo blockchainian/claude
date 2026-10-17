@@ -251,12 +251,7 @@ impl View {
                 self.title_style(&task.id)
             };
             line(
-                Line::from(if task.background_job.is_some() {
-                    format!("bg {}", task.display_title())
-                } else {
-                    task.display_title().to_owned()
-                })
-                .style(title_style),
+                Line::from(task.display_title().to_owned()).style(title_style),
                 title,
                 buf,
             );
