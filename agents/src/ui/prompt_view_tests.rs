@@ -231,3 +231,29 @@ fn pending_prompt_clears_next_frame_and_blocks_repeated_enter() {
     );
     assert_eq!(view.input_box.editor.text(), text);
 }
+
+#[test]
+fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
+    for input in [
+        crate::providers::SessionInput::SetModel("claude-opus-5-5".into()),
+        crate::providers::SessionInput::SetEffort("medium".into()),
+    ] {
+        let mut view = fixture();
+        let id = view.selected_id().unwrap().clone();
+        view.input_box.focused = true;
+        view.handle_paste(include_str!("../../tests/fixtures/claude-peer-message.txt"));
+        let area = Rect::new(0, 0, 120, 5);
+        let mut before = Buffer::empty(area);
+        view.input_box.render(area, &mut before, "Task", None);
+        view.input_sending(&id, &input);
+        let mut during = Buffer::empty(area);
+        view.input_box.render(area, &mut during, "Task", None);
+        assert_eq!(during, before);
+        assert_eq!(key(&mut view, KeyCode::Enter), None);
+        view.input_complete(&id, &input, Ok(()));
+        assert!(matches!(
+            key(&mut view, KeyCode::Enter),
+            Some(Action::SendPrompt { .. })
+        ));
+    }
+}

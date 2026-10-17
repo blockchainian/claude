@@ -120,6 +120,7 @@ fn enter_prompt_reaches_background_provider_and_displays_identity_failure() {
     assert!(!pending.contains("registry race prompt"), "{pending}");
     assert!(!app.handle_action(Some(Action::Open(id.clone()))));
     assert!(app.launch.is_none());
+    assert!(!screen(&mut app).contains("Input is still being sent"));
     complete_input(&mut app, "Claude background session identity changed");
     assert!(screen(&mut app).contains("registry race prompt"));
     assert!(app.handle_action(Some(Action::Open(id))));
@@ -501,4 +502,25 @@ fn codex_setting_actions_show_unsupported_input_errors() {
             "{rendered}"
         );
     }
+}
+
+#[test]
+fn duplicate_inputs_keep_the_screen_and_do_not_start_another_job() {
+    let (_directory, mut app, path, mut registry) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    registry["sessionId"] = "a-different-session".into();
+    fs::write(path, serde_json::to_vec(&registry).unwrap()).unwrap();
+    app.send_input(id.clone(), SessionInput::Prompt("original prompt".into()));
+    for input in [
+        SessionInput::Prompt("duplicate prompt".into()),
+        SessionInput::SetModel("claude-opus-5-5".into()),
+        SessionInput::SetEffort("medium".into()),
+        SessionInput::Interrupt,
+    ] {
+        app.send_input(id.clone(), input);
+        assert_eq!(app.pending_inputs.len(), 1);
+        assert!(!screen(&mut app).contains("Input is still being sent"));
+    }
+    complete_input(&mut app, "Claude background session identity changed");
+    assert!(app.receiver.try_recv().is_err());
 }

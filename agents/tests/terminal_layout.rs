@@ -159,6 +159,39 @@ fn start_probe_with_transcript(
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_show_more_keeps_label_while_loading() {
+    let (directory, tmux, _transcript) = start_probe("show-more");
+    let project = directory.path().join("claude/projects/project");
+    for index in 1..12 {
+        let id = format!("00000000-0000-0000-0000-000000000{index:03}");
+        let records = include_str!("fixtures/transcript.jsonl")
+            .lines()
+            .map(|line| {
+                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+                record["sessionId"] = id.clone().into();
+                record.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(project.join(format!("{id}.jsonl")), records).unwrap();
+    }
+    let capture = tmux.capture_when(|capture| capture.contains("Inactive 10"));
+    let tabs = capture.lines().next().unwrap();
+    let inactive = tabs[..tabs.find("Inactive 10").unwrap()].width();
+    tmux.mouse(0, inactive, 0, true);
+    tmux.wait_for(|capture| capture.contains("Show more"));
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| capture.contains("Show more"));
+    assert!(!capture.contains("Loading more"));
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| capture.contains("Inactive 12"));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    assert!(!capture.contains("Loading more"));
+    println!("{{\"show_more\":\"pass\",\"transient_label\":\"absent\"}}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_branch_name_uses_prompt_and_restores_input() {
     let repository = tempfile::tempdir().unwrap();
     for args in [

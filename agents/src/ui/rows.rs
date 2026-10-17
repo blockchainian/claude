@@ -146,11 +146,7 @@ impl View {
                         Style::default()
                     };
                     fill_list_row(rect, buf, style);
-                    let label = if self.loading {
-                        "Loading more…"
-                    } else {
-                        "Show more"
-                    };
+                    let label = "Show more";
                     if selected {
                         state.marker = Some((rect.x, rect.y));
                     }

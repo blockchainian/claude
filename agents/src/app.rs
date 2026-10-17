@@ -761,8 +761,6 @@ impl App {
 
     fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
         if !self.pending_inputs.insert(id.clone()) {
-            self.view
-                .set_notice(Some("Input is still being sent".into()));
             return false;
         }
         let interrupt = matches!(input, SessionInput::Interrupt);
@@ -1174,8 +1172,6 @@ impl App {
     /// Hands the terminal to the selected session's provider process.
     fn launch_session(&mut self, action: Action, session: Session) -> bool {
         if self.pending_inputs.contains(&session.id) {
-            self.view
-                .set_notice(Some("Input is still being sent".into()));
             return false;
         }
 

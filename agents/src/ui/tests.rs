@@ -1594,7 +1594,9 @@ fn live_center_show_more() {
     );
     assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::ShowMore));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert!(screen(&view, 80, 12).contains("Loading more…"));
+    let rendered = screen(&view, 80, 12);
+    assert!(rendered.contains("Show more"));
+    assert!(!rendered.contains("Loading more…"));
 }
 #[test]
 fn group_headers_have_no_count() {

@@ -298,6 +298,32 @@ mod tests {
     }
 
     #[test]
+    fn answer_submission_keeps_screen_and_blocks_duplicates() {
+        let mut view = fixture();
+        let Some(Action::AnswerQuestions { ask, answer }) =
+            view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
+        else {
+            panic!("answer action missing");
+        };
+        let before = screen(&view, 100, 40);
+        let input = crate::providers::SessionInput::Answer {
+            ask: ask.clone(),
+            answer,
+            transcript: "probe.jsonl".into(),
+        };
+        view.input_sending(&ask.session, &input);
+        assert_eq!(screen(&view, 100, 40), before);
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            None
+        );
+        view.handle_paste("duplicate answer");
+        assert_eq!(screen(&view, 100, 40), before);
+        view.input_complete(&ask.session, &input, Ok(()));
+        assert!(view.active_question().is_none());
+    }
+
+    #[test]
     fn ask_flow_uses_question_footer_instead_of_open_hint() {
         let view = fixture();
         let text = view.center_footer_hints().to_string();
