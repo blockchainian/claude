@@ -90,6 +90,7 @@ pub struct InputChoices {
 }
 
 pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
+pub type CreateJob = Box<dyn FnOnce() -> io::Result<Output> + Send>;
 
 pub trait Provider {
     fn id(&self) -> ProviderId;
@@ -99,7 +100,7 @@ pub trait Provider {
     fn send(&self, _session: &Session, _input: SessionInput) -> Option<Job> {
         None
     }
-    fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<Command>> {
+    fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<CreateJob>> {
         None
     }
     fn input_choices(&self) -> InputChoices {

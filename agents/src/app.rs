@@ -791,13 +791,13 @@ impl App {
         provider: ProviderId,
         request: crate::tasks::NewTask,
     ) {
-        let command = self
+        let job = self
             .hub
             .provider(provider)
             .create(&request)
             .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
-        let mut command = match command {
-            Ok(command) => command,
+        let job = match job {
+            Ok(job) => job,
             Err(error) => {
                 self.view.draft_created(draft_id, Err(error));
                 return;
@@ -807,9 +807,8 @@ impl App {
         if let Err(error) = thread::Builder::new()
             .name("agents-create".into())
             .spawn(move || {
-                let result =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| command.output()))
-                        .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
                 let _ = sender.send(Input::Created {
                     draft_id,
                     provider,

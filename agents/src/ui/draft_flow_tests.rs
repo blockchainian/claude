@@ -519,3 +519,36 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
         }
     }
 }
+
+#[test]
+fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
+    for text in ["describe this", ""] {
+        let (directory, mut view) = fixture();
+        let id = view.add_draft(setup(directory.path()));
+        view.handle_paste(text);
+        view.attach_image(
+            crate::images::ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap(),
+        );
+        let paths = view.input_box.editor.image_paths();
+        let action = key(&mut view, KeyCode::Enter);
+        assert!(
+            matches!(action, Some(Action::CreateTask { draft_id, .. }) if draft_id == id),
+            "{action:?}"
+        );
+        let Some(Action::CreateTask { request, .. }) = action else {
+            unreachable!()
+        };
+        assert_eq!(request.prompt, text);
+        assert_eq!(request.images, paths);
+        assert!(view.drafts[0].working);
+        view.draft_created(id, Err(std::io::Error::other("delivery failed")));
+        assert_eq!(view.selected_draft, Some(id));
+        assert_eq!(view.input_box.editor.prompt_text(), text);
+        assert_eq!(view.input_box.editor.image_paths(), paths);
+        assert_eq!(view.drafts[0].error.as_deref(), Some("delivery failed"));
+        assert!(!view.drafts[0].working);
+    }
+}

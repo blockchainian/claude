@@ -264,7 +264,58 @@ pub struct ClaudeProvider {
     pending_asks: pending_asks::PendingAsks,
 }
 
+fn created_job(output: &std::process::Output) -> io::Result<String> {
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "Claude task creation failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let stdout = std::str::from_utf8(&output.stdout)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let mut ids = stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("backgrounded · "))
+        .map(|id| {
+            id.strip_suffix(" (idle — send a prompt to start)")
+                .unwrap_or(id)
+        });
+    let id = ids.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Claude did not report a background job id",
+        )
+    })?;
+    if id.is_empty()
+        || id.starts_with('-')
+        || id.chars().any(char::is_whitespace)
+        || ids.next().is_some()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Claude reported an invalid background job id",
+        ));
+    }
+    Ok(id.to_owned())
+}
+
 impl ClaudeProvider {
+    fn create_command(request: &crate::tasks::NewTask) -> Command {
+        let mut command = Command::new("claude");
+        command.arg("--bg").current_dir(&request.cwd);
+        if let Some(model) = &request.model {
+            command.args(["--model", model]);
+        }
+        if let Some(effort) = &request.effort {
+            command.args(["--effort", effort]);
+        }
+        if request.images.is_empty() {
+            command.arg(&request.prompt);
+        }
+        command
+    }
+
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config_dir,
@@ -637,17 +688,29 @@ impl Provider for ClaudeProvider {
         log::tail_session(path, count, sidechains)
     }
 
-    fn create(&self, request: &crate::tasks::NewTask) -> Option<io::Result<Command>> {
-        let mut command = Command::new("claude");
-        command.arg("--bg").current_dir(&request.cwd);
-        if let Some(model) = &request.model {
-            command.args(["--model", model]);
-        }
-        if let Some(effort) = &request.effort {
-            command.args(["--effort", effort]);
-        }
-        command.arg(&request.prompt);
-        Some(Ok(command))
+    fn create(
+        &self,
+        request: &crate::tasks::NewTask,
+    ) -> Option<io::Result<crate::providers::CreateJob>> {
+        let mut command = Self::create_command(request);
+        let request = request.clone();
+        let settings = self.config_dir.join("settings.json");
+        Some(Ok(Box::new(move || {
+            let output = command.output()?;
+            if !request.images.is_empty() {
+                let job_id = created_job(&output)?;
+                attach::send(
+                    &job_id,
+                    &request.cwd,
+                    &settings,
+                    SessionInput::PromptWithImages {
+                        text: request.prompt,
+                        images: request.images,
+                    },
+                )?;
+            }
+            Ok(output)
+        })))
     }
 
     fn input_choices(&self) -> crate::providers::InputChoices {
@@ -690,35 +753,7 @@ impl Provider for ClaudeProvider {
     }
 
     fn created_job(&self, output: &std::process::Output) -> io::Result<String> {
-        if !output.status.success() {
-            return Err(io::Error::other(format!(
-                "Claude task creation failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        let stdout = std::str::from_utf8(&output.stdout)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let mut ids = stdout
-            .lines()
-            .filter_map(|line| line.strip_prefix("backgrounded · "));
-        let id = ids.next().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Claude did not report a background job id",
-            )
-        })?;
-        if id.is_empty()
-            || id.starts_with('-')
-            || id.chars().any(char::is_whitespace)
-            || ids.next().is_some()
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Claude reported an invalid background job id",
-            ));
-        }
-        Ok(id.to_owned())
+        created_job(output)
     }
 
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {

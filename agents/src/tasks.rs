@@ -9,6 +9,7 @@ pub struct NewTask {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub prompt: String,
+    pub images: Vec<PathBuf>,
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TaskDefaults {

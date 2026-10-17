@@ -9,14 +9,14 @@ const BACKGROUND_OUTPUT: &str = "backgrounded · d887474c\n  claude agents      
 #[test]
 fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
     let directory = tempfile::tempdir().unwrap();
-    let provider = ClaudeProvider::new(directory.path().into());
     let mut request = NewTask {
         cwd: directory.path().into(),
         model: Some("haiku".into()),
         effort: Some("high".into()),
+        images: Vec::new(),
         prompt: include_str!("../../../tests/fixtures/claude-peer-message.txt").into(),
     };
-    let command = provider.create(&request).unwrap().unwrap();
+    let command = ClaudeProvider::create_command(&request);
     assert_eq!(command.get_program(), "claude");
     assert_eq!(command.get_current_dir(), Some(directory.path()));
     assert_eq!(
@@ -32,10 +32,27 @@ fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
     );
     request.model = None;
     request.effort = None;
-    let command = provider.create(&request).unwrap().unwrap();
+    let command = ClaudeProvider::create_command(&request);
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
         ["--bg", request.prompt.as_str()]
+    );
+}
+
+#[test]
+fn image_creation_starts_idle_with_model_and_effort() {
+    let directory = tempfile::tempdir().unwrap();
+    let request = NewTask {
+        cwd: directory.path().into(),
+        model: Some("haiku".into()),
+        effort: Some("high".into()),
+        prompt: "describe this".into(),
+        images: vec![directory.path().join("image.png")],
+    };
+    let command = ClaudeProvider::create_command(&request);
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["--bg", "--model", "haiku", "--effort", "high"]
     );
 }
 
@@ -107,4 +124,14 @@ fn claude_input_choices_are_the_supported_model_and_effort_names() {
     let choices = ClaudeProvider::new(directory.path().into()).input_choices();
     assert_eq!(choices.models, ["fable", "opus", "sonnet", "haiku"]);
     assert_eq!(choices.efforts, ["low", "medium", "high", "xhigh", "max"]);
+}
+
+#[test]
+fn creation_parses_idle_background_output() {
+    let output = Output {
+        status: ExitStatus::from_raw(0),
+        stdout: include_bytes!("../../../tests/fixtures/claude-background-idle.txt").to_vec(),
+        stderr: Vec::new(),
+    };
+    assert_eq!(created_job(&output).unwrap(), "6f03db53");
 }

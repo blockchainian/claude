@@ -966,11 +966,7 @@ impl View {
                 Some(prompt_box::PromptAction::PasteImage) => Some(Action::PasteImage),
                 Some(prompt_box::PromptAction::Submit(text)) => {
                     let images = self.input_box.editor.image_paths();
-                    if !images.is_empty() {
-                        if self.selected_draft.is_some() {
-                            self.input_failed("This task cannot receive that input".into());
-                            return None;
-                        }
+                    if !images.is_empty() && self.selected_draft.is_none() {
                         return self.selected_id().cloned().map(|id| Action::SendImages {
                             id,
                             text,
@@ -991,6 +987,7 @@ impl View {
                                 model: draft.setup.model.clone(),
                                 effort: draft.setup.effort.clone(),
                                 prompt: text,
+                                images,
                             },
                         })
                     } else {

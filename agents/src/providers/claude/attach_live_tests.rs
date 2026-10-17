@@ -120,6 +120,7 @@ impl Live {
                 cwd: cwd.to_owned(),
                 model: Some("haiku".into()),
                 effort: None,
+                images: Vec::new(),
                 prompt: "Reply exactly READY and stop. Do not use tools or edit files.".into(),
             },
         );
