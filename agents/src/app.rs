@@ -890,12 +890,10 @@ impl App {
         }
     }
 
-    /// Deletes the session on a worker thread; the list shows it as deleting until then.
+    /// Hides the session at once and deletes it on a worker thread.
     fn delete(&mut self, session: Session) {
         let id = session.id.clone();
-        if !self.view.start_deleting(&id) {
-            return;
-        }
+        self.view.hide(&id);
         let job = match self.hub.provider(id.provider).delete(&session) {
             Ok(job) => job,
             Err(error) => return self.deleted(&id, Err(error)),
@@ -918,13 +916,10 @@ impl App {
     }
 
     fn deleted(&mut self, id: &SessionKey, result: io::Result<()>) {
-        self.view.finish_deleting(id);
         match result {
-            Ok(()) => {
-                self.view.hide(id);
-                self.refresh();
-            }
+            Ok(()) => self.refresh(),
             Err(error) => {
+                self.view.unhide(id);
                 self.refresh();
                 self.view
                     .set_notice(Some(format!("Failed to delete: {error}")));

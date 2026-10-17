@@ -1303,10 +1303,7 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
     assert!(!key(&mut app, KeyCode::Backspace));
     assert!(!key(&mut app, KeyCode::Down));
     assert!(!key(&mut app, KeyCode::Enter));
-    assert_eq!(
-        app.view.status_of(app.session(&target.id).as_ref().unwrap()).0,
-        "Deleting"
-    );
+    assert_ne!(app.view.selected_id(), Some(&target.id));
     let event = app
         .receiver
         .recv_timeout(Duration::from_secs(10))
