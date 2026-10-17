@@ -111,3 +111,61 @@ fn cross_section_drag_preserves_blank_line() {
         })
     );
 }
+
+fn assert_hidden_suffix_search(width: u16) {
+    let (mut view, now) = open_tool_fixture();
+    let mut event = view.visible_log_event().unwrap().clone();
+    event.calls.truncate(1);
+    let output = (0..50)
+        .map(|n| format!("row {n}"))
+        .chain(std::iter::once(format!("{}HIDDEN_NEEDLE", "x".repeat(240))))
+        .collect::<Vec<_>>()
+        .join("\n");
+    event.calls[0].output = Some(vec![crate::log::Section::Text {
+        label: "stdout".into(),
+        text: output,
+    }]);
+    view.select_fixture_event(Some(event));
+    let area = Rect::new(0, 0, width, 30);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let target = {
+        let viewport = view.viewport.borrow();
+        let layout = viewport.log_detail_layout.as_ref().unwrap();
+        let target = layout
+            .rows
+            .iter()
+            .position(|(id, cells)| {
+                cells.iter().any(|(_, bytes)| {
+                    layout.sources[*id].text[bytes.clone()].contains("HIDDEN_NEEDLE")
+                })
+            })
+            .unwrap();
+        let drawn = layout.lines[target].to_string();
+        assert!(drawn.ends_with('…'));
+        assert!(!drawn.contains("HIDDEN_NEEDLE"));
+        assert_eq!(viewport.log_detail_scroll, 0);
+        target
+    };
+    view.log_detail_search.query.insert("HIDDEN_NEEDLE");
+    view.jump_detail_match();
+    assert_eq!(view.viewport.borrow().log_detail_scroll, target);
+    view.render_at(area, &mut buf, now);
+    let viewport = view.viewport.borrow();
+    assert!(viewport.log_detail_scroll > 0);
+    assert!(viewport.log_text.rows.iter().any(|row| {
+        row.cells.iter().any(|(_, bytes)| {
+            viewport.log_text.sources[row.segment].text[bytes.clone()].contains("HIDDEN_NEEDLE")
+        })
+    }));
+}
+
+#[test]
+fn search_finds_hidden_suffix_at_100_columns() {
+    assert_hidden_suffix_search(100);
+}
+
+#[test]
+fn search_finds_hidden_suffix_at_200_columns() {
+    assert_hidden_suffix_search(200);
+}

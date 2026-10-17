@@ -364,7 +364,22 @@ impl View {
         let found = layout
             .lines
             .iter()
-            .position(|line| !self.log_detail_search.indices(&line.to_string()).is_empty());
+            .zip(&layout.rows)
+            .position(|(line, (id, cells))| {
+                if !self.log_detail_search.indices(&line.to_string()).is_empty() {
+                    return true;
+                }
+                // The ellipsis maps to the hidden suffix, so these bounds cover the full row.
+                let bytes = cells.iter().map(|(_, bytes)| bytes.clone()).reduce(|a, b| {
+                    a.start.min(b.start)..a.end.max(b.end)
+                });
+                bytes.is_some_and(|bytes| {
+                    !self
+                        .log_detail_search
+                        .indices(&layout.sources[*id].text[bytes])
+                        .is_empty()
+                })
+            });
         drop(viewport);
         if let Some(line) = found {
             self.viewport.borrow_mut().log_detail_scroll = line;
