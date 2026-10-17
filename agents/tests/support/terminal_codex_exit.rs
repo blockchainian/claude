@@ -1,19 +1,13 @@
 use super::*;
 
-#[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_codex_exit_sections() {
+fn start_codex_probe(name: &str, fixture: &str) -> (tempfile::TempDir, Tmux) {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
     let claude = directory.path().join("claude");
     std::fs::create_dir(&codex).unwrap();
     std::fs::create_dir(&claude).unwrap();
     let transcript = codex.join("failed.jsonl");
-    std::fs::write(
-        &transcript,
-        include_str!("../fixtures/codex-command-failed.jsonl"),
-    )
-    .unwrap();
+    std::fs::write(&transcript, fixture).unwrap();
     let db = rusqlite::Connection::open(codex.join("state_5.sqlite")).unwrap();
     db.execute_batch(include_str!("../fixtures/codex-state.sql"))
         .unwrap();
@@ -24,7 +18,7 @@ fn terminal_codex_exit_sections() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-exit-status-{}", std::process::id()));
+    let tmux = Tmux(format!("agents-{name}-{}", std::process::id()));
     tmux.run(&[
         "-f",
         "/dev/null",
@@ -51,6 +45,16 @@ fn terminal_codex_exit_sections() {
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    (directory, tmux)
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_codex_exit_sections() {
+    let (_directory, tmux) = start_codex_probe(
+        "exit-status",
+        include_str!("../fixtures/codex-command-failed.jsonl"),
+    );
     let capture = tmux.capture_when(|capture| {
         capture.contains("false → 1")
             && capture.contains("exit code: 1")
@@ -76,4 +80,44 @@ fn terminal_codex_exit_sections() {
         "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
         path.display()
     );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_failed_plain_output_uses_error_color() {
+    for (name, fixture, message) in [
+        (
+            "mcp-error-color",
+            include_str!("../fixtures/codex-mcp-errors.jsonl"),
+            "user rejected MCP tool call",
+        ),
+        (
+            "command-error-color",
+            include_str!("../fixtures/codex-command-failed.jsonl"),
+            "[scrubbed]",
+        ),
+    ] {
+        let (_directory, tmux) = start_codex_probe(name, fixture);
+        tmux.wait_for(|capture| capture.contains(message));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let parser = captured_screen(&capture, 160, 45);
+        let screen = parser.screen();
+        let row = screen
+            .rows(0, 160)
+            .position(|row| row.contains(message))
+            .unwrap();
+        let text = screen.rows(0, 160).nth(row).unwrap();
+        let column = text.find(message).unwrap();
+        for offset in 0..message.len() {
+            let cell = screen.cell(row as u16, (column + offset) as u16).unwrap();
+            assert_eq!(cell.fgcolor(), vt100::Color::Idx(1), "{name}: {capture}");
+            assert!(!cell.bold(), "error body keeps ordinary weight");
+        }
+        let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
+        std::fs::write(&path, capture).unwrap();
+        println!(
+            "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
 }

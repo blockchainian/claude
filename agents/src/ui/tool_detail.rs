@@ -30,6 +30,7 @@ fn record_json_scan(bytes: usize) {
 pub(super) struct Part {
     pub source: String,
     body: Body,
+    style: Style,
 }
 
 enum Body {
@@ -79,6 +80,7 @@ impl Part {
         Part {
             source: source.into(),
             body,
+            style: Style::default(),
         }
     }
 
@@ -216,7 +218,7 @@ impl Part {
             .into_iter()
             .map(|mut line| {
                 for span in &mut line.spans {
-                    span.style = body_style.patch(span.style);
+                    span.style = body_style.patch(self.style).patch(span.style);
                 }
                 line
             })
@@ -607,6 +609,13 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                     }
                 }
                 None => output_parts.push(Part::new("", Body::Running)),
+            }
+            if call.is_error {
+                for part in &mut output_parts {
+                    if matches!(part.body, Body::Text) {
+                        part.style = super::style::log_styles(&Kind::Error).1;
+                    }
+                }
             }
             groups.push(Group {
                 parts: output_parts,
@@ -1628,6 +1637,73 @@ mod tests {
         let lines = parts[3].lines(9, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].spans.len() > 1);
+    }
+
+    #[test]
+    fn failed_plain_outputs_use_error_body_style() {
+        use crate::providers::Provider;
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut claude = crate::providers::claude::ClaudeProvider::new(dir.path().into());
+        let mut session = claude.refresh(1).sessions.remove(0);
+        let codex = crate::providers::codex::CodexProvider::new(
+            dir.path().into(),
+            dir.path().join("manager"),
+        );
+        for fixture in ["codex-mcp-errors.jsonl", "codex-command-failed.jsonl"] {
+            session.transcript = Some(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures")
+                    .join(fixture),
+            );
+            for mut event in codex.log(&session, usize::MAX, false).unwrap() {
+                assert!(event.calls.iter().all(|call| call.is_error));
+                for failed in [true, false] {
+                    for call in &mut event.calls {
+                        call.is_error = failed;
+                        call.name = "arbitrary tool".into();
+                    }
+                    let detail = parts(&event);
+                    for section in detail {
+                        let output = section.groups.last().unwrap();
+                        assert!(
+                            output
+                                .parts
+                                .iter()
+                                .any(|part| matches!(part.body, Body::Text))
+                        );
+                        for part in &output.parts {
+                            if !matches!(part.body, Body::Text) {
+                                continue;
+                            }
+                            let style = if failed {
+                                super::super::style::log_styles(&Kind::Error).1
+                            } else {
+                                Style::default()
+                            };
+                            for width in [20, 160] {
+                                for line in part.lines(width, Style::default(), event.started_at) {
+                                    for span in line.spans {
+                                        assert_eq!(
+                                            span.style.fg, style.fg,
+                                            "{fixture}: {}",
+                                            span.content
+                                        );
+                                        assert_eq!(span.style.add_modifier, style.add_modifier);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
