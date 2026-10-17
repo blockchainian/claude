@@ -29,12 +29,14 @@ impl View {
                 return;
             }
             if field == Field::Branch {
-                if draft.setup.branch.is_empty() || draft.setup.branch != draft.setup.trunk {
+                if draft.setup.branch.is_empty() {
                     return;
                 }
+                let mut editor = line_edit::LineEdit::default();
+                editor.set_text(draft.new_branch.as_deref().unwrap_or_default());
                 self.branch_editor = Some(BranchEditor {
                     draft: draft.id,
-                    editor: line_edit::LineEdit::default(),
+                    editor,
                 });
                 self.input_box.focused = false;
                 return;
@@ -98,7 +100,9 @@ impl View {
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
         if cancel && (self.picker.is_some() || self.branch_editor.is_some()) {
             self.picker = None;
-            self.branch_editor = None;
+            if self.branch_editor.take().is_some() {
+                self.input_box.focused = true;
+            }
             return Some(None);
         }
         if let Some(picker) = self.picker.as_mut() {
@@ -118,20 +122,14 @@ impl View {
         if self.branch_editor.is_some() {
             if key.code == KeyCode::Enter {
                 let editor = self.branch_editor.take().expect("branch editor");
+                self.input_box.focused = true;
                 let draft = self
                     .drafts
                     .iter_mut()
                     .find(|draft| draft.id == editor.draft)?;
-                if editor.editor.is_empty() {
-                    return Some(None);
-                }
-                draft.working = true;
-                draft.error = None;
-                return Some(Some(Action::CreateWorktree {
-                    draft_id: draft.id,
-                    cwd: draft.setup.cwd.clone(),
-                    branch: editor.editor.text().to_owned(),
-                }));
+                let name = editor.editor.text().trim();
+                draft.new_branch = (!name.is_empty()).then(|| name.to_owned());
+                return Some(None);
             }
             self.branch_editor
                 .as_mut()
@@ -173,21 +171,6 @@ impl View {
                 self.viewport.borrow_mut().picker_rows.push((row, index));
             }
         }
-        if let Some(editor) = &self.branch_editor
-            && let Some((rect, _)) = self
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .find(|(_, field)| *field == Field::Branch)
-        {
-            render::render_input_row(
-                &format!("Branch {PROMPT_MARKER} "),
-                &editor.editor,
-                *rect,
-                buf,
-            );
-        }
     }
 }
 
@@ -210,7 +193,6 @@ mod tests {
             model: None,
             effort: None,
             branch: "main".into(),
-            trunk: "main".into(),
         });
         view
     }
@@ -222,17 +204,11 @@ mod tests {
         view.open_field(Field::Branch);
         view.branch_editor.as_mut().unwrap().editor.set_text("你好");
         view.render(area, &mut buffer);
-        let rect = view
-            .viewport
-            .borrow()
-            .field_targets
-            .iter()
-            .find(|(_, field)| *field == Field::Branch)
-            .unwrap()
-            .0;
-        assert_eq!(buffer[(rect.x + 7, rect.y)].symbol(), "❯");
-        assert_eq!(buffer[(rect.x + 9, rect.y)].symbol(), "你");
-        assert_eq!(view.cursor_pos(area), Some((rect.x + 13, rect.y)));
+        let prompt = view.center_layout(area).prompt;
+        let rect = Rect::new(prompt.x + 1, prompt.y, prompt.width - 2, 1);
+        assert_eq!(buffer[(rect.x + 11, rect.y)].symbol(), "❯");
+        assert_eq!(buffer[(rect.x + 13, rect.y)].symbol(), "你");
+        assert_eq!(view.cursor_pos(area), Some((rect.x + 17, rect.y)));
         view.branch_editor = None;
         view.open_field(Field::Model);
         view.render(area, &mut buffer);
@@ -261,13 +237,11 @@ mod tests {
     fn plain_directory_draft_has_no_branch_control() {
         let mut view = draft_view();
         view.drafts[0].setup.branch.clear();
-        view.drafts[0].setup.trunk.clear();
         view.open_field(Field::Branch);
         assert!(view.branch_editor.is_none());
         let area = Rect::new(0, 0, 120, 24);
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer);
-        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
         assert!(
             view.viewport
                 .borrow()

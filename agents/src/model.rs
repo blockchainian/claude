@@ -213,15 +213,12 @@ pub enum Action {
     NewDraft {
         cwd: PathBuf,
     },
+    /// Creates a task, first in a new worktree on `branch` when one is given.
     CreateTask {
         draft_id: DraftId,
         provider: ProviderId,
         request: crate::tasks::NewTask,
-    },
-    CreateWorktree {
-        draft_id: DraftId,
-        cwd: PathBuf,
-        branch: String,
+        branch: Option<String>,
     },
     SetModel {
         id: SessionKey,

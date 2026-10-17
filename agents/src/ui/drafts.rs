@@ -10,13 +10,14 @@ pub(crate) struct DraftSetup {
     pub effort: Option<String>,
     /// Empty when the draft directory is outside a Git working tree.
     pub branch: String,
-    pub trunk: String,
 }
 
 pub(super) struct Draft {
     pub id: DraftId,
     pub setup: DraftSetup,
     pub input: prompt_box::PromptBox,
+    /// The branch, and worktree, to create for the task when its first prompt is sent.
+    pub new_branch: Option<String>,
     pub job: Option<String>,
     pub working: bool,
     pub error: Option<String>,
@@ -43,6 +44,7 @@ impl View {
             id,
             setup,
             input: prompt_box::PromptBox::default(),
+            new_branch: None,
             job: None,
             working: false,
             error: None,
@@ -53,23 +55,22 @@ impl View {
         id
     }
 
-    pub(crate) fn draft_worktree_complete(
+    /// Moves the draft into its new worktree; its task is created there next.
+    pub(crate) fn draft_worktree_created(
         &mut self,
         id: DraftId,
         result: io::Result<(PathBuf, String)>,
     ) {
+        let (cwd, branch) = match result {
+            Ok(created) => created,
+            Err(error) => return self.draft_created(id, Err(error)),
+        };
         let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) else {
             return;
         };
-        draft.working = false;
-        match result {
-            Ok((cwd, branch)) => {
-                draft.setup.cwd = cwd;
-                draft.setup.branch = branch;
-                draft.error = None;
-            }
-            Err(error) => draft.error = Some(error.to_string()),
-        }
+        draft.setup.cwd = cwd;
+        draft.setup.branch = branch;
+        draft.new_branch = None;
     }
 
     pub(crate) fn draft_created(&mut self, id: DraftId, result: io::Result<String>) {
@@ -174,7 +175,6 @@ mod tests {
             model: None,
             effort: None,
             branch: "main".into(),
-            trunk: "main".into(),
         }
     }
     #[test]
@@ -199,14 +199,16 @@ mod tests {
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
         let second = view.add_draft(setup(directory.path()));
-        view.draft_worktree_complete(first, Ok((directory.path().join("stale"), "stale".into())));
-        view.draft_worktree_complete(
+        view.draft_worktree_created(first, Ok((directory.path().join("stale"), "stale".into())));
+        view.draft_worktree_created(
             second,
             Ok((directory.path().join("worktree"), "feature".into())),
         );
         assert_eq!(view.selected_draft, Some(second));
         assert_eq!(view.drafts.len(), 1);
         assert_eq!(view.drafts[0].setup.branch, "feature");
+        view.draft_worktree_created(second, Err(std::io::Error::other("taken")));
+        assert_eq!(view.drafts[0].error.as_deref(), Some("taken"));
         view.draft_created(first, Ok("stale-job-id".into()));
         view.draft_created(second, Ok("real-job-id".into()));
         assert_eq!(view.drafts[0].job.as_deref(), Some("real-job-id"));

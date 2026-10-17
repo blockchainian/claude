@@ -266,7 +266,7 @@ fn app_refresh_reads_live_and_stopped_background_jobs_from_disk() {
 
 #[test]
 #[ignore = "writes and restores the real Claude trust config; run serially with live CLI tests"]
-fn app_creates_worktree_and_applies_completion_to_draft() {
+fn app_creates_worktree_with_the_task_request() {
     struct RestoreTrust {
         path: PathBuf,
         bytes: Option<Vec<u8>>,
@@ -343,27 +343,32 @@ fn app_creates_worktree_and_applies_completion_to_draft() {
     );
     app.handle_action(Some(Action::NewDraft { cwd: repo.clone() }));
     assert!(screen(&mut app).contains("New task"));
-    app.handle_action(Some(Action::CreateWorktree {
+    app.handle_action(Some(Action::CreateTask {
         draft_id: 1,
-        cwd: repo,
-        branch: "feature-path".into(),
+        provider: ProviderId::Claude,
+        request: crate::tasks::NewTask {
+            cwd: repo,
+            model: None,
+            effort: None,
+            prompt: "probe".into(),
+            images: Vec::new(),
+        },
+        branch: Some("feature-path".into()),
     }));
+    let worktree = trees.join("repo/feature-path");
+    // The worktree arrives with the request; handling it would start a real task.
     let event = app.receiver.recv_timeout(Duration::from_secs(15)).unwrap();
     assert!(
-        matches!(&event, Input::WorktreeCreated { draft_id: 1, result: Ok((path, branch)) }
-        if path == &trees.join("feature-path") && branch == "feature-path")
+        matches!(&event, Input::WorktreeCreated { draft_id: 1, request, result: Ok((path, branch)), .. }
+        if path == &worktree && branch == "feature-path" && request.prompt == "probe")
     );
-    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
-    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
-    let rendered = screen(&mut app);
-    assert!(rendered.contains("feature-path"), "{rendered}");
     assert_eq!(
-        fs::read(trees.join("feature-path/.env")).unwrap(),
+        fs::read(worktree.join(".env")).unwrap(),
         b"APP_WORKTREE_PROBE=1\n"
     );
     let output = Command::new("git")
         .args(["branch", "--show-current"])
-        .current_dir(trees.join("feature-path"))
+        .current_dir(&worktree)
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -372,7 +377,7 @@ fn app_creates_worktree_and_applies_completion_to_draft() {
         "feature-path"
     );
     let trusted: serde_json::Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
-    let path = fs::canonicalize(trees.join("feature-path")).unwrap();
+    let path = fs::canonicalize(&worktree).unwrap();
     assert_eq!(
         trusted["projects"][path.to_str().unwrap()]["hasTrustDialogAccepted"],
         true

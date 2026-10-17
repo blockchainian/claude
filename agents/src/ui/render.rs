@@ -61,6 +61,7 @@ pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
 }
 
 pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
+const NEW_BRANCH_LABEL: &str = "New branch";
 
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
@@ -224,15 +225,17 @@ impl View {
         {
             return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
         }
-        if let Some(editor) = &self.branch_editor
-            && let Some((rect, _)) = self
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .find(|(_, field)| *field == Field::Branch)
-        {
-            let (_, caret) = input_row(&format!("Branch {PROMPT_MARKER} "), &editor.editor, *rect);
+        if let Some(editor) = &self.branch_editor {
+            let rect = row(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                0,
+                1,
+            );
+            let (_, caret) = input_row(
+                &format!("{NEW_BRANCH_LABEL} {PROMPT_MARKER} "),
+                &editor.editor,
+                rect,
+            );
             return Some((rect.x + caret, rect.y));
         }
         if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
@@ -300,6 +303,16 @@ impl View {
         self.viewport.borrow_mut().prompt = layout.prompt;
         if let Some(question) = self.active_question() {
             question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
+        } else if let Some(editor) = &self.branch_editor {
+            // The new branch's name is typed where the prompt goes; the prompt waits unchanged.
+            let prompt = layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0));
+            Clear.render(prompt, buf);
+            render_input_row(
+                &format!("{NEW_BRANCH_LABEL} {PROMPT_MARKER} "),
+                &editor.editor,
+                row(prompt, 0, 1),
+                buf,
+            );
         } else {
             self.input_box.render(
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
@@ -641,15 +654,6 @@ impl View {
         if buf[(rule.x, rule.y)].symbol() == "│" {
             buf[(rule.x, rule.y)].set_symbol("├");
         }
-        if session.is_none() && self.branch_editor.is_some() {
-            // The branch editor takes the whole rule between its corners.
-            let area = Rect::new(rule.x + 2, rule.y, rule.width.saturating_sub(4), 1);
-            self.viewport
-                .borrow_mut()
-                .field_targets
-                .push((area, Field::Branch));
-            return;
-        }
         let width = usize::from(rule.width).saturating_sub(4);
         let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
         status.spans.insert(0, " ".into());
@@ -674,8 +678,11 @@ impl View {
                 .pr
                 .as_ref()
                 .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id))),
-            (None, Some(draft)) => (!draft.setup.branch.is_empty())
-                .then(|| Span::styled(draft.setup.branch.clone(), style::time_style())),
+            (None, Some(draft)) => draft
+                .new_branch
+                .clone()
+                .or_else(|| (!draft.setup.branch.is_empty()).then(|| draft.setup.branch.clone()))
+                .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
         let (left_area, folder_area) = render_rule_ends(

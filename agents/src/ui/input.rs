@@ -948,6 +948,7 @@ impl View {
                         Some(Action::CreateTask {
                             draft_id: id,
                             provider: draft.setup.provider,
+                            branch: draft.new_branch.clone(),
                             request: crate::tasks::NewTask {
                                 cwd: draft.setup.cwd.clone(),
                                 model: draft.setup.model.clone(),

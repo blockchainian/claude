@@ -113,6 +113,7 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
             draft_id: 1,
             provider: ProviderId::Claude,
             request,
+            branch: None,
         },
     );
     let event = app

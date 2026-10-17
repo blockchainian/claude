@@ -1,19 +1,6 @@
 use super::*;
 use crate::providers::Provider;
-use std::process::Command;
 
-fn git(directory: &std::path::Path, arguments: &[&str]) {
-    let output = Command::new("git")
-        .args(arguments)
-        .current_dir(directory)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 fn fixture() -> (tempfile::TempDir, View) {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("config/projects/probe");
@@ -48,7 +35,6 @@ fn setup(cwd: &std::path::Path) -> DraftSetup {
         model: None,
         effort: None,
         branch: "main".into(),
-        trunk: "main".into(),
     }
 }
 fn key(view: &mut View, code: KeyCode) -> Option<Action> {
@@ -427,4 +413,46 @@ fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
     assert!(view.drafts.is_empty());
     assert_eq!(view.selected_id(), Some(&session));
     assert!(!view.input_box.editor.text().contains("typed prompt"));
+}
+
+#[test]
+fn new_branch_is_typed_in_the_prompt_row_and_rides_with_the_first_prompt() {
+    let (directory, mut view) = fixture();
+    let id = view.add_draft(setup(directory.path()));
+    view.handle_paste("start the work");
+    view.open_field(Field::Branch);
+    view.handle_paste("feature/probe");
+    let area = Rect::new(0, 0, 160, 40);
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, Utc::now());
+    let prompt = view.center_layout(area).prompt;
+    let row = (prompt.left()..prompt.right())
+        .map(|x| buffer[(x, prompt.y)].symbol())
+        .collect::<String>();
+    assert!(row.contains("New branch ❯ feature/probe"), "{row}");
+    let (x, y) = view.cursor_pos(area).unwrap();
+    assert_eq!(y, prompt.y);
+    assert!(x > prompt.x);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(view.branch_editor.is_none());
+    assert_eq!(view.drafts[0].new_branch.as_deref(), Some("feature/probe"));
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "start the work");
+    view.open_field(Field::Branch);
+    assert_eq!(
+        view.branch_editor.as_ref().unwrap().editor.text(),
+        "feature/probe"
+    );
+    key(&mut view, KeyCode::Esc);
+    assert!(view.branch_editor.is_none());
+    assert_eq!(view.drafts.len(), 1);
+    let action = key(&mut view, KeyCode::Enter);
+    let Some(Action::CreateTask {
+        draft_id, branch, ..
+    }) = action
+    else {
+        panic!("{action:?}");
+    };
+    assert_eq!(draft_id, id);
+    assert_eq!(branch.as_deref(), Some("feature/probe"));
 }

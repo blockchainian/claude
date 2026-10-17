@@ -43,8 +43,11 @@ enum Input {
         provider: ProviderId,
         result: io::Result<std::process::Output>,
     },
+    /// A new task's worktree, with the task request to create in it.
     WorktreeCreated {
         draft_id: DraftId,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
         result: io::Result<(PathBuf, String)>,
     },
     Sent {
@@ -397,9 +400,20 @@ impl App {
                     self.view.draft_created(draft_id, result);
                     schedule.changed(Instant::now());
                 }
-                Input::WorktreeCreated { draft_id, result } => {
-                    self.view.draft_worktree_complete(draft_id, result);
-                }
+                Input::WorktreeCreated {
+                    draft_id,
+                    provider,
+                    mut request,
+                    result,
+                } => match result {
+                    Ok((cwd, branch)) => {
+                        request.cwd = cwd.clone();
+                        self.view
+                            .draft_worktree_created(draft_id, Ok((cwd, branch)));
+                        self.create_task(draft_id, provider, request);
+                    }
+                    Err(error) => self.view.draft_worktree_created(draft_id, Err(error)),
+                },
                 Input::Sent { id, input, result } => {
                     self.pending_inputs.remove(&id);
                     if matches!(input, SessionInput::Interrupt) {
@@ -763,9 +777,9 @@ impl App {
             let defaults = defaults?;
             let cwd = std::fs::canonicalize(cwd)?;
             let repository = crate::tasks::repository_if_present(&cwd)?;
-            let (cwd, branch, trunk) = match repository {
-                Some(repository) => (repository.directory, repository.branch, repository.trunk),
-                None => (cwd, String::new(), String::new()),
+            let (cwd, branch) = match repository {
+                Some(repository) => (repository.directory, repository.branch),
+                None => (cwd, String::new()),
             };
             Ok(crate::ui::DraftSetup {
                 provider,
@@ -773,7 +787,6 @@ impl App {
                 model: defaults.model,
                 effort: defaults.effort,
                 branch,
-                trunk,
             })
         })();
         match result {
@@ -821,15 +834,23 @@ impl App {
         }
     }
 
-    fn create_worktree(&mut self, draft_id: DraftId, cwd: PathBuf, branch: String) {
+    /// Creates the task's worktree on `branch`, then the task in it.
+    fn create_task_in_worktree(
+        &mut self,
+        draft_id: DraftId,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
+        branch: String,
+    ) {
         let Some(root) = self.preferences.worktree_root.clone() else {
-            self.view.draft_worktree_complete(
+            self.view.draft_worktree_created(
                 draft_id,
                 Err(io::Error::other("Set worktree_root in agents.json")),
             );
             return;
         };
         let config = crate::providers::claude::trust_config_path();
+        let cwd = request.cwd.clone();
         let sender = self.sender.clone();
         if let Err(error) = thread::Builder::new()
             .name("agents-worktree".into())
@@ -839,10 +860,15 @@ impl App {
                         .map(|cwd| (cwd, branch))
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
-                let _ = sender.send(Input::WorktreeCreated { draft_id, result });
+                let _ = sender.send(Input::WorktreeCreated {
+                    draft_id,
+                    provider,
+                    request,
+                    result,
+                });
             })
         {
-            self.view.draft_worktree_complete(draft_id, Err(error));
+            self.view.draft_worktree_created(draft_id, Err(error));
         }
     }
 
@@ -883,12 +909,14 @@ impl App {
                 draft_id,
                 provider,
                 request,
+                branch: None,
             } => self.create_task(draft_id, provider, request),
-            Action::CreateWorktree {
+            Action::CreateTask {
                 draft_id,
-                cwd,
-                branch,
-            } => self.create_worktree(draft_id, cwd, branch),
+                provider,
+                request,
+                branch: Some(branch),
+            } => self.create_task_in_worktree(draft_id, provider, request, branch),
             Action::SetModel { id, model } => self.send_input(id, SessionInput::SetModel(model)),
             Action::SetEffort { id, effort } => {
                 self.send_input(id, SessionInput::SetEffort(effort))
