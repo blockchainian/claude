@@ -431,8 +431,8 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
     assert.match(result.instructions, /no activity for a minute.*stuck.*pointed hint.*never steer.*faked tests/);
     assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask or approval.*checked and accepted.*no further message/);
     assert.match(result.instructions, /Detach it in that same turn/);
-    assert.match(result.instructions, /Before ending a multi-thread run, list with excludeDetached: true.*detach every finished one/);
-    assert.match(result.instructions, /check list with excludeDetached: true for waiting requests before you reply.*already answered/);
+    assert.match(result.instructions, /Before ending a multi-thread run, list with state: \["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"\].*detach every finished one/);
+    assert.match(result.instructions, /check list with state: \["waiting"\] for waiting requests before you reply.*already answered/);
   } finally {
     await home.close();
   }
@@ -1201,41 +1201,51 @@ async function recordedListHome() {
   return home;
 }
 
-test("list optionally excludes detached threads without changing stored history", { timeout: 10_000 }, async () => {
-  const home = await recordedListHome();
-  const stateFile = path.join(home.dir, "state.json");
-  const state = JSON.parse(await readFile(stateFile, "utf8"));
-  delete state.threads[0].detached;
-  state.threads[1].detached = false;
-  await writeFile(stateFile, JSON.stringify(state));
-  const before = await readFile(stateFile, "utf8");
-  const mcp = await mcpChild(home, { socketPath: path.join(home.home, "missing.sock") });
-  try {
-    const all = await mcp.call("list", {});
-    assert.equal(all.isError, false, all.text);
-    assert.deepEqual(all.json.threads.map(thread => thread.id), state.threads.map(thread => thread.id));
-    const filtered = await mcp.call("list", { excludeDetached: true });
-    assert.equal(filtered.isError, false, filtered.text);
-    assert.deepEqual(filtered.json, { ...all.json, threads: all.json.threads.slice(0, 2) });
-    const explicitAll = await mcp.call("list", { excludeDetached: false });
-    assert.deepEqual(explicitAll.json, all.json);
-    assert.equal(await readFile(stateFile, "utf8"), before);
-
-    state.threads.forEach(thread => { thread.detached = true; });
-    await writeFile(stateFile, JSON.stringify(state));
-    assert.deepEqual((await mcp.call("list", { excludeDetached: true })).json.threads, []);
-
-    const tools = await mcp.request("tools/list", {});
-    const schema = tools.result.tools.find(tool => tool.name === "list").inputSchema;
-    assert.equal(schema.properties.excludeDetached.type, "boolean");
-    assert.equal(schema.properties.excludeDetached.default, false);
-    assert.match(schema.properties.excludeDetached.description, /detached/);
-    assert.equal(schema.required?.includes("excludeDetached") ?? false, false);
-  } finally {
-    await mcp.close();
-    await home.close();
-  }
-});
+for (const check of ["state precedence", "state filter"]) {
+  test(`list exposes ${check} without changing stored history`, { timeout: 10_000 }, async () => {
+    const home = await tempHome();
+    await mkdir(home.dir, { recursive: true });
+    const approval = { kind: "approval", callId: "approval", since: 1, text: "allow?" };
+    const threads = [
+      { id: "detached", detached: true, lastStatus: "inProgress", waiting: [approval] },
+      { id: "approval", lastStatus: "inProgress", waiting: [approval] },
+      { id: "ask", lastStatus: "inProgress", waiting: [] },
+      ...["inProgress", "completed", "failed", "interrupted", "idle", "unavailable"].map(lastStatus => ({ id: lastStatus, lastStatus, waiting: [] }))
+    ];
+    const stateFile = path.join(home.dir, "state.json");
+    const before = JSON.stringify({ updatedAt: 1, threads });
+    await writeFile(stateFile, before);
+    await writeFile(path.join(home.dir, "ask.ask.question.json"), JSON.stringify({ kind: "ask", callId: "question", since: 1, text: "which?" }));
+    const mcp = await mcpChild(home, { socketPath: path.join(home.home, "missing.sock") });
+    try {
+      const all = await mcp.call("list", {});
+      assert.equal(all.isError, false, all.text);
+      const states = ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"];
+      if (check === "state precedence") {
+        assert.deepEqual(all.json.threads.map(thread => thread.state), ["detached", "waiting", "waiting", ...states.slice(2)]);
+        assert.deepEqual(all.json.threads.map(thread => thread.id), threads.map(thread => thread.id));
+        assert.equal(all.json.threads[2].waiting[0].callId, "question");
+      } else {
+        for (const state of [...states.map(value => [value]), states.slice(1), states, [], ["waiting", "completed"]]) {
+          const filtered = await mcp.call("list", { state });
+          assert.equal(filtered.isError, false, filtered.text);
+          assert.deepEqual(filtered.json, { ...all.json, threads: all.json.threads.filter(thread => state.includes(thread.state)) });
+        }
+        const tools = await mcp.request("tools/list", {});
+        const schema = tools.result.tools.find(tool => tool.name === "list").inputSchema;
+        assert.deepEqual(Object.keys(schema.properties), ["state"]);
+        assert.equal(schema.properties.state.type, "array");
+        assert.equal(schema.properties.state.items.type, "string");
+        assert.deepEqual(schema.properties.state.items.enum, states);
+        assert.equal(schema.required?.includes("state") ?? false, false);
+      }
+      assert.equal(await readFile(stateFile, "utf8"), before);
+    } finally {
+      await mcp.close();
+      await home.close();
+    }
+  });
+}
 
 test("list refreshes registered names in one paged pass and persists only name changes", { timeout: 10_000 }, async () => {
   const home = await recordedListHome();
