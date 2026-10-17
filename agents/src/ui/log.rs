@@ -1153,6 +1153,7 @@ pub(super) mod log_markdown {
     fn tool_without_calls_has_no_body_below_its_title() {
         let event = &Event {
             source: None,
+            source_records: Vec::new(),
             sender: None,
             kind: Kind::Tool,
             body: "finished".into(),
@@ -1190,6 +1191,7 @@ pub(super) mod log_markdown {
         let mut buffer = Buffer::empty(area);
         let event = Event {
             source: None,
+            source_records: Vec::new(),
             sender: None,
             kind,
             body: body.into(),
@@ -1451,6 +1453,7 @@ pub(super) mod log_markdown {
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
                 source: None,
+                source_records: Vec::new(),
                 sender: None,
                 kind: kind.clone(),
                 body: body.clone(),

@@ -3554,6 +3554,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
         source: None,
+        source_records: Vec::new(),
         sender: None,
         kind, body: body.into(), paths: Vec::new(), started_at: now - Duration::seconds(age),
         ended_at: end.map(|age| now - Duration::seconds(age)),
@@ -4792,6 +4793,7 @@ fn task_log_shows_only_visible_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
         source: None,
+        source_records: Vec::new(),
         sender: None,
         kind: crate::log::Kind::User,
         body: "Discarded event".into(),

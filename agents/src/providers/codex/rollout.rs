@@ -755,6 +755,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     };
     Ok(Some(Event {
         source: None,
+        source_records: Vec::new(),
         sender: None,
         kind: Kind::Tool,
         body,
@@ -1022,7 +1023,7 @@ impl Reader {
             self.shown = 0;
             self.pending_offset = None;
             parsed_bytes += self.read_pending(&mut file)?;
-            self.entries = events(&self.records, usize::MAX)?;
+            self.entries = events(&self.path, &self.records, usize::MAX)?;
         } else if changed && metadata.len() > self.read {
             let pending = self.pending_offset.take();
             let pending_bytes = std::mem::take(&mut self.pending_bytes);
@@ -1065,7 +1066,7 @@ impl Reader {
             let start = self
                 .records
                 .partition_point(|(offset, _)| *offset < affected);
-            let mut suffix = events(&self.records[start..], usize::MAX)?;
+            let mut suffix = events(&self.path, &self.records[start..], usize::MAX)?;
             if let Some((_, previous)) = prefix
                 .checked_sub(1)
                 .and_then(|index| self.entries.get(index))
@@ -1097,7 +1098,7 @@ impl Reader {
             older.reverse();
             older.append(&mut self.records);
             self.records = older;
-            self.entries = events(&self.records, usize::MAX)?;
+            self.entries = events(&self.path, &self.records, usize::MAX)?;
             self.dependencies.clear();
             self.latest_prompt = None;
             // Rebuild dependency positions only when the retained range expands backward.
@@ -1155,13 +1156,13 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
         Ok(true)
     })?;
     records.reverse();
-    Ok(events(&records, count)?
+    Ok(events(path, &records, count)?
         .into_iter()
         .map(|(_, event)| event)
         .collect())
 }
 
-fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
+fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
@@ -1171,14 +1172,20 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
             return Ok(true);
         };
         if completed_user(record) {
-            completed_prompt = Some(record.clone());
+            completed_prompt = Some((offset, record.clone()));
             return Ok(true);
         }
         let payload = &record["payload"];
         let mut images = Vec::new();
         let mut calls = Vec::new();
+        let reference = |offset| crate::log::SourceRecord {
+            path: path.to_path_buf(),
+            offset,
+        };
+        let mut source_records = vec![reference(offset)];
         if let Some(mut event) = completed_tool(record)? {
             event.source = Some(source(record, offset));
+            event.source_records = source_records;
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
             }
@@ -1200,7 +1207,7 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
                             .collect::<Vec<_>>()
                             .join("\n")
                     };
-                    results.insert(id.to_owned(), (at, output));
+                    results.insert(id.to_owned(), (at, output, offset));
                 }
                 return Ok(true);
             }
@@ -1218,12 +1225,15 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
                     .and_then(|id| results.remove(id));
                 calls.push(response_tool_call(
                     payload,
-                    ended.as_ref().map(|(_, text)| text.as_str()),
+                    ended.as_ref().map(|(_, text, _)| text.as_str()),
                 ));
+                if let Some((_, _, offset)) = &ended {
+                    source_records.insert(0, reference(*offset));
+                }
                 (
                     crate::log::tool_kind(payload["name"].as_str().unwrap()),
                     body,
-                    ended.map(|(at, _)| at),
+                    ended.map(|(at, _, _)| at),
                 )
             }
             (Some("response_item"), Some("message")) => {
@@ -1239,7 +1249,14 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
                 };
                 let Some(body) = (if kind == Kind::User {
                     let prompt = user_prompt(&payload["content"]);
-                    images = prompt_images(&prompt, payload, completed.as_ref());
+                    if let Some((offset, _)) = &completed {
+                        source_records.push(reference(*offset));
+                    }
+                    images = prompt_images(
+                        &prompt,
+                        payload,
+                        completed.as_ref().map(|(_, record)| record),
+                    );
                     prompt.body()
                 } else {
                     content_text(&payload["content"])
@@ -1274,6 +1291,7 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
             offset,
             Event {
                 source: Some(source(record, offset)),
+                source_records,
                 sender: None,
                 kind,
                 body,
@@ -1296,6 +1314,8 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
     entries.reverse();
     let mut previous_end = None;
     for (_, entry) in &mut entries {
+        entry.source_records.sort_by_key(|record| record.offset);
+        entry.source_records.dedup();
         entry.previous_end = previous_end;
         previous_end = Some(entry.ended_at.unwrap_or(entry.started_at));
     }
@@ -1304,6 +1324,34 @@ fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raw_source_records_preserve_real_call_and_result_order() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut file,
+            include_bytes!("../../../tests/fixtures/codex-raw-detail.jsonl"),
+        )
+        .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        let rows: Vec<serde_json::Value> =
+            include_str!("../../../tests/fixtures/codex-raw-detail.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let expected = rows[1..]
+            .iter()
+            .map(|row| serde_json::to_string_pretty(row).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+        assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        assert_eq!(
+            update.events[0].raw_text().unwrap(),
+            serde_json::to_string_pretty(&rows[0]).unwrap()
+        );
+    }
+
     use super::*;
     use crate::log::Kind;
     use std::io::Write;

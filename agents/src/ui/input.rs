@@ -156,6 +156,7 @@ impl View {
         self.log_background_event = Some(crate::log::Event {
             kind: crate::log::Kind::Tool,
             source: None,
+            source_records: Vec::new(),
             sender: None,
             body: task.description.clone(),
             paths: Vec::new(),

@@ -120,8 +120,18 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     }
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
-    let mut log = Log::default();
-    super::transcript::walk_records(&mut file, len, Vec::new(), sidechains, |record| {
+    let mut log = Log {
+        path: Some(path.to_path_buf()),
+        ..Log::default()
+    };
+    crate::jsonl::read_lines_back(&mut file, len, |offset, line| {
+        let Ok(record) = serde_json::from_slice::<serde_json::Value>(line) else {
+            return true;
+        };
+        if !sidechains && record["isSidechain"] == true {
+            return true;
+        }
+        log.offset = offset;
         log.record(record, count)
     })?;
     let mut events: Vec<_> = log.entries.into_iter().map(|entry| entry.event).collect();
@@ -190,7 +200,10 @@ impl Reader {
         let retained = self.entries.partition_point(|entry| entry.offset < start);
         let replaced = self.entries.len() - retained;
         self.entries.truncate(retained);
-        let mut log = Log::default();
+        let mut log = Log {
+            path: Some(self.path.clone()),
+            ..Log::default()
+        };
         for (offset, record) in self
             .records
             .iter()
@@ -413,7 +426,9 @@ impl crate::log::Reader for Reader {
 
 #[derive(Default)]
 struct Log {
+    path: Option<PathBuf>,
     offset: u64,
+    companions: std::collections::HashMap<String, Vec<crate::log::SourceRecord>>,
     images: super::images::Companions,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
@@ -429,6 +444,7 @@ struct Entry {
     last_result: Option<usize>,
 }
 struct ResultAt {
+    source_records: Vec<crate::log::SourceRecord>,
     at: DateTime<Utc>,
     sequence: usize,
     error: bool,
@@ -699,12 +715,32 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
 }
 
 impl Log {
+    fn source_records(&self) -> Vec<crate::log::SourceRecord> {
+        self.path
+            .as_ref()
+            .map(|path| crate::log::SourceRecord {
+                path: path.clone(),
+                offset: self.offset,
+            })
+            .into_iter()
+            .collect()
+    }
+
     fn ready(&self, count: usize) -> bool {
         self.entries.len() > count && self.batch.is_none_or(|index| index > count)
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
         self.images.record(&record);
+        if record["turnCompanion"] == true
+            && let Some(id) = record["promptId"].as_str()
+        {
+            let source_records = self.source_records();
+            self.companions
+                .entry(id.to_owned())
+                .or_default()
+                .extend(source_records);
+        }
         self.sequence += 1;
         if record["type"] == "assistant" {
             let key = record["message"]["id"]
@@ -736,7 +772,9 @@ impl Log {
                         if block["type"] == "tool_result"
                             && let Some(id) = block["tool_use_id"].as_str()
                         {
+                            let source_records = self.source_records();
                             let result = self.results.entry(id.to_owned()).or_insert(ResultAt {
+                                source_records: Vec::new(),
                                 at,
                                 sequence: self.sequence,
                                 error: false,
@@ -744,6 +782,7 @@ impl Log {
                                 content: result_text(&block["content"]),
                                 value: record["toolUseResult"].clone(),
                             });
+                            result.source_records.extend(source_records);
                             result.error |= block["is_error"] == true;
                             if block["is_error"] == true {
                                 if record["toolDenialKind"] == "automode-blocked" {
@@ -796,6 +835,17 @@ impl Log {
                         self.entries.last_mut().unwrap().event.source =
                             record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.images = images;
+                        if let Some(records) = record["promptId"]
+                            .as_str()
+                            .and_then(|id| self.companions.remove(id))
+                        {
+                            self.entries
+                                .last_mut()
+                                .unwrap()
+                                .event
+                                .source_records
+                                .extend(records);
+                        }
                     }
                 }
                 // A hidden turn starter is still the immediately preceding event.
@@ -908,6 +958,7 @@ impl Log {
             offset: self.offset,
             event: Event {
                 source: None,
+                source_records: self.source_records(),
                 sender: None,
                 kind,
                 body,
@@ -968,6 +1019,7 @@ impl Log {
                 offset: self.offset,
                 event: Event {
                     source: None,
+                    source_records: self.source_records(),
                     sender: None,
                     kind,
                     body: String::new(),
@@ -985,6 +1037,18 @@ impl Log {
             }
         };
         entry.offset = self.offset;
+        entry.event.source_records.extend(self.source_records());
+        if let Some(result) = result {
+            entry
+                .event
+                .source_records
+                .extend(result.source_records.clone());
+        }
+        entry
+            .event
+            .source_records
+            .sort_by_key(|record| record.offset);
+        entry.event.source_records.dedup();
         let body = entry
             .event
             .body
@@ -1130,6 +1194,55 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn raw_source_records_include_each_consumed_result_line() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let lines: Vec<_> = include_str!("../../../tests/fixtures/claude-raw-detail.jsonl")
+            .lines()
+            .collect();
+        for line in lines.iter().chain(std::iter::once(&lines[2])) {
+            writeln!(file, "{line}").unwrap();
+        }
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        let expected = [lines[1], lines[2], lines[2]]
+            .into_iter()
+            .map(|line| {
+                serde_json::to_string_pretty(&serde_json::from_str::<Value>(line).unwrap()).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+    }
+
+    #[test]
+    fn raw_source_records_preserve_real_call_and_result_order() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut file,
+            include_bytes!("../../../tests/fixtures/claude-raw-detail.jsonl"),
+        )
+        .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        let rows: Vec<serde_json::Value> =
+            include_str!("../../../tests/fixtures/claude-raw-detail.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let expected = rows[1..]
+            .iter()
+            .map(|row| serde_json::to_string_pretty(row).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+        assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        assert_eq!(
+            update.events[0].raw_text().unwrap(),
+            serde_json::to_string_pretty(&rows[0]).unwrap()
+        );
+    }
+
     #[test]
     fn task_notification_delivery_keeps_only_enqueue_rows() {
         use std::io::Write;
@@ -1680,6 +1793,7 @@ pub(crate) mod tests {
             .collect();
         let bash = &records[0]["message"]["content"][0];
         let mut result = ResultAt {
+            source_records: Vec::new(),
             at: at(1),
             sequence: 1,
             error: false,
@@ -2474,7 +2588,10 @@ pub(crate) mod tests {
             "Bash",
             json!({"description":"inspect files"}),
         );
-        let expected = events_from(vec![bash.clone(), result(3, "bash", false)]);
+        let mut expected = events_from(vec![bash.clone(), result(3, "bash", false)]);
+        for event in &mut expected {
+            event.source_records.clear();
+        }
         assert_eq!(expected.len(), 1);
         for task_first in [false, true] {
             let task = tool(1, "batch", "task", "TaskCreate", json!({}));
@@ -2484,7 +2601,11 @@ pub(crate) mod tests {
                 usize::from(!task_first),
                 task["message"]["content"][0].clone(),
             );
-            assert_eq!(events_from(vec![mixed, result(3, "bash", false)]), expected);
+            let mut actual = events_from(vec![mixed, result(3, "bash", false)]);
+            for event in &mut actual {
+                event.source_records.clear();
+            }
+            assert_eq!(actual, expected);
         }
     }
 
@@ -2734,7 +2855,14 @@ pub(crate) mod tests {
         writeln!(file).unwrap();
         file.write_all(&std::fs::read(base.path()).unwrap())
             .unwrap();
-        assert_eq!(tail(file.path(), 2).unwrap(), tail(base.path(), 2).unwrap());
+        let mut actual = tail(file.path(), 2).unwrap();
+        let mut expected = tail(base.path(), 2).unwrap();
+        for (actual, expected) in actual.iter_mut().zip(&mut expected) {
+            assert_eq!(actual.raw_text().unwrap(), expected.raw_text().unwrap());
+            actual.source_records.clear();
+            expected.source_records.clear();
+        }
+        assert_eq!(actual, expected);
     }
     #[test]
     fn shared_walk_reads_only_the_last_chunk_when_events_are_complete() {

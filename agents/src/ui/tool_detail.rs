@@ -760,6 +760,7 @@ mod tests {
     fn event(calls: Vec<ToolCall>) -> Event {
         Event {
             source: None,
+            source_records: Vec::new(),
             sender: None,
             kind: Kind::Tool,
             body: String::new(),
