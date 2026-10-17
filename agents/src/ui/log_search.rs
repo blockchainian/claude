@@ -125,7 +125,6 @@ impl View {
         if selected != selected_full {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_detail_layout = None;
-            viewport.log_detail_other_layout = None;
         }
     }
 

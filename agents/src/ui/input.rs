@@ -32,11 +32,7 @@ pub(super) struct PendingClick {
 
 impl View {
     fn detail_copy_label(&self, event: &crate::log::Event) -> String {
-        if self.log_detail_raw {
-            "Copied transcript".into()
-        } else {
-            super::log::copied_label(event)
-        }
+        super::log::copied_label(event)
     }
 
     pub(crate) fn pending_click_in(&self, now: Instant) -> Option<Duration> {
@@ -194,7 +190,6 @@ impl View {
         });
         self.log_detail_focused = true;
         self.viewport.borrow_mut().log_detail_layout = None;
-        self.viewport.borrow_mut().log_detail_other_layout = None;
         self.viewport.borrow_mut().log_detail_scroll = 0;
     }
 
@@ -375,19 +370,7 @@ impl View {
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
                 self.last_detail_click = None;
-                let position = (mouse.column, mouse.row).into();
-                if self.viewport.borrow().log_detail.contains(position) {
-                    self.log_detail_raw = !self.log_detail_raw;
-                    self.cancel_detail_selection();
-                    self.pending_click = None;
-                    let mut viewport = self.viewport.borrow_mut();
-                    let cached = viewport.log_detail_other_layout.take();
-                    viewport.log_detail_other_layout = viewport.log_detail_layout.take();
-                    viewport.log_detail_layout = cached;
-                    viewport.log_detail_scroll = 0;
-                } else {
-                    self.right_click();
-                }
+                self.right_click();
             }
             return None;
         }

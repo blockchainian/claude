@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 
 pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
     match name.map(str::trim).filter(|name| !name.is_empty()) {
@@ -56,6 +55,7 @@ pub struct SourceRecord {
 }
 
 impl Event {
+    #[cfg(test)]
     pub fn raw_text(&self) -> std::io::Result<String> {
         use std::io::{BufRead, Seek};
         let mut records = self.source_records.iter().collect::<Vec<_>>();
@@ -68,7 +68,7 @@ impl Event {
                 file.seek(std::io::SeekFrom::Start(record.offset))?;
                 let mut line = Vec::new();
                 std::io::BufReader::new(file).read_until(b'\n', &mut line)?;
-                let value: Value = serde_json::from_slice(&line)
+                let value: serde_json::Value = serde_json::from_slice(&line)
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                 serde_json::to_string_pretty(&value)
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))

@@ -6682,34 +6682,6 @@ fn task_log_click_keeps_list_and_detail_right_click_keeps_selection() {
         view.log_redraw_in(now),
         Some(std::time::Duration::from_secs(1))
     );
-    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
-    assert!(!view.log_detail_raw);
-    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
-    assert!(view.log_detail_raw);
-    let raw = log_screen(&view, 100, 45, now);
-    let area = view.viewport.borrow().log_detail;
-    click_mouse(
-        &mut view,
-        mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            area.x + 1,
-            area.y + 3,
-        ),
-    );
-    assert_eq!(log_screen(&view, 100, 45, now), raw);
-    let area = view.viewport.borrow().log_detail;
-    view.handle_mouse(mouse(
-        MouseEventKind::Down(MouseButton::Right),
-        area.x + 1,
-        area.y + 3,
-    ));
-    view.handle_mouse(mouse(
-        MouseEventKind::Up(MouseButton::Right),
-        area.x + 1,
-        area.y + 3,
-    ));
-    assert!(!view.log_detail_raw);
-    assert_eq!(log_screen(&view, 100, 45, now), open);
 }
 
 fn detail_parts(event: &crate::log::Event) -> Vec<super::tool_detail::Part> {
@@ -7601,77 +7573,39 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
 }
 
 #[test]
-fn log_detail_right_click_toggles_and_left_click_has_no_deadline() {
+fn log_detail_left_click_has_no_deadline() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 100, 45, now);
     let area = view.viewport.borrow().log_detail;
     let (x, y) = (area.right() - 2, area.y + 4);
-    for raw in [false, true] {
-        view.log_detail_raw = raw;
-        log_screen(&view, 100, 45, now);
-        assert_eq!(
-            click_mouse(
-                &mut view,
-                mouse(MouseEventKind::Down(MouseButton::Left), x, y)
-            ),
-            None
-        );
-        assert_eq!(view.pending_click_in(Instant::now()), None);
-        assert_eq!(
-            view.flush_pending_click(Instant::now() + view.double_click_interval),
-            None
-        );
-        assert_eq!(view.log_detail_raw, raw);
-        assert_eq!(
-            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), x, y)),
-            None
-        );
-        assert_eq!(
-            view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), x, y)),
-            None
-        );
-        assert_eq!(view.log_detail_raw, !raw);
-        assert_eq!(view.pending_click_in(Instant::now()), None);
-    }
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+        ),
+        None
+    );
+    assert_eq!(view.pending_click_in(Instant::now()), None);
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + view.double_click_interval),
+        None
+    );
 }
 
 #[test]
-fn double_click_log_detail_copy_note_matches_transcript_mode() {
-    for raw in [false, true] {
-        let (mut view, now) = log_fixture();
-        view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
-        view.log[6].source_records = vec![crate::log::SourceRecord {
-            path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/transcript.jsonl"),
-            offset: 0,
-        }];
-        let list = log_screen(&view, 100, 25, now);
-        click_log_text(&mut view, &list, "A long response", MouseButton::Left);
-        view.log_detail_raw = raw;
-        let expected = if raw {
-            view.log[6].raw_text().unwrap()
-        } else {
-            view.log[6].body.clone()
-        };
-        let open = log_screen(&view, 100, 25, now);
-        assert_eq!(
-            double_click_text(
-                &mut view,
-                &open,
-                if raw { "{" } else { "A second paragraph" }
-            ),
-            Some(Action::Copy {
-                text: expected,
-                label: if raw {
-                    "Copied transcript"
-                } else {
-                    "Copied assistant message"
-                }
-                .into(),
-            }),
-            "raw={raw}",
-        );
-    }
+fn double_click_log_detail_copies_the_message() {
+    let (mut view, now) = log_fixture();
+    view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+    let open = log_screen(&view, 100, 25, now);
+    assert_eq!(
+        double_click_text(&mut view, &open, "A second paragraph"),
+        Some(Action::Copy {
+            text: view.log[6].body.clone(),
+            label: "Copied assistant message".into(),
+        }),
+    );
 }
 
 #[test]
@@ -9134,7 +9068,9 @@ fn log_border_fields_keep_click_actions_without_jumping() {
             });
             view.rows[view.selected].effort = Some("high".into());
             view.rows[view.selected].process.as_mut().unwrap().label = Some("bg".into());
-            let provider = crate::providers::claude::ClaudeProvider::new(PathBuf::new());
+            let config = tempfile::tempdir().unwrap();
+            crate::providers::claude::write_fixture_cache(config.path());
+            let provider = crate::providers::claude::ClaudeProvider::new(config.path().into());
             view.set_input_choices(HashMap::from([(
                 ProviderId::Claude,
                 crate::providers::Provider::input_choices(&provider),
@@ -9177,7 +9113,9 @@ fn log_border_omits_model_and_effort_it_cannot_read() {
     row.model = None;
     row.model_label = None;
     row.effort = None;
-    let provider = crate::providers::claude::ClaudeProvider::new(PathBuf::new());
+    let config = tempfile::tempdir().unwrap();
+    crate::providers::claude::write_fixture_cache(config.path());
+    let provider = crate::providers::claude::ClaudeProvider::new(config.path().into());
     view.set_input_choices(HashMap::from([(
         ProviderId::Claude,
         crate::providers::Provider::input_choices(&provider),
@@ -9227,8 +9165,6 @@ fn log_border_bottom_double_click_selects_latest_in_both_layouts() {
 #[path = "index_selection_tests.rs"]
 mod index_selection;
 
-#[path = "raw_detail_tests.rs"]
-mod raw_detail_tests;
 
 #[test]
 fn claude_agent_display_from_real_records() {

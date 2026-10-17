@@ -1,4 +1,4 @@
-use super::detail_model::{DetailColumns, Group, Section, TitleRow, detail_columns};
+use super::detail_model::{DetailColumns, Section, detail_columns};
 use super::formatting::{format_log_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
@@ -17,14 +17,7 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 
 impl View {
     pub(super) fn detail_text(&self, event: &Event) -> String {
-        if self.log_detail_raw {
-            match event.raw_text() {
-                Ok(text) => text,
-                Err(error) => format!("Cannot read transcript: {error}"),
-            }
-        } else {
-            open_text(event)
-        }
+        open_text(event)
     }
 
     fn selected_detail_layout(
@@ -34,38 +27,9 @@ impl View {
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> DetailLayout {
-        let (sections, raw) = if self.log_detail_raw {
-            let source = self.detail_text(event);
-            let drawn = source.replace('\t', "    ");
-            let raw = super::highlight::JsonHighlight::enabled(&drawn).then(|| RawHighlight {
-                source: drawn,
-                highlighter: super::highlight::JsonHighlight::default(),
-                row: 0,
-                padding: 0,
-                style: super::style::log_styles(&event.kind).1,
-            });
-            (
-                vec![Section {
-                    title: TitleRow {
-                        left: event.sender.clone(),
-                        title: kind_label(&event.kind).into(),
-                        title_style: super::style::log_styles(&event.kind).0,
-                        time: Some(String::new()),
-                        meta_style: Style::new().dim(),
-                    },
-                    groups: vec![Group {
-                        parts: vec![super::tool_detail::Part::raw_json(source)],
-                    }],
-                }],
-                raw,
-            )
-        } else {
-            (
-                super::tool_detail::detail(event, String::new(), Style::new().dim()).sections,
-                None,
-            )
-        };
-        detail_parts_layout(event, columns, cwd, now, sections, raw)
+        let sections =
+            super::tool_detail::detail(event, String::new(), Style::new().dim()).sections;
+        detail_parts_layout(event, columns, cwd, now, sections)
     }
 
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -243,7 +207,7 @@ impl View {
                 layout
             }
         };
-        if (self.log_detail_raw || !shows_calls(event) || event.calls.len() == 1)
+        if (!shows_calls(event) || event.calls.len() == 1)
             && let Some((_, span)) = layout.times.first_mut()
         {
             span.content = time.to_owned().into();
@@ -265,7 +229,6 @@ impl View {
         viewport.log_detail_max = layout.lines.len().saturating_sub(height);
         viewport.log_detail_scroll = viewport.log_detail_scroll.min(viewport.log_detail_max);
         let scroll = viewport.log_detail_scroll;
-        layout.highlight_raw(scroll + height);
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(layout.lines.len())
@@ -389,7 +352,6 @@ impl View {
             self.log_detail_search.clear();
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_detail_layout = None;
-            viewport.log_detail_other_layout = None;
             viewport.log_detail_scroll = 0;
         }
         if self.following_log() {
@@ -561,7 +523,6 @@ impl View {
         }
         self.cancel_detail_selection();
         self.viewport.borrow_mut().log_detail_layout = None;
-        self.viewport.borrow_mut().log_detail_other_layout = None;
         let max_scroll = self.log_max_scroll();
         if update.reset {
             let mut viewport = self.viewport.borrow_mut();
@@ -823,18 +784,8 @@ fn render_event(
 /// The screen cells of one drawn line, each with the source bytes it shows.
 type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
 
-/// The raw source prefix colored so far, with its saved grammar and theme state.
-struct RawHighlight {
-    source: String,
-    highlighter: super::highlight::JsonHighlight,
-    row: usize,
-    padding: usize,
-    style: Style,
-}
-
 /// The open log event laid out for one panel size and highlight theme.
 pub(super) struct DetailLayout {
-    raw: Option<RawHighlight>,
     columns: DetailColumns,
     height: usize,
     theme_generation: u64,
@@ -848,31 +799,6 @@ pub(super) struct DetailLayout {
     links: Vec<Vec<super::links::Link>>,
     /// Section title times, drawn separately in the time column.
     times: Vec<(usize, Span<'static>)>,
-}
-
-impl DetailLayout {
-    fn highlight_raw(&mut self, end: usize) {
-        let Some(raw) = &mut self.raw else {
-            return;
-        };
-        if raw.row >= end.min(self.lines.len()) {
-            return;
-        }
-        raw.highlighter.advance(&raw.source, |line| {
-            let mut line = line;
-            for span in &mut line.spans {
-                span.style = raw.style.patch(span.style);
-            }
-            line =
-                truncate_detail_line(line, &mut Vec::new(), usize::from(self.columns.text.width));
-            if raw.padding > 0 {
-                line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
-            }
-            self.lines[raw.row] = line;
-            raw.row += 1;
-            raw.row < end
-        });
-    }
 }
 
 #[cfg(test)]
@@ -891,7 +817,6 @@ fn detail_layout(
         cwd,
         now,
         super::tool_detail::detail(event, String::new(), Style::new().dim()).sections,
-        None,
     )
 }
 
@@ -934,12 +859,10 @@ fn detail_parts_layout(
     cwd: &Path,
     now: DateTime<Utc>,
     sections: Vec<Section>,
-    raw: Option<RawHighlight>,
 ) -> DetailLayout {
     let width = usize::from(columns.text.width);
     let body_style = super::style::log_styles(&event.kind).1;
     let mut layout = DetailLayout {
-        raw,
         columns,
         height: 0,
         theme_generation: super::highlight::theme_generation(),
@@ -1005,10 +928,6 @@ fn detail_parts_layout(
             let group_x =
                 super::centering::centered_x(columns.panel, columns.text, group_width as u16);
             let padding = usize::from(group_x - columns.text.x);
-            if let Some(raw) = &mut layout.raw {
-                raw.padding = padding;
-                raw.row = layout.lines.len();
-            }
             for (part, lines) in rendered {
                 let id = layout.sources.len();
                 let mut maps = part.maps(&lines);
@@ -1864,6 +1783,7 @@ mod reading_tests;
 
 #[cfg(test)]
 mod panel_detail_tests {
+    use super::super::detail_model::Group;
     use super::super::tool_detail::Part;
     use super::*;
 
@@ -1885,7 +1805,7 @@ mod panel_detail_tests {
         detail_columns(Rect::new(10, 2, width, 20), Rect::new(0, 0, 50, 20))
     }
 
-    fn layout_part(columns: DetailColumns, part: Part, raw: Option<RawHighlight>) -> DetailLayout {
+    fn layout_part(columns: DetailColumns, part: Part) -> DetailLayout {
         detail_parts_layout(
             &fixture_event(),
             columns,
@@ -1902,7 +1822,6 @@ mod panel_detail_tests {
                 .title,
                 groups: vec![Group { parts: vec![part] }],
             }],
-            raw,
         )
     }
 
@@ -2008,7 +1927,7 @@ mod panel_detail_tests {
         let source = event.body.lines().next().unwrap();
         for width in [200, 35] {
             let columns = columns(width);
-            let layout = layout_part(columns, Part::text(source.into(), false), None);
+            let layout = layout_part(columns, Part::text(source.into(), false));
             assert_eq!(layout.lines.len(), 3);
             assert_eq!(layout.lines[2].width(), usize::from(columns.text.width));
             assert!(layout.lines[2].to_string().ends_with('…'));
@@ -2035,7 +1954,7 @@ mod panel_detail_tests {
             .unwrap();
         for width in [200, 35] {
             let columns = columns(width);
-            let layout = layout_part(columns, Part::prose(source.into(), false), None);
+            let layout = layout_part(columns, Part::prose(source.into(), false));
             assert!(layout.lines.len() > 1);
             let wrap_width = columns.reading_width.min(columns.text.width);
             for (_, cells) in layout.rows.iter().skip(2) {
@@ -2081,7 +2000,6 @@ mod panel_detail_tests {
                         ],
                     }],
                 }],
-                None,
             );
             let expected_x = columns.panel.x + columns.panel.width / 2 - 3;
             assert_eq!(
@@ -2093,31 +2011,6 @@ mod panel_detail_tests {
                     .collect::<Vec<_>>(),
                 vec![expected_x; 3]
             );
-        }
-    }
-
-    #[test]
-    fn raw_highlighting_keeps_the_same_clipped_geometry_and_source_maps() {
-        let source = include_str!("../../tests/fixtures/transcript.jsonl")
-            .lines()
-            .next()
-            .unwrap();
-        for width in [200, 35] {
-            let columns = columns(width);
-            let raw = RawHighlight {
-                source: source.into(),
-                highlighter: super::super::highlight::JsonHighlight::default(),
-                row: 0,
-                padding: 0,
-                style: Style::new(),
-            };
-            let mut layout = layout_part(columns, Part::raw_json(source.into()), Some(raw));
-            let before = layout.lines[2].to_string();
-            let maps = layout.rows.clone();
-            layout.highlight_raw(3);
-            assert_eq!(layout.lines[2].to_string(), before);
-            assert_eq!(layout.rows, maps);
-            assert_eq!(layout.lines[2].width(), usize::from(columns.text.width));
         }
     }
 
@@ -2219,7 +2112,6 @@ mod panel_detail_tests {
                 DateTime::UNIX_EPOCH,
                 super::super::tool_detail::detail(&event, String::new(), Style::new().dim())
                     .sections,
-                None,
             );
             let id = layout
                 .sources

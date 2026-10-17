@@ -128,7 +128,6 @@ struct Viewport {
     log_detail_max: usize,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,
-    log_detail_other_layout: Option<log::DetailLayout>,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
@@ -227,7 +226,6 @@ pub struct View {
     log_selected: Option<usize>,
     log_background_event: Option<crate::log::Event>,
     log_detail_focused: bool,
-    log_detail_raw: bool,
     log_list_focused: bool,
     /// Older wheel steps waiting for App to extend the loaded transcript window.
     log_pending_older: usize,
@@ -355,7 +353,6 @@ impl View {
             log_selected: None,
             log_background_event: None,
             log_detail_focused: false,
-            log_detail_raw: false,
             log_list_focused: false,
             log_pending_older: 0,
             log_start_requested: false,
@@ -889,7 +886,6 @@ impl View {
         viewport.log_unseen = 0;
         viewport.log_detail_scroll = 0;
         viewport.log_detail_layout = None;
-        viewport.log_detail_other_layout = None;
         self.input_box = shown.input_box;
         self.log_search = shown.log_search;
         self.log_selected = None;

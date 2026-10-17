@@ -43,8 +43,6 @@ enum Body {
     Fields(Vec<std::ops::Range<usize>>),
     /// Code highlighted as the given language.
     Code(String),
-    /// Raw JSON colors are filled as its rows enter the viewport.
-    RawJson,
     /// Shell command ranges retain original bytes while separators are display-only.
     Shell(Vec<super::shell_commands::Command>),
     /// Parsed JSON with multiline string values.
@@ -67,7 +65,6 @@ impl Body {
             | Self::Running
             | Self::Fields(_)
             | Self::Code(_)
-            | Self::RawJson
             | Self::Shell(_)
             | Self::Json(_)
             | Self::Diff
@@ -135,10 +132,6 @@ impl Part {
 
     fn text_fragment(source: String, markdown: bool) -> Self {
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
-    }
-
-    pub fn raw_json(source: String) -> Self {
-        Self::new(source, Body::RawJson)
     }
 
     pub fn text(source: String, markdown: bool) -> Self {
@@ -271,7 +264,6 @@ impl Part {
                 });
                 lines.collect()
             }
-            Body::RawJson => highlight::plain_lines(source),
             Body::Code(lang) => highlight::code_lines(source, lang),
             Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Json(value) => json_lines(value),

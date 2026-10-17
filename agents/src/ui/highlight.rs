@@ -314,45 +314,6 @@ fn convert(style: syntect::highlighting::Style) -> Style {
     converted
 }
 
-/// Resumes the JSON grammar at the first source line not yet drawn.
-#[derive(Default)]
-pub(super) struct JsonHighlight {
-    state: Option<(
-        syntect::highlighting::HighlightState,
-        syntect::parsing::ParseState,
-    )>,
-    offset: usize,
-}
-
-impl JsonHighlight {
-    pub fn enabled(text: &str) -> bool {
-        !text.is_empty() && !exceeds_limits(text)
-    }
-
-    pub fn advance(&mut self, text: &str, mut visit: impl FnMut(Line<'static>) -> bool) {
-        with_theme(|theme| {
-            let mut highlighter = match self.state.take() {
-                Some((highlight, parse)) => HighlightLines::from_state(theme, highlight, parse),
-                None => {
-                    HighlightLines::new(find_syntax("json").expect("JSON syntax exists"), theme)
-                }
-            };
-            for source in LinesWithEndings::from(&text[self.offset..]) {
-                #[cfg(test)]
-                JSON_HIGHLIGHTED_LINES.with(|count| count.set(count.get() + 1));
-                let ranges = highlighter
-                    .highlight_line(source, syntax_set())
-                    .expect("JSON grammar parses transcript text");
-                self.offset += source.len();
-                if !visit(styled_line(ranges)) {
-                    break;
-                }
-            }
-            self.state = Some(highlighter.state());
-        });
-    }
-}
-
 /// `text` as one unstyled line per source line.
 pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
     text.lines()
