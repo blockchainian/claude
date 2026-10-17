@@ -130,7 +130,7 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
 }
 
 #[test]
-fn question_agent_inputs_and_tool_outputs_use_the_log_column_width() {
+fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
     for fixture in [
         include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
@@ -167,21 +167,26 @@ fn question_agent_inputs_and_tool_outputs_use_the_log_column_width() {
     }
     let mut event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
         .into_iter()
-        .find(|e| e.calls.iter().any(|c| c.name == "Bash"))
+        .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
         .unwrap();
     event.calls.truncate(1);
+    let output = "tool output with many words ".repeat(20);
     event.calls[0].output = Some(vec![crate::log::Section::Text {
         label: "stdout".into(),
-        text: "tool output with many words ".repeat(20),
+        text: output.clone(),
     }]);
     for width in [200, 120] {
         let drawn = layout(&event, width);
-        let output = drawn
-            .sources
+        let rows: Vec<_> = drawn
+            .lines
             .iter()
-            .position(|s| s.text.starts_with("tool output"))
-            .unwrap();
-        assert_reading_column(&drawn, output, width == 200);
+            .filter(|line| line.to_string().contains(&output))
+            .collect();
+        assert_eq!(
+            rows.len(),
+            1,
+            "tool output retains one logical line at {width}"
+        );
     }
 }
 
@@ -278,11 +283,12 @@ fn command_and_all_output_body_formats_keep_their_width() {
     ]);
     for part in open_parts(&event) {
         for width in [200, 120] {
-            assert!(
-                part.lines(width, Style::default(), DateTime::UNIX_EPOCH)
-                    .iter()
-                    .all(|line| line.width() <= width)
-            );
+            let lines = part.lines(width, Style::default(), DateTime::UNIX_EPOCH);
+            if part.markdown() {
+                assert!(lines.iter().all(|line| line.width() <= width));
+            } else if part.source.contains(&text) {
+                assert!(lines.iter().any(|line| line.width() > width));
+            }
         }
     }
 }
@@ -370,12 +376,30 @@ fn codex_events(fixture: &str) -> Vec<Event> {
 fn assert_centered_blocks(event: &Event, width: u16) {
     let parts = open_parts(event);
     let drawn = layout(event, width);
-    let mut groups = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+    let mut widths = std::collections::BTreeMap::<usize, usize>::new();
     for (index, part) in parts.iter().enumerate() {
-        groups
-            .entry(part.group.unwrap_or(index))
-            .or_default()
-            .push(index);
+        let widest = part
+            .lines(
+                drawn.content_width.into(),
+                Style::default(),
+                DateTime::UNIX_EPOCH,
+            )
+            .iter()
+            .map(Line::width)
+            .max()
+            .unwrap_or(0);
+        let width = widths.entry(part.group.unwrap_or(index)).or_default();
+        *width = (*width).max(widest);
+    }
+    let mut groups = std::collections::BTreeMap::<(usize, usize), Vec<usize>>::new();
+    for (index, part) in parts.iter().enumerate() {
+        let group = part.group.unwrap_or(index);
+        let kind = if widths[&group] > usize::from(drawn.content_width) {
+            part.content_kind() as usize
+        } else {
+            0
+        };
+        groups.entry((group, kind)).or_default().push(index);
     }
     for indices in groups.values() {
         // Merged title rules also carry a right-aligned duration, outside the body blocks.
@@ -410,7 +434,7 @@ fn assert_centered_blocks(event: &Event, width: u16) {
             .unwrap();
         let right = nonempty
             .iter()
-            .map(|text| usize::from(width) - text.trim_end().width())
+            .map(|text| usize::from(width).saturating_sub(text.width()))
             .min()
             .unwrap();
         assert!(
@@ -538,4 +562,126 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
             .iter()
             .any(|part| part.source == "实测 attach 发提示词")
     );
+}
+
+#[test]
+fn notification_preformatted_blocks_preserve_logical_lines() {
+    let output = include_str!("../../tests/fixtures/claude-task-notification-output.txt");
+    let dir = tempfile::tempdir().unwrap();
+    let event = super::log_markdown::notification_events(dir.path(), Some(output)).remove(0);
+    let value: serde_json::Value = serde_json::Deserializer::from_str(output)
+        .into_iter()
+        .next()
+        .unwrap()
+        .unwrap();
+    let message = value["lastMessage"].as_str().unwrap();
+    let command_line = message
+        .lines()
+        .find(|line| line.ends_with("Claude provider:"))
+        .unwrap();
+    for width in [200, 90] {
+        let drawn = layout(&event, width);
+        for expected in message.lines().filter(|line| !line.is_empty()) {
+            assert!(
+                drawn
+                    .lines
+                    .iter()
+                    .any(|line| line.to_string().contains(expected)),
+                "lost JSON logical line at {width}: {expected}"
+            );
+        }
+        let continuation = drawn
+            .sources
+            .iter()
+            .find(|source| source.text.contains("lastMessage"))
+            .unwrap();
+        assert!(
+            continuation.text.contains(&format!("\n  {command_line}")),
+            "JSON continuations use structural indent"
+        );
+    }
+}
+
+#[test]
+fn command_preformatted_blocks_preserve_logical_lines() {
+    recorded_preformatted_block(false);
+}
+
+#[test]
+fn code_preformatted_blocks_preserve_logical_lines() {
+    recorded_preformatted_block(true);
+}
+
+fn recorded_preformatted_block(code: bool) {
+    let output = include_str!("../../tests/fixtures/claude-task-notification-output.txt");
+    let dir = tempfile::tempdir().unwrap();
+    let event = super::log_markdown::notification_events(dir.path(), Some(output)).remove(0);
+    let value: serde_json::Value = serde_json::Deserializer::from_str(output)
+        .into_iter()
+        .next()
+        .unwrap()
+        .unwrap();
+    let message = value["lastMessage"].as_str().unwrap();
+    let command_line = message
+        .lines()
+        .find(|line| line.ends_with("Claude provider:"))
+        .unwrap();
+    // Both examples come verbatim from the completion's recorded terminal capture.
+    for section in [
+        crate::log::Section::Text {
+            label: "stdout".into(),
+            text: command_line.into(),
+        },
+        crate::log::Section::Code {
+            label: "output".into(),
+            lang: "text".into(),
+            text: command_line.into(),
+        },
+        crate::log::Section::Markdown {
+            label: "message".into(),
+            text: format!("Result\n\n```text\n{command_line}\n```"),
+        },
+    ] {
+        if matches!(section, crate::log::Section::Text { .. }) == code {
+            continue;
+        }
+        let mut event = event.clone();
+        event.calls[0].output = Some(vec![section]);
+        for width in [200, 90] {
+            let drawn = layout(&event, width);
+            assert!(
+                drawn
+                    .lines
+                    .iter()
+                    .any(|line| line.to_string().trim_start() == command_line),
+                "wrapped command/code at {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn notification_preformatted_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let event = super::log_markdown::notification_events(
+        dir.path(),
+        Some(include_str!(
+            "../../tests/fixtures/claude-task-notification-output.txt"
+        )),
+    )
+    .remove(0);
+    let mut snapshot = String::new();
+    for width in [200, 90] {
+        snapshot.push_str(&format!("{width} columns\n"));
+        for line in layout(&event, width).lines {
+            snapshot.push_str(line.to_string().trim_end());
+            snapshot.push('\n');
+        }
+    }
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/task_notification_json.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }

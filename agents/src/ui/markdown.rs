@@ -1,3 +1,4 @@
+use super::content::{Block, Kind};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
     style::Style,
@@ -29,16 +30,23 @@ pub(super) fn render_with_options(
     text: &str,
     options: textwrap::Options<'_>,
 ) -> Vec<Line<'static>> {
-    if options.width == 0 {
-        return Vec::new();
-    }
+    blocks(text)
+        .into_iter()
+        .flat_map(|block| block.layout(options.clone()))
+        .collect()
+}
+
+pub(super) fn blocks(text: &str) -> Vec<Block> {
     let mut writer = Writer::default();
     for event in Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES) {
         match event {
             Event::Start(tag) => {
                 let style = writer.style();
                 match tag {
-                    Tag::Table(_) => writer.separate(),
+                    Tag::Table(_) => {
+                        writer.separate();
+                        writer.kind = Kind::Preformatted;
+                    }
                     Tag::TableHead => {
                         writer.flush();
                         writer.table_cells = 0;
@@ -76,6 +84,7 @@ pub(super) fn render_with_options(
                     Tag::CodeBlock(_) => {
                         writer.separate();
                         writer.code = true;
+                        writer.kind = Kind::Preformatted;
                         writer.styles.push(style.cyan());
                     }
                     Tag::List(start) => {
@@ -107,12 +116,17 @@ pub(super) fn render_with_options(
                     writer.flush();
                     writer.styles.pop();
                 }
-                TagEnd::TableRow | TagEnd::Table => writer.flush(),
+                TagEnd::TableRow => writer.flush(),
+                TagEnd::Table => {
+                    writer.flush();
+                    writer.kind = Kind::Prose;
+                }
                 TagEnd::Paragraph => writer.flush(),
                 TagEnd::Heading(_) | TagEnd::BlockQuote | TagEnd::CodeBlock => {
                     writer.flush();
                     writer.styles.pop();
                     writer.code = false;
+                    writer.kind = Kind::Prose;
                 }
                 TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => {
                     writer.styles.pop();
@@ -153,21 +167,18 @@ pub(super) fn render_with_options(
         }
     }
     writer.flush();
-    writer
-        .lines
-        .into_iter()
-        .flat_map(|(line, indent)| wrap(line, indent, options.clone()))
-        .collect()
+    writer.lines
 }
 
 #[derive(Default)]
 struct Writer {
-    lines: Vec<(Line<'static>, usize)>,
+    lines: Vec<Block>,
     current: Line<'static>,
     styles: Vec<Style>,
     lists: Vec<Option<u64>>,
     indent: usize,
     code: bool,
+    kind: Kind,
     table_cells: usize,
 }
 
@@ -194,8 +205,11 @@ impl Writer {
     }
 
     fn flush_code(&mut self) {
-        self.lines
-            .push((std::mem::take(&mut self.current), self.indent));
+        self.lines.push(Block {
+            lines: vec![std::mem::take(&mut self.current)],
+            indent: self.indent,
+            kind: self.kind,
+        });
     }
 
     fn separate(&mut self) {
@@ -203,55 +217,15 @@ impl Writer {
         if self
             .lines
             .last()
-            .is_some_and(|(line, _)| !line.spans.is_empty())
+            .is_some_and(|block| block.lines.iter().any(|line| !line.spans.is_empty()))
         {
-            self.lines.push((Line::default(), 0));
+            self.lines.push(Block {
+                lines: vec![Line::default()],
+                indent: 0,
+                kind: Kind::Prose,
+            });
         }
     }
-}
-
-fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> Vec<Line<'static>> {
-    let width = options.width;
-    if line.width() <= width {
-        return vec![line];
-    }
-    let plain = line.to_string();
-    let padding = " ".repeat(indent.min(width.saturating_sub(1)));
-    let options = options
-        .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit)
-        .subsequent_indent(&padding);
-    let mut offset = 0;
-    textwrap::wrap(&plain, options)
-        .into_iter()
-        .enumerate()
-        .map(|(i, text)| {
-            let text = if i > 0 { &text[padding.len()..] } else { &text };
-            let start = offset
-                + plain[offset..]
-                    .find(text)
-                    .expect("wrapped text belongs to source");
-            let end = start + text.len();
-            offset = end;
-            let mut spans = Vec::new();
-            if i > 0 && !padding.is_empty() {
-                spans.push(Span::raw(padding.clone()));
-            }
-            let mut position = 0;
-            for span in &line.spans {
-                let next = position + span.content.len();
-                let from = start.max(position);
-                let to = end.min(next);
-                if from < to {
-                    spans.push(Span::styled(
-                        span.content[from - position..to - position].to_owned(),
-                        span.style,
-                    ));
-                }
-                position = next;
-            }
-            Line::from(spans)
-        })
-        .collect()
 }
 
 #[cfg(test)]

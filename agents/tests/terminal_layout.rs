@@ -1253,8 +1253,8 @@ fn terminal_json_strings_keep_multiline_alignment_and_colors() {
         .expect("await lastMessage continuation line");
     assert_eq!(
         rows[first_row + 2][..second_byte].width(),
-        first_column,
-        "continuation must align under the first string character: {capture}"
+        rows[first_row][..key_byte].width(),
+        "continuation must use the field's structural indent: {capture}"
     );
     assert_eq!(
         rows[first_row + 3].trim().trim_end_matches(','),
@@ -1263,7 +1263,7 @@ fn terminal_json_strings_keep_multiline_alignment_and_colors() {
     );
     assert_eq!(
         rows[first_row + 3].find('"').unwrap(),
-        first_column,
+        rows[first_row][..key_byte].width(),
         "the trailing newline must precede the closing quote: {capture}"
     );
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
@@ -1271,7 +1271,10 @@ fn terminal_json_strings_keep_multiline_alignment_and_colors() {
     let screen = parser.screen();
     let string = screen.cell(first_row as u16, first_column as u16).unwrap();
     let continuation = screen
-        .cell((first_row + 2) as u16, first_column as u16)
+        .cell(
+            (first_row + 2) as u16,
+            rows[first_row][..key_byte].width() as u16,
+        )
         .unwrap();
     let key = screen
         .cell(
@@ -1888,7 +1891,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
         })
         .expect("recorded user message");
     // Keep recorded upstream bodies, field names and command line breaks intact.
-    for (kind, records, needle, _prose) in [
+    for (kind, records, needle, prose) in [
         ("assistant", String::new(), "对，必须", true),
         (
             "send",
@@ -2013,10 +2016,12 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 .expect("detail body group");
             let group_right = group.iter().map(|line| line.width()).max().unwrap();
             let cap = terminal_detail_width::message_width(&capture, usize::from(width));
-            assert!(
-                group_right - group_left <= cap,
-                "{kind} exceeds actual message column {cap}: {capture}"
-            );
+            if prose {
+                assert!(
+                    group_right - group_left <= cap,
+                    "{kind} exceeds actual message column {cap}: {capture}"
+                );
+            }
             let expected_left = if width >= 150 {
                 1 + (usize::from(width) - 2 - (group_right - group_left)) / 2
             } else {
@@ -2299,4 +2304,89 @@ fn terminal_start_description_header() {
             path.display()
         );
     }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_notification_json_preserves_lines_wide_and_narrow() {
+    use std::io::Write;
+    let (directory, tmux, transcript) = start_probe("notification-preformatted");
+    let output = directory.path().join("completion.output");
+    std::fs::write(
+        &output,
+        include_str!("fixtures/claude-task-notification-output.txt"),
+    )
+    .unwrap();
+    let notifications = include_str!("fixtures/claude-task-notifications.jsonl").replace(
+        "/tmp/agents-notification/tasks/b9wi31ww0.output",
+        output.to_str().unwrap(),
+    );
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(transcript)
+            .unwrap(),
+        "{notifications}"
+    )
+    .unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    for width in [200, 120] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "90",
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == 90
+                && capture.contains("181h 38m")
+                && capture.contains("Claude provider:")
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = capture.lines().collect();
+        let start = rows
+            .iter()
+            .position(|line| line.contains("\"lastMessage\":"))
+            .unwrap();
+        let code = rows
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find(|(_, line)| line.contains("Claude 图片链接") && line.contains("181h 38m"))
+            .unwrap();
+        let prompt = rows
+            .iter()
+            .enumerate()
+            .skip(code.0)
+            .find(|(_, line)| {
+                line.contains("Implement workstream A") && line.contains("Claude provider:")
+            })
+            .unwrap();
+        assert_eq!(
+            code.1.find("Claude 图片链接"),
+            prompt.1.find("Implement workstream A"),
+            "{capture}"
+        );
+        assert!(
+            rows[code.0 + 1]
+                .trim()
+                .trim_end_matches('│')
+                .trim()
+                .is_empty(),
+            "no wrapped duration: {capture}"
+        );
+        let file =
+            std::env::temp_dir().join(format!("agents-notification-preformatted-{width}.txt"));
+        std::fs::write(&file, &capture).unwrap();
+        println!(
+            "{width} columns: {}\n{}\n{}",
+            file.display(),
+            code.1,
+            prompt.1
+        );
+    }
+    println!("{{\"notification_preformatted\":\"pass\"}}");
 }

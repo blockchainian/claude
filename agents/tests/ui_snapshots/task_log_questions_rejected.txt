@@ -6,9 +6,11 @@
   • 直 接 隐 藏 : 日 志 里 完 全 不 显 示 这 条
 ↓
 Questions asked:
-• "压 缩 摘 要 那 条 在  agents 里 怎 么 处 理 ？ " (No answer provided)
+- "压 缩 摘 要 那 条 在  agents 里 怎 么 处 理 ？ "
+  (No answer provided)
 
-The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was
-NOT written to the file). To tell you how to proceed, the user said: The user wants to clarify these questions. This means they
-may have additional information, context or questions for you. Take their response into account and then reformulate the
-questions if appropriate. Start by asking them what they would like to clarify.
+The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to
+The user wants to clarify these questions.
+    This means they may have additional information, context or questions for you.
+    Take their response into account and then reformulate the questions if appropriate.
+    Start by asking them what they would like to clarify.

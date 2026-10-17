@@ -185,7 +185,19 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
             let left = cells.iter().map(|columns| columns.start).min().unwrap();
             let right = cells.iter().map(|columns| columns.end).max().unwrap();
             assert_eq!(left, 0);
-            assert!(right <= view.center_layout(area).log.width.saturating_sub(10));
+            let limit = if matches!(
+                parts
+                    .iter()
+                    .find(|part| part.group == Some(group))
+                    .unwrap()
+                    .content_kind(),
+                super::super::content::Kind::Prose
+            ) {
+                view.center_layout(area).log.width.saturating_sub(10)
+            } else {
+                area.width
+            };
+            assert!(right <= limit);
         }
         assert_eq!(region.sources[0].text.as_ref(), parts[0].source);
         drop(viewport);

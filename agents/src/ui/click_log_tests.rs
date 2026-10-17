@@ -613,10 +613,7 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
             .log
             .width
             .saturating_sub(10);
-        let mut expected = super::tool_detail::split_wide(
-            super::highlight::code_lines(&source, "json"),
-            content_width as usize,
-        );
+        let mut expected = super::highlight::code_lines(&source, "json");
         let plain = super::tool_detail::Part::raw_json(source.clone());
         assert_eq!(
             plain.maps(&expected),

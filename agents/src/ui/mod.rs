@@ -10,6 +10,7 @@ mod formatting;
 pub(crate) use drafts::DraftSetup;
 #[cfg(test)]
 mod chronological_log_tests;
+mod content;
 mod highlight;
 mod hints;
 mod hyperlink;

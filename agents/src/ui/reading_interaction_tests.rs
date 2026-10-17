@@ -211,7 +211,7 @@ fn start_summary_truncates_before_center_title_and_time() {
 }
 
 #[test]
-fn detail_blocks_use_the_log_list_message_column_width() {
+fn preformatted_detail_rows_use_the_viewport_width() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
     let event = crate::providers::claude::log::tail(&path, usize::MAX)
         .unwrap()
@@ -225,17 +225,9 @@ fn detail_blocks_use_the_log_list_message_column_width() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
-        let limit = viewport
-            .log
-            .width
-            .saturating_sub(super::super::log::CLOCK_WIDTH as u16 + 2);
+        let limit = viewport.log_detail.width;
         let wide = width >= super::super::render::WIDE_LAYOUT_COLUMNS;
-        let left = viewport.log_detail.x
-            + if wide {
-                (viewport.log_detail.width - limit) / 2
-            } else {
-                0
-            };
+        let left = viewport.log_detail.x;
         for row in &viewport.log_text.rows {
             for (cells, _) in &row.cells {
                 assert!(

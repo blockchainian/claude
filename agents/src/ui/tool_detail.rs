@@ -1,10 +1,10 @@
 //! The calls of an open tool row as the parts the log panel draws and copies.
 
+use super::content::{Block, Kind as ContentKind};
 use super::highlight;
 use crate::log::{Event, Kind, Section};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 #[cfg(test)]
@@ -57,10 +57,29 @@ enum Body {
     Markdown,
     /// A message or free-text input, with a shared reading column.
     Prose(bool),
-    ProseJson(serde_json::Value),
     InputFields(Vec<std::ops::Range<usize>>),
-    /// Prose wrapped at the panel width.
+    /// Literal output with its original logical lines.
     Text,
+}
+
+impl Body {
+    fn content_kind(&self) -> ContentKind {
+        match self {
+            Self::Markdown | Self::Prose(_) => ContentKind::Prose,
+            Self::TitleRule(..)
+            | Self::Label(_)
+            | Self::Arrow
+            | Self::Running
+            | Self::Fields(_)
+            | Self::Code(_)
+            | Self::RawJson
+            | Self::Shell(_)
+            | Self::Json(_)
+            | Self::Diff
+            | Self::InputFields(_)
+            | Self::Text => ContentKind::Preformatted,
+        }
+    }
 }
 
 impl Part {
@@ -72,7 +91,7 @@ impl Part {
         }
     }
 
-    /// Text fragments use the shared Markdown renderer; JSON fragments are copied as drawn.
+    /// Split embedded JSON from text; each fragment retains its content semantics.
     pub fn text_parts(source: String, markdown: bool) -> Vec<Self> {
         let mut parts = Vec::new();
         let mut cursor = 0;
@@ -124,7 +143,6 @@ impl Part {
     }
 
     fn text_fragment(source: String, markdown: bool) -> Self {
-        let markdown = markdown || super::markdown::has_markers(&source);
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
 
@@ -142,21 +160,23 @@ impl Part {
     }
 
     pub fn prose(source: String, markdown: bool) -> Self {
-        Self::text(source, markdown).into_prose()
+        Self::text(source, markdown).into_prose(false)
     }
 
     pub fn prose_parts(source: String, markdown: bool) -> Vec<Self> {
         Self::text_parts(source, markdown)
             .into_iter()
-            .map(Self::into_prose)
+            .map(|part| part.into_prose(true))
             .collect()
     }
 
-    fn into_prose(mut self) -> Self {
+    fn into_prose(mut self, detect_markdown: bool) -> Self {
         self.body = match self.body {
-            Body::Json(value) => Body::ProseJson(value),
+            Body::Json(value) => Body::Json(value),
             Body::Markdown => Body::Prose(true),
-            Body::Text => Body::Prose(false),
+            Body::Text => {
+                Body::Prose(detect_markdown && super::markdown::has_markers(&self.source))
+            }
             _ => unreachable!("only text fragments become prose"),
         };
         self
@@ -215,7 +235,7 @@ impl Part {
             .collect()
     }
 
-    /// The part drawn `width` columns wide; every line fits so each cell maps to its source.
+    /// Lay out prose at `width`, preserving logical lines in preformatted blocks.
     pub fn lines(
         &self,
         width: usize,
@@ -225,7 +245,41 @@ impl Part {
         let drawn = self.source.replace('\t', "    ");
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
-        let lines = match &self.body {
+        let kind = self.body.content_kind();
+        let blocks = match &self.body {
+            Body::Markdown | Body::Prose(true) => super::markdown::blocks(source),
+            _ => vec![Block {
+                lines: self.render_lines(width, now),
+                indent: 0,
+                kind,
+            }],
+        };
+        let lines: Vec<_> = blocks
+            .into_iter()
+            .flat_map(|block| block.layout(options.clone()))
+            .collect();
+        if matches!(self.body, Body::TitleRule(..) | Body::Arrow) {
+            return lines;
+        }
+        lines
+            .into_iter()
+            .map(|mut line| {
+                for span in &mut line.spans {
+                    span.style = body_style.patch(span.style);
+                }
+                line
+            })
+            .collect()
+    }
+
+    pub fn content_kind(&self) -> ContentKind {
+        self.body.content_kind()
+    }
+
+    fn render_lines(&self, width: usize, now: chrono::DateTime<chrono::Utc>) -> Vec<Line<'static>> {
+        let drawn = self.source.replace('\t', "    ");
+        let source = drawn.as_str();
+        match &self.body {
             Body::TitleRule(time, header, summary) => {
                 vec![if let Some(summary) = summary {
                     input_title_bar(
@@ -238,10 +292,7 @@ impl Part {
                     call_title_rule(source, width, time.as_deref(), header)
                 }]
             }
-            Body::Label(style) => split_wide(
-                vec![Line::from(Span::styled(source.to_owned(), *style))],
-                width,
-            ),
+            Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
             Body::Arrow => {
                 let row = if width > 0 { "↓" } else { "" };
                 vec![Line::styled(row, super::style::log_jump_style())]
@@ -276,33 +327,19 @@ impl Part {
                     offset += raw.len();
                     line
                 });
-                split_wide(lines.collect(), width)
+                lines.collect()
             }
-            Body::RawJson => split_wide(highlight::plain_lines(source), width),
-            Body::Code(lang) => split_wide(highlight::code_lines(source, lang), width),
+            Body::RawJson => highlight::plain_lines(source),
+            Body::Code(lang) => highlight::code_lines(source, lang),
             Body::Shell(commands) => shell_lines(&self.source, commands, width),
-            Body::Json(value) | Body::ProseJson(value) => split_wide(json_lines(value), width),
-            Body::Diff => split_wide(highlight::diff_lines(source), width),
-            Body::Markdown | Body::Prose(true) => {
-                super::markdown::render_with_options(source, options)
-            }
-            Body::Text | Body::Prose(false) => textwrap::wrap(source, options)
-                .into_iter()
-                .map(|line| Line::from(line.into_owned()))
+            Body::Json(value) => json_lines(value),
+            Body::Diff => highlight::diff_lines(source),
+            Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
+            Body::Text | Body::Prose(false) => source
+                .split('\n')
+                .map(|line| Line::from(line.to_owned()))
                 .collect(),
-        };
-        if matches!(self.body, Body::TitleRule(..) | Body::Arrow) {
-            return lines;
         }
-        lines
-            .into_iter()
-            .map(|mut line| {
-                for span in &mut line.spans {
-                    span.style = body_style.patch(span.style);
-                }
-                line
-            })
-            .collect()
     }
 }
 
@@ -400,18 +437,12 @@ fn shell_lines(
     commands: &[super::shell_commands::Command],
     width: usize,
 ) -> Vec<Line<'static>> {
-    let connected = commands.iter().any(|command| command.and_next);
-    let text_width = if connected && width > 2 {
-        width - 2
-    } else {
-        width
-    };
     let mut lines = Vec::new();
     let mut rows = Vec::new();
     for command in commands {
         let start = lines.len();
         let text = source[command.range.clone()].replace('\t', "    ");
-        lines.extend(split_wide(highlight::code_lines(&text, "bash"), text_width));
+        lines.extend(highlight::code_lines(&text, "bash"));
         rows.push(start..lines.len());
     }
     let mut connectors = vec![std::collections::BTreeMap::new(); lines.len()];
@@ -528,14 +559,14 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
             self.lines.push(Line::from(" ".repeat(indent)));
         }
 
-        fn string(&mut self, text: &str, token: JsonToken, multiline: bool) {
+        fn string(&mut self, text: &str, token: JsonToken, multiline: bool, indent: usize) {
             let quote = if multiline {
                 JsonToken::StringQuote
             } else {
                 token
             };
             self.push("\"", quote);
-            let column = self.lines.last().expect("JSON line exists").width();
+            // Continuations use the value's structural indent, preserving its own whitespace.
             // Serialize each logical line so all other JSON escapes retain their spelling.
             let normalized = if multiline {
                 text.replace("\r\n", "\n")
@@ -544,7 +575,7 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
             };
             for (index, line) in normalized.split_inclusive('\n').enumerate() {
                 if index > 0 && multiline {
-                    self.newline(column);
+                    self.newline(indent);
                 }
                 let line = if multiline {
                     line.strip_suffix('\n').unwrap_or(line)
@@ -574,7 +605,7 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
                 self.push(&content[start..], token);
             }
             if multiline && normalized.ends_with('\n') {
-                self.newline(column);
+                self.newline(indent);
             }
             self.push("\"", quote);
         }
@@ -586,7 +617,7 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
                     self.push("{", JsonToken::Punctuation);
                     for (index, (key, value)) in values.iter().enumerate() {
                         self.newline(indent + 2);
-                        self.string(key, JsonToken::Key, false);
+                        self.string(key, JsonToken::Key, false, indent + 2);
                         self.push(": ", JsonToken::Punctuation);
                         self.value(value, indent + 2);
                         if index + 1 < values.len() {
@@ -612,7 +643,7 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
                     }
                     self.push("]", JsonToken::Punctuation);
                 }
-                Value::String(text) => self.string(text, JsonToken::String, true),
+                Value::String(text) => self.string(text, JsonToken::String, true, indent),
                 Value::Number(number) => self.push(number.to_string(), JsonToken::Number),
                 Value::Bool(_) | Value::Null => self.push(value.to_string(), JsonToken::Literal),
             }
@@ -914,44 +945,6 @@ fn cells(text: &str) -> String {
     text.trim_end_matches(['\n', '\r']).to_owned()
 }
 
-/// `lines` with every line wider than `width` split at grapheme boundaries.
-pub(super) fn split_wide(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
-    if width == 0 {
-        return lines;
-    }
-    let mut split = Vec::new();
-    for line in lines {
-        if line.width() <= width {
-            split.push(line);
-            continue;
-        }
-        let mut current = Line::default();
-        let mut used = 0;
-        for span in line.spans {
-            let mut text = String::new();
-            for grapheme in span.content.graphemes(true) {
-                let grapheme_width = grapheme.width();
-                if used + grapheme_width > width && used > 0 {
-                    if !text.is_empty() {
-                        current
-                            .spans
-                            .push(Span::styled(std::mem::take(&mut text), span.style));
-                    }
-                    split.push(std::mem::take(&mut current));
-                    used = 0;
-                }
-                text.push_str(grapheme);
-                used += grapheme_width;
-            }
-            if !text.is_empty() {
-                current.spans.push(Span::styled(text, span.style));
-            }
-        }
-        split.push(current);
-    }
-    split
-}
-
 pub(super) fn running_frame(now: chrono::DateTime<chrono::Utc>) -> &'static str {
     ["•··", "·•·", "··•"][now.timestamp_millis().div_euclid(300).rem_euclid(3) as usize]
 }
@@ -964,6 +957,7 @@ pub(super) fn running_redraw_in(now: chrono::DateTime<chrono::Utc>) -> std::time
 mod tests {
     use super::*;
     use crate::log::ToolCall;
+    use unicode_segmentation::UnicodeSegmentation;
 
     fn event(calls: Vec<ToolCall>) -> Event {
         Event {
@@ -1106,7 +1100,7 @@ mod tests {
             .iter()
             .position(|line| line.contains("已提交推送"))
             .unwrap();
-        let column = text[first].find("已提交推送").unwrap();
+        let column = 2;
         assert_eq!(text[first + 1], " ".repeat(column));
         assert_eq!(
             text[first + 2],
@@ -1153,15 +1147,7 @@ mod tests {
         });
         let part = Part::text(serde_json::to_string(&value).unwrap(), false);
         let pretty = serde_json::to_string_pretty(&value).unwrap();
-        let prefix = "  \"中\": \"";
-        let expected = pretty.replace(
-            "first\\r\\nsecond\\r\\n",
-            &format!(
-                "first\n{}second\n{}",
-                " ".repeat(prefix.width()),
-                " ".repeat(prefix.width())
-            ),
-        );
+        let expected = pretty.replace("first\\r\\nsecond\\r\\n", "first\n  second\n  ");
         assert_eq!(part.source, expected);
         assert_eq!(texts(&[part], 200).join("\n"), expected);
     }
@@ -1291,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    fn text_outputs_detect_markdown_but_code_keeps_source_and_language() {
+    fn text_outputs_keep_literal_markup_and_code_keeps_language() {
         for source in [
             "# title",
             "```rust\ncode\n```",
@@ -1302,7 +1288,7 @@ mod tests {
             "| a | b |\n| --- | --- |\n| 1 | 2 |",
         ] {
             assert!(
-                Part::text_parts(source.into(), false)[0].markdown(),
+                !Part::text_parts(source.into(), false)[0].markdown(),
                 "{source}"
             );
         }
@@ -1392,7 +1378,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_wrapping_and_fields_keep_source_maps() {
+    fn shell_lines_and_fields_keep_source_maps() {
         for command in [
             "echo 中文 && printf done; pwd",
             "python3 -c \"\nimport json;d=json.load(open('/tmp/x.json'))\nfor t in d['threads']:\n  if t['id'].startswith('01a147c6'): print(t)\n\"",
@@ -1409,7 +1395,11 @@ mod tests {
                 let lines = part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH);
                 let maps = part.maps(&lines);
                 assert_eq!(maps.len(), lines.len());
-                assert!(lines.iter().all(|line| line.width() <= width));
+                assert_eq!(
+                    lines.len(),
+                    part.lines(200, Style::default(), chrono::DateTime::UNIX_EPOCH)
+                        .len()
+                );
                 for (line, map) in lines.iter().zip(maps) {
                     let displayed = line.to_string();
                     for (cells, bytes) in map {
@@ -1499,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn review_wide_label_fits_drawn_cells() {
+    fn wide_label_keeps_its_logical_line() {
         let part = Part::new(
             "/workspace/very/long/path/to/source.rs",
             Body::Label(Style::default()),
@@ -1507,7 +1497,7 @@ mod tests {
         assert!(
             part.lines(8, Style::default(), chrono::DateTime::UNIX_EPOCH)
                 .iter()
-                .all(|line| line.width() <= 8)
+                .any(|line| line.to_string() == part.source)
         );
     }
 
@@ -1711,7 +1701,7 @@ mod tests {
     }
 
     #[test]
-    fn wide_code_and_diff_lines_split_at_grapheme_boundaries() {
+    fn wide_code_and_diff_keep_logical_lines() {
         let parts = parts(&event(vec![ToolCall {
             agent: None,
             id: "Edit-fixture".into(),
@@ -1734,17 +1724,14 @@ mod tests {
             texts(&parts, 9),
             [
                 "a.rs",
-                "+中文字符",
-                "串很长",
+                "+中文字符串很长",
                 "-short",
                 "↓",
-                "let value",
-                " = \"abcde",
-                "fghij\";",
+                "let value = \"abcdefghij\";"
             ]
         );
         let lines = parts[3].lines(9, Style::default(), chrono::DateTime::UNIX_EPOCH);
-        assert!(lines.iter().all(|line| line.width() <= 9));
+        assert_eq!(lines.len(), 1);
         assert!(lines[0].spans.len() > 1);
     }
 

@@ -8215,7 +8215,7 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
 }
 
 #[test]
-fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
+fn mixed_open_outputs_keep_literal_markup_and_copy_pretty_json() {
     let output = "# Result\n{\"answer\":[1,2]}\n**finished**";
     for calls in [false, true] {
         let (mut view, now) = open_tool_fixture();
@@ -8238,7 +8238,7 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
         assert!(screen.contains("\"answer\": ["));
         assert!(screen.contains("finished"));
         assert!(
-            !screen
+            screen
                 .lines()
                 .skip(usize::from(view.viewport.borrow().log_detail.y))
                 .any(|line| line.contains("**finished**"))
@@ -8251,13 +8251,6 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
             .skip(usize::from(detail_y))
             .collect::<Vec<_>>()
             .join("\n");
-        let (x, y) = rendered_cell(&detail_screen, "finished");
-        let y = y + detail_y;
-        assert!(
-            buf[(x, y)]
-                .modifier
-                .contains(ratatui::style::Modifier::BOLD)
-        );
         let (x, y) = rendered_cell(&detail_screen, "\"answer\"");
         let y = y + detail_y;
         assert!(matches!(

@@ -13,7 +13,7 @@ pub(super) fn message_width(capture: &str, width: usize) -> usize {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_detail_uses_actual_log_message_width() {
+fn terminal_preformatted_detail_uses_viewport_width() {
     let calls: Vec<_> = include_str!("../fixtures/claude-tool-calls.jsonl")
         .lines()
         .collect();
@@ -71,10 +71,10 @@ fn terminal_detail_uses_actual_log_message_width() {
             .min()
             .unwrap();
         let right = body.iter().map(|line| line.width()).max().unwrap();
-        let cap = message_width(&capture, usize::from(width));
+        let cap = usize::from(width) - 2;
         assert!(
             right - left <= cap,
-            "detail width {} exceeds actual message column {cap}: {capture}",
+            "detail width {} exceeds detail viewport {cap}: {capture}",
             right - left
         );
         if width >= 150 {
@@ -91,7 +91,7 @@ fn terminal_detail_uses_actual_log_message_width() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_raw_detail_uses_actual_log_message_width() {
+fn terminal_raw_detail_uses_viewport_width() {
     let (_directory, tmux, _transcript) = start_probe("raw-message-width");
     tmux.wait_for(|capture| capture.contains("对，必须"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -144,17 +144,15 @@ fn terminal_raw_detail_uses_actual_log_message_width() {
             .min()
             .unwrap();
         let right = body.iter().map(|line| line.width()).max().unwrap();
-        let cap = message_width(&capture, usize::from(width));
+        let cap = usize::from(width) - 2;
         assert!(
             right - left <= cap,
-            "raw width {} exceeds actual message column {cap}: {capture}",
+            "raw width {} exceeds detail viewport {cap}: {capture}",
             right - left
         );
-        if width >= 150 {
-            assert!(left.abs_diff(usize::from(width) - right) <= 1, "{capture}");
-        } else {
-            assert_eq!(left, 1, "{capture}");
-        }
+        // This record's long JSON string exceeds every tested viewport. Its visible
+        // prefix starts at the left edge; clipped wide cells need not fill the last column.
+        assert_eq!(left, 1, "{capture}");
         println!(
             "{{\"raw_message_width\":\"pass\",\"width\":{width},\"cap\":{cap},\"capture\":\"{}\"}}",
             path.display()

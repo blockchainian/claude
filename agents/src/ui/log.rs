@@ -50,14 +50,11 @@ impl View {
             if super::highlight::JsonHighlight::enabled(&drawn) {
                 let widest = layout.lines.iter().map(Line::width).max().unwrap_or(0);
                 // Centering was already applied to plain rows by detail_parts_layout.
-                let content_width = super::tool_detail::split_wide(
-                    super::highlight::plain_lines(&drawn),
-                    usize::from(content_width),
-                )
-                .iter()
-                .map(Line::width)
-                .max()
-                .unwrap_or(0);
+                let content_width = super::highlight::plain_lines(&drawn)
+                    .iter()
+                    .map(Line::width)
+                    .max()
+                    .unwrap_or(0);
                 layout.raw = Some(RawHighlight {
                     source: drawn,
                     highlighter: super::highlight::JsonHighlight::default(),
@@ -906,17 +903,15 @@ impl DetailLayout {
             return;
         }
         raw.highlighter.advance(&raw.source, |line| {
-            let rows = super::tool_detail::split_wide(vec![line], usize::from(self.content_width));
-            for mut line in rows {
-                for span in &mut line.spans {
-                    span.style = raw.style.patch(span.style);
-                }
-                if raw.padding > 0 {
-                    line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
-                }
-                self.lines[raw.row] = line;
-                raw.row += 1;
+            let mut line = line;
+            for span in &mut line.spans {
+                span.style = raw.style.patch(span.style);
             }
+            if raw.padding > 0 {
+                line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
+            }
+            self.lines[raw.row] = line;
+            raw.row += 1;
             raw.row < end
         });
     }
@@ -969,11 +964,12 @@ fn detail_parts_layout(
             (part, lines)
         })
         .collect();
-    let mut group_widths = vec![0; rendered.len()];
+    let mut group_widths = vec![[0; 2]; rendered.len()];
     for (part, lines) in &rendered {
         if let Some(group) = part.group {
             let widest = lines.iter().map(Line::width).max().unwrap_or(0);
-            group_widths[group] = group_widths[group].max(widest);
+            let kind = part.content_kind() as usize;
+            group_widths[group][kind] = group_widths[group][kind].max(widest);
         }
     }
     let parts: Vec<_> = rendered
@@ -983,10 +979,24 @@ fn detail_parts_layout(
             let mut maps = part.maps(&lines);
             let block_width = part.group.map_or_else(
                 || lines.iter().map(Line::width).max().unwrap_or(0),
-                |group| group_widths[group],
+                |group| {
+                    let widths = group_widths[group];
+                    let widest = *widths.iter().max().expect("content kinds exist");
+                    if widest > usize::from(content_width) {
+                        widths[part.content_kind() as usize]
+                    } else {
+                        widest
+                    }
+                },
             );
-            let padding =
-                usize::from(detail_block(Rect::new(0, 0, width, 1), block_width as u16, wide).x);
+            let padding = usize::from(
+                detail_block(
+                    Rect::new(0, 0, width, 1),
+                    block_width.min(usize::from(u16::MAX)) as u16,
+                    wide,
+                )
+                .x,
+            );
             if padding > 0 {
                 // Every row keeps its position within the section, including its source cell map.
                 for (line, cells) in lines.iter_mut().zip(&mut maps) {
