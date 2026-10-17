@@ -5,7 +5,7 @@ use crate::log;
 use crate::model::{Action, Session};
 use std::{
     fmt, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Output},
     str::FromStr,
 };
@@ -106,7 +106,7 @@ pub trait Provider {
     fn input_choices(&self) -> InputChoices {
         InputChoices::default()
     }
-    fn task_defaults(&self) -> Option<io::Result<crate::tasks::TaskDefaults>> {
+    fn task_defaults(&self, _cwd: &Path) -> Option<io::Result<crate::tasks::TaskDefaults>> {
         None
     }
     fn created_job(&self, _output: &Output) -> io::Result<String> {

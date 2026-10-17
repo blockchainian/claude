@@ -5,7 +5,10 @@ mod watcher;
 use crate::model::SessionStatus;
 use crate::providers::{Capabilities, Provider, ProviderId, Snapshot};
 use std::collections::{HashMap, HashSet};
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 pub use watcher::watch;
 
@@ -44,10 +47,13 @@ impl Hub {
             .collect()
     }
 
-    pub fn task_defaults(&self) -> Option<(ProviderId, io::Result<crate::tasks::TaskDefaults>)> {
+    pub fn task_defaults(
+        &self,
+        cwd: &Path,
+    ) -> Option<(ProviderId, io::Result<crate::tasks::TaskDefaults>)> {
         self.providers.iter().find_map(|provider| {
             provider
-                .task_defaults()
+                .task_defaults(cwd)
                 .map(|defaults| (provider.id(), defaults))
         })
     }

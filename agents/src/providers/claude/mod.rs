@@ -6,6 +6,7 @@ mod attach_live_tests;
 mod background;
 #[cfg(test)]
 mod create_tests;
+mod defaults;
 mod images;
 pub(crate) mod log;
 mod peer;
@@ -724,32 +725,10 @@ impl Provider for ClaudeProvider {
         }
     }
 
-    fn task_defaults(&self) -> Option<io::Result<crate::tasks::TaskDefaults>> {
-        Some((|| {
-            let bytes = match fs::read(self.config_dir.join("settings.json")) {
-                Ok(bytes) => bytes,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    return Ok(crate::tasks::TaskDefaults::default());
-                }
-                Err(error) => return Err(error),
-            };
-            let settings: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_slice(&bytes)?;
-            let field = |name: &str| -> io::Result<Option<String>> {
-                match settings.get(name) {
-                    None => Ok(None),
-                    Some(serde_json::Value::String(value)) => Ok(Some(value.clone())),
-                    Some(_) => Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Claude setting {name} must be a string"),
-                    )),
-                }
-            };
-            Ok(crate::tasks::TaskDefaults {
-                model: field("model")?,
-                effort: field("effortLevel")?,
-            })
-        })())
+    fn task_defaults(&self, cwd: &Path) -> Option<io::Result<crate::tasks::TaskDefaults>> {
+        Some(defaults::resolve(&self.config_dir, cwd, |name| {
+            std::env::var(name).ok()
+        }))
     }
 
     fn created_job(&self, output: &std::process::Output) -> io::Result<String> {

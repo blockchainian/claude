@@ -784,12 +784,12 @@ impl App {
 
     fn new_draft(&mut self, cwd: PathBuf) {
         let result: io::Result<crate::ui::DraftSetup> = (|| {
+            let (cwd, branch) = draft_location(cwd)?;
             let (provider, defaults) = self
                 .hub
-                .task_defaults()
+                .task_defaults(&cwd)
                 .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
             let defaults = defaults?;
-            let (cwd, branch) = draft_location(cwd)?;
             Ok(crate::ui::DraftSetup {
                 provider,
                 cwd,
