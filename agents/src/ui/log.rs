@@ -776,7 +776,7 @@ fn render_event(
     let padding = body_width.saturating_sub(body.width()) / 2;
     let body_x = content_area.x + padding as u16;
     let links = {
-        let links = if is_prose(&event.kind) {
+        let links = if is_prose(&event.kind) || event.kind == Kind::QueuedUser {
             super::links::text_links(&fitted.source, cwd, &event.images)
         } else {
             super::links::path_links(&fitted.source, &fitted.paths, cwd)
@@ -918,7 +918,10 @@ fn detail_parts_layout(
                     }
                 }
             }
-            let links = if markdown || (!shows_calls(event) && is_prose(&event.kind)) {
+            let links = if markdown
+                || (!shows_calls(event)
+                    && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
+            {
                 let images = if shows_calls(event) {
                     &[][..]
                 } else {
@@ -1188,6 +1191,49 @@ fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSe
 pub(super) mod log_markdown {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn queued_pasted_image_links_in_the_list_and_detail() {
+        let delivery: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        let text = &delivery["attachment"]["prompt"][0]["text"];
+        let enqueue = serde_json::json!({
+            "type": "queue-operation", "operation": "enqueue", "content": text,
+            "timestamp": delivery["timestamp"]
+        });
+        let remove = serde_json::json!({
+            "type": "queue-operation", "operation": "remove", "content": text,
+            "commandUuid": delivery["attachment"]["source_uuid"],
+            "timestamp": delivery["timestamp"]
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, format!("{enqueue}\n{remove}\n{delivery}\n")).unwrap();
+        let events = crate::providers::claude::log::tail(&transcript, 20).unwrap();
+        let event = &events[0];
+        let image = &event.images[0];
+        let layout = detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
+        assert!(
+            layout
+                .links
+                .iter()
+                .flatten()
+                .any(|link| link.target == image.path)
+        );
+        let area = Rect::new(0, 0, 200, 1);
+        let links = render_event(
+            event,
+            "19:58:06",
+            false,
+            area,
+            &mut Buffer::empty(area),
+            None,
+            dir.path(),
+        );
+        assert!(links.iter().any(|(_, target)| target == &image.path));
+    }
 
     #[test]
     fn task_notifications_show_output_content_without_repeating_summary() {
