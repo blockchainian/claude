@@ -1,4 +1,3 @@
-use super::draft_controls::{NEW_BRANCH_LABEL, SelectorKind};
 use super::formatting::{
     format_duration, format_relative_time, format_session_duration, tail_lines,
 };
@@ -230,25 +229,6 @@ impl View {
             && let Some(question) = self.active_question()
         {
             return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
-        }
-        if let Some(selector) = &self.selector
-            && let SelectorKind::Branch {
-                editor: Some(editor),
-                ..
-            } = &selector.kind
-            && let Some((rect, _)) = self
-                .viewport
-                .borrow()
-                .picker_rows
-                .iter()
-                .find(|(_, index)| Some(*index) == selector.create_index())
-        {
-            let (_, caret) = input_row(
-                &format!("  {NEW_BRANCH_LABEL} {PROMPT_MARKER} "),
-                editor,
-                *rect,
-            );
-            return Some((rect.x + caret, rect.y));
         }
         if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
             return self.input_box.cursor(

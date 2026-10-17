@@ -505,6 +505,7 @@ impl View {
                 && let Some(selector) = self.selector.as_mut()
             {
                 if selector.editing() && Some(index) == selector.create_index() {
+                    self.mouse_focus = Panel::Prompt;
                     return None;
                 }
                 selector.selected = index;

@@ -159,6 +159,84 @@ fn start_probe_with_transcript(
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_branch_name_uses_prompt_and_restores_input() {
+    let repository = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec![
+            "-c",
+            "user.name=Probe",
+            "-c",
+            "user.email=probe@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "probe",
+        ],
+    ] {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repository.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    let transcript = include_str!("fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            record["cwd"] = repository.path().to_str().unwrap().into();
+            record.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (_directory, tmux, _transcript) = start_probe_with_transcript("branch-prompt", &transcript);
+    tmux.wait_for(|capture| capture.contains("Stop hook"));
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.wait_for(|capture| capture.contains("New task name ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "-l", "unfinished task"]);
+    let capture = tmux.capture_when(|capture| capture.contains("unfinished task"));
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("main") && line.contains(" New "))
+        .unwrap();
+    let column = line[..line.find("main").unwrap()].width();
+    tmux.mouse(0, column, row, true);
+    let capture = tmux.capture_when(|capture| capture.contains("Create new branch"));
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("Create new branch"))
+        .unwrap();
+    let create_column = line[..line.find("Create new branch").unwrap()].width();
+    let branch_line = capture
+        .lines()
+        .find(|line| {
+            line.chars()
+                .skip(create_column)
+                .collect::<String>()
+                .starts_with("main")
+        })
+        .unwrap();
+    assert_eq!(
+        create_column,
+        branch_line[..branch_line.find("main").unwrap()].width()
+    );
+    tmux.mouse(0, create_column, row, true);
+    tmux.wait_for(|capture| capture.contains("New branch name ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "-l", "feature/probe"]);
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| {
+        capture.contains("New task name ❯ unfinished task") && capture.contains("feature/probe")
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| !capture.contains("New task name ❯"));
+    println!("{{\"branch_prompt\":\"pass\",\"alignment\":\"pass\",\"restore\":\"pass\"}}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_newline_entry() {
     let (_directory, tmux, _transcript) = start_probe("prompt-newlines");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
