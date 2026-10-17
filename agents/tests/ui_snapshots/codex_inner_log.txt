@@ -22,4 +22,4 @@
                                                                               •··
 
 
- ? help  esc back  ↑/↓ move  enter open  n new  g group by project
+ ? help  esc back  ↑/↓ move  enter open  n new

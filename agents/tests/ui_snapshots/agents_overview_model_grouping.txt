@@ -21,4 +21,4 @@
                                                   │
                                                   ├──────────────────── Ready ──────────── project╶─
  Legacy task ❯
- ? help  esc back  ↑/↓ move  enter open  n new  g group by model
+ ? help  esc back  ↑/↓ move  enter open  n new

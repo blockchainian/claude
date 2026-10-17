@@ -22,4 +22,4 @@
                                                  ↓
        Reason: The server-side auto mode classifier judged this action dangerous (it gave no
        explanation). If you have other tasks…
- ? help  esc back  ↑/↓ move  enter open  n new  g group by project
+ ? help  esc back  ↑/↓ move  enter open  n new

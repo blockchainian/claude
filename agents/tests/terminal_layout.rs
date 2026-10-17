@@ -452,7 +452,7 @@ fn terminal_mcp_display_names() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_dashboard_tabs_and_grouping_hint() {
+fn terminal_dashboard_tabs_and_footer() {
     let (_directory, tmux, _transcript) = start_probe("header-footer");
     for width in [200, 120] {
         tmux.run(&[
@@ -467,7 +467,7 @@ fn terminal_dashboard_tabs_and_grouping_hint() {
         tmux.wait_for(|capture| {
             // The clipped pre-resize frame can already have the expected height and footer.
             capture.lines().count() == 45
-                && capture.contains("g group by project")
+                && capture.contains("? help  esc back  ↑/↓ move  enter open  n new")
                 && capture
                     .lines()
                     .next()
@@ -479,22 +479,27 @@ fn terminal_dashboard_tabs_and_grouping_hint() {
         assert!(rows[0].contains("Inactive 1"), "{capture}");
         assert!(rows[1].contains("──"), "{capture}");
         assert!(!capture.contains("Agent command center"), "{capture}");
-        assert!(rows[44].contains("g group by project"), "{capture}");
+        assert_eq!(
+            rows[44].trim(),
+            "? help  esc back  ↑/↓ move  enter open  n new",
+            "{capture}"
+        );
         let path = std::env::temp_dir().join(format!("agents-dashboard-{width}x45.txt"));
         std::fs::write(&path, &capture).unwrap();
         println!(
             "{{\"dashboard_header_footer\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
             path.display()
         );
-        for grouping in ["status", "model", "project"] {
-            tmux.run(&["send-keys", "-t", "probe", "g"]);
-            tmux.wait_for(|capture| {
-                capture
-                    .lines()
-                    .last()
-                    .is_some_and(|footer| footer.contains(&format!("g group by {grouping}")))
-            });
-        }
+        tmux.run(&["send-keys", "-t", "probe", "?"]);
+        tmux.wait_for(|capture| capture.contains("Task shortcuts"));
+        let help = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(
+            help.lines()
+                .any(|line| line.contains('g') && line.contains("Group")),
+            "{help}"
+        );
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| capture.contains("? help"));
     }
 }
 

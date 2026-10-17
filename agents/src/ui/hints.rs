@@ -14,7 +14,7 @@ pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
 }
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        let mut hints = if self.confirm_dialog.is_some() {
+        if self.confirm_dialog.is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
@@ -42,20 +42,7 @@ impl View {
                 ("enter", "open"),
                 ("n", "new"),
             ])
-        };
-        if !self.input_box.focused
-            && self.confirm_dialog.is_none()
-            && !self.help
-            && self.rename_target.is_none()
-            && !self.log_search.editing
-            && !self.log_detail_search.editing
-            && !self.searching
-        {
-            let grouping = format!("group by {}", self.grouping().label().to_lowercase());
-            hints.spans.push("  ".dim());
-            hints.spans.extend(hint_line(&[("g", &grouping)]).spans);
         }
-        hints
     }
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
         let group = |title, entries: &[(&str, &'static str)]| Group {
@@ -130,14 +117,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grouping_hint_tracks_the_grouping_key() {
+    fn grouping_key_works_without_a_footer_hint() {
         let mut view = View::new(Grouping::Project, false);
         for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
             assert_eq!(view.grouping(), grouping);
+            assert!(view.center_help_lines(120).iter().any(|line| {
+                let text = line.to_string();
+                text.contains("g") && text.contains("Group")
+            }));
             assert!(
-                view.center_footer_hints()
+                !view.center_footer_hints()
                     .to_string()
-                    .contains(&format!("g group by {}", grouping.as_str()))
+                    .contains("g group by")
             );
             assert_eq!(
                 view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
