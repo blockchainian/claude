@@ -64,7 +64,12 @@ fn tool_label(name: &str, detail: &str) -> String {
     } else if matches!(name, "Bash" | "AskUserQuestion") {
         detail.to_owned()
     } else {
-        format!("{} {detail}", crate::log::display_tool_name(name))
+        let label = crate::log::display_tool_name(name);
+        if label == name {
+            format!("{label} {detail}")
+        } else {
+            [label.as_str(), detail].join(" · ")
+        }
     }
 }
 
@@ -648,11 +653,15 @@ impl Log {
         let detail = tool_detail(name, input);
         let display_name = crate::log::display_tool_name(name);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
-            format!("{display_name}: {reason}")
+            if display_name == name {
+                format!("{display_name}: {reason}")
+            } else {
+                tool_label(name, reason)
+            }
         } else if name == "AskUserQuestion" {
             crate::log::tool_title(name, input)
         } else if let Some(path) = path {
-            format!("{display_name} {path}")
+            tool_label(name, path)
         } else {
             tool_label(name, &detail)
         };
@@ -690,17 +699,26 @@ impl Log {
             .strip_suffix(" *")
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
-        let path = path.map(|_| display_name.len() + 1..call.len());
+        let path = path.map(|path| call.len() - path.len()..call.len());
         // A path call followed by a path call of the same tool shares its verb: "Edit a b".
-        let verb = format!("{display_name} ");
+        let verb = path
+            .as_ref()
+            .map(|range| call[..range.start].to_owned())
+            .unwrap_or_default();
         let shared = path.is_some()
+            && entry
+                .event
+                .calls
+                .first()
+                .is_some_and(|call| call.name == name)
             && body.starts_with(&verb)
             && entry.event.paths.first().map(|range| range.start) == Some(verb.len());
         let (body, call) = if shared {
             for range in &mut entry.event.paths {
                 *range = range.start - verb.len()..range.end - verb.len();
             }
-            (&body[verb.len()..], format!("{call} "))
+            let separator = if display_name == name { " " } else { " · " };
+            (&body[verb.len()..], format!("{call}{separator}"))
         } else if body.is_empty() {
             (body, call)
         } else {
@@ -835,26 +853,54 @@ pub(crate) mod tests {
                         .all(|call| call.name == "mcp__plugin_codex_codex-manager__start")
             })
             .unwrap();
-        assert!(event.body.contains("codex-manager start"));
+        assert!(event.body.contains("codex-manager · start"));
         assert!(!event.body.contains("mcp__"));
         assert!(
             event
                 .calls
                 .iter()
-                .all(|call| call.title == "codex-manager start")
+                .all(|call| call.title == "codex-manager · start")
         );
         let record: serde_json::Value =
             include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
                 .lines()
                 .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-                .find(|record| {
-                    record["message"]["content"][0]["name"]
-                        == "mcp__plugin_codex_codex-manager__start"
-                })
+                .find(|record| record["message"]["content"][0]["id"] == event.calls[0].id)
                 .unwrap();
         assert_eq!(
             super::tool_activity(&record["message"]["content"][0]).unwrap(),
-            "codex-manager start"
+            "codex-manager · start"
+        );
+        let input = &record["message"]["content"][0]["input"];
+        let prompt = input["prompt"].as_str().unwrap();
+        assert!(
+            event
+                .body
+                .contains(&format!("codex-manager · start · {prompt}"))
+        );
+        assert_eq!(
+            super::tool_label("mcp__plugin_codex_codex-manager__start", ""),
+            "codex-manager · start"
+        );
+        assert_eq!(
+            super::tool_label("mcp__tool", prompt),
+            format!("mcp__tool {prompt}")
+        );
+        assert_eq!(
+            super::tool_label("mcp__plugin_codex_codex-manager__send", prompt),
+            format!("codex-manager · send · {prompt}")
+        );
+        let url = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| record["message"]["content"][0]["name"] == "WebFetch")
+            .unwrap()["message"]["content"][0]["input"]["url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            super::tool_label("mcp__claude-in-chrome__navigate", &url),
+            format!("claude-in-chrome · navigate · {url}")
         );
     }
 
@@ -2069,7 +2115,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "codex-manager detach，TaskStop");
+        assert_eq!(events[0].body, "codex-manager · detach，TaskStop");
     }
 
     #[test]

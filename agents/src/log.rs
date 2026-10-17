@@ -19,7 +19,7 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     if server.is_empty() || tool.is_empty() || tool.contains("__") {
         name.to_owned()
     } else {
-        format!("{server} {tool}")
+        [server, tool].join(" · ")
     }
 }
 
@@ -180,17 +180,17 @@ mod tests {
         for (name, expected) in [
             (
                 "mcp__plugin_codex_codex-manager__send",
-                "codex-manager send",
+                "codex-manager · send",
             ),
             (
                 "mcp__plugin_codex_codex-manager__start",
-                "codex-manager start",
+                "codex-manager · start",
             ),
             (
                 "mcp__claude-in-chrome__navigate",
-                "claude-in-chrome navigate",
+                "claude-in-chrome · navigate",
             ),
-            ("mcp__context7__query-docs", "context7 query-docs"),
+            ("mcp__context7__query-docs", "context7 · query-docs"),
             ("mcp__tool", "mcp__tool"),
             ("mcp____send", "mcp____send"),
             ("mcp__server__", "mcp__server__"),

@@ -141,7 +141,7 @@ fn terminal_mcp_display_names() {
         writeln!(file, "{line}").unwrap();
     }
     tmux.run(&["send-keys", "-t", "probe", "Home"]);
-    tmux.wait_for(|capture| capture.contains("codex-manager start"));
+    tmux.wait_for(|capture| capture.contains("codex-manager · start"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let path = std::env::temp_dir().join("agents-mcp-names-200x45.txt");
     std::fs::write(&path, &capture).unwrap();
@@ -151,7 +151,11 @@ fn terminal_mcp_display_names() {
         "{capture}"
     );
     assert!(
-        capture.matches("codex-manager start").count() >= 3,
+        capture.matches("codex-manager · start").count() >= 3,
+        "{capture}"
+    );
+    assert!(
+        capture.contains("codex-manager · start · Implement workstream A"),
         "{capture}"
     );
     println!(
