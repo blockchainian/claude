@@ -343,6 +343,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         last_message: None,
         last_message_at: None,
         activity: None,
+        ask: None,
         pending_questions: vec![],
         tasks: vec![],
         background: vec![],

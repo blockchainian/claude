@@ -1,5 +1,6 @@
 mod activity;
 mod app;
+mod ask;
 mod clipboard;
 mod images;
 mod jsonl;

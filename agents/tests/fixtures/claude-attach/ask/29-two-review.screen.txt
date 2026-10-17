@@ -1,0 +1,50 @@
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Haiku 5.5 with low effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/claude-501/ask-ui/probe/repo · /rc
+
+
+❯ This is an isolated terminal key-map probe. Use ONLY AskUserQuestion, no other tools. Ask the following five tool calls ONE AT A TIME, waiting for each answer before the next. Use the exact
+  question strings, headers, labels, descriptions and multiSelect values below. Do not skip calls or answer them yourself. After the fifth call, reply DONE and stop. Every question must include the
+  three options: Red (description Red choice), Green (description Green choice), Blue (description Blue choice). 1: single question "Probe single choice?" header "Single", multiSelect false. 2:
+  single question "Probe multiple choices?" header "Multi", multiSelect true. 3: TWO questions in ONE call: "Probe first page?" header "First", multiSelect false; "Probe second page?" header
+  "Second", multiSelect false. 4: single question "Probe custom text?" header "Custom", multiSelect false. 5: single question "Probe escape?" header "Escape", multiSelect false. This is testing
+  interaction, ask even if you have no task needing clarification.
+
+  Called 3 tools
+
+❯ 3
+
+⏺ Calling 1 tool…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ First  ☒ Second  ✔ Submit  →
+
+Review your answers
+
+ ● Probe first page?
+   → Green
+ ● Probe second page?
+   → Green
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ask-keymap-probe ─

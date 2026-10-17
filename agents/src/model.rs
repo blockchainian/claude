@@ -115,6 +115,7 @@ pub struct Session {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub ask: Option<crate::ask::Ask>,
     pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
     /// The session's own to-do list, replayed from its transcript.

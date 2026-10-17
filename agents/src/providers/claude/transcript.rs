@@ -1,3 +1,5 @@
+use crate::ask::{AskKind, Question, QuestionOption};
+#[cfg(test)]
 use crate::log::question_texts;
 use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
@@ -30,6 +32,7 @@ pub(super) struct Summary {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub ask: Option<PendingAsk>,
     pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
     pub completed_background: HashSet<String>,
@@ -39,6 +42,60 @@ pub(super) struct Summary {
     pub model_identities: HashMap<String, String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct PendingAsk {
+    pub id: String,
+    pub kind: AskKind,
+    pub since: DateTime<Utc>,
+}
+
+fn pending_ask(id: &str, input: &Value, timestamp: &Value) -> io::Result<PendingAsk> {
+    #[derive(serde::Deserialize)]
+    struct Input {
+        questions: Vec<ClaudeQuestion>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ClaudeQuestion {
+        question: String,
+        header: String,
+        options: Vec<QuestionOption>,
+        #[serde(rename = "multiSelect")]
+        multi: bool,
+    }
+    let input: Input = serde_json::from_value(input.clone())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let since = timestamp
+        .as_str()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "AskUserQuestion missing timestamp",
+            )
+        })?
+        .with_timezone(&Utc);
+    Ok(PendingAsk {
+        id: id.to_owned(),
+        kind: AskKind::Questions {
+            questions: input
+                .questions
+                .into_iter()
+                .map(|question| Question {
+                    id: question.question.clone(),
+                    header: question.header,
+                    text: question.question,
+                    options: question.options,
+                    multi: question.multi,
+                    other: true,
+                    secret: false,
+                })
+                .collect(),
+            blocking: true,
+        },
+        since,
+    })
 }
 
 #[derive(Clone, Debug, Default)]
@@ -600,6 +657,7 @@ fn read_messages(
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
     let mut image_error = None;
+    let mut ask_error = None;
     walk_records(file, start, bytes, sidechains, |record| {
         if record["type"] == "assistant" {
             if !model_found && let Some(model) = assistant_model(&record) {
@@ -627,7 +685,20 @@ fn read_messages(
                 {
                     questions_found = true;
                     if !tool_results.contains(id) {
-                        summary.pending_questions = question_texts(&block["input"]);
+                        match pending_ask(id, &block["input"], &record["timestamp"]) {
+                            Ok(ask) => {
+                                let AskKind::Questions { questions, .. } = &ask.kind;
+                                summary.pending_questions = questions
+                                    .iter()
+                                    .map(|question| question.text.clone())
+                                    .collect();
+                                summary.ask = Some(ask);
+                            }
+                            Err(error) => {
+                                ask_error = Some(error);
+                                return false;
+                            }
+                        }
                     }
                     break;
                 }
@@ -742,6 +813,9 @@ fn read_messages(
         }
         true
     })?;
+    if let Some(error) = ask_error {
+        return Err(error);
+    }
     if let Some(error) = image_error {
         return Err(error);
     }

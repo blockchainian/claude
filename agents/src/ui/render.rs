@@ -1651,6 +1651,7 @@ mod wrapped_path_tests {
             last_message: Some(MESSAGE.into()),
             last_message_at: None,
             activity: None,
+            ask: None,
             pending_questions: Vec::new(),
             background_job: None,
             background: Vec::new(),
