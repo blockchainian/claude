@@ -104,11 +104,7 @@ impl View {
             .min(area.height.saturating_sub(header_height + footer_height));
         let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
         let log_height = bottom_height.saturating_sub(footer_height).max(10);
-        let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6
-            && (wide
-                || self
-                    .selected_row()
-                    .is_some_and(|session| session.transcript.is_some()));
+        let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6;
         // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
         // The detail rectangle adds its top rule back below; it is not content.
         let content_height = area

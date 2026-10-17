@@ -1695,7 +1695,7 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
         true,
     );
     key(&mut view, KeyCode::Home);
-    let rendered = screen(&view, 80, 24);
+    let rendered = screen(&view, 80, 60);
     assert!(rendered.contains("Active 0"));
     assert!(rendered.contains("Inactive 12"));
     assert_eq!(
@@ -2235,7 +2235,7 @@ fn lifecycle_fixture() -> View {
 fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
     let mut view = lifecycle_fixture();
     assert_eq!(key(&mut view, KeyCode::Char('a')), None);
-    let rendered = screen(&view, 120, 24);
+    let rendered = screen(&view, 120, 48);
     assert!(rendered.contains("Archive “Current task”?"));
     let dialog = rendered
         .lines()
@@ -4581,7 +4581,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
 }
 
 #[test]
-fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel() {
+fn task_log_last_message_uses_relative_time_and_missing_transcript_keeps_panel() {
     let (mut view, now) = log_fixture();
     view.log.pop();
     assert!(
@@ -4592,8 +4592,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
     view.rows[view.selected].transcript = None;
     let rendered = log_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
-    assert!(!rendered.lines().nth(14).unwrap().contains('─'));
-    assert!(rendered.lines().nth(21).unwrap().contains('│'));
+    assert!(rendered.lines().nth(10).unwrap().starts_with("─╴"));
 }
 
 #[test]
@@ -5151,11 +5150,20 @@ fn center_layout_log_and_details_hide_thresholds() {
             .details
             .is_empty()
     );
-    view.rows[view.selected].transcript = None;
-    for height in [24, 40, 60] {
+    let panels = |view: &View, height| {
         let layout = view.center_layout(Rect::new(0, 0, 120, height));
-        assert_eq!(layout.log.height, 0);
-        assert_eq!(layout.list.height, height - 4);
+        [
+            layout.list,
+            layout.details,
+            layout.log,
+            layout.prompt,
+            layout.log_detail,
+        ]
+    };
+    let with_transcript = [24, 40, 60].map(|height| panels(&view, height));
+    view.rows[view.selected].transcript = None;
+    for (height, expected) in [24, 40, 60].into_iter().zip(with_transcript) {
+        assert_eq!(panels(&view, height), expected, "height {height}");
     }
 }
 
