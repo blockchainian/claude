@@ -7890,7 +7890,7 @@ fn open_json_body_is_pretty_for_every_kind() {
 }
 
 #[test]
-fn open_view_top_button_and_scrollbar() {
+fn open_view_scrollbar() {
     let (mut view, now) = log_fixture();
     let mut event = view.log[1].clone();
     event.body = (0..80)
@@ -7898,8 +7898,7 @@ fn open_view_top_button_and_scrollbar() {
         .collect::<Vec<_>>()
         .join("\n");
     view.select_fixture_event(Some(event));
-    let top = log_screen(&view, 100, 25, now);
-    assert!(!top.contains(" ↑ Top "));
+    log_screen(&view, 100, 25, now);
     let area = view.viewport.borrow().log_text.area;
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
     assert_eq!(area.right() + 11, layout.log_detail.right());
@@ -7913,21 +7912,9 @@ fn open_view_top_button_and_scrollbar() {
         assert_ne!(buf[(area.right() - 1, y)].symbol(), "│");
     }
     view.viewport.borrow_mut().log_detail_scroll = usize::MAX;
-    let bottom = log_screen(&view, 100, 25, now);
-    assert!(bottom.contains(" ↑ Top "), "{bottom}");
-    let layout = view.center_layout(Rect::new(0, 0, 100, 25));
-    let jump = view.viewport.borrow().log_detail_jump;
-    assert_eq!(
-        jump.x,
-        super::log::log_content_centered(layout.log_detail.inner(Margin::new(1, 0)), jump.width,).x
-    );
-    assert_eq!(jump.y, layout.log_detail.y);
+    log_screen(&view, 100, 25, now);
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "│");
-    click_text(&mut view, &bottom, " ↑ Top ");
-    assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
-    assert!(view.log_selected.is_some());
-    assert!(!log_screen(&view, 100, 25, now).contains(" ↑ Top "));
 }
 
 #[test]
@@ -8409,7 +8396,7 @@ fn mixed_open_outputs_keep_literal_markup_and_copy_pretty_json() {
 }
 
 #[test]
-fn log_jump_buttons_keep_centering_and_distinct_targets() {
+fn log_new_button_keeps_centering_and_target() {
     for width in [60, 100, 149, 150, 200] {
         for unseen in [0, 3] {
             let (mut view, now) = log_fixture();
@@ -8425,7 +8412,6 @@ fn log_jump_buttons_keep_centering_and_distinct_targets() {
             let layout = view.center_layout(Rect::new(0, 0, width, 40));
             let viewport = view.viewport.borrow();
             let latest = viewport.log_jump;
-            let top = viewport.log_detail_jump;
             let border_y = layout.log.bottom();
             assert_eq!(
                 latest.x,
@@ -8436,42 +8422,15 @@ fn log_jump_buttons_keep_centering_and_distinct_targets() {
                 )
             );
             assert_eq!(latest.y, border_y);
-            let centered_top = super::log::log_content_centered(
-                layout.log_detail.inner(Margin::new(1, 0)),
-                top.width,
-            );
-            assert_eq!(
-                top.x,
-                if centered_top.intersects(latest) {
-                    latest.right()
-                } else {
-                    centered_top.x
-                }
-            );
-            assert_eq!(top.y, layout.log_detail.y);
-            assert!(!latest.intersects(top));
             let label = if unseen == 0 {
                 " ↓ Latest "
             } else {
                 " ↓ 3 New "
             };
             assert_eq!(rendered_cell(&screen, label), (latest.x, latest.y));
-            assert_eq!(rendered_cell(&screen, " ↑ Top "), (top.x, top.y));
             let row = screen.lines().nth(usize::from(border_y)).unwrap();
             assert_eq!(row.chars().next(), Some('─'));
             drop(viewport);
-            click_mouse(
-                &mut view,
-                MouseEvent {
-                    kind: MouseEventKind::Down(MouseButton::Left),
-                    column: top.x,
-                    row: top.y,
-                    modifiers: KeyModifiers::NONE,
-                },
-            );
-            assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
-            assert_eq!(view.log_selected, Some(6));
-            log_screen(&view, width, 40, now);
             click_mouse(
                 &mut view,
                 MouseEvent {
@@ -8483,46 +8442,6 @@ fn log_jump_buttons_keep_centering_and_distinct_targets() {
             );
             assert!(view.following_log());
             assert_eq!(view.viewport.borrow().log_unseen, 0);
-        }
-    }
-}
-
-#[test]
-fn open_top_button_centers_on_the_detail_panel_for_every_kind_and_width() {
-    for width in [60, 100, 160] {
-        for kind in [
-            crate::log::Kind::User,
-            crate::log::Kind::Assistant,
-            crate::log::Kind::Tool,
-            crate::log::Kind::Error,
-            crate::log::Kind::Denied,
-        ] {
-            let (mut view, now) = log_fixture();
-            let mut event = view.log[7].clone();
-            event.kind = kind;
-            event.body = (0..100).map(|n| format!("row {n}\n\n")).collect();
-            event.calls.clear();
-            if event.kind == crate::log::Kind::Tool {
-                assert!(super::log::open_text(&event).is_empty());
-                continue;
-            }
-            view.select_fixture_event(Some(event));
-            log_screen(&view, width, 25, now);
-            view.viewport.borrow_mut().log_detail_scroll = 1;
-            let screen = log_screen(&view, width, 25, now);
-            let layout = view.center_layout(Rect::new(0, 0, width, 25));
-            let jump = view.viewport.borrow().log_detail_jump;
-            assert_eq!(
-                jump.x,
-                super::log::log_content_centered(
-                    layout.log_detail.inner(Margin::new(1, 0)),
-                    jump.width,
-                )
-                .x
-            );
-            assert_eq!(jump.y, layout.log_detail.y);
-            click_text(&mut view, &screen, " ↑ Top ");
-            assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
         }
     }
 }

@@ -805,17 +805,8 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         let scrolled = draw_size(&mut app, width, height);
         assert_ne!(detail(&scrolled), before);
         assert!(lines(&scrolled).join("\n").contains("↓ Latest"));
-        assert!(lines(&scrolled).join("\n").contains("↑ Top"));
-        let (jump_x, jump_y) = position(&scrolled, "↑ Top");
-        click(&mut app, jump_x, jump_y);
-        let top = draw_size(&mut app, width, height);
-        assert!(!lines(&top).join("\n").contains("↑ Top"));
-        assert!(lines(&top).join("\n").contains("↓ Latest"));
-        assert_eq!(
-            detail(&top).lines().skip(1).collect::<Vec<_>>(),
-            before.lines().skip(1).collect::<Vec<_>>()
-        );
-        let (jump_x, jump_y) = position(&top, "↓ Latest");
+        assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
+        let (jump_x, jump_y) = position(&scrolled, "↓ Latest");
         click(&mut app, jump_x, jump_y);
         let latest = draw_size(&mut app, width, height);
         assert!(!lines(&latest).join("\n").contains("↓ Latest"));

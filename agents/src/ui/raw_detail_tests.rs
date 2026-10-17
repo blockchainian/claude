@@ -205,19 +205,29 @@ fn raw_detail_link_click_opens_path_without_toggle() {
 }
 
 #[test]
-fn raw_detail_top_button_scrolls_without_toggle() {
+fn scrolled_detail_has_no_top_button_and_former_target_keeps_scroll() {
     for raw in [false, true] {
-        let (mut view, now, _) = source_view(ProviderId::Claude);
-        view.log_detail_raw = raw;
-        log_screen(&view, 80, 25, now);
-        view.viewport.borrow_mut().log_detail_scroll = usize::MAX;
-        log_screen(&view, 80, 25, now);
-        let top = view.viewport.borrow().log_detail_jump;
-        assert!(top.width > 0);
-        assert_eq!(click(&mut view, MouseButton::Left, top.x, top.y), None);
-        assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
-        assert_eq!(flush(&mut view), None);
-        assert_eq!(view.log_detail_raw, raw);
+        for width in [80, 160] {
+            let (mut view, now, _) = source_view(ProviderId::Claude);
+            view.log_detail_raw = raw;
+            log_screen(&view, width, 25, now);
+            let detail = view.viewport.borrow().log_detail;
+            view.handle_mouse(mouse(MouseEventKind::ScrollDown, detail.x + 1, detail.y + 1));
+            let screen = log_screen(&view, width, 25, now);
+            let scroll = view.viewport.borrow().log_detail_scroll;
+            assert!(scroll > 0);
+            let layout = view.center_layout(Rect::new(0, 0, width, 25));
+            let former = super::log::log_content_centered(
+                layout.log_detail.inner(Margin::new(1, 0)),
+                " ↑ Top ".width() as u16,
+            );
+            assert_eq!(click(&mut view, MouseButton::Left, former.x, former.y), None);
+            assert_eq!(flush(&mut view), None);
+            assert_eq!(view.viewport.borrow().log_detail_scroll, scroll);
+            let border = screen.lines().nth(usize::from(former.y)).unwrap();
+            assert!(!border.contains("Top"), "{screen}");
+            assert_eq!(view.log_detail_raw, raw);
+        }
     }
 }
 

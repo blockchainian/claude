@@ -539,12 +539,6 @@ impl View {
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
-            && self.viewport.borrow().log_detail_jump.contains(position)
-        {
-            self.viewport.borrow_mut().log_detail_scroll = 0;
-            return None;
-        }
-        if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && let Some(target @ ClickTarget::LogBorder { latest, .. }) =
                 self.click_target_at(position)
         {

@@ -1622,20 +1622,13 @@ fn terminal_log_latest_uses_list_bottom_border() {
         assert_eq!(jump - 1, expected);
         if width < 150 {
             tmux.mouse(65, 2, bottom + 3, false);
-            tmux.wait_for(|capture| capture.contains("↑ Top"));
             let scrolled = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-            let (top_row, top_line) = scrolled
-                .lines()
-                .enumerate()
-                .find(|(_, row)| row.contains("↑ Top"))
-                .unwrap();
+            assert_ne!(scrolled, older);
+            assert!(!scrolled.contains("↑ Top"), "{scrolled}");
             assert!(
                 scrolled.lines().nth(bottom).unwrap().contains("↓ Latest"),
                 "{scrolled}"
             );
-            let top_column = top_line[..top_line.find("↑ Top").unwrap()].width();
-            tmux.mouse(0, top_column, top_row, true);
-            tmux.wait_for(|capture| !capture.contains("↑ Top") && capture.contains("↓ Latest"));
         }
         tmux.mouse(0, jump, bottom, true);
         tmux.wait_for(|capture| !capture.contains("↓ Latest") && capture.contains("decision"));

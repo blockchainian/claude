@@ -295,7 +295,6 @@ impl View {
             viewport.log = Rect::default();
             viewport.log_borders = [Rect::default(); 2];
             viewport.log_detail = Rect::default();
-            viewport.log_detail_jump = Rect::default();
             viewport.details_links.clear();
             viewport.log_links.clear();
         }
@@ -489,20 +488,6 @@ impl View {
             ));
         }
         join_separators(&separators, area, buf);
-        if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
-            let label = " ↑ Top ";
-            let mut jump =
-                super::log::log_content_centered(inset(layout.log_detail), label.width() as u16);
-            let latest = self.viewport.borrow().log_jump;
-            if jump.intersects(latest) {
-                jump.x = latest.right();
-                jump.width = jump
-                    .width
-                    .min(layout.log_detail.right().saturating_sub(jump.x));
-            }
-            Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
-            self.viewport.borrow_mut().log_detail_jump = jump;
-        }
         self.render_controls(details, buf);
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.top, buf);
