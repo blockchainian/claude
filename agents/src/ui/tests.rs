@@ -8493,11 +8493,10 @@ fn task_notification_detail_shows_task_id_and_output_content() {
             .iter()
             .position(|line| line.contains(&summary))
             .unwrap();
-        assert!(lines[header].starts_with("Task ID b9wi31ww0"), "{lines:#?}");
-        let title_column = lines[header].find(&summary).unwrap() as u16;
-        let title_style = buffer[(title_column, header as u16)].style();
-        for column in 0.."Task ID b9wi31ww0".len() {
-            assert_eq!(buffer[(column as u16, header as u16)].style(), title_style);
+        assert!(lines[header].starts_with("Task b9wi31ww0"), "{lines:#?}");
+        let time_style = buffer[(159, header as u16)].style();
+        for column in 0.."Task b9wi31ww0".len() {
+            assert_eq!(buffer[(column as u16, header as u16)].style(), time_style);
         }
         assert_eq!(
             lines
@@ -8922,6 +8921,30 @@ fn claude_agent_display_from_real_records() {
             .position(|r| r.trim_start().starts_with(metadata))
             .unwrap_or_else(|| panic!("{screen}"));
         assert!(rows[header].contains("Agent"), "{screen}");
+        for kind in [
+            crate::log::Kind::Tool,
+            crate::log::Kind::Error,
+            crate::log::Kind::Denied,
+        ] {
+            let mut event = event.clone();
+            event.kind = kind;
+            view.log = vec![event.clone(), event.clone()];
+            view.select_fixture_event(Some(event));
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 200, 45));
+            view.render_at(buffer.area, &mut buffer, now);
+            let left = (0..200)
+                .find(|&x| buffer[(x, header as u16)].symbol() != " ")
+                .unwrap();
+            let right = (0..200)
+                .rev()
+                .find(|&x| buffer[(x, header as u16)].symbol() != " ")
+                .unwrap();
+            assert_eq!(
+                buffer[(left, header as u16)].style(),
+                buffer[(right, header as u16)].style()
+            );
+        }
+
         assert!(
             rows[header + 2..]
                 .iter()

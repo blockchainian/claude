@@ -212,22 +212,22 @@ impl View {
             };
             header.push(Span::styled(title, label_style));
         }
-        let task_id = match event.calls.as_slice() {
+        let header_label = match event.calls.as_slice() {
             [call] if call.name == "task-notification" => {
-                Some(Span::styled(format!("Task ID {}", call.id), label_style))
+                Some(Span::styled(format!("Task {}", call.id), time_style))
             }
             [call] => call
                 .agent
                 .as_ref()
                 .and_then(|agent| agent.header.as_ref())
-                .map(|header| Span::styled(header.clone(), label_style)),
+                .map(|header| Span::styled(header.clone(), time_style)),
             _ => None,
         };
         let header_row = super::render::row(area, LOG_TOP, 1);
         let (content_area, time_area) = log_row_areas(header_row);
-        // The centered header keeps the time and task id clear on both sides.
+        // The centered title keeps the metadata and time clear on both sides.
         let margin = (header_row.width - content_area.width).max(
-            task_id
+            header_label
                 .as_ref()
                 .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16),
         );
@@ -245,10 +245,10 @@ impl View {
         Line::from(Span::styled(time.to_owned(), time_style))
             .right_aligned()
             .render(time_area, buf);
-        // A task notification shows its task id opposite the time.
-        if let Some(task_id) = task_id {
+        // Metadata occupies the slot opposite the time.
+        if let Some(header_label) = header_label {
             let id_area = Rect::new(header_row.x, header_row.y, margin, 1);
-            truncate_line_with_ellipsis_if_overflow(Line::from(task_id), id_area.width.into())
+            truncate_line_with_ellipsis_if_overflow(Line::from(header_label), id_area.width.into())
                 .render(id_area, buf);
         }
         let mut body_area =

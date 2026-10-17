@@ -828,10 +828,7 @@ fn terminal_task_notification_shows_summary_id_and_missing_output_path() {
         .expect("log detail rule");
     let detail = rows[rule + 1..rows.len() - 1].join("\n");
     assert_eq!(detail.matches(summary).count(), 1, "{capture}");
-    assert!(
-        rows[rule + 1].starts_with(" Task ID b9wi31ww0 "),
-        "{capture}"
-    );
+    assert!(rows[rule + 1].starts_with(" Task b9wi31ww0 "), "{capture}");
     assert!(
         detail.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output"),
         "{capture}"
