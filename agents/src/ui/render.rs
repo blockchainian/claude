@@ -664,19 +664,6 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        let effort = match session.effort.as_deref() {
-            Some(effort) => Some(effort),
-            None if session.is_live_background()
-                && session.input_disabled_reason().is_none()
-                && self
-                    .input_choices
-                    .get(&session.id.provider)
-                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
-            {
-                Some("Unknown")
-            }
-            None => None,
-        };
         // The jump centers without the clock column; both end labels must stay outside it.
         let jump = self.viewport.borrow().log_jump;
         let center = if jump.intersects(rule) {
@@ -688,11 +675,13 @@ impl View {
         let (model_area, effort_area) = render_rule_ends(
             rule,
             center,
-            Some(Span::styled(
-                session.model_label().to_owned(),
-                style::time_style(),
-            )),
-            effort.map(|effort| Span::styled(effort.to_owned(), style::time_style())),
+            session
+                .model_label()
+                .map(|model| Span::styled(model.to_owned(), style::time_style())),
+            session
+                .effort
+                .as_deref()
+                .map(|effort| Span::styled(effort.to_owned(), style::time_style())),
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();

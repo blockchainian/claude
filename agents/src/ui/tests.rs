@@ -4026,6 +4026,7 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
     for width in [100, 149, 150, 200] {
         for search in [false, true] {
             let (mut view, now) = column_padding_fixture();
+            view.rows[0].model = Some("opus".into());
             let event = view
                 .log
                 .iter()
@@ -4573,6 +4574,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
 #[test]
 fn task_log_last_message_uses_relative_time_and_missing_transcript_keeps_panel() {
     let (mut view, now) = log_fixture();
+    view.rows[view.selected].model = Some("opus".into());
     view.log.pop();
     assert!(
         log_screen(&view, 100, 25, now)
@@ -8878,6 +8880,7 @@ fn dashboard_starts_with_tabs_and_one_header_rule() {
 #[test]
 fn border_labels_use_dim_half_lines_beside_separator_joints() {
     let (mut view, now) = column_padding_fixture();
+    view.rows[0].model = Some("opus".into());
     view.rows[0].started_at = Some(now - Duration::minutes(97));
     for width in [120, 200] {
         let area = Rect::new(0, 0, width, 45);
@@ -8916,6 +8919,7 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
 #[test]
 fn border_labels_use_half_lines_beside_screen_edge_corners() {
     let (mut view, now) = column_padding_fixture();
+    view.rows[0].model = Some("opus".into());
     view.rows[0].effort = Some("medium".into());
     for width in [120, 200] {
         let area = Rect::new(0, 0, width, 45);
@@ -9118,6 +9122,7 @@ fn log_border_fields_keep_click_actions_without_jumping() {
     for width in [100, 200] {
         for field in [Field::Model, Field::Effort] {
             let (mut view, now) = log_fixture();
+            view.rows[view.selected].model = Some("opus".into());
             view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
                 id: "e772d00b".into(),
                 needs: None,
@@ -9153,6 +9158,28 @@ fn log_border_fields_keep_click_actions_without_jumping() {
             assert!(view.picker.is_some());
         }
     }
+}
+
+#[test]
+fn log_border_omits_model_and_effort_it_cannot_read() {
+    let (mut view, now) = log_fixture();
+    let row = &mut view.rows[view.selected];
+    row.background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+    });
+    row.process.as_mut().unwrap().label = Some("bg".into());
+    row.model = None;
+    row.model_label = None;
+    row.effort = None;
+    let provider = crate::providers::claude::ClaudeProvider::new(PathBuf::new());
+    view.set_input_choices(HashMap::from([(
+        ProviderId::Claude,
+        crate::providers::Provider::input_choices(&provider),
+    )]));
+    let screen = log_screen(&view, 100, 45, now);
+    assert!(!screen.contains("Unknown"), "{screen}");
+    assert!(view.viewport.borrow().field_targets.is_empty());
 }
 
 #[test]

@@ -974,7 +974,7 @@ mod tests {
             let len = std::fs::metadata(&path).unwrap().len();
             let summary = transcript::read(&path, len).unwrap();
             let session = session("model-identity".into(), summary, Some(path), Utc::now());
-            assert_eq!(session.model_label(), label);
+            assert_eq!(session.model_label(), Some(label));
         }
     }
 

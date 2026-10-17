@@ -220,7 +220,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
     });
     view.rows[view.selected].effort = Some("high".into());
     view.rows[view.selected].model_label = Some("Opus 5.5".into());
-    let model_name = view.rows[view.selected].model_label().to_owned();
+    let model_name = view.rows[view.selected].model_label().unwrap().to_owned();
     for width in [149, 150, 200] {
         let area = Rect::new(0, 0, width, 60);
         let mut buffer = Buffer::empty(area);
@@ -268,51 +268,6 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
             key(&mut view, KeyCode::Esc);
         }
     }
-}
-
-#[test]
-fn live_effort_picker_remains_available_when_transcript_omits_effort() {
-    let (_directory, mut view) = fixture();
-    let id = view.selected_id().unwrap().clone();
-    let session = &mut view.rows[view.selected];
-    session.status = SessionStatus::Ready;
-    session.model = None;
-    session.effort = None;
-    session.background_job = Some(crate::model::BackgroundJob {
-        id: "e772d00b".into(),
-        needs: None,
-    });
-    session.process = Some(crate::model::Process {
-        pid: std::process::id(),
-        label: Some("bg".into()),
-        started_at: None,
-    });
-    render(&view);
-    let rect = view
-        .viewport
-        .borrow()
-        .field_targets
-        .iter()
-        .find(|(_, field)| *field == Field::Effort)
-        .map(|(rect, _)| *rect)
-        .expect("missing optional effort metadata must not hide the control");
-    assert_eq!(click(&mut view, rect.x, rect.y), None);
-    assert_eq!(click(&mut view, rect.x, rect.y), None);
-    let index = view
-        .picker
-        .as_ref()
-        .unwrap()
-        .values
-        .iter()
-        .position(|value| value == "high")
-        .unwrap();
-    assert_eq!(
-        view.apply_choice(index),
-        Some(Action::SetEffort {
-            id,
-            effort: "high".into()
-        })
-    );
 }
 
 #[test]
