@@ -503,8 +503,8 @@ impl View {
         id: &SessionKey,
         input: &crate::providers::SessionInput,
     ) {
-        if matches!(input, crate::providers::SessionInput::Answer { .. }) {
-            self.questions.sending.insert(id.clone());
+        if let crate::providers::SessionInput::Answer { ask, .. } = input {
+            self.questions.begin(ask);
             return;
         }
         let target = self.task_input(id);
@@ -523,7 +523,7 @@ impl View {
         result: std::io::Result<()>,
     ) {
         if let crate::providers::SessionInput::Answer { ask, .. } = input {
-            self.questions.complete(ask, result.is_ok());
+            self.questions.complete(ask, &result);
             if let Err(error) = result {
                 self.set_notice(Some(error.to_string()));
             }

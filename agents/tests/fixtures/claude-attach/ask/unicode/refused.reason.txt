@@ -1,0 +1,1 @@
+Claude attach timed out; screen: ⚠ You have not answered all questions | Ready to submit your answers? | ❯ 1. Submit answers | 2. Cancel

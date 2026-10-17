@@ -380,11 +380,16 @@ impl<'a> AnswerFlow<'a> {
         if self.focus.is_some_and(|expected| focus != expected) {
             return Err(mismatch());
         }
-        if matches!(self.phase, Phase::OtherFocus | Phase::OtherPasted) {
+        let other = q.options.len() + 1;
+        let editing_other = self.phase == Phase::Select
+            && focus == other
+            && choices
+                .get(self.choice)
+                .is_some_and(|choice| choice.starts_with("user_note: "));
+        if matches!(self.phase, Phase::OtherFocus | Phase::OtherPasted) || editing_other {
             let note = choices[self.choice]
                 .strip_prefix("user_note: ")
                 .ok_or_else(mismatch)?;
-            let other = q.options.len() + 1;
             if focus != other {
                 if self.phase != Phase::OtherFocus || focus > other {
                     return Err(mismatch());
@@ -392,8 +397,9 @@ impl<'a> AnswerFlow<'a> {
                 next.focus = Some(other);
                 return Ok((next, Delivery::Keys(b"\x1b[B".repeat(other - focus))));
             }
-            if self.phase == Phase::OtherFocus {
+            if self.phase == Phase::OtherFocus || editing_other {
                 next.phase = Phase::OtherPasted;
+                next.focus = Some(other);
                 return Ok((next, Delivery::Paste(note.to_owned())));
             }
             let page = body(screen)?;
@@ -590,6 +596,90 @@ mod tests {
             serde_json::from_value(event["toolUseResult"]["answers"].clone()).unwrap(),
         )
     }
+    #[test]
+    fn recorded_cold_other_focus_accepts_an_answer() {
+        let mut parser = OutputScreen::new();
+        parser.process(include_bytes!(
+            "../../../tests/fixtures/claude-attach/ask/cold-start/other-focused.raw"
+        ));
+        let screen = parser.complete().unwrap();
+        let state: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-attach/ask/cold-start/pending-state.json"
+        ))
+        .unwrap();
+        let mut question = state["block"]["questions"][0].clone();
+        question["header"] = json!(headers(&screen).unwrap()[0]);
+        let ask = Ask {
+            id: "screen:recorded-cold".into(),
+            session: format!("claude:{}", state["sessionId"].as_str().unwrap())
+                .parse()
+                .unwrap(),
+            since: Utc::now(),
+            kind: AskKind::Questions {
+                blocking: true,
+                questions: vec![parse_page(&screen, &question).unwrap()],
+            },
+        };
+        let answer = Answer {
+            answers: BTreeMap::from([(
+                "Cold Other?".into(),
+                crate::ask::QuestionAnswer {
+                    answers: vec!["user_note: hey".into()],
+                },
+            )]),
+        };
+        let (next, delivery) = AnswerFlow::new(&ask, &answer)
+            .unwrap()
+            .next(&screen)
+            .unwrap();
+        assert_eq!(delivery, Delivery::Paste("hey".into()));
+        assert_eq!(next.phase, Phase::OtherPasted);
+    }
+
+    #[test]
+    fn recorded_unicode_other_checks_text_before_enter() {
+        let capture =
+            include_str!("../../../tests/fixtures/claude-attach/ask/unicode/transcript.jsonl");
+        let (ask, expected) = fixture_ask(capture, "Probe single choice?");
+        let answer = Answer {
+            answers: BTreeMap::from([(
+                "Probe single choice?".into(),
+                crate::ask::QuestionAnswer {
+                    answers: vec!["user_note: 嗨".into()],
+                },
+            )]),
+        };
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/ask/unicode/single-hi.raw");
+        for size in [1, 7, 37, 512] {
+            let mut parser = OutputScreen::new();
+            let mut flow = AnswerFlow::new(&ask, &answer).unwrap();
+            let mut deliveries = Vec::new();
+            for chunk in raw.chunks(size) {
+                parser.process(chunk);
+                while flow.phase != Phase::Done
+                    && let Some(screen) = parser.complete()
+                    && let Ok((next, delivery)) = flow.next(&screen)
+                {
+                    deliveries.push(delivery);
+                    flow = next;
+                }
+            }
+            assert_eq!(
+                deliveries,
+                [
+                    Delivery::Keys(b"3".to_vec()),
+                    Delivery::Paste("嗨".into()),
+                    Delivery::Keys(b"\r".to_vec()),
+                ],
+                "{size}-byte chunks; {}",
+                parser.contents(),
+            );
+            assert_eq!(flow.phase, Phase::Done);
+        }
+        assert_eq!(expected["Probe single choice?"], "嗨");
+        assert!(verify_result(capture, &ask, &expected).unwrap());
+    }
+
     #[test]
     fn recorded_two_question_attach_waits_for_all_headers() {
         let raw = include_bytes!(

@@ -18,12 +18,7 @@ pub(super) fn send(
     settings_path: &Path,
     input: SessionInput,
 ) -> io::Result<()> {
-    if job_id.is_empty() || job_id.starts_with('-') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid Claude job id",
-        ));
-    }
+    validate_job_id(job_id)?;
     match &input {
         SessionInput::Prompt(text) => validate_text(text)?,
         SessionInput::PromptWithImages { text, images } => {
@@ -78,6 +73,19 @@ pub(super) fn inspect(job_id: &str, cwd: &Path) -> io::Result<String> {
         Ok(screen) => detached.map(|()| screen),
         Err(error) => Err(error),
     }
+}
+
+fn validate_job_id(job_id: &str) -> io::Result<()> {
+    if job_id.is_empty()
+        || job_id.starts_with('-')
+        || Path::new(job_id).file_name() != Some(std::ffi::OsStr::new(job_id))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid Claude job id",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_text(text: &str) -> io::Result<()> {
@@ -195,12 +203,43 @@ struct Terminal {
     child: Child,
     master: File,
     parser: OutputScreen,
+    // Attach clients share Claude's cursor and editor. Hold this through detach so
+    // page inspection cannot navigate while another client is answering.
+    _input_lock: File,
     #[cfg(test)]
     raw: Vec<u8>,
 }
 
 impl Terminal {
     fn spawn(job_id: &str, cwd: &Path) -> io::Result<Self> {
+        validate_job_id(job_id)?;
+        let input_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(
+                super::config_dir()
+                    .join("jobs")
+                    .join(job_id)
+                    .join("agents-input.lock"),
+            )?;
+        let deadline = Instant::now() + READY_TIMEOUT;
+        loop {
+            match input_lock.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Claude input is busy in another dashboard",
+                    ));
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            }
+        }
         let mut master = -1;
         let mut slave = -1;
         let mut size = libc::winsize {
@@ -254,6 +293,7 @@ impl Terminal {
             child,
             master,
             parser: OutputScreen::new(),
+            _input_lock: input_lock,
             #[cfg(test)]
             raw: Vec::new(),
         })

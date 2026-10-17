@@ -28,6 +28,7 @@ pub(super) struct QuestionView {
     ask: Ask,
     page: usize,
     pages: Vec<Page>,
+    error: Option<String>,
 }
 
 impl QuestionView {
@@ -38,11 +39,39 @@ impl QuestionView {
             ask,
             page: 0,
             pages,
+            error: None,
         }
     }
 
     pub(super) fn ask(&self) -> &Ask {
         &self.ask
+    }
+
+    pub(super) fn set_error(&mut self, error: Option<String>) {
+        self.error = error;
+    }
+
+    fn footer(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        if let Some(error) = &self.error {
+            lines.extend(
+                textwrap::wrap(error, usize::from(width.max(1)))
+                    .into_iter()
+                    .map(|text| {
+                        Line::styled(text.into_owned(), super::style::attention_title_style())
+                    }),
+            );
+        }
+        lines.push(Line::styled(
+            "↑/↓ move · Enter to confirm · Esc to close",
+            Style::default().dim(),
+        ));
+        lines
+    }
+
+    fn body_height(&self, area: Rect) -> usize {
+        let height = usize::from(area.height);
+        height.saturating_sub(self.footer(area.width).len())
     }
 
     fn questions(&self) -> &[Question] {
@@ -311,10 +340,7 @@ impl QuestionView {
             ));
         }
         lines.push(Line::default());
-        lines.push(Line::styled(
-            "↑/↓ move · Enter to confirm · Esc to close",
-            Style::default().dim(),
-        ));
+        lines.extend(self.footer(width));
         (lines, focus_row)
     }
 
@@ -329,11 +355,11 @@ impl QuestionView {
         let (mut lines, focus) = self.lines(area.width);
         let height = usize::from(area.height);
         if lines.len() > height {
-            let footer = lines.pop().expect("footer");
-            let body_height = height.saturating_sub(1);
+            let footer = lines.split_off(lines.len() - self.footer(area.width).len());
+            let body_height = self.body_height(area);
             let offset = (focus + 1).saturating_sub(body_height);
             lines = lines.into_iter().skip(offset).take(body_height).collect();
-            lines.push(footer);
+            lines.extend(footer.into_iter().take(height - body_height));
         }
         Paragraph::new(lines).render(area, buf);
     }
@@ -343,7 +369,7 @@ impl QuestionView {
             return None;
         }
         let (_, focus) = self.lines(area.width);
-        let visible = usize::from(area.height.saturating_sub(1));
+        let visible = self.body_height(area);
         if visible == 0 {
             return None;
         }
@@ -592,5 +618,10 @@ mod tests {
         assert!((3..7).contains(&cursor.1));
         assert!(view.height(12) > view.height(60));
         assert_eq!(view.ask().id, fixture("Single").id);
+        view.set_error(Some("Question changed".into()));
+        let rendered = screen(&view, 24, 4);
+        assert!(rendered.contains("› 4."), "{rendered}");
+        assert!(rendered.contains("Question changed"), "{rendered}");
+        assert!(rendered.contains("Enter"), "{rendered}");
     }
 }

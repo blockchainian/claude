@@ -43,9 +43,23 @@ impl Questions {
             .filter(|view| self.closed.get(id) != Some(view.ask()))
     }
 
-    pub(super) fn complete(&mut self, ask: &crate::ask::Ask, success: bool) {
+    pub(super) fn begin(&mut self, ask: &crate::ask::Ask) {
+        self.sending.insert(ask.session.clone());
+        if let Some(view) = self.views.get_mut(&ask.session)
+            && view.ask() == ask
+        {
+            view.set_error(None);
+        }
+    }
+
+    pub(super) fn complete(&mut self, ask: &crate::ask::Ask, result: &std::io::Result<()>) {
         self.sending.remove(&ask.session);
-        if success {
+        if let Some(view) = self.views.get_mut(&ask.session)
+            && view.ask() == ask
+        {
+            view.set_error(result.as_ref().err().map(ToString::to_string));
+        }
+        if result.is_ok() {
             self.closed.insert(ask.session.clone(), ask.clone());
         }
     }
@@ -254,6 +268,14 @@ mod tests {
     #[test]
     fn ask_flow_failure_keeps_draft_and_shows_notice() {
         let mut view = fixture();
+        let mut capture = vt100::Parser::new(50, 200, 0);
+        capture.process(include_bytes!(
+            "../../tests/fixtures/claude-attach/ask/unicode/refused.raw"
+        ));
+        assert!(capture.screen().contents().contains("Review your answers"));
+        let reason =
+            include_str!("../../tests/fixtures/claude-attach/ask/unicode/refused.reason.txt")
+                .trim();
         let ask = view.selected_row().unwrap().ask.clone().unwrap();
         let input = crate::providers::SessionInput::Answer {
             ask: ask.clone(),
@@ -265,16 +287,15 @@ mod tests {
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
                 .is_none()
         );
-        view.input_complete(
-            &ask.session,
-            &input,
-            Err(std::io::Error::other("Question changed")),
-        );
-        assert!(screen(&view, 100, 40).contains("Question changed"));
+        view.input_complete(&ask.session, &input, Err(std::io::Error::other(reason)));
+        view.expire_messages(Instant::now() + Duration::from_secs(2));
+        assert!(screen(&view, 100, 40).contains("Claude attach timed out"));
         assert!(matches!(
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
             Some(Action::AnswerQuestions { .. })
         ));
+        view.input_sending(&ask.session, &input);
+        assert!(!screen(&view, 100, 40).contains("Claude attach timed out"));
     }
 
     #[test]

@@ -154,6 +154,134 @@ impl Drop for Probe {
 }
 
 #[test]
+#[ignore = "starts a disposable Claude session with its real Other editor already focused"]
+fn ask_live_other_focus_after_restart() {
+    let mut probe = Probe::new().unwrap();
+    probe.start_prompt("Use ONLY AskUserQuestion. Ask exactly one single-select question: question 'Cold Other?' header 'Cold' with exactly two options Red (description Red choice) and Green (description Green choice). Wait for my answer. This is an explicit interactive question restart test.").unwrap();
+    let state = probe.waiting("Cold Other?").unwrap();
+    let id = state["sessionId"].as_str().unwrap();
+    let ask = pending(
+        probe.job.as_ref().unwrap(),
+        probe.cwd.path(),
+        format!("claude:{id}").parse().unwrap(),
+        Utc::now(),
+        &state["block"],
+    )
+    .unwrap();
+    let AskKind::Questions { questions, .. } = &ask.kind;
+    let question = question_value(&questions[0]);
+    {
+        let mut terminal = Terminal::spawn(probe.job.as_ref().unwrap(), probe.cwd.path()).unwrap();
+        terminal
+            .wait_allowing(
+                |screen| parse_page(screen, &question).is_ok(),
+                Some("Enter to select"),
+            )
+            .unwrap();
+        terminal.write(b"3").unwrap();
+        terminal
+            .wait_allowing(
+                |screen| {
+                    body(screen).is_ok_and(|page| {
+                        page.lines()
+                            .any(|line| numbered(line).is_some_and(|(n, focus, _)| n == 3 && focus))
+                    })
+                },
+                Some("Enter to select"),
+            )
+            .unwrap();
+        if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
+            let directory = PathBuf::from(directory);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("other-focused.raw"), &terminal.raw).unwrap();
+            fs::write(
+                directory.join("other-focused.screen.txt"),
+                terminal.screen(),
+            )
+            .unwrap();
+            fs::write(directory.join("pending-state.json"), state.to_string()).unwrap();
+        }
+        terminal.detach().unwrap();
+    }
+    let answer = Answer {
+        answers: BTreeMap::from([(
+            "Cold Other?".into(),
+            crate::ask::QuestionAnswer {
+                answers: vec!["user_note: hey".into()],
+            },
+        )]),
+    };
+    let result = send(
+        probe.job.as_ref().unwrap(),
+        probe.cwd.path(),
+        &probe.config.join("settings.json"),
+        SessionInput::Answer {
+            ask,
+            answer,
+            transcript: probe.transcript(id).unwrap(),
+        },
+    );
+    if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
+        let directory = PathBuf::from(directory);
+        fs::write(directory.join("result.txt"), format!("{result:?}")).unwrap();
+        fs::write(
+            directory.join("transcript.jsonl"),
+            fs::read(probe.transcript(id).unwrap()).unwrap(),
+        )
+        .unwrap();
+    }
+    probe.cleanup().unwrap();
+    result.unwrap();
+}
+
+#[test]
+#[ignore = "starts a disposable Claude session and inspects its real question from two clients"]
+fn ask_live_concurrent_question_inspection() {
+    let mut probe = Probe::new().unwrap();
+    probe.start_prompt("Use ONLY AskUserQuestion. Ask exactly TWO single-select questions in ONE call. First: question 'Concurrent first?' header 'First'. Second: question 'Concurrent second?' header 'Second'. Both have exactly two options Red (description Red choice) and Green (description Green choice). Wait for my answer. This is an explicit interactive question inspection test.").unwrap();
+    let state = probe.waiting("Concurrent first?").unwrap();
+    // Allow dashboards already watching this disposable session to finish their
+    // initial inspection before the two clients under test start together.
+    thread::sleep(Duration::from_secs(3));
+    let session: SessionKey = format!("claude:{}", state["sessionId"].as_str().unwrap())
+        .parse()
+        .unwrap();
+    let start = std::sync::Barrier::new(2);
+    let results = thread::scope(|scope| {
+        let inspect = || {
+            start.wait();
+            pending(
+                probe.job.as_ref().unwrap(),
+                probe.cwd.path(),
+                session.clone(),
+                Utc::now(),
+                &state["block"],
+            )
+        };
+        let first = scope.spawn(inspect);
+        let second = scope.spawn(inspect);
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
+        let directory = PathBuf::from(directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("pending-state.json"), state.to_string()).unwrap();
+        fs::write(
+            directory.join("concurrent.raw"),
+            probe
+                .command(&["logs", probe.job.as_ref().unwrap()])
+                .unwrap(),
+        )
+        .unwrap();
+        fs::write(directory.join("results.txt"), format!("{results:?}")).unwrap();
+    }
+    probe.cleanup().unwrap();
+    for result in results {
+        assert!(result.is_ok(), "concurrent inspection failed: {result:?}");
+    }
+}
+
+#[test]
 #[ignore = "starts billable disposable Claude sessions and adds/removes isolated cwd trust"]
 fn ask_live_single_multi_two_other() {
     let mut probe = Probe::new().unwrap();
