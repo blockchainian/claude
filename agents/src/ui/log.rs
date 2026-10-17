@@ -961,6 +961,10 @@ fn detail_parts_layout(
     for (section_index, section) in sections.into_iter().enumerate() {
         if section_index > 0 {
             layout.lines.push(Line::default());
+            // Keep source indices stable while preserving the section break in cross-part copies.
+            if let Some(source) = layout.sources.last_mut() {
+                source.text = format!("{}\n", source.text).into();
+            }
             layout.rows.push((layout.sources.len(), Vec::new()));
         }
         if let Some(title) = section.title {
@@ -2111,3 +2115,7 @@ mod panel_detail_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "log_detail_regression_tests.rs"]
+mod detail_regression_tests;
