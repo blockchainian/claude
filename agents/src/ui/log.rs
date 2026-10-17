@@ -34,13 +34,35 @@ impl View {
         now: DateTime<Utc>,
     ) -> DetailLayout {
         if self.log_detail_raw {
-            detail_parts_layout(
+            let source = self.detail_text(event);
+            let drawn = source.replace('\t', "    ");
+            let mut layout = detail_parts_layout(
                 event,
                 width,
                 cwd,
                 now,
-                vec![super::tool_detail::Part::raw_json(self.detail_text(event))],
-            )
+                vec![super::tool_detail::Part::raw_json(source)],
+            );
+            if super::highlight::JsonHighlight::enabled(&drawn) {
+                let widest = layout.lines.iter().map(Line::width).max().unwrap_or(0);
+                // Centering was already applied to plain rows by detail_parts_layout.
+                let content_width = super::tool_detail::split_wide(
+                    super::highlight::plain_lines(&drawn),
+                    usize::from(width),
+                )
+                .iter()
+                .map(Line::width)
+                .max()
+                .unwrap_or(0);
+                layout.raw = Some(RawHighlight {
+                    source: drawn,
+                    highlighter: super::highlight::JsonHighlight::default(),
+                    row: 0,
+                    padding: widest.saturating_sub(content_width),
+                    style: super::style::log_styles(&event.kind).1,
+                });
+            }
+            layout
         } else {
             detail_layout(event, width, cwd, now)
         }
@@ -275,6 +297,7 @@ impl View {
         viewport.log_detail_max = layout.lines.len().saturating_sub(height);
         viewport.log_detail_scroll = viewport.log_detail_scroll.min(viewport.log_detail_max);
         let scroll = viewport.log_detail_scroll;
+        layout.highlight_raw(scroll + height);
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(layout.lines.len())
@@ -788,8 +811,18 @@ fn render_event(
 /// The screen cells of one drawn line, each with the source bytes it shows.
 type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
 
+/// The raw source prefix colored so far, with its saved grammar and theme state.
+struct RawHighlight {
+    source: String,
+    highlighter: super::highlight::JsonHighlight,
+    row: usize,
+    padding: usize,
+    style: Style,
+}
+
 /// The open log event laid out for one panel size and highlight theme.
 pub(super) struct DetailLayout {
+    raw: Option<RawHighlight>,
     width: u16,
     height: usize,
     theme_generation: u64,
@@ -801,6 +834,31 @@ pub(super) struct DetailLayout {
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
+}
+
+impl DetailLayout {
+    fn highlight_raw(&mut self, end: usize) {
+        let Some(raw) = &mut self.raw else {
+            return;
+        };
+        if raw.row >= end.min(self.lines.len()) {
+            return;
+        }
+        raw.highlighter.advance(&raw.source, |line| {
+            let rows = super::tool_detail::split_wide(vec![line], usize::from(self.width));
+            for mut line in rows {
+                for span in &mut line.spans {
+                    span.style = raw.style.patch(span.style);
+                }
+                if raw.padding > 0 {
+                    line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
+                }
+                self.lines[raw.row] = line;
+                raw.row += 1;
+            }
+            raw.row < end
+        });
+    }
 }
 
 fn detail_layout(
@@ -874,6 +932,7 @@ fn detail_parts_layout(
         })
         .collect();
     let mut layout = DetailLayout {
+        raw: None,
         width,
         height: 0,
         theme_generation,

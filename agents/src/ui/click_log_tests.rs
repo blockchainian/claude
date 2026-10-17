@@ -513,3 +513,101 @@ fn background_return_restores_detail_search() {
     assert_eq!(view.visible_log_event(), Some(&previous));
     assert_eq!(view.log_detail_search.query.text(), query);
 }
+
+#[test]
+fn cold_raw_detail_highlights_only_the_visible_source_prefix() {
+    let (mut view, now) = real_log_view();
+    let event = view
+        .log
+        .iter()
+        .filter(|event| {
+            let text = event.raw_text().unwrap();
+            text.lines().count() > 40 && text.lines().all(|line| line.len() <= 4096)
+        })
+        .max_by_key(|event| event.raw_text().unwrap().len())
+        .unwrap()
+        .clone();
+    let source = event.raw_text().unwrap();
+    assert!(source.lines().count() > 40);
+    view.select_fixture_event(Some(event));
+    view.log_detail_raw = true;
+    super::highlight::JSON_HIGHLIGHTED_LINES.with(|count| count.set(0));
+    let _ = detail_buffer(&view, 80, now);
+    let highlighted = super::highlight::JSON_HIGHLIGHTED_LINES.with(|count| count.get());
+    assert!(highlighted > 0);
+    assert!(
+        highlighted <= 40,
+        "highlighted {highlighted} source lines for a 40-row panel"
+    );
+    let _ = detail_buffer(&view, 80, now);
+    assert_eq!(
+        super::highlight::JSON_HIGHLIGHTED_LINES.with(|count| count.get()),
+        highlighted
+    );
+}
+
+#[test]
+fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
+    use ratatui::widgets::{Paragraph, Widget};
+    let (mut view, now) = real_log_view();
+    let event = view
+        .log
+        .iter()
+        .filter(|event| {
+            let source = event.raw_text().unwrap();
+            source.lines().count() > 40 && source.lines().all(|line| line.len() <= 4096)
+        })
+        .max_by_key(|event| event.raw_text().unwrap().len())
+        .unwrap()
+        .clone();
+    let source = event.raw_text().unwrap();
+    let body_style = super::style::log_styles(&event.kind).1;
+    view.select_fixture_event(Some(event));
+    view.log_detail_raw = true;
+    for width in [23, 80, 120] {
+        let mut expected = super::tool_detail::split_wide(
+            super::highlight::code_lines(&source, "json"),
+            width as usize,
+        );
+        let plain = super::tool_detail::Part::raw_json(source.clone());
+        assert_eq!(
+            plain.maps(&expected),
+            plain.maps(&plain.lines(width as usize, body_style, now))
+        );
+        let widest = expected.iter().map(Line::width).max().unwrap();
+        let padding = (width as usize).saturating_sub(widest) / 2;
+        for line in &mut expected {
+            for span in &mut line.spans {
+                span.style = body_style.patch(span.style);
+            }
+            if padding > 0 {
+                line.spans.insert(0, Span::raw(" ".repeat(padding)));
+            }
+        }
+        for scroll in [0, 7, expected.len(), 0] {
+            view.viewport.borrow_mut().log_detail_scroll = scroll;
+            let actual = detail_buffer(&view, width, now);
+            let scroll = view.viewport.borrow().log_detail_scroll;
+            let body = Rect::new(2, 4, width, 37);
+            let mut reference = Buffer::empty(actual.area);
+            Paragraph::new(
+                expected
+                    .iter()
+                    .skip(scroll)
+                    .take(37)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+            .render(body, &mut reference);
+            for y in body.y..body.bottom() {
+                for x in body.x..body.right() {
+                    assert_eq!(
+                        actual[(x, y)],
+                        reference[(x, y)],
+                        "width={width} scroll={scroll} x={x} y={y}"
+                    );
+                }
+            }
+        }
+    }
+}

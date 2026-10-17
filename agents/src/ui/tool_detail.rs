@@ -47,6 +47,8 @@ enum Body {
     Fields(Vec<std::ops::Range<usize>>),
     /// Code highlighted as the given language.
     Code(String),
+    /// Raw JSON colors are filled as its rows enter the viewport.
+    RawJson,
     /// Shell command ranges retain original bytes while separators are display-only.
     Shell(Vec<super::shell_commands::Command>),
     /// Parsed JSON with multiline string values.
@@ -123,7 +125,7 @@ impl Part {
     }
 
     pub fn raw_json(source: String) -> Self {
-        Self::new(source, Body::Code("json".into()))
+        Self::new(source, Body::RawJson)
     }
 
     pub fn text(source: String, markdown: bool) -> Self {
@@ -244,6 +246,7 @@ impl Part {
                 });
                 split_wide(lines.collect(), width)
             }
+            Body::RawJson => split_wide(highlight::plain_lines(source), width),
             Body::Code(lang) => split_wide(highlight::code_lines(source, lang), width),
             Body::Shell(commands) => shell_lines(&self.source, commands, width),
             Body::Json(value) => split_wide(json_lines(value), width),
@@ -711,7 +714,7 @@ fn cells(text: &str) -> String {
 }
 
 /// `lines` with every line wider than `width` split at grapheme boundaries.
-fn split_wide(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
+pub(super) fn split_wide(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return lines;
     }

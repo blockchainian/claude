@@ -15,6 +15,11 @@ const MAX_BYTES: usize = 512 * 1024;
 const MAX_LINES: usize = 10_000;
 const MAX_LINE_BYTES: usize = 4 * 1024;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static JSON_HIGHLIGHTED_LINES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 /// The theme for the current terminal background; `None` until a background is applied.
 static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
@@ -214,18 +219,26 @@ fn highlighted(text: &str, lang: &str) -> Option<Vec<Line<'static>>> {
         let mut highlighter = HighlightLines::new(syntax, theme);
         let mut lines = Vec::new();
         for line in LinesWithEndings::from(text) {
+            #[cfg(test)]
+            if lang == "json" {
+                JSON_HIGHLIGHTED_LINES.with(|count| count.set(count.get() + 1));
+            }
             let ranges = highlighter.highlight_line(line, syntax_set()).ok()?;
-            let spans: Vec<_> = ranges
-                .into_iter()
-                .filter_map(|(style, part)| {
-                    let part = part.trim_end_matches(['\n', '\r']);
-                    (!part.is_empty()).then(|| Span::styled(part.to_owned(), convert(style)))
-                })
-                .collect();
-            lines.push(Line::from(spans));
+            lines.push(styled_line(ranges));
         }
         Some(lines)
     })
+}
+
+fn styled_line(ranges: Vec<(syntect::highlighting::Style, &str)>) -> Line<'static> {
+    let spans: Vec<_> = ranges
+        .into_iter()
+        .filter_map(|(style, part)| {
+            let part = part.trim_end_matches(['\n', '\r']);
+            (!part.is_empty()).then(|| Span::styled(part.to_owned(), convert(style)))
+        })
+        .collect();
+    Line::from(spans)
 }
 
 fn convert(style: syntect::highlighting::Style) -> Style {
@@ -243,6 +256,45 @@ fn convert(style: syntect::highlighting::Style) -> Style {
         converted = converted.add_modifier(Modifier::UNDERLINED);
     }
     converted
+}
+
+/// Resumes the JSON grammar at the first source line not yet drawn.
+#[derive(Default)]
+pub(super) struct JsonHighlight {
+    state: Option<(
+        syntect::highlighting::HighlightState,
+        syntect::parsing::ParseState,
+    )>,
+    offset: usize,
+}
+
+impl JsonHighlight {
+    pub fn enabled(text: &str) -> bool {
+        !text.is_empty() && !exceeds_limits(text)
+    }
+
+    pub fn advance(&mut self, text: &str, mut visit: impl FnMut(Line<'static>) -> bool) {
+        with_theme(|theme| {
+            let mut highlighter = match self.state.take() {
+                Some((highlight, parse)) => HighlightLines::from_state(theme, highlight, parse),
+                None => {
+                    HighlightLines::new(find_syntax("json").expect("JSON syntax exists"), theme)
+                }
+            };
+            for source in LinesWithEndings::from(&text[self.offset..]) {
+                #[cfg(test)]
+                JSON_HIGHLIGHTED_LINES.with(|count| count.set(count.get() + 1));
+                let ranges = highlighter
+                    .highlight_line(source, syntax_set())
+                    .expect("JSON grammar parses transcript text");
+                self.offset += source.len();
+                if !visit(styled_line(ranges)) {
+                    break;
+                }
+            }
+            self.state = Some(highlighter.state());
+        });
+    }
 }
 
 /// `text` as one unstyled line per source line.
