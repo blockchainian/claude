@@ -26,5 +26,5 @@
                                                             │
                                                             │
                                                             ├──────────────────────── Working ────────── child-project╶─
- Check files · Subagent cannot take input
+ Check files ❮ Subagent cannot take input
  ? help  esc back  ↑/↓ move  n new  g group by project

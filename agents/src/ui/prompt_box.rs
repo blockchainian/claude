@@ -109,7 +109,7 @@ impl PromptBox {
             buf.set_stringn(
                 area.x,
                 area.y,
-                format!("{label} · {reason}"),
+                format!("{label} {DISABLED_PROMPT_MARKER} {reason}"),
                 usize::from(area.width),
                 Style::default().dim(),
             );
@@ -339,8 +339,23 @@ mod tests {
             assert!(screen.contains(expected), "{screen}");
         }
         let screen = rendered(&editor, 100, Some("Running in a terminal"));
-        assert!(screen.contains("Running in a terminal"));
+        assert!(screen.contains("Task ❮ Running in a terminal"), "{screen}");
         assert!(!screen.contains("denied"));
+        let area = Rect::new(0, 0, 100, 1);
+        for reason in ["Running in a terminal", "Subagent cannot take input"] {
+            let mut buffer = Buffer::empty(area);
+            editor.render(area, &mut buffer, "升级命令中心", Some(reason));
+            use unicode_segmentation::UnicodeSegmentation;
+            let expected = format!("升级命令中心 ❮ {reason}");
+            let mut column = 0;
+            for grapheme in expected.graphemes(true) {
+                let cell = &buffer[(column as u16, 0)];
+                assert_eq!(cell.symbol(), grapheme);
+                assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+                column += grapheme.width();
+            }
+            assert_eq!(column, expected.width());
+        }
     }
 
     #[test]

@@ -8,5 +8,5 @@
                                         │
                                         │
                                         │
- No task · Select a task to type
+ No task ❮ Select a task to type
  ? help  esc back  ↑/↓ move  enter open  n new  g group by project

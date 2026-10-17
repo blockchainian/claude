@@ -63,6 +63,7 @@ use std::{
 use unicode_width::UnicodeWidthStr;
 
 const PROMPT_MARKER: &str = "❯";
+const DISABLED_PROMPT_MARKER: &str = "❮";
 
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     (

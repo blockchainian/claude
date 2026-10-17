@@ -12,6 +12,9 @@ mod terminal_headings;
 #[path = "support/terminal_scripts.rs"]
 mod terminal_scripts;
 
+#[path = "support/terminal_disabled_prompt.rs"]
+mod terminal_disabled_prompt;
+
 struct Tmux(String);
 
 impl Tmux {

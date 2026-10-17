@@ -7,7 +7,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example · Running in a terminal
+ Task log example ❮ Running in a terminal
 ─╴Unknown ──────────────────────────────────────────────────────────────────────────────────────────
                                      Edit: Dangerous                                            10s
                                     Bash: Safety Check                                          10s
