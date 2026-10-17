@@ -254,7 +254,7 @@ fn terminal_mcp_display_names() {
         "{capture}"
     );
     assert!(
-        capture.matches("codex-manager start").count() >= 3,
+        capture.contains("codex-manager start") && capture.contains("Claude 图片链接"),
         "{capture}"
     );
     assert!(
@@ -1570,5 +1570,259 @@ fn terminal_session_search_overlays_chart_bottom() {
         );
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| !capture.contains("Search ›"));
+    }
+}
+
+#[test]
+#[ignore = "requires tmux and macOS clipboard; run with --ignored --nocapture"]
+fn terminal_detail_reading_column_preserves_original_copy() {
+    use std::io::Write;
+
+    let calls: Vec<_> = include_str!("fixtures/claude-tool-calls.jsonl")
+        .lines()
+        .collect();
+    let agents: Vec<_> = include_str!("fixtures/claude-agent-display.jsonl")
+        .lines()
+        .collect();
+    let user = include_str!("fixtures/claude-raw-detail.jsonl")
+        .lines()
+        .find(|line| {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            record["type"] == "user"
+                && record["message"]["content"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("cctail"))
+        })
+        .expect("recorded user message");
+    // Keep recorded upstream bodies, field names and command line breaks intact.
+    for (kind, records, needle, prose) in [
+        ("assistant", String::new(), "对，必须", true),
+        (
+            "send",
+            include_str!("fixtures/reading-column-send.jsonl").to_owned(),
+            "Additional scope",
+            true,
+        ),
+        ("user", format!("{user}\n"), "cctail", true),
+        (
+            "compaction",
+            include_str!("fixtures/claude-compaction.jsonl").to_owned(),
+            "This session is being continued",
+            true,
+        ),
+        (
+            "queued",
+            format!(
+                "{}\n",
+                include_str!("fixtures/claude-agent-names.jsonl")
+                    .lines()
+                    .nth(2)
+                    .unwrap()
+            ),
+            "Checks passed.",
+            true,
+        ),
+        (
+            "question",
+            include_str!("fixtures/claude-questions-pending.jsonl").to_owned(),
+            "怎么判断命令后面",
+            true,
+        ),
+        (
+            "agent-prompt",
+            format!("{}\n", agents[2]),
+            "You are the fork",
+            true,
+        ),
+        (
+            "tool-prompt",
+            format!("{}\n", calls[16]),
+            "Implement workstream A",
+            true,
+        ),
+        (
+            "command",
+            format!("{}\n", calls[0]),
+            "pkill -f slide_boxes",
+            false,
+        ),
+        (
+            "output",
+            format!("{}\n{}\n", calls[2], calls[3]),
+            "default-terminal",
+            false,
+        ),
+    ] {
+        let (_directory, tmux, transcript) = start_probe(&format!("reading-{kind}"));
+        if !records.is_empty() {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&transcript)
+                .unwrap()
+                .write_all(records.as_bytes())
+                .unwrap();
+            tmux.wait_for(|capture| capture.lines().skip(25).any(|line| line.contains(needle)));
+        }
+        for width in [200_u16, 120] {
+            tmux.run(&[
+                "resize-window",
+                "-t",
+                "probe",
+                "-x",
+                &width.to_string(),
+                "-y",
+                "50",
+            ]);
+            tmux.wait_for(|capture| {
+                capture.lines().count() == 50
+                    && capture.lines().skip(25).any(|line| line.contains(needle))
+            });
+            std::thread::sleep(Duration::from_millis(200));
+            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let path = std::env::temp_dir().join(format!("agents-reading-{kind}-{width}.txt"));
+            std::fs::write(&path, &capture).unwrap();
+            let rows: Vec<_> = capture.lines().collect();
+            let rule = rows
+                .iter()
+                .rposition(|line| line.matches('─').count() > usize::from(width / 2))
+                .expect("detail header rule");
+            let (row, line) = rows
+                .iter()
+                .enumerate()
+                .skip(rule + 1)
+                .find(|(_, line)| line.contains(needle))
+                .expect("recorded body in event detail");
+            let left = if kind == "question" {
+                line.len() - line.trim_start().len()
+            } else {
+                line[..line.find(needle).unwrap()].width()
+            };
+            let expected_left = if prose && width >= 150 {
+                50
+            } else if matches!(kind, "compaction" | "queued") {
+                // Existing narrow mode centers a short body inside the full-width column.
+                1 + (usize::from(width) - 2 - line.trim().width()) / 2
+            } else {
+                1
+            };
+            if kind == "command" {
+                assert!(
+                    left < usize::from(width / 4),
+                    "command acquired a reading margin: {capture}"
+                );
+                assert!(
+                    rows.iter()
+                        .skip(row)
+                        .any(|line| line.trim().width() > usize::from(width / 2)),
+                    "command wrapped at prose width: {capture}"
+                );
+            } else if kind == "agent-prompt" && width < 150 {
+                // Its existing group centers at the widest full-width wrapped row.
+                assert!(left <= 3, "agent prompt unexpectedly narrowed: {capture}");
+                assert!(
+                    rows.iter().skip(row).any(|line| line.trim().width() > 100),
+                    "agent prompt did not use the full narrow column: {capture}"
+                );
+            } else if kind != "output" {
+                assert_eq!(left, expected_left, "{kind} at {width}: {capture}");
+            } else {
+                let recorded: serde_json::Value = serde_json::from_str(calls[3]).unwrap();
+                let content = recorded["toolUseResult"]["file"]["content"]
+                    .as_str()
+                    .unwrap();
+                let widest = content.lines().map(UnicodeWidthStr::width).max().unwrap();
+                let padding = (usize::from(width) - 2 - widest) / 2;
+                assert_eq!(
+                    left,
+                    1 + padding + "set -g ".width(),
+                    "output layout changed: {capture}"
+                );
+                assert!(
+                    capture.contains(content.lines().max_by_key(|line| line.width()).unwrap()),
+                    "output wrapped at prose width: {capture}"
+                );
+            }
+            if prose && width >= 150 {
+                for line in rows
+                    .iter()
+                    .skip(row)
+                    .take_while(|line| !line.trim().is_empty())
+                {
+                    assert!(
+                        line.trim_end().trim_end_matches('│').trim_end().width() <= 149,
+                        "prose exceeds reading column: {capture}"
+                    );
+                }
+            }
+            if kind == "send" {
+                assert!(
+                    rows[rule + 1].starts_with(" thread 00000000-0000-4000-8000-000000000000"),
+                    "identifier missing from top-left header: {capture}"
+                );
+                assert!(
+                    !rows
+                        .iter()
+                        .skip(rule + 2)
+                        .any(|line| line.contains("threadId")),
+                    "identifier retained in field list: {capture}"
+                );
+            }
+            if kind == "tool-prompt" {
+                assert!(
+                    rows[rule + 1].starts_with(" Claude 图片链接"),
+                    "name missing from top-left header: {capture}"
+                );
+                let cwd = rows
+                    .iter()
+                    .skip(rule + 2)
+                    .find(|line| line.contains("cwd"))
+                    .expect("remaining cwd field");
+                assert_eq!(
+                    cwd.len() - cwd.trim_start().len(),
+                    expected_left,
+                    "cwd outside reading column: {capture}"
+                );
+            }
+            if kind == "assistant" {
+                // Drag in screen coordinates to the next character's boundary.
+                tmux.mouse(0, left, row, false);
+                tmux.mouse(32, left + "对，必须".width(), row, false);
+                let release = format!("\x1b[<0;{};{}m", left + "对，必须".width() + 1, row + 1);
+                tmux.run(&["send-keys", "-t", "probe", "-l", &release]);
+                tmux.wait_for(|capture| capture.contains("Copied"));
+                let selected = Command::new("pbpaste").output().unwrap();
+                assert!(selected.status.success());
+                assert_eq!(String::from_utf8(selected.stdout).unwrap(), "对，必须");
+                std::thread::sleep(Duration::from_millis(350));
+                // Visual wrapping must not change the Markdown or source paragraphs copied.
+                let click = format!(
+                    "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+                    left + 1,
+                    row + 1,
+                    left + 1,
+                    row + 1
+                )
+                .repeat(2);
+                tmux.run(&["send-keys", "-t", "probe", "-l", &click]);
+                tmux.wait_for(|capture| capture.contains("Copied assistant message"));
+                let copied = Command::new("pbpaste").output().unwrap();
+                assert!(copied.status.success());
+                let source: serde_json::Value = serde_json::from_str(
+                    include_str!("fixtures/transcript.jsonl")
+                        .lines()
+                        .nth(1)
+                        .unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    String::from_utf8(copied.stdout).unwrap(),
+                    source["message"]["content"][0]["text"].as_str().unwrap()
+                );
+            }
+            println!(
+                "{{\"reading_column\":\"pass\",\"kind\":\"{kind}\",\"width\":{width},\"capture\":\"{}\"}}",
+                path.display()
+            );
+        }
     }
 }

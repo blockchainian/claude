@@ -37,6 +37,7 @@ pub(super) struct Part {
 enum Body {
     /// A merged call's title after a leading rule cell and space, with the call's duration.
     TitleRule(Option<String>),
+    InputTitleRule(Option<String>),
     /// A section label, in the given style.
     Label(Style),
     /// An input/output arrow without selectable source bytes.
@@ -194,7 +195,7 @@ impl Part {
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
-        if !matches!(self.body, Body::TitleRule(_)) {
+        if !matches!(self.body, Body::TitleRule(_) | Body::InputTitleRule(_)) {
             return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
         }
         lines
@@ -241,11 +242,20 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::TitleRule(time) => vec![super::title_rule::centered_title_rule(
-                source,
-                width,
-                time.as_deref(),
-            )],
+            Body::TitleRule(time) | Body::InputTitleRule(time) => {
+                let mut line =
+                    super::title_rule::centered_title_rule(source, width, time.as_deref());
+                if matches!(self.body, Body::InputTitleRule(_))
+                    && line.spans.len() >= 4
+                    && line.spans[0].width() >= 2
+                {
+                    let shift = line.spans[0].width().saturating_sub(2);
+                    line.spans[0].content = "─ ".into();
+                    let last = line.spans.last_mut().expect("title rule suffix exists");
+                    last.content = format!("{}{}", "─".repeat(shift), last.content).into();
+                }
+                vec![line]
+            }
             Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
                 width,
@@ -299,7 +309,10 @@ impl Part {
                 .map(|line| Line::from(line.into_owned()))
                 .collect(),
         };
-        if matches!(self.body, Body::TitleRule(_) | Body::Arrow) {
+        if matches!(
+            self.body,
+            Body::TitleRule(_) | Body::InputTitleRule(_) | Body::Arrow
+        ) {
             return lines;
         }
         lines
@@ -581,10 +594,10 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
         }
         if event.calls.len() > 1 {
             let time = call.duration.map(super::formatting::format_log_duration);
-            parts.push(Part::new(
-                input_title(call).unwrap_or_else(|| call.title.clone()),
-                Body::TitleRule(time),
-            ));
+            parts.push(match input_title(call) {
+                Some(title) => Part::new(title, Body::InputTitleRule(time)),
+                None => Part::new(call.title.clone(), Body::TitleRule(time)),
+            });
         }
         if let Some(agent) = &call.agent {
             parts.push(Part::text(agent.label.clone(), false));

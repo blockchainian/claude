@@ -313,3 +313,40 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
         assert_eq!(part.column(200, true), Some((100, 50)));
     }
 }
+
+#[test]
+fn merged_input_titles_start_at_the_left_and_keep_copy_maps() {
+    let mut event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+        .into_iter()
+        .find(|e| e.calls.iter().any(|c| c.name.ends_with("__start")))
+        .unwrap();
+    let call = event
+        .calls
+        .iter()
+        .find(|c| c.name.ends_with("__start"))
+        .unwrap()
+        .clone();
+    event.calls = vec![call.clone(), call];
+    let part = open_parts(&event).remove(0);
+    let title = super::super::tool_detail::input_title(&event.calls[0]).unwrap();
+    for width in 0..40 {
+        assert!(
+            part.lines(width, Style::default(), DateTime::UNIX_EPOCH)
+                .iter()
+                .all(|line| line.width() <= width)
+        );
+    }
+    for width in [120, 200] {
+        let lines = part.lines(width, Style::default(), DateTime::UNIX_EPOCH);
+        assert!(lines[0].to_string().starts_with(&format!("─ {title} ")));
+        let maps = part.maps(&lines);
+        assert_eq!(maps[0][0].0.start, 2);
+        assert_eq!(
+            maps[0]
+                .iter()
+                .map(|(_, bytes)| &part.source[bytes.clone()])
+                .collect::<String>(),
+            title
+        );
+    }
+}
