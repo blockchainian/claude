@@ -282,6 +282,7 @@ fn created_job(output: &std::process::Output) -> io::Result<String> {
         .lines()
         .filter_map(|line| line.strip_prefix("backgrounded · "))
         .map(|id| {
+            let id = id.split_once(" · ").map_or(id, |(id, _)| id);
             id.strip_suffix(" (idle — send a prompt to start)")
                 .unwrap_or(id)
         });
@@ -1249,7 +1250,10 @@ mod tests {
                 .launch(&Action::Resume(session.id.clone()), Some(&session))
                 .is_none()
         );
-        provider.delete(&session).and_then(|delete| delete()).unwrap();
+        provider
+            .delete(&session)
+            .and_then(|delete| delete())
+            .unwrap();
         assert!(!path.exists());
     }
 

@@ -283,3 +283,13 @@ fn task_defaults_fall_back_to_the_cached_models_own_effort() {
     assert_eq!(defaults().model.as_deref(), Some("claude-fable-5-1"));
     assert_eq!(defaults().effort.as_deref(), Some("high"));
 }
+
+#[test]
+fn creation_parses_named_background_output() {
+    let output = Output {
+        status: ExitStatus::from_raw(0),
+        stdout: include_bytes!("../../../tests/fixtures/claude-background-named.txt").to_vec(),
+        stderr: Vec::new(),
+    };
+    assert_eq!(created_job(&output).unwrap(), "17935055");
+}

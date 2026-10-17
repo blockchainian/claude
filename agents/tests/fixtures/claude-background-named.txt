@@ -1,0 +1,5 @@
+backgrounded · 17935055 · probe-x
+  claude agents             list sessions
+  claude attach 17935055    open in this terminal
+  claude logs 17935055      show recent output
+  claude stop 17935055      stop this session
