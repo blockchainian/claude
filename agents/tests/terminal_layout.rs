@@ -193,14 +193,15 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
         tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
         tmux.wait_for(|capture| capture.contains("Search ❯ Stop"));
         let assert_caret = |needle: &str, offset: usize| {
-            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-            let (row, line) = capture
-                .lines()
-                .enumerate()
-                .find(|(_, line)| line.contains(needle))
-                .unwrap();
-            let column = line[..line.find(needle).unwrap()].width() + offset;
-            tmux.wait_for(|_| {
+            tmux.wait_for(|capture| {
+                let Some((row, line)) = capture
+                    .lines()
+                    .enumerate()
+                    .find(|(_, line)| line.contains(needle))
+                else {
+                    return false;
+                };
+                let column = line[..line.find(needle).unwrap()].width() + offset;
                 let cursor = tmux.run(&[
                     "display-message",
                     "-t",
@@ -365,7 +366,14 @@ fn terminal_leaving_list_search_preserves_detail() {
             "search-exit-escape"
         });
         tmux.run(&["resize-window", "-t", "probe", "-x", "120", "-y", "50"]);
-        tmux.wait_for(|capture| capture.lines().any(|line| line.matches('─').count() > 100));
+        // The wide screen also has long rules; wait for the narrow panel divider
+        // before deriving mouse coordinates from the rendered prompt and detail.
+        tmux.wait_for(|capture| {
+            capture.lines().nth(1).is_some_and(|line| {
+                line.find('┬')
+                    .is_some_and(|column| line[..column].width() == 60)
+            })
+        });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = capture.lines().collect();
         let rule = rows
@@ -395,6 +403,7 @@ fn terminal_leaving_list_search_preserves_detail() {
         }
         tmux.mouse(64, 2, rule + 3, false);
         tmux.mouse(0, 2, rule + 3, true);
+        tmux.wait_for(|capture| !capture.contains("Search ❯ Stop"));
         let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(!after.contains("Search ❯ Stop"), "{after}");
         assert!(
@@ -1933,11 +1942,21 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             } else {
                 line[..line.find(needle).unwrap()].width()
             };
-            let expected_left = if prose && width >= 150 {
-                50
-            } else if matches!(kind, "compaction" | "queued") {
-                // Existing narrow mode centers a short body inside the full-width column.
-                1 + (usize::from(width) - 2 - line.trim().width()) / 2
+            let expected_left = if prose {
+                let body: Vec<_> = rows
+                    .iter()
+                    .skip(rule + 3)
+                    .take_while(|line| line.trim() != "↓" && !line.starts_with(" ? help"))
+                    .map(|line| line.trim_end().trim_end_matches('│').trim_end())
+                    .filter(|line| !line.trim().is_empty())
+                    .collect();
+                let start = body
+                    .iter()
+                    .map(|line| line.width() - line.trim_start().width())
+                    .min()
+                    .expect("input body");
+                let end = body.iter().map(|line| line.width()).max().unwrap();
+                1 + (usize::from(width) - 2 - (end - start)) / 2
             } else {
                 1
             };

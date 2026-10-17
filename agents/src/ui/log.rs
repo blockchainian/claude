@@ -953,8 +953,8 @@ fn detail_parts_layout(
         .into_iter()
         .map(|part| {
             let body_width = part
-                .column(usize::from(width), wide)
-                .map_or(usize::from(width), |(width, _)| width);
+                .wrap_width(usize::from(width), wide)
+                .unwrap_or(usize::from(width));
             let lines = part.lines(body_width, body_style, now);
             (part, lines)
         })
@@ -975,10 +975,7 @@ fn detail_parts_layout(
                 || lines.iter().map(Line::width).max().unwrap_or(0),
                 |group| group_widths[group],
             );
-            let padding = part.column(usize::from(width), wide).map_or_else(
-                || usize::from(width).saturating_sub(block_width) / 2,
-                |(_, left)| left,
-            );
+            let padding = usize::from(width).saturating_sub(block_width) / 2;
             if padding > 0 {
                 // Every row keeps its position within the section, including its source cell map.
                 for (line, cells) in lines.iter_mut().zip(&mut maps) {

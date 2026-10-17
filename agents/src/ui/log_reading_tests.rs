@@ -28,19 +28,6 @@ fn assert_reading_column(layout: &DetailLayout, segment: usize, wide: bool) {
             cells.last()
         );
     }
-    if wide {
-        assert_eq!(
-            layout
-                .rows
-                .iter()
-                .find(|(id, cells)| *id == segment && !cells.is_empty())
-                .unwrap()
-                .1[0]
-                .0
-                .start,
-            left
-        );
-    }
 }
 
 #[test]
@@ -292,8 +279,8 @@ fn command_and_all_output_body_formats_keep_their_width() {
         Section::Fields(vec![("prompt".into(), text.clone())]),
     ]);
     for part in open_parts(&event) {
-        assert_eq!(part.column(200, true), None);
-        assert_eq!(part.column(120, false), None);
+        assert_eq!(part.wrap_width(200, true), None);
+        assert_eq!(part.wrap_width(120, false), None);
     }
 }
 
@@ -310,7 +297,7 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
         expected.iter().map(|p| &p.source).collect::<Vec<_>>()
     );
     for part in actual {
-        assert_eq!(part.column(200, true), Some((100, 50)));
+        assert_eq!(part.wrap_width(200, true), Some(100));
     }
 }
 
@@ -349,4 +336,156 @@ fn merged_input_titles_start_at_the_left_and_keep_copy_maps() {
             title
         );
     }
+}
+
+fn codex_events(fixture: &str) -> Vec<Event> {
+    use crate::providers::Provider;
+    let dir = tempfile::tempdir().unwrap();
+    rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let mut provider = crate::providers::codex::CodexProvider::new(
+        dir.path().to_owned(),
+        dir.path().join("manager"),
+    );
+    let mut session = provider.refresh(1).sessions.remove(0);
+    session.transcript = Some(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture),
+    );
+    provider.log(&session, usize::MAX, false).unwrap()
+}
+
+/// Every input/output group has equal outer margins, while preserving its own indentation.
+fn assert_centered_blocks(event: &Event, width: u16) {
+    let parts = open_parts(event);
+    let drawn = layout(event, width);
+    let mut groups = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+    for (index, part) in parts.iter().enumerate() {
+        groups
+            .entry(part.group.unwrap_or(index))
+            .or_default()
+            .push(index);
+    }
+    for indices in groups.values() {
+        let rows: Vec<_> = drawn
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, (id, _))| indices.contains(id))
+            .map(|(row, _)| &drawn.lines[row])
+            .collect();
+        let nonempty: Vec<_> = rows
+            .iter()
+            .map(|line| line.to_string())
+            .filter(|text| !text.trim().is_empty())
+            .collect();
+        if nonempty.is_empty() {
+            continue;
+        }
+        let left = nonempty
+            .iter()
+            .map(|text| text.width() - text.trim_start().width())
+            .min()
+            .unwrap();
+        let right = nonempty
+            .iter()
+            .map(|text| usize::from(width) - text.trim_end().width())
+            .min()
+            .unwrap();
+        assert!(
+            left.abs_diff(right) <= 1,
+            "{} {:?} group {:?}: margins {left}/{right} at width {width}: {nonempty:#?}",
+            event.body,
+            event.kind,
+            indices
+        );
+    }
+}
+
+#[test]
+fn subagent_activity_blocks_are_centered() {
+    let events = codex_events("codex-inner/subagent.jsonl");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].calls[0].name, "SubAgentActivity");
+    for width in [200, 151, 120, 41] {
+        assert_centered_blocks(&events[0], width);
+    }
+}
+
+#[test]
+fn provider_detail_blocks_are_centered() {
+    let mut entries = Vec::new();
+    for fixture in [
+        include_str!("../../tests/fixtures/transcript.jsonl"),
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
+        include_str!("../../tests/fixtures/claude-tool-details.jsonl"),
+        include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),
+        include_str!("../../tests/fixtures/claude-peer-prompts.jsonl"),
+        include_str!("../../tests/fixtures/claude-compaction.jsonl"),
+        include_str!("../../tests/fixtures/claude-questions-pending.jsonl"),
+        include_str!("../../tests/fixtures/claude-questions-rejected.jsonl"),
+        include_str!("../../tests/fixtures/claude-task-notifications.jsonl"),
+        include_str!("../../tests/fixtures/claude-task-notification-delivery.jsonl"),
+    ] {
+        entries.extend(events(fixture));
+    }
+    for fixture in [
+        "codex-rollout.jsonl",
+        "codex-tool-calls.jsonl",
+        "codex-command-failed.jsonl",
+        "codex-inner/subagent.jsonl",
+        "codex-inner/mcp.jsonl",
+        "codex-inner/extension.jsonl",
+        "codex-inner/command.jsonl",
+        "codex-inner/file-change.jsonl",
+        "codex-inner/image-view.jsonl",
+        "codex-inner/image-generation.jsonl",
+        "codex-inner/collaboration.jsonl",
+        "codex-input/default-pending.jsonl",
+        "codex-input/default-answered.jsonl",
+        "codex-input/plan-pending.jsonl",
+        "codex-input/plan-answered.jsonl",
+    ] {
+        entries.extend(codex_events(fixture));
+    }
+    assert!(entries.len() > 30);
+    for event in entries {
+        for width in [200, 151, 120] {
+            assert_centered_blocks(&event, width);
+        }
+    }
+}
+
+#[test]
+fn centered_detail_blocks_snapshot() {
+    let mut entries = codex_events("codex-inner/subagent.jsonl");
+    entries.extend(
+        codex_events("codex-tool-calls.jsonl")
+            .into_iter()
+            .filter(|event| event.calls.iter().any(|call| call.name == "spawn_agent")),
+    );
+    entries.extend(
+        events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+            .into_iter()
+            .filter(|event| event.calls.iter().any(|call| call.name == "WebFetch")),
+    );
+    let mut snapshot = String::new();
+    for event in entries {
+        for width in [120, 200] {
+            snapshot.push_str(&format!("{} — {width} columns\n", event.body));
+            for line in layout(&event, width).lines {
+                snapshot.push_str(line.to_string().trim_end());
+                snapshot.push('\n');
+            }
+        }
+    }
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/detail_blocks_centered.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }

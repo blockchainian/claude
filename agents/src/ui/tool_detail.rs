@@ -163,16 +163,15 @@ impl Part {
         self
     }
 
-    /// Body semantics determine the reading column, independently of the caller.
-    pub fn column(&self, width: usize, wide: bool) -> Option<(usize, usize)> {
+    /// Body semantics limit wrapping; the layout centers each block by its rendered width.
+    pub fn wrap_width(&self, width: usize, wide: bool) -> Option<usize> {
         if wide
             && matches!(
                 self.body,
                 Body::Prose(_) | Body::ProseJson(_) | Body::InputFields(_)
             )
         {
-            let reading = (width / 2).max(1);
-            Some((reading, width.saturating_sub(reading) / 2))
+            Some((width / 2).max(1))
         } else {
             None
         }
