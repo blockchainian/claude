@@ -510,30 +510,23 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
 /// Build the event title and the sections of aligned input and output groups.
 pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     let label_style = super::style::log_styles(&event.kind).0;
-    let mut header = Vec::new();
+    let (left, call_title) = match event.calls.as_slice() {
+        [call] => call_title(call),
+        _ => (None, event.body.clone()),
+    };
+    let mut header = String::new();
     if let Some(sender) = &event.sender {
-        header.push(Span::styled(format!("({sender}) "), label_style));
+        header.push_str(&format!("({sender}) "));
     }
     if event.kind != Kind::Tool {
-        header.push(Span::styled(
-            super::log::kind_label(&event.kind),
-            label_style,
-        ));
+        header.push_str(super::log::kind_label(&event.kind));
     }
     if event.kind == Kind::Tool || super::log::shows_calls(event) {
         if event.kind != Kind::Tool {
-            header.push(Span::raw(" "));
+            header.push(' ');
         }
-        let title = match event.calls.as_slice() {
-            [call] => call_title(call),
-            _ => event.body.clone(),
-        };
-        header.push(Span::styled(title, label_style));
+        header.push_str(&call_title);
     }
-    let left = match event.calls.as_slice() {
-        [call] => left_details(call).0,
-        _ => None,
-    };
     let sections = if super::log::shows_calls(event) {
         parts(event)
     } else if event.kind == Kind::Tool {
@@ -557,7 +550,8 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     Detail {
         title: TitleRow {
             left,
-            title: Line::from(header),
+            title: header,
+            title_style: label_style,
             rule: false,
             time: Some(time),
             meta_style,
@@ -566,26 +560,28 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     }
 }
 
-fn call_title(call: &crate::log::ToolCall) -> String {
-    if input_label(call).is_some() {
-        crate::log::display_tool_name(&call.name)
+/// Choose both title segments for event and call rows.
+fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
+    if let Some(input) = input_label(call) {
+        (Some(crate::log::display_tool_name(&call.name)), input)
     } else {
-        call.title.clone()
+        let left = if call.name == "task-notification" {
+            Some(format!("Task {}", call.id))
+        } else {
+            call.agent.as_ref().and_then(|agent| agent.header.clone())
+        };
+        (left, call.title.clone())
     }
 }
 
-/// Choose the left slot once for both event and call titles, keeping displaced details.
-fn left_details(call: &crate::log::ToolCall) -> (Option<String>, Vec<Part>) {
+/// Keep details displaced by the title segments in the body.
+fn left_details(call: &crate::log::ToolCall, left: Option<&str>) -> Vec<Part> {
     let input = input_label(call);
     let task = (call.name == "task-notification").then(|| format!("Task {}", call.id));
     let header = call.agent.as_ref().and_then(|agent| agent.header.clone());
-    let left = input
-        .clone()
-        .or_else(|| task.clone())
-        .or_else(|| header.clone());
     let mut body = Vec::new();
     if let Some(task) = task
-        && left.as_ref() != Some(&task)
+        && left != Some(task.as_str())
     {
         body.push(Part::text(task, false));
     }
@@ -598,7 +594,7 @@ fn left_details(call: &crate::log::ToolCall) -> (Option<String>, Vec<Part>) {
             body.push(Part::text(agent.label.clone(), false));
         }
     }
-    (left, body)
+    body
 }
 
 /// One section per call; arrows are independent alignment groups.
@@ -609,10 +605,12 @@ fn parts(event: &Event) -> Vec<DetailSection> {
         .calls
         .iter()
         .map(|call| {
-            let (left, mut input) = left_details(call);
+            let (left, title) = call_title(call);
+            let mut input = left_details(call, left.as_deref());
             let title = (event.calls.len() > 1).then(|| TitleRow {
                 left,
-                title: Line::styled(call_title(call), label_style),
+                title,
+                title_style: label_style,
                 rule: input_label(call).is_none(),
                 time: call.duration.map(super::formatting::format_log_duration),
                 meta_style: Style::new().dim(),
@@ -697,7 +695,7 @@ fn input_label_field(call: &crate::log::ToolCall) -> Option<(&str, &str)> {
     })
 }
 
-/// Prefer the input description, then its name, for the left title slot.
+/// Prefer the input description, then its name, for the centered title.
 pub(super) fn input_label(call: &crate::log::ToolCall) -> Option<String> {
     input_label_field(call).map(|(_, value)| value.to_owned())
 }
@@ -916,6 +914,38 @@ mod tests {
     }
 
     #[test]
+    fn tool_descriptions_are_centered_in_single_and_merged_title_rows() {
+        let call = ToolCall {
+            agent: None,
+            id: "description-fixture".into(),
+            title: "Bash".into(),
+            name: "Bash".into(),
+            input: vec![Section::Fields(vec![(
+                "description".into(),
+                "Check the workspace".into(),
+            )])],
+            output: None,
+            exit_code: None,
+            is_error: false,
+            duration: None,
+        };
+        for count in [1, 2] {
+            let detail = detail(
+                &event(vec![call.clone(); count]),
+                String::new(),
+                Style::new(),
+            );
+            let title = if count == 1 {
+                &detail.title
+            } else {
+                detail.sections[0].title.as_ref().unwrap()
+            };
+            assert_eq!(title.title, "Check the workspace");
+            assert_eq!(title.left.as_deref(), Some("Bash"));
+        }
+    }
+
+    #[test]
     fn call_details_use_the_same_left_slot_and_keep_displaced_agent_details() {
         let mut call = ToolCall {
             agent: Some(crate::log::Agent {
@@ -951,10 +981,11 @@ mod tests {
             } else {
                 section.title.as_ref().unwrap()
             };
-            assert_eq!(title.left.as_deref(), Some("Inspect source"));
+            assert_eq!(title.left, Some(crate::log::display_tool_name("Agent")));
+            assert_eq!(title.title, "Inspect source");
             assert_eq!(
-                title.title.to_string(),
-                crate::log::display_tool_name("Agent")
+                title.title_style,
+                super::super::style::log_styles(&Kind::Tool).0
             );
             assert!(!title.rule);
             if count > 1 {
@@ -970,10 +1001,15 @@ mod tests {
             assert!(section.groups[4].parts[0].running());
         }
         call.input.clear();
-        assert_eq!(left_details(&call).0.as_deref(), Some("explore"));
-        assert_eq!(left_details(&call).1[0].source, "Explore source");
+        let (left, title) = call_title(&call);
+        assert_eq!(left.as_deref(), Some("explore"));
+        assert_eq!(title, "Inspect source");
+        assert_eq!(
+            left_details(&call, left.as_deref())[0].source,
+            "Explore source"
+        );
         call.name = "task-notification".into();
-        assert_eq!(left_details(&call).0.as_deref(), Some("Task call-id"));
+        assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id"));
     }
 
     #[test]
