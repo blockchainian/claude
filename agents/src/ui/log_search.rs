@@ -33,7 +33,6 @@ impl LogSearch {
         self.query.clear();
         self.editing = false;
         self.matches.clear();
-        self.bodies.clear();
     }
 
     fn pattern(&self) -> Pattern {

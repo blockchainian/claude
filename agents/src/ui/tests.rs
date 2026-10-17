@@ -5197,6 +5197,43 @@ mod log_search {
     }
 
     #[test]
+    fn leaving_list_search_preserves_event_and_detail_search() {
+        for mouse_exit in [false, true] {
+            let (mut view, now) = log_fixture();
+            view.select_log_event(Some(1));
+            let selected = view.visible_log_event().unwrap().clone();
+            open(&mut view);
+            for c in "files".chars() {
+                key(&mut view, KeyCode::Char(c));
+            }
+            assert_eq!(view.visible_log_event(), Some(&selected));
+            screen(&view, 120, 50);
+            let detail = view.viewport.borrow().log_detail;
+            if mouse_exit {
+                view.handle_mouse(mouse(MouseEventKind::ScrollUp, detail.x + 2, detail.y + 3));
+            } else {
+                key(&mut view, KeyCode::Esc);
+                view.mouse_focus = Panel::LogDetail;
+            }
+            assert!(!view.log_search.active());
+            assert_eq!(view.visible_log_event(), Some(&selected));
+            let area = Rect::new(0, 0, 100, 12);
+            let mut buf = Buffer::empty(area);
+            view.render_log_detail(area, &mut buf, now);
+            assert!(text(&buf).contains("I will check the files"));
+            key(&mut view, KeyCode::Char('/'));
+            for c in "files".chars() {
+                key(&mut view, KeyCode::Char(c));
+            }
+            assert!(view.log_detail_search.editing);
+            let mut buf = Buffer::empty(area);
+            view.render_log_detail(area, &mut buf, now);
+            assert!(text(&buf).contains("I will check the files"));
+            assert!(text(&buf).contains("Search › files"));
+        }
+    }
+
+    #[test]
     fn input_live_match_highlight_keep_and_escape() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let (mut view, now) = log_fixture();

@@ -126,6 +126,64 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_leaving_list_search_preserves_detail() {
+    for mouse_exit in [false, true] {
+        let (_directory, tmux, _transcript) = start_probe(if mouse_exit {
+            "search-exit-mouse"
+        } else {
+            "search-exit-escape"
+        });
+        tmux.run(&["resize-window", "-t", "probe", "-x", "120", "-y", "50"]);
+        tmux.wait_for(|capture| capture.lines().any(|line| line.matches('─').count() > 100));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = capture.lines().collect();
+        let rule = rows
+            .iter()
+            .rposition(|line| line.matches('─').count() > 100)
+            .unwrap();
+        let prompt = rows[..rule]
+            .iter()
+            .rposition(|line| line.contains('›'))
+            .unwrap();
+        tmux.mouse(64, 2, prompt + 2, false);
+        tmux.run(&["send-keys", "-t", "probe", "/"]);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
+        tmux.wait_for(|capture| capture.contains("Search › Stop"));
+        let detail = |capture: &str| {
+            capture
+                .lines()
+                .skip(rule + 1)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(detail(&before).contains("manager.mjs:125"), "{before}");
+        if !mouse_exit {
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        }
+        tmux.mouse(64, 2, rule + 3, false);
+        let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(!after.contains("Search › Stop"), "{after}");
+        assert!(
+            detail(&after).contains("manager.mjs:125"),
+            "detail lost after search exit: {after}"
+        );
+        tmux.run(&["send-keys", "-t", "probe", "/"]);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
+        tmux.wait_for(|capture| detail(capture).contains("Search › Stop"));
+        let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(detail(&searched).contains("manager.mjs:125"), "{searched}");
+        let path = std::env::temp_dir().join(format!("agents-search-exit-{mouse_exit}.txt"));
+        std::fs::write(&path, &searched).unwrap();
+        println!(
+            "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_mcp_display_names() {
     use std::io::Write;
 
