@@ -142,10 +142,59 @@ fn image_visible(screen: &str, count: usize) -> bool {
         == count
 }
 
+#[derive(Default)]
+struct SynchronizedOutput {
+    active: bool,
+}
+
+impl vt100::Callbacks for SynchronizedOutput {
+    fn unhandled_csi(
+        &mut self,
+        _: &mut vt100::Screen,
+        first: Option<u8>,
+        second: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if first == Some(b'?') && second.is_none() && params.iter().any(|param| *param == [2026]) {
+            match command {
+                'h' => self.active = true,
+                'l' => self.active = false,
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Defers screen checks until Claude finishes its synchronized redraw.
+struct OutputScreen {
+    parser: vt100::Parser<SynchronizedOutput>,
+}
+
+impl OutputScreen {
+    fn new() -> Self {
+        Self {
+            parser: vt100::Parser::new_with_callbacks(50, 200, 0, SynchronizedOutput::default()),
+        }
+    }
+
+    fn process(&mut self, bytes: &[u8]) {
+        self.parser.process(bytes);
+    }
+
+    fn contents(&self) -> String {
+        self.parser.screen().contents()
+    }
+
+    fn complete(&self) -> Option<String> {
+        (!self.parser.callbacks().active).then(|| self.contents())
+    }
+}
+
 struct Terminal {
     child: Child,
     master: File,
-    parser: vt100::Parser,
+    parser: OutputScreen,
     #[cfg(test)]
     raw: Vec<u8>,
 }
@@ -204,14 +253,14 @@ impl Terminal {
         Ok(Self {
             child,
             master,
-            parser: vt100::Parser::new(50, 200, 0),
+            parser: OutputScreen::new(),
             #[cfg(test)]
             raw: Vec::new(),
         })
     }
 
     fn screen(&self) -> String {
-        self.parser.screen().contents()
+        self.parser.contents()
     }
 
     fn unexpected(&self, reason: &str) -> io::Error {
@@ -254,14 +303,15 @@ impl Terminal {
     ) -> io::Result<()> {
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
-            let screen = self.screen();
-            if predicate(&screen) {
-                return Ok(());
-            }
-            if known_dialog(&screen)
-                && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
-            {
-                return Err(self.unexpected("Claude attach needs a response"));
+            if let Some(screen) = self.parser.complete() {
+                if predicate(&screen) {
+                    return Ok(());
+                }
+                if known_dialog(&screen)
+                    && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
+                {
+                    return Err(self.unexpected("Claude attach needs a response"));
+                }
             }
             if self.child.try_wait()?.is_some() {
                 return Err(self.unexpected("Claude attach exited"));
@@ -340,7 +390,12 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
-        if let SessionInput::Answer { ask, answer, transcript } = &input {
+        if let SessionInput::Answer {
+            ask,
+            answer,
+            transcript,
+        } = &input
+        {
             return self.answer_questions(ask, answer, transcript);
         }
         self.wait_at("initial-ready", ready)?;
@@ -513,6 +568,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn captured_question_redraw_waits_for_synchronized_output_end() {
+        let raw = include_bytes!(
+            "../../../tests/fixtures/claude-attach/ask/other-submit/two-initial.raw"
+        );
+        let end = raw
+            .windows(8)
+            .position(|bytes| bytes == b"\x1b[?2026l")
+            .unwrap();
+        for chunk_size in [1, 7, 37, 512] {
+            let mut screen = OutputScreen::new();
+            for bytes in raw[..end + 7].chunks(chunk_size) {
+                screen.process(bytes);
+            }
+            assert!(screen.contents().contains("First"));
+            assert!(screen.contents().contains("Enter to select"));
+            assert!(
+                screen.complete().is_none(),
+                "incomplete synchronized redraw accepted with {chunk_size}-byte chunks"
+            );
+            screen.process(&raw[end + 7..]);
+            let complete = screen.complete().expect("completed synchronized redraw");
+            assert!(complete.contains("First"));
+            assert!(complete.contains("Second"));
+        }
+    }
+
+    #[test]
     fn captured_queue_placeholder_accepts_another_input() {
         let screen = include_str!("../../../tests/fixtures/claude-attach/queued.screen.txt");
         let sent_text = screen
@@ -556,13 +638,13 @@ mod tests {
     #[test]
     fn captured_terminal_output_contains_ready_before_detaching() {
         let raw = include_bytes!("../../../tests/fixtures/claude-attach/attach.raw");
-        let mut parser = vt100::Parser::new(50, 200, 0);
+        let mut parser = OutputScreen::new();
         let mut saw_ready = false;
         for chunk in raw.chunks(37) {
             parser.process(chunk);
-            saw_ready |= ready(&parser.screen().contents());
+            saw_ready |= parser.complete().is_some_and(|screen| ready(&screen));
         }
-        let screen = parser.screen().contents();
+        let screen = parser.complete().expect("completed terminal output");
         assert!(
             saw_ready,
             "No empty input appeared in the real terminal capture: {screen}"

@@ -25,6 +25,10 @@ fn body(screen: &str) -> io::Result<&str> {
         .ok_or_else(mismatch)?;
     Ok(&screen[start..])
 }
+fn pending_ready(screen: &str, questions: usize) -> bool {
+    headers(screen)
+        .is_ok_and(|names| names.len() == questions && names.iter().all(|name| !name.is_empty()))
+}
 fn headers(screen: &str) -> io::Result<Vec<String>> {
     let line = body(screen)?.lines().next().ok_or_else(mismatch)?;
     Ok(line
@@ -131,11 +135,11 @@ pub(in crate::providers::claude) fn pending(
         .ok_or_else(mismatch)?;
     let mut terminal = Terminal::spawn(job_id, cwd)?;
     let result = (|| {
-        terminal.wait_allowing(|screen| body(screen).is_ok(), Some("Enter to select"))?;
+        terminal.wait_allowing(
+            |screen| pending_ready(screen, source.len()),
+            Some("Enter to select"),
+        )?;
         let names = headers(&terminal.screen())?;
-        if names.len() != source.len() {
-            return Err(mismatch());
-        }
         let mut questions = Vec::new();
         // Read each page without committing an answer. Tab only navigates; never enter review.
         for (index, value) in source.iter().enumerate() {
@@ -385,8 +389,8 @@ impl<'a> AnswerFlow<'a> {
                 if self.phase != Phase::OtherFocus || focus > other {
                     return Err(mismatch());
                 }
-                next.focus = Some(focus + 1);
-                return Ok((next, Delivery::Keys(b"\x1b[B".to_vec())));
+                next.focus = Some(other);
+                return Ok((next, Delivery::Keys(b"\x1b[B".repeat(other - focus))));
             }
             if self.phase == Phase::OtherFocus {
                 next.phase = Phase::OtherPasted;
@@ -482,7 +486,6 @@ impl Terminal {
         let mut capture_index = 0;
         while flow.phase != Phase::Done {
             self.wait_allowing(|screen| flow.next(screen).is_ok(), Some("Enter to select"))?;
-            self.read(Duration::from_millis(25))?;
             let (next, delivery) = flow.next(&self.screen())?;
             #[cfg(test)]
             if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
@@ -588,6 +591,26 @@ mod tests {
         )
     }
     #[test]
+    fn recorded_two_question_attach_waits_for_all_headers() {
+        let raw = include_bytes!(
+            "../../../tests/fixtures/claude-attach/ask/other-submit/two-initial.raw"
+        );
+        let mut parser = OutputScreen::new();
+        let mut saw_ready = false;
+        for byte in raw {
+            parser.process(&[*byte]);
+            let Some(screen) = parser.complete() else {
+                continue;
+            };
+            if pending_ready(&screen, 2) {
+                assert_eq!(headers(&screen).unwrap(), ["First", "Second"], "{screen}");
+                saw_ready = true;
+            }
+        }
+        assert!(saw_ready);
+    }
+
+    #[test]
     fn recorded_results_confirm_single_multi_two_and_other() {
         for text in [
             "Probe single choice?",
@@ -632,6 +655,39 @@ mod tests {
             assert!(focused_option(screen, &q));
             assert_eq!(checked(screen), expected);
         }
+    }
+
+    #[test]
+    fn recorded_multi_other_focus_moves_in_one_delivery() {
+        let capture =
+            include_str!("../../../tests/fixtures/claude-attach/ask/production/transcript.jsonl");
+        let (ask, _) = fixture_ask(capture, "Transport multi Other?");
+        let answer = Answer {
+            answers: BTreeMap::from([(
+                "Transport multi Other?".into(),
+                crate::ask::QuestionAnswer {
+                    answers: vec!["Red".into(), "user_note: custom multi note".into()],
+                },
+            )]),
+        };
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-attach/ask/production");
+        let mut flow = AnswerFlow::new(&ask, &answer).unwrap();
+        for index in 0..2 {
+            let screen = std::fs::read_to_string(
+                directory.join(format!("MultiOther-{index:02}.screen.txt")),
+            )
+            .unwrap();
+            flow = flow.next(&screen).unwrap().0;
+        }
+        let screen = std::fs::read_to_string(directory.join("MultiOther-02.screen.txt")).unwrap();
+        let (next, delivery) = flow.next(&screen).unwrap();
+        assert_eq!(delivery, Delivery::Keys(b"\x1b[B".repeat(3)));
+        let screen = std::fs::read_to_string(directory.join("MultiOther-05.screen.txt")).unwrap();
+        assert_eq!(
+            next.next(&screen).unwrap().1,
+            Delivery::Paste("custom multi note".into())
+        );
     }
 
     #[test]
@@ -682,9 +738,7 @@ mod tests {
                 vec![
                     Delivery::Keys(b"1".to_vec()),
                     Delivery::Keys(b"4".to_vec()),
-                    Delivery::Keys(b"\x1b[B".to_vec()),
-                    Delivery::Keys(b"\x1b[B".to_vec()),
-                    Delivery::Keys(b"\x1b[B".to_vec()),
+                    Delivery::Keys(b"\x1b[B".repeat(3)),
                     Delivery::Paste("custom multi note".into()),
                     Delivery::Keys(b"\t".to_vec()),
                     Delivery::Keys(b"\r".to_vec()),
@@ -709,7 +763,12 @@ mod tests {
                     .collect(),
             };
             let mut flow = AnswerFlow::new(&ask, &answer).unwrap();
-            for (index, expected) in expected.into_iter().enumerate() {
+            let captures: Vec<usize> = if header == "MultiOther" {
+                vec![0, 1, 2, 5, 6, 7, 8]
+            } else {
+                (0..expected.len()).collect()
+            };
+            for (index, expected) in captures.into_iter().zip(expected) {
                 let screen = std::fs::read_to_string(
                     directory.join(format!("{header}-{index:02}.screen.txt")),
                 )
