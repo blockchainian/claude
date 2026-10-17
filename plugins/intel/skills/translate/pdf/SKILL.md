@@ -1,8 +1,8 @@
 ---
 name: translate-pdf
 description: >
-  Translate an English document we print ourselves, a web page (course reading, lab handout, blog post) or a Markdown
-  note, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
+  Translate an English document we print ourselves, a web page (course reading, lab handout, blog post), a Markdown
+  note or a plain-text transcript, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
   黑体 bold, boxed code, Mermaid diagrams, MathJax math, bookmarks. Code, identifiers, math and diagram labels stay
   English; prose, headings, captions and exercise text are translated through `codex exec`. Translating from the
   source keeps structure, code blocks, exercises and images exact. Use for "/translate-pdf <url or .md>", "把这个网页
@@ -44,6 +44,9 @@ It runs the translate-epub skill's setup (poppler, uv, codex login, Chrome) and 
 ```bash
 # A Markdown note (Mermaid fences become diagrams)
 "$SKILL_DIR/scripts/translate_doc.sh" --md note.md --out ~/Documents/zh/note.pdf
+
+# A plain-text lecture transcript, one sentence per line, regrouped into paragraphs of about 150 words
+"$SKILL_DIR/scripts/translate_doc.sh" --txt lecture.txt --out ~/Documents/zh/lecture.pdf
 
 # A course page, printed as it is
 "$SKILL_DIR/scripts/translate_doc.sh" --url https://example.edu/classes/02-testing/ --out ~/Documents/zh/L02.pdf
@@ -93,6 +96,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
 - A `FAILED` line in the run's output: read the segment in `<work>/zh.rejected.json`. A sound translation the checks
   reject (a model that writes `delete()` for the source's `delete` every time) is accepted by copying it into
   `zh.json` and adding its id to `<work>/zh.accepted.json`, a JSON list the recheck skips.
+  `md2pdf.py` does not typeset TeX, so for `--md` and `--txt` rewrite any `$…$` the model added as plain text first.
 - A segment still in English: its source has prose outside code, but its `zh.json` entry has no Chinese. Function
   signatures, names and code drawn as text legitimately stay English.
 - Raw TeX in `pdftotext` output (`$x$`, `\(`, `\begin{`) on a math page means MathJax did not typeset; rerun.
