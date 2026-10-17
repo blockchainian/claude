@@ -1,4 +1,4 @@
-use super::detail_model::{DetailColumns, Group, Section, detail_columns};
+use super::detail_model::{DetailColumns, Group, Section, TitleRow, detail_columns};
 use super::formatting::{format_log_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
@@ -8,7 +8,7 @@ use chrono::{DateTime, Local, Utc};
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 pub(super) const CLOCK_WIDTH: usize = 8;
 
-/// Rows above the detail header: the top rule.
+/// Rows above the scrolling sections: the top rule.
 pub(super) const LOG_TOP: u16 = 1;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
@@ -46,7 +46,13 @@ impl View {
             });
             (
                 vec![Section {
-                    title: None,
+                    title: TitleRow {
+                        left: event.sender.clone(),
+                        title: kind_label(&event.kind).into(),
+                        title_style: super::style::log_styles(&event.kind).0,
+                        time: Some(String::new()),
+                        meta_style: Style::new().dim(),
+                    },
                     groups: vec![Group {
                         parts: vec![super::tool_detail::Part::raw_json(source)],
                     }],
@@ -190,7 +196,7 @@ impl View {
         viewport.log_jump = jump;
     }
 
-    /// Draws one log event whole: its list row's time and kind, a blank row, then the full body.
+    /// Draws the selected event as scrolling sections, including their titles and times.
     fn render_event_detail(
         &self,
         event: &Event,
@@ -202,20 +208,8 @@ impl View {
     ) {
         let list = self.center_layout(buf.area).log;
         let columns = detail_columns(area, list);
-        let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
-        let detail = super::tool_detail::detail(event, time.to_owned(), time_style);
-        let header_row = super::render::row(columns.text, LOG_TOP, 1);
-        detail.title.line(columns).0.render(header_row, buf);
-        if let Some(time) = detail.title.time {
-            Line::from(Span::styled(time, detail.title.meta_style))
-                .right_aligned()
-                .render(super::render::row(columns.time, LOG_TOP, 1), buf);
-        }
-        let mut body_area = super::render::row(
-            columns.text,
-            LOG_TOP + 2,
-            area.height.saturating_sub(LOG_TOP + 2),
-        );
+        let mut body_area =
+            super::render::row(columns.text, LOG_TOP, area.height.saturating_sub(LOG_TOP));
         if self.log_detail_search.active() {
             body_area.height = body_area.height.saturating_sub(1);
             let input = search_input_rect(area);
@@ -249,6 +243,12 @@ impl View {
                 layout
             }
         };
+        if (self.log_detail_raw || !shows_calls(event) || event.calls.len() == 1)
+            && let Some((_, span)) = layout.times.first_mut()
+        {
+            span.content = time.to_owned().into();
+            span.style = super::style::log_time_style(&event.kind, self.is_newest_shown());
+        }
         for &row in &layout.running {
             layout.lines[row]
                 .spans
@@ -358,9 +358,10 @@ impl View {
                     return true;
                 }
                 // The ellipsis maps to the hidden suffix, so these bounds cover the full row.
-                let bytes = cells.iter().map(|(_, bytes)| bytes.clone()).reduce(|a, b| {
-                    a.start.min(b.start)..a.end.max(b.end)
-                });
+                let bytes = cells
+                    .iter()
+                    .map(|(_, bytes)| bytes.clone())
+                    .reduce(|a, b| a.start.min(b.start)..a.end.max(b.end));
                 bytes.is_some_and(|bytes| {
                     !self
                         .log_detail_search
@@ -727,13 +728,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
 pub(super) fn log_content_centered(area: Rect, width: u16) -> Rect {
     let (content, _) = log_row_areas(area);
     let x = super::centering::centered_x(area, content, width);
-    Rect::new(
-        x,
-        area.y,
-        width.min(content.right().saturating_sub(x)),
-        1,
-    )
-    .intersection(area)
+    Rect::new(x, area.y, width.min(content.right().saturating_sub(x)), 1).intersection(area)
 }
 
 /// Reserves the same trailing clock column and separator for every row.
@@ -868,11 +863,8 @@ impl DetailLayout {
             for span in &mut line.spans {
                 span.style = raw.style.patch(span.style);
             }
-            line = truncate_detail_line(
-                line,
-                &mut Vec::new(),
-                usize::from(self.columns.text.width),
-            );
+            line =
+                truncate_detail_line(line, &mut Vec::new(), usize::from(self.columns.text.width));
             if raw.padding > 0 {
                 line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
             }
@@ -967,7 +959,8 @@ fn detail_parts_layout(
             }
             layout.rows.push((layout.sources.len(), Vec::new()));
         }
-        if let Some(title) = section.title {
+        {
+            let title = section.title;
             let id = layout.sources.len();
             let source = title.source();
             let (line, cells) = title.line(columns);
@@ -1012,6 +1005,7 @@ fn detail_parts_layout(
             let padding = usize::from(group_x - columns.text.x);
             if let Some(raw) = &mut layout.raw {
                 raw.padding = padding;
+                raw.row = layout.lines.len();
             }
             for (part, lines) in rendered {
                 let id = layout.sources.len();
@@ -1075,7 +1069,7 @@ pub(super) fn shows_calls(event: &Event) -> bool {
                 .any(|call| call.name == "AskUserQuestion"))
 }
 
-/// The full text an open log event shows below its header.
+/// The copied event text, including the titles separating merged tool calls.
 pub(super) fn open_text(event: &Event) -> String {
     let detail = super::tool_detail::detail(event, String::new(), Style::new().dim());
     let mut sources = Vec::new();
@@ -1083,8 +1077,8 @@ pub(super) fn open_text(event: &Event) -> String {
         if index > 0 {
             sources.push(String::new());
         }
-        if let Some(title) = section.title {
-            sources.push(title.source());
+        if shows_calls(event) && event.calls.len() > 1 {
+            sources.push(section.title.source());
         }
         for group in section.groups {
             sources.extend(group.parts.into_iter().map(|part| part.source));
@@ -1415,15 +1409,21 @@ pub(super) mod log_markdown {
             calls: Vec::new(),
         };
         assert!(event.calls.is_empty());
+        let detail = super::tool_detail::detail(event, String::new(), Style::new().dim());
+        assert_eq!(detail.sections.len(), 1);
+        assert_eq!(detail.sections[0].title.title, "finished");
         assert!(
-            super::tool_detail::detail(event, String::new(), Style::new().dim())
-                .sections
-                .is_empty()
+            detail.sections[0]
+                .groups
+                .iter()
+                .all(|group| group.parts.is_empty())
         );
         assert!(open_text(event).is_empty());
         assert_eq!(
-            detail_layout(event, 100, std::path::Path::new("/"), DateTime::UNIX_EPOCH).height,
-            0
+            detail_layout(event, 100, std::path::Path::new("/"), DateTime::UNIX_EPOCH)
+                .lines
+                .len(),
+            1
         );
     }
 
@@ -1887,11 +1887,77 @@ mod panel_detail_tests {
             Path::new("/"),
             DateTime::UNIX_EPOCH,
             vec![Section {
-                title: None,
+                title: super::tool_detail::detail(
+                    &fixture_event(),
+                    String::new(),
+                    Style::new().dim(),
+                )
+                .sections
+                .remove(0)
+                .title,
                 groups: vec![Group { parts: vec![part] }],
             }],
             raw,
         )
+    }
+
+    #[test]
+    fn section_titles_scroll_without_a_merged_event_header_or_rules() {
+        let event = fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+            .into_iter()
+            .find(|event| event.calls.len() > 1)
+            .unwrap();
+        let panel = Rect::new(0, 0, 200, 12);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 201, 12));
+        let view = View::new(Grouping::Project, false);
+        view.render_event_detail(
+            &event,
+            "12:34:56",
+            panel,
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        let row = |buffer: &Buffer, y| {
+            (0..200)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        };
+        assert!(
+            !row(&buffer, LOG_TOP).contains("12:34:56"),
+            "merged event time must not be drawn"
+        );
+        let viewport = view.viewport.borrow();
+        let layout = viewport.log_detail_layout.as_ref().unwrap();
+        let mut expected = Buffer::empty(buffer.area);
+        layout.lines[0].clone().render(
+            super::super::render::row(layout.columns.text, LOG_TOP, 1),
+            &mut expected,
+        );
+        for x in layout.columns.text.x..layout.columns.text.right() {
+            assert_eq!(
+                buffer[(x, LOG_TOP)].symbol(),
+                expected[(x, LOG_TOP)].symbol()
+            );
+        }
+        assert!(
+            layout
+                .lines
+                .iter()
+                .all(|line| !line.to_string().contains('─'))
+        );
+        drop(viewport);
+        view.viewport.borrow_mut().log_detail_scroll = 1;
+        let mut scrolled = Buffer::empty(buffer.area);
+        view.render_event_detail(
+            &event,
+            "12:34:56",
+            panel,
+            &mut scrolled,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        assert_ne!(row(&buffer, LOG_TOP), row(&scrolled, LOG_TOP));
     }
 
     #[test]
@@ -1901,18 +1967,18 @@ mod panel_detail_tests {
         for width in [200, 35] {
             let columns = columns(width);
             let layout = layout_part(columns, Part::text(source.into(), false), None);
-            assert_eq!(layout.lines.len(), 1);
-            assert_eq!(layout.lines[0].width(), usize::from(columns.text.width));
-            assert!(layout.lines[0].to_string().ends_with('…'));
-            let cells = &layout.rows[0].1;
+            assert_eq!(layout.lines.len(), 2);
+            assert_eq!(layout.lines[1].width(), usize::from(columns.text.width));
+            assert!(layout.lines[1].to_string().ends_with('…'));
+            let cells = &layout.rows[1].1;
             assert_eq!(cells.first().unwrap().0.start, 0);
             assert_eq!(cells.last().unwrap().0.end, columns.text.width);
             assert_eq!(
                 cells
                     .iter()
-                    .map(|(_, bytes)| &layout.sources[0].text[bytes.clone()])
+                    .map(|(_, bytes)| &layout.sources[1].text[bytes.clone()])
                     .collect::<String>(),
-                layout.sources[0].text.as_ref()
+                layout.sources[1].text.as_ref()
             );
         }
     }
@@ -1930,7 +1996,7 @@ mod panel_detail_tests {
             let layout = layout_part(columns, Part::prose(source.into(), false), None);
             assert!(layout.lines.len() > 1);
             let wrap_width = columns.reading_width.min(columns.text.width);
-            for (_, cells) in &layout.rows {
+            for (_, cells) in layout.rows.iter().skip(1) {
                 let start = cells.first().unwrap().0.start;
                 let end = cells.last().unwrap().0.end;
                 assert!(end - start <= wrap_width);
@@ -1939,6 +2005,7 @@ mod panel_detail_tests {
             let longest = layout
                 .rows
                 .iter()
+                .skip(1)
                 .map(|(_, cells)| cells.last().unwrap().0.end - cells.first().unwrap().0.start)
                 .max()
                 .unwrap();
@@ -1957,7 +2024,14 @@ mod panel_detail_tests {
                 Path::new("/"),
                 DateTime::UNIX_EPOCH,
                 vec![Section {
-                    title: None,
+                    title: super::tool_detail::detail(
+                        &fixture_event(),
+                        String::new(),
+                        Style::new().dim(),
+                    )
+                    .sections
+                    .remove(0)
+                    .title,
                     groups: vec![Group {
                         parts: vec![
                             Part::text(source.into(), false),
@@ -1972,6 +2046,7 @@ mod panel_detail_tests {
                 layout
                     .rows
                     .iter()
+                    .skip(1)
                     .map(|(_, cells)| columns.text.x + cells[0].0.start)
                     .collect::<Vec<_>>(),
                 vec![expected_x; 3]
@@ -1995,12 +2070,12 @@ mod panel_detail_tests {
                 style: Style::new(),
             };
             let mut layout = layout_part(columns, Part::raw_json(source.into()), Some(raw));
-            let before = layout.lines[0].to_string();
+            let before = layout.lines[1].to_string();
             let maps = layout.rows.clone();
-            layout.highlight_raw(1);
-            assert_eq!(layout.lines[0].to_string(), before);
+            layout.highlight_raw(2);
+            assert_eq!(layout.lines[1].to_string(), before);
             assert_eq!(layout.rows, maps);
-            assert_eq!(layout.lines[0].width(), usize::from(columns.text.width));
+            assert_eq!(layout.lines[1].width(), usize::from(columns.text.width));
         }
     }
 
@@ -2026,7 +2101,7 @@ mod panel_detail_tests {
                     .collect::<String>(),
                 "12:34:56"
             );
-            for y in panel.y + LOG_TOP + 2..panel.bottom() {
+            for y in panel.y + LOG_TOP + 1..panel.bottom() {
                 assert!(
                     (columns.text.right()..panel.right()).all(|x| buffer[(x, y)].symbol() == " ")
                 );
@@ -2057,7 +2132,7 @@ mod panel_detail_tests {
             assert!(!layout.times.is_empty());
             assert_eq!(layout.columns.time.right(), panel.right());
             for (row, time) in &layout.times {
-                let y = panel.y + LOG_TOP + 2 + *row as u16;
+                let y = panel.y + LOG_TOP + *row as u16;
                 let start = panel.right() - time.width() as u16;
                 assert_eq!(
                     (start..panel.right())

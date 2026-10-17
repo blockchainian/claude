@@ -174,7 +174,7 @@ impl View {
             previous_end: None,
             images: Vec::new(),
             calls: vec![crate::log::ToolCall {
-                agent: None,
+                subagent_type: None,
                 id: String::new(),
                 title: task.description,
                 name: "background".into(),
@@ -595,7 +595,7 @@ impl View {
                     viewport.log.contains(position)
                         || (detail.contains(position)
                             && self.visible_log_event().is_some()
-                            && mouse.row >= detail.y + super::log::LOG_TOP + 2)
+                            && mouse.row >= detail.y + super::log::LOG_TOP)
                         || viewport.list.contains(position)
                         || (viewport.details.contains(position)
                             && viewport

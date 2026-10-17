@@ -1,6 +1,5 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                   Assistant AskUserQuestion · 子 命 令  · cd                                               now
-
+AskUserQuestion                                         AskUserQuestion · 子 命 令  · cd                                                    now
   • 怎 么 判 断 命 令 后 面 那 个 词 是 子 命 令 ？ 比 如  `rg -n 'background' src` 里 的  background 是 搜 索 词 、 `cat README.md` 的 是 文 件 ， 光 看 形 状 分 不
   出 来 。
     • 白 名 单  (Recommended): 只 有 白 名 单 里 的 命 令 （ git、 cargo、 gh、 npm、 docker、 codex……从 真 实 日 志 里 统 计 出 来 ） 才 取 第 一 个 非 选 项 词 当 子 命

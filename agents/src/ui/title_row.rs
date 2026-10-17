@@ -26,21 +26,21 @@ impl TitleRow {
             cells.end += padding as u16;
         }
         let label = self.left_label(padding);
-        let fill = if self.rule { "─" } else { " " };
+
         let mut spans = vec![Span::styled(
-            format!("{label}{}", fill.repeat(padding - label.width())),
+            format!("{label}{}", " ".repeat(padding - label.width())),
             self.meta_style,
         )];
         let title_width = title.width();
         spans.extend(title.spans);
         spans.push(Span::styled(
-            fill.repeat(width - padding - title_width),
+            " ".repeat(width - padding - title_width),
             self.meta_style,
         ));
         (Line::from(spans), maps)
     }
 
-    /// The title's copy source, excluding metadata and generated padding or rules.
+    /// The title's copy source, excluding metadata and generated padding.
     pub fn source(&self) -> String {
         self.title.clone()
     }
@@ -67,12 +67,11 @@ mod tests {
         style::{Color, Style},
     };
 
-    fn row(title: &str, rule: bool) -> TitleRow {
+    fn row(title: &str) -> TitleRow {
         TitleRow {
             left: None,
             title: title.into(),
             title_style: Style::new().fg(Color::Blue).bold(),
-            rule,
             time: Some("12s".into()),
             meta_style: Style::new().dim(),
         }
@@ -85,22 +84,21 @@ mod tests {
     #[test]
     fn short_titles_use_the_panel_midline_in_wide_and_narrow_panels() {
         for (width, expected_x) in [(100, 58), (40, 28)] {
-            for rule in [false, true] {
-                let columns = columns(width);
-                let row = row("Bash", rule);
-                let (line, maps) = row.line(columns);
-                assert_eq!(columns.text.x + maps.first().unwrap().0.start, expected_x);
-                assert_eq!(line.width(), usize::from(columns.text.width));
-                assert!(!line.to_string().contains("12s"));
-                assert_eq!(columns.time.right(), columns.panel.right());
-                assert_eq!(columns.time.x - columns.text.right(), 2);
-                assert!(
-                    line.spans
-                        .iter()
-                        .filter(|span| span.content.contains("Bash"))
-                        .all(|span| span.style == row.title_style)
-                );
-            }
+            let columns = columns(width);
+            let row = row("Bash");
+            let (line, maps) = row.line(columns);
+            assert_eq!(columns.text.x + maps.first().unwrap().0.start, expected_x);
+            assert_eq!(line.width(), usize::from(columns.text.width));
+            assert!(!line.to_string().contains('─'));
+            assert!(!line.to_string().contains("12s"));
+            assert_eq!(columns.time.right(), columns.panel.right());
+            assert_eq!(columns.time.x - columns.text.right(), 2);
+            assert!(
+                line.spans
+                    .iter()
+                    .filter(|span| span.content.contains("Bash"))
+                    .all(|span| span.style == row.title_style)
+            );
         }
     }
 
@@ -108,26 +106,24 @@ mod tests {
     fn long_titles_move_against_the_gap_and_overflow_starts_without_padding() {
         for width in [100, 40] {
             let columns = columns(width);
-            for rule in [false, true] {
-                let row = row(&"T".repeat(usize::from(columns.text.width - 4)), rule);
-                let (_, maps) = row.line(columns);
-                assert_eq!(
-                    columns.text.x + maps.last().unwrap().0.end,
-                    columns.text.right()
-                );
-                let row = row_title_with_metadata(&"T".repeat(usize::from(width)), rule);
-                let (line, maps) = row.line(columns);
-                assert!(line.to_string().starts_with('T'));
-                assert!(line.to_string().ends_with('…'));
-                assert_eq!(maps.first().unwrap().0.start, 0);
-                assert_eq!(maps.last().unwrap().0.end, columns.text.width);
-                assert_eq!(
-                    maps.iter()
-                        .map(|(_, bytes)| &row.title[bytes.clone()])
-                        .collect::<String>(),
-                    row.title
-                );
-            }
+            let row = row(&"T".repeat(usize::from(columns.text.width - 4)));
+            let (_, maps) = row.line(columns);
+            assert_eq!(
+                columns.text.x + maps.last().unwrap().0.end,
+                columns.text.right()
+            );
+            let row = row_title_with_metadata(&"T".repeat(usize::from(width)));
+            let (line, maps) = row.line(columns);
+            assert!(line.to_string().starts_with('T'));
+            assert!(line.to_string().ends_with('…'));
+            assert_eq!(maps.first().unwrap().0.start, 0);
+            assert_eq!(maps.last().unwrap().0.end, columns.text.width);
+            assert_eq!(
+                maps.iter()
+                    .map(|(_, bytes)| &row.title[bytes.clone()])
+                    .collect::<String>(),
+                row.title
+            );
         }
     }
 
@@ -135,26 +131,25 @@ mod tests {
     fn oversized_wide_titles_start_at_text_left_and_end_at_the_gap() {
         for width in [100, 40, 39] {
             let columns = columns(width);
-            for rule in [false, true] {
-                let row = row(&"界".repeat(100), rule);
-                let (line, maps) = row.line(columns);
-                assert!(line.to_string().starts_with('界'));
-                assert!(line.to_string().ends_with('…'));
-                assert_eq!(maps.first().unwrap().0.start, 0);
-                assert_eq!(maps.last().unwrap().0.end, columns.text.width);
-                assert_eq!(line.width(), usize::from(columns.text.width));
-                assert_eq!(
-                    maps.iter()
-                        .map(|(_, bytes)| &row.title[bytes.clone()])
-                        .collect::<String>(),
-                    row.title
-                );
-            }
+            let row = row(&"界".repeat(100));
+            let (line, maps) = row.line(columns);
+            assert!(line.to_string().starts_with('界'));
+            assert!(line.to_string().ends_with('…'));
+            assert_eq!(maps.first().unwrap().0.start, 0);
+            assert_eq!(maps.last().unwrap().0.end, columns.text.width);
+            assert_eq!(line.width(), usize::from(columns.text.width));
+            assert!(!line.to_string().contains('─'));
+            assert_eq!(
+                maps.iter()
+                    .map(|(_, bytes)| &row.title[bytes.clone()])
+                    .collect::<String>(),
+                row.title
+            );
         }
     }
 
-    fn row_title_with_metadata(title: &str, rule: bool) -> TitleRow {
-        let mut row = row(title, rule);
+    fn row_title_with_metadata(title: &str) -> TitleRow {
+        let mut row = row(title);
         row.left = Some("Task very-long-metadata".into());
         row
     }
@@ -162,7 +157,7 @@ mod tests {
     #[test]
     fn metadata_fills_only_the_space_left_of_the_title() {
         let columns = columns(40);
-        let row = row_title_with_metadata("Bash", false);
+        let row = row_title_with_metadata("Bash");
         let (line, maps) = row.line(columns);
         let left_width = usize::from(maps.first().unwrap().0.start);
         assert_eq!(left_width, 18);
@@ -179,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn rules_fill_text_and_unicode_ellipsis_copies_the_hidden_suffix() {
+    fn plain_titles_fill_text_and_unicode_ellipsis_copies_the_hidden_suffix() {
         for title in [
             "Bash",
             "看探针结果",
@@ -190,9 +185,10 @@ mod tests {
         ] {
             for width in 0..=100 {
                 let columns = columns(width);
-                let row = row(title, true);
+                let row = row(title);
                 let (line, maps) = row.line(columns);
                 assert_eq!(line.width(), usize::from(columns.text.width));
+                assert!(!line.to_string().contains('─'));
                 if columns.text.width == 0 {
                     assert!(maps.is_empty());
                 } else {

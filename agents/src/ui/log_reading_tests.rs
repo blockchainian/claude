@@ -55,8 +55,8 @@ fn prose_body_kinds_use_the_log_column_width() {
         event.kind = kind;
         for width in [200, 120] {
             let drawn = layout(&event, width);
-            assert_reading_column(&drawn, 0);
-            assert_eq!(drawn.sources[0].text.as_ref(), event.body);
+            assert_reading_column(&drawn, 1);
+            assert_eq!(drawn.sources[1].text.as_ref(), event.body);
             if width == 120 {
                 assert!(
                     drawn
@@ -129,7 +129,7 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
         None
     );
     let drawn = layout(&event, 200);
-    assert_reading_column(&drawn, 0);
+    assert_reading_column(&drawn, 1);
     assert!(
         drawn
             .sources
@@ -233,11 +233,11 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
             None
         );
         let drawn = layout(&event, 200);
-        assert!(drawn.sources[0].text.contains("title: Readable task"));
-        assert!(drawn.sources[0].text.contains("sessionId: abc"));
-        assert!(drawn.sources[0].text.contains("cwd: /workspace"));
-        assert_reading_column(&drawn, 0);
+        assert!(drawn.sources[1].text.contains("title: Readable task"));
+        assert!(drawn.sources[1].text.contains("sessionId: abc"));
+        assert!(drawn.sources[1].text.contains("cwd: /workspace"));
         assert_reading_column(&drawn, 1);
+        assert_reading_column(&drawn, 2);
         assert!(
             drawn
                 .sources
@@ -348,7 +348,7 @@ fn merged_calls_keep_descriptions_in_title_bars() {
         .clone();
     event.calls = vec![call.clone(), call];
     let detail = super::super::tool_detail::detail(&event, String::new(), Style::new().dim());
-    let title = detail.sections[0].title.as_ref().unwrap();
+    let title = &detail.sections[0].title;
     assert_eq!(
         title.source(),
         super::super::tool_detail::input_label(&event.calls[0]).unwrap()
@@ -405,7 +405,7 @@ fn assert_centered_blocks(event: &Event, width: u16) {
     let cap = usize::from(drawn.columns.text.width);
     let mut id = 0;
     for section in detail.sections {
-        id += usize::from(section.title.is_some());
+        id += 1;
         for group in section.groups {
             let start = id;
             id += group.parts.len();
@@ -571,7 +571,11 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
         Some("实测 attach 发提示词")
     );
     let body = body_parts(event);
-    assert!(body.iter().any(|part| part.source == "name: attach-probe"));
+    assert!(
+        !body
+            .iter()
+            .any(|part| part.source.contains("name: attach-probe"))
+    );
     assert!(
         !body
             .iter()
@@ -732,10 +736,12 @@ fn equal_reading_width_wraps_prose_identically_in_wide_and_narrow_panels() {
         narrow
             .lines
             .iter()
+            .skip(1)
             .map(|line| line.to_string().trim_start().to_owned())
             .collect::<Vec<_>>(),
         wide.lines
             .iter()
+            .skip(1)
             .map(|line| line.to_string().trim_start().to_owned())
             .collect::<Vec<_>>(),
     );

@@ -39,7 +39,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -57,7 +57,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "Read-fixture".into(),
             title: "Read".into(),
             name: "Read".into(),

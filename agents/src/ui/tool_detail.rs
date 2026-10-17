@@ -514,30 +514,15 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
     printer.lines
 }
 
-/// Build the event title and the sections of aligned input and output groups.
+/// Build one titled section per message or tool call.
 pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
-    let label_style = super::style::log_styles(&event.kind).0;
-    let (left, call_title) = match event.calls.as_slice() {
-        [call] => call_title(call),
-        _ => (None, event.body.clone()),
-    };
-    let mut header = String::new();
-    if let Some(sender) = &event.sender {
-        header.push_str(&format!("({sender}) "));
-    }
-    if event.kind != Kind::Tool {
-        header.push_str(super::log::kind_label(&event.kind));
-    }
-    if event.kind == Kind::Tool || super::log::shows_calls(event) {
-        if event.kind != Kind::Tool {
-            header.push(' ');
-        }
-        header.push_str(&call_title);
-    }
     let sections = if super::log::shows_calls(event) {
-        parts(event)
-    } else if event.kind == Kind::Tool {
-        Vec::new()
+        let mut sections = parts(event);
+        if let [section] = sections.as_mut_slice() {
+            section.title.time = Some(time);
+            section.title.meta_style = meta_style;
+        }
+        sections
     } else {
         let parts = if matches!(
             event.kind,
@@ -546,62 +531,42 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
             vec![Part::prose(event.body.clone(), true)]
         } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
             Part::prose_parts(event.body.clone(), false)
+        } else if event.kind == Kind::Tool {
+            Vec::new()
         } else {
             Part::text_parts(event.body.clone(), false)
         };
         vec![DetailSection {
-            title: None,
+            title: TitleRow {
+                left: event.sender.clone(),
+                title: if event.kind == Kind::Tool {
+                    event.body.clone()
+                } else {
+                    super::log::kind_label(&event.kind).into()
+                },
+                title_style: super::style::log_styles(&event.kind).0,
+                time: Some(time),
+                meta_style,
+            },
             groups: vec![Group { parts }],
         }]
     };
-    Detail {
-        title: TitleRow {
-            left,
-            title: header,
-            title_style: label_style,
-            rule: false,
-            time: Some(time),
-            meta_style,
-        },
-        sections,
-    }
+    Detail { sections }
 }
 
-/// Choose both title segments for event and call rows.
+/// Choose the tool section's metadata and centered title together.
 fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
-    if let Some(input) = input_label(call) {
-        (Some(crate::log::display_tool_name(&call.name)), input)
+    let left = if call.name == "task-notification" {
+        format!("Task {}", call.id)
     } else {
-        let left = if call.name == "task-notification" {
-            Some(format!("Task {}", call.id))
-        } else {
-            call.agent.as_ref().and_then(|agent| agent.header.clone())
-        };
-        (left, call.title.clone())
-    }
-}
-
-/// Keep details displaced by the title segments in the body.
-fn left_details(call: &crate::log::ToolCall, left: Option<&str>) -> Vec<Part> {
-    let input = input_label(call);
-    let task = (call.name == "task-notification").then(|| format!("Task {}", call.id));
-    let header = call.agent.as_ref().and_then(|agent| agent.header.clone());
-    let mut body = Vec::new();
-    if let Some(task) = task
-        && left != Some(task.as_str())
-    {
-        body.push(Part::text(task, false));
-    }
-    if let Some(agent) = &call.agent {
-        if input.is_some() {
-            if let Some(header) = header {
-                body.push(Part::text(header, false));
-            }
-        } else {
-            body.push(Part::text(agent.label.clone(), false));
-        }
-    }
-    body
+        call.subagent_type
+            .clone()
+            .unwrap_or_else(|| crate::log::display_tool_name(&call.name))
+    };
+    (
+        Some(left),
+        input_label(call).unwrap_or_else(|| call.title.clone()),
+    )
 }
 
 /// One section per call; arrows are independent alignment groups.
@@ -613,22 +578,22 @@ fn parts(event: &Event) -> Vec<DetailSection> {
         .iter()
         .map(|call| {
             let (left, title) = call_title(call);
-            let mut input = left_details(call, left.as_deref());
-            let title = (event.calls.len() > 1).then(|| TitleRow {
+            let mut input = Vec::new();
+            let title = TitleRow {
                 left,
                 title,
                 title_style: label_style,
-                rule: input_label(call).is_none(),
                 time: call.duration.map(super::formatting::format_log_duration),
                 meta_style: Style::new().dim(),
-            });
-            let label_key = input_label_field(call).map(|(key, _)| key);
+            };
             for section in &call.input {
                 if let Section::Fields(fields) = section {
                     let body = Section::Fields(
                         fields
                             .iter()
-                            .filter(|(key, _)| Some(key.as_str()) != label_key)
+                            .filter(|(key, _)| {
+                                !matches!(key.as_str(), "name" | "description" | "subagent_type")
+                            })
                             .cloned()
                             .collect(),
                     );
@@ -921,9 +886,41 @@ mod tests {
     }
 
     #[test]
+    fn section_titles_cover_single_tools_and_messages() {
+        let parsed = crate::providers::claude::log::tail(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-agent-display.jsonl"),
+            100,
+        )
+        .unwrap();
+        for source in parsed.iter().filter(|event| !event.calls.is_empty()) {
+            let mut event = source.clone();
+            event.calls.truncate(1);
+            let detail = detail(&event, "event time".into(), Style::new().dim());
+            let title = &detail.sections[0].title;
+            assert_eq!(title.time.as_deref(), Some("event time"));
+            let body: Vec<_> = detail.sections[0]
+                .groups
+                .iter()
+                .flat_map(|group| &group.parts)
+                .map(|part| part.source.as_str())
+                .collect();
+            assert!(!body.contains(&title.left.as_deref().unwrap()));
+        }
+        let mut message = event(vec![]);
+        message.kind = Kind::Assistant;
+        message.sender = Some("peer".into());
+        let detail = detail(&message, "event time".into(), Style::new().dim());
+        let title = &detail.sections[0].title;
+        assert_eq!(title.left.as_deref(), Some("peer"));
+        assert_eq!(title.title, "Assistant");
+        assert_eq!(title.time.as_deref(), Some("event time"));
+    }
+
+    #[test]
     fn tool_descriptions_are_centered_in_single_and_merged_title_rows() {
         let call = ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "description-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -942,28 +939,23 @@ mod tests {
                 String::new(),
                 Style::new(),
             );
-            let title = if count == 1 {
-                &detail.title
-            } else {
-                detail.sections[0].title.as_ref().unwrap()
-            };
+            let title = &detail.sections[0].title;
             assert_eq!(title.title, "Check the workspace");
             assert_eq!(title.left.as_deref(), Some("Bash"));
         }
     }
 
     #[test]
-    fn call_details_use_the_same_left_slot_and_keep_displaced_agent_details() {
+    fn call_titles_keep_type_and_labels_out_of_the_body() {
         let mut call = ToolCall {
-            agent: Some(crate::log::Agent {
-                label: "Explore source".into(),
-                header: Some("explore".into()),
-            }),
+            subagent_type: Some("general-purpose".into()),
             id: "call-id".into(),
-            title: "Inspect source".into(),
+            title: "Agent".into(),
             name: "Agent".into(),
             input: vec![Section::Fields(vec![
                 ("description".into(), "Inspect source".into()),
+                ("name".into(), "source-reader".into()),
+                ("subagent_type".into(), "general-purpose".into()),
                 ("prompt".into(), "Find the entry".into()),
             ])],
             output: None,
@@ -972,51 +964,46 @@ mod tests {
             duration: Some(chrono::Duration::seconds(12)),
         };
         for count in [1, 2] {
-            let meta_style = Style::new().italic();
             let detail = detail(
                 &event(vec![call.clone(); count]),
                 "10:11:12".into(),
-                meta_style,
+                Style::new().dim(),
             );
-            assert_eq!(detail.title.time.as_deref(), Some("10:11:12"));
-            assert_eq!(detail.title.meta_style, meta_style);
-            assert!(!detail.title.rule);
-            let section = &detail.sections[0];
-            let title = if count == 1 {
-                assert!(section.title.is_none());
-                &detail.title
-            } else {
-                section.title.as_ref().unwrap()
-            };
-            assert_eq!(title.left, Some(crate::log::display_tool_name("Agent")));
-            assert_eq!(title.title, "Inspect source");
-            assert_eq!(
-                title.title_style,
-                super::super::style::log_styles(&Kind::Tool).0
-            );
-            assert!(!title.rule);
-            if count > 1 {
-                assert_eq!(title.time.as_deref(), Some("12s"));
+            assert_eq!(detail.sections.len(), count);
+            for section in &detail.sections {
+                let title = &section.title;
+                assert_eq!(title.left.as_deref(), Some("general-purpose"));
+                assert_eq!(title.title, "Inspect source");
+                assert_eq!(
+                    title.time.as_deref(),
+                    Some(if count == 1 { "10:11:12" } else { "12s" })
+                );
+                assert_eq!(
+                    title.title_style,
+                    super::super::style::log_styles(&Kind::Tool).0
+                );
                 assert_eq!(title.meta_style, Style::new().dim());
+                assert_eq!(section.groups.len(), 5);
+                assert_eq!(section.groups[0].parts.len(), 1);
+                assert_eq!(section.groups[0].parts[0].source, "Find the entry");
+                assert!(matches!(section.groups[1].parts[0].body, Body::Arrow));
+                assert_eq!(section.groups[2].parts[0].source, "exit code: 1");
+                assert!(matches!(section.groups[3].parts[0].body, Body::Arrow));
+                assert!(section.groups[4].parts[0].running());
             }
-            assert_eq!(section.groups.len(), 5);
-            assert_eq!(section.groups[0].parts[0].source, "explore");
-            assert_eq!(section.groups[0].parts[1].source, "Find the entry");
-            assert!(matches!(section.groups[1].parts[0].body, Body::Arrow));
-            assert_eq!(section.groups[2].parts[0].source, "exit code: 1");
-            assert!(matches!(section.groups[3].parts[0].body, Body::Arrow));
-            assert!(section.groups[4].parts[0].running());
         }
+        call.input = vec![Section::Fields(vec![(
+            "name".into(),
+            "source-reader".into(),
+        )])];
+        assert_eq!(call_title(&call).1, "source-reader");
         call.input.clear();
-        let (left, title) = call_title(&call);
-        assert_eq!(left.as_deref(), Some("explore"));
-        assert_eq!(title, "Inspect source");
-        assert_eq!(
-            left_details(&call, left.as_deref())[0].source,
-            "Explore source"
-        );
+        assert_eq!(call_title(&call).1, "Agent");
         call.name = "task-notification".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id"));
+        call.name = "Read".into();
+        call.subagent_type = None;
+        assert_eq!(call_title(&call).0.as_deref(), Some("Read"));
     }
 
     #[test]
@@ -1038,19 +1025,22 @@ mod tests {
             event.sender = Some("peer".into());
             event.body = "before {\"ok\":true} after".into();
             let detail = detail(&event, "event time".into(), Style::new().dim());
-            assert_eq!(detail.title.time.as_deref(), Some("event time"));
-            let expected = if kind == Kind::Tool {
-                format!("(peer) {}", event.body)
-            } else {
-                format!("(peer) {}", super::super::log::kind_label(&kind))
-            };
-            assert_eq!(detail.title.title.to_string(), expected);
+            assert_eq!(detail.sections.len(), 1);
+            let title = &detail.sections[0].title;
+            assert_eq!(title.time.as_deref(), Some("event time"));
+            assert_eq!(title.left.as_deref(), Some("peer"));
+            assert_eq!(
+                title.title,
+                if kind == Kind::Tool {
+                    event.body.as_str()
+                } else {
+                    super::super::log::kind_label(&kind)
+                }
+            );
             if kind == Kind::Tool {
-                assert!(detail.sections.is_empty());
+                assert!(detail.sections[0].groups[0].parts.is_empty());
                 continue;
             }
-            assert_eq!(detail.sections.len(), 1);
-            assert!(detail.sections[0].title.is_none());
             assert_eq!(detail.sections[0].groups.len(), 1);
             let parts = &detail.sections[0].groups[0].parts;
             if matches!(
@@ -1103,7 +1093,7 @@ mod tests {
     #[test]
     fn running_part_has_no_copy_source_or_selectable_cells() {
         let parts = flattened_parts(&event(vec![ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "running-copy".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -1580,7 +1570,7 @@ mod tests {
     fn merged_calls_keep_separate_sections_and_groups() {
         let sections = parts(&event(vec![
             ToolCall {
-                agent: None,
+                subagent_type: None,
                 id: "Bash-fixture".into(),
                 title: "Bash".into(),
                 name: "Bash".into(),
@@ -1598,7 +1588,7 @@ mod tests {
                 duration: None,
             },
             ToolCall {
-                agent: None,
+                subagent_type: None,
                 id: "Read-fixture".into(),
                 title: "Read".into(),
                 name: "Read".into(),
@@ -1614,8 +1604,8 @@ mod tests {
         ]));
         assert_eq!(sections.len(), 2);
         for (section, title) in sections.iter().zip(["Bash", "Read"]) {
-            assert_eq!(section.title.as_ref().unwrap().title.to_string(), title);
-            assert!(section.title.as_ref().unwrap().rule);
+            assert_eq!(section.title.title.to_string(), title);
+            assert_eq!(section.title.left.as_deref(), Some(title));
             assert_eq!(section.groups.len(), 3);
             assert!(matches!(section.groups[1].parts[0].body, Body::Arrow));
         }
@@ -1657,7 +1647,7 @@ mod tests {
         for count in [1, 2] {
             let calls = vec![
                 ToolCall {
-                    agent: None,
+                    subagent_type: None,
                     id: "arrow-fixture".into(),
                     title: "Run checks".into(),
                     name: "Bash".into(),
@@ -1686,7 +1676,7 @@ mod tests {
     #[test]
     fn wide_code_and_diff_keep_logical_lines() {
         let parts = flattened_parts(&event(vec![ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "Edit-fixture".into(),
             title: "Edit".into(),
             name: "Edit".into(),
@@ -1721,7 +1711,7 @@ mod tests {
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
         let parts = flattened_parts(&event(vec![ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),

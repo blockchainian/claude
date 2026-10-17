@@ -155,7 +155,7 @@ fn start_detail_header(width: u16) -> (String, String, super::super::detail_mode
         .to_owned();
     let body = rendered
         .lines()
-        .skip(usize::from(detail.y + 3))
+        .skip(usize::from(detail.y + 2))
         .collect::<Vec<_>>()
         .join("\n");
     (header, body, columns)
@@ -281,7 +281,7 @@ fn detail_without_description_centers_tool_in_both_modes() {
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
         let title = "codex-manager detach";
         assert_eq!(
-            header[..header.find(title).unwrap()].width(),
+            header[..header.rfind(title).unwrap()].width(),
             usize::from(super::super::centering::centered_x(
                 columns.panel,
                 columns.text,
@@ -291,7 +291,7 @@ fn detail_without_description_centers_tool_in_both_modes() {
         assert!(
             screen
                 .lines()
-                .skip(usize::from(detail.y + 3))
+                .skip(usize::from(detail.y + 2))
                 .any(|line| line.contains("threadId: 01a1489e"))
         );
     }
@@ -331,7 +331,7 @@ fn detail_event_and_tool_times_share_the_list_clock_column() {
         let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
         let mut id = 0;
         for section in &detail.sections {
-            let title = section.title.as_ref().unwrap();
+            let title = &section.title;
             let source = &viewport.log_text.sources[id];
             assert_eq!(source.text.as_ref(), title.source());
             id += 1 + section

@@ -1,4 +1,4 @@
-//! The open log event as the detail panel lays it out: a title row, then sections of
+//! The open log event as the detail panel lays it out: sections with title rows and
 //! aligned groups of parts, drawn left of a time column at the panel's right edge.
 
 use super::tool_detail::Part;
@@ -31,22 +31,20 @@ pub(super) fn detail_columns(panel: Rect, list: Rect) -> DetailColumns {
 }
 
 /// A title row: an optional left label, a title centered on the panel's midline, and an
-/// optional time in the time column. Events and merged tool calls both use it.
+/// optional time in the time column. Every section uses it.
 pub(super) struct TitleRow {
     pub left: Option<String>,
     pub title: String,
     /// The style of the centered title.
     pub title_style: Style,
-    /// Draw the title between dim rules instead of as plain text.
-    pub rule: bool,
     pub time: Option<String>,
     /// The style of the left label and the time.
     pub meta_style: Style,
 }
 
-/// One message, or one tool call with its title row when the event merges several calls.
+/// One message or tool call, with its title and aligned body groups.
 pub(super) struct Section {
-    pub title: Option<TitleRow>,
+    pub title: TitleRow,
     pub groups: Vec<Group>,
 }
 
@@ -55,8 +53,7 @@ pub(super) struct Group {
     pub parts: Vec<Part>,
 }
 
-/// An open log event: its title row and its sections.
+/// An open log event as a sequence of sections.
 pub(super) struct Detail {
-    pub title: TitleRow,
     pub sections: Vec<Section>,
 }

@@ -31,17 +31,17 @@ fn ask_question_titles_include_all_headers_in_list_and_detail() {
         assert!(log::shows_calls(&event));
         let (mut view, now) = log_fixture();
         view.set_log(vec![event.clone()]);
-        view.select_fixture_event(Some(event));
+        view.select_fixture_event(Some(event.clone()));
         let screen = log_screen(&view, 180, 60, now);
         let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
         let title: String = title.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(compact.matches(&title).count() >= 2, "{screen}");
-        if fixture == REJECTED {
-            assert!(
-                compact.contains("ErrorAskUserQuestion·压缩摘要"),
-                "{screen}"
-            );
-        }
+        let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
+        assert_eq!(
+            detail.sections[0].title.left.as_deref(),
+            Some("AskUserQuestion")
+        );
+        assert_eq!(detail.sections[0].title.title, event.calls[0].title);
     }
 }
 
@@ -75,7 +75,16 @@ fn ask_question_input_is_a_copyable_bullet_list() {
             view.render_log_detail(area, &mut buf, now);
             let viewport = view.viewport.borrow();
             let region = &viewport.log_text;
-            let rows: Vec<_> = region.rows.iter().filter(|row| row.segment == 0).collect();
+            let source = region
+                .sources
+                .iter()
+                .find(|source| source.text.as_ref() == expected)
+                .unwrap();
+            let rows: Vec<_> = region
+                .rows
+                .iter()
+                .filter(|row| row.segment == source.id)
+                .collect();
             assert!(!rows.is_empty());
             for row in rows {
                 for (columns, bytes) in &row.cells {
@@ -181,7 +190,7 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
                     .all(|(cells, _)| cells.end <= columns.text.width)
             );
         }
-        assert_eq!(region.sources[0].text.as_ref(), parts[0].source);
+        assert_eq!(region.sources[1].text.as_ref(), parts[0].source);
         drop(viewport);
         let screen = log_screen(&view, 180, 70, now);
         assert_eq!(

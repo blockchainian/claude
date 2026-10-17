@@ -758,7 +758,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     });
     crate::log::include_description(&mut sections, input);
     ToolCall {
-        agent: None,
+        subagent_type: None,
         id: String::new(),
         title: tool_title(name, input),
         name: name.to_owned(),
@@ -771,35 +771,6 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
 }
 
 impl Log {
-    fn agent_model(&self, input: &serde_json::Value, result: Option<&ResultAt>) -> Option<String> {
-        let value = result.map(|result| &result.value);
-        let child = self
-            .path
-            .as_ref()
-            .zip(value.and_then(|v| input_text(v, "agentId")))
-            .filter(|(_, id)| id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
-            .map(|(path, id)| {
-                path.with_extension("")
-                    .join("subagents")
-                    .join(format!("agent-{id}.jsonl"))
-            });
-        let summary = child.as_ref().and_then(|path| {
-            let len = std::fs::metadata(path).ok()?.len();
-            super::transcript::read_subagent_cached(path, len, None).ok()
-        });
-        let model = value
-            .and_then(|v| input_text(v, "resolvedModel"))
-            .or_else(|| input_text(input, "model"))
-            .or_else(|| summary.as_ref().and_then(|s| s.model.as_deref()))?;
-        Some(
-            summary
-                .as_ref()
-                .and_then(|s| s.model_identities.get(model))
-                .cloned()
-                .unwrap_or_else(|| model.to_owned()),
-        )
-    }
-
     fn source_records(&self) -> Vec<crate::log::SourceRecord> {
         self.path
             .as_ref()
@@ -1036,7 +1007,7 @@ impl Log {
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
-                agent: None,
+                subagent_type: None,
                 id: field("task-id").unwrap_or("").to_owned(),
                 title: summary.to_owned(),
                 name: "task-notification".to_owned(),
@@ -1187,16 +1158,7 @@ impl Log {
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
         if name == "Agent" {
-            let kind = input_text(input, "subagent_type");
-            let header = if kind == Some("general-purpose") {
-                self.agent_model(input, result)
-            } else {
-                kind.map(str::to_owned)
-            };
-            detail.agent = Some(crate::log::Agent {
-                label: tool_detail(name, input),
-                header,
-            });
+            detail.subagent_type = input_text(input, "subagent_type").map(str::to_owned);
         }
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
@@ -1664,51 +1626,23 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn agent_model_uses_recorded_child_identity_without_an_input_model() {
+    fn agent_subagent_type_preserves_input_including_general_purpose() {
         let fixture =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-display.jsonl");
-        let mut records: Vec<Value> = std::fs::read_to_string(&fixture)
-            .unwrap()
-            .lines()
-            .take(2)
-            .map(|line| serde_json::from_str(line).unwrap())
+        let events = tail(&fixture, 10).unwrap();
+        let types: Vec<_> = events
+            .iter()
+            .flat_map(|event| &event.calls)
+            .map(|call| call.subagent_type.as_deref())
             .collect();
-        records[0]["message"]["content"][0]["input"]
-            .as_object_mut()
-            .unwrap()
-            .remove("model");
-        records[1]["toolUseResult"]
-            .as_object_mut()
-            .unwrap()
-            .remove("resolvedModel");
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("session.jsonl");
-        let child = directory.path().join("session/subagents");
-        std::fs::create_dir_all(&child).unwrap();
-        let id = records[1]["toolUseResult"]["agentId"].as_str().unwrap();
-        let filename = format!("agent-{id}.jsonl");
-        std::fs::copy(
-            fixture.with_extension("").join("subagents").join(&filename),
-            child.join(&filename),
-        )
-        .unwrap();
-        std::fs::write(
-            &path,
-            records
-                .iter()
-                .map(Value::to_string)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-        .unwrap();
-        let events = tail(&path, 10).unwrap();
         assert_eq!(
-            events[0].calls[0].agent.as_ref().unwrap().header.as_deref(),
-            Some("Sonnet 5.5")
+            types,
+            [
+                Some("general-purpose"),
+                Some("fork"),
+                Some("feature:ux-implementer")
+            ]
         );
-        std::fs::remove_file(child.join(filename)).unwrap();
-        let events = tail(&path, 10).unwrap();
-        assert_eq!(events[0].calls[0].agent.as_ref().unwrap().header, None);
     }
 
     #[test]

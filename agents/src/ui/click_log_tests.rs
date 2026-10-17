@@ -104,7 +104,7 @@ fn detail_centers_multiline_sections_and_arrow_on_panel_midline() {
         assert_eq!(
             buf[(
                 super::super::centering::centered_x(columns.panel, columns.text, 1),
-                region.area.y + 2
+                region.area.y + 3
             )]
                 .symbol(),
             "↓"
@@ -163,7 +163,7 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             region
                 .rows
                 .iter()
-                .filter(|row| row.segment >= output_start)
+                .filter(|row| row.segment > output_start)
                 .count(),
             output_parts
                 .iter()
@@ -176,8 +176,8 @@ fn detail_centers_all_output_fragments_with_one_offset() {
                     .len())
                 .sum::<usize>(),
         );
-        for row in region.rows.iter().filter(|row| row.segment >= output_start) {
-            let part = &parts[row.segment];
+        for row in region.rows.iter().filter(|row| row.segment > output_start) {
+            let part = &parts[row.segment - 1];
             let rows: Vec<_> = region
                 .rows
                 .iter()
@@ -658,13 +658,19 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
                 Rect::new(2, 1, width, 40),
                 view.center_layout(actual.area).log,
             );
-            let body = Rect::new(columns.text.x, 4, columns.text.width, 37);
+            let title_rows = usize::from(scroll == 0);
+            let body = Rect::new(
+                columns.text.x,
+                2 + title_rows as u16,
+                columns.text.width,
+                39 - title_rows as u16,
+            );
             let mut reference = Buffer::empty(actual.area);
             Paragraph::new(
                 expected
                     .iter()
-                    .skip(scroll)
-                    .take(37)
+                    .skip(scroll.saturating_sub(1))
+                    .take(usize::from(body.height))
                     .cloned()
                     .collect::<Vec<_>>(),
             )
@@ -702,7 +708,7 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
         .iter()
         .find(|row| row.contains("codex-manager detach"))
         .expect("detail must retain the log-list tool title");
-    let left = title.find("codex-manager detach").unwrap();
+    let left = title.rfind("codex-manager detach").unwrap();
     let viewport = view.viewport.borrow();
     let columns = super::super::detail_model::detail_columns(
         viewport.log_detail,

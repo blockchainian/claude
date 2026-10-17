@@ -3535,21 +3535,14 @@ fn background_box_dims_title_rule_but_not_output() {
     let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
     let columns = super::detail_model::detail_columns(title_buf.area, title_buf.area);
-    (&detail.sections[0].title.as_ref().unwrap().line(columns).0)
-        .render(title_buf.area, &mut title_buf);
+    (&detail.sections[0].title.line(columns).0).render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
         .find(|x| title_buf[(*x, 0)].symbol() == "R")
         .unwrap();
     assert_eq!(title_buf[(0, 0)].modifier, buf[(0, top)].modifier);
     assert_eq!(
         title_buf[(title_x, 0)].fg,
-        detail.sections[0]
-            .title
-            .as_ref()
-            .unwrap()
-            .title_style
-            .fg
-            .unwrap()
+        detail.sections[0].title.title_style.fg.unwrap()
     );
     assert_eq!(buf[(0, top + 1)].symbol(), "t");
     assert!(!buf[(0, top + 1)].modifier.contains(Modifier::DIM));
@@ -6728,7 +6721,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -6746,7 +6739,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
-            agent: None,
+            subagent_type: None,
             id: "Read-fixture".into(),
             title: "Read".into(),
             name: "Read".into(),
@@ -6781,7 +6774,7 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
-fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
+fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
     for (width, title) in [
         (100, "Bash"),
         (99, "看探针结果"),
@@ -6822,10 +6815,10 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                 super::centering::centered_x(panel, body, end - start)
             );
             if start > 1 {
-                assert_eq!(buf[(body.x + start - 2, row.y)].symbol(), "─");
+                assert_ne!(buf[(body.x + start - 2, row.y)].symbol(), "─");
             }
             if end < body.width - 1 {
-                let last = "─";
+                let last = " ";
                 assert_eq!(buf[(body.right() - 1, row.y)].symbol(), last);
             }
             if title != "Read" {
@@ -7590,7 +7583,13 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
             label: "Copied assistant message".into()
         })
     );
-    assert_eq!(double_click_text(&mut view, &open, "Assistant"), None);
+    assert_eq!(
+        double_click_text(&mut view, &open, "Assistant"),
+        Some(Action::Copy {
+            text: body.into(),
+            label: "Copied assistant message".into()
+        })
+    );
 }
 
 #[test]
@@ -7817,7 +7816,7 @@ fn review_cached_layout_shares_source_bytes() {
 }
 
 #[test]
-fn open_tool_layout_titles_and_rules() {
+fn open_tool_layout_titles_and_arrows() {
     let (mut view, now) = open_tool_fixture();
     view.log[7].calls.truncate(1);
     view.log[7].calls[0].title = "Run tests".into();
@@ -7825,7 +7824,9 @@ fn open_tool_layout_titles_and_rules() {
     let open = log_screen(&view, 100, 48, now);
     assert!(
         open.lines()
-            .any(|line| line.trim_start().starts_with("Run tests") && line.ends_with("35s")),
+            .any(|line| line.trim_start().starts_with("Bash")
+                && line.contains("Run tests")
+                && line.ends_with("35s")),
         "{open}"
     );
     assert!(
@@ -7926,12 +7927,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         true,
     )
     .unwrap();
-    for (name, title) in [
-        ("Bash", "改到持久目录"),
-        ("Agent", "Agent"),
-        ("Skill", "secrets:secrets-manager"),
-        ("SendMessage", "To "),
-    ] {
+    for name in ["Bash", "Agent", "Skill", "SendMessage"] {
         let event = calls
             .iter()
             .chain(&messages)
@@ -7940,45 +7936,30 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         let call = event.calls.iter().find(|call| call.name == name).unwrap();
         let mut event = event.clone();
         event.calls = vec![call.clone()];
-        let (mut view, now) = log_fixture();
-        view.select_fixture_event(Some(event.clone()));
-        let open = log_screen(&view, 120, 48, now);
-        let header = open
-            .lines()
-            .skip(usize::from(view.viewport.borrow().log_detail.y))
-            .find(|line| line.replace(' ', "").contains(&title.replace(' ', "")))
-            .unwrap_or_else(|| panic!("{name}: {open}"));
-        assert!(!header.contains(" Tool "), "{header}");
-        if super::tool_detail::input_label(call).is_some() {
-            assert!(
-                header.contains(&crate::log::display_tool_name(&call.name)),
-                "{header}"
-            );
-        } else {
-            assert!(
-                header
-                    .replace(' ', "")
-                    .starts_with(&call.title.replace(' ', ""))
-            );
-        }
-        for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
+        let title = super::tool_detail::input_label(call).unwrap_or_else(|| call.title.clone());
+        let left = call
+            .subagent_type
+            .clone()
+            .unwrap_or_else(|| crate::log::display_tool_name(&call.name));
+        for kind in [
+            crate::log::Kind::Tool,
+            crate::log::Kind::Error,
+            crate::log::Kind::Denied,
+        ] {
             event.kind = kind;
+            let (mut view, now) = log_fixture();
             view.select_fixture_event(Some(event.clone()));
             let open = log_screen(&view, 120, 48, now);
+            let header = open
+                .lines()
+                .nth(usize::from(view.viewport.borrow().log_detail.y + 1))
+                .unwrap();
+            assert!(header.contains(&left), "{name}: {open}");
             assert!(
-                open.lines()
-                    .any(|line| line.replace(' ', "").contains(&format!(
-                        "{}{}",
-                        super::log::kind_label(&event.kind),
-                        if super::tool_detail::input_label(call).is_some() {
-                            super::tool_detail::input_label(call)
-                                .unwrap()
-                                .replace(' ', "")
-                        } else {
-                            call.title.replace(' ', "")
-                        }
-                    )))
+                header.replace(' ', "").contains(&title.replace(' ', "")),
+                "{name}: {open}"
             );
+            assert!(!header.contains('─'), "{header}");
         }
     }
 }
@@ -8480,16 +8461,16 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
         }
         let mut later = event.clone();
         later.started_at = now;
-        view.log = vec![event.clone(), later];
+        view.set_log(vec![event.clone(), later]);
         view.select_fixture_event(Some(event));
         let rendered = log_screen(&view, 160, 25, now);
-        assert!(
-            rendered.lines().any(|line| line
-                .trim_start()
-                .starts_with(&format!("({sender}) {label}"))
-                && line.ends_with("11:58:00")),
-            "{rendered}"
-        );
+        let header = rendered
+            .lines()
+            .nth(usize::from(view.viewport.borrow().log_detail.y + 1))
+            .unwrap();
+        assert!(header.trim_start().starts_with(sender), "sender: {header}");
+        assert!(header.contains(label), "kind: {header}");
+        assert!(header.ends_with("11:58:00"), "time: {header}");
         assert!(
             !super::log::open_text(view.visible_log_event().unwrap())
                 .contains(&format!("({sender})"))
@@ -8808,7 +8789,10 @@ fn task_notification_detail_shows_task_id_and_output_content() {
             })
             .collect();
         let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
-        assert_eq!(detail.title.left.as_deref(), Some("Task b9wi31ww0"));
+        assert_eq!(
+            detail.sections[0].title.left.as_deref(),
+            Some("Task b9wi31ww0")
+        );
         let header = 1;
         assert!(
             !lines[header + 1..]
@@ -9249,7 +9233,7 @@ fn claude_agent_display_from_real_records() {
         (
             "toolu_015h3Ngbytx63sMddkJwjDX7",
             "attach-probe · 实测 attach 发提示词",
-            "Sonnet 5.5",
+            "general-purpose",
         ),
         (
             "toolu_01X69UrWoFVNnNKno4yavSre",
@@ -9270,9 +9254,16 @@ fn claude_agent_display_from_real_records() {
         let rows: Vec<_> = screen.lines().collect();
         let detail = view.viewport.borrow().log_detail;
         let header = usize::from(detail.y + 1);
-        assert!(rows[header].contains("Agent"), "{screen}");
+        assert!(rows[header].contains(metadata), "{screen}");
+        let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
         assert!(
-            rows[header + 2..].iter().any(|row| row.trim() == metadata),
+            rows[header]
+                .replace(' ', "")
+                .contains(&description.replace(' ', "")),
+            "{screen}"
+        );
+        assert!(
+            !rows[header + 1..].iter().any(|row| row.trim() == metadata),
             "{screen}"
         );
         for kind in [
@@ -9300,7 +9291,7 @@ fn claude_agent_display_from_real_records() {
         }
         let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
         assert!(
-            !rows[header + 2..]
+            !rows[header + 1..]
                 .iter()
                 .any(|row| row.replace(' ', "") == description.replace(' ', "")),
             "{screen}"
