@@ -2084,12 +2084,22 @@ mod panel_detail_tests {
     #[test]
     fn shell_gutters_stay_one_cell_left_of_their_group() {
         let dir = tempfile::tempdir().unwrap();
-        let event = fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
-            .into_iter()
-            .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
-            .unwrap();
+        let event = fixture_events(include_str!(
+            "../../tests/fixtures/claude-inline-script.jsonl"
+        ))
+        .into_iter()
+        .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
+        .unwrap();
         for width in [200, 35] {
-            let layout = detail_layout(&event, width, dir.path(), DateTime::UNIX_EPOCH);
+            let layout = detail_parts_layout(
+                &event,
+                columns(width),
+                dir.path(),
+                DateTime::UNIX_EPOCH,
+                super::super::tool_detail::detail(&event, String::new(), Style::new().dim())
+                    .sections,
+                None,
+            );
             assert!(!layout.gutters.is_empty());
             for &(row, x, _) in &layout.gutters {
                 let (_, cells) = &layout.rows[row];
