@@ -221,7 +221,7 @@ fn log_selection_wheel_updates_detail_and_cursor_through_app() {
         assert!(detail(&buffer).contains("run_in_background"));
         let (_, older) = log_position(&buffer, "⏺");
         assert_log_cursor(&buffer, older);
-        assert!(lines(&buffer).join("\n").contains("↓ Latest"));
+        assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
         wheel(&mut app, MouseEventKind::ScrollDown, x, older);
         let buffer = draw_size(&mut app, width, height);
         assert!(detail(&buffer).contains("decision"));
@@ -249,7 +249,7 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         let buffer = draw_size(&mut app, width, height);
         assert!(detail(&buffer).contains("run_in_background"));
         assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
-        assert!(lines(&buffer).join("\n").contains("↓ Latest"));
+        assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
         let mut arrival: serde_json::Value = serde_json::from_str(first).unwrap();
         arrival["timestamp"] = "2026-10-06T16:40:00Z".into();
         arrival["uuid"] = "tail-arrival".into();
@@ -804,10 +804,10 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         }
         let scrolled = draw_size(&mut app, width, height);
         assert_ne!(detail(&scrolled), before);
-        assert!(lines(&scrolled).join("\n").contains("↓ Latest"));
+        assert!(!lines(&scrolled).join("\n").contains("↓ Latest"));
         assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
-        let (jump_x, jump_y) = position(&scrolled, "↓ Latest");
-        click(&mut app, jump_x, jump_y);
+        click(&mut app, x, y);
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
         let latest = draw_size(&mut app, width, height);
         assert!(!lines(&latest).join("\n").contains("↓ Latest"));
         assert_eq!(
@@ -932,7 +932,7 @@ fn wide_border_labels_stay_in_their_columns() {
                 );
             }
         }
-        // Scrolling keeps the jump on the bottom rule without adding a row inside the list.
+        // Scrolling without arrivals leaves the borders free of jump buttons.
         app.handle_event(Event::Mouse(MouseEvent {
             kind: MouseEventKind::ScrollUp,
             column: log.start,
@@ -940,13 +940,13 @@ fn wide_border_labels_stay_in_their_columns() {
             modifiers: KeyModifiers::NONE,
         }));
         let buffer = draw(&mut app, width);
-        assert!(segment(&buffer, log.clone(), middle).contains("↓ Latest"));
+        assert!(!segment(&buffer, log.clone(), middle).contains("↓ Latest"));
         assert!(!segment(&buffer, log.clone(), 1).contains("↓ Latest"));
         for y in 2..middle {
             assert!(!segment(&buffer, log.clone(), y).contains("↓ Latest"));
         }
-        let (x, y) = position(&buffer, "↓ Latest");
-        click(&mut app, x, y);
+        click(&mut app, log.start + 1, middle);
+        click(&mut app, log.start + 1, middle);
         assert!(
             !lines(&draw(&mut app, width))
                 .join("\n")

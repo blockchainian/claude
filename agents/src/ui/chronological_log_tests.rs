@@ -72,6 +72,55 @@ fn chronological_appends_preserve_older_view_and_count_new_rows() {
 }
 
 #[test]
+fn chronological_jump_only_shows_and_accepts_clicks_for_new_events() {
+    let (_dir, mut view, events) = fixture();
+    view.set_log(events[..8].to_vec());
+    view.navigate_log(KeyCode::Home);
+    let area = Rect::new(0, 0, 100, 45);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, Utc::now());
+    let border = view.viewport.borrow().log_borders[1];
+    let former = super::log::log_content_centered(border, " ↓ Latest ".len() as u16);
+    let border_text: String = (border.x..border.right())
+        .map(|x| buf[(x, border.y)].symbol())
+        .collect();
+    assert!(!border_text.contains("Latest"), "{border_text}");
+    assert!(view.viewport.borrow().log_jump.is_empty());
+    let click = |view: &mut View, target: Rect| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: target.x + 2,
+                row: target.y,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+    };
+    click(&mut view, former);
+    assert_eq!(view.log_selected, Some(0));
+    view.set_log(events[..10].to_vec());
+    view.render_at(area, &mut buf, Utc::now());
+    let jump = view.viewport.borrow().log_jump;
+    assert!(!jump.is_empty());
+    let label: String = (jump.x..jump.right())
+        .map(|x| buf[(x, jump.y)].symbol())
+        .collect();
+    assert_eq!(label, " ↓ 2 New ");
+    view.pending_click = None;
+    click(&mut view, jump);
+    assert_eq!(view.log_selected, Some(9));
+    assert!(view.following_log());
+    view.render_at(area, &mut buf, Utc::now());
+    assert!(view.viewport.borrow().log_jump.is_empty());
+    view.navigate_log(KeyCode::Home);
+    view.render_at(area, &mut buf, Utc::now());
+    assert!(view.viewport.borrow().log_jump.is_empty());
+}
+
+#[test]
 fn chronological_prepend_anchors_rows_and_selection() {
     let (_dir, mut view, events) = fixture();
     view.set_log(events[3..10].to_vec());
@@ -177,10 +226,10 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
 }
 
 #[test]
-fn chronological_latest_bottom_border_preserves_center_and_model_targets() {
+fn chronological_new_bottom_border_preserves_center_and_model_targets() {
     use unicode_width::UnicodeWidthStr;
     for width in [60, 80, 100, 149, 150, 200] {
-        for unseen in [0, 3, 100_000_000] {
+        for unseen in [3, 100_000_000] {
             let (_dir, mut view, events) = fixture();
             view.set_log(events);
             view.select_log_event(Some(3));
@@ -195,11 +244,7 @@ fn chronological_latest_bottom_border_preserves_center_and_model_targets() {
             let jump = viewport.log_jump;
             let top = viewport.log_borders[0];
             let bottom = viewport.log_borders[1];
-            let label = if unseen == 0 {
-                " ↓ Latest ".to_owned()
-            } else {
-                format!(" ↓ {unseen} New ")
-            };
+            let label = format!(" ↓ {unseen} New ");
             assert_eq!(
                 jump,
                 super::log::log_content_centered(bottom, label.width() as u16),
@@ -218,7 +263,7 @@ fn chronological_latest_bottom_border_preserves_center_and_model_targets() {
                     .0;
                 assert!(
                     !target.intersects(jump),
-                    "{field:?} overlaps Latest at width {width}"
+                    "{field:?} overlaps New at width {width}"
                 );
             }
             assert!(!top.intersects(jump));

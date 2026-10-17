@@ -450,6 +450,14 @@ fn top_border_loads_first_event_of_whole_log() {
             click(&mut app, bottom);
             click(&mut app, bottom);
         } else {
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(transcript_copies(&payload, 1, 200).as_bytes())
+                .unwrap();
+            app.refresh_log(visible);
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.view.render(area, &mut buffer);
             let row = (0..45)
@@ -457,7 +465,7 @@ fn top_border_loads_first_event_of_whole_log() {
                     (130..200)
                         .map(|x| buffer[(x, y)].symbol())
                         .collect::<String>()
-                        .contains("↓ Latest")
+                        .contains(" New ")
                 })
                 .unwrap();
             let line = (0..200)
@@ -477,7 +485,7 @@ fn top_border_loads_first_event_of_whole_log() {
             }
         }
         app.refresh_log(visible);
-        assert!(log_detail_at(&app, area).contains("Transcript copy 199"));
+        assert!(log_detail_at(&app, area).contains("Transcript copy 200"));
         assert_eq!(app.view.log_scroll(), app.view.log_max_scroll());
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));

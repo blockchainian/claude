@@ -905,7 +905,7 @@ fn terminal_layout_tracks_width() {
                 list,
                 "event list hidden after click: {opened}"
             );
-            assert!(opened_lines[log_rule].contains("↓ Latest"), "{opened}");
+            assert!(!opened_lines[log_rule].contains("↓ Latest"), "{opened}");
             assert!(
                 opened_lines[log_rule + 1..opened_lines.len() - 1]
                     .join("\n")
@@ -1022,7 +1022,7 @@ fn terminal_log_selection_tracks_wheel_click_and_tail() {
         tmux.mouse(64, column, row, false);
         let older = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(detail(&older).contains("run_in_background"), "{older}");
-        assert!(older.contains("↓ Latest"), "{older}");
+        assert!(!older.contains("↓ Latest"), "{older}");
         tmux.mouse(65, column, row, false);
         let newest = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(detail(&newest).contains("decision"), "{newest}");
@@ -1564,9 +1564,9 @@ mod terminal_codex_exit;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_log_latest_uses_list_bottom_border() {
+fn terminal_log_new_jump_uses_list_bottom_border() {
     for width in [80, 200] {
-        let (_directory, tmux, _transcript) = start_probe("log-latest-border");
+        let (_directory, tmux, transcript) = start_probe("log-latest-border");
         tmux.run(&[
             "resize-window",
             "-t",
@@ -1597,26 +1597,50 @@ fn terminal_log_latest_uses_list_bottom_border() {
             (rows[2][..separator].width() + 2, 1, model)
         };
         tmux.mouse(64, column, top + 1, false);
-        tmux.wait_for(|capture| capture.contains("↓ Latest"));
+        tmux.wait_for(|capture| capture.contains("run_in_background"));
+        let without_arrivals = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(!without_arrivals.contains("↓ Latest"), "{without_arrivals}");
+        let panel_width = width - column - 1;
+        let former = column + panel_width / 2;
+        tmux.mouse(0, former, bottom, true);
+        let clicked = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(clicked.contains("run_in_background"), "{clicked}");
+        let mut arrival: serde_json::Value = serde_json::from_str(
+            include_str!("fixtures/transcript.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        arrival["uuid"] = "terminal-new-jump".into();
+        arrival["timestamp"] = "2026-10-06T16:41:00Z".into();
+        arrival["message"]["content"] = "terminal-new-jump-proof".into();
+        use std::io::Write;
+        writeln!(
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&transcript)
+                .unwrap(),
+            "{arrival}"
+        )
+        .unwrap();
+        tmux.wait_for(|capture| capture.contains("↓ 1 New"));
         let older = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = older.lines().collect();
         assert!(
-            rows[bottom].contains("↓ Latest"),
-            "Latest missing from bottom border: {older}"
+            rows[bottom].contains("↓ 1 New"),
+            "New missing from bottom border: {older}"
         );
-        assert!(
-            !rows[top].contains("Latest"),
-            "Latest on top border: {older}"
-        );
+        assert!(!rows[top].contains("New"), "New on top border: {older}");
         assert!(
             (rows[model].contains("claude-opus-5-5") || rows[model].contains("Opus 5.5"))
                 && rows[model].contains("medium"),
             "{older}"
         );
-        let byte = rows[bottom].find("↓ Latest").unwrap();
+        let byte = rows[bottom].find("↓ 1 New").unwrap();
         let jump = rows[bottom][..byte].width();
         let panel_width = width - column - 1;
-        let button_width = " ↓ Latest ".width();
+        let button_width = " ↓ 1 New ".width();
         let expected = (column + panel_width / 2 - button_width / 2)
             .min(column + panel_width - 10 - button_width);
         assert_eq!(jump - 1, expected);
@@ -1626,12 +1650,14 @@ fn terminal_log_latest_uses_list_bottom_border() {
             assert_ne!(scrolled, older);
             assert!(!scrolled.contains("↑ Top"), "{scrolled}");
             assert!(
-                scrolled.lines().nth(bottom).unwrap().contains("↓ Latest"),
+                scrolled.lines().nth(bottom).unwrap().contains("↓ 1 New"),
                 "{scrolled}"
             );
         }
         tmux.mouse(0, jump, bottom, true);
-        tmux.wait_for(|capture| !capture.contains("↓ Latest") && capture.contains("decision"));
+        tmux.wait_for(|capture| {
+            !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
+        });
         let double_click = |column: usize, row: usize| {
             let column = column + 1;
             let row = row + 1;
@@ -1641,18 +1667,22 @@ fn terminal_log_latest_uses_list_bottom_border() {
         let border_column = column + (width - column) / 3;
         double_click(border_column, top);
         tmux.wait_for(|capture| {
-            capture.contains("↓ Latest") && capture.contains("run_in_background")
+            !capture.contains("↓ 1 New") && capture.contains("run_in_background")
         });
         double_click(border_column, bottom);
-        tmux.wait_for(|capture| !capture.contains("↓ Latest") && capture.contains("decision"));
+        tmux.wait_for(|capture| {
+            !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
+        });
         tmux.mouse(64, column, top + 1, false);
-        tmux.wait_for(|capture| capture.contains("↓ Latest"));
+        tmux.wait_for(|capture| capture.contains("decision"));
         double_click(jump, bottom);
-        tmux.wait_for(|capture| !capture.contains("↓ Latest") && capture.contains("decision"));
+        tmux.wait_for(|capture| {
+            !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
+        });
         let path = std::env::temp_dir().join(format!("agents-latest-border-{width}x50.txt"));
         std::fs::write(&path, older).unwrap();
         println!(
-            "{{\"latest_bottom_border\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            "{{\"new_bottom_border\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
             path.display()
         );
     }
@@ -1682,7 +1712,7 @@ fn terminal_log_border_double_clicks() {
         tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
     };
     double_click(2);
-    tmux.wait_for(|capture| capture.contains("↓ Latest"));
+    tmux.wait_for(|capture| capture.contains("Codex Manager 在一个 turn"));
     let oldest = capture("oldest");
     assert!(
         oldest

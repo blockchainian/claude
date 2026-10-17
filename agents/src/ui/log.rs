@@ -173,17 +173,18 @@ impl View {
     }
 
     /// Draws the button that jumps back to the newest row, centered over the rows' content, while
-    /// an older event is selected.
+    /// an older event is selected and new events have arrived.
     pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
+        viewport.log_jump = Rect::default();
         if self.following_log() {
             viewport.log_unseen = 0;
             return;
         }
-        let label = match viewport.log_unseen {
-            0 => " ↓ Latest ".to_owned(),
-            unseen => format!(" ↓ {unseen} New "),
-        };
+        if viewport.log_unseen == 0 {
+            return;
+        }
+        let label = format!(" ↓ {} New ", viewport.log_unseen);
         let jump = log_content_centered(area, label.width() as u16);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
@@ -1508,7 +1509,7 @@ pub(super) mod log_markdown {
     #[test]
     fn log_list_jump_centers_on_panel_midline_and_stays_before_time_gap() {
         let panel = Rect::new(10, 3, 100, 1);
-        for label in [" ↓ Latest ", " ↓ 12 New "] {
+        for label in [" ↓ 1 New ", " ↓ 12 New "] {
             let width = label.width() as u16;
             let jump = log_content_centered(panel, width);
             assert_eq!(jump.x + width / 2, panel.x + panel.width / 2);

@@ -95,7 +95,7 @@ fn terminal_chronological_large_live_transcript() {
         // A list click owns keyboard navigation; moving upward releases follow.
         tmux.mouse(0, column, bottom - 1, true);
         tmux.run(&["send-keys", "-t", "probe", "PPage"]);
-        tmux.wait_for(|capture| capture.contains("↓ Latest"));
+        tmux.wait_for(|capture| !list(capture).contains("terminal-live-pinned-proof"));
         let away = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         arrival["uuid"] = format!("terminal-live-away-{width}").into();
         arrival["timestamp"] = chrono::Utc::now().to_rfc3339().into();
@@ -105,10 +105,10 @@ fn terminal_chronological_large_live_transcript() {
         let grown = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = grown.lines().collect();
         assert!(
-            rows[top].contains("↓ 1 New"),
-            "Latest/count missing from top border: {grown}"
+            rows[bottom].contains("↓ 1 New"),
+            "New count missing from bottom border: {grown}"
         );
-        assert!(!rows[bottom].contains("New") && !rows[bottom].contains("Latest"));
+        assert!(!rows[top].contains("New") && !rows[top].contains("Latest"));
         assert_eq!(
             list(&away),
             list(&grown),
@@ -139,15 +139,15 @@ fn terminal_chronological_large_live_transcript() {
             !list(&oldest).contains("terminal-live-away-proof"),
             "top border stayed at newest: {oldest}"
         );
-        let top_line = oldest.lines().nth(top).unwrap();
+        let top_line = oldest.lines().nth(bottom).unwrap();
         let jump_column = top_line[..top_line.find("↓ 1 New").unwrap()].width();
-        tmux.mouse(0, jump_column, top, true);
+        tmux.mouse(0, jump_column, bottom, true);
         tmux.wait_for(|capture| {
             capture.matches("terminal-live-away-proof").count() >= 2 && !capture.contains("↓ 1 New")
         });
         tmux.mouse(0, column, bottom - 1, true);
         tmux.run(&["send-keys", "-t", "probe", "PPage"]);
-        tmux.wait_for(|capture| capture.contains("↓ Latest"));
+        tmux.wait_for(|capture| !list(capture).contains("terminal-live-away-proof"));
         double_click(bottom);
         tmux.wait_for(|capture| {
             capture.matches("terminal-live-away-proof").count() >= 2 && !capture.contains("↓ 1 New")

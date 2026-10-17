@@ -486,7 +486,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y));
     let before = log_list_screen(&view, 100, 25, now);
-    assert!(before.contains("↓ Latest"), "{before}");
+    assert!(!before.contains("↓ Latest"), "{before}");
     view.set_log(log_with_newer_event(&view, now));
     let after = log_list_screen(&view, 100, 25, now);
     assert!(!after.contains("brand new event"), "{after}");
@@ -591,13 +591,14 @@ fn jump_button_returns_to_the_newest_log_row() {
         rect.x + 2,
         rect.y + super::log::LOG_TOP,
     ));
+    view.set_log(log_with_newer_event(&view, now));
     let scrolled = log_screen(&view, 100, 25, now);
-    let (x, y) = rendered_cell(&scrolled, "↓ Latest");
+    let (x, y) = rendered_cell(&scrolled, "↓ 1 New");
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x + 2, y));
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x + 2, y));
     assert_eq!(view.log_scroll(), view.log_max_scroll());
     let after = log_screen(&view, 100, 25, now);
-    assert!(after.contains("run tests"), "{after}");
+    assert!(after.contains("brand new event"), "{after}");
     assert!(
         !after.lines().nth(usize::from(y)).unwrap().contains('↑'),
         "{after}"
@@ -3100,6 +3101,7 @@ mod details_header {
         let (mut view, now) = log_fixture();
         view.select_fixture_event(Some(view.log[6].clone()));
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
+        view.viewport.borrow_mut().log_unseen = 1;
         view.set_activity([crate::usage::bin_of(now)].into());
         for width in [112, 200] {
             for with_log in [true, false] {
@@ -4393,11 +4395,7 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
         }
         view.scroll_content_row(true, true, top);
         view.render_at(area, &mut buffer, now);
-        let jump = view.viewport.borrow().log_jump;
-        assert_eq!(
-            jump.x,
-            super::centering::centered_x(log, super::log::log_row_areas(log).0, jump.width)
-        );
+        assert!(view.viewport.borrow().log_jump.is_empty());
     }
 }
 
@@ -8398,7 +8396,7 @@ fn mixed_open_outputs_keep_literal_markup_and_copy_pretty_json() {
 #[test]
 fn log_new_button_keeps_centering_and_target() {
     for width in [60, 100, 149, 150, 200] {
-        for unseen in [0, 3] {
+        for unseen in [1, 3] {
             let (mut view, now) = log_fixture();
             let mut event = view.log[6].clone();
             event.body = (0..100).map(|n| format!("row {n}\n\n")).collect();
@@ -8422,12 +8420,8 @@ fn log_new_button_keeps_centering_and_target() {
                 )
             );
             assert_eq!(latest.y, border_y);
-            let label = if unseen == 0 {
-                " ↓ Latest "
-            } else {
-                " ↓ 3 New "
-            };
-            assert_eq!(rendered_cell(&screen, label), (latest.x, latest.y));
+            let label = format!(" ↓ {unseen} New ");
+            assert_eq!(rendered_cell(&screen, &label), (latest.x, latest.y));
             let row = screen.lines().nth(usize::from(border_y)).unwrap();
             assert_eq!(row.chars().next(), Some('─'));
             drop(viewport);
@@ -9111,7 +9105,7 @@ fn log_border_double_clicks_select_both_ends_in_both_layouts() {
         log_screen(&view, width, 20, now);
         assert!(view.viewport.borrow().log_rows.contains(&0));
         assert_eq!(view.log_scroll(), 0);
-        assert!(!view.viewport.borrow().log_jump.is_empty());
+        assert!(view.viewport.borrow().log_jump.is_empty());
         click(&mut view, log.bottom());
         assert_eq!(view.visible_log_event(), Some(&oldest));
         click(&mut view, log.bottom());
@@ -9119,9 +9113,10 @@ fn log_border_double_clicks_select_both_ends_in_both_layouts() {
         assert_eq!(view.log_scroll(), view.log_max_scroll());
         log_screen(&view, width, 20, now);
         assert!(view.viewport.borrow().log_jump.is_empty());
-        // The existing jump remains the return path after jumping to the oldest.
+        // New arrivals provide a single-click return path after jumping to the oldest.
         click(&mut view, log.y - 1);
         click(&mut view, log.y - 1);
+        view.viewport.borrow_mut().log_unseen = 1;
         log_screen(&view, width, 20, now);
         let jump = view.viewport.borrow().log_jump;
         click_mouse(
