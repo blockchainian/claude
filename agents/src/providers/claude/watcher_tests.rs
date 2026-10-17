@@ -65,3 +65,42 @@ fn appended_transcript_notifies_within_two_seconds() {
     }
     assert!(start.elapsed() < Duration::from_secs(2));
 }
+
+#[test]
+fn manager_lock_churn_does_not_refresh_sessions() {
+    // Paths and event kinds captured from the running manager's FSEvents stream.
+    for path in [
+        "manager/session/thread.jsonl.lock",
+        "manager/session/thread.jsonl.lock/owner",
+        "manager/session/state.json.lock",
+    ] {
+        for kind in [
+            EventKind::Create(notify::event::CreateKind::Folder),
+            EventKind::Remove(notify::event::RemoveKind::Folder),
+            EventKind::Modify(notify::event::ModifyKind::Metadata(
+                notify::event::MetadataKind::Extended,
+            )),
+        ] {
+            assert!(
+                !relevant(&notify::Event::new(kind).add_path(path.into())),
+                "{path}"
+            );
+        }
+    }
+    for path in [
+        "manager/session/state.json",
+        "manager/session/thread.ask.request.json",
+        "codex/thread-writer-locks/thread.lock",
+        "codex/sessions/rollout.jsonl",
+    ] {
+        assert!(
+            relevant(&notify::Event::new(EventKind::Any).add_path(path.into())),
+            "{path}"
+        );
+    }
+    assert!(relevant(
+        &notify::Event::new(EventKind::Any)
+            .add_path("manager/session/state.json.lock".into())
+            .add_path("manager/session/state.json".into())
+    ));
+}
