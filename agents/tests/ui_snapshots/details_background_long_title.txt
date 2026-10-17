@@ -1,10 +1,10 @@
+               Background
+─ A very long description A very lon… 0s
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+─ Waiting for output                  0s
+
                  Prompt
 Background task
 
                  Update
 Checking the project
-
-               Background
-─ A very long description A very lon… 0s
-  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-─ Waiting for output                  0s

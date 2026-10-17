@@ -3224,7 +3224,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_prompt_update_activity_background_tasks() {
+fn details_sections_run_tasks_background_prompt_update_activity() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         kind: crate::log::Kind::Tool,
@@ -3244,11 +3244,11 @@ fn details_sections_run_prompt_update_activity_background_tasks() {
     }];
     let rendered = queued_details(row, 40);
     let positions = [
+        "Tasks",
+        "Background\n",
         "Prompt\n",
         "Update",
         "Last activity",
-        "Background\n",
-        "Tasks",
     ]
     .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
@@ -3274,7 +3274,7 @@ fn details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_details(row.clone(), 22);
-    assert!(rendered.find("Prompt\n").unwrap() < rendered.find("Background\n").unwrap());
+    assert!(rendered.find("Background\n").unwrap() < rendered.find("Prompt\n").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
@@ -3291,7 +3291,9 @@ fn details_background_boxes_tail_and_clip_output() {
             .map(str::trim_start)
             .collect::<Vec<_>>()
             .join("\n")
-            .starts_with("Prompt\nBackground task\n\nUpdate\nChecking the project\n\nBackground\n…"),
+            .starts_with(
+                "Background\n…\n\nPrompt\nBackground task\n\nUpdate\nChecking the project"
+            ),
         "{clipped}"
     );
     assert!(clipped.contains("Update"));

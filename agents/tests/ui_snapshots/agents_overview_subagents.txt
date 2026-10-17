@@ -1,10 +1,10 @@
   Active 3                                                                                                  Inactive 0
 ────────────────────────────────────────────────────────────┬────────────────────── Parent task ────────────────────────
-                        /tmp/project                        │                          Prompt
- ○ Parent task                       Ready           2m ago │ Parent task
+                        /tmp/project                        │                        Background
+ ○ Parent task                       Ready           2m ago │ ─ Check files ──────────────────────────────────────────╴
  ├─ ○ Review results                 Ready              now │
- └─ ● Check files                    Working         1m ago │                        Background
-                                                            │ ─ Check files ──────────────────────────────────────────╴
+ └─ ● Check files                    Working         1m ago │                          Prompt
+                                                            │ Parent task
                                                             │
                                                             │
                                                             │
