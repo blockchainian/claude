@@ -23,7 +23,8 @@ fn log_content_centers_short_rows_and_keeps_truncated_rows_and_clock() {
                 usize::from(content_width),
             )
             .to_string();
-            let padding = (usize::from(content_width) - fitted.width()) / 2;
+            let padding = (usize::from(width / 2) - fitted.width() / 2)
+                .min(usize::from(content_width) - fitted.width());
             let expected = format!(
                 "{}{}{}",
                 " ".repeat(padding),
@@ -69,7 +70,7 @@ fn log_content_centered_links_click_and_underline_exactly_the_path() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let log = view.viewport.borrow().log;
-        let start = log.x + (log.width - 10 - 19) / 2;
+        let start = log.x + (log.width / 2 - 19 / 2).min(log.width - 10 - 19);
         let expected = Rect::new(start + 5, log.y, 9, 1);
         let links = view.viewport.borrow().log_links.clone();
         assert!(links.contains(&(expected, target.clone())), "{links:?}");
@@ -105,7 +106,7 @@ fn log_content_centered_selection_copies_drawn_text() {
         view.set_log(vec![event]);
         let _ = log_screen(&view, width, 40, now);
         let log = view.viewport.borrow().log;
-        let x = log.x + (log.width - 10 - 9) / 2;
+        let x = log.x + (log.width / 2 - 9 / 2).min(log.width - 10 - 9);
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, log.y));
         view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x + 9, log.y));
         assert_eq!(
@@ -132,7 +133,7 @@ fn log_content_centered_search_highlights_the_shifted_match() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let log = view.viewport.borrow().log;
-        let x = log.x + (log.width - 10 - 9) / 2;
+        let x = log.x + (log.width / 2 - 9 / 2).min(log.width - 10 - 9);
         for column in log.x..log.right() - 10 {
             assert_eq!(
                 buf[(column, log.y)]

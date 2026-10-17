@@ -729,15 +729,14 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     format_row_time(&row_time(event, session, last), now)
 }
 
-/// Centers a one-row label of `width` over the content beside the clock column, the line log
-/// rows center their text on.
+/// Centers a one-row label of `width` on the panel midline, clear of the clock column's gap.
 pub(super) fn log_content_centered(area: Rect, width: u16) -> Rect {
     let (content, _) = log_row_areas(area);
-    let width = width.min(area.width);
+    let x = super::centering::centered_x(area, content, width);
     Rect::new(
-        content.x + content.width.saturating_sub(width) / 2,
+        x,
         area.y,
-        width,
+        width.min(content.right().saturating_sub(x)),
         1,
     )
     .intersection(area)
@@ -778,8 +777,11 @@ fn render_event(
     let body_width = content_width;
     let fitted = fitted_body_line(event, body_width, cwd);
     let mut body = fitted.line;
-    let padding = body_width.saturating_sub(body.width()) / 2;
-    let body_x = content_area.x + padding as u16;
+    let body_x = super::centering::centered_x(
+        area,
+        content_area,
+        body.width().min(usize::from(u16::MAX)) as u16,
+    );
     let clipped = body.width() > body_width;
     let visible = if clipped {
         body_width.saturating_sub(1)
@@ -823,7 +825,7 @@ fn render_event(
         }
     }
     body.render(
-        Rect::new(body_x, area.y, (body_width - padding) as u16, 1),
+        Rect::new(body_x, area.y, content_area.right() - body_x, 1),
         buf,
     );
     links
@@ -1475,6 +1477,43 @@ pub(super) mod log_markdown {
             .collect::<String>()
             .trim_end()
             .to_owned()
+    }
+
+    #[test]
+    fn log_list_short_row_centers_on_panel_midline() {
+        let body = "x".repeat(20);
+        let buffer = body_buffer(Kind::Tool, &body, 90);
+        let start = body_padding(&buffer);
+        assert_eq!(start + body.width() / 2, usize::from(buffer.area.width / 2));
+        assert_eq!(body_text(&buffer).trim(), body);
+    }
+
+    #[test]
+    fn log_list_near_full_row_moves_left_to_time_gap_without_truncation() {
+        let body = "x".repeat(86);
+        let buffer = body_buffer(Kind::Tool, &body, 90);
+        let (span, time) = log_row_areas(buffer.area);
+        assert_eq!(
+            body_padding(&buffer) + body.width(),
+            usize::from(span.right())
+        );
+        assert_eq!(body_text(&buffer).trim(), body);
+        assert_eq!(buffer[(span.right(), 0)].symbol(), " ");
+        assert_eq!(buffer[(time.x - 1, 0)].symbol(), " ");
+    }
+
+    #[test]
+    fn log_list_jump_centers_on_panel_midline_and_stays_before_time_gap() {
+        let panel = Rect::new(10, 3, 100, 1);
+        for label in [" ↓ Latest ", " ↓ 12 New "] {
+            let width = label.width() as u16;
+            let jump = log_content_centered(panel, width);
+            assert_eq!(jump.x + width / 2, panel.x + panel.width / 2);
+            assert_eq!(jump.width, width);
+        }
+        assert_eq!(log_content_centered(panel, 86), Rect::new(14, 3, 86, 1));
+        assert_eq!(log_content_centered(panel, 120), log_row_areas(panel).0);
+        assert_eq!(log_content_centered(Rect::new(10, 3, 8, 1), 10).width, 0);
     }
 
     #[test]
