@@ -158,7 +158,10 @@ fn transcript_copies(payload: &str, copies: usize, first: usize) -> String {
 }
 
 fn log_detail(app: &App) -> String {
-    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
+    log_detail_at(app, ratatui::layout::Rect::new(0, 0, 120, 23))
+}
+
+fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
     let rule = (0..area.height)
@@ -265,6 +268,114 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     assert_eq!(app.view.log.len(), 8);
     assert_ne!(app.view.log, cached[1..]);
     assert!(log_detail(&app).contains("Transcript copy 19"));
+}
+
+#[test]
+fn bottom_border_loads_first_event_of_whole_log() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, transcript_copies(&payload, 200, 0)).unwrap();
+    app.refresh_log(8);
+    assert_eq!(app.view.log.len(), 8);
+    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let visible = app.view.log_event_count(area);
+    let scroll = |app: &mut App, kind| {
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column: 134,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        }));
+    };
+    let click = |app: &mut App, row| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            app.handle_event(Event::Mouse(MouseEvent {
+                kind,
+                column: 134,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }));
+        }
+    };
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    let bottom = (0..45)
+        .find(|&y| {
+            (100..200)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .contains("claude-opus")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{}",
+                (0..45)
+                    .map(|y| (0..200)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        });
+    for latest in [false, true] {
+        click(&mut app, bottom);
+        click(&mut app, bottom);
+        app.refresh_log(visible);
+        let detail = log_detail_at(&app, area);
+        assert!(detail.contains("Transcript copy 0"), "{detail}");
+        scroll(&mut app, MouseEventKind::ScrollUp);
+        scroll(&mut app, MouseEventKind::ScrollUp);
+        app.refresh_log(visible);
+        assert!(log_detail_at(&app, area).contains("Transcript copy 1"));
+        scroll(&mut app, MouseEventKind::ScrollDown);
+        scroll(&mut app, MouseEventKind::ScrollDown);
+        app.refresh_log(visible);
+        assert!(log_detail_at(&app, area).contains("Transcript copy 0"));
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        if latest {
+            click(&mut app, 1);
+            click(&mut app, 1);
+        } else {
+            let mut buffer = ratatui::buffer::Buffer::empty(area);
+            app.view.render(area, &mut buffer);
+            let row = (0..45)
+                .find(|&y| {
+                    (130..200)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                        .contains("↑ Latest")
+                })
+                .unwrap();
+            let line = (0..200)
+                .map(|x| buffer[(x, row)].symbol())
+                .collect::<String>();
+            let column = line.chars().position(|c| c == '↑').unwrap() as u16;
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.handle_event(Event::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+        }
+        app.refresh_log(visible);
+        assert!(log_detail_at(&app, area).contains("Transcript copy 199"));
+        assert_eq!(app.view.log_scroll(), 0);
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    }
 }
 
 #[test]

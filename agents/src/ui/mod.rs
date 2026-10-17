@@ -204,6 +204,7 @@ pub struct View {
     log_list_focused: bool,
     /// Older wheel steps waiting for App to extend the loaded transcript window.
     log_pending_older: usize,
+    pub(crate) log_start_requested: bool,
     log_background_return: Option<BackgroundReturn>,
     log_detail_search: log_search::LogSearch,
     input_box: prompt_box::PromptBox,
@@ -324,6 +325,7 @@ impl View {
             log_detail_focused: false,
             log_list_focused: false,
             log_pending_older: 0,
+            log_start_requested: false,
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
@@ -728,6 +730,7 @@ impl View {
         viewport.log_detail_scroll = 0;
         viewport.log_unseen = 0;
         self.log_pending_older = 0;
+        self.log_start_requested = false;
         self.log_background_return = None;
     }
 
@@ -773,6 +776,7 @@ impl View {
         self.log_detail_focused = false;
         self.log_list_focused = false;
         self.log_pending_older = 0;
+        self.log_start_requested = false;
         self.log_background_return = None;
         self.log_detail_search.clear();
         self.pending_click = None;

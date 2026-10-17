@@ -434,7 +434,11 @@ impl App {
     }
 
     fn refresh_log(&mut self, visible: usize) {
-        let count = visible.saturating_add(self.view.log_scroll());
+        let count = if self.view.log_start_requested {
+            usize::MAX
+        } else {
+            visible.saturating_add(self.view.log_scroll())
+        };
         let selected = self
             .view
             .selected_id()
@@ -481,6 +485,7 @@ impl App {
                     }
                     self.log_stamp = None;
                     self.view.log_session = Some(session);
+                    self.view.finish_log_start();
                     self.view
                         .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
                 }
@@ -526,6 +531,7 @@ impl App {
                 self.log_stamp = Some(stamp);
                 let scroll = self.view.log_scroll();
                 self.view.set_log(events);
+                self.view.finish_log_start();
                 self.view.log_session = Some(session);
                 // Keeping the rows still scrolled further back than the loaded window reaches.
                 if self.view.log_scroll() > scroll {

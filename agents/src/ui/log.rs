@@ -446,6 +446,18 @@ impl View {
         self.reveal_log_selection();
     }
 
+    /// Selects the first shown event after App has loaded the whole transcript.
+    pub(crate) fn finish_log_start(&mut self) {
+        if std::mem::take(&mut self.log_start_requested) {
+            let oldest = self
+                .shown_log_events()
+                .next()
+                .map(|(_, event)| event.clone());
+            self.select_log_event(oldest);
+            self.reveal_log_selection();
+        }
+    }
+
     /// Replaces the loaded transcript, retaining the selected event unless following its tail.
     pub(crate) fn set_log(&mut self, events: Vec<Event>) {
         let following = self.following_log();

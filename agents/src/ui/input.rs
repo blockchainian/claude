@@ -460,6 +460,8 @@ impl View {
                         .next()
                         .map(|(_, event)| event.clone());
                     self.log_background_return = None;
+                    self.log_pending_older = 0;
+                    self.log_start_requested = true;
                     self.select_log_event(oldest);
                 }
             }
