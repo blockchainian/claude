@@ -306,6 +306,16 @@ pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static PARSED_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_parsed_bytes() -> u64 {
+    PARSED_BYTES.with(|count| count.replace(0))
+}
+
 fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
     records_with_sidechains(bytes, false)
 }
@@ -316,7 +326,11 @@ fn records_with_sidechains(
 ) -> impl DoubleEndedIterator<Item = Value> + '_ {
     bytes
         .split(|byte| *byte == b'\n')
-        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+        .filter_map(|line| {
+            #[cfg(test)]
+            PARSED_BYTES.with(|count| count.set(count.get() + line.len() as u64));
+            serde_json::from_slice::<Value>(line).ok()
+        })
         .filter(move |record| sidechains || record["isSidechain"] != true)
 }
 

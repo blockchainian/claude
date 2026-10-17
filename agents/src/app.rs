@@ -107,6 +107,8 @@ pub struct App {
     last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
+    task_log: Option<(SessionKey, PathBuf, Box<dyn crate::log::Reader>)>,
+    log_parsed_bytes: u64,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
     /// When each recently active transcript's turns ran.
@@ -146,6 +148,8 @@ impl App {
             last_session: None,
             log_stamp: None,
             full_log_stamp: None,
+            task_log: None,
+            log_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
             activity: std::collections::HashMap::new(),
         }
@@ -434,7 +438,7 @@ impl App {
     }
 
     fn refresh_log(&mut self, visible: usize) {
-        let count = if self.view.log_start_requested {
+        let count = if self.view.log_start_requested || self.view.log_search.active() {
             usize::MAX
         } else {
             visible.saturating_add(self.view.log_scroll())
@@ -443,105 +447,74 @@ impl App {
             .view
             .selected_id()
             .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
-            .and_then(|session| {
-                Some((
-                    session.id.clone(),
-                    session.transcript.clone()?,
-                    session.clone(),
-                ))
-            });
-        let Some((session, path, selected_session)) = selected else {
+            .cloned();
+        let Some(selected) = selected.filter(|session| session.transcript.is_some()) else {
             self.log_stamp = None;
             self.full_log_stamp = None;
+            self.task_log = None;
             self.view.log.clear();
             self.view.log_session = None;
             return;
         };
-        if self.view.log_search.active() {
-            let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
-                let metadata = std::fs::metadata(&path)?;
-                let stamp = LogStamp {
-                    session: session.clone(),
-                    path: path.clone(),
-                    modified: metadata.modified()?,
-                    length: metadata.len(),
-                    count: usize::MAX,
-                };
-                if self.full_log_stamp.as_ref() == Some(&stamp) {
-                    return Ok(None);
-                }
-                let events = self.hub.provider(session.provider).log(
-                    &selected_session,
-                    usize::MAX,
-                    selected_session.parent.is_some(),
-                )?;
-                Ok(Some((stamp, events)))
-            };
-            match load() {
-                Ok(loaded) => {
-                    if let Some((stamp, events)) = loaded {
-                        self.full_log_stamp = Some(stamp);
-                        self.view.set_log(events);
-                    }
-                    self.log_stamp = None;
-                    self.view.log_session = Some(session);
-                    self.view.finish_log_start();
-                    self.view
-                        .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
-                }
-                Err(error) => {
-                    self.full_log_stamp = None;
-                    self.log_stamp = None;
-                    self.view.log.clear();
-                    self.view.prepare_log_search();
-                    self.view.log_session = None;
-                    self.view
-                        .set_notice(Some(format!("Failed to read task log: {error}")));
-                }
+        let path = selected.transcript.as_ref().expect("transcript checked");
+        let result = (|| -> io::Result<(LogStamp, crate::log::Update)> {
+            if self
+                .task_log
+                .as_ref()
+                .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path)
+            {
+                self.task_log = Some((
+                    selected.id.clone(),
+                    path.clone(),
+                    crate::providers::log_reader(&selected)?,
+                ));
             }
-            return;
-        }
-        self.full_log_stamp = None;
-        let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
-            let metadata = std::fs::metadata(&path)?;
+            let update = self
+                .task_log
+                .as_mut()
+                .expect("reader opened")
+                .2
+                .refresh(count)?;
+            let metadata = std::fs::metadata(path)?;
             let stamp = LogStamp {
-                session: session.clone(),
+                session: selected.id.clone(),
                 path: path.clone(),
                 modified: metadata.modified()?,
                 length: metadata.len(),
                 count,
             };
-            if self.log_stamp.as_ref() == Some(&stamp) {
-                return Ok(None);
-            }
-            let events = self.hub.provider(session.provider).log(
-                &selected_session,
-                count,
-                selected_session.parent.is_some(),
-            )?;
-            Ok(Some((stamp, events)))
-        };
-        match load() {
-            Ok(Some((mut stamp, events))) => {
-                if events.len() < count {
-                    self.view
-                        .clamp_log_scroll(events.len().saturating_sub(visible));
-                    stamp.count = visible.saturating_add(self.view.log_scroll());
+            Ok((stamp, update))
+        })();
+        match result {
+            Ok((mut stamp, update)) => {
+                self.log_parsed_bytes += update.parsed_bytes;
+                debug_assert!(update.oldest_offset <= update.read_offset);
+                let changed = update.reset
+                    || update.prepended > 0
+                    || update.appended > 0
+                    || update.replaced > 0;
+                if changed {
+                    self.view.set_log(update.events);
                 }
-                self.log_stamp = Some(stamp);
-                let scroll = self.view.log_scroll();
-                self.view.set_log(events);
                 self.view.finish_log_start();
-                self.view.log_session = Some(session);
-                // Keeping the rows still scrolled further back than the loaded window reaches.
-                if self.view.log_scroll() > scroll {
-                    self.refresh_log(visible);
+                self.view.log_session = Some(selected.id);
+                self.view
+                    .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
+                if self.view.log_search.active() {
+                    self.full_log_stamp = Some(stamp);
+                    self.log_stamp = None;
+                } else {
+                    self.full_log_stamp = None;
+                    stamp.count = visible.saturating_add(self.view.log_scroll());
+                    self.log_stamp = Some(stamp);
                 }
             }
-            Ok(None) => {}
             Err(error) => {
+                self.task_log = None;
                 self.log_stamp = None;
+                self.full_log_stamp = None;
                 self.view.log.clear();
+                self.view.prepare_log_search();
                 self.view.log_session = None;
                 self.view
                     .set_notice(Some(format!("Failed to read task log: {error}")));

@@ -619,6 +619,7 @@ impl Provider for ClaudeProvider {
     fn refresh(&mut self, pages: usize) -> Snapshot {
         self.snapshot(pages)
     }
+    #[cfg(test)]
     fn log(
         &self,
         session: &Session,

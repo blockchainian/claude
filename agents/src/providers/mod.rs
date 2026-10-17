@@ -111,6 +111,7 @@ pub trait Provider {
     }
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
+    #[cfg(test)]
     fn log(&self, session: &Session, count: usize, sidechains: bool)
     -> io::Result<Vec<log::Event>>;
     /// Returns a resume, fork or new-session command when available.
@@ -130,6 +131,18 @@ pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
         ]),
         preferences_dir,
     ))
+}
+
+/// Opens a reader whose decoded records and event state survive refreshes.
+pub(crate) fn log_reader(session: &Session) -> io::Result<Box<dyn log::Reader>> {
+    let path = session
+        .transcript
+        .clone()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Session has no transcript"))?;
+    Ok(match session.id.provider {
+        ProviderId::Claude => Box::new(claude::log::Reader::new(path, session.parent.is_some())),
+        ProviderId::Codex => Box::new(codex::rollout::Reader::new(path, session.parent.is_some())),
+    })
 }
 
 #[cfg(test)]

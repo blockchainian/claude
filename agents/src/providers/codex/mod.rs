@@ -2,17 +2,16 @@ mod app_server;
 #[cfg(test)]
 mod inner_tests;
 mod manager;
-mod rollout;
+pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;
 #[cfg(test)]
 mod tests;
 
 use super::{Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot};
-use crate::{
-    log,
-    model::{Action, Process, Session, SessionStatus},
-};
+#[cfg(test)]
+use crate::log;
+use crate::model::{Action, Process, Session, SessionStatus};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, Row};
 use std::{
@@ -433,6 +432,7 @@ impl Provider for CodexProvider {
             }
         })
     }
+    #[cfg(test)]
     fn log(&self, session: &Session, count: usize, _: bool) -> io::Result<Vec<log::Event>> {
         session
             .transcript

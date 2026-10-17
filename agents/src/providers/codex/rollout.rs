@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const CHUNK: u64 = 64 * 1024;
 
@@ -917,31 +917,272 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     Ok(summary)
 }
 
+/// Parsed rollout records and the byte range retained for backward paging.
+pub(crate) struct Reader {
+    path: PathBuf,
+    identity: Option<(u64, u64)>,
+    observed_len: u64,
+    modified: Option<std::time::SystemTime>,
+    oldest: u64,
+    read: u64,
+    pending_offset: Option<u64>,
+    pending_bytes: Vec<u8>,
+    records: Vec<(u64, Value)>,
+    entries: Vec<(u64, Event)>,
+    dependencies: HashMap<String, u64>,
+    latest_prompt: Option<u64>,
+    shown: usize,
+    boundary: crate::jsonl::Boundary,
+}
+
+impl Reader {
+    pub fn new(path: PathBuf, _sidechains: bool) -> Self {
+        Self {
+            path,
+            identity: None,
+            observed_len: 0,
+            modified: None,
+            oldest: 0,
+            read: 0,
+            pending_offset: None,
+            pending_bytes: Vec::new(),
+            records: Vec::new(),
+            entries: Vec::new(),
+            dependencies: HashMap::new(),
+            latest_prompt: None,
+            shown: 0,
+            boundary: crate::jsonl::Boundary::default(),
+        }
+    }
+
+    fn dependency(&mut self, record: &Value, offset: u64) -> u64 {
+        let payload = &record["payload"];
+        let mut affected = offset;
+        for id in [
+            payload["id"].as_str(),
+            payload["call_id"].as_str(),
+            payload["item"]["id"].as_str(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            affected = affected.min(*self.dependencies.entry(id.to_owned()).or_insert(offset));
+        }
+        if completed_user(record) {
+            affected = affected.min(self.latest_prompt.unwrap_or(offset));
+        }
+        if record["type"] == "response_item"
+            && payload["type"] == "message"
+            && payload["role"] == "user"
+        {
+            self.latest_prompt = Some(offset);
+        }
+        affected
+    }
+
+    fn read_pending(&mut self, file: &mut File) -> io::Result<u64> {
+        file.seek(SeekFrom::Start(self.read))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        if let Ok(record) = serde_json::from_slice::<Value>(&bytes) {
+            self.pending_offset = Some(self.read);
+            self.pending_bytes = bytes.clone();
+            self.records.push((self.read, record));
+            Ok(bytes.len() as u64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        use std::os::unix::fs::MetadataExt;
+        let mut file = File::open(&self.path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        let modified = metadata.modified()?;
+        let reset = self.identity != Some(identity)
+            || metadata.len() < self.read
+            || (metadata.len() == self.observed_len && self.modified != Some(modified))
+            || (metadata.len() > self.observed_len && !self.boundary.matches(&mut file)?);
+        let changed = self.observed_len != metadata.len() || self.modified != Some(modified);
+        self.observed_len = metadata.len();
+        self.modified = Some(modified);
+        let old_shown = self.shown;
+        let mut parsed_bytes = 0;
+        let mut appended = 0;
+        let mut replaced = 0;
+        if reset {
+            self.identity = Some(identity);
+            self.read = crate::jsonl::complete_end(&mut file)?;
+            self.oldest = self.read;
+            self.records.clear();
+            self.entries.clear();
+            self.dependencies.clear();
+            self.latest_prompt = None;
+            self.shown = 0;
+            self.pending_offset = None;
+            parsed_bytes += self.read_pending(&mut file)?;
+            self.entries = events(&self.records, usize::MAX)?;
+        } else if changed && metadata.len() > self.read {
+            let pending = self.pending_offset.take();
+            let pending_bytes = std::mem::take(&mut self.pending_bytes);
+            let pending_record =
+                pending.and_then(|_| self.records.last().map(|(_, record)| record.clone()));
+            let mut reused = 0;
+            if let Some(pending) = pending {
+                self.records.truncate(
+                    self.records
+                        .partition_point(|(offset, _)| *offset < pending),
+                );
+            }
+            let mut offset = self.read;
+            let mut incoming = Vec::new();
+            let end = crate::jsonl::read_lines(&mut file, self.read, |line| {
+                if pending == Some(offset) && line == pending_bytes {
+                    if let Some(record) = &pending_record {
+                        incoming.push((offset, record.clone()));
+                        reused += line.len() as u64;
+                    }
+                } else if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    incoming.push((offset, record));
+                }
+                offset += line.len() as u64 + 1;
+            })?;
+            parsed_bytes += end - self.read - reused;
+            self.read = end;
+            let mut affected = pending.unwrap_or(end);
+            for (offset, record) in &incoming {
+                affected = affected.min(self.dependency(record, *offset));
+            }
+            self.records.extend(incoming);
+            parsed_bytes += self.read_pending(&mut file)?;
+            if let Some((offset, record)) = self.records.last().cloned() {
+                affected = affected.min(self.dependency(&record, offset));
+            }
+            let prefix = self
+                .entries
+                .partition_point(|(offset, _)| *offset < affected);
+            let start = self
+                .records
+                .partition_point(|(offset, _)| *offset < affected);
+            let mut suffix = events(&self.records[start..], usize::MAX)?;
+            if let Some((_, previous)) = prefix
+                .checked_sub(1)
+                .and_then(|index| self.entries.get(index))
+                && let Some((_, first)) = suffix.first_mut()
+            {
+                first.previous_end = Some(previous.ended_at.unwrap_or(previous.started_at));
+            }
+            let previous = self.entries.len() - prefix;
+            appended = suffix.len().saturating_sub(previous);
+            replaced = previous;
+            self.entries.truncate(prefix);
+            self.entries.extend(suffix);
+        }
+        let parsed_before_older = parsed_bytes;
+        while self.entries.len() < requested && self.oldest > 0 {
+            let end = self.oldest;
+            let target = end.saturating_sub(CHUNK);
+            let mut older = Vec::new();
+            let mut oldest = end;
+            crate::jsonl::read_lines_back(&mut file, end, |offset, line| {
+                oldest = offset;
+                parsed_bytes += line.len() as u64 + 1;
+                if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    older.push((offset, record));
+                }
+                offset > target
+            })?;
+            self.oldest = oldest;
+            older.reverse();
+            older.append(&mut self.records);
+            self.records = older;
+            self.entries = events(&self.records, usize::MAX)?;
+            self.dependencies.clear();
+            self.latest_prompt = None;
+            // Rebuild dependency positions only when the retained range expands backward.
+            for index in 0..self.records.len() {
+                let (offset, record) = self.records[index].clone();
+                self.dependency(&record, offset);
+            }
+        }
+        if parsed_bytes > parsed_before_older {
+            replaced = replaced.max(old_shown);
+        }
+        let shown = self
+            .entries
+            .len()
+            .min(requested.max(self.shown.saturating_add(appended)));
+        let prepended = if reset {
+            0
+        } else {
+            shown.saturating_sub(old_shown + appended)
+        };
+        self.shown = shown;
+        let skip = self.entries.len() - shown;
+        let events = self.entries[skip..]
+            .iter()
+            .map(|(_, event)| event.clone())
+            .collect();
+        self.boundary.capture(&mut file, metadata.len())?;
+        Ok(crate::log::Update {
+            events,
+            prepended,
+            appended: if reset { 0 } else { appended },
+            replaced,
+            reset,
+            parsed_bytes,
+            oldest_offset: self.oldest,
+            read_offset: self.read,
+        })
+    }
+}
+
+impl crate::log::Reader for Reader {
+    fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        Reader::refresh(self, requested)
+    }
+}
+
+#[cfg(test)]
 pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
+    let mut records = Vec::new();
+    walk(path, |record, offset| {
+        records.push((offset, record));
+        Ok(true)
+    })?;
+    records.reverse();
+    Ok(events(&records, count)?
+        .into_iter()
+        .map(|(_, event)| event)
+        .collect())
+}
+
+fn events(records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
     let mut completed_prompt = None;
-    walk(path, |record, offset| {
-        let Some(at) = timestamp(&record) else {
+    let mut visit = |record: &Value, offset: u64| -> io::Result<bool> {
+        let Some(at) = timestamp(record) else {
             return Ok(true);
         };
-        if completed_user(&record) {
-            completed_prompt = Some(record);
+        if completed_user(record) {
+            completed_prompt = Some(record.clone());
             return Ok(true);
         }
         let payload = &record["payload"];
         let mut images = Vec::new();
         let mut calls = Vec::new();
-        if let Some(mut event) = completed_tool(&record)? {
-            event.source = Some(source(&record, offset));
+        if let Some(mut event) = completed_tool(record)? {
+            event.source = Some(source(record, offset));
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
             }
-            entries.push(event);
+            entries.push((offset, event));
             return Ok(entries.len() <= count);
         }
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
@@ -1029,24 +1270,32 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             }
             _ => return Ok(true),
         };
-        entries.push(Event {
-            source: Some(source(&record, offset)),
-            sender: None,
-            kind,
-            body,
-            paths: Vec::new(),
-            started_at: at,
-            ended_at,
-            duration: ended_at.map(|end| end - at),
-            previous_end: None,
-            images,
-            calls,
-        });
+        entries.push((
+            offset,
+            Event {
+                source: Some(source(record, offset)),
+                sender: None,
+                kind,
+                body,
+                paths: Vec::new(),
+                started_at: at,
+                ended_at,
+                duration: ended_at.map(|end| end - at),
+                previous_end: None,
+                images,
+                calls,
+            },
+        ));
         Ok(entries.len() <= count)
-    })?;
+    };
+    for (offset, record) in records.iter().rev() {
+        if !visit(record, *offset)? {
+            break;
+        }
+    }
     entries.reverse();
     let mut previous_end = None;
-    for entry in &mut entries {
+    for (_, entry) in &mut entries {
         entry.previous_end = previous_end;
         previous_end = Some(entry.ended_at.unwrap_or(entry.started_at));
     }
@@ -1066,6 +1315,130 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn reader_extends_real_fixture_without_reparsing_bytes() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        for name in [
+            "codex-tool-calls.jsonl",
+            "codex-rollout.jsonl",
+            "codex-inner/command.jsonl",
+            "codex-inner/file-change.jsonl",
+            "codex-images/wrapped.jsonl",
+            "codex-images/fallback.jsonl",
+        ] {
+            let bytes = std::fs::read(root.join(name)).unwrap();
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut reader = Reader::new(file.path().to_path_buf(), false);
+            let mut parsed = 0;
+            for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+                for chunk in line.chunks(137) {
+                    file.write_all(chunk).unwrap();
+                    parsed += reader.refresh(usize::MAX).unwrap().parsed_bytes;
+                }
+                let update = reader.refresh(usize::MAX).unwrap();
+                assert_eq!(
+                    format!("{:?}", update.events),
+                    format!("{:?}", tail(file.path(), usize::MAX).unwrap()),
+                    "{name}"
+                );
+            }
+            assert_eq!(parsed, bytes.len() as u64, "{name}");
+            assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn reader_expands_backwards_and_resets_on_truncation() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/codex-tool-calls.jsonl"
+        ))
+        .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let first = reader.refresh(1).unwrap();
+        assert!(first.reset);
+        let expanded = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(
+            expanded.events.len(),
+            tail(file.path(), usize::MAX).unwrap().len()
+        );
+        assert_eq!(
+            expanded.prepended,
+            expanded.events.len() - first.events.len()
+        );
+        file.as_file_mut().set_len(0).unwrap();
+        let reset = reader.refresh(1).unwrap();
+        assert!(reset.reset);
+        assert!(reset.events.is_empty());
+    }
+
+    #[test]
+    fn reader_resets_when_source_file_is_replaced() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        std::fs::copy(fixture(), &path).unwrap();
+        let mut reader = Reader::new(path.clone(), false);
+        reader.refresh(usize::MAX).unwrap();
+        let replacement = directory.path().join("replacement.jsonl");
+        std::fs::copy(fixture(), &replacement).unwrap();
+        std::fs::rename(replacement, &path).unwrap();
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert!(update.reset);
+        assert_eq!(
+            format!("{:?}", update.events),
+            format!("{:?}", tail(&path, usize::MAX).unwrap())
+        );
+    }
+
+    #[test]
+    fn reader_resets_on_same_length_overwrite() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let bytes = std::fs::read(fixture()).unwrap();
+        file.write_all(&bytes).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        reader.refresh(usize::MAX).unwrap();
+        let before = file.as_file().metadata().unwrap().modified().unwrap();
+        let changed = String::from_utf8(bytes)
+            .unwrap()
+            .replace("Checks passed.", "Checks failed.");
+        file.as_file_mut().seek(SeekFrom::Start(0)).unwrap();
+        file.write_all(changed.as_bytes()).unwrap();
+        file.as_file()
+            .set_modified(before + std::time::Duration::from_secs(1))
+            .unwrap();
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert!(update.reset);
+        assert_eq!(update.events.last().unwrap().body, "Checks failed.");
+        assert!(!reader.refresh(usize::MAX).unwrap().reset);
+    }
+
+    #[test]
+    fn reader_keeps_valid_unterminated_record_when_newline_arrives() {
+        let text = std::fs::read_to_string(fixture()).unwrap();
+        let end = text
+            .lines()
+            .scan(0usize, |offset, line| {
+                *offset += line.len() + 1;
+                let record: Value = serde_json::from_str(line).unwrap();
+                Some((*offset, record))
+            })
+            .find(|(_, record)| record["payload"]["role"] == "assistant")
+            .unwrap()
+            .0;
+        let bytes = text[..end].strip_suffix('\n').unwrap().as_bytes();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(bytes).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let initial = reader.refresh(usize::MAX).unwrap();
+        let expected = tail(file.path(), usize::MAX).unwrap();
+        assert_eq!(format!("{:?}", initial.events), format!("{expected:?}"));
+        assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        file.write_all(b"\n").unwrap();
+        let completed = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(format!("{:?}", completed.events), format!("{expected:?}"));
+        assert_eq!(completed.appended, 0);
     }
 
     #[test]

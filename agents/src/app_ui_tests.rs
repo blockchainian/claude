@@ -1180,3 +1180,29 @@ fn task_tabs_ignore_saved_removed_filter() {
         assert!(saved.get("status_filter").is_none());
     }
 }
+
+#[test]
+fn incremental_refresh_parses_only_appended_fixture_bytes() {
+    use std::io::Write;
+    let (_directory, mut app) = fixture();
+    app.refresh();
+    select_archive(&mut app);
+    draw_size(&mut app, 200, 45);
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let before = app.log_parsed_bytes;
+    draw_size(&mut app, 200, 45);
+    assert_eq!(
+        app.log_parsed_bytes, before,
+        "unchanged file must decode zero bytes"
+    );
+    let payload = include_str!("../tests/fixtures/claude-task-notifications.jsonl");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    app.refresh();
+    draw_size(&mut app, 200, 45);
+    assert_eq!(app.log_parsed_bytes - before, payload.len() as u64);
+}

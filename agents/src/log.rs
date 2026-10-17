@@ -128,6 +128,23 @@ pub struct Event {
     pub calls: Vec<ToolCall>,
 }
 
+/// Structural changes produced by one persistent log-reader refresh.
+#[derive(Default)]
+pub(crate) struct Update {
+    pub events: Vec<Event>,
+    pub prepended: usize,
+    pub appended: usize,
+    pub replaced: usize,
+    pub reset: bool,
+    pub parsed_bytes: u64,
+    pub oldest_offset: u64,
+    pub read_offset: u64,
+}
+
+pub(crate) trait Reader {
+    fn refresh(&mut self, requested: usize) -> std::io::Result<Update>;
+}
+
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {

@@ -1,6 +1,10 @@
 use crate::log::{Event, Kind, Section, ToolCall, participant_text};
 use chrono::{DateTime, Utc};
-use std::{io, path::Path};
+use std::{
+    io::{self, Read, Seek, SeekFrom},
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
 
 pub(super) fn tool_hidden(name: &str) -> bool {
     matches!(
@@ -98,6 +102,7 @@ pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     tail_session(path, count, false)
 }
 
+#[cfg(test)]
 pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
@@ -124,8 +129,280 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     Ok(events.into_iter().skip(skip).collect())
 }
 
+/// Retains decoded records and parsed rows between file notifications.
+/// Only the suffix affected by a new call, result or image companion is replayed.
+pub(crate) struct Reader {
+    path: PathBuf,
+    sidechains: bool,
+    identity: Option<(u64, u64)>,
+    modified: Option<std::time::SystemTime>,
+    oldest_offset: u64,
+    read_offset: u64,
+    pending: Vec<u8>,
+    records: Vec<(u64, serde_json::Value)>,
+    entries: Vec<Entry>,
+    shown: usize,
+    boundary: crate::jsonl::Boundary,
+}
+
+impl Reader {
+    pub fn new(path: PathBuf, sidechains: bool) -> Self {
+        Self {
+            path,
+            sidechains,
+            identity: None,
+            modified: None,
+            oldest_offset: 0,
+            read_offset: 0,
+            pending: Vec::new(),
+            records: Vec::new(),
+            entries: Vec::new(),
+            shown: 0,
+            boundary: crate::jsonl::Boundary::default(),
+        }
+    }
+
+    fn decode(&self, bytes: &[u8], start: u64) -> Vec<(u64, serde_json::Value)> {
+        let mut offset = start;
+        bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .filter_map(|line| {
+                let position = offset;
+                offset += line.len() as u64;
+                let record = serde_json::from_slice::<serde_json::Value>(line).ok()?;
+                (self.sidechains || record["isSidechain"] != true).then_some((position, record))
+            })
+            .collect()
+    }
+
+    fn replay(&mut self, start: u64) -> usize {
+        let retained = self.entries.partition_point(|entry| entry.offset < start);
+        let replaced = self.entries.len() - retained;
+        self.entries.truncate(retained);
+        let mut log = Log::default();
+        for (offset, record) in self
+            .records
+            .iter()
+            .rev()
+            .take_while(|(offset, _)| *offset >= start)
+        {
+            log.offset = *offset;
+            log.record(record.clone(), usize::MAX);
+        }
+        self.entries.extend(log.entries.into_iter().rev());
+        let mut previous_end = None;
+        for entry in &mut self.entries {
+            let event = &mut entry.event;
+            if event.kind != Kind::Assistant || event.previous_end.is_none() {
+                event.previous_end = previous_end;
+            }
+            previous_end = match event.kind {
+                Kind::Tool | Kind::Error | Kind::Denied => event.ended_at,
+                _ => Some(event.started_at),
+            };
+        }
+        replaced
+    }
+
+    fn affected_start(&self, appended: &[(u64, serde_json::Value)]) -> u64 {
+        let mut group = None;
+        let mut key = None;
+        let mut requests = std::collections::HashMap::new();
+        let mut prompts = std::collections::HashMap::new();
+        for (offset, record) in &self.records {
+            if record["type"] == "assistant" {
+                let next = record["message"]["id"]
+                    .as_str()
+                    .or_else(|| record["requestId"].as_str())
+                    .or_else(|| record["uuid"].as_str());
+                if next.is_none() || next != key {
+                    group = Some(*offset);
+                    key = next;
+                }
+                for block in record["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    if block["type"] == "tool_use"
+                        && let Some(id) = block["id"].as_str()
+                    {
+                        requests.insert(id, group.unwrap_or(*offset));
+                    }
+                }
+            }
+            if record["type"] == "user"
+                && record["isMeta"] != true
+                && let Some(id) = record["promptId"].as_str()
+            {
+                prompts.insert(id, *offset);
+            }
+        }
+        let mut start = group.unwrap_or(self.read_offset);
+        for (_, record) in appended {
+            for block in record["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                if block["type"] == "tool_result"
+                    && let Some(offset) = block["tool_use_id"]
+                        .as_str()
+                        .and_then(|id| requests.get(id))
+                {
+                    start = start.min(*offset);
+                }
+            }
+            if record["turnCompanion"] == true
+                && let Some(offset) = record["promptId"].as_str().and_then(|id| prompts.get(id))
+            {
+                start = start.min(*offset);
+            }
+        }
+        start
+    }
+
+    fn older_page(&mut self, file: &mut std::fs::File) -> io::Result<u64> {
+        let end = self.oldest_offset;
+        let mut start = end.saturating_sub(64 * 1024);
+        let (bytes, skip) = loop {
+            file.seek(SeekFrom::Start(start))?;
+            let mut bytes = vec![0; (end - start) as usize];
+            file.read_exact(&mut bytes)?;
+            let skip = if start == 0 {
+                Some(0)
+            } else {
+                bytes
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .map(|index| index + 1)
+            };
+            if let Some(skip) = skip.filter(|skip| *skip < bytes.len() || start == 0) {
+                break (bytes, skip);
+            }
+            start = start.saturating_sub(64 * 1024);
+        };
+        self.oldest_offset = start + skip as u64;
+        let complete = if end == self.read_offset && self.records.is_empty() {
+            let complete = bytes
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(skip, |index| index + 1);
+            self.pending = bytes[complete..].to_vec();
+            complete
+        } else {
+            bytes.len()
+        };
+        let mut records = self.decode(&bytes[skip..complete], self.oldest_offset);
+        if complete < bytes.len() {
+            records.extend(self.decode(&bytes[complete..], start + complete as u64));
+        }
+        records.append(&mut self.records);
+        self.records = records;
+        Ok((bytes.len() - skip) as u64)
+    }
+
+    pub fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        let mut file = std::fs::File::open(&self.path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        let modified = metadata.modified().ok();
+        let reset = self.identity != Some(identity)
+            || metadata.len() < self.read_offset
+            || (metadata.len() == self.read_offset && modified != self.modified)
+            || (metadata.len() > self.read_offset && !self.boundary.matches(&mut file)?);
+        self.modified = modified;
+        if reset {
+            self.identity = Some(identity);
+            self.records.clear();
+            self.entries.clear();
+            self.shown = 0;
+            self.pending.clear();
+            self.oldest_offset = metadata.len();
+            self.read_offset = metadata.len();
+        }
+        let before = self.entries.len();
+        let shown_before = self.shown;
+        let mut parsed_bytes = 0;
+        let mut replaced = 0;
+        if !reset && metadata.len() > self.read_offset {
+            file.seek(SeekFrom::Start(self.read_offset))?;
+            let start = self.read_offset - self.pending.len() as u64;
+            let mut bytes = std::mem::take(&mut self.pending);
+            (&mut file)
+                .take(metadata.len() - self.read_offset)
+                .read_to_end(&mut bytes)?;
+            self.read_offset = metadata.len();
+            let complete = bytes
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(0, |index| index + 1);
+            self.pending = bytes[complete..].to_vec();
+            let mut appended = self.decode(&bytes[..complete], start);
+            if complete < bytes.len() {
+                appended.extend(self.decode(&bytes[complete..], start + complete as u64));
+            }
+            parsed_bytes += bytes.len() as u64;
+            let previous_eof = self
+                .records
+                .last()
+                .is_some_and(|(offset, _)| *offset == start);
+            if !appended.is_empty() || previous_eof {
+                let affected = self.affected_start(&appended).min(start);
+                if previous_eof {
+                    self.records.pop();
+                }
+                self.records.extend(appended);
+                replaced = self.replay(affected);
+            }
+        }
+        let after_append = self.entries.len();
+        let parsed_before_older = parsed_bytes;
+        while self.oldest_offset > 0 && self.entries.len() < requested {
+            parsed_bytes += self.older_page(&mut file)?;
+            self.replay(self.oldest_offset);
+        }
+        if parsed_bytes > parsed_before_older {
+            replaced = replaced.max(shown_before);
+        }
+        let appended = after_append.saturating_sub(before);
+        self.shown = self
+            .shown
+            .saturating_add(appended)
+            .max(requested)
+            .min(self.entries.len());
+        let prepended = self
+            .shown
+            .saturating_sub(shown_before)
+            .saturating_sub(appended);
+        self.boundary.capture(&mut file, metadata.len())?;
+        Ok(crate::log::Update {
+            events: self
+                .entries
+                .iter()
+                .skip(self.entries.len() - self.shown)
+                .map(|entry| entry.event.clone())
+                .collect(),
+            prepended: if reset { 0 } else { prepended },
+            appended: if reset { self.shown } else { appended },
+            replaced: replaced.min(shown_before),
+            reset,
+            parsed_bytes,
+            oldest_offset: self.oldest_offset,
+            read_offset: self.read_offset,
+        })
+    }
+}
+
+impl crate::log::Reader for Reader {
+    fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+        Reader::refresh(self, requested)
+    }
+}
+
 #[derive(Default)]
 struct Log {
+    offset: u64,
     images: super::images::Companions,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
@@ -134,6 +411,7 @@ struct Log {
     sequence: usize,
 }
 struct Entry {
+    offset: u64,
     event: Event,
     missing: bool,
     background: bool,
@@ -616,6 +894,7 @@ impl Log {
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
         self.entries.push(Entry {
+            offset: self.offset,
             event: Event {
                 source: None,
                 sender: None,
@@ -675,6 +954,7 @@ impl Log {
             self.entries.remove(index)
         } else {
             Entry {
+                offset: self.offset,
                 event: Event {
                     source: None,
                     sender: None,
@@ -693,6 +973,7 @@ impl Log {
                 last_result: None,
             }
         };
+        entry.offset = self.offset;
         let body = entry
             .event
             .body
@@ -838,6 +1119,135 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    #[ignore = "requires AGENTS_MEASURE_TRANSCRIPT pointing to a real large transcript"]
+    fn measure_incremental_transcript_bytes() {
+        use std::io::Write;
+        let source = std::env::var_os("AGENTS_MEASURE_TRANSCRIPT").unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::copy(&mut std::fs::File::open(source).unwrap(), &mut file).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let initial = reader.refresh(50).unwrap();
+        let notification = include_str!("../../../tests/fixtures/claude-task-notifications.jsonl")
+            .split_inclusive('\n')
+            .find(|line| line.contains("<task-notification>"))
+            .unwrap();
+        file.write_all(notification.as_bytes()).unwrap();
+        super::super::transcript::take_parsed_bytes();
+        let baseline = super::tail(file.path(), 50).unwrap();
+        let before = super::super::transcript::take_parsed_bytes();
+        let after = reader.refresh(50).unwrap();
+        assert_eq!(
+            &after.events[after.events.len() - baseline.len()..],
+            baseline
+        );
+        assert_eq!(after.parsed_bytes, notification.len() as u64);
+        println!(
+            "transcript_bytes={} initial_parsed_bytes={} before_refresh_bytes={} after_refresh_bytes={} appended_record_bytes={} events={}",
+            file.as_file().metadata().unwrap().len(),
+            initial.parsed_bytes,
+            before,
+            after.parsed_bytes,
+            notification.len(),
+            after.events.len()
+        );
+    }
+
+    #[test]
+    fn incremental_older_pages_and_resets_match_real_transcript() {
+        use std::io::Write;
+        let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let tail = reader.refresh(1).unwrap();
+        assert!(tail.oldest_offset > 0);
+        let complete = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(complete.oldest_offset, 0);
+        assert!(complete.replaced >= tail.events.len());
+        assert_eq!(
+            complete.events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+        assert_eq!(
+            complete.prepended,
+            complete.events.len() - tail.events.len()
+        );
+        assert_eq!(
+            tail.parsed_bytes + complete.parsed_bytes,
+            fixture.len() as u64
+        );
+        file.as_file().set_len(0).unwrap();
+        let reset = reader.refresh(usize::MAX).unwrap();
+        assert!(reset.reset);
+        assert!(reset.events.is_empty());
+    }
+
+    #[test]
+    fn incremental_valid_unterminated_record_is_not_duplicated_by_newline() {
+        use std::io::Write;
+        let lines: Vec<_> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .take(2)
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(lines[0].as_bytes()).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let first = reader.refresh(usize::MAX).unwrap();
+        assert!(!first.events.is_empty());
+        assert_eq!(first.events, super::tail(file.path(), usize::MAX).unwrap());
+        writeln!(file).unwrap();
+        assert_eq!(reader.refresh(usize::MAX).unwrap().events, first.events);
+        file.write_all(lines[1].as_bytes()).unwrap();
+        assert_eq!(
+            reader.refresh(usize::MAX).unwrap().events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+        writeln!(file).unwrap();
+        assert_eq!(
+            reader.refresh(usize::MAX).unwrap().events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+    }
+
+    #[test]
+    fn incremental_partial_record_waits_for_newline() {
+        use std::io::Write;
+        let line = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .split_inclusive('\n')
+            .next()
+            .unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let split = line.len() / 2;
+        file.write_all(&line.as_bytes()[..split]).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        assert!(reader.refresh(usize::MAX).unwrap().events.is_empty());
+        file.write_all(&line.as_bytes()[split..]).unwrap();
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(update.events, super::tail(file.path(), usize::MAX).unwrap());
+        assert_eq!(update.parsed_bytes, line.len() as u64);
+    }
+
+    #[test]
+    fn incremental_real_transcripts_match_full_parse() {
+        use std::io::Write;
+        for fixture in [
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl"),
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl"),
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl"),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut reader = super::Reader::new(file.path().to_owned(), false);
+            for line in fixture.split_inclusive('\n') {
+                file.write_all(line.as_bytes()).unwrap();
+                let update = reader.refresh(usize::MAX).unwrap();
+                assert_eq!(update.events, super::tail(file.path(), usize::MAX).unwrap());
+                assert_eq!(update.parsed_bytes, line.len() as u64);
+            }
+            assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
     #[test]
     fn real_mcp_calls_share_display_names_and_keep_raw_names() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

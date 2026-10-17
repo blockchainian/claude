@@ -32,6 +32,13 @@ pub(super) fn fixture() -> (tempfile::TempDir, App) {
     (dir, app)
 }
 
+fn replace_transcript(path: &std::path::Path, content: impl AsRef<[u8]>) {
+    use std::io::Write;
+    let mut replacement = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
+    replacement.write_all(content.as_ref()).unwrap();
+    replacement.persist(path).unwrap();
+}
+
 pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     app.refresh_log(8);
@@ -102,8 +109,8 @@ fn task_log_cache_rereads_when_event_count_changes() {
     app.refresh_log(8);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
-    for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 0), (24, 6)] {
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
+    for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 18), (24, 18)] {
         app.refresh_log(
             app.view
                 .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
@@ -200,7 +207,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(8);
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
@@ -234,7 +241,7 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(8);
     for _ in 0..6 {
         scroll_log(&mut app, ScrollDown);
@@ -265,8 +272,8 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     app.refresh_log(8);
     assert_eq!(app.view.log_scroll(), 0);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
-    assert_eq!(app.view.log.len(), 8);
-    assert_ne!(app.view.log, cached[1..]);
+    assert_eq!(app.view.log.len(), 10);
+    assert_eq!(app.view.log, cached);
     assert!(log_detail(&app).contains("Transcript copy 19"));
 }
 
@@ -357,7 +364,7 @@ fn bottom_border_loads_first_event_of_whole_log() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, transcript_copies(&payload, 200, 0)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 200, 0));
     app.refresh_log(8);
     assert_eq!(app.view.log.len(), 8);
     let area = ratatui::layout::Rect::new(0, 0, 200, 45);
@@ -465,7 +472,7 @@ fn task_log_growth_keeps_distance_from_end() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(8);
     scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
@@ -492,7 +499,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(1);
     app.view.handle_key(crossterm::event::KeyEvent::new(
         KeyCode::Char('r'),
@@ -541,11 +548,11 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
         .unwrap();
     writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
     app.refresh_log(1);
-    assert_eq!(app.view.matching_log_count(), 1);
+    assert_eq!(app.view.matching_log_count(), 21);
     assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
     app.refresh_log(1);
-    assert_eq!(app.view.log.len(), 1);
+    assert_eq!(app.view.log.len(), 41);
 }
 
 #[test]
@@ -562,7 +569,7 @@ fn task_log_scroll_clamps_at_transcript_start() {
     scroll_log(&mut app, ScrollUp);
     app.refresh_log(1);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
-    assert_eq!(app.view.log.len(), 1);
+    assert_eq!(app.view.log.len(), 2);
     // A transcript shorter than the visible window clamps all the way to zero.
     scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
