@@ -179,7 +179,13 @@ fn terminal_dashboard_tabs_and_grouping_hint() {
             "45",
         ]);
         tmux.wait_for(|capture| {
-            capture.lines().count() == 45 && capture.contains("g group by project")
+            // The clipped pre-resize frame can already have the expected height and footer.
+            capture.lines().count() == 45
+                && capture.contains("g group by project")
+                && capture
+                    .lines()
+                    .next()
+                    .is_some_and(|row| row.contains("Inactive 1"))
         });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = capture.lines().collect();
