@@ -33,16 +33,16 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  Bash                                           Bash                                            12s
+
                                              cargo test
                                                   ↓
                                            running 3 tests
                                            ...
 
  Read                                           Read
+
                                        agents/src/log.rs:1-40
                                                   ↓
                                                  •··
-
-
 
  ? help  esc back  ↑/↓ move  enter open  n new

@@ -87,6 +87,11 @@ fn terminal_log_section_titles_and_scrolling() {
         "{capture}"
     );
     assert!(!rows[0].contains('─'), "{capture}");
+    assert!(rows[1].trim_end_matches('│').trim().is_empty(), "{capture}");
+    assert!(
+        !rows[2].trim_end_matches('│').trim().is_empty(),
+        "{capture}"
+    );
 
     let recorded_agents: Vec<_> = include_str!("../fixtures/claude-agent-display.jsonl")
         .lines()
@@ -106,7 +111,12 @@ fn terminal_log_section_titles_and_scrolling() {
     assert!(rows[0].contains("实测 attach 发提示词"), "{capture}");
     assert!(!rows[0].contains("sonnet"), "{capture}");
     assert!(!rows[0].contains('─'), "{capture}");
-    let body = rows[1..].join("\n");
+    assert!(rows[1].trim_end_matches('│').trim().is_empty(), "{capture}");
+    assert!(
+        !rows[2].trim_end_matches('│').trim().is_empty(),
+        "{capture}"
+    );
+    let body = rows[2..].join("\n");
     assert!(!body.contains("general-purpose"), "{capture}");
     assert!(!body.contains("attach-probe"), "{capture}");
     assert!(!body.contains("实测 attach 发提示词"), "{capture}");
@@ -199,10 +209,13 @@ fn terminal_parallel_tools_have_only_section_titles() {
         "{capture}"
     );
     for title in ["Claude 图片链接", "Codex 图片链接"] {
-        let row = rows
+        let index = rows
             .iter()
-            .find(|row| row.starts_with(" codex-manager start") && row.contains(title))
+            .position(|row| row.starts_with(" codex-manager start") && row.contains(title))
             .unwrap();
+        let row = rows[index];
+        assert!(rows[index + 1].trim().is_empty(), "{capture}");
+        assert!(rows[index + 2].contains("cwd:"), "{capture}");
         assert_eq!(
             row[..row.find(title).unwrap()].width(),
             terminal_detail_width::detail_center(200, title.width()),

@@ -1,5 +1,6 @@
 200 columns
 Task b9wi31ww0                                                          Background command "等 tab 线程" completed (exit code 0)
+
                                                                                                     ↓
                                                     {
                                                       "kind": "completed",
@@ -36,6 +37,7 @@ Task b9wi31ww0                                                          Backgrou
                                                     [exited with code 0]
 90 columns
 Task b9wi31ww0   Background command "等 tab 线程" completed (exit code 0)
+
                                              ↓
 {
   "kind": "completed",

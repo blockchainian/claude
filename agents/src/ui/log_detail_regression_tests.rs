@@ -112,6 +112,46 @@ fn cross_section_drag_preserves_blank_line() {
     );
 }
 
+#[test]
+fn title_to_body_drag_does_not_copy_the_display_gap() {
+    let (mut view, now) = open_tool_fixture();
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 60));
+    view.render_at(buf.area, &mut buf, now);
+    let (title, body, expected, gap_y) = {
+        let viewport = view.viewport.borrow();
+        let region = &viewport.log_text;
+        let title = region
+            .rows
+            .iter()
+            .find(|row| row.segment == 0 && !row.cells.is_empty())
+            .unwrap()
+            .clone();
+        let body = region
+            .rows
+            .iter()
+            .find(|row| row.segment == 1 && !row.cells.is_empty())
+            .unwrap()
+            .clone();
+        let expected = format!("{}\n{}", region.sources[0].text, region.sources[1].text);
+        let gap_y = title.y + 1;
+        (title, body, expected, gap_y)
+    };
+    assert_eq!(body.y, title.y + 2);
+    view.begin_text_selection(title.x, gap_y);
+    assert!(view.text_selection.borrow().is_none());
+    let start = title.x + title.cells.first().unwrap().0.start;
+    let end = body.x + body.cells.last().unwrap().0.end;
+    view.begin_text_selection(start, title.y);
+    view.extend_text_selection(end, body.y);
+    assert_eq!(
+        view.finish_text_selection(end, body.y),
+        Some(Action::Copy {
+            text: expected,
+            label: "Copied selection".into(),
+        })
+    );
+}
+
 fn assert_hidden_suffix_search(width: u16) {
     let (mut view, now) = open_tool_fixture();
     let mut event = view.visible_log_event().unwrap().clone();

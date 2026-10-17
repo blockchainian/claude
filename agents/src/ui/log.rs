@@ -980,6 +980,8 @@ fn detail_parts_layout(
                 label: copied_label(event),
             });
         }
+        layout.lines.push(Line::default());
+        layout.rows.push((layout.sources.len() - 1, Vec::new()));
         for group in section.groups {
             let rendered: Vec<_> = group
                 .parts
@@ -1423,7 +1425,7 @@ pub(super) mod log_markdown {
             detail_layout(event, 100, std::path::Path::new("/"), DateTime::UNIX_EPOCH)
                 .lines
                 .len(),
-            1
+            2
         );
     }
 
@@ -1902,6 +1904,43 @@ mod panel_detail_tests {
     }
 
     #[test]
+    fn each_section_title_has_a_display_only_gap_before_its_body() {
+        let mut events =
+            fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+        events.push(fixture_event());
+        for event in events {
+            let sections =
+                super::tool_detail::detail(&event, String::new(), Style::new().dim()).sections;
+            let mut id = 0;
+            let titles: Vec<_> = sections
+                .iter()
+                .map(|section| {
+                    let title = id;
+                    id += 1 + section
+                        .groups
+                        .iter()
+                        .map(|group| group.parts.len())
+                        .sum::<usize>();
+                    title
+                })
+                .collect();
+            let layout = detail_layout(&event, 200, Path::new("/"), DateTime::UNIX_EPOCH);
+            assert_eq!(layout.lines.len(), layout.rows.len());
+            for id in titles {
+                let row = layout
+                    .rows
+                    .iter()
+                    .position(|(source, cells)| *source == id && !cells.is_empty())
+                    .unwrap();
+                assert_eq!(layout.lines[row + 1].to_string(), "");
+                assert!(layout.rows[row + 1].1.is_empty());
+                assert_eq!(layout.rows[row + 2].0, id + 1);
+                assert!(!layout.rows[row + 2].1.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn section_titles_scroll_without_a_merged_event_header_or_rules() {
         let event = fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
             .into_iter()
@@ -1967,10 +2006,10 @@ mod panel_detail_tests {
         for width in [200, 35] {
             let columns = columns(width);
             let layout = layout_part(columns, Part::text(source.into(), false), None);
-            assert_eq!(layout.lines.len(), 2);
-            assert_eq!(layout.lines[1].width(), usize::from(columns.text.width));
-            assert!(layout.lines[1].to_string().ends_with('…'));
-            let cells = &layout.rows[1].1;
+            assert_eq!(layout.lines.len(), 3);
+            assert_eq!(layout.lines[2].width(), usize::from(columns.text.width));
+            assert!(layout.lines[2].to_string().ends_with('…'));
+            let cells = &layout.rows[2].1;
             assert_eq!(cells.first().unwrap().0.start, 0);
             assert_eq!(cells.last().unwrap().0.end, columns.text.width);
             assert_eq!(
@@ -1996,7 +2035,7 @@ mod panel_detail_tests {
             let layout = layout_part(columns, Part::prose(source.into(), false), None);
             assert!(layout.lines.len() > 1);
             let wrap_width = columns.reading_width.min(columns.text.width);
-            for (_, cells) in layout.rows.iter().skip(1) {
+            for (_, cells) in layout.rows.iter().skip(2) {
                 let start = cells.first().unwrap().0.start;
                 let end = cells.last().unwrap().0.end;
                 assert!(end - start <= wrap_width);
@@ -2005,7 +2044,7 @@ mod panel_detail_tests {
             let longest = layout
                 .rows
                 .iter()
-                .skip(1)
+                .skip(2)
                 .map(|(_, cells)| cells.last().unwrap().0.end - cells.first().unwrap().0.start)
                 .max()
                 .unwrap();
@@ -2046,7 +2085,7 @@ mod panel_detail_tests {
                 layout
                     .rows
                     .iter()
-                    .skip(1)
+                    .skip(2)
                     .map(|(_, cells)| columns.text.x + cells[0].0.start)
                     .collect::<Vec<_>>(),
                 vec![expected_x; 3]
@@ -2070,12 +2109,12 @@ mod panel_detail_tests {
                 style: Style::new(),
             };
             let mut layout = layout_part(columns, Part::raw_json(source.into()), Some(raw));
-            let before = layout.lines[1].to_string();
+            let before = layout.lines[2].to_string();
             let maps = layout.rows.clone();
-            layout.highlight_raw(2);
-            assert_eq!(layout.lines[1].to_string(), before);
+            layout.highlight_raw(3);
+            assert_eq!(layout.lines[2].to_string(), before);
             assert_eq!(layout.rows, maps);
-            assert_eq!(layout.lines[1].width(), usize::from(columns.text.width));
+            assert_eq!(layout.lines[2].width(), usize::from(columns.text.width));
         }
     }
 

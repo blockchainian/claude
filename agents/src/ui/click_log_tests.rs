@@ -104,7 +104,7 @@ fn detail_centers_multiline_sections_and_arrow_on_panel_midline() {
         assert_eq!(
             buf[(
                 super::super::centering::centered_x(columns.panel, columns.text, 1),
-                region.area.y + 3
+                region.area.y + 4
             )]
                 .symbol(),
             "↓"
@@ -658,7 +658,7 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
                 Rect::new(2, 1, width, 40),
                 view.center_layout(actual.area).log,
             );
-            let title_rows = usize::from(scroll == 0);
+            let title_rows = 2usize.saturating_sub(scroll);
             let body = Rect::new(
                 columns.text.x,
                 2 + title_rows as u16,
@@ -669,7 +669,7 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
             Paragraph::new(
                 expected
                     .iter()
-                    .skip(scroll.saturating_sub(1))
+                    .skip(scroll.saturating_sub(2))
                     .take(usize::from(body.height))
                     .cloned()
                     .collect::<Vec<_>>(),

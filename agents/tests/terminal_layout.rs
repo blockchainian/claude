@@ -2029,6 +2029,10 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 .iter()
                 .rposition(|line| line.matches('─').count() > usize::from(width / 2))
                 .expect("detail header rule");
+            assert!(
+                rows[rule + 2].trim_end_matches('│').trim().is_empty(),
+                "{capture}"
+            );
             let (row, line) = rows
                 .iter()
                 .enumerate()
@@ -2043,12 +2047,12 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             let group_start = rows
                 .iter()
                 .enumerate()
-                .skip(rule + 2)
-                .take(row.saturating_sub(rule + 2))
+                .skip(rule + 3)
+                .take(row.saturating_sub(rule + 3))
                 .filter(|(_, line)| line.trim() == "↓")
                 .map(|(index, _)| index + 1)
                 .next_back()
-                .unwrap_or(rule + 2);
+                .unwrap_or(rule + 3);
             let group: Vec<_> = rows
                 .iter()
                 .skip(group_start)
@@ -2097,7 +2101,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 );
                 let summary = rows
                     .iter()
-                    .skip(rule + 2)
+                    .skip(rule + 3)
                     .find(|line| line.contains("threadId: 00000000-0000-4000-8000-000000000000"))
                     .expect("identifier remains an ordinary input field");
                 assert_eq!(
@@ -2115,13 +2119,13 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 assert!(
                     !rows
                         .iter()
-                        .skip(rule + 2)
+                        .skip(rule + 3)
                         .any(|line| line.contains("Claude 图片链接")),
                     "{capture}"
                 );
                 let cwd = rows
                     .iter()
-                    .skip(rule + 2)
+                    .skip(rule + 3)
                     .find(|line| line.contains("cwd"))
                     .expect("remaining cwd field");
                 assert_eq!(
@@ -2230,6 +2234,11 @@ fn terminal_manager_detach_title() {
             .rposition(|line| line.matches('─').count() > usize::from(width / 2))
             .unwrap();
         let title = rows[rule + 1];
+        assert!(
+            rows[rule + 2].trim_end_matches('│').trim().is_empty(),
+            "{capture}"
+        );
+        assert!(rows[rule + 3].contains("threadId: 01a1489e"), "{capture}");
         assert!(
             title.trim_start().starts_with("codex-manager detach"),
             "{capture}"
