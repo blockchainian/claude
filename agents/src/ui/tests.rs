@@ -3686,7 +3686,6 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
-        tool_time: crate::log::ToolTime::Turn,
         source: None,
         source_records: Vec::new(),
         sender: None,
@@ -4959,7 +4958,6 @@ fn task_log_right_aligns_mixed_width_times_and_centers_content() {
 fn task_log_shows_only_visible_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
-        tool_time: crate::log::ToolTime::Turn,
         source: None,
         source_records: Vec::new(),
         sender: None,
@@ -6723,14 +6721,13 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
-            display_name: "Bash".into(),
-            detail_title: None,
-            expand: true,
+            subagent_type: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
-            input: vec![Section::Shell {
-                prefix: String::new(),
+            input: vec![Section::Code {
+                label: "command".into(),
+                lang: "bash".into(),
                 text: "cargo test".into(),
             }],
             output: Some(vec![Section::Text {
@@ -6742,9 +6739,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
-            display_name: "Read".into(),
-            detail_title: None,
-            expand: true,
+            subagent_type: None,
             id: "Read-fixture".into(),
             title: "Read".into(),
             name: "Read".into(),
@@ -6879,8 +6874,9 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
     let mut event = view.log[7].clone();
     event.calls.truncate(1);
     event.calls[0].input = vec![
-        crate::log::Section::Shell {
-            prefix: String::new(),
+        crate::log::Section::Code {
+            label: "command".into(),
+            lang: "bash".into(),
             text: command.into(),
         },
         crate::log::Section::Fields(vec![("timeout".into(), "1000".into())]),
@@ -7940,11 +7936,11 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         let call = event.calls.iter().find(|call| call.name == name).unwrap();
         let mut event = event.clone();
         event.calls = vec![call.clone()];
-        let title = call
-            .detail_title
+        let title = super::tool_detail::input_label(call).unwrap_or_else(|| call.title.clone());
+        let left = call
+            .subagent_type
             .clone()
-            .unwrap_or_else(|| call.title.clone());
-        let left = call.display_name.clone();
+            .unwrap_or_else(|| crate::log::display_tool_name(&call.name));
         for kind in [
             crate::log::Kind::Tool,
             crate::log::Kind::Error,
@@ -9259,7 +9255,7 @@ fn claude_agent_display_from_real_records() {
         let detail = view.viewport.borrow().log_detail;
         let header = usize::from(detail.y + 1);
         assert!(rows[header].contains(metadata), "{screen}");
-        let description = event.calls[0].detail_title.clone().unwrap();
+        let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
         assert!(
             rows[header]
                 .replace(' ', "")
@@ -9293,7 +9289,7 @@ fn claude_agent_display_from_real_records() {
                 buffer[(right, header as u16)].style()
             );
         }
-        let description = event.calls[0].detail_title.clone().unwrap();
+        let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
         assert!(
             !rows[header + 1..]
                 .iter()

@@ -556,11 +556,16 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
 
 /// Choose the tool section's metadata and centered title together.
 fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
-    (
-        Some(call.display_name.clone()),
-        call.detail_title
+    let left = if call.name == "task-notification" {
+        format!("Task {}", call.id)
+    } else {
+        call.subagent_type
             .clone()
-            .unwrap_or_else(|| call.title.clone()),
+            .unwrap_or_else(|| crate::log::display_tool_name(&call.name))
+    };
+    (
+        Some(left),
+        input_label(call).unwrap_or_else(|| call.title.clone()),
     )
 }
 
@@ -582,7 +587,20 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                 meta_style: Style::new().dim(),
             };
             for section in &call.input {
-                push_section(&mut input, section, label_style, false);
+                if let Section::Fields(fields) = section {
+                    let body = Section::Fields(
+                        fields
+                            .iter()
+                            .filter(|(key, _)| {
+                                !matches!(key.as_str(), "name" | "description" | "subagent_type")
+                            })
+                            .cloned()
+                            .collect(),
+                    );
+                    push_section(&mut input, &body, label_style, false);
+                } else {
+                    push_section(&mut input, section, label_style, false);
+                }
             }
             let mut groups = Vec::new();
             if !input.is_empty() {
@@ -629,21 +647,73 @@ fn parts(event: &Event) -> Vec<DetailSection> {
         .collect()
 }
 
+fn free_text(key: &str) -> bool {
+    matches!(key, "prompt" | "message" | "question")
+}
+
+fn input_label_field(call: &crate::log::ToolCall) -> Option<(&str, &str)> {
+    ["description", "name"].into_iter().find_map(|label_key| {
+        call.input
+            .iter()
+            .filter_map(|section| match section {
+                Section::Fields(fields) => Some(fields),
+                _ => None,
+            })
+            .flatten()
+            .find_map(|(key, value)| {
+                (key == label_key && !value.trim().is_empty())
+                    .then_some((key.as_str(), value.as_str()))
+            })
+    })
+}
+
+/// Prefer the input description, then its name, for the centered title.
+pub(super) fn input_label(call: &crate::log::ToolCall) -> Option<String> {
+    input_label_field(call).map(|(_, value)| value.to_owned())
+}
+
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
-        Section::Shell { text, prefix } => {
-            parts.push(shell_part(format!("{prefix}{text}"), prefix.len()));
-            return;
-        }
-        Section::Prose { text, markdown } => {
-            parts.push(Part::prose(cells(text), *markdown));
-            return;
-        }
-        Section::Heading(label) => {
-            parts.push(Part::new(label.clone(), Body::Label(label_style)));
-            return;
-        }
         Section::Fields(fields) => {
+            if !text_output
+                && fields
+                    .iter()
+                    .any(|(key, _)| matches!(key.as_str(), "command" | "cmd"))
+            {
+                for (key, value) in fields {
+                    if matches!(key.as_str(), "command" | "cmd") {
+                        parts.push(shell_part(format!("{key}: {value}"), key.len() + 2));
+                    } else {
+                        push_section(
+                            parts,
+                            &Section::Fields(vec![(key.clone(), value.clone())]),
+                            label_style,
+                            false,
+                        );
+                    }
+                }
+                return;
+            }
+            if !text_output {
+                let ordinary: Vec<_> = fields
+                    .iter()
+                    .filter(|(key, _)| !free_text(key))
+                    .cloned()
+                    .collect();
+                if !ordinary.is_empty() {
+                    push_section(parts, &Section::Fields(ordinary), label_style, true);
+                    let part = parts.last_mut().expect("fields part exists");
+                    if let Body::Fields(keys) = &part.body {
+                        part.body = Body::InputFields(keys.clone());
+                    }
+                }
+                for (key, value) in fields {
+                    if free_text(key) {
+                        parts.push(Part::prose(value.clone(), true));
+                    }
+                }
+                return;
+            }
             let mut text = String::new();
             let mut keys = Vec::new();
             for (key, value) in fields {
@@ -655,17 +725,14 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
                 text.push_str(": ");
                 text.push_str(value);
             }
-            parts.push(Part::new(
-                cells(&text),
-                if text_output {
-                    Body::Fields(keys)
-                } else {
-                    Body::InputFields(keys)
-                },
-            ));
+            parts.push(Part::new(cells(&text), Body::Fields(keys)));
             return;
         }
         Section::Code { label, lang, text } => {
+            if !text_output && label == "command" && lang == "bash" {
+                parts.push(shell_part(text.clone(), 0));
+                return;
+            }
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
         Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
@@ -677,16 +744,23 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
                 Part::prose(cells(text), true)
             },
         ),
-        Section::Text { text, .. } => {
+        Section::Text { label, text } => {
+            if label == "stderr" {
+                parts.push(Part::new(label.clone(), Body::Label(label_style)));
+            }
             if text_output {
                 parts.extend(Part::text_parts(cells(text), false));
             } else {
-                parts.push(Part::text(cells(text), false));
+                parts.push(if free_text(label) || label == "questions" {
+                    Part::prose(cells(text), false)
+                } else {
+                    Part::text(cells(text), false)
+                });
             }
             return;
         }
     };
-    if matches!(section, Section::Diff { .. }) {
+    if matches!(section, Section::Diff { .. }) || label == "stderr" {
         parts.push(Part::new(label.clone(), Body::Label(label_style)));
     }
     parts.push(body);
@@ -782,7 +856,6 @@ mod tests {
         Event {
             source: None,
             source_records: Vec::new(),
-            tool_time: crate::log::ToolTime::Turn,
             sender: None,
             kind: Kind::Tool,
             body: String::new(),
@@ -847,13 +920,14 @@ mod tests {
     #[test]
     fn tool_descriptions_are_centered_in_single_and_merged_title_rows() {
         let call = ToolCall {
-            display_name: "Bash".into(),
-            detail_title: Some("Check the workspace".into()),
-            expand: true,
+            subagent_type: None,
             id: "description-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
-            input: vec![],
+            input: vec![Section::Fields(vec![(
+                "description".into(),
+                "Check the workspace".into(),
+            )])],
             output: None,
             exit_code: None,
             is_error: false,
@@ -874,16 +948,16 @@ mod tests {
     #[test]
     fn call_titles_keep_type_and_labels_out_of_the_body() {
         let mut call = ToolCall {
-            display_name: "general-purpose".into(),
-            detail_title: Some("Inspect source".into()),
-            expand: true,
+            subagent_type: Some("general-purpose".into()),
             id: "call-id".into(),
             title: "Agent".into(),
             name: "Agent".into(),
-            input: vec![Section::Prose {
-                text: "Find the entry".into(),
-                markdown: true,
-            }],
+            input: vec![Section::Fields(vec![
+                ("description".into(), "Inspect source".into()),
+                ("name".into(), "source-reader".into()),
+                ("subagent_type".into(), "general-purpose".into()),
+                ("prompt".into(), "Find the entry".into()),
+            ])],
             output: None,
             exit_code: Some(1),
             is_error: true,
@@ -918,13 +992,17 @@ mod tests {
                 assert!(section.groups[4].parts[0].running());
             }
         }
-        call.detail_title = Some("source-reader".into());
+        call.input = vec![Section::Fields(vec![(
+            "name".into(),
+            "source-reader".into(),
+        )])];
         assert_eq!(call_title(&call).1, "source-reader");
-        call.detail_title = None;
+        call.input.clear();
         assert_eq!(call_title(&call).1, "Agent");
-        call.display_name = "Task call-id".into();
+        call.name = "task-notification".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id"));
-        call.display_name = "Read".into();
+        call.name = "Read".into();
+        call.subagent_type = None;
         assert_eq!(call_title(&call).0.as_deref(), Some("Read"));
     }
 
@@ -1015,9 +1093,7 @@ mod tests {
     #[test]
     fn running_part_has_no_copy_source_or_selectable_cells() {
         let parts = flattened_parts(&event(vec![ToolCall {
-            display_name: "Bash".into(),
-            detail_title: None,
-            expand: true,
+            subagent_type: None,
             id: "running-copy".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -1261,9 +1337,10 @@ mod tests {
         let mut parts = Vec::new();
         push_section(
             &mut parts,
-            &Section::Shell {
+            &Section::Code {
+                label: "command".into(),
+                lang: "bash".into(),
                 text: command.into(),
-                prefix: String::new(),
             },
             Style::default(),
             false,
@@ -1398,16 +1475,10 @@ mod tests {
         let mut parts = Vec::new();
         push_section(
             &mut parts,
-            &Section::Shell {
-                text: "a && bb".into(),
-                prefix: "command: ".into(),
-            },
-            Style::default(),
-            false,
-        );
-        push_section(
-            &mut parts,
-            &Section::Fields(vec![("timeout".into(), "1000".into())]),
+            &Section::Fields(vec![
+                ("command".into(), "a && bb".into()),
+                ("timeout".into(), "1000".into()),
+            ]),
             Style::default(),
             false,
         );
@@ -1429,42 +1500,6 @@ mod tests {
             .to_string(),
             "echo 'broken && next"
         );
-    }
-
-    #[test]
-    fn fields_keep_their_semantics_for_command_and_prose_keys() {
-        let fields = Section::Fields(vec![
-            ("command".into(), "a && bb".into()),
-            ("cmd".into(), "c && dd".into()),
-            ("prompt".into(), "Read this".into()),
-            ("name".into(), "Keep this field".into()),
-            ("description".into(), "Keep this too".into()),
-        ]);
-        let mut parts = Vec::new();
-        push_section(&mut parts, &fields, Style::default(), false);
-        assert_eq!(parts.len(), 1);
-        assert!(matches!(parts[0].body, Body::InputFields(_)));
-        assert_eq!(
-            texts(&parts, 80),
-            [
-                "command: a && bb",
-                "cmd: c && dd",
-                "prompt: Read this",
-                "name: Keep this field",
-                "description: Keep this too",
-            ]
-        );
-        let mut parts = Vec::new();
-        push_section(
-            &mut parts,
-            &Section::Shell {
-                prefix: "arbitrary: ".into(),
-                text: "a && bb".into(),
-            },
-            Style::default(),
-            false,
-        );
-        assert_eq!(texts(&parts, 80), ["┌ arbitrary: a", "└ bb"]);
     }
 
     #[test]
@@ -1535,14 +1570,13 @@ mod tests {
     fn merged_calls_keep_separate_sections_and_groups() {
         let sections = parts(&event(vec![
             ToolCall {
-                display_name: "Bash".into(),
-                detail_title: None,
-                expand: true,
+                subagent_type: None,
                 id: "Bash-fixture".into(),
                 title: "Bash".into(),
                 name: "Bash".into(),
-                input: vec![Section::Shell {
-                    prefix: String::new(),
+                input: vec![Section::Code {
+                    label: "command".into(),
+                    lang: "bash".into(),
                     text: "cargo test\n".into(),
                 }],
                 output: Some(vec![Section::Text {
@@ -1554,9 +1588,7 @@ mod tests {
                 duration: None,
             },
             ToolCall {
-                display_name: "Read".into(),
-                detail_title: None,
-                expand: true,
+                subagent_type: None,
                 id: "Read-fixture".into(),
                 title: "Read".into(),
                 name: "Read".into(),
@@ -1615,9 +1647,7 @@ mod tests {
         for count in [1, 2] {
             let calls = vec![
                 ToolCall {
-                    display_name: "Bash".into(),
-                    detail_title: None,
-                    expand: true,
+                    subagent_type: None,
                     id: "arrow-fixture".into(),
                     title: "Run checks".into(),
                     name: "Bash".into(),
@@ -1646,9 +1676,7 @@ mod tests {
     #[test]
     fn wide_code_and_diff_keep_logical_lines() {
         let parts = flattened_parts(&event(vec![ToolCall {
-            display_name: "Edit".into(),
-            detail_title: None,
-            expand: true,
+            subagent_type: None,
             id: "Edit-fixture".into(),
             title: "Edit".into(),
             name: "Edit".into(),
@@ -1683,20 +1711,15 @@ mod tests {
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
         let parts = flattened_parts(&event(vec![ToolCall {
-            display_name: "Bash".into(),
-            detail_title: None,
-            expand: true,
+            subagent_type: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
-            output: Some(vec![
-                Section::Heading("stderr".into()),
-                Section::Text {
-                    label: String::new(),
-                    text: "\tboom".into(),
-                },
-            ]),
+            output: Some(vec![Section::Text {
+                label: "stderr".into(),
+                text: "\tboom".into(),
+            }]),
             exit_code: None,
             is_error: true,
             duration: None,

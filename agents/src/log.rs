@@ -1,6 +1,100 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+pub(crate) fn display_tool_name(name: &str) -> String {
+    let Some((server, tool)) = name
+        .strip_prefix("mcp__")
+        .and_then(|rest| rest.split_once("__"))
+    else {
+        return name.to_owned();
+    };
+    let server = if let Some(rest) = server.strip_prefix("plugin_") {
+        match rest.split_once('_') {
+            Some((plugin, server)) if !plugin.is_empty() => server,
+            _ => return name.to_owned(),
+        }
+    } else {
+        server
+    };
+    if server.is_empty() || tool.is_empty() || tool.contains("__") {
+        name.to_owned()
+    } else {
+        [server, tool].join(" ")
+    }
+}
+
+pub(crate) fn tool_kind(name: &str) -> Kind {
+    match name.rsplit('.').next() {
+        Some("AskUserQuestion" | "request_user_input") => Kind::Assistant,
+        _ => Kind::Tool,
+    }
+}
+
+pub(crate) fn tool_title(name: &str, input: &Value) -> String {
+    let text = |key: &str| input[key].as_str().filter(|text| !text.trim().is_empty());
+    let tool = name.rsplit('.').next().unwrap_or(name);
+    match tool {
+        "AskUserQuestion" => std::iter::once(name)
+            .chain(
+                input["questions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|question| {
+                        question["header"]
+                            .as_str()
+                            .filter(|header| !header.trim().is_empty())
+                    }),
+            )
+            .collect::<Vec<_>>()
+            .join(" · "),
+        "Agent" | "Task" | "spawn_agent" => {
+            let agent = text("subagent_type")
+                .map(|kind| format!("{kind} agent"))
+                .unwrap_or_else(|| "Agent".to_owned());
+            text("description")
+                .map(|description| format!("{agent} {description}"))
+                .unwrap_or(agent)
+        }
+        "Skill" => text("skill").unwrap_or(name).to_owned(),
+        "SendMessage" | "send_message" | "followup_task" => text("to")
+            .or_else(|| text("target"))
+            .map(|recipient| format!("To {recipient}"))
+            .unwrap_or_else(|| name.to_owned()),
+        _ if name.starts_with("mcp__") => display_tool_name(name),
+        _ if text("description").is_some() => text("description").unwrap().to_owned(),
+        "Bash" | "exec" | "exec_command" | "shell" => {
+            let command = text("command").or_else(|| text("cmd")).unwrap_or("");
+            let summary = crate::shell_summary::summarize_shell_commands(command);
+            if summary.is_empty() {
+                name.to_owned()
+            } else {
+                summary
+            }
+        }
+        _ => name.to_owned(),
+    }
+}
+
+/// Retain the input description alongside specialized input sections.
+pub(crate) fn include_description(sections: &mut Vec<Section>, input: &Value) {
+    if let Some(description) = input["description"].as_str()
+        && !sections.iter().any(|section| matches!(section, Section::Fields(fields) if fields.iter().any(|(key, _)| key == "description")))
+    {
+        sections.push(Section::Fields(vec![("description".into(), description.into())]));
+    }
+}
+
+pub(crate) fn question_texts(input: &Value) -> Vec<String> {
+    input["questions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|question| question["question"].as_str())
+        .map(str::to_owned)
+        .collect()
+}
+
 pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
     match name.map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) if body.is_empty() => format!("({name})"),
@@ -22,22 +116,12 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
-/// How the provider's tool rows account for elapsed time.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ToolTime {
-    #[default]
-    Turn,
-    Background,
-    Execution,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     /// Identity of the transcript record that produced this event.
     pub source: Option<String>,
     pub source_records: Vec<SourceRecord>,
     pub kind: Kind,
-    pub tool_time: ToolTime,
     pub sender: Option<String>,
     pub body: String,
     /// Byte ranges of the file paths inside `body`, in order.
@@ -104,16 +188,12 @@ pub(crate) trait Reader: Send {
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
-    /// Left-hand detail header chosen by the provider.
-    pub display_name: String,
-    /// Preferred centered detail header.
-    pub detail_title: Option<String>,
-    /// Whether the event renders this call as a detail section.
-    pub expand: bool,
+    /// Claude Agent calls preserve the requested subagent type.
+    pub subagent_type: Option<String>,
     /// The provider's stable call identifier.
     pub id: String,
     pub title: String,
-    /// The provider's opaque tool name.
+    /// The provider's tool name, such as "Bash", "exec_command" or "apply_patch".
     pub name: String,
     pub input: Vec<Section>,
     /// A completed command's non-zero exit status.
@@ -128,12 +208,6 @@ pub struct ToolCall {
 /// One labelled part of a tool call's input or output, as the open log event draws it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
-    /// Shell source with an optional selectable field prefix.
-    Shell { text: String, prefix: String },
-    /// Input prose, optionally interpreted as Markdown.
-    Prose { text: String, markdown: bool },
-    /// A visible section label.
-    Heading(String),
     /// `key: value` lines, in order.
     Fields(Vec<(String, String)>),
     /// Code highlighted by `lang`, a syntax token or file extension such as "bash" or "rs".
@@ -156,4 +230,34 @@ pub enum Section {
 pub struct Image {
     pub label: String,
     pub path: std::path::PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mcp_titles_show_server_and_tool() {
+        for (name, expected) in [
+            (
+                "mcp__plugin_codex_codex-manager__send",
+                "codex-manager send",
+            ),
+            (
+                "mcp__plugin_codex_codex-manager__start",
+                "codex-manager start",
+            ),
+            (
+                "mcp__claude-in-chrome__navigate",
+                "claude-in-chrome navigate",
+            ),
+            ("mcp__context7__query-docs", "context7 query-docs"),
+            ("mcp__tool", "mcp__tool"),
+            ("mcp____send", "mcp____send"),
+            ("mcp__server__", "mcp__server__"),
+            ("mcp__plugin_codex__send", "mcp__plugin_codex__send"),
+            ("mcp__plugin__server__send", "mcp__plugin__server__send"),
+            ("mcp__plugin_codex___send", "mcp__plugin_codex___send"),
+        ] {
+            assert_eq!(super::tool_title(name, &serde_json::json!({})), expected);
+        }
+    }
 }

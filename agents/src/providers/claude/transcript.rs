@@ -1,7 +1,7 @@
 use crate::ask::{AskKind, Question, QuestionOption};
-use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 #[cfg(test)]
-use crate::providers::presentation::question_texts;
+use crate::log::question_texts;
+use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -779,7 +779,7 @@ fn read_messages(
                     super::log::tool_activity(block).map(|label| {
                         summary.detail_sources[0] = block["id"].as_str().map(str::to_owned);
                         (
-                            super::log::tool_kind(block["name"].as_str().unwrap()),
+                            crate::log::tool_kind(block["name"].as_str().unwrap()),
                             label,
                         )
                     })

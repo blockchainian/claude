@@ -744,7 +744,6 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
     let started_at = chrono::Utc::now();
     app.view.log_session = Some(app.sessions[0].id.clone());
     app.view.log = vec![crate::log::Event {
-        tool_time: crate::log::ToolTime::Turn,
         source: None,
         source_records: Vec::new(),
         sender: None,

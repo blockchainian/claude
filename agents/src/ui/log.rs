@@ -663,7 +663,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
             RowTime::Clock(event.started_at)
         };
     }
-    if event.tool_time == crate::log::ToolTime::Execution
+    if session.id.provider == crate::providers::ProviderId::Codex
         && event.kind == Kind::Tool
         && let Some(end) = event.ended_at
     {
@@ -675,7 +675,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
     let Some(previous) = event.previous_end else {
         return RowTime::Clock(event.started_at);
     };
-    let background = event.tool_time == crate::log::ToolTime::Background;
+    let background = event.body.ends_with(" *");
     let end = match event.ended_at {
         Some(end) => end,
         None if !last || background => event.started_at,
@@ -1063,7 +1063,12 @@ fn detail_parts_layout(
 /// Whether an event draws its tool calls when open, which makes its row open on click even
 /// when its body fits the row.
 pub(super) fn shows_calls(event: &Event) -> bool {
-    event.calls.iter().any(|call| call.expand)
+    !event.calls.is_empty()
+        && (matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied)
+            || event
+                .calls
+                .iter()
+                .any(|call| call.name == "AskUserQuestion"))
 }
 
 /// The copied event text, including the titles separating merged tool calls.
@@ -1394,7 +1399,6 @@ pub(super) mod log_markdown {
         let event = &Event {
             source: None,
             source_records: Vec::new(),
-            tool_time: crate::log::ToolTime::Turn,
             sender: None,
             kind: Kind::Tool,
             body: "finished".into(),
@@ -1443,7 +1447,6 @@ pub(super) mod log_markdown {
         let event = Event {
             source: None,
             source_records: Vec::new(),
-            tool_time: crate::log::ToolTime::Turn,
             sender: None,
             kind,
             body: body.into(),
@@ -1559,11 +1562,6 @@ pub(super) mod log_markdown {
         );
         let time = event_time(event, &session, true, event.ended_at.unwrap());
         assert_eq!(time, "370ms");
-        session.id.provider = crate::providers::ProviderId::Claude;
-        assert_eq!(
-            event_time(event, &session, true, event.ended_at.unwrap()),
-            time
-        );
         let area = Rect::new(0, 0, 40, 1);
         let mut buffer = Buffer::empty(area);
         render_event(event, &time, true, area, &mut buffer, None, &session.cwd);
@@ -1748,7 +1746,6 @@ pub(super) mod log_markdown {
             let event = Event {
                 source: None,
                 source_records: Vec::new(),
-                tool_time: crate::log::ToolTime::Turn,
                 sender: None,
                 kind: kind.clone(),
                 body: body.clone(),
@@ -2197,29 +2194,6 @@ mod panel_detail_tests {
     }
 
     #[test]
-    fn call_details_use_semantics_instead_of_provider_names() {
-        for mut event in
-            fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
-        {
-            if event.calls.is_empty() {
-                continue;
-            }
-            let before = detail_layout(&event, 120, Path::new("/"), DateTime::UNIX_EPOCH);
-            let copied = open_text(&event);
-            let expanded = shows_calls(&event);
-            for call in &mut event.calls {
-                call.name = "unrelated_tool".into();
-                call.id = "unrelated_call".into();
-            }
-            let after = detail_layout(&event, 120, Path::new("/"), DateTime::UNIX_EPOCH);
-            assert_eq!(before.lines, after.lines);
-            assert_eq!(before.rows, after.rows);
-            assert_eq!(copied, open_text(&event));
-            assert_eq!(expanded, shows_calls(&event));
-        }
-    }
-
-    #[test]
     fn shell_prefixes_count_toward_group_width_and_ellipsis_maps_hidden_command_bytes() {
         let mut event = fixture_events(include_str!(
             "../../tests/fixtures/claude-inline-script.jsonl"
@@ -2229,8 +2203,9 @@ mod panel_detail_tests {
         .unwrap();
         let source = "echo 123456789012345678901234567890 && pwd; whoami";
         event.calls.truncate(1);
-        event.calls[0].input = vec![crate::log::Section::Shell {
-            prefix: String::new(),
+        event.calls[0].input = vec![crate::log::Section::Code {
+            label: "command".into(),
+            lang: "bash".into(),
             text: source.into(),
         }];
         for width in [200, 35] {

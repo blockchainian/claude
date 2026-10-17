@@ -363,13 +363,14 @@ fn clipped_command_and_output_keep_time_empty_and_double_click_copies_original()
         .unwrap();
     event.calls.retain(|call| call.name == "Bash");
     event.calls.truncate(1);
-    let crate::log::Section::Shell { text, .. } = &event.calls[0].input[0] else {
+    let crate::log::Section::Code { text, .. } = &event.calls[0].input[0] else {
         panic!("recorded Bash command")
     };
     let text = text.lines().max_by_key(|line| line.width()).unwrap();
     let command = text.to_owned();
-    event.calls[0].input = vec![crate::log::Section::Shell {
-        prefix: String::new(),
+    event.calls[0].input = vec![crate::log::Section::Code {
+        label: "command".into(),
+        lang: "bash".into(),
         text: command.clone(),
     }];
     event.calls[0].output = Some(vec![crate::log::Section::Text {

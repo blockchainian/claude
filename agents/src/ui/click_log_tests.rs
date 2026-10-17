@@ -36,7 +36,7 @@ fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
         .calls
         .retain(|call| call.id == "toolu_01GnWk7yiKqPJ1tzHjouKcCx");
     let call = &mut event.calls[0];
-    let Section::Shell { text, .. } = &mut call.input[0] else {
+    let Section::Code { text, .. } = &mut call.input[0] else {
         panic!("Bash command")
     };
     *text = text.lines().skip(1).take(2).collect::<Vec<_>>().join("\n");
@@ -122,13 +122,10 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             .nth(2)
             .unwrap();
         let output = format!("before\n{json}\nafter");
-        event.calls[0].output = Some(vec![
-            crate::log::Section::Heading("stderr".into()),
-            crate::log::Section::Text {
-                label: String::new(),
-                text: output,
-            },
-        ]);
+        event.calls[0].output = Some(vec![crate::log::Section::Text {
+            label: "stderr".into(),
+            text: output,
+        }]);
         let parts = detail_parts(&event);
         let output_start = parts
             .iter()
