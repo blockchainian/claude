@@ -228,7 +228,7 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
         capture
             .lines()
             .last()
-            .is_some_and(|line| line.contains("g group by"))
+            .is_some_and(|line| line.trim() == "? help  esc back  ↑/↓ move  enter open  n new")
     });
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let (row, line) = capture

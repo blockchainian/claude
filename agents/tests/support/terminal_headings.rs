@@ -4,11 +4,18 @@ use super::*;
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_group_headings_center_at_wide_and_narrow_widths() {
     let (_directory, tmux, _transcript) = start_probe("headings");
-    for grouping in ["Project", "Status", "Model"] {
+    for (grouping, heading) in [
+        ("Project", "/claude"),
+        ("Status", "Inactive"),
+        ("Model", "claude-opus-5-5"),
+    ] {
         if grouping != "Project" {
             tmux.run(&["send-keys", "-t", "probe", "g"]);
             tmux.wait_for(|capture| {
-                capture.contains(&format!("g group by {}", grouping.to_lowercase()))
+                capture
+                    .lines()
+                    .nth(2)
+                    .is_some_and(|row| row.contains(heading))
             });
         }
         for width in [80, 112, 200, 300] {
@@ -34,12 +41,11 @@ fn terminal_group_headings_center_at_wide_and_narrow_widths() {
                 "{capture}"
             );
             if grouping == "Project" {
-                assert!(label.ends_with("/claude"), "{capture}");
-            } else if grouping == "Model" {
-                assert_eq!(label, "claude-opus-5-5", "{capture}");
+                assert!(label.ends_with(heading), "{capture}");
             } else {
-                assert_eq!(label, "Inactive", "{capture}");
+                assert_eq!(label, heading, "{capture}");
             }
+            assert!(!capture.lines().last().unwrap().contains("g group by"));
             println!(
                 "{grouping}, {width} columns:\n{}",
                 capture.lines().take(7).collect::<Vec<_>>().join("\n")
