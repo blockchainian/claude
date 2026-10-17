@@ -209,10 +209,6 @@ impl View {
     ) {
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
-        let input_title = match event.calls.as_slice() {
-            [call] => super::tool_detail::input_title(call),
-            _ => None,
-        };
         let mut header = Vec::new();
         if let Some(sender) = &event.sender {
             header.push(Span::styled(format!("({sender}) "), label_style));
@@ -225,9 +221,7 @@ impl View {
                 header.push(" ".into());
             }
             let title = if event.calls.len() == 1 {
-                input_title
-                    .clone()
-                    .unwrap_or_else(|| event.calls[0].title.clone())
+                event.calls[0].title.clone()
             } else {
                 event.body.clone()
             };
@@ -252,26 +246,18 @@ impl View {
                 .as_ref()
                 .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16),
         );
-        let mut header_area = Rect::new(
+        let header_area = Rect::new(
             header_row.x + margin,
             header_row.y,
             header_row.width.saturating_sub(margin * 2),
             1,
         );
-        if input_title.is_some() {
-            header_area = content_area;
-        }
         if !header_area.is_empty() {
             let title = truncate_line_with_ellipsis_if_overflow(
                 Line::from(header),
                 header_area.width.into(),
             );
-            let title = if input_title.is_some() {
-                title
-            } else {
-                title.centered()
-            };
-            title.render(header_area, buf);
+            title.centered().render(header_area, buf);
         }
         Line::from(Span::styled(time.to_owned(), time_style))
             .right_aligned()

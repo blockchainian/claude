@@ -88,7 +88,7 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
 }
 
 #[test]
-fn generic_input_title_occupies_top_left_and_fields_share_prose_column() {
+fn generic_tool_title_stays_centered_above_input_summary() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
     let event = crate::providers::claude::log::tail(&path, usize::MAX)
         .unwrap()
@@ -108,13 +108,13 @@ fn generic_input_title_occupies_top_left_and_fields_share_prose_column() {
         view.set_log(vec![event.clone()]);
         view.select_fixture_event(Some(event));
         let rendered = log_screen(&view, width, 50, now);
-        let title = super::super::tool_detail::input_title(&call).unwrap();
+        let title = call.title.clone();
         let detail = view.viewport.borrow().log_detail;
         let header = rendered.lines().nth(usize::from(detail.y + 1)).unwrap();
         assert!(header.trim_start().starts_with(&title), "{header}");
         assert_eq!(
             header[..header.find(&title).unwrap()].width(),
-            usize::from(detail.x)
+            usize::from(detail.x) + (usize::from(detail.width) - title.width()) / 2
         );
     }
 }

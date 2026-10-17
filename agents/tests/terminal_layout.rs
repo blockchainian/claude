@@ -2011,8 +2011,20 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             }
             if kind == "send" {
                 assert!(
-                    rows[rule + 1].starts_with(" thread 00000000-0000-4000-8000-000000000000"),
-                    "identifier missing from top-left header: {capture}"
+                    rows[rule + 1]
+                        .trim_start()
+                        .starts_with("codex-manager send"),
+                    "tool title missing from centered header: {capture}"
+                );
+                let summary = rows
+                    .iter()
+                    .skip(rule + 2)
+                    .find(|line| line.contains("thread 00000000-0000-4000-8000-000000000000"))
+                    .expect("identifier remains in input block");
+                assert_eq!(
+                    summary.len() - summary.trim_start().len(),
+                    expected_left,
+                    "{capture}"
                 );
                 assert!(
                     !rows
@@ -2024,8 +2036,20 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             }
             if kind == "tool-prompt" {
                 assert!(
-                    rows[rule + 1].starts_with(" Claude 图片链接"),
-                    "name missing from top-left header: {capture}"
+                    rows[rule + 1]
+                        .trim_start()
+                        .starts_with("codex-manager start"),
+                    "tool title missing from centered header: {capture}"
+                );
+                let summary = rows
+                    .iter()
+                    .skip(rule + 2)
+                    .find(|line| line.contains("Claude 图片链接"))
+                    .expect("name remains in input block");
+                assert_eq!(
+                    summary.len() - summary.trim_start().len(),
+                    expected_left,
+                    "{capture}"
                 );
                 let cwd = rows
                     .iter()
@@ -2084,3 +2108,48 @@ fn terminal_detail_reading_column_preserves_original_copy() {
 
 #[path = "support/terminal_chronological.rs"]
 mod terminal_chronological;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_manager_detach_title() {
+    use std::io::Write;
+    let (_directory, tmux, transcript) = start_probe("manager-detach-title");
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(transcript)
+        .unwrap();
+    write!(
+        file,
+        "{}",
+        include_str!("fixtures/claude-manager-detach.jsonl")
+    )
+    .unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    tmux.wait_for(|capture| capture.contains("thread 01a1489e"));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    // The centered header is separate from the list row and input body.
+    let title = capture
+        .lines()
+        .find(|line| line.trim_start().starts_with("codex-manager detach"))
+        .expect("centered tool title");
+    let left = title.len() - title.trim_start().len();
+    assert!(
+        left.abs_diff((200 - "codex-manager detach".len()) / 2) <= 1,
+        "{capture}"
+    );
+    let input = capture
+        .lines()
+        .find(|line| line.contains("thread 01a1489e"))
+        .expect("thread input block");
+    assert!(input.len() - input.trim_start().len() > 50, "{capture}");
+    assert!(
+        capture.contains("\"archived\": true") && capture.contains("\"detached\": true"),
+        "{capture}"
+    );
+    let path = std::env::temp_dir().join("agents-manager-detach-title.txt");
+    std::fs::write(&path, &capture).unwrap();
+    println!(
+        "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
+        path.display()
+    );
+}

@@ -37,7 +37,6 @@ pub(super) struct Part {
 enum Body {
     /// A merged call's title and duration, with the event header used to size its rule.
     TitleRule(Option<String>, String),
-    InputTitleRule(Option<String>),
     /// A section label, in the given style.
     Label(Style),
     /// An input/output arrow without selectable source bytes.
@@ -194,7 +193,7 @@ impl Part {
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
-        if !matches!(self.body, Body::TitleRule(..) | Body::InputTitleRule(_)) {
+        if !matches!(self.body, Body::TitleRule(..)) {
             return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
         }
         lines
@@ -243,20 +242,6 @@ impl Part {
         let lines = match &self.body {
             Body::TitleRule(time, header) => {
                 vec![call_title_rule(source, width, time.as_deref(), header)]
-            }
-            Body::InputTitleRule(time) => {
-                let mut line =
-                    super::title_rule::centered_title_rule(source, width, time.as_deref());
-                if matches!(self.body, Body::InputTitleRule(_))
-                    && line.spans.len() >= 4
-                    && line.spans[0].width() >= 2
-                {
-                    let shift = line.spans[0].width().saturating_sub(2);
-                    line.spans[0].content = "─ ".into();
-                    let last = line.spans.last_mut().expect("title rule suffix exists");
-                    last.content = format!("{}{}", "─".repeat(shift), last.content).into();
-                }
-                vec![line]
             }
             Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
@@ -311,10 +296,7 @@ impl Part {
                 .map(|line| Line::from(line.into_owned()))
                 .collect(),
         };
-        if matches!(
-            self.body,
-            Body::TitleRule(..) | Body::InputTitleRule(_) | Body::Arrow
-        ) {
+        if matches!(self.body, Body::TitleRule(..) | Body::Arrow) {
             return lines;
         }
         lines
@@ -628,26 +610,24 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
         }
         if event.calls.len() > 1 {
             let time = call.duration.map(super::formatting::format_log_duration);
-            parts.push(match input_title(call) {
-                Some(title) => Part::new(title, Body::InputTitleRule(time)),
-                None => {
-                    let mut header = String::new();
-                    if let Some(sender) = &event.sender {
-                        header.push_str(&format!("({sender}) "));
-                    }
-                    if event.kind != Kind::Tool {
-                        header.push_str(super::log::kind_label(&event.kind));
-                        header.push(' ');
-                    }
-                    header.push_str(&event.body);
-                    Part::new(call.title.clone(), Body::TitleRule(time, header))
-                }
-            });
+            let mut header = String::new();
+            if let Some(sender) = &event.sender {
+                header.push_str(&format!("({sender}) "));
+            }
+            if event.kind != Kind::Tool {
+                header.push_str(super::log::kind_label(&event.kind));
+                header.push(' ');
+            }
+            header.push_str(&event.body);
+            parts.push(Part::new(call.title.clone(), Body::TitleRule(time, header)));
         }
         if let Some(agent) = &call.agent {
             parts.push(Part::text(agent.label.clone(), false));
         }
         let input_start = parts.len();
+        if let Some(summary) = input_summary(call) {
+            parts.push(Part::prose(summary, false));
+        }
         for section in &call.input {
             push_section(&mut parts, section, label_style, false);
         }
@@ -709,8 +689,8 @@ fn header_field(key: &str, value: &str) -> Option<String> {
         .map(|stem| format!("{stem} {value}"))
 }
 
-/// Input metadata belongs to the header; outputs never take part in these roles.
-pub(super) fn input_title(call: &crate::log::ToolCall) -> Option<String> {
+/// Input metadata forms a body summary; the tool title stays independent.
+pub(super) fn input_summary(call: &crate::log::ToolCall) -> Option<String> {
     let labels: Vec<_> = call
         .input
         .iter()

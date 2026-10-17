@@ -611,3 +611,44 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
         }
     }
 }
+
+#[test]
+fn manager_detach_detail_keeps_tool_title_and_centered_input() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-manager-detach.jsonl");
+    let event = crate::providers::claude::log::tail(&path, 200)
+        .unwrap()
+        .remove(0);
+    assert_eq!(event.calls[0].title, "codex-manager detach");
+    let (mut view, now) = log_fixture();
+    view.select_fixture_event(Some(event));
+    let buf = detail_buffer(&view, 120, now);
+    let rows: Vec<String> = buf
+        .content
+        .chunks(124)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+        .collect();
+    let title = rows
+        .iter()
+        .find(|row| row.contains("codex-manager detach"))
+        .expect("detail must retain the log-list tool title");
+    let left = title.find("codex-manager detach").unwrap();
+    assert!(left.abs_diff((124 - "codex-manager detach".len()) / 2) <= 1);
+    let input = rows
+        .iter()
+        .find(|row| row.contains("thread 01a1489e"))
+        .expect("thread input remains visible");
+    assert!(input.len() - input.trim_start().len() > 20);
+    let snapshot = rows
+        .iter()
+        .map(|row| row.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/manager_detach_detail.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}

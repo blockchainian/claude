@@ -61,7 +61,7 @@ fn prose_body_kinds_use_reading_column_only_in_wide_mode() {
 }
 
 #[test]
-fn generic_input_fields_promote_titles_and_prose_without_changing_outputs() {
+fn generic_input_fields_keep_summaries_and_prose_without_changing_outputs() {
     let parsed = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
     let event = parsed
         .iter()
@@ -93,7 +93,7 @@ fn generic_input_fields_promote_titles_and_prose_without_changing_outputs() {
             .any(|p| p.source.starts_with("name: ") || p.source.contains("\nname: "))
     );
     assert_eq!(
-        super::super::tool_detail::input_title(&event.calls[0]).as_deref(),
+        super::super::tool_detail::input_summary(&event.calls[0]).as_deref(),
         Some(name.as_str())
     );
     assert!(parts.iter().any(|p| p.source.starts_with("cwd: ")));
@@ -116,7 +116,7 @@ fn generic_input_fields_promote_titles_and_prose_without_changing_outputs() {
     ])];
     event.calls[0].name = "mcp__plugin_codex_codex-manager__send".into();
     assert_eq!(
-        super::super::tool_detail::input_title(&event.calls[0]).as_deref(),
+        super::super::tool_detail::input_summary(&event.calls[0]).as_deref(),
         Some("thread abc-123")
     );
     let drawn = layout(&event, 200);
@@ -214,11 +214,15 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
         ])];
         event.calls[0].output = Some(event.calls[0].input.clone());
         assert_eq!(
-            super::super::tool_detail::input_title(&event.calls[0]).as_deref(),
+            super::super::tool_detail::input_summary(&event.calls[0]).as_deref(),
             Some("Readable task · session abc")
         );
         let drawn = layout(&event, 200);
-        assert_eq!(drawn.sources[0].text.as_ref(), "cwd: /workspace");
+        assert_eq!(
+            drawn.sources[0].text.as_ref(),
+            "Readable task · session abc"
+        );
+        assert_eq!(drawn.sources[1].text.as_ref(), "cwd: /workspace");
         assert_reading_column(&drawn, 0, true);
         assert_reading_column(&drawn, 1, true);
         assert!(
@@ -241,7 +245,7 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
     for value in ["a\nb".to_owned(), "x".repeat(81)] {
         event.calls[0].input = vec![Section::Fields(vec![("name".into(), value.clone())])];
         assert_eq!(
-            super::super::tool_detail::input_title(&event.calls[0]),
+            super::super::tool_detail::input_summary(&event.calls[0]),
             None
         );
         assert_eq!(open_parts(&event)[0].source, format!("name: {value}"));
@@ -302,7 +306,7 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
 }
 
 #[test]
-fn merged_input_titles_start_at_the_left_and_keep_copy_maps() {
+fn merged_calls_keep_tool_titles_and_centered_input_summaries() {
     let mut event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
         .into_iter()
         .find(|e| e.calls.iter().any(|c| c.name.ends_with("__start")))
@@ -314,26 +318,22 @@ fn merged_input_titles_start_at_the_left_and_keep_copy_maps() {
         .unwrap()
         .clone();
     event.calls = vec![call.clone(), call];
-    let part = open_parts(&event).remove(0);
-    let title = super::super::tool_detail::input_title(&event.calls[0]).unwrap();
-    for width in 0..40 {
-        assert!(
-            part.lines(width, Style::default(), DateTime::UNIX_EPOCH)
-                .iter()
-                .all(|line| line.width() <= width)
-        );
-    }
+    let parts = open_parts(&event);
+    assert_eq!(parts[0].source, event.calls[0].title);
+    assert_eq!(
+        parts[1].source,
+        super::super::tool_detail::input_summary(&event.calls[0]).unwrap()
+    );
     for width in [120, 200] {
-        let lines = part.lines(width, Style::default(), DateTime::UNIX_EPOCH);
-        assert!(lines[0].to_string().starts_with(&format!("─ {title} ")));
-        let maps = part.maps(&lines);
-        assert_eq!(maps[0][0].0.start, 2);
+        assert_centered_blocks(&event, width);
+        let lines = parts[0].lines(width.into(), Style::default(), DateTime::UNIX_EPOCH);
+        let maps = parts[0].maps(&lines);
         assert_eq!(
             maps[0]
                 .iter()
-                .map(|(_, bytes)| &part.source[bytes.clone()])
+                .map(|(_, bytes)| &parts[0].source[bytes.clone()])
                 .collect::<String>(),
-            title
+            event.calls[0].title
         );
     }
 }
@@ -370,6 +370,16 @@ fn assert_centered_blocks(event: &Event, width: u16) {
             .push(index);
     }
     for indices in groups.values() {
+        // Merged title rules also carry a right-aligned duration, outside the body blocks.
+        if indices.len() == 1
+            && event.calls.len() > 1
+            && event
+                .calls
+                .iter()
+                .any(|call| call.title == parts[indices[0]].source)
+        {
+            continue;
+        }
         let rows: Vec<_> = drawn
             .rows
             .iter()
