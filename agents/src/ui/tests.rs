@@ -8437,8 +8437,8 @@ fn task_notification_detail_shows_task_id_and_output_content() {
     let (mut view, now) = log_fixture();
     for event in events {
         let summary = event.body.clone();
-        view.log = vec![event.clone()];
-        view.select_fixture_event(Some(event));
+        view.log = vec![event.clone(), event.clone()];
+        view.select_fixture_event(Some(event.clone()));
         let area = Rect::new(0, 0, 160, 15);
         let mut buffer = Buffer::empty(area);
         view.render_log_detail(area, &mut buffer, now);
@@ -8465,7 +8465,21 @@ fn task_notification_detail_shows_task_id_and_output_content() {
             .iter()
             .position(|line| line.contains(&summary))
             .unwrap();
-        assert!(lines[header].starts_with("b9wi31ww0"), "{lines:#?}");
+        assert!(lines[header].starts_with("Task ID b9wi31ww0"), "{lines:#?}");
+        let title_column = lines[header].find(&summary).unwrap() as u16;
+        let title_style = buffer[(title_column, header as u16)].style();
+        for column in 0.."Task ID b9wi31ww0".len() {
+            assert_eq!(buffer[(column as u16, header as u16)].style(), title_style);
+        }
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+            include_str!("../../tests/ui_snapshots/task_notification_detail.txt")
+        );
         let rest = &lines[header + 1..];
         let arrow = rest.iter().position(|line| line.trim() == "↓").unwrap();
         assert!(

@@ -159,10 +159,20 @@ impl View {
             };
             header.push(Span::styled(title, label_style));
         }
+        let task_id = match event.calls.as_slice() {
+            [call] if call.name == "task-notification" => {
+                Some(Span::styled(format!("Task ID {}", call.id), label_style))
+            }
+            _ => None,
+        };
         let header_row = super::render::row(area, LOG_TOP, 1);
         let (content_area, time_area) = log_row_areas(header_row);
-        // The header centers on the panel, so it keeps the time column's width clear on both sides.
-        let margin = header_row.width - content_area.width;
+        // The centered header keeps the time and task id clear on both sides.
+        let margin = (header_row.width - content_area.width).max(
+            task_id
+                .as_ref()
+                .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16),
+        );
         let header_area = Rect::new(
             header_row.x + margin,
             header_row.y,
@@ -178,15 +188,10 @@ impl View {
             .right_aligned()
             .render(time_area, buf);
         // A task notification shows its task id opposite the time.
-        if let [call] = &event.calls[..]
-            && call.name == "task-notification"
-        {
+        if let Some(task_id) = task_id {
             let id_area = Rect::new(header_row.x, header_row.y, margin, 1);
-            truncate_line_with_ellipsis_if_overflow(
-                Line::from(Span::styled(call.id.clone(), time_style)),
-                id_area.width.into(),
-            )
-            .render(id_area, buf);
+            truncate_line_with_ellipsis_if_overflow(Line::from(task_id), id_area.width.into())
+                .render(id_area, buf);
         }
         let mut body_area =
             super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
