@@ -40,8 +40,8 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     let (buf, rows) = render(&view, 40, 40);
     let find = |s: &str| rows.iter().position(|line| line.contains(s)).unwrap();
     assert!(find("Update") < find("Tasks"));
-    assert!(find("Tasks") < find("Prompt"));
-    assert!(find("Tasks") < find("Needs attention"));
+    assert!(find("Prompt") < find("Tasks"));
+    assert!(find("Needs attention") < find("Tasks"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
     assert!(rows[find("Tasks")].ends_with("2/4"));
@@ -128,7 +128,7 @@ fn tasks_one_in_progress_and_one_pending_snapshot() {
 }
 
 #[test]
-fn tasks_long_list_uses_details_scroll_and_keeps_footer() {
+fn tasks_long_list_uses_details_scroll_and_keeps_other_sections() {
     let mut view = tasks_view();
     view.rows[view.selected].tasks = (1..=30)
         .map(|id| SessionTask {
@@ -156,7 +156,10 @@ fn tasks_long_list_uses_details_scroll_and_keeps_footer() {
         1
     );
     assert!(after.iter().any(|row| row.contains("Task row 2")));
-    assert_eq!(after.last(), before.last());
+    for label in ["Prompt", "Needs attention", "Waiting for your response."] {
+        assert!(before.iter().any(|row| row.trim() == label));
+        assert!(after.iter().any(|row| row.trim() == label));
+    }
     view.scroll_content_row(false, false, y.saturating_sub(1));
     assert_eq!(render(&view, 40, 24).1, before);
 }

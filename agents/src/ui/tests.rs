@@ -3195,7 +3195,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_activity_background_update_tasks_prompt() {
+fn details_sections_run_activity_background_update_prompt_tasks() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         kind: crate::log::Kind::Tool,
@@ -3218,8 +3218,8 @@ fn details_sections_run_activity_background_update_tasks_prompt() {
         "Latest activity",
         "Background\n",
         "Update",
-        "Tasks",
         "Prompt\n",
+        "Tasks",
     ]
     .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");

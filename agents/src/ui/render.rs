@@ -726,8 +726,8 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: activity, background, message, tasks, prompt,
-        // needs attention, project, model. The title
+        // Sections top to bottom: activity, background, message, prompt,
+        // needs attention, tasks. The title
         // sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
@@ -831,64 +831,6 @@ impl View {
             keys.push(body_key("Update", message));
             copies.push(Some((message.as_str(), "Copied update")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
-        }
-
-        let tasks = [
-            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
-            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
-        ]
-        .into_iter()
-        .flat_map(|(status, indicator)| {
-            session
-                .tasks
-                .iter()
-                .filter(move |task| task.status == status)
-                .map(move |task| (task, indicator))
-        })
-        .collect::<Vec<_>>();
-        let tasks_text = tasks
-            .iter()
-            .map(|(task, status)| {
-                format!(
-                    "{} {}",
-                    Self::status_indicator(*status).content,
-                    task.subject
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !tasks.is_empty() {
-            separate_section(&mut items);
-            let in_progress = tasks
-                .iter()
-                .filter(|(_, status)| *status == SessionStatus::Working)
-                .count();
-            items.push(
-                centered_header(
-                    "Tasks".dim().into(),
-                    format!("{in_progress}/{}", tasks.len()).dim().into(),
-                    width,
-                )
-                .into(),
-            );
-            let start = items.len();
-            for (task, status) in tasks {
-                items.push(
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(vec![
-                            Self::status_indicator(status),
-                            Span::raw(format!(" {}", task.subject)),
-                        ]),
-                        width,
-                    )
-                    .into(),
-                );
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key("Tasks", &tasks_text));
-            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
-            body_links.push(Vec::new());
-            item_links.resize(items.len(), Vec::new());
         }
 
         let prompt_header = if let Some(start) = session.prompt_at {
@@ -999,6 +941,64 @@ impl View {
             body_links.push(Vec::new());
         }
         item_links.resize(items.len(), Vec::new());
+
+        let tasks = [
+            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
+            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
+        ]
+        .into_iter()
+        .flat_map(|(status, indicator)| {
+            session
+                .tasks
+                .iter()
+                .filter(move |task| task.status == status)
+                .map(move |task| (task, indicator))
+        })
+        .collect::<Vec<_>>();
+        let tasks_text = tasks
+            .iter()
+            .map(|(task, status)| {
+                format!(
+                    "{} {}",
+                    Self::status_indicator(*status).content,
+                    task.subject
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(
+                centered_header(
+                    "Tasks".dim().into(),
+                    format!("{in_progress}/{}", tasks.len()).dim().into(),
+                    width,
+                )
+                .into(),
+            );
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
+                );
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
+        }
 
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();

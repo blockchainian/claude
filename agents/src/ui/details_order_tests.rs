@@ -7,9 +7,14 @@ fn details_section_order_preserves_clicks_and_copies() {
         std::fs::write(output.path(), "background output\n").unwrap();
         let mut view = fixture();
         let selected = &mut view.rows[view.selected];
-        selected.status = SessionStatus::Ready;
+        selected.status = SessionStatus::NeedsInput;
         selected.prompt = "Moved prompt".into();
         selected.queued = vec!["Queued prompt".into()];
+        selected.tasks = vec![crate::model::SessionTask {
+            id: "1".into(),
+            subject: "Moved task".into(),
+            status: crate::model::TaskStatus::Pending,
+        }];
         selected.last_message = Some("Moved reply".into());
         selected.last_message_at = Some(selected.updated_at);
         selected.activity = activity.then(|| crate::model::Activity {
@@ -36,8 +41,14 @@ fn details_section_order_preserves_clicks_and_copies() {
         if activity {
             sections.push("Latest activity");
         }
-        sections.push("Background");
-        sections.extend(["Update", "Prompt", "Queued prompt"]);
+        sections.extend([
+            "Background",
+            "Update",
+            "Prompt",
+            "Queued prompt",
+            "Needs attention",
+            "Tasks",
+        ]);
         assert!(!rendered.contains("Project"));
         assert!(!rendered.contains("Unknown"));
         let positions: Vec<_> = sections
