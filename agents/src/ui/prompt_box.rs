@@ -158,7 +158,8 @@ impl PromptBox {
 
     pub(super) fn paste(&mut self, text: &str) {
         if self.focused {
-            self.editor.insert(text);
+            self.editor
+                .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
         }
     }
 
@@ -173,6 +174,13 @@ impl PromptBox {
             self.editor.clear();
         } else if key.code == KeyCode::Esc {
             self.focused = false;
+        } else if (key.code == KeyCode::Enter
+            && key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT))
+            || (key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            self.editor.insert('\n');
         } else if key.code == KeyCode::Enter {
             if !self.editor.is_empty() && self.state != SendState::Sending {
                 self.state = SendState::Sending;

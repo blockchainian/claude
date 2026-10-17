@@ -133,6 +133,39 @@ fn start_probe_with_transcript(
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_prompt_newline_entry() {
+    let (_directory, tmux, _transcript) = start_probe("prompt-newlines");
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    for (name, entry) in [
+        ("shift-enter", "first line\x1b[13;2usecond line"),
+        ("option-enter", "first line\x1b\rsecond line"),
+        ("control-j", "first line\nsecond line"),
+        ("paste-cr", "\x1b[200~first line\rsecond line\x1b[201~"),
+        ("paste-crlf", "\x1b[200~first line\r\nsecond line\x1b[201~"),
+        ("paste-lf", "\x1b[200~first line\nsecond line\x1b[201~"),
+    ] {
+        tmux.run(&["send-keys", "-t", "probe", "-l", entry]);
+        tmux.wait_for(|capture| {
+            let rows: Vec<_> = capture.lines().collect();
+            rows.windows(2).any(|pair| {
+                pair[0].contains("New task ❯ first line") && pair[1].trim() == "second line"
+            })
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let path = std::env::temp_dir().join(format!("agents-prompt-{name}.txt"));
+        std::fs::write(&path, capture).unwrap();
+        println!(
+            "{{\"prompt_newline\":\"pass\",\"entry\":\"{name}\",\"capture\":\"{}\"}}",
+            path.display()
+        );
+        tmux.run(&["send-keys", "-t", "probe", "C-c"]);
+        tmux.wait_for(|capture| capture.contains("New task ❯") && !capture.contains("first line"));
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_marker_caret_and_mouse_alignment() {
     let (_directory, tmux, _transcript) = start_probe("prompt-marker");
     for width in [120, 200] {
@@ -1314,7 +1347,7 @@ fn terminal_details_section_positions() {
                         .collect()
                 })
                 .collect();
-            let positions = ["Tasks", "Update", "Prompt"]
+            let positions = ["Prompt", "Update", "Tasks"]
                 .map(|label| panel.iter().position(|row| row.contains(label)).unwrap());
             assert!(positions.is_sorted(), "{panel:?}");
             for label in ["Update", "Prompt", "Tasks"] {

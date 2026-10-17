@@ -504,3 +504,7 @@ mod tests {
         assert!(validate_text("第一行\nsecond line\t✓").is_ok());
     }
 }
+
+#[cfg(test)]
+#[path = "attach_input_tests.rs"]
+mod input_tests;
