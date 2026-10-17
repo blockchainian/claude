@@ -7,7 +7,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example ❮ Running in a terminal
+ Task log example ❮ Running in a terminal · /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                        Also inspect the tests                              11:59:00
                                               run tests                                         35s

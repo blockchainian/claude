@@ -125,6 +125,9 @@ pub struct Session {
     pub transcript: Option<PathBuf>,
 }
 
+/// Why a Claude session running in another terminal takes no input here, and how to fix it.
+pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
+
 impl Session {
     /// Whether provider session operations apply; display nesting does not make a thread a subagent.
     pub fn can_resume(&self) -> bool {
@@ -151,7 +154,7 @@ impl Session {
                 .as_ref()
                 .is_some_and(|process| process.label.as_deref() != Some("bg"))
         {
-            Some("Running in a terminal")
+            Some(FOREGROUND_SESSION)
         } else {
             None
         }
@@ -233,8 +236,17 @@ pub enum Action {
         id: SessionKey,
         effort: String,
     },
-    /// `o`: resume the session in this terminal.
+    /// Esc on the top level: resume the last launched session in this terminal.
     Resume(SessionKey),
+    /// `o` or a right click on the log detail: run the session's program in the log detail
+    /// panel.
+    OpenTerminal(SessionKey),
+    /// A right click on the session terminal: detach it and show the log detail again.
+    CloseTerminal,
+    /// Keys and mouse reports for the session terminal.
+    TerminalInput(Vec<u8>),
+    /// A paste into the session terminal.
+    TerminalPaste(String),
     /// `f`: resume as a new session id.
     Fork(SessionKey),
     /// Start a session when there is no previous task to return to.

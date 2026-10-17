@@ -45,6 +45,13 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - Log detail times share the list’s time-column geometry at the panel’s right edge. Title rows place details on the left, the title on the panel midline and the time in its column; titles move left to clear the time column and truncate only when wider than the available space. Body groups stay left of the time column and use the same panel-midline placement: prose wraps at the reading width, while preformatted lines use the full available width and truncate with an ellipsis. List rows also center on the panel midline, moving left to clear the time column.
 - Shell blocks containing `&&` chains draw a two-cell display prefix on every line: `┌ `, `│ ` and `└ ` inside chains, two spaces outside. Blocks without chains have no prefix. Prefixes count toward group width and truncation, but have no selectable or copied bytes.
 
+## Session terminal
+
+- `o`, or a right click on the log detail, runs the selected session's program in the log detail panel: `codex resume` for Codex, `claude attach` for a Claude background job, and for a Claude session with no live process `claude --resume <id> --bg` followed by `claude attach`. A Claude session running in another terminal shows `Running in a terminal · /bg` instead.
+- A right click on the terminal switches back to the log detail; the dashboard always keeps the right button. Switching back, selecting another task, quitting or the program exiting closes the terminal: Codex clients are ended, since the app-server owns the turn, and Claude attach clients detach with Ctrl-Z.
+- The focused terminal takes every key and paste. A left click on another panel moves focus away; a left click on the terminal moves it back and is not forwarded. Mouse events go to a program that enabled mouse reporting; otherwise the wheel scrolls the terminal's scrollback.
+- While a Claude session's terminal is open, prompts and interrupts from the prompt box are typed into it instead of opening a second attach client.
+
 ## Development
 
 - A rendering change updates the snapshots it moves in `tests/ui_snapshots/`.

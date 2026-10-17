@@ -7,7 +7,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example ❮ Running in a terminal
+ Task log example ❮ Running in a terminal · /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                        Please inspect the task                             11:58:00
                                      Bash: Create Unsafe Agents                                 15s

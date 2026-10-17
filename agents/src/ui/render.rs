@@ -218,6 +218,12 @@ impl View {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && let Some(cursor) = self.terminal_cursor()
+        {
+            return Some(cursor);
+        }
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
@@ -301,6 +307,7 @@ impl View {
             viewport.log = Rect::default();
             viewport.log_borders = [Rect::default(); 2];
             viewport.log_detail = Rect::default();
+            viewport.terminal = Rect::default();
             viewport.details_links.clear();
             viewport.log_links.clear();
         }

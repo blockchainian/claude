@@ -10,6 +10,7 @@ mod processes;
 mod providers;
 mod pty;
 mod refresh;
+mod session_terminal;
 mod repository;
 mod sessions;
 mod shell_summary;

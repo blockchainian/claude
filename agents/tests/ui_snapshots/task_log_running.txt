@@ -7,7 +7,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example ❮ Running in a terminal
+ Task log example ❮ Running in a terminal · /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                   Read src/main.rs， Read src/app.rs                             15s
                                             failed check                                        15s

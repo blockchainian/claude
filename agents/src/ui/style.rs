@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering;
 /// Whether the terminal background is light, as last reported by the terminal.
 static LIGHT_BACKGROUND: AtomicBool = AtomicBool::new(false);
 
-#[cfg(test)]
 pub fn light_background() -> bool {
     LIGHT_BACKGROUND.load(Ordering::Relaxed)
 }

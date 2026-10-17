@@ -768,7 +768,7 @@ impl Provider for ClaudeProvider {
                     .ok_or_else(|| io::Error::other("Claude background session has no job id"))?;
                 attach::send(&job_id, &session.cwd, &config.join("settings.json"), input)
             }
-            Some(_) => Err(io::Error::other("Running in a terminal")),
+            Some(_) => Err(io::Error::other(crate::model::FOREGROUND_SESSION)),
             None => match input {
                 SessionInput::Prompt(text) => {
                     let output = resume_prompt(&session, &text).output()?;

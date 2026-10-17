@@ -937,16 +937,15 @@ fn escape_after_session_removed_opens_new_session() {
 }
 
 #[test]
-fn escape_remembers_resume_and_fork_but_not_new() {
-    for code in [KeyCode::Char('o'), KeyCode::Char('f')] {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, code));
-        app.launch.take().unwrap();
-        assert!(app.handle_action(Some(Action::New)));
-        app.launch.take().unwrap();
-        assert!(key(&mut app, KeyCode::Esc));
-        assert_resume(&app);
-    }
+fn escape_remembers_fork_but_not_new() {
+    let (_dir, mut app) = fixture();
+    assert!(key(&mut app, KeyCode::Char('f')));
+    app.launch.take().unwrap();
+    assert!(app.handle_action(Some(Action::New)));
+    app.launch.take().unwrap();
+    assert!(key(&mut app, KeyCode::Esc));
+    assert_resume(&app);
+
     let (_dir, mut app) = fixture();
     assert!(app.handle_action(Some(Action::New)));
     app.launch.take().unwrap();

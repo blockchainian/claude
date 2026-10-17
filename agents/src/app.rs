@@ -59,6 +59,8 @@ enum Input {
         id: SessionKey,
         result: io::Result<()>,
     },
+    /// The session terminal's screen changed or its program closed the terminal.
+    TerminalOutput,
 }
 
 struct InputReader {
@@ -116,6 +118,8 @@ pub struct App {
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
+    /// The session program running in the log detail panel.
+    terminal: Option<crate::session_terminal::SessionTerminal>,
     last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
@@ -176,6 +180,7 @@ impl App {
             clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
             launch: None,
+            terminal: None,
             last_session: None,
             log_stamp: None,
             full_log_stamp: None,
@@ -198,6 +203,7 @@ impl App {
                 .flatten();
             self.apply_background(background.is_some_and(terminal_background::is_light));
             let result = self.event_loop(&mut terminal);
+            self.close_terminal();
             leave_terminal(terminal)?;
             result?;
             let Some(mut command) = self.launch.take() else {
@@ -268,6 +274,7 @@ impl App {
                 schedule.refreshed(Instant::now());
             }
             self.view.set_cell_aspect(cell_aspect());
+            self.sync_terminal();
             self.draw(terminal)?;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
                 return Ok(());
@@ -298,6 +305,7 @@ impl App {
                 frame.set_cursor_position((x, y));
             }
         })?;
+        self.terminal_drawn();
         // The hidden cursor otherwise rests wherever the last repainted cell was, and a
         // terminal's cursor-line guide follows it there; park it on the selected row's marker.
         if self.view.cursor_pos(terminal.get_frame().area()).is_none()
@@ -439,6 +447,7 @@ impl App {
                     }
                 }
                 Input::Deleted { id, result } => self.deleted(&id, result),
+                Input::TerminalOutput => {}
             }
         }
         Ok(false)
@@ -473,6 +482,9 @@ impl App {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::Paste(text) => {
+                if let Some(action) = self.view.terminal_paste(&text) {
+                    return self.handle_action(Some(action));
+                }
                 if self.view.pasting_prompt() {
                     match crate::images::ImageAttachment::from_paste(&text) {
                         Ok(Some(image)) => self.view.attach_image(image),
@@ -724,6 +736,9 @@ impl App {
 
     /// Returns true when the dashboard should close.
     fn send_input(&mut self, id: SessionKey, input: SessionInput) {
+        if self.send_to_terminal(&id, &input) {
+            return;
+        }
         let Some(session) = self.session(&id) else {
             self.input_error(&input, "Task is no longer available".into());
             return;
@@ -934,6 +949,7 @@ impl App {
         let target = match &action {
             Action::Open(id)
             | Action::Resume(id)
+            | Action::OpenTerminal(id)
             | Action::Fork(id)
             | Action::Rename { id, .. }
             | Action::Delete(id)
@@ -947,6 +963,9 @@ impl App {
         {
             if matches!(action, Action::Open(_) | Action::Resume(_)) {
                 return self.handle_action(Some(Action::Unsupported("Resume")));
+            }
+            if matches!(action, Action::OpenTerminal(_)) {
+                return self.handle_action(Some(Action::Unsupported("Open terminal")));
             }
             return false;
         }
@@ -1031,6 +1050,10 @@ impl App {
                     return self.launch_session(Action::Fork(id), session);
                 }
             }
+            Action::OpenTerminal(id) => self.open_terminal(id),
+            Action::CloseTerminal => self.close_terminal(),
+            Action::TerminalInput(bytes) => self.write_terminal(&bytes),
+            Action::TerminalPaste(text) => self.paste_terminal(&text),
             Action::New => {
                 return self.launch_new();
             }
@@ -1202,6 +1225,9 @@ impl crossterm::Command for MouseReports {
 
 #[path = "app_keyboard.rs"]
 mod keyboard;
+
+#[path = "app_terminal.rs"]
+mod session_terminal;
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;

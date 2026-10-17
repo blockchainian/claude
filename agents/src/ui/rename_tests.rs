@@ -135,7 +135,7 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         let session = view.selected_row().unwrap().clone();
         let expected = match code {
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => Action::Open(session.id),
-            KeyCode::Char('o') => Action::Resume(session.id),
+            KeyCode::Char('o') => Action::OpenTerminal(session.id),
             KeyCode::Char('f') => Action::Fork(session.id),
             KeyCode::Char('n') => Action::NewDraft { cwd: session.cwd },
             KeyCode::Char('x') => Action::Stop(session.id),

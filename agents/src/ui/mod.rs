@@ -39,11 +39,11 @@ mod text_selection_layout;
 mod timeline;
 mod title_row;
 mod title_rule;
+mod terminal_panel;
 mod tool_detail;
 mod usage_chart;
 pub(crate) mod vscode;
 pub use highlight::use_theme as use_highlight_theme;
-#[cfg(test)]
 pub use style::light_background;
 pub use style::set_light_background;
 pub(crate) use timeline::timeline_seconds;
@@ -111,6 +111,8 @@ struct Viewport {
     first_entry: usize,
     log: Rect,
     log_detail: Rect,
+    /// Where the session terminal was drawn inside the log detail panel.
+    terminal: Rect,
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
@@ -205,6 +207,7 @@ enum Panel {
     TaskList,
     LogList,
     LogDetail,
+    Terminal,
     Details,
     Prompt,
     Other,
@@ -212,6 +215,8 @@ enum Panel {
 
 pub struct View {
     mouse_focus: Panel,
+    /// The session whose program runs in the log detail panel, and its screen.
+    terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
     startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
     selected_draft: Option<crate::model::DraftId>,
@@ -346,6 +351,7 @@ impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             mouse_focus: Panel::TaskList,
+            terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             log: Vec::new(),
             log_session: None,

@@ -127,6 +127,9 @@ impl View {
 
     pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
+        if self.render_terminal(area, buf) {
+            return;
+        }
         let Some(session) = self.selected_row() else {
             return;
         };

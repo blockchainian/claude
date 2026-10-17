@@ -5,7 +5,7 @@
  Navigate            Tasks
  ↑      Up           n          New
  ↓      Down         w          New worktree
- enter  Open         o          Resume
+ enter  Open         o          Open terminal
  pgup   Page up      f          Fork
  pgdn   Page down    r          Rename
  ⌃c     Quit         x          Stop

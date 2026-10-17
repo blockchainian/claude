@@ -155,6 +155,16 @@ fn background_send_rechecks_kind_and_job_id_and_allows_retry() {
 }
 
 #[test]
+fn terminal_registry_session_does_not_open_a_session_terminal() {
+    let (_directory, mut app, _path, _registry) = registry_app("interactive");
+    let id = app.view.selected_id().unwrap().clone();
+    screen(&mut app);
+    app.handle_action(Some(Action::OpenTerminal(id)));
+    assert!(app.terminal.is_none());
+    assert!(screen(&mut app).contains(crate::model::FOREGROUND_SESSION));
+}
+
+#[test]
 fn terminal_registry_session_refuses_provider_input() {
     let (_directory, mut app, _path, _registry) = registry_app("interactive");
     let id = app.view.selected_id().unwrap().clone();
@@ -166,7 +176,7 @@ fn terminal_registry_session_refuses_provider_input() {
     }));
     let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(matches!(&event, Input::Sent { result: Err(error), .. }
-        if error.to_string() == "Running in a terminal"));
+        if error.to_string() == crate::model::FOREGROUND_SESSION));
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
     assert!(app.pending_inputs.is_empty());

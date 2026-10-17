@@ -262,7 +262,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
     view.set_sessions(vec![session.clone()], false);
     for (code, expected) in [
         (KeyCode::Enter, Action::Open(session.id.clone())),
-        (KeyCode::Char('o'), Action::Resume(session.id.clone())),
+        (KeyCode::Char('o'), Action::OpenTerminal(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
         (
             KeyCode::Char('n'),
@@ -303,10 +303,13 @@ fn capabilities_gate_codex_actions_in_the_view() {
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
-    for code in [KeyCode::Enter, KeyCode::Char('o')] {
+    for (code, name) in [
+        (KeyCode::Enter, "Resume"),
+        (KeyCode::Char('o'), "Open terminal"),
+    ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            Some(Action::Unsupported("Resume"))
+            Some(Action::Unsupported(name))
         );
     }
     for (code, label) in [
@@ -639,7 +642,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     for (code, expected) in [
         (KeyCode::Enter, Action::Open(key("thread-12".into()))),
         (KeyCode::Right, Action::Open(key("thread-12".into()))),
-        (KeyCode::Char('o'), Action::Resume(key("thread-12".into()))),
+        (KeyCode::Char('o'), Action::OpenTerminal(key("thread-12".into()))),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
@@ -761,10 +764,13 @@ fn spawn_children_cannot_resume_in_the_view() {
     )]));
     view.set_sessions(vec![parent, child], false);
     assert_eq!(view.selected_id(), Some(&id));
-    for code in [KeyCode::Enter, KeyCode::Char('o')] {
+    for (code, name) in [
+        (KeyCode::Enter, "Resume"),
+        (KeyCode::Char('o'), "Open terminal"),
+    ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            Some(Action::Unsupported("Resume"))
+            Some(Action::Unsupported(name))
         );
     }
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));

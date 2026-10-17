@@ -1765,7 +1765,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     let mut view = fixture();
     assert_eq!(
         key(&mut view, KeyCode::Char('o')),
-        Some(Action::Resume(session_key("42")))
+        Some(Action::OpenTerminal(session_key("42")))
     );
     assert_eq!(
         key(&mut view, KeyCode::Char('f')),
@@ -6346,9 +6346,13 @@ mod subagent_actions {
 
     #[test]
     fn resume_emits_unsupported_notice() {
-        for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+        for (code, name) in [
+            (KeyCode::Enter, "Resume"),
+            (KeyCode::Right, "Resume"),
+            (KeyCode::Char('o'), "Open terminal"),
+        ] {
             let mut view = fixture();
-            assert_eq!(key(&mut view, code), Some(Action::Unsupported("Resume")));
+            assert_eq!(key(&mut view, code), Some(Action::Unsupported(name)));
             assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         }
         let mut view = fixture();
@@ -6415,7 +6419,7 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
     for (code, name) in [
         (KeyCode::Enter, "Resume"),
         (KeyCode::Right, "Resume"),
-        (KeyCode::Char('o'), "Resume"),
+        (KeyCode::Char('o'), "Open terminal"),
         (KeyCode::Char('f'), "Fork"),
         (KeyCode::Char('r'), "Rename"),
         (KeyCode::Backspace, "Delete"),
@@ -6460,7 +6464,7 @@ fn missing_provider_capabilities_do_not_allow_actions() {
     view.set_capabilities(HashMap::new());
     assert_eq!(
         key(&mut view, KeyCode::Char('o')),
-        Some(Action::Unsupported("Resume"))
+        Some(Action::Unsupported("Open terminal"))
     );
 }
 
@@ -9398,3 +9402,6 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
 
 #[path = "reading_interaction_tests.rs"]
 mod reading_interaction_tests;
+
+#[path = "terminal_panel_tests.rs"]
+mod terminal_panel_tests;

@@ -222,6 +222,8 @@ impl View {
                         .any(|rect| rect.contains(position))
                 {
                     Panel::LogList
+                } else if viewport.terminal.contains(position) && self.terminal.is_some() {
+                    Panel::Terminal
                 } else if viewport.log_detail.contains(position) {
                     Panel::LogDetail
                 } else if viewport.details.contains(position) {
@@ -248,6 +250,9 @@ impl View {
         } else {
             None
         };
+        if let Some(action) = self.terminal_mouse(mouse, previous_focus) {
+            return action;
+        }
         let next = self.handle_mouse_event(mouse);
         if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
             self.input_box.focused =
@@ -365,6 +370,18 @@ impl View {
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
                 self.last_detail_click = None;
+                if self
+                    .viewport
+                    .borrow()
+                    .log_detail
+                    .contains((mouse.column, mouse.row).into())
+                {
+                    return if self.terminal.is_some() {
+                        Some(Action::CloseTerminal)
+                    } else {
+                        self.selected_id().cloned().map(Action::OpenTerminal)
+                    };
+                }
                 if self.selector.is_some()
                     && self
                         .viewport
@@ -890,6 +907,9 @@ impl View {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if let Some(action) = self.terminal_key(key) {
+            return action;
+        }
         if let Some(action) = self.question_key(key) {
             return action;
         }
@@ -1278,9 +1298,9 @@ impl View {
                     if self.selected_capabilities().resume
                         && self.selected_row().is_some_and(Session::can_resume)
                     {
-                        Action::Resume(id)
+                        Action::OpenTerminal(id)
                     } else {
-                        Action::Unsupported("Resume")
+                        Action::Unsupported("Open terminal")
                     },
                 );
             }

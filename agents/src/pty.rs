@@ -59,6 +59,7 @@ impl Pty {
         Ok(Self { child, master })
     }
 
+    #[cfg(test)]
     pub fn pid(&self) -> u32 {
         self.child.id()
     }
