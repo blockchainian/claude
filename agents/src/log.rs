@@ -172,7 +172,7 @@ pub(crate) struct Update {
     pub read_offset: u64,
 }
 
-pub(crate) trait Reader {
+pub(crate) trait Reader: Send {
     fn refresh(&mut self, requested: usize) -> std::io::Result<Update>;
 }
 

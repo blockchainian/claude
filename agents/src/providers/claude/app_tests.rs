@@ -508,6 +508,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     for c in "Codex".chars() {
         key(&mut app, KeyCode::Char(c));
     }
+    super::log_search_tests::finish_search(&mut app);
     app.refresh_log(1);
     assert_eq!(app.view.matching_log_count(), 20);
     for _ in 0..30 {

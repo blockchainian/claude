@@ -175,6 +175,8 @@ pub(crate) struct Reader {
     entries: Vec<Entry>,
     shown: usize,
     boundary: crate::jsonl::Boundary,
+    #[cfg(test)]
+    replayed_records: usize,
 }
 
 impl Reader {
@@ -191,6 +193,8 @@ impl Reader {
             entries: Vec::new(),
             shown: 0,
             boundary: crate::jsonl::Boundary::default(),
+            #[cfg(test)]
+            replayed_records: 0,
         }
     }
 
@@ -221,6 +225,10 @@ impl Reader {
             .rev()
             .take_while(|(offset, _)| *offset >= start)
         {
+            #[cfg(test)]
+            {
+                self.replayed_records += 1;
+            }
             log.offset = *offset;
             log.record(record.clone(), usize::MAX);
         }
@@ -423,7 +431,10 @@ impl Reader {
         let parsed_before_older = parsed_bytes;
         while self.oldest_offset > 0 && self.entries.len() < requested {
             parsed_bytes += self.older_page(&mut file)?;
-            self.replay(self.oldest_offset)?;
+            // Full history has no intermediate row-count boundary to inspect.
+            if requested != usize::MAX || self.oldest_offset == 0 {
+                self.replay(self.oldest_offset)?;
+            }
         }
         if parsed_bytes > parsed_before_older {
             replaced = replaced.max(shown_before);
@@ -1443,6 +1454,41 @@ pub(crate) mod tests {
         let reset = reader.refresh(usize::MAX).unwrap();
         assert!(reset.reset);
         assert!(reset.events.is_empty());
+    }
+
+    #[test]
+    fn full_history_replays_each_retained_record_once() {
+        use std::io::Write;
+        let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture).unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let tail = reader.refresh(1).unwrap();
+        assert!(tail.oldest_offset > 0);
+        let replayed = reader.replayed_records;
+        let complete = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(complete.oldest_offset, 0);
+        assert_eq!(
+            reader.replayed_records - replayed,
+            reader.records.len(),
+            "expanding full history must replay retained records only once"
+        );
+        assert_eq!(
+            complete.events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
+        assert_eq!(
+            tail.parsed_bytes + complete.parsed_bytes,
+            fixture.len() as u64
+        );
+
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let complete = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(reader.replayed_records, reader.records.len());
+        assert_eq!(
+            complete.events,
+            super::tail(file.path(), usize::MAX).unwrap()
+        );
     }
 
     #[test]

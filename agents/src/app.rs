@@ -33,6 +33,11 @@ const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 enum Input {
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
+    LogLoaded {
+        token: u64,
+        reader: Box<dyn crate::log::Reader>,
+        result: io::Result<(LogStamp, crate::log::Update)>,
+    },
     Created {
         draft_id: DraftId,
         provider: ProviderId,
@@ -108,6 +113,9 @@ pub struct App {
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
     task_log: Option<(SessionKey, PathBuf, Box<dyn crate::log::Reader>)>,
+    pending_log: Option<PendingLog>,
+    log_request: u64,
+    log_oldest_offset: u64,
     log_parsed_bytes: u64,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
@@ -122,6 +130,13 @@ struct LogStamp {
     modified: std::time::SystemTime,
     length: u64,
     count: usize,
+}
+
+struct PendingLog {
+    token: u64,
+    session: SessionKey,
+    path: PathBuf,
+    visible: usize,
 }
 
 impl App {
@@ -149,6 +164,9 @@ impl App {
             log_stamp: None,
             full_log_stamp: None,
             task_log: None,
+            pending_log: None,
+            log_request: 0,
+            log_oldest_offset: 0,
             log_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
             activity: std::collections::HashMap::new(),
@@ -362,6 +380,13 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::LogLoaded {
+                    token,
+                    reader,
+                    result,
+                } => {
+                    self.finish_log_load(token, reader, result);
+                }
                 Input::Created {
                     draft_id,
                     provider,
@@ -447,23 +472,76 @@ impl App {
             self.log_stamp = None;
             self.full_log_stamp = None;
             self.task_log = None;
+            self.pending_log = None;
+            self.log_oldest_offset = 0;
             self.view.log.clear();
             self.view.log_session = None;
             return;
         };
         let path = selected.transcript.as_ref().expect("transcript checked");
-        let result = (|| -> io::Result<(LogStamp, crate::log::Update)> {
-            if self
-                .task_log
-                .as_ref()
-                .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path)
-            {
-                self.task_log = Some((
-                    selected.id.clone(),
-                    path.clone(),
-                    crate::providers::log_reader(&selected)?,
-                ));
+        if let Some(pending) = &self.pending_log {
+            if pending.session == selected.id && &pending.path == path {
+                return;
             }
+            self.pending_log = None;
+        }
+        if self
+            .task_log
+            .as_ref()
+            .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path)
+        {
+            match crate::providers::log_reader(&selected) {
+                Ok(reader) => {
+                    self.task_log = Some((selected.id.clone(), path.clone(), reader));
+                    self.log_oldest_offset = u64::MAX;
+                    if self.view.log_session.as_ref() != Some(&selected.id) {
+                        self.view.apply_log_update(crate::log::Update {
+                            reset: true,
+                            ..Default::default()
+                        });
+                        self.view.log_session = Some(selected.id.clone());
+                    }
+                }
+                Err(error) => {
+                    self.apply_log_result(Err(error), visible);
+                    return;
+                }
+            }
+        }
+        if self.view.log_search.active() && self.log_oldest_offset > 0 {
+            let (session, path, mut reader) = self.task_log.take().expect("reader checked");
+            self.log_request += 1;
+            let token = self.log_request;
+            self.pending_log = Some(PendingLog {
+                token,
+                session: session.clone(),
+                path: path.clone(),
+                visible,
+            });
+            let sender = self.sender.clone();
+            thread::spawn(move || {
+                let result = reader.refresh(usize::MAX).and_then(|update| {
+                    let metadata = std::fs::metadata(&path)?;
+                    Ok((
+                        LogStamp {
+                            session,
+                            path,
+                            modified: metadata.modified()?,
+                            length: metadata.len(),
+                            count: usize::MAX,
+                        },
+                        update,
+                    ))
+                });
+                let _ = sender.send(Input::LogLoaded {
+                    token,
+                    reader,
+                    result,
+                });
+            });
+            return;
+        }
+        let result = (|| -> io::Result<(LogStamp, crate::log::Update)> {
             let update = self
                 .task_log
                 .as_mut()
@@ -480,9 +558,42 @@ impl App {
             };
             Ok((stamp, update))
         })();
+        self.apply_log_result(result, visible);
+    }
+
+    fn finish_log_load(
+        &mut self,
+        token: u64,
+        reader: Box<dyn crate::log::Reader>,
+        result: io::Result<(LogStamp, crate::log::Update)>,
+    ) {
+        let Some(pending) = self
+            .pending_log
+            .as_ref()
+            .filter(|pending| pending.token == token)
+        else {
+            return;
+        };
+        let current = self.view.selected_id() == Some(&pending.session)
+            && self.sessions.iter().any(|session| {
+                session.id == pending.session && session.transcript.as_ref() == Some(&pending.path)
+            });
+        let pending = self.pending_log.take().expect("request checked");
+        if current {
+            self.task_log = Some((pending.session, pending.path, reader));
+            self.apply_log_result(result, pending.visible);
+        }
+    }
+
+    fn apply_log_result(
+        &mut self,
+        result: io::Result<(LogStamp, crate::log::Update)>,
+        visible: usize,
+    ) {
         match result {
             Ok((mut stamp, update)) => {
                 self.log_parsed_bytes += update.parsed_bytes;
+                self.log_oldest_offset = update.oldest_offset;
                 debug_assert!(update.oldest_offset <= update.read_offset);
                 let changed = self.view.log_page_pending()
                     || update.reset
@@ -493,7 +604,7 @@ impl App {
                     self.view.apply_log_update(update);
                 }
                 self.view.finish_log_start();
-                self.view.log_session = Some(selected.id);
+                self.view.log_session = Some(stamp.session.clone());
                 self.view
                     .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
                 if self.view.log_search.active() {
@@ -507,6 +618,7 @@ impl App {
             }
             Err(error) => {
                 self.task_log = None;
+                self.log_oldest_offset = 0;
                 self.log_stamp = None;
                 self.full_log_stamp = None;
                 self.view.log.clear();
@@ -1042,3 +1154,7 @@ mod loop_tests;
 #[cfg(test)]
 #[path = "app_project_tests.rs"]
 mod project_tests;
+
+#[cfg(test)]
+#[path = "app_log_search_tests.rs"]
+mod log_search_tests;
