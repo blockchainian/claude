@@ -72,7 +72,7 @@ fn terminal_preformatted_detail_stays_in_content_column() {
             .unwrap();
         let body: Vec<_> = rows
             .iter()
-            .skip(rule + 3)
+            .skip(rule + 2)
             .take_while(|line| !line.starts_with(" ? help"))
             .map(|line| line.trim_end().trim_end_matches('│').trim_end())
             .filter(|line| !line.trim().is_empty() && line.trim() != "↓")
@@ -148,7 +148,7 @@ fn terminal_raw_detail_stays_in_content_column() {
             .unwrap();
         let body: Vec<_> = rows
             .iter()
-            .skip(rule + 3)
+            .skip(rule + 2)
             .take_while(|line| !line.starts_with(" ? help"))
             .map(|line| line.trim_end().trim_end_matches('│').trim_end())
             .filter(|line| !line.trim().is_empty())

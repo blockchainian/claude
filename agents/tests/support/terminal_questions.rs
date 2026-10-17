@@ -9,13 +9,13 @@ fn terminal_ask_questions_render_real_rejection_and_answer() {
         (
             "rejected",
             include_str!("../fixtures/claude-questions-rejected.jsonl"),
-            "Error AskUserQuestion · 压缩摘要",
+            "AskUserQuestion · 压缩摘要",
             "Questions asked:",
         ),
         (
             "answered",
             include_str!("../fixtures/claude-questions-answered.jsonl"),
-            "Assistant AskUserQuestion · 子命令 · cd",
+            "AskUserQuestion · 子命令 · cd",
             "Your questions have been answered:",
         ),
     ] {

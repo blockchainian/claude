@@ -959,8 +959,9 @@ fn terminal_compaction_summary_keeps_row_and_labels_detail() {
         .unwrap()
         .write_all(include_bytes!("fixtures/claude-compaction.jsonl"))
         .unwrap();
-    std::thread::sleep(Duration::from_secs(1));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let capture = tmux.capture_when(|capture| {
+        capture.contains("This session is being continued") && capture.contains("Compaction")
+    });
     let rows: Vec<_> = capture.lines().collect();
     let rule = rows
         .iter()
@@ -1712,7 +1713,13 @@ fn terminal_log_border_double_clicks() {
         tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
     };
     double_click(2);
-    tmux.wait_for(|capture| capture.contains("Codex Manager 在一个 turn"));
+    tmux.wait_for(|capture| {
+        capture
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("Codex Manager 在一个 turn")
+    });
     let oldest = capture("oldest");
     assert!(
         oldest
@@ -1729,7 +1736,7 @@ fn terminal_log_border_double_clicks() {
     println!("{{\"log_border_double_clicks\":\"pass\",\"width\":200,\"height\":45}}");
 }
 
-// The last full-width rule is the detail header; summaries above it can repeat
+// The last full-width rule divides the detail panel; summaries above can repeat
 // the same text as the copy target.
 fn detail_body_position(capture: &str, needle: &str) -> Option<(usize, usize)> {
     let rows: Vec<_> = capture.lines().collect();
@@ -2032,12 +2039,12 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             let group_start = rows
                 .iter()
                 .enumerate()
-                .skip(rule + 3)
-                .take(row.saturating_sub(rule + 3))
+                .skip(rule + 2)
+                .take(row.saturating_sub(rule + 2))
                 .filter(|(_, line)| line.trim() == "↓")
                 .map(|(index, _)| index + 1)
                 .next_back()
-                .unwrap_or(rule + 3);
+                .unwrap_or(rule + 2);
             let group: Vec<_> = rows
                 .iter()
                 .skip(group_start)
@@ -2066,10 +2073,8 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 terminal_detail_width::content_width(usize::from(width))
             };
             let leftmost = terminal_detail_width::detail_center(usize::from(width), maximum_width);
-            let rightmost = terminal_detail_width::detail_center(
-                usize::from(width),
-                group_right - group_left,
-            );
+            let rightmost =
+                terminal_detail_width::detail_center(usize::from(width), group_right - group_left);
             assert!(
                 (leftmost..=rightmost).contains(&group_left),
                 "{kind} group center outside {leftmost}..={rightmost} at {width}: {capture}"
@@ -2225,7 +2230,7 @@ fn terminal_manager_detach_title() {
             title.trim_start().starts_with("codex-manager detach"),
             "{capture}"
         );
-        let title_left = title.width() - title.trim_start().width();
+        let title_left = title[..title.rfind("codex-manager detach").unwrap()].width();
         let input = rows
             .iter()
             .skip(rule + 2)
@@ -2339,7 +2344,10 @@ fn terminal_start_description_header() {
             clock(list_row),
             "event time stays at the panel edge: {capture}"
         );
-        assert!(bar.trim_end().width() < usize::from(width), "{capture}");
+        assert!(
+            bar.trim_end_matches('│').trim_end().width() < usize::from(width),
+            "{capture}"
+        );
         assert_eq!(
             bar[..bar.find("codex-manager start").unwrap()].width(),
             1,
