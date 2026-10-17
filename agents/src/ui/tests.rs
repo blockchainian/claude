@@ -495,7 +495,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
         (jump.0, jump.1),
         (
             rect.x + (rect.width - LOG_CLOCK_COLUMNS - label) / 2 + 1,
-            rect.bottom()
+            rect.y - 1
         )
     );
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
@@ -3054,7 +3054,7 @@ mod details_header {
                             .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
                     );
                     if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
-                        assert_eq!(view.viewport.borrow().log_jump.y, bottom);
+                        assert_eq!(view.viewport.borrow().log_jump.y, layout.log.y - 1);
                         assert!(view.viewport.borrow().log_jump.x >= top.right());
                     }
                 }
@@ -8226,7 +8226,7 @@ fn log_jump_buttons_keep_centering_and_distinct_targets() {
             let viewport = view.viewport.borrow();
             let latest = viewport.log_jump;
             let top = viewport.log_detail_jump;
-            let border_y = layout.log.bottom();
+            let border_y = layout.log.y - 1;
             assert_eq!(
                 latest.x,
                 layout.log.x + (layout.log.width - LOG_CLOCK_COLUMNS - latest.width) / 2
@@ -8234,13 +8234,9 @@ fn log_jump_buttons_keep_centering_and_distinct_targets() {
             assert_eq!(latest.y, border_y);
             assert_eq!(
                 top.x,
-                if width < super::render::WIDE_LAYOUT_COLUMNS {
-                    latest.right()
-                } else {
-                    layout.log_detail.x
-                        + 1
-                        + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - top.width) / 2
-                }
+                layout.log_detail.x
+                    + 1
+                    + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - top.width) / 2
             );
             assert_eq!(top.y, layout.log_detail.y);
             assert!(!latest.intersects(top));

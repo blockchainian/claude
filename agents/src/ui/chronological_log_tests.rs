@@ -175,3 +175,82 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
     assert_eq!(view.log_selected, Some(0));
     assert!(!view.log_page_pending());
 }
+
+#[test]
+fn chronological_latest_top_border_preserves_center_and_model_targets() {
+    use unicode_width::UnicodeWidthStr;
+    for width in [60, 80, 100, 149, 150, 200] {
+        for unseen in [0, 3, 100_000_000] {
+            let (_dir, mut view, events) = fixture();
+            view.set_log(events);
+            view.select_log_event(Some(3));
+            view.rows[view.selected].model_label =
+                Some("provider/model-with-a-very-long-display-name".into());
+            view.rows[view.selected].effort = Some("a-very-long-effort-label".into());
+            view.viewport.borrow_mut().log_unseen = unseen;
+            let area = Rect::new(0, 0, width, 45);
+            let mut buf = Buffer::empty(area);
+            view.render_at(area, &mut buf, Utc::now());
+            let viewport = view.viewport.borrow();
+            let jump = viewport.log_jump;
+            let top = viewport.log_borders[0];
+            let label = if unseen == 0 {
+                " ↓ Latest ".to_owned()
+            } else {
+                format!(" ↓ {unseen} New ")
+            };
+            assert_eq!(
+                jump,
+                super::log::log_content_centered(top, label.width() as u16),
+                "width {width}"
+            );
+            let drawn: String = (jump.x..jump.right())
+                .map(|x| buf[(x, jump.y)].symbol())
+                .collect();
+            assert_eq!(drawn, label, "width {width}");
+            for field in [Field::Model, Field::Effort] {
+                let target = viewport
+                    .field_targets
+                    .iter()
+                    .find(|(_, candidate)| *candidate == field)
+                    .expect("visible model/effort target")
+                    .0;
+                assert!(
+                    !target.intersects(jump),
+                    "{field:?} overlaps Latest at width {width}"
+                );
+            }
+            assert!(!viewport.log_borders[1].intersects(jump));
+            let border_click = (top.right() - 1, top.y);
+            drop(viewport);
+            // The plain top border selects oldest; the labeled button still selects latest.
+            for _ in 0..2 {
+                for kind in [
+                    MouseEventKind::Down(MouseButton::Left),
+                    MouseEventKind::Up(MouseButton::Left),
+                ] {
+                    view.handle_mouse(MouseEvent {
+                        kind,
+                        column: border_click.0,
+                        row: border_click.1,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                }
+            }
+            assert_eq!(view.log_selected, Some(0));
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                view.handle_mouse(MouseEvent {
+                    kind,
+                    column: jump.x + 1,
+                    row: jump.y,
+                    modifiers: KeyModifiers::NONE,
+                });
+            }
+            assert_eq!(view.log_selected, view.matching_log_count().checked_sub(1));
+            assert_eq!(view.viewport.borrow().log_unseen, 0);
+        }
+    }
+}

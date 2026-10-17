@@ -937,8 +937,7 @@ fn wide_border_labels_stay_in_their_columns() {
                 );
             }
         }
-        // Scroll the real event list through App, so its existing jump control
-        // must move to the same border without adding a row inside the list.
+        // Scrolling keeps the jump on the top rule without adding a row inside the list.
         app.handle_event(Event::Mouse(MouseEvent {
             kind: MouseEventKind::ScrollUp,
             column: log.start,
@@ -946,7 +945,7 @@ fn wide_border_labels_stay_in_their_columns() {
             modifiers: KeyModifiers::NONE,
         }));
         let buffer = draw(&mut app, width);
-        assert!(segment(&buffer, log.clone(), middle).contains("↓ Latest"));
+        assert!(segment(&buffer, log.clone(), 1).contains("↓ Latest"));
         for y in 2..middle {
             assert!(!segment(&buffer, log.clone(), y).contains("↓ Latest"));
         }

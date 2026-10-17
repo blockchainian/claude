@@ -415,7 +415,8 @@ impl View {
                 rule(border, buf);
                 border.y
             };
-            let log_rule = Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1);
+            let log_rule = self.viewport.borrow().log_borders[0];
+            self.render_log_jump(log_rule, buf);
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
             let left = if area.width >= WIDE_LAYOUT_COLUMNS {
@@ -427,7 +428,6 @@ impl View {
                 Rect::new(left, model_y, area.right().saturating_sub(left), 1),
                 buf,
             );
-            self.render_log_jump(log_rule, buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
@@ -666,9 +666,17 @@ impl View {
             }
             None => None,
         };
+        // The jump centers without the clock column; both end labels must stay outside it.
+        let jump = self.viewport.borrow().log_jump;
+        let center = if jump.intersects(rule) {
+            rule.width
+                .saturating_sub(jump.x.saturating_sub(rule.x).saturating_mul(2))
+        } else {
+            0
+        };
         let (model_area, effort_area) = render_rule_ends(
             rule,
-            0,
+            center,
             Some(Span::styled(
                 session.model_label().to_owned(),
                 style::time_style(),
