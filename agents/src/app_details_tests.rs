@@ -77,7 +77,7 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
             let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
             app.draw(&mut terminal).unwrap();
             let buffer = terminal.backend().buffer();
-            let status_y = position(buffer, "›").1 - 1;
+            let status_y = position(buffer, "❯").1 - 1;
             let separators: Vec<_> = (0..width)
                 .filter(|&x| cell_text(buffer, x, 2) == "│")
                 .collect();
@@ -167,7 +167,7 @@ fn app_details_without_pr_has_only_folder_link_and_no_branch() {
         let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
         app.draw(&mut terminal).unwrap();
         let buffer = terminal.backend().buffer();
-        let y = position(buffer, "›").1 - 1;
+        let y = position(buffer, "❯").1 - 1;
         let separators: Vec<_> = (0..width)
             .filter(|&x| cell_text(buffer, x, 2) == "│")
             .collect();

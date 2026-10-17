@@ -8,9 +8,9 @@
  │ permanently deletes their history.     │ │
  │ This cannot be undone.                 │ │
  │                                        │ │
- │ › 1. Cancel                            │ │
+ │ ❯ 1. Cancel                            │ │
  │   2. Permanently delete task and child │ │
  └────────────────────────────────────────┘ │
                                             ├──────────────── Inactive ─────── project╶─
- Unloaded task ›
+ Unloaded task ❯
  ↑/↓ move  enter select  esc back

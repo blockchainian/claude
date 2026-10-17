@@ -62,7 +62,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let separators: Vec<_> = (0..buffer.area.width)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
-    let (_, prompt) = position(buffer, "›");
+    let (_, prompt) = position(buffer, "❯");
     let (left, rows) = if separators.len() == 2 {
         (separators[1] + 2, 2..prompt - 1)
     } else {
@@ -119,7 +119,7 @@ fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
     let separators: Vec<_> = (0..buffer.area.width)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
-    let task_row = (2..position(buffer, "›").1)
+    let task_row = (2..position(buffer, "❯").1)
         .find(|&y| {
             buffer[(0, y)]
                 .modifier
@@ -371,7 +371,7 @@ fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("Stop hook error"), "{rendered}");
         assert!(rendered.contains("codex-manager"), "{rendered}");
-        let (x, y) = position(&buffer, "›");
+        let (x, y) = position(&buffer, "❯");
         click(&mut app, x, y);
         assert!(!app.handle_event(Event::Paste("ui-route-proof".into())));
         let rendered = lines(&draw(&mut app, width)).join("\n");
@@ -450,7 +450,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
     )));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("Model: haiku"), "{rendered}");
-    assert!(!rendered.contains("› high"), "{rendered}");
+    assert!(!rendered.contains("❯ high"), "{rendered}");
 }
 
 #[test]
@@ -657,7 +657,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("Stop hook".into()));
         let buffer = draw_size(&mut app, width, height);
-        assert!(lines(&buffer).join("\n").contains("Search › Stop hook"));
+        assert!(lines(&buffer).join("\n").contains("Search ❯ Stop hook"));
         assert_eq!(
             detail(&buffer),
             original,
@@ -678,7 +678,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         app.handle_event(Event::Paste("await".into()));
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("Search › await"),
+            detail(&buffer).contains("Search ❯ await"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -704,7 +704,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         let (_directory, mut app) = fixture();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
-        let prompt = position(&buffer, "›").1;
+        let prompt = position(&buffer, "❯").1;
         let middle = prompt - 1;
         let list_end = log_list_end(&buffer, prompt);
         let heights = [
@@ -888,7 +888,7 @@ fn wide_border_labels_stay_in_their_columns() {
             .filter(|&x| buffer[(x, 2)].symbol() == "│")
             .collect();
         assert_eq!(separators.len(), 2);
-        let prompt = position(&buffer, "›").1;
+        let prompt = position(&buffer, "❯").1;
         let middle = prompt - 1;
         let tasks = 1..separators[0] - 1;
         let details = separators[0] + 2..separators[1] - 1;
@@ -1062,7 +1062,7 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 .flush_pending_click(Instant::now() + Duration::from_secs(1));
             let buffer = draw(&mut app, width);
             let (detail_x, detail_y) = position(&buffer, "User      ");
-            let (_, prompt_y) = position(&buffer, "›");
+            let (_, prompt_y) = position(&buffer, "❯");
             assert!(
                 detail_y > prompt_y,
                 "clicked event must open below the prompt"

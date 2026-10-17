@@ -133,6 +133,89 @@ fn start_probe_with_transcript(
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_prompt_marker_caret_and_mouse_alignment() {
+    let (_directory, tmux, _transcript) = start_probe("prompt-marker");
+    for width in [120, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        tmux.run(&["send-keys", "-t", "probe", "/"]);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
+        tmux.wait_for(|capture| capture.contains("Search ❯ Stop"));
+        let assert_caret = |needle: &str, offset: usize| {
+            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let (row, line) = capture
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(needle))
+                .unwrap();
+            let column = line[..line.find(needle).unwrap()].width() + offset;
+            tmux.wait_for(|_| {
+                let cursor = tmux.run(&[
+                    "display-message",
+                    "-t",
+                    "probe",
+                    "-p",
+                    "#{cursor_x},#{cursor_y}",
+                ]);
+                cursor.trim() == format!("{column},{row}")
+            });
+        };
+        assert_caret("Search ❯ Stop", 13);
+        tmux.run(&["send-keys", "-t", "probe", "Left"]);
+        assert_caret("Search ❯ Stop", 12);
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.run(&["send-keys", "-t", "probe", "r"]);
+        tmux.wait_for(|capture| capture.contains("Rename ❯ "));
+        tmux.run(&["send-keys", "-t", "probe", "Home"]);
+        assert_caret("Rename ❯ ", 9);
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    }
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.wait_for(|capture| capture.contains("New task ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .last()
+            .is_some_and(|line| line.contains("g group by"))
+    });
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("New task ❯"))
+        .unwrap();
+    let marker = line[..line.find('❯').unwrap()].width();
+    tmux.mouse(0, marker, row, true);
+    tmux.run(&["send-keys", "-t", "probe", "-l", "你好"]);
+    tmux.wait_for(|capture| capture.contains("New task ❯ 你好"));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let row = capture
+        .lines()
+        .position(|line| line.contains("New task ❯ 你好"))
+        .unwrap();
+    let cursor = tmux.run(&[
+        "display-message",
+        "-t",
+        "probe",
+        "-p",
+        "#{cursor_x},#{cursor_y}",
+    ]);
+    assert_eq!(cursor.trim(), format!("{},{row}", marker + 6));
+    println!(
+        "{{\"prompt_marker\":\"pass\",\"widths\":[120,200],\"caret\":\"pass\",\"mouse\":\"pass\"}}"
+    );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_inline_code_follows_neovim_accent() {
     let (_directory, tmux, _transcript) = start_probe("text-accent");
     for (mode, notification, index) in [
@@ -185,12 +268,12 @@ fn terminal_leaving_list_search_preserves_detail() {
             .unwrap();
         let prompt = rows[..rule]
             .iter()
-            .rposition(|line| line.contains('›'))
+            .rposition(|line| line.contains('❯'))
             .unwrap();
         tmux.mouse(64, 2, prompt + 2, false);
         tmux.run(&["send-keys", "-t", "probe", "/"]);
         tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
-        tmux.wait_for(|capture| capture.contains("Search › Stop"));
+        tmux.wait_for(|capture| capture.contains("Search ❯ Stop"));
         let detail = |capture: &str| {
             capture
                 .lines()
@@ -205,14 +288,14 @@ fn terminal_leaving_list_search_preserves_detail() {
         }
         tmux.mouse(64, 2, rule + 3, false);
         let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        assert!(!after.contains("Search › Stop"), "{after}");
+        assert!(!after.contains("Search ❯ Stop"), "{after}");
         assert!(
             detail(&after).contains("manager.mjs:125"),
             "detail lost after search exit: {after}"
         );
         tmux.run(&["send-keys", "-t", "probe", "/"]);
         tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
-        tmux.wait_for(|capture| detail(capture).contains("Search › Stop"));
+        tmux.wait_for(|capture| detail(capture).contains("Search ❯ Stop"));
         let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(detail(&searched).contains("manager.mjs:125"), "{searched}");
         let path = std::env::temp_dir().join(format!("agents-search-exit-{mouse_exit}.txt"));
@@ -365,7 +448,7 @@ fn terminal_task_cursor_keeps_cell_colors() {
             })
             .expect("selected task marker");
         assert!(
-            !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "›"),
+            !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "❯"),
             "{capture}"
         );
         let marker = screen.cell(y, x).unwrap();
@@ -570,7 +653,7 @@ fn terminal_layout_tracks_width() {
             .take_while(|line| line.matches('│').count() == separators.len())
             .count();
         let prompt = top_end + 1;
-        assert!(lines[prompt].contains('›'), "prompt missing: {capture}");
+        assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
         let log_rule = if width >= 150 {
             top_end + 2
         } else {
@@ -626,7 +709,7 @@ fn terminal_layout_tracks_width() {
                 }
             }
             assert!(
-                lines[top_end + 1].contains('›'),
+                lines[top_end + 1].contains('❯'),
                 "prompt missing: {capture}"
             );
             let middle: Vec<_> = lines[top_end].chars().collect();
@@ -705,7 +788,7 @@ fn terminal_layout_tracks_width() {
                 searched
                     .lines()
                     .skip(log_rule + 1)
-                    .any(|line| line.contains("Search › await")),
+                    .any(|line| line.contains("Search ❯ await")),
                 "detail search missing: {searched}"
             );
             tmux.run(&["send-keys", "-t", "probe", "Escape"]);
@@ -783,7 +866,7 @@ fn terminal_log_selection_tracks_wheel_click_and_tail() {
         let rows: Vec<_> = capture.lines().collect();
         let prompt = rows
             .iter()
-            .rposition(|row| row.contains('›'))
+            .rposition(|row| row.contains('❯'))
             .expect("prompt");
         let (column, row) = if width >= 150 {
             let separator = rows[2].rfind('│').expect("log column separator");
@@ -1518,7 +1601,7 @@ fn terminal_session_search_overlays_chart_bottom() {
             let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             tmux.run(&["send-keys", "-t", "probe", "/"]);
             tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
-            tmux.wait_for(|capture| capture.contains("Search › Stop"));
+            tmux.wait_for(|capture| capture.contains("Search ❯ Stop"));
             let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             if pair == chrono::Utc::now().timestamp().div_euclid(10) {
                 break (before, after);
@@ -1528,7 +1611,7 @@ fn terminal_session_search_overlays_chart_bottom() {
                 "capture crossed usage bins"
             );
             tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-            tmux.wait_for(|capture| !capture.contains("Search ›"));
+            tmux.wait_for(|capture| !capture.contains("Search ❯"));
         };
         let list_width = before
             .lines()
@@ -1543,7 +1626,7 @@ fn terminal_session_search_overlays_chart_bottom() {
         let searched: Vec<_> = after.lines().map(left).collect();
         let input = searched
             .iter()
-            .position(|line| line.contains("Search › Stop"))
+            .position(|line| line.contains("Search ❯ Stop"))
             .unwrap();
         assert_eq!(input, panel_bottom, "{width}x{height}: {after}");
         assert!(
@@ -1551,7 +1634,7 @@ fn terminal_session_search_overlays_chart_bottom() {
             "chart dots in search row: {after}"
         );
         assert!(
-            !searched[2].contains("Search ›")
+            !searched[2].contains("Search ❯")
                 && (searched[2].contains("claude") || searched[2].contains("Codex manager")),
             "top row must remain the list: {after}"
         );
@@ -1569,7 +1652,7 @@ fn terminal_session_search_overlays_chart_bottom() {
             path.display()
         );
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| !capture.contains("Search ›"));
+        tmux.wait_for(|capture| !capture.contains("Search ❯"));
     }
 }
 

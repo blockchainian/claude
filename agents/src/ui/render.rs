@@ -76,11 +76,11 @@ pub(super) struct CenterLayout {
 }
 
 impl View {
-    fn input(&self) -> (&str, &line_edit::LineEdit) {
+    fn input(&self) -> (String, &line_edit::LineEdit) {
         if self.rename_target.is_some() {
-            ("Rename › ", &self.rename)
+            (format!("Rename {PROMPT_MARKER} "), &self.rename)
         } else {
-            ("Search › ", &self.search)
+            (format!("Search {PROMPT_MARKER} "), &self.search)
         }
     }
 
@@ -221,7 +221,7 @@ impl View {
                 .iter()
                 .find(|(_, field)| *field == Field::Branch)
         {
-            let (_, caret) = input_row("Branch › ", &editor.editor, *rect);
+            let (_, caret) = input_row(&format!("Branch {PROMPT_MARKER} "), &editor.editor, *rect);
             return Some((rect.x + caret, rect.y));
         }
         if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
@@ -246,7 +246,7 @@ impl View {
             } else {
                 &self.log_search
             };
-            let (_, caret) = input_row("Search › ", &search.query, input);
+            let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
             return Some((input.x + caret, input.y));
         }
         if !(self.searching || self.rename_target.is_some())
@@ -257,7 +257,7 @@ impl View {
             return None;
         }
         let (prompt, edit) = self.input();
-        let (_, caret) = input_row(prompt, edit, layout.search);
+        let (_, caret) = input_row(&prompt, edit, layout.search);
         Some((layout.search.x + caret, layout.search.y))
     }
 
@@ -362,7 +362,7 @@ impl View {
         if self.searching || self.rename_target.is_some() {
             let (prompt, edit) = self.input();
             Clear.render(layout.search, buf);
-            render_input_row(prompt, edit, layout.search, buf);
+            render_input_row(&prompt, edit, layout.search, buf);
         }
         if let Some((notice, _)) = &self.notice
             && !layout.list.is_empty()
@@ -519,7 +519,7 @@ impl View {
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
-                if selected { "›" } else { " " },
+                if selected { PROMPT_MARKER } else { " " },
                 if confirm { 2 } else { 1 }
             );
             lines.push(Line::from(Span::styled(

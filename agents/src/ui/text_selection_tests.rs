@@ -403,7 +403,7 @@ fn task_list_drag_copies_rendered_indicator_ellipsis_and_time() {
         .map(|y| drawn_cells(&initial, y, list.x, list.right()))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!expected.contains('›'));
+    assert!(!expected.contains('❯'));
     assert!(expected.lines().all(|line| line.starts_with('●')));
     assert!(expected.contains('…'));
     assert!(expected.contains("Working"));

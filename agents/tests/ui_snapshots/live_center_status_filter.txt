@@ -8,5 +8,5 @@
                     │
                     │
                     ├──── Inactive ─ …╶─
- Unloaded tas ›
+ Unloaded tas ❯
  ? help  esc back  ↑/↓ move  enter ope…

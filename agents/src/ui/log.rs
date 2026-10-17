@@ -93,7 +93,12 @@ impl View {
         if self.log_search.active() && area.height > 1 {
             let input = search_input_rect(area);
             if self.log_search.editing {
-                super::render::render_input_row("Search › ", &self.log_search.query, input, buf);
+                super::render::render_input_row(
+                    &format!("Search {PROMPT_MARKER} "),
+                    &self.log_search.query,
+                    input,
+                    buf,
+                );
             } else {
                 Line::from(self.log_search.query.text().to_owned())
                     .dim()
@@ -276,7 +281,7 @@ impl View {
             let input = search_input_rect(area);
             if self.log_detail_search.editing {
                 super::render::render_input_row(
-                    "Search › ",
+                    &format!("Search {PROMPT_MARKER} "),
                     &self.log_detail_search.query,
                     input,
                     buf,

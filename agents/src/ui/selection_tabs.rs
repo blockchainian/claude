@@ -63,7 +63,7 @@ pub(crate) fn render_filled_tab_bar(
         x = x.saturating_add(width).saturating_add(/*rhs*/ 1);
     }
     if show_right {
-        Line::from("›").dim().render(
+        Line::from(PROMPT_MARKER).dim().render(
             Rect::new(
                 area.right() - 1,
                 area.y,

@@ -156,7 +156,11 @@ impl View {
                 render::line(
                     Line::from(format!(
                         "{} {value}",
-                        if index == picker.selected { "›" } else { " " }
+                        if index == picker.selected {
+                            PROMPT_MARKER
+                        } else {
+                            " "
+                        }
                     ))
                     .style(if index == picker.selected {
                         style::selection_style()
@@ -177,7 +181,12 @@ impl View {
                 .iter()
                 .find(|(_, field)| *field == Field::Branch)
         {
-            render::render_input_row("Branch › ", &editor.editor, *rect, buf);
+            render::render_input_row(
+                &format!("Branch {PROMPT_MARKER} "),
+                &editor.editor,
+                *rect,
+                buf,
+            );
         }
     }
 }
@@ -205,6 +214,49 @@ mod tests {
         });
         view
     }
+    #[test]
+    fn branch_prompt_caret_and_picker_mouse_targets_match_cells() {
+        let mut view = draft_view();
+        let area = Rect::new(3, 2, 120, 40);
+        let mut buffer = Buffer::empty(area);
+        view.open_field(Field::Branch);
+        view.branch_editor.as_mut().unwrap().editor.set_text("你好");
+        view.render(area, &mut buffer);
+        let rect = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::Branch)
+            .unwrap()
+            .0;
+        assert_eq!(buffer[(rect.x + 7, rect.y)].symbol(), "❯");
+        assert_eq!(buffer[(rect.x + 9, rect.y)].symbol(), "你");
+        assert_eq!(view.cursor_pos(area), Some((rect.x + 13, rect.y)));
+        view.branch_editor = None;
+        view.open_field(Field::Model);
+        view.render(area, &mut buffer);
+        let (rect, index) = view.viewport.borrow().picker_rows[0];
+        assert_eq!(index, 0);
+        assert_eq!(buffer[(rect.x, rect.y)].symbol(), "❯");
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(view.handle_mouse(click).is_none());
+        assert!(
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                ..click
+            })
+            .is_none()
+        );
+        assert!(view.picker.is_none());
+        assert_eq!(view.drafts[0].setup.model.as_deref(), Some("sonnet"));
+    }
+
     #[test]
     fn plain_directory_draft_has_no_branch_control() {
         let mut view = draft_view();

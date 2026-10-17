@@ -1722,7 +1722,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     );
     assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
-    assert!(screen(&view, 88, 16).contains("Rename ›"));
+    assert!(screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(view.rename.text(), "Needs an answer");
     key(&mut view, KeyCode::Esc);
 
@@ -1945,7 +1945,7 @@ fn details_name_a_missing_prompt() {
 fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
-    assert!(screen(&view, 88, 16).contains("Rename › Current task"));
+    assert!(screen(&view, 88, 16).contains("Rename ❯ Current task"));
     assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 2)));
     for c in " updated  ".chars() {
         key(&mut view, KeyCode::Char(c));
@@ -1991,7 +1991,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
         key(&mut view, KeyCode::Char(c));
     }
     key(&mut view, KeyCode::Backspace);
-    assert!(screen(&view, 88, 16).contains("Rename ›"));
+    assert!(screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     key(&mut view, KeyCode::Esc);
     assert_eq!(view.center_footer_hints().to_string(), hints);
@@ -2014,7 +2014,7 @@ fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
         .status = SessionStatus::Inactive;
     view.set_sessions(rows, false);
     assert_eq!(view.selected_id(), Some(&session_key("42")));
-    assert!(screen(&view, 88, 16).contains("Rename › Current task"));
+    assert!(screen(&view, 88, 16).contains("Rename ❯ Current task"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
     view.hide(&session_key("42"));
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
@@ -3721,7 +3721,7 @@ fn task_rows_start_at_left_padding_without_marker_and_click_correctly() {
                 );
                 assert_eq!(buf[(list.x + 2, y)].symbol(), &title[..1]);
                 for x in list.x..list.right() {
-                    assert_ne!(buf[(x, y)].symbol(), "›");
+                    assert_ne!(buf[(x, y)].symbol(), "❯");
                     assert!(
                         buf[(x, y)]
                             .modifier
@@ -3836,9 +3836,9 @@ fn list_row_highlights_include_column_padding() {
             };
             let marker_x = content.x;
             if kind == "picker" {
-                assert_eq!(buf[(marker_x, y)].symbol(), "›");
+                assert_eq!(buf[(marker_x, y)].symbol(), "❯");
             } else {
-                assert!(!(content.x..content.right()).any(|x| buf[(x, y)].symbol() == "›"));
+                assert!(!(content.x..content.right()).any(|x| buf[(x, y)].symbol() == "❯"));
             }
             if kind == "task" {
                 assert_eq!(buf[(marker_x, y)].symbol(), "●");
@@ -4212,7 +4212,7 @@ fn dashboard_log_search_uses_the_row_padding() {
         };
         let y = view.viewport.borrow().log.bottom() - 1;
         let input: String = (left..left + 13).map(|x| buf[(x, y)].symbol()).collect();
-        assert_eq!(input, "Search › Tool");
+        assert_eq!(input, "Search ❯ Tool");
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
         view.log_search.editing = false;
         view.render_at(area, &mut buf, now);
@@ -5281,7 +5281,7 @@ mod log_search {
             let mut buf = Buffer::empty(area);
             view.render_log_detail(area, &mut buf, now);
             assert!(text(&buf).contains("I will check the files"));
-            assert!(text(&buf).contains("Search › files"));
+            assert!(text(&buf).contains("Search ❯ files"));
         }
     }
 
@@ -5302,7 +5302,7 @@ mod log_search {
         })
         .to_vec();
         open(&mut view);
-        assert!(text(&panel(&view, now)).contains("Search › "));
+        assert!(text(&panel(&view, now)).contains("Search ❯ "));
         assert!(
             view.center_footer_hints()
                 .to_string()
@@ -5324,11 +5324,11 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("timeout"));
         assert!(buf[(99, 11)].modifier.contains(Modifier::DIM));
-        assert!(!text(&buf).contains("Search › "));
+        assert!(!text(&buf).contains("Search ❯ "));
         open(&mut view);
-        assert!(text(&panel(&view, now)).contains("Search › time out"));
+        assert!(text(&panel(&view, now)).contains("Search ❯ time out"));
         key(&mut view, KeyCode::Backspace);
-        assert!(text(&panel(&view, now)).contains("Search › time ou"));
+        assert!(text(&panel(&view, now)).contains("Search ❯ time ou"));
         key(&mut view, KeyCode::Esc);
         assert!(text(&panel(&view, now)).contains("unrelated"));
     }
@@ -5419,7 +5419,7 @@ mod log_search {
         view.set_selected(index);
         view.log_session = Some(session_key("second"));
         let buf = panel(&view, now);
-        assert!(!text(&buf).contains("Search › "));
+        assert!(!text(&buf).contains("Search ❯ "));
         assert_eq!(
             view.center_footer_hints().to_string(),
             super::super::hints::hint_line(&[
@@ -5553,7 +5553,7 @@ mod input_row {
                     Clear.render(log_row, &mut log);
                     log_row.width = task_row.width;
                     super::super::render::render_input_row(
-                        "Search › ",
+                        "Search ❯ ",
                         &log_view.log_search.query,
                         log_row,
                         &mut log,
@@ -9200,7 +9200,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         let input: String = (layout.search.x..layout.search.right())
             .map(|x| after[(x, layout.search.y)].symbol())
             .collect();
-        assert!(input.contains("Search › Task"));
+        assert!(input.contains("Search ❯ Task"));
         assert_eq!(view.cursor_pos(area).unwrap().1, layout.search.y);
         assert!(
             !view
@@ -9220,7 +9220,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         let input: String = (rename.search.x..rename.search.right())
             .map(|x| after[(x, rename.search.y)].symbol())
             .collect();
-        assert!(input.contains("Rename ›"));
+        assert!(input.contains("Rename ❯"));
     }
 }
 

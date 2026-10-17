@@ -57,7 +57,7 @@ impl PromptBox {
         let label_budget =
             usize::from(width / 3).min(prefix_budget.saturating_sub(status.width() + 3));
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
-        let heading = format!("{label}{status} › ");
+        let heading = format!("{label}{status} {PROMPT_MARKER} ");
         let prefix = clip(&heading, prefix_budget);
         let inset = prefix.width() as u16;
         let available = usize::from(width.saturating_sub(inset).max(1));
@@ -209,6 +209,23 @@ mod tests {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn prompt_marker_keeps_one_cell_and_caret_after_unicode_text() {
+        let mut editor = focused();
+        let area = Rect::new(8, 4, 35, 5);
+        let mut buffer = Buffer::empty(area);
+        editor.render(area, &mut buffer, "Task", None);
+        assert_eq!(buffer[(13, 4)].symbol(), "❯");
+        assert_eq!(editor.cursor(area, "Task"), Some((15, 4)));
+        editor.paste("你好");
+        editor.render(area, &mut buffer, "Task", None);
+        assert_eq!(buffer[(15, 4)].symbol(), "你");
+        assert_eq!(buffer[(17, 4)].symbol(), "好");
+        assert_eq!(editor.cursor(area, "Task"), Some((19, 4)));
+        key(&mut editor, KeyCode::Left);
+        assert_eq!(editor.cursor(area, "Task"), Some((17, 4)));
     }
 
     #[test]

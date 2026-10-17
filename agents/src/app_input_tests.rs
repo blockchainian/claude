@@ -86,7 +86,7 @@ fn enter_prompt_reaches_background_provider_and_displays_identity_failure() {
     app.draw(&mut terminal).unwrap();
     let buffer = terminal.backend().buffer();
     let prompt_y = (0..40)
-        .find(|&y| (0..240).any(|x| buffer[(x, y)].symbol() == "›" && x > 5))
+        .find(|&y| (0..240).any(|x| buffer[(x, y)].symbol() == "❯" && x > 5))
         .expect("rendered prompt prefix");
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
