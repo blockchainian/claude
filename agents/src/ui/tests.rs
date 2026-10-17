@@ -6484,6 +6484,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
+            agent: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -6501,6 +6502,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
+            agent: None,
             id: "Read-fixture".into(),
             title: "Read".into(),
             name: "Read".into(),
@@ -7567,7 +7569,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
     .unwrap();
     for (name, title) in [
         ("Bash", "改到持久目录"),
-        ("Agent", "Plan agent 写工具详情计划"),
+        ("Agent", "Agent"),
         ("Skill", "secrets:secrets-manager"),
         ("SendMessage", "To "),
     ] {
@@ -7591,6 +7593,8 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         assert!(
             header
                 .replace(' ', "")
+                .strip_prefix(if name == "Agent" { "Plan" } else { "" })
+                .unwrap()
                 .starts_with(&call.title.replace(' ', ""))
         );
         for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
@@ -8884,3 +8888,45 @@ mod index_selection;
 
 #[path = "raw_detail_tests.rs"]
 mod raw_detail_tests;
+
+#[test]
+fn claude_agent_display_from_real_records() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/claude-agent-display.jsonl");
+    let events = crate::providers::claude::log::tail(&path, 100).unwrap();
+    for (id, label, metadata) in [
+        (
+            "toolu_015h3Ngbytx63sMddkJwjDX7",
+            "attach-probe · 实测 attach 发提示词",
+            "Sonnet 5.5",
+        ),
+        (
+            "toolu_01X69UrWoFVNnNKno4yavSre",
+            "接手边框和标题行改动",
+            "feature:ux-implementer",
+        ),
+        ("toolu_01YMEgiGEMc9cjoePq6j2E69", "滚动条挪到最右边", "fork"),
+    ] {
+        let event = events
+            .iter()
+            .find(|e| e.calls.iter().any(|c| c.id == id))
+            .unwrap();
+        assert_eq!(event.body, label);
+        assert_eq!(event.calls[0].title, "Agent");
+        let (mut view, now) = log_fixture();
+        view.select_fixture_event(Some(event.clone()));
+        let screen = log_screen(&view, 200, 45, now);
+        let rows: Vec<_> = screen.lines().collect();
+        let header = rows
+            .iter()
+            .position(|r| r.trim_start().starts_with(metadata))
+            .unwrap_or_else(|| panic!("{screen}"));
+        assert!(rows[header].contains("Agent"), "{screen}");
+        assert!(
+            rows[header + 2..]
+                .iter()
+                .any(|r| r.replace(' ', "") == label.replace(' ', "")),
+            "{screen}"
+        );
+    }
+}

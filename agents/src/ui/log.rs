@@ -216,6 +216,11 @@ impl View {
             [call] if call.name == "task-notification" => {
                 Some(Span::styled(format!("Task ID {}", call.id), label_style))
             }
+            [call] => call
+                .agent
+                .as_ref()
+                .and_then(|agent| agent.header.as_ref())
+                .map(|header| Span::styled(header.clone(), label_style)),
             _ => None,
         };
         let header_row = super::render::row(area, LOG_TOP, 1);

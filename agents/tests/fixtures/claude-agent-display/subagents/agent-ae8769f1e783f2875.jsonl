@@ -1,0 +1,2 @@
+{"type": "attachment", "timestamp": "2026-10-16T23:52:15.075Z", "attachment": {"type": "model", "identity": {"modelId": "claude-fable-5-1", "marketingName": "Fable 5.1", "knowledgeCutoff": "June 2026"}, "text": "You are powered by the model named Fable 5.1. The exact model ID is claude-fable-5-1. Assistant knowledge cutoff is June 2026."}}
+{"type": "assistant", "timestamp": "2026-10-16T23:52:16.756Z", "message": {"model": "claude-fable-5-1", "content": []}}

@@ -533,6 +533,9 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
             let time = call.duration.map(super::formatting::format_log_duration);
             parts.push(Part::new(call.title.clone(), Body::TitleRule(time)));
         }
+        if let Some(agent) = &call.agent {
+            parts.push(Part::text(agent.label.clone(), false));
+        }
         let input_start = parts.len();
         for section in &call.input {
             push_section(&mut parts, section, label_style, false);
@@ -826,6 +829,7 @@ mod tests {
     #[test]
     fn running_part_has_no_copy_source_or_selectable_cells() {
         let parts = parts(&event(vec![ToolCall {
+            agent: None,
             id: "running-copy".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -1274,6 +1278,7 @@ mod tests {
     fn merged_calls_start_with_title_rules_and_end_with_content() {
         let parts = parts(&event(vec![
             ToolCall {
+                agent: None,
                 id: "Bash-fixture".into(),
                 title: "Bash".into(),
                 name: "Bash".into(),
@@ -1291,6 +1296,7 @@ mod tests {
                 duration: None,
             },
             ToolCall {
+                agent: None,
                 id: "Read-fixture".into(),
                 title: "Read".into(),
                 name: "Read".into(),
@@ -1349,6 +1355,7 @@ mod tests {
         ] {
             let calls = vec![
                 ToolCall {
+                    agent: None,
                     id: "title-fixture".into(),
                     title: title.into(),
                     name: "Read".into(),
@@ -1411,6 +1418,7 @@ mod tests {
         for count in [1, 2] {
             let calls = vec![
                 ToolCall {
+                    agent: None,
                     id: "arrow-fixture".into(),
                     title: "Run checks".into(),
                     name: "Bash".into(),
@@ -1446,6 +1454,7 @@ mod tests {
     #[test]
     fn wide_code_and_diff_lines_split_at_grapheme_boundaries() {
         let parts = parts(&event(vec![ToolCall {
+            agent: None,
             id: "Edit-fixture".into(),
             title: "Edit".into(),
             name: "Edit".into(),
@@ -1483,6 +1492,7 @@ mod tests {
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
         let parts = parts(&event(vec![ToolCall {
+            agent: None,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),

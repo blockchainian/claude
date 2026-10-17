@@ -484,6 +484,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         }
     };
     ToolCall {
+        agent: None,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
         title: crate::log::tool_title(
             payload["name"].as_str().unwrap_or(""),
@@ -592,6 +593,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         crate::log::tool_title(&name, &item["arguments"])
     };
     ToolCall {
+        agent: None,
         id: item["id"].as_str().unwrap_or("").to_owned(),
         title,
         name,

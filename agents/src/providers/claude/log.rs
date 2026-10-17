@@ -24,6 +24,9 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
 }
 
 fn tool_title(name: &str, input: &serde_json::Value) -> String {
+    if name == "Agent" {
+        return name.to_owned();
+    }
     let title = crate::log::tool_title(name, input);
     if name == "Skill"
         && let Some(args) = input["args"].as_str().filter(|args| !args.is_empty())
@@ -55,7 +58,12 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
                 .or_else(|| input_text(input, "message").and_then(|text| text.lines().next()));
             participant_text(input_text(input, "to"), message.unwrap_or(""))
         }
-        "Agent" | "Task" => participant_text(
+        "Agent" => [input_text(input, "name"), input_text(input, "description")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · "),
+        "Task" => participant_text(
             input_text(input, "name"),
             default_detail(input).map(|(_, text)| text).unwrap_or(""),
         ),
@@ -76,7 +84,7 @@ fn tool_label(name: &str, detail: &str) -> String {
     let name = if name == "SendMessage" { "To" } else { name };
     if detail.is_empty() {
         crate::log::display_tool_name(name)
-    } else if matches!(name, "Bash" | "AskUserQuestion") {
+    } else if matches!(name, "Bash" | "AskUserQuestion" | "Agent") {
         detail.to_owned()
     } else {
         let label = crate::log::display_tool_name(name);
@@ -703,6 +711,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         }
     });
     ToolCall {
+        agent: None,
         id: String::new(),
         title: tool_title(name, input),
         name: name.to_owned(),
@@ -715,6 +724,35 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
 }
 
 impl Log {
+    fn agent_model(&self, input: &serde_json::Value, result: Option<&ResultAt>) -> Option<String> {
+        let value = result.map(|result| &result.value);
+        let child = self
+            .path
+            .as_ref()
+            .zip(value.and_then(|v| input_text(v, "agentId")))
+            .filter(|(_, id)| id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+            .map(|(path, id)| {
+                path.with_extension("")
+                    .join("subagents")
+                    .join(format!("agent-{id}.jsonl"))
+            });
+        let summary = child.as_ref().and_then(|path| {
+            let len = std::fs::metadata(path).ok()?.len();
+            super::transcript::read_subagent_cached(path, len, None).ok()
+        });
+        let model = value
+            .and_then(|v| input_text(v, "resolvedModel"))
+            .or_else(|| input_text(input, "model"))
+            .or_else(|| summary.as_ref().and_then(|s| s.model.as_deref()))?;
+        Some(
+            summary
+                .as_ref()
+                .and_then(|s| s.model_identities.get(model))
+                .cloned()
+                .unwrap_or_else(|| model.to_owned()),
+        )
+    }
+
     fn source_records(&self) -> Vec<crate::log::SourceRecord> {
         self.path
             .as_ref()
@@ -939,6 +977,7 @@ impl Log {
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
+                agent: None,
                 id: field("task-id").unwrap_or("").to_owned(),
                 title: summary.to_owned(),
                 name: "task-notification".to_owned(),
@@ -1088,6 +1127,18 @@ impl Log {
         let mut detail = tool_call(name, input, result);
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
+        if name == "Agent" {
+            let kind = input_text(input, "subagent_type");
+            let header = if kind == Some("general-purpose") {
+                self.agent_model(input, result)
+            } else {
+                kind.map(str::to_owned)
+            };
+            detail.agent = Some(crate::log::Agent {
+                label: tool_detail(name, input),
+                header,
+            });
+        }
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
@@ -1519,6 +1570,54 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn agent_model_uses_recorded_child_identity_without_an_input_model() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-display.jsonl");
+        let mut records: Vec<Value> = std::fs::read_to_string(&fixture)
+            .unwrap()
+            .lines()
+            .take(2)
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        records[0]["message"]["content"][0]["input"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model");
+        records[1]["toolUseResult"]
+            .as_object_mut()
+            .unwrap()
+            .remove("resolvedModel");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session.jsonl");
+        let child = directory.path().join("session/subagents");
+        std::fs::create_dir_all(&child).unwrap();
+        let id = records[1]["toolUseResult"]["agentId"].as_str().unwrap();
+        let filename = format!("agent-{id}.jsonl");
+        std::fs::copy(
+            fixture.with_extension("").join("subagents").join(&filename),
+            child.join(&filename),
+        )
+        .unwrap();
+        std::fs::write(
+            &path,
+            records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let events = tail(&path, 10).unwrap();
+        assert_eq!(
+            events[0].calls[0].agent.as_ref().unwrap().header.as_deref(),
+            Some("Sonnet 5.5")
+        );
+        std::fs::remove_file(child.join(filename)).unwrap();
+        let events = tail(&path, 10).unwrap();
+        assert_eq!(events[0].calls[0].agent.as_ref().unwrap().header, None);
+    }
+
+    #[test]
     fn real_call_titles_and_ids_match_inputs() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-tool-calls.jsonl");
@@ -1528,7 +1627,7 @@ pub(crate) mod tests {
         assert_eq!(bash.title, "改到持久目录");
         assert_eq!(bash.id, "toolu_01XU5dCe5eBxX8ccqC2DwN2G");
         let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
-        assert_eq!(agent.title, "Plan agent 写工具详情计划");
+        assert_eq!(agent.title, "Agent");
         let skill = calls.iter().find(|call| call.name == "Skill").unwrap();
         assert_eq!(skill.title, "secrets:secrets-manager [scrubbed]");
         assert_eq!(skill.input, vec![super::text_section("args", "[scrubbed]")]);
@@ -1941,7 +2040,7 @@ pub(crate) mod tests {
     #[test]
     fn real_agent_names_in_log_and_activity() {
         let expected = [
-            "Agent (reviewer) Review files",
+            "reviewer · Review files",
             "SubagentHandback Checks passed.",
             "(worker-id) Checks passed.",
             "(team-lead) Review files.",
@@ -2013,7 +2112,14 @@ pub(crate) mod tests {
             ("SubagentHandback", "SubagentHandback"),
         ] {
             for (participant, expected) in [
-                ("reviewer", format!("{label} (reviewer)")),
+                (
+                    "reviewer",
+                    if name == "Agent" {
+                        "reviewer".to_owned()
+                    } else {
+                        format!("{label} (reviewer)")
+                    },
+                ),
                 (" ", label.to_owned()),
             ] {
                 let mut record = record.clone();

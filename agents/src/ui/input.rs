@@ -182,6 +182,7 @@ impl View {
             previous_end: None,
             images: Vec::new(),
             calls: vec![crate::log::ToolCall {
+                agent: None,
                 id: String::new(),
                 title: task.description,
                 name: "background".into(),

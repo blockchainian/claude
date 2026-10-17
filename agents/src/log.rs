@@ -179,6 +179,7 @@ pub(crate) trait Reader {
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
+    pub agent: Option<Agent>,
     /// The provider's stable call identifier.
     pub id: String,
     pub title: String,
@@ -192,6 +193,13 @@ pub struct ToolCall {
     pub is_error: bool,
     /// How long a completed call in a merged event ran, from its request to its result.
     pub duration: Option<chrono::Duration>,
+}
+
+/// Claude Agent call labels shown in its detail header and body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Agent {
+    pub label: String,
+    pub header: Option<String>,
 }
 
 /// One labelled part of a tool call's input or output, as the open log event draws it.
