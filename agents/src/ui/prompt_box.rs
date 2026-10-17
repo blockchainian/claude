@@ -33,13 +33,6 @@ impl PromptBox {
     fn layout(&self, width: u16, label: &str) -> PromptLayout {
         use unicode_segmentation::UnicodeSegmentation;
         use unicode_width::UnicodeWidthStr;
-        let status = match &self.state {
-            SendState::Ready => String::new(),
-            SendState::Sending => " · sending".into(),
-            SendState::Failed(reason) => {
-                format!(" · failed: {}", reason.lines().next().unwrap_or(""))
-            }
-        };
         let clip = |text: &str, limit: usize| {
             let mut clipped = String::new();
             let mut columns = 0;
@@ -53,11 +46,9 @@ impl PromptBox {
             clipped
         };
         let prefix_budget = usize::from(width.saturating_sub((width / 3).max(1)));
-        let status = clip(&status, prefix_budget.saturating_sub(6));
-        let label_budget =
-            usize::from(width / 3).min(prefix_budget.saturating_sub(status.width() + 3));
+        let label_budget = usize::from(width / 3).min(prefix_budget.saturating_sub(3));
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
-        let heading = format!("{label}{status} {PROMPT_MARKER} ");
+        let heading = format!("{label} {PROMPT_MARKER} ");
         let prefix = clip(&heading, prefix_budget);
         let inset = prefix.width() as u16;
         let available = usize::from(width.saturating_sub(inset).max(1));
@@ -326,17 +317,21 @@ mod tests {
     }
 
     #[test]
-    fn target_send_states_and_disabled_reason_are_visible() {
+    fn send_feedback_does_not_change_prompt_and_disabled_reason_is_visible() {
         let mut editor = focused();
         for (state, expected) in [
             (SendState::Ready, "Task"),
-            (SendState::Sending, "sending"),
-            (SendState::Failed("denied".into()), "denied"),
+            (SendState::Sending, "Task ❯"),
+            (SendState::Failed("denied".into()), "Task ❯"),
         ] {
             editor.state = state;
             let screen = rendered(&editor, 80, None);
             assert!(screen.contains("Task"));
             assert!(screen.contains(expected), "{screen}");
+            assert!(
+                !screen.contains("sending") && !screen.contains("failed"),
+                "{screen}"
+            );
         }
         let screen = rendered(&editor, 100, Some("Running in a terminal"));
         assert!(screen.contains("Task ❮ Running in a terminal"), "{screen}");
@@ -374,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn long_real_target_leaves_room_for_text_and_send_state() {
+    fn long_real_target_leaves_room_for_text() {
         let mut editor = focused();
         editor.paste("No reply needed.");
         editor.state = SendState::Sending;
@@ -389,7 +384,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(text.contains("FYI:"));
-        assert!(text.contains("sending"));
+        assert!(!text.contains("sending"));
         assert!(text.contains("No reply needed."));
     }
 

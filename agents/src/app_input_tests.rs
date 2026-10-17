@@ -115,7 +115,9 @@ fn enter_prompt_reaches_background_provider_and_displays_identity_failure() {
         app.pending_inputs.contains(&id),
         "Enter must dispatch SendPrompt to Provider::send"
     );
-    assert!(screen(&mut app).contains(" · sending"));
+    let pending = screen(&mut app);
+    assert!(!pending.contains(" · sending"));
+    assert!(!pending.contains("registry race prompt"), "{pending}");
     assert!(!app.handle_action(Some(Action::Open(id.clone()))));
     assert!(app.launch.is_none());
     complete_input(&mut app, "Claude background session identity changed");
@@ -460,6 +462,13 @@ fn codex_setting_actions_show_unsupported_input_errors() {
     ] {
         app.handle_action(Some(action));
         assert!(app.pending_inputs.is_empty());
-        assert!(screen(&mut app).contains("This task cannot receive that input"));
+        let area = ratatui::layout::Rect::new(0, 0, 240, 40);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        app.view.render(area, &mut buffer);
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(
+            rendered.contains("This task cannot receive that input"),
+            "{rendered}"
+        );
     }
 }

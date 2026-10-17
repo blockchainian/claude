@@ -119,7 +119,10 @@ fn successful_input_keeps_prompt_while_another_task_is_selected() {
     let first_id = view.selected_id().unwrap().clone();
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.input_box.editor.set_text(text);
-    view.input_sending(&first_id);
+    view.input_sending(
+        &first_id,
+        &crate::providers::SessionInput::Prompt(text.into()),
+    );
     let second = view
         .selectable_indices()
         .into_iter()
@@ -146,7 +149,7 @@ fn input_completion_keeps_text_edited_during_the_send() {
     let id = view.selected_id().unwrap().clone();
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.input_box.editor.set_text(text);
-    view.input_sending(&id);
+    view.input_sending(&id, &crate::providers::SessionInput::Prompt(text.into()));
     view.input_box.editor.insert("next");
     let edited = view.input_box.editor.text().to_owned();
     view.input_complete(
@@ -168,4 +171,61 @@ fn input_completion_keeps_text_edited_during_the_send() {
         view.input_box.state,
         prompt_box::SendState::Failed("attach timed out".into())
     );
+}
+
+#[test]
+fn failed_prompt_restores_submitted_text_without_losing_the_next_draft() {
+    for next in ["", "next draft"] {
+        let mut view = fixture();
+        let id = view.selected_id().unwrap().clone();
+        let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+        view.input_box.editor.set_text(text);
+        view.input_sending(&id, &crate::providers::SessionInput::Prompt(text.into()));
+        view.input_box.editor.set_text(next);
+        view.input_complete(
+            &id,
+            &crate::providers::SessionInput::Prompt(text.into()),
+            Err(std::io::Error::other("attach timed out")),
+        );
+        let expected = if next.is_empty() {
+            text.to_owned()
+        } else {
+            format!("{text}\n{next}")
+        };
+        assert_eq!(view.input_box.editor.text(), expected);
+        assert_eq!(
+            view.notice.as_ref().map(|(text, _)| text.as_str()),
+            Some("attach timed out")
+        );
+        assert_eq!(
+            view.input_box.state,
+            prompt_box::SendState::Failed("attach timed out".into())
+        );
+    }
+}
+
+#[test]
+fn pending_prompt_clears_next_frame_and_blocks_repeated_enter() {
+    let mut view = fixture();
+    let id = view.selected_id().unwrap().clone();
+    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.input_box.focused = true;
+    view.input_box.editor.set_text(text);
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::SendPrompt {
+            id: id.clone(),
+            text: text.into()
+        })
+    );
+    view.input_sending(&id, &crate::providers::SessionInput::Prompt(text.into()));
+    assert!(view.input_box.editor.is_empty());
+    view.input_box.paste(text);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    view.input_complete(
+        &id,
+        &crate::providers::SessionInput::Prompt(text.into()),
+        Ok(()),
+    );
+    assert_eq!(view.input_box.editor.text(), text);
 }

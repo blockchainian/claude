@@ -715,10 +715,11 @@ impl App {
         }
         let interrupt = matches!(input, SessionInput::Interrupt);
         if !interrupt {
-            self.view.input_sending(&id);
+            self.view.input_sending(&id, &input);
         }
         let sender = self.sender.clone();
         let target = id.clone();
+        let sent_input = input.clone();
         match thread::Builder::new()
             .name("agents-send".into())
             .spawn(move || {
@@ -726,7 +727,7 @@ impl App {
                     .unwrap_or_else(|_| Err(io::Error::other("Input job panicked")));
                 let _ = sender.send(Input::Sent {
                     id: target,
-                    input,
+                    input: sent_input,
                     result,
                 });
             }) {
@@ -737,7 +738,7 @@ impl App {
                     self.view
                         .set_notice(Some(format!("Failed to stop: {error}")));
                 } else {
-                    self.view.input_failed(error.to_string());
+                    self.view.input_complete(&id, &input, Err(error));
                 }
                 false
             }

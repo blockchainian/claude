@@ -472,8 +472,16 @@ impl View {
         }
     }
 
-    pub(crate) fn input_sending(&mut self, id: &SessionKey) {
-        self.task_input(id).state = prompt_box::SendState::Sending;
+    pub(crate) fn input_sending(
+        &mut self,
+        id: &SessionKey,
+        input: &crate::providers::SessionInput,
+    ) {
+        let target = self.task_input(id);
+        if matches!(input, crate::providers::SessionInput::Prompt(_)) {
+            target.editor.clear();
+        }
+        target.state = prompt_box::SendState::Sending;
     }
 
     pub(crate) fn input_complete(
@@ -483,21 +491,30 @@ impl View {
         result: std::io::Result<()>,
     ) {
         let target = self.task_input(id);
+        let error = result.as_ref().err().map(ToString::to_string);
         target.state = match result {
-            Ok(()) => {
-                if let crate::providers::SessionInput::Prompt(text) = input
-                    && target.editor.text() == text
-                {
-                    target.editor.clear();
+            Ok(()) => prompt_box::SendState::Ready,
+            Err(error) => {
+                if let crate::providers::SessionInput::Prompt(text) = input {
+                    let draft = target.editor.text();
+                    let restored = if draft.is_empty() {
+                        text.clone()
+                    } else {
+                        format!("{text}\n{draft}")
+                    };
+                    target.editor.set_text(&restored);
                 }
-                prompt_box::SendState::Ready
+                prompt_box::SendState::Failed(error.to_string())
             }
-            Err(error) => prompt_box::SendState::Failed(error.to_string()),
         };
+        if let Some(error) = error {
+            self.set_notice(Some(error));
+        }
     }
 
     pub(crate) fn input_failed(&mut self, reason: String) {
-        self.input_box.state = prompt_box::SendState::Failed(reason);
+        self.input_box.state = prompt_box::SendState::Failed(reason.clone());
+        self.set_notice(Some(reason));
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {
