@@ -31,7 +31,7 @@ fn ask_question_titles_include_all_headers_in_list_and_detail() {
         assert!(log::shows_calls(&event));
         let (mut view, now) = log_fixture();
         view.set_log(vec![event.clone()]);
-        view.select_log_event(Some(event));
+        view.select_fixture_event(Some(event));
         let screen = log_screen(&view, 180, 60, now);
         let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
         let title: String = title.chars().filter(|ch| !ch.is_whitespace()).collect();
@@ -68,7 +68,7 @@ fn ask_question_input_is_a_copyable_bullet_list() {
         for width in [24, 180] {
             let (mut view, now) = log_fixture();
             view.set_log(vec![event.clone()]);
-            view.select_log_event(Some(event.clone()));
+            view.select_fixture_event(Some(event.clone()));
             let area = Rect::new(0, 0, width, 150);
             view.viewport.borrow_mut().log_detail = area;
             let mut buf = Buffer::empty(area);
@@ -145,7 +145,7 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
         let event = question_event(fixture);
         let (mut view, now) = log_fixture();
         view.set_log(vec![event.clone()]);
-        view.select_log_event(Some(event.clone()));
+        view.select_fixture_event(Some(event.clone()));
         let area = Rect::new(0, 0, 140, 35);
         view.viewport.borrow_mut().log_detail = area;
         let mut buf = Buffer::empty(area);

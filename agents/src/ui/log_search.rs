@@ -92,6 +92,15 @@ impl View {
     }
 
     pub(crate) fn rematch_log(&mut self) {
+        let full = self
+            .log_selected
+            .and_then(|index| self.log_search.matches.get(index).copied());
+        self.rematch_log_at(full);
+    }
+
+    pub(super) fn rematch_log_at(&mut self, selected_full: Option<usize>) {
+        self.cancel_detail_selection();
+        self.viewport.borrow_mut().log_detail_layout = None;
         let pattern = self.log_search.pattern();
         let mut matcher = self.log_search.matcher.borrow_mut();
         let mut buffer = Vec::new();
@@ -106,6 +115,16 @@ impl View {
                     .map(|_| index)
             })
             .collect();
+        drop(matcher);
+        self.log_selected = selected_full
+            .and_then(|full| {
+                self.log_search
+                    .matches
+                    .iter()
+                    .position(|index| *index >= full)
+                    .or_else(|| self.log_search.matches.len().checked_sub(1))
+            })
+            .or_else(|| self.log_search.matches.len().checked_sub(1));
     }
 
     pub(crate) fn matching_log_count(&self) -> usize {

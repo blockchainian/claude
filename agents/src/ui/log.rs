@@ -49,11 +49,7 @@ impl View {
         self.reveal_log_selection();
         let scroll = self.log_scroll();
         let matching: Vec<_> = self.shown_log_events().collect();
-        let selected_index = matching
-            .iter()
-            .rev()
-            .find(|(_, event)| self.log_selected.as_ref() == Some(*event))
-            .map(|(index, _)| *index);
+        let selected_index = self.log_selected;
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(
             area.height
@@ -73,7 +69,7 @@ impl View {
                 Some(&self.log_search),
                 &session.cwd,
             );
-            if selected_index == Some(log_index) {
+            if selected_index == Some(end - index - 1) {
                 super::render::fill_list_row(
                     super::render::row(area, index as u16, 1),
                     buf,
@@ -93,7 +89,10 @@ impl View {
     }
 
     pub(super) fn visible_log_event(&self) -> Option<&Event> {
-        self.log_selected.as_ref()
+        self.log_background_event.as_ref().or_else(|| {
+            self.log_selected
+                .and_then(|index| self.shown_log_events().nth(index).map(|(_, event)| event))
+        })
     }
 
     pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -107,7 +106,7 @@ impl View {
         let Some(event) = self.visible_log_event() else {
             return;
         };
-        let time = event_time(event, session, self.is_newest_shown(event), now);
+        let time = event_time(event, session, self.is_newest_shown(), now);
         let list_links = self.viewport.borrow().log_links.clone();
         self.render_event_detail(event, &time, area, buf, &session.cwd, now);
         self.viewport.borrow_mut().log_links.extend(list_links);
@@ -143,7 +142,7 @@ impl View {
         now: DateTime<Utc>,
     ) {
         let (label_style, _) = super::style::log_styles(&event.kind);
-        let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
+        let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
         let mut header = Vec::new();
         if let Some(sender) = &event.sender {
             header.push(Span::styled(format!("({sender}) "), label_style));
@@ -295,7 +294,7 @@ impl View {
     }
 
     pub(super) fn jump_detail_match(&mut self) {
-        let Some(event) = &self.log_selected else {
+        let Some(event) = self.visible_log_event() else {
             return;
         };
         if self.log_detail_search.query.is_empty() {
@@ -318,13 +317,17 @@ impl View {
         }
     }
 
-    /// Selects an event for both panels; `None` selects the newest shown event.
-    pub(super) fn select_log_event(&mut self, event: Option<Event>) {
-        self.log_detail_focused = event.is_some();
-        let event = event.or_else(|| self.shown_log_events().last().map(|(_, e)| e.clone()));
-        if self.log_selected != event {
+    /// Selects an index in the shown list; `None` selects its newest row.
+    pub(super) fn select_log_event(&mut self, index: Option<usize>) {
+        self.log_detail_focused = index.is_some();
+        let background = self.log_background_event.take().is_some();
+        let len = self.matching_log_count();
+        let index = len
+            .checked_sub(1)
+            .map(|last| index.unwrap_or(last).min(last));
+        if self.log_selected != index || background {
             self.cancel_detail_selection();
-            self.log_selected = event;
+            self.log_selected = index;
             self.log_detail_search.clear();
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_detail_layout = None;
@@ -335,12 +338,29 @@ impl View {
         }
     }
 
-    fn following_log(&self) -> bool {
-        self.log_selected.as_ref().is_none_or(|selected| {
+    #[cfg(test)]
+    pub(super) fn select_fixture_event(&mut self, event: Option<Event>) {
+        let index = event.map(|event| {
+            let full = self
+                .log
+                .iter()
+                .position(|candidate| candidate == &event)
+                .unwrap_or_else(|| {
+                    self.log.push(event);
+                    self.prepare_log_search();
+                    self.log.len() - 1
+                });
             self.shown_log_events()
-                .last()
-                .is_some_and(|(_, newest)| same_event(selected, newest))
-        }) && self.log_background_return.is_none()
+                .position(|(index, _)| index == full)
+                .expect("fixture is shown")
+        });
+        self.select_log_event(index);
+    }
+
+    fn following_log(&self) -> bool {
+        (self.log_selected.is_none()
+            || self.log_selected == self.matching_log_count().checked_sub(1))
+            && self.log_background_return.is_none()
     }
 
     /// Keeps the cursor in view without moving a list being dragged for text selection.
@@ -351,18 +371,10 @@ impl View {
         {
             return;
         }
-        let Some(selected) = &self.log_selected else {
+        let Some(selected) = self.log_selected else {
             return;
         };
-        let Some(offset) = self
-            .shown_log_events()
-            .collect::<Vec<_>>()
-            .iter()
-            .rev()
-            .position(|(_, event)| same_event(selected, event))
-        else {
-            return;
-        };
+        let offset = self.matching_log_count().saturating_sub(selected + 1);
         let mut viewport = self.viewport.borrow_mut();
         let height = usize::from(
             viewport
@@ -384,8 +396,11 @@ impl View {
         match code {
             KeyCode::Up | KeyCode::Down => self.move_log_selection(code == KeyCode::Down),
             KeyCode::PageUp | KeyCode::PageDown => {
-                let height = self.viewport.borrow().log.height;
-                let steps = height
+                let steps = self
+                    .viewport
+                    .borrow()
+                    .log
+                    .height
                     .saturating_sub(u16::from(self.log_search.active()))
                     .max(1);
                 for _ in 0..steps {
@@ -393,37 +408,26 @@ impl View {
                 }
             }
             KeyCode::Home | KeyCode::End => {
-                let events: Vec<_> = self.shown_log_events().collect();
-                let event = if code == KeyCode::Home {
-                    events.last()
-                } else {
-                    events.first()
-                }
-                .map(|(_, event)| (*event).clone());
                 self.log_pending_older = 0;
-                self.select_log_event(event);
+                self.select_log_event(if code == KeyCode::Home { Some(0) } else { None });
                 self.reveal_log_selection();
             }
             _ => unreachable!("list navigation action"),
         }
     }
 
-    /// Moves one displayed event; App loads older rows when the cursor reaches the tail window.
+    /// Moves one displayed event; App loads older rows at the oldest loaded boundary.
     pub(super) fn move_log_selection(&mut self, older: bool) {
         self.pending_click = None;
         self.log_background_return = None;
+        self.log_background_event = None;
         if !older && self.log_pending_older > 0 {
             self.log_pending_older -= 1;
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_scroll = viewport.log_scroll.saturating_sub(1);
             return;
         }
-        let matching: Vec<_> = self.shown_log_events().collect();
-        let Some(index) = self.log_selected.as_ref().and_then(|selected| {
-            matching
-                .iter()
-                .position(|(_, event)| same_event(selected, event))
-        }) else {
+        let Some(index) = self.log_selected else {
             self.show_newest_log();
             return;
         };
@@ -436,101 +440,97 @@ impl View {
             return;
         }
         let next = if older {
-            index - 1
+            index.saturating_sub(1)
         } else {
-            (index + 1).min(matching.len() - 1)
+            index.saturating_add(1)
         };
-        let event = matching[next].1.clone();
         self.log_pending_older = 0;
-        self.select_log_event(Some(event));
+        self.select_log_event(Some(next));
         self.reveal_log_selection();
     }
 
-    /// Selects the first shown event after App has loaded the whole transcript.
     pub(crate) fn finish_log_start(&mut self) {
         if std::mem::take(&mut self.log_start_requested) {
-            let oldest = self
-                .shown_log_events()
-                .next()
-                .map(|(_, event)| event.clone());
-            self.select_log_event(oldest);
+            self.select_log_event(Some(0));
             self.reveal_log_selection();
         }
     }
 
-    /// Replaces the loaded transcript, retaining the selected event unless following its tail.
-    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
+    pub(crate) fn log_page_pending(&self) -> bool {
+        self.log_pending_older > 0
+    }
+
+    /// Applies structural changes without comparing row contents.
+    pub(crate) fn apply_log_update(&mut self, update: crate::log::Update) {
         let following = self.following_log();
-        let newest = self
-            .shown_log_events()
-            .last()
-            .map(|(_, event)| event.clone());
-        self.log = events;
+        let selected_index = self
+            .log_background_return
+            .as_ref()
+            .and_then(|saved| saved.event)
+            .or(self.log_selected);
+        let selected_full = selected_index
+            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+        let old_len = self.log.len();
+        let appended_start = update.events.len().saturating_sub(update.appended);
+        self.log = update.events;
+        // Rematching below uses the explicitly shifted full-list position.
+        self.log_selected = None;
         self.prepare_log_search();
-        let added = newest.as_ref().map_or(0, |newest| {
-            let matching: Vec<_> = self.shown_log_events().collect();
-            matching
-                .iter()
-                .rposition(|(_, event)| same_event(newest, event))
-                .map_or_else(
-                    || {
-                        matching
-                            .iter()
-                            .filter(|(_, event)| event.started_at > newest.started_at)
-                            .count()
-                    },
-                    |index| matching.len() - index - 1,
-                )
-        });
-        let selected = if self.log_background_return.is_some() {
-            self.log_selected.clone()
-        } else if following {
-            self.shown_log_events()
-                .last()
-                .map(|(_, event)| event.clone())
+        let added = self
+            .shown_log_events()
+            .filter(|(full, _)| *full >= appended_start)
+            .count();
+        let len = self.matching_log_count();
+        self.log_selected = if update.reset || following {
+            len.checked_sub(1)
         } else {
-            let current = self.log_selected.as_ref().and_then(|selected| {
+            selected_full.and_then(|full| {
+                let full = full
+                    .saturating_add(update.prepended)
+                    .min(self.log.len().saturating_sub(1));
                 self.shown_log_events()
-                    .find(|(_, event)| same_event(selected, event))
-                    .map(|(_, event)| event.clone())
-            });
-            match current {
-                Some(event) => Some(event),
-                // App extends the tail window after the new rows shift its offset.
-                None if added > 0 => self.log_selected.clone(),
-                None => self
-                    .shown_log_events()
-                    .last()
-                    .map(|(_, event)| event.clone()),
-            }
+                    .position(|(index, _)| index >= full)
+                    .or_else(|| len.checked_sub(1))
+            })
         };
-        if self.log_selected != selected {
-            self.cancel_detail_selection();
-            self.log_selected = selected;
-            self.viewport.borrow_mut().log_detail_layout = None;
-            if following {
-                self.viewport.borrow_mut().log_detail_scroll = 0;
-            }
+        if let Some(previous) = &mut self.log_background_return {
+            // Background details retain a list index, independent of their synthetic event.
+            previous.event = self.log_selected;
         }
-        if !following || self.mouse_press.is_some() {
+        self.cancel_detail_selection();
+        self.viewport.borrow_mut().log_detail_layout = None;
+        if update.reset {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll = 0;
+            viewport.log_unseen = 0;
+            viewport.log_detail_scroll = 0;
+        } else if !following || self.mouse_press.is_some() {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_scroll += added;
             viewport.log_unseen += added;
             drop(viewport);
             self.shift_list_selection(text_selection::Panel::LogList, added);
+        } else {
+            self.viewport.borrow_mut().log_scroll = 0;
         }
         let pending = std::mem::take(&mut self.log_pending_older);
-        if pending > 0 {
-            let matching: Vec<_> = self.shown_log_events().collect();
-            if let Some(index) = self.log_selected.as_ref().and_then(|selected| {
-                matching
-                    .iter()
-                    .position(|(_, event)| same_event(selected, event))
-            }) {
-                let event = matching[index.saturating_sub(pending)].1.clone();
-                self.select_log_event(Some(event));
-            }
+        if pending > 0
+            && self.log.len() > old_len
+            && !update.reset
+            && let Some(index) = self.log_selected
+        {
+            self.select_log_event(Some(index.saturating_sub(pending)));
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
+        let appended = events.len().saturating_sub(self.log.len());
+        self.apply_log_update(crate::log::Update {
+            events,
+            appended,
+            ..Default::default()
+        });
     }
 
     /// Wake only when an animated tool output is in the visible detail viewport.
@@ -559,11 +559,10 @@ impl View {
         row_time_changes_in(&row_time(event, session, true), now)
     }
 
-    /// Whether `event` is the newest log event the search lets through.
-    fn is_newest_shown(&self, event: &Event) -> bool {
-        self.shown_log_events()
-            .last()
-            .is_some_and(|(_, newest)| newest.started_at == event.started_at)
+    fn is_newest_shown(&self) -> bool {
+        self.log_background_event.is_none()
+            && self.log_selected.is_some()
+            && self.log_selected == self.matching_log_count().checked_sub(1)
     }
 
     /// The log events the search lets through, with their index in the log.
@@ -572,25 +571,6 @@ impl View {
             .iter()
             .enumerate()
             .filter(|(index, _)| self.log_matches(*index))
-    }
-}
-
-fn same_event(left: &Event, right: &Event) -> bool {
-    // A task can emit several notifications with the same task ID.
-    if shows_calls(left)
-        && left
-            .calls
-            .iter()
-            .all(|call| call.name != "task-notification")
-    {
-        right
-            .calls
-            .iter()
-            .any(|call| left.calls.iter().any(|selected| selected.id == call.id))
-    } else if let (Some(left), Some(right)) = (&left.source, &right.source) {
-        left == right
-    } else {
-        left.started_at == right.started_at && left.kind == right.kind
     }
 }
 

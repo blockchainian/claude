@@ -489,12 +489,13 @@ impl App {
             Ok((mut stamp, update)) => {
                 self.log_parsed_bytes += update.parsed_bytes;
                 debug_assert!(update.oldest_offset <= update.read_offset);
-                let changed = update.reset
+                let changed = self.view.log_page_pending()
+                    || update.reset
                     || update.prepended > 0
                     || update.appended > 0
                     || update.replaced > 0;
                 if changed {
-                    self.view.set_log(update.events);
+                    self.view.apply_log_update(update);
                 }
                 self.view.finish_log_start();
                 self.view.log_session = Some(selected.id);

@@ -241,7 +241,7 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
         .unwrap();
     let source = super::log::open_text(&event);
     view.log_session = Some(view.rows[0].id.clone());
-    view.log_selected = Some(event);
+    view.select_fixture_event(Some(event));
     let area = Rect::new(2, 1, 30, 10);
     view.viewport.borrow_mut().log_detail = area;
     let render = |view: &View| {
@@ -486,7 +486,7 @@ fn log_list_drag_copies_abbreviated_path_as_drawn() {
     );
     dashboard(&view, area);
     assert!(
-        view.log_selected.as_ref() == view.log.last(),
+        view.visible_log_event() == view.log.last(),
         "dragging list text preserves the selected event"
     );
     assert_eq!(
@@ -616,15 +616,15 @@ fn log_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
     dashboard(&view, area);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.log_selected.as_ref(), view.log.first());
+    assert_eq!(view.visible_log_event(), view.log.first());
     view.flush_pending_click(Instant::now() + view.double_click_interval);
-    assert_eq!(view.log_selected.as_ref(), view.log.first());
+    assert_eq!(view.visible_log_event(), view.log.first());
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
@@ -642,7 +642,7 @@ fn log_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
@@ -848,14 +848,14 @@ fn dragging_across_cut_log_rows_preserves_selected_event() {
         .collect::<Vec<_>>()
         .join("\n");
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, y));
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
     dashboard(&view, area);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         log.right(),
         y + 1,
     ));
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
     dashboard(&view, area);
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
@@ -865,7 +865,7 @@ fn dragging_across_cut_log_rows_preserves_selected_event() {
         ))),
         expected
     );
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
     assert_eq!(dashboard(&view, area), initial);
 }
 
@@ -918,8 +918,8 @@ fn second_task_press_drag_is_not_a_double_click() {
 #[test]
 fn right_drag_does_not_close_open_log() {
     let mut view = path_log_fixture();
-    view.log_selected = Some(view.log[0].clone());
-    let event = view.log_selected.clone();
+    view.select_fixture_event(Some(view.log[0].clone()));
+    let event = view.log_selected;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20));
     assert_eq!(view.log_selected, event);
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Right), 3, 20));
@@ -937,8 +937,8 @@ fn right_click_selects_newest_only_on_release() {
     let mut events = view.log.clone();
     events.push(newest);
     view.set_log(events);
-    view.select_log_event(Some(view.log[0].clone()));
-    let event = view.log_selected.clone();
+    view.select_fixture_event(Some(view.log[0].clone()));
+    let event = view.log_selected;
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20))
             .is_none()
@@ -948,7 +948,7 @@ fn right_click_selects_newest_only_on_release() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 2, 20))
             .is_none()
     );
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]

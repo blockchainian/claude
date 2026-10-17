@@ -127,6 +127,7 @@ fn log_content_centered_search_highlights_the_shifted_match() {
         view.log_selected = None;
         view.log_search.query.set_text("tests");
         view.rematch_log();
+        view.log_selected = None;
         let area = Rect::new(0, 0, width, 40);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);

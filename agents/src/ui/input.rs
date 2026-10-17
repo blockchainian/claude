@@ -10,7 +10,7 @@ pub(super) enum ClickTarget {
         latest: bool,
     },
     Log {
-        event: crate::log::Event,
+        index: usize,
     },
     Details {
         session: SessionKey,
@@ -53,18 +53,14 @@ impl View {
             } => {
                 if self.selected_id() == Some(&session)
                     && let Some(source) = source
-                    && let Some(event) = self
-                        .log
-                        .iter()
-                        .rev()
-                        .find(|event| {
-                            event.source.as_ref() == Some(&source)
-                                || event.calls.iter().any(|call| call.id == source)
-                        })
-                        .cloned()
+                    && let Some((full, _)) = self.log.iter().enumerate().rev().find(|(_, event)| {
+                        event.source.as_ref() == Some(&source)
+                            || event.calls.iter().any(|call| call.id == source)
+                    })
                 {
+                    let index = self.shown_log_events().position(|(index, _)| index == full);
                     self.log_background_return = None;
-                    self.select_log_event(Some(event));
+                    self.select_log_event(index);
                 }
                 None
             }
@@ -151,13 +147,13 @@ impl View {
         };
         if self.log_background_return.is_none() {
             self.log_background_return = Some(BackgroundReturn {
-                event: self.log_selected.take(),
+                event: self.log_selected,
                 detail_focused: self.log_detail_focused,
                 scroll: self.viewport.borrow().log_detail_scroll,
                 search: std::mem::take(&mut self.log_detail_search),
             });
         }
-        self.select_log_event(Some(crate::log::Event {
+        self.log_background_event = Some(crate::log::Event {
             kind: crate::log::Kind::Tool,
             source: None,
             sender: None,
@@ -181,7 +177,9 @@ impl View {
                 is_error: false,
                 duration: None,
             }],
-        }));
+        });
+        self.log_detail_focused = true;
+        self.viewport.borrow_mut().log_detail_layout = None;
         self.viewport.borrow_mut().log_detail_scroll = 0;
     }
 
@@ -315,11 +313,8 @@ impl View {
             && let Some(&index) = viewport
                 .log_rows
                 .get(usize::from(position.y - viewport.log.y))
-            && let Some(event) = self.log.get(index)
         {
-            return Some(ClickTarget::Log {
-                event: event.clone(),
-            });
+            return Some(ClickTarget::Log { index });
         }
         None
     }
@@ -455,14 +450,10 @@ impl View {
                 if latest {
                     self.show_newest_log();
                 } else {
-                    let oldest = self
-                        .shown_log_events()
-                        .next()
-                        .map(|(_, event)| event.clone());
                     self.log_background_return = None;
                     self.log_pending_older = 0;
                     self.log_start_requested = true;
-                    self.select_log_event(oldest);
+                    self.select_log_event(Some(0));
                 }
             }
             return None;
@@ -475,8 +466,7 @@ impl View {
                     .contains(position)
                     .then(|| usize::from(mouse.row - viewport.log.y))
                     .and_then(|row| viewport.log_rows.get(row))
-                    .and_then(|&index| self.log.get(index))
-                    .cloned()
+                    .and_then(|&full| self.shown_log_events().position(|(index, _)| index == full))
             };
             self.log_list_focused = self.viewport.borrow().log.contains(position);
             if let Some(event) = event {
@@ -624,11 +614,8 @@ impl View {
                         return None;
                     }
                     self.last_click = Some((task, now));
-                } else if let Some(index) = log_row
-                    && let Some(event) = self.log.get(index)
-                {
-                    let event = event.clone();
-                    if self.defer_click(ClickTarget::Log { event }) {
+                } else if let Some(index) = log_row {
+                    if self.defer_click(ClickTarget::Log { index }) {
                         self.focus_input();
                     }
                 } else if let Some(target @ ClickTarget::Details { .. }) =
@@ -990,6 +977,9 @@ impl View {
             return None;
         }
         if self.log_search.editing {
+            let selected_full = self
+                .log_selected
+                .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
             match key.code {
                 KeyCode::Esc => {
                     self.log_search.clear();
@@ -1000,16 +990,14 @@ impl View {
                     let before = self.log_search.query.text().to_owned();
                     if self.log_search.query.handle(key) {
                         if self.log_search.query.text() != before {
-                            self.rematch_log();
-                            self.show_newest_log();
+                            self.rematch_log_at(selected_full);
                         }
                         return None;
                     }
                 }
             }
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-                self.rematch_log();
-                self.show_newest_log();
+                self.rematch_log_at(selected_full);
                 return None;
             }
         }
@@ -1024,7 +1012,6 @@ impl View {
                 self.log_search.editing = true;
                 self.log_list_focused = true;
                 self.prepare_log_search();
-                self.show_newest_log();
             }
             return None;
         }

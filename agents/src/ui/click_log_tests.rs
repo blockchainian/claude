@@ -53,7 +53,7 @@ fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
     let output = text.clone();
     assert_eq!(input, "import json,sys\nlast=None");
     assert!(output.starts_with("Traceback"));
-    view.select_log_event(Some(event));
+    view.select_fixture_event(Some(event));
     (view, now, input, output)
 }
 
@@ -110,7 +110,7 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
 fn detail_centers_all_output_fragments_with_one_offset() {
     for width in [80, 81, 120] {
         let (mut view, now, _, _) = multiline_tool_view();
-        let mut event = view.log_selected.clone().unwrap();
+        let mut event = view.visible_log_event().cloned().unwrap();
         let json = include_str!("../../tests/fixtures/transcript.jsonl")
             .lines()
             .nth(2)
@@ -137,7 +137,7 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             .unwrap() as u16;
         let offset = (width - widest) / 2;
         assert!(offset > 0);
-        view.select_log_event(Some(event));
+        view.select_fixture_event(Some(event));
         let buf = detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
         let region = &viewport.log_text;
@@ -190,7 +190,7 @@ fn detail_centers_all_output_fragments_with_one_offset() {
 fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
     for width in [120, 121, 160] {
         let (mut view, now, _, _) = multiline_tool_view();
-        let mut event = view.log_selected.clone().unwrap();
+        let mut event = view.visible_log_event().cloned().unwrap();
         event.calls[0].output = Some(vec![crate::log::Section::Text {
             label: String::new(),
             text: include_str!("../../tests/fixtures/codex-manager-await.jsonl").into(),
@@ -213,7 +213,7 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
         assert!(offset > 0);
         let copy = super::super::log::open_text(&event);
         assert!(copy.ends_with(&part.source));
-        view.select_log_event(Some(event));
+        view.select_fixture_event(Some(event));
         let buf = detail_buffer(&view, width, now);
         let (x, y, expected) = {
             let viewport = view.viewport.borrow();
@@ -265,7 +265,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     let path = directory.path().join("output/decks.txt");
     std::fs::create_dir(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "").unwrap();
-    let mut event = view.log_selected.clone().unwrap();
+    let mut event = view.visible_log_event().cloned().unwrap();
     let recorded = view
         .log
         .iter()
@@ -279,7 +279,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     };
     *text = text.replacen("decks.txt", "output/decks.txt", 1);
     view.rows[view.selected].cwd = directory.path().into();
-    view.select_log_event(Some(event));
+    view.select_fixture_event(Some(event));
     view.log_detail_search.query.set_text("decks.txt");
     let mut buf = detail_buffer(&view, 120, now);
     let (rect, target) = view
@@ -364,7 +364,7 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
         "Background double click must open its full log"
     );
     assert!(
-        super::super::log::open_text(view.log_selected.as_ref().unwrap()).contains("globalState")
+        super::super::log::open_text(view.visible_log_event().unwrap()).contains("globalState")
     );
     assert_eq!(view.pending_click_in(Instant::now()), None);
 }
@@ -374,7 +374,7 @@ fn background_double_click_returns_to_previous_list() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
@@ -386,39 +386,39 @@ fn background_double_click_restores_previous_detail_and_scroll() {
         .max_by_key(|event| log::open_text(event).len())
         .unwrap()
         .clone();
-    view.select_log_event(Some(previous.clone()));
+    view.select_fixture_event(Some(previous.clone()));
     log_screen(&view, 160, 40, now);
     view.viewport.borrow_mut().log_detail_scroll = 2;
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_selected.as_ref(), Some(&previous));
+    assert_eq!(view.visible_log_event(), Some(&previous));
     assert_eq!(view.viewport.borrow().log_detail_scroll, 2);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
 fn selected_detail_refreshes_and_log_wheel_changes_it() {
     let (mut view, now) = real_log_view();
     let previous = view.log.first().unwrap().clone();
-    view.select_log_event(Some(previous.clone()));
+    view.select_fixture_event(Some(previous.clone()));
     log_screen(&view, 100, 30, now);
     let mut refreshed = view.log.clone();
     refreshed.extend(view.log.clone());
     view.set_log(refreshed);
-    assert_eq!(view.log_selected.as_ref(), Some(&previous));
+    assert_eq!(view.visible_log_event(), Some(&previous));
     let area = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollUp, area.x + 22, area.y + 3));
-    assert_eq!(view.log_selected.as_ref(), view.log.get(1));
+    assert_eq!(view.visible_log_event(), view.log.get(1));
     release_click(&mut view, MouseButton::Right, area.x + 22, area.y + 3);
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
 fn detail_ctrl_r_search_jumps_and_highlights_without_closing() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
-    let expected = view.log_selected.clone();
+    let expected = view.log_selected;
     log_screen(&view, 100, 25, now);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
@@ -460,21 +460,21 @@ fn detail_ctrl_r_search_jumps_and_highlights_without_closing() {
 fn right_click_cancels_innermost_modal_before_open_detail() {
     let (mut view, _now) = real_log_view();
     let event = view.log[0].clone();
-    view.select_log_event(Some(event.clone()));
+    view.select_fixture_event(Some(event.clone()));
     view.rename_target = view.selected_id().cloned();
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(view.rename_target.is_none());
-    assert_eq!(view.log_selected.as_ref(), Some(&event));
+    assert_eq!(view.visible_log_event(), Some(&event));
     view.help = true;
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(!view.help);
-    assert_eq!(view.log_selected.as_ref(), Some(&event));
+    assert_eq!(view.visible_log_event(), Some(&event));
     view.searching = true;
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(!view.searching);
-    assert_eq!(view.log_selected.as_ref(), Some(&event));
+    assert_eq!(view.visible_log_event(), Some(&event));
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
@@ -488,8 +488,8 @@ fn background_detail_survives_refresh_with_matching_tool_timestamp() {
         .started_at;
     view.rows[view.selected].background[0].started_at = tool_time;
     open_background(&mut view, now);
-    let expected = view.log_selected.clone();
-    assert_eq!(expected.as_ref().unwrap().started_at, tool_time);
+    let expected = view.log_selected;
+    assert_eq!(view.visible_log_event().unwrap().started_at, tool_time);
     view.set_log(view.log.clone());
     assert_eq!(
         view.log_selected, expected,
@@ -501,12 +501,12 @@ fn background_detail_survives_refresh_with_matching_tool_timestamp() {
 fn background_return_restores_detail_search() {
     let (mut view, now, _output) = with_background();
     let previous = view.log[0].clone();
-    view.select_log_event(Some(previous.clone()));
+    view.select_fixture_event(Some(previous.clone()));
     let text = log::open_text(&previous);
     let query = text.split_whitespace().next().unwrap();
     view.log_detail_search.query.set_text(query);
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_selected.as_ref(), Some(&previous));
+    assert_eq!(view.visible_log_event(), Some(&previous));
     assert_eq!(view.log_detail_search.query.text(), query);
 }
