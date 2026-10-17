@@ -41,22 +41,48 @@ impl Companions {
             return Vec::new();
         };
         ids.iter()
-            .filter_map(Value::as_u64)
-            .filter_map(|id| {
-                let number = id.to_string();
+            .zip(paths.into_iter().flatten())
+            .filter_map(|(id, path)| {
+                let id = id.as_u64()?;
                 let label = format!("[Image #{id}]");
-                if !body.contains(&label) {
+                if !body.contains(&label) || !path.is_file() {
                     return None;
                 }
-                let path = paths.as_ref()?.iter().find(|path| {
-                    path.file_stem().and_then(|stem| stem.to_str()) == Some(number.as_str())
-                        && path.is_file()
-                })?;
-                Some(Image {
-                    label,
-                    path: path.clone(),
-                })
+                Some(Image { label, path })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Transcript e2364ea0, lines 3781/3785; base64 removed and source directory redacted.
+    #[test]
+    fn pasted_filename_links_to_its_prompt_and_requires_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-pasted-image.jsonl")
+            .replace("/redacted", dir.path().to_str().unwrap())
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let path = dir.path().join("pasted-image-20261016-190234.png");
+        std::fs::write(&path, b"\x89PNG\r\n\x1a\n").unwrap();
+        let body = records[0]["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        let mut companions = Companions::default();
+        companions.record(&records[1]);
+        assert_eq!(
+            companions.take(&records[0], body),
+            vec![Image {
+                label: "[Image #18]".into(),
+                path: path.clone(),
+            }]
+        );
+        std::fs::remove_file(&path).unwrap();
+        companions.record(&records[1]);
+        assert!(companions.take(&records[0], body).is_empty());
     }
 }

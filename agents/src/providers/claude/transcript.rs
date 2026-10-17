@@ -1009,7 +1009,7 @@ pub(super) mod tests {
 
     pub(in crate::providers::claude) fn image_fixture() -> (tempfile::TempDir, Vec<Value>) {
         let dir = tempfile::tempdir().unwrap();
-        let mut records: Vec<Value> =
+        let records: Vec<Value> =
             include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
                 .lines()
                 .map(|line| {
@@ -1018,11 +1018,6 @@ pub(super) mod tests {
                     serde_json::from_str(&line).unwrap()
                 })
                 .collect();
-        // Pair by paste id even when companion text blocks arrive in another order.
-        records[7]["message"]["content"]
-            .as_array_mut()
-            .unwrap()
-            .reverse();
         std::fs::create_dir(dir.path().join("images")).unwrap();
         for number in [6, 8, 9] {
             std::fs::write(
