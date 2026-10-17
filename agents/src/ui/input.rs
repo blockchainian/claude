@@ -216,27 +216,29 @@ impl View {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
         let position = (mouse.column, mouse.row).into();
         let previous_focus = self.mouse_focus;
-        self.mouse_focus = {
-            let viewport = self.viewport.borrow();
-            if viewport.list.contains(position) || viewport.tab_bar.contains(position) {
-                Panel::TaskList
-            } else if viewport.log.contains(position)
-                || viewport
-                    .log_borders
-                    .iter()
-                    .any(|rect| rect.contains(position))
-            {
-                Panel::LogList
-            } else if viewport.log_detail.contains(position) {
-                Panel::LogDetail
-            } else if viewport.details.contains(position) {
-                Panel::Details
-            } else if viewport.prompt.contains(position) {
-                Panel::Prompt
-            } else {
-                Panel::Other
-            }
-        };
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+            self.mouse_focus = {
+                let viewport = self.viewport.borrow();
+                if viewport.list.contains(position) || viewport.tab_bar.contains(position) {
+                    Panel::TaskList
+                } else if viewport.log.contains(position)
+                    || viewport
+                        .log_borders
+                        .iter()
+                        .any(|rect| rect.contains(position))
+                {
+                    Panel::LogList
+                } else if viewport.log_detail.contains(position) {
+                    Panel::LogDetail
+                } else if viewport.details.contains(position) {
+                    Panel::Details
+                } else if viewport.prompt.contains(position) {
+                    Panel::Prompt
+                } else {
+                    Panel::Other
+                }
+            };
+        }
         if self.mouse_focus != previous_focus
             && (self.searching || self.log_search.editing || self.log_detail_search.editing)
         {
@@ -253,6 +255,12 @@ impl View {
             None
         };
         let next = self.handle_mouse_event(mouse);
+        if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
+            self.input_box.focused =
+                self.mouse_focus == Panel::Prompt && self.input_disabled().is_none();
+            self.log_list_focused = self.mouse_focus == Panel::LogList;
+            self.log_detail_focused = self.mouse_focus == Panel::LogDetail;
+        }
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
@@ -421,7 +429,11 @@ impl View {
         }
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                if self.viewport.borrow().prompt.contains((mouse.column, mouse.row).into()) =>
+                if self
+                    .viewport
+                    .borrow()
+                    .prompt
+                    .contains((mouse.column, mouse.row).into()) =>
             {
                 let area = self.viewport.borrow().prompt.inner(Margin::new(1, 0));
                 self.input_box.scroll_mouse(
@@ -561,7 +573,6 @@ impl View {
                     .and_then(|row| viewport.log_rows.get(row))
                     .and_then(|&full| self.shown_log_events().position(|(index, _)| index == full))
             };
-            self.log_list_focused = self.viewport.borrow().log.contains(position);
             if let Some(event) = event {
                 self.log_background_return = None;
                 self.select_log_event(Some(event));
@@ -940,7 +951,7 @@ impl View {
                 self.mouse_focus,
                 Panel::TaskList | Panel::LogList | Panel::LogDetail
             )
-            && !self.input_box.searching_history()
+            && !self.input_box.focused
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
@@ -950,15 +961,10 @@ impl View {
         if let Some(action) = self.control_key(key) {
             return action;
         }
-        let open_search = key.code == KeyCode::Char('/')
-            && !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
         if self.input_box.focused
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
-            && (!open_search || self.input_box.searching_history())
         {
             self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {

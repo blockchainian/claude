@@ -377,6 +377,7 @@ fn terminal_leaving_list_search_preserves_detail() {
             .rposition(|line| line.contains('❯'))
             .unwrap();
         tmux.mouse(65, 2, prompt + 2, false);
+        tmux.mouse(0, 2, prompt + 4, true);
         tmux.run(&["send-keys", "-t", "probe", "/"]);
         tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
         tmux.wait_for(|capture| capture.contains("Search ❯ Stop"));
@@ -393,6 +394,7 @@ fn terminal_leaving_list_search_preserves_detail() {
             tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         }
         tmux.mouse(64, 2, rule + 3, false);
+        tmux.mouse(0, 2, rule + 3, true);
         let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(!after.contains("Search ❯ Stop"), "{after}");
         assert!(
@@ -1061,11 +1063,25 @@ fn terminal_log_selection_tracks_wheel_click_and_tail() {
             !pinned.contains("↓ Latest") && !pinned.contains("↓ 1 New"),
             "{pinned}"
         );
-        let list: String = pinned.lines().skip(row).take(if width >= 150 {
-            prompt - row - 1
-        } else {
-            pinned.lines().enumerate().filter_map(|(index, line)| (line.matches('─').count() > width / 2).then_some(index)).last().unwrap() - row
-        }).map(|line| line.split('│').next_back().unwrap()).collect::<Vec<_>>().join("\n");
+        let list: String = pinned
+            .lines()
+            .skip(row)
+            .take(if width >= 150 {
+                prompt - row - 1
+            } else {
+                pinned
+                    .lines()
+                    .enumerate()
+                    .filter_map(|(index, line)| {
+                        (line.matches('─').count() > width / 2).then_some(index)
+                    })
+                    .last()
+                    .unwrap()
+                    - row
+            })
+            .map(|line| line.split('│').next_back().unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
         let first = list.find("terminal-tail-proof").unwrap();
         let last = list.find("terminal-pinned-proof").unwrap();
         assert!(first < last, "arrivals must append downwards: {pinned}");

@@ -865,7 +865,7 @@ fn details_scroll_tracks_session_identity_across_refreshes() {
 }
 
 #[test]
-fn mouse_list_click_selects_and_double_click_focuses_second_task() {
+fn mouse_list_click_and_double_click_keep_focus_on_second_task() {
     let mut view = fixture();
     let rendered = screen(&view, 160, 40);
     let second = view.selectable_indices()[1];
@@ -882,7 +882,7 @@ fn mouse_list_click_selects_and_double_click_focuses_second_task() {
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, second);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
+    assert!(!view.input_box.focused);
     assert_eq!(view.selected_id(), Some(&id));
 }
 
@@ -1047,7 +1047,7 @@ fn mouse_list_click_uses_last_render_scroll_offset() {
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, target);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
+    assert!(!view.input_box.focused);
     assert_eq!(view.selected_id(), Some(&view.rows[target].id));
 }
 
@@ -5325,7 +5325,14 @@ mod log_search {
             screen(&view, 120, 50);
             let detail = view.viewport.borrow().log_detail;
             if mouse_exit {
-                view.handle_mouse(mouse(MouseEventKind::ScrollUp, detail.x + 2, detail.y + 3));
+                click_mouse(
+                    &mut view,
+                    mouse(
+                        MouseEventKind::Down(MouseButton::Left),
+                        detail.x + 2,
+                        detail.y + 3,
+                    ),
+                );
             } else {
                 key(&mut view, KeyCode::Esc);
                 view.mouse_focus = Panel::LogDetail;
@@ -6383,7 +6390,7 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     click_mouse(&mut view, click);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
+    assert!(!view.input_box.focused);
     key(&mut view, KeyCode::Esc);
     assert_eq!(
         key(&mut view, KeyCode::Enter),

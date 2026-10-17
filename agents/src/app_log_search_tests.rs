@@ -1,5 +1,5 @@
 use super::*;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn fixture() -> (tempfile::TempDir, App) {
     let (dir, mut app) = super::tests::fixture();
@@ -11,7 +11,7 @@ fn fixture() -> (tempfile::TempDir, App) {
     .unwrap();
     app.refresh_log(1);
     assert!(app.log_parsed_bytes < std::fs::metadata(path).unwrap().len());
-    super::tests::scroll_log(&mut app, MouseEventKind::ScrollUp);
+    super::tests::click_log(&mut app);
     (dir, app)
 }
 

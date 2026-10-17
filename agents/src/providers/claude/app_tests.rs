@@ -202,6 +202,23 @@ pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) 
     }));
 }
 
+pub(super) fn click_log(app: &mut App) {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    for kind in [
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+    ] {
+        app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column: 2,
+            row: 13,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+}
+
 #[test]
 fn queued_wheel_events_apply_before_the_next_draw() {
     let (_dir, mut app) = fixture();
@@ -513,7 +530,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(1);
-    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
+    click_log(&mut app);
     key(&mut app, KeyCode::Char('/'));
     app.refresh_log(1);
     for c in "Codex".chars() {
@@ -673,7 +690,7 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
     assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
     assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
+    click_log(&mut app);
     key(&mut app, KeyCode::Char('/'));
     app.refresh_log(8);
     assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);

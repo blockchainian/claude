@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn task_double_click_focuses_prompt_but_enter_still_opens() {
+fn task_double_click_keeps_task_focus_and_enter_opens() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 120, 40, now);
     view.rows[view.selected].process = None;
@@ -10,9 +10,8 @@ fn task_double_click_focuses_prompt_but_enter_still_opens() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y);
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
-    key(&mut view, KeyCode::Esc);
     assert!(!view.input_box.focused);
+    assert!(view.mouse_focus == Panel::TaskList);
     assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Open(id)));
 }
 
@@ -51,20 +50,22 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
 }
 
 #[test]
-fn right_click_leaves_input_before_closing_log_detail() {
+fn right_click_leaves_input_on_press_and_shows_newest_on_release() {
     let (mut view, now) = log_fixture();
     view.select_fixture_event(Some(view.log[0].clone()));
     let expected = view.log_selected;
     log_screen(&view, 120, 40, now);
     view.input_box.focused = true;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
-    view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
     assert!(!view.input_box.focused);
     assert_eq!(view.log_selected, expected);
+    view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
+    assert!(!view.input_box.focused);
+    assert_eq!(view.visible_log_event(), view.log.last());
 }
 
 #[test]
-fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
+fn whole_log_row_double_click_keeps_log_focus_and_detail() {
     for width in [120, 200] {
         let (mut view, now) = log_fixture();
         view.rows[view.selected].process = None;
@@ -92,7 +93,8 @@ fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
         assert_eq!(view.visible_log_event(), Some(&expected));
         assert_eq!(click_mouse(&mut view, click), None);
         assert_eq!(click_mouse(&mut view, click), None);
-        assert!(view.input_box.focused);
+        assert!(!view.input_box.focused);
+        assert!(view.mouse_focus == Panel::LogList);
         assert_eq!(view.visible_log_event(), Some(&expected));
         log_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();

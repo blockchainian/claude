@@ -615,7 +615,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
 }
 
 #[test]
-fn narrow_and_wide_log_double_click_focuses_prompt_and_keeps_preview_following() {
+fn narrow_and_wide_log_double_click_focuses_list_and_keeps_preview_following() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -628,13 +628,15 @@ fn narrow_and_wide_log_double_click_focuses_prompt_and_keeps_preview_following()
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
         click(&mut app, x, y);
-        app.handle_event(Event::Paste("double-click-prompt-proof".into()));
+        key(&mut app, KeyCode::Char('/'));
+        app.handle_event(Event::Paste("double-click-list-proof".into()));
         let buffer = draw_size(&mut app, width, height);
         assert!(
             lines(&buffer)
                 .join("\n")
-                .contains("double-click-prompt-proof")
+                .contains("Search ❯ double-click-list-proof")
         );
+        key(&mut app, KeyCode::Esc);
         std::fs::write(&path, payload).unwrap();
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
@@ -654,12 +656,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let original = detail(&draw_size(&mut app, width, height));
         let initial = draw_size(&mut app, width, height);
         let (column, row) = log_position(&initial, "Stop hook");
-        app.handle_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Moved,
-            column,
-            row,
-            modifiers: KeyModifiers::NONE,
-        }));
+        click(&mut app, column, row);
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("Stop hook".into()));
         let buffer = draw_size(&mut app, width, height);
@@ -674,12 +671,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
         wait_for_click(&mut app);
-        app.handle_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Moved,
-            column: 1,
-            row: height - 3,
-            modifiers: KeyModifiers::NONE,
-        }));
+        click(&mut app, 1, height - 3);
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("await".into()));
         let buffer = draw_size(&mut app, width, height);
