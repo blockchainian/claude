@@ -112,8 +112,8 @@ impl View {
         self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
-    /// Draws the button that jumps back to the newest row centered on the rule while an older
-    /// event is selected.
+    /// Draws the button that jumps back to the newest row, centered over the rows' content, while
+    /// an older event is selected.
     pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
         if self.following_log() {
@@ -124,9 +124,7 @@ impl View {
             0 => " ↑ Latest ".to_owned(),
             unseen => format!(" ↑ {unseen} New "),
         };
-        let width = label.width() as u16;
-        let x = area.x + area.width.saturating_sub(width) / 2;
-        let jump = Rect::new(x, area.y, width, 1).intersection(area);
+        let jump = log_content_centered(area, label.width() as u16);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
     }
@@ -658,6 +656,20 @@ fn row_time_changes_in(time: &RowTime, now: DateTime<Utc>) -> Option<std::time::
 
 fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) -> String {
     format_row_time(&row_time(event, session, last), now)
+}
+
+/// Centers a one-row label of `width` over the content beside the clock column, the line log
+/// rows center their text on.
+pub(super) fn log_content_centered(area: Rect, width: u16) -> Rect {
+    let (content, _) = log_row_areas(area);
+    let width = width.min(area.width);
+    Rect::new(
+        content.x + content.width.saturating_sub(width) / 2,
+        area.y,
+        width,
+        1,
+    )
+    .intersection(area)
 }
 
 /// Reserves the same trailing clock column and separator for every row.

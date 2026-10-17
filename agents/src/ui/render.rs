@@ -455,15 +455,8 @@ impl View {
         join_separators(&separators, area, buf);
         if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
-            let panel = layout.log_detail;
-            let width = (label.width() as u16).min(panel.width);
-            let jump = Rect::new(
-                panel.x + panel.width.saturating_sub(width) / 2,
-                panel.y,
-                width,
-                1,
-            )
-            .intersection(inset(panel));
+            let jump =
+                super::log::log_content_centered(inset(layout.log_detail), label.width() as u16);
             Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
             self.viewport.borrow_mut().log_detail_jump = jump;
         }

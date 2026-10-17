@@ -27,6 +27,9 @@ mod ask_question_tests;
 use chrono::{Duration, Utc};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
+/// The log rows' trailing clock column and the two spaces before it.
+const LOG_CLOCK_COLUMNS: u16 = 10;
+
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind,
@@ -485,7 +488,10 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let label = " ↑ 1 New ".width() as u16;
     assert_eq!(
         (jump.0, jump.1),
-        (rect.x + (rect.width - label) / 2 + 1, rect.y - 1)
+        (
+            rect.x + (rect.width - LOG_CLOCK_COLUMNS - label) / 2 + 1,
+            rect.y - 1
+        )
     );
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
@@ -4243,7 +4249,10 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
         view.scroll_content_row(true, true, top);
         view.render_at(area, &mut buffer, now);
         let jump = view.viewport.borrow().log_jump;
-        assert_eq!(jump.x, log.x + (log.width - jump.width) / 2);
+        assert_eq!(
+            jump.x,
+            log.x + (log.width - LOG_CLOCK_COLUMNS - jump.width) / 2
+        );
     }
 }
 
@@ -7508,7 +7517,9 @@ fn open_view_top_button_and_scrollbar() {
     let jump = view.viewport.borrow().log_detail_jump;
     assert_eq!(
         jump.x,
-        layout.log_detail.x + (layout.log_detail.width - jump.width) / 2
+        layout.log_detail.x
+            + 1
+            + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - jump.width) / 2
     );
     assert_eq!(jump.y, layout.log_detail.y);
     view.render_at(buf.area, &mut buf, now);
@@ -8017,12 +8028,14 @@ fn log_jump_buttons_center_on_separate_panel_borders() {
             };
             assert_eq!(
                 latest.x,
-                layout.log.x + (layout.log.width - latest.width) / 2
+                layout.log.x + (layout.log.width - LOG_CLOCK_COLUMNS - latest.width) / 2
             );
             assert_eq!(latest.y, border_y);
             assert_eq!(
                 top.x,
-                layout.log_detail.x + (layout.log_detail.width - top.width) / 2
+                layout.log_detail.x
+                    + 1
+                    + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - top.width) / 2
             );
             assert_eq!(top.y, layout.log_detail.y);
             assert_ne!(latest.y, top.y);
@@ -8066,7 +8079,9 @@ fn open_top_button_centers_on_the_detail_panel_for_every_kind_and_width() {
             let jump = view.viewport.borrow().log_detail_jump;
             assert_eq!(
                 jump.x,
-                layout.log_detail.x + (layout.log_detail.width - jump.width) / 2
+                layout.log_detail.x
+                    + 1
+                    + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - jump.width) / 2
             );
             assert_eq!(jump.y, layout.log_detail.y);
             click_text(&mut view, &screen, " ↑ Top ");
