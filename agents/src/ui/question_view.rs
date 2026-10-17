@@ -63,12 +63,20 @@ impl QuestionView {
     }
 
     fn finish_page(&mut self) -> Option<Outcome> {
+        if self.pages[self.page].selected.is_empty() && self.pages[self.page].other.is_empty() {
+            self.pages[self.page].committed = false;
+            return None;
+        }
         self.pages[self.page].committed = true;
         if self.page + 1 < self.pages.len() {
             self.page += 1;
             return None;
         }
-        if let Some(unanswered) = self.pages.iter().position(|page| !page.committed) {
+        if let Some(unanswered) = self
+            .pages
+            .iter()
+            .position(|page| !page.committed || (page.selected.is_empty() && page.other.is_empty()))
+        {
             self.page = unanswered;
             return None;
         }
@@ -468,6 +476,15 @@ mod tests {
     }
 
     #[test]
+    fn ask_view_empty_multi_stays_open() {
+        let mut view = QuestionView::new(fixture("Multi"));
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+        press(&mut view, KeyCode::Char('1'));
+        press(&mut view, KeyCode::Char('1'));
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+    }
+
+    #[test]
     fn ask_view_two_questions_submit_together() {
         let mut view = QuestionView::new(fixture("First"));
         assert!(press(&mut view, KeyCode::Char('2')).is_none());
@@ -552,9 +569,10 @@ mod tests {
         let mut key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
         key.kind = KeyEventKind::Release;
         assert!(view.key(key).is_none());
-        assert!(view
-            .key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL))
-            .is_none());
+        assert!(
+            view.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL))
+                .is_none()
+        );
         assert_eq!(
             submitted(press(&mut view, KeyCode::Enter)).answers["Probe single choice?"].answers,
             ["Red"]

@@ -199,6 +199,10 @@ pub enum Action {
         id: SessionKey,
         text: String,
     },
+    AnswerQuestions {
+        ask: crate::ask::Ask,
+        answer: crate::ask::Answer,
+    },
     PasteImage,
     SendImages {
         id: SessionKey,

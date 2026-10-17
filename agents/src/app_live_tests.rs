@@ -44,7 +44,7 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
         "created session must be keyboard selectable"
     );
     let action = match input.clone() {
-        SessionInput::PromptWithImages { .. } => {
+        SessionInput::PromptWithImages { .. } | SessionInput::Answer { .. } => {
             app.send_input(id.clone(), input.clone());
             None
         }
@@ -133,4 +133,76 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
     job
+}
+
+pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<String>>) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let ask = session
+        .ask
+        .clone()
+        .expect("live provider detected question");
+    let crate::ask::AskKind::Questions { questions, .. } = &ask.kind;
+    let id = session.id.clone();
+    app.sessions = vec![session.clone()];
+    app.view.set_sessions(vec![session], false);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(
+        screen.contains(&questions[0].text),
+        "question view absent: {screen}"
+    );
+    for (question, answers) in questions.iter().zip(values) {
+        for answer in answers {
+            if let Some(note) = answer.strip_prefix("user_note: ") {
+                app.handle_event(Event::Key(KeyEvent::new(
+                    KeyCode::Char(char::from_digit(question.options.len() as u32 + 1, 10).unwrap()),
+                    KeyModifiers::NONE,
+                )));
+                app.handle_event(Event::Paste(note.to_owned()));
+                app.handle_event(Event::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )));
+            } else {
+                let n = question
+                    .options
+                    .iter()
+                    .position(|o| o.label == answer)
+                    .unwrap()
+                    + 1;
+                app.handle_event(Event::Key(KeyEvent::new(
+                    KeyCode::Char(char::from_digit(n as u32, 10).unwrap()),
+                    KeyModifiers::NONE,
+                )));
+            }
+        }
+        if question.multi {
+            app.handle_event(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            )));
+        }
+    }
+    assert!(
+        app.pending_inputs.contains(&id),
+        "dashboard did not submit answer"
+    );
+    let event = app
+        .receiver
+        .recv_timeout(Duration::from_secs(120))
+        .expect("live answer deadline");
+    let Input::Sent { result, .. } = &event else {
+        panic!("expected answer completion")
+    };
+    assert!(result.is_ok(), "live dashboard answer failed: {result:?}");
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    assert!(!app.pending_inputs.contains(&id));
 }

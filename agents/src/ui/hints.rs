@@ -18,6 +18,8 @@ impl View {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
+        } else if self.active_question().is_some() {
+            hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])
         } else if self.log_search.editing || self.log_detail_search.editing {

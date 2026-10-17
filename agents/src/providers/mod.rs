@@ -77,6 +77,7 @@ pub struct Snapshot {
 pub enum SessionInput {
     Prompt(String),
     PromptWithImages { text: String, images: Vec<PathBuf> },
+    Answer { ask: crate::ask::Ask, answer: crate::ask::Answer, transcript: PathBuf },
     Interrupt,
     SetModel(String),
     SetEffort(String),

@@ -929,6 +929,9 @@ impl View {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if let Some(action) = self.question_key(key) {
+            return action;
+        }
         if key.code == KeyCode::Char('/')
             && !key
                 .modifiers

@@ -23,6 +23,7 @@ mod markdown;
 mod navigation;
 mod paths;
 mod prompt_box;
+mod question_flow;
 mod question_view;
 mod render;
 mod rows;
@@ -232,6 +233,7 @@ pub struct View {
     log_detail_search: log_search::LogSearch,
     input_box: prompt_box::PromptBox,
     prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
+    questions: question_flow::Questions,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -365,6 +367,7 @@ impl View {
             branch_editor: None,
             input_box: prompt_box::PromptBox::default(),
             prompt_history: Default::default(),
+            questions: question_flow::Questions::default(),
             capabilities: HashMap::new(),
             rows: Vec::new(),
             project_groups: Vec::new(),
@@ -433,6 +436,9 @@ impl View {
         if self.confirm_dialog.is_some() || self.help || self.picker.is_some() {
             return;
         }
+        if self.question_paste(text) {
+            return;
+        }
         if let Some(editor) = &mut self.branch_editor {
             editor.editor.insert(text);
         } else if self.input_box.focused {
@@ -496,6 +502,10 @@ impl View {
         id: &SessionKey,
         input: &crate::providers::SessionInput,
     ) {
+        if matches!(input, crate::providers::SessionInput::Answer { .. }) {
+            self.questions.sending.insert(id.clone());
+            return;
+        }
         let target = self.task_input(id);
         if let crate::providers::SessionInput::Prompt(text)
         | crate::providers::SessionInput::PromptWithImages { text, .. } = input
@@ -511,6 +521,13 @@ impl View {
         input: &crate::providers::SessionInput,
         result: std::io::Result<()>,
     ) {
+        if let crate::providers::SessionInput::Answer { ask, .. } = input {
+            self.questions.complete(ask, result.is_ok());
+            if let Err(error) = result {
+                self.set_notice(Some(error.to_string()));
+            }
+            return;
+        }
         let target = self.task_input(id);
         let error = result.as_ref().err().map(ToString::to_string);
         if matches!(
@@ -827,6 +844,7 @@ impl View {
     /// Keeps the details and log panels with their task: saves what the task the user left
     /// showed, and shows what the selected task showed when the user last left it.
     fn show_selected_panels(&mut self) {
+        self.sync_questions();
         let selected = self.selected_id().cloned();
         if self.panels_task == selected {
             return;

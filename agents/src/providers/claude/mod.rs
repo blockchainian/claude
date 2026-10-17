@@ -9,6 +9,7 @@ mod create_tests;
 mod images;
 pub(crate) mod log;
 mod peer;
+mod pending_asks;
 pub(super) mod registry;
 mod settings;
 mod subagents;
@@ -260,6 +261,7 @@ pub struct ClaudeProvider {
     summaries: HashMap<PathBuf, CachedSummary>,
     starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
     background: background::Tasks,
+    pending_asks: pending_asks::PendingAsks,
 }
 
 impl ClaudeProvider {
@@ -270,6 +272,7 @@ impl ClaudeProvider {
             summaries: HashMap::new(),
             starts: HashMap::new(),
             background: background::Tasks::default(),
+            pending_asks: pending_asks::PendingAsks::default(),
         }
     }
 
@@ -402,6 +405,7 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
+        self.pending_asks.refresh(&self.config_dir, &mut sessions);
         Snapshot { sessions, has_more }
     }
 

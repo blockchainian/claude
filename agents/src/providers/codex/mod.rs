@@ -523,7 +523,7 @@ impl Provider for CodexProvider {
         if !session.can_resume()
             || matches!(
                 input,
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_)
+                SessionInput::SetModel(_) | SessionInput::SetEffort(_) | SessionInput::Answer { .. }
             )
         {
             return None;
@@ -545,7 +545,7 @@ impl Provider for CodexProvider {
                         None => Ok(()),
                     }
                 }
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_) => {
+                SessionInput::SetModel(_) | SessionInput::SetEffort(_) | SessionInput::Answer { .. } => {
                     Err(io::ErrorKind::Unsupported.into())
                 }
             }

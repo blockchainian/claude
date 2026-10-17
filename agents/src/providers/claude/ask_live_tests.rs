@@ -1,0 +1,220 @@
+//! Opt-in, disposable AskUserQuestion delivery checks against Claude Code.
+use super::*;
+use std::{fs, path::PathBuf, process::Stdio, thread};
+
+struct Probe {
+    cwd: tempfile::TempDir,
+    config: PathBuf,
+    job: Option<String>,
+    trust: Option<Value>,
+    trust_path: PathBuf,
+}
+
+impl Probe {
+    fn command(&self, args: &[&str]) -> io::Result<String> {
+        let out = tempfile::tempfile()?;
+        let err = tempfile::tempfile()?;
+        let mut child = Command::new("claude")
+            .args(args)
+            .current_dir(self.cwd.path())
+            .stdin(Stdio::null())
+            .stdout(out.try_clone()?)
+            .stderr(err.try_clone()?)
+            .spawn()?;
+        let deadline = Instant::now() + Duration::from_secs(45);
+        loop {
+            if let Some(status) = child.try_wait()? {
+                use std::io::Seek;
+                let mut out = out;
+                out.rewind()?;
+                let mut text = String::new();
+                out.read_to_string(&mut text)?;
+                if !status.success() {
+                    let mut err = err;
+                    err.rewind()?;
+                    err.read_to_string(&mut text)?;
+                    return Err(io::Error::other(text));
+                }
+                return Ok(text);
+            }
+            if Instant::now() >= deadline {
+                child.kill()?;
+                child.wait()?;
+                return Err(io::Error::other("Claude command timed out"));
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+    fn new() -> io::Result<Self> {
+        let config = PathBuf::from(std::env::var_os("HOME").ok_or_else(mismatch)?).join(".claude");
+        let cwd = tempfile::tempdir()?;
+        let trust_path = config.with_extension("json");
+        let mut value: Value = serde_json::from_slice(&fs::read(&trust_path)?)?;
+        let key = cwd.path().canonicalize()?.to_string_lossy().into_owned();
+        let trust = value["projects"].get(&key).cloned();
+        value["projects"][&key]["hasTrustDialogAccepted"] = json!(true);
+        fs::write(&trust_path, serde_json::to_vec_pretty(&value)?)?;
+        Ok(Self {
+            cwd,
+            config,
+            job: None,
+            trust,
+            trust_path,
+        })
+    }
+    fn start(&mut self) -> io::Result<()> {
+        let prompt = "This is an isolated terminal answer transport probe. Use ONLY AskUserQuestion. Make exactly FOUR calls in order and wait for each answer before the next. Do not answer yourself. Use exact question/header text. Every question has options Red (description Red choice), Green (description Green choice), Blue (description Blue choice). Call 1: one question question='Transport single?' header='Single' multiSelect=false. Call 2: one question question='Transport multi?' header='Multi' multiSelect=true. Call 3: two questions in ONE call: question='Transport first?' header='First' multiSelect=false and question='Transport second?' header='Second' multiSelect=false. Call 4: one question question='Transport other?' header='Other' multiSelect=false. After all answers reply DONE and stop. This explicitly requests testing interactive question behavior.";
+        let output = self.command(&[
+            "--bg",
+            "--model",
+            "haiku",
+            "--effort",
+            "low",
+            "--tools",
+            "AskUserQuestion",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "{\"mcpServers\":{}}",
+            "--safe-mode",
+            prompt,
+        ])?;
+        let id = output
+            .split_whitespace()
+            .map(|s| s.trim_matches(|c: char| !c.is_ascii_hexdigit()))
+            .find(|s| s.len() == 8 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or_else(|| io::Error::other(format!("Missing job id: {output}")))?;
+        self.job = Some(id.to_owned());
+        eprintln!("probe job {id}");
+        Ok(())
+    }
+    fn waiting(&self, text: &str) -> io::Result<Value> {
+        let path = self
+            .config
+            .join("jobs")
+            .join(self.job.as_ref().unwrap())
+            .join("state.json");
+        let deadline = Instant::now() + Duration::from_secs(90);
+        loop {
+            if let Ok(bytes) = fs::read(&path)
+                && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+                && value["block"]["questions"]
+                    .as_array()
+                    .is_some_and(|qs| qs.iter().any(|q| q["question"] == text))
+            {
+                return Ok(value);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(format!(
+                    "Question {text} not reached; state {}",
+                    fs::read_to_string(&path).unwrap_or_default()
+                )));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    fn transcript(&self, id: &str) -> io::Result<PathBuf> {
+        for dir in fs::read_dir(self.config.join("projects"))? {
+            let path = dir?.path().join(format!("{id}.jsonl"));
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+        Err(io::Error::other("Probe transcript missing"))
+    }
+    fn cleanup(&mut self) -> io::Result<()> {
+        if let Some(job) = self.job.take() {
+            let _ = self.command(&["stop", &job]);
+            self.command(&["rm", &job])?;
+        }
+        let mut value: Value = serde_json::from_slice(&fs::read(&self.trust_path)?)?;
+        let key = self
+            .cwd
+            .path()
+            .canonicalize()?
+            .to_string_lossy()
+            .into_owned();
+        if let Some(saved) = self.trust.take() {
+            value["projects"][&key] = saved;
+        } else if let Some(projects) = value["projects"].as_object_mut() {
+            projects.remove(&key);
+        }
+        fs::write(&self.trust_path, serde_json::to_vec_pretty(&value)?)?;
+        Ok(())
+    }
+}
+impl Drop for Probe {
+    fn drop(&mut self) {
+        if let Err(error) = self.cleanup() {
+            eprintln!("Probe cleanup failed: {error}");
+        }
+    }
+}
+
+#[test]
+#[ignore = "starts billable disposable Claude sessions and adds/removes isolated cwd trust"]
+fn ask_live_single_multi_two_other() {
+    let mut probe = Probe::new().unwrap();
+    probe.start().unwrap();
+    for (text, answers) in [
+        ("Transport single?", vec![vec!["Green"]]),
+        ("Transport multi?", vec![vec!["Blue", "Red"]]),
+        ("Transport first?", vec![vec!["Green"], vec!["Green"]]),
+        (
+            "Transport other?",
+            vec![vec!["user_note: custom transport note"]],
+        ),
+    ] {
+        let state = probe.waiting(text).unwrap();
+        let id = state["sessionId"].as_str().unwrap().to_owned();
+        use crate::providers::Provider;
+        let mut provider = crate::providers::claude::ClaudeProvider::new(probe.config.clone());
+        let deadline = Instant::now() + Duration::from_secs(25);
+        let session = loop {
+            if let Some(session) = provider
+                .refresh(1)
+                .sessions
+                .into_iter()
+                .find(|s| s.id.id == id && s.ask.is_some())
+            {
+                break session;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "live provider did not resolve pending ask"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        let transcript = probe.transcript(&id).unwrap();
+        let pending_text = fs::read_to_string(&transcript).unwrap();
+        let pending_has_call = pending_text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .any(|record| {
+                record["message"]["content"]
+                    .as_array()
+                    .is_some_and(|items| {
+                        items.iter().any(|item| {
+                            item["name"] == "AskUserQuestion"
+                                && item["input"]["questions"]
+                                    .as_array()
+                                    .is_some_and(|qs| qs.iter().any(|q| q["question"] == text))
+                        })
+                    })
+            });
+        eprintln!(
+            "pending {text}: transcript_has_call={pending_has_call}; provider ask={}",
+            session.ask.as_ref().unwrap().id
+        );
+        let mut app = crate::app::live_tests::app(Box::new(provider), probe.cwd.path().to_owned());
+        crate::app::live_tests::answer_questions(
+            &mut app,
+            session,
+            answers
+                .into_iter()
+                .map(|values| values.into_iter().map(str::to_owned).collect())
+                .collect(),
+        );
+        eprintln!("verified live {text}");
+    }
+    probe.cleanup().unwrap();
+}

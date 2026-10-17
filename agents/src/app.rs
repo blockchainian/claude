@@ -898,6 +898,25 @@ impl App {
             Action::SendPrompt { id, text } => {
                 self.send_input(id, SessionInput::Prompt(text));
             }
+            Action::AnswerQuestions { ask, answer } => {
+                let id = ask.session.clone();
+                if let Some(transcript) = self
+                    .session(&id)
+                    .and_then(|session| session.transcript.clone())
+                {
+                    self.send_input(
+                        id,
+                        SessionInput::Answer {
+                            ask,
+                            answer,
+                            transcript,
+                        },
+                    );
+                } else {
+                    self.view
+                        .set_notice(Some("Session has no transcript".into()));
+                }
+            }
             Action::SendImages { id, text, images } => {
                 self.send_input(id, SessionInput::PromptWithImages { text, images })
             }

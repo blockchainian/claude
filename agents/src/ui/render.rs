@@ -91,10 +91,15 @@ impl View {
         let header = row(area, 0, header_height);
         let wide = area.width >= WIDE_LAYOUT_COLUMNS;
         let prompt_height = self
-            .input_box
-            .height(
-                area.width.saturating_sub(2 * HORIZONTAL_PADDING),
-                &self.input_label(),
+            .active_question()
+            .map_or_else(
+                || {
+                    self.input_box.height(
+                        area.width.saturating_sub(2 * HORIZONTAL_PADDING),
+                        &self.input_label(),
+                    )
+                },
+                |question| question.height(area.width.saturating_sub(2 * HORIZONTAL_PADDING)),
             )
             .min(area.height.saturating_sub(header_height + footer_height));
         let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
@@ -213,6 +218,12 @@ impl View {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && let Some(question) = self.active_question()
+        {
+            return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
+        }
         if let Some(editor) = &self.branch_editor
             && let Some((rect, _)) = self
                 .viewport
@@ -287,12 +298,16 @@ impl View {
         }
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
-        self.input_box.render(
-            layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
-            buf,
-            &self.input_label(),
-            self.input_disabled(),
-        );
+        if let Some(question) = self.active_question() {
+            question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
+        } else {
+            self.input_box.render(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                buf,
+                &self.input_label(),
+                self.input_disabled(),
+            );
+        }
         let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
         let labels = TASK_FILTERS
             .iter()

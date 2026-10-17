@@ -47,7 +47,7 @@ pub(super) fn send(
             }
             validate_text(value)?;
         }
-        SessionInput::Interrupt => {}
+        SessionInput::Interrupt | SessionInput::Answer { .. } => {}
     }
     let restore = matches!(
         input,
@@ -340,6 +340,9 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
+        if let SessionInput::Answer { ask, answer, transcript } = &input {
+            return self.answer_questions(ask, answer, transcript);
+        }
         self.wait_at("initial-ready", ready)?;
         match input {
             SessionInput::Prompt(text) => {
@@ -370,6 +373,7 @@ impl Terminal {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
+            SessionInput::Answer { .. } => unreachable!("Answers use the question transport"),
             SessionInput::Interrupt => self.write(b"\x1b"),
             SessionInput::SetModel(model) => {
                 self.submit(&format!("/model {model}"))?;
@@ -631,3 +635,7 @@ mod input_tests;
 #[cfg(test)]
 #[path = "attach_image_tests.rs"]
 mod image_tests;
+
+#[path = "ask_transport.rs"]
+mod ask_transport;
+pub(super) use ask_transport::pending;
