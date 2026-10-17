@@ -6415,7 +6415,7 @@ fn click_log_text(view: &mut View, screen: &str, text: &str, button: MouseButton
 }
 
 #[test]
-fn task_log_click_keeps_list_and_right_click_restores_preview() {
+fn task_log_click_keeps_list_and_detail_right_click_keeps_selection() {
     let (mut view, now) = log_fixture();
     view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
     let list = log_screen(&view, 100, 45, now);
@@ -6452,9 +6452,13 @@ fn task_log_click_keeps_list_and_right_click_restores_preview() {
         Some(std::time::Duration::from_secs(1))
     );
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
-    assert_eq!(log_screen(&view, 100, 45, now), open);
+    assert!(view.log_detail_raw);
+    let raw = log_screen(&view, 100, 45, now);
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
-    assert_eq!(log_screen(&view, 100, 45, now), list);
+    assert_eq!(log_screen(&view, 100, 45, now), raw);
+    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
+    assert!(!view.log_detail_raw);
+    assert_eq!(log_screen(&view, 100, 45, now), open);
 }
 
 /// The calls of a merged Bash + Read row, the Read still running.
@@ -8858,3 +8862,6 @@ fn log_border_top_double_click_selects_latest_in_both_layouts() {
 
 #[path = "index_selection_tests.rs"]
 mod index_selection;
+
+#[path = "raw_detail_tests.rs"]
+mod raw_detail_tests;

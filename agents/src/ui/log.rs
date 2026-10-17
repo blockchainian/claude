@@ -15,6 +15,37 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 }
 
 impl View {
+    pub(super) fn detail_text(&self, event: &Event) -> String {
+        if self.log_detail_raw {
+            match event.raw_text() {
+                Ok(text) => text,
+                Err(error) => format!("Cannot read transcript: {error}"),
+            }
+        } else {
+            open_text(event)
+        }
+    }
+
+    fn selected_detail_layout(
+        &self,
+        event: &Event,
+        width: u16,
+        cwd: &Path,
+        now: DateTime<Utc>,
+    ) -> DetailLayout {
+        if self.log_detail_raw {
+            detail_parts_layout(
+                event,
+                width,
+                cwd,
+                now,
+                vec![super::tool_detail::Part::raw_json(self.detail_text(event))],
+            )
+        } else {
+            detail_layout(event, width, cwd, now)
+        }
+    }
+
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         self.viewport.borrow_mut().log_text = text_selection::TextRegion::default();
         if !self.selecting_list(text_selection::Panel::LogList) {
@@ -223,7 +254,7 @@ impl View {
                 layout
             }
             _ => {
-                let mut layout = detail_layout(event, area.width, cwd, now);
+                let mut layout = self.selected_detail_layout(event, area.width, cwd, now);
                 layout.height = height;
                 layout
             }
@@ -309,7 +340,7 @@ impl View {
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = detail_layout(event, width, cwd, DateTime::UNIX_EPOCH);
+        let layout = self.selected_detail_layout(event, width, cwd, DateTime::UNIX_EPOCH);
         let found = layout
             .lines
             .iter()
@@ -776,9 +807,19 @@ fn detail_layout(
     cwd: &std::path::Path,
     now: DateTime<Utc>,
 ) -> DetailLayout {
+    detail_parts_layout(event, width, cwd, now, open_parts(event))
+}
+
+fn detail_parts_layout(
+    event: &Event,
+    width: u16,
+    cwd: &Path,
+    now: DateTime<Utc>,
+    parts: Vec<super::tool_detail::Part>,
+) -> DetailLayout {
     let theme_generation = super::highlight::theme_generation();
     let body_style = super::style::log_styles(&event.kind).1;
-    let rendered: Vec<_> = open_parts(event)
+    let rendered: Vec<_> = parts
         .into_iter()
         .map(|part| {
             let lines = part.lines(usize::from(width), body_style, now);

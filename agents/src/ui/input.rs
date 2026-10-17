@@ -12,6 +12,10 @@ pub(super) enum ClickTarget {
     Log {
         index: usize,
     },
+    LogDetail {
+        session: SessionKey,
+        index: Option<usize>,
+    },
     Details {
         session: SessionKey,
         source: Option<String>,
@@ -48,6 +52,16 @@ impl View {
         let click = self.pending_click.take().expect("click is due");
         match click.target {
             ClickTarget::Log { .. } | ClickTarget::LogBorder { .. } => None,
+            ClickTarget::LogDetail { session, index } => {
+                if self.selected_id() == Some(&session) && self.log_selected == index {
+                    self.log_detail_raw = !self.log_detail_raw;
+                    self.cancel_detail_selection();
+                    let mut viewport = self.viewport.borrow_mut();
+                    viewport.log_detail_layout = None;
+                    viewport.log_detail_scroll = 0;
+                }
+                None
+            }
             ClickTarget::Details {
                 session, source, ..
             } => {
@@ -299,6 +313,15 @@ impl View {
                 label,
             });
         }
+        if viewport.log_text.area.contains(position)
+            && self.visible_log_event().is_some()
+            && let Some(session) = self.selected_id()
+        {
+            return Some(ClickTarget::LogDetail {
+                session: session.clone(),
+                index: self.log_selected,
+            });
+        }
         if !viewport.log_jump.contains(position)
             && let Some(border) = viewport
                 .log_borders
@@ -331,7 +354,10 @@ impl View {
                 .take()
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
-                self.right_click();
+                let position = (mouse.column, mouse.row).into();
+                if !self.viewport.borrow().log_detail.contains(position) {
+                    self.right_click();
+                }
             }
             return None;
         }
@@ -531,7 +557,7 @@ impl View {
                             && let Some(event) = self.visible_log_event()
                         {
                             return Some(Action::Copy {
-                                text: super::log::open_text(event),
+                                text: self.detail_text(event),
                                 label: super::log::copied_label(event),
                             });
                         }
@@ -567,12 +593,8 @@ impl View {
             } else if viewport.log_detail.contains(position)
                 && mouse.row >= viewport.log_detail.y + super::log::LOG_TOP + 2
             {
-                self.visible_log_event().map(|event| {
-                    (
-                        super::log::open_text(event),
-                        super::log::copied_label(event),
-                    )
-                })
+                self.visible_log_event()
+                    .map(|event| (self.detail_text(event), super::log::copied_label(event)))
             } else {
                 None
             };
@@ -631,6 +653,14 @@ impl View {
                     };
                     if self.defer_click(target) {
                         return Some(action);
+                    }
+                } else if let Some(target @ ClickTarget::LogDetail { .. }) =
+                    self.click_target_at(position)
+                {
+                    if self.defer_click(target)
+                        && let Some((text, label)) = copy_text
+                    {
+                        return Some(Action::Copy { text, label });
                     }
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();

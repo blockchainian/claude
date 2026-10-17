@@ -122,6 +122,10 @@ impl Part {
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
 
+    pub fn raw_json(source: String) -> Self {
+        Self::new(source, Body::Code("json".into()))
+    }
+
     pub fn text(source: String, markdown: bool) -> Self {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&source)
             && (value.is_object() || value.is_array())

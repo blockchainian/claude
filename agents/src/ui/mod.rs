@@ -202,6 +202,7 @@ pub struct View {
     log_selected: Option<usize>,
     log_background_event: Option<crate::log::Event>,
     log_detail_focused: bool,
+    log_detail_raw: bool,
     log_list_focused: bool,
     /// Older wheel steps waiting for App to extend the loaded transcript window.
     log_pending_older: usize,
@@ -325,6 +326,7 @@ impl View {
             log_selected: None,
             log_background_event: None,
             log_detail_focused: false,
+            log_detail_raw: false,
             log_list_focused: false,
             log_pending_older: 0,
             log_start_requested: false,
