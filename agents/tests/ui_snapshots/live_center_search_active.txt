@@ -11,6 +11,6 @@
                                             │
                                             │
                                             │
-                                            ├───────────────── Ready ───────── project ─
+                                            ├───────────────── Ready ───────── project╶─
  Task to find ›
  esc back  enter open

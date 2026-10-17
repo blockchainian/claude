@@ -7,6 +7,6 @@
                     │
                     │
                     │
-                    ├──── Inactive ─ … ─
+                    ├──── Inactive ─ …╶─
  Unloaded tas ›
  ? help  esc back  ↑/↓ move  enter ope…

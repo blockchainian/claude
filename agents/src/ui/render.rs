@@ -1394,9 +1394,8 @@ fn rule(area: Rect, buf: &mut Buffer) {
     line("─".repeat(usize::from(area.width)).dim(), area, buf);
 }
 
-/// Draws `left` a space after the rule's first corner cell and `right` a space before its last,
-/// each between spaces, keeping clear the `center` columns in the rule's middle. Returns where
-/// each text landed.
+/// Draws end labels with a half line toward their corner and a space toward the center,
+/// keeping clear the `center` columns in the rule's middle. Returns where each text landed.
 fn render_rule_ends(
     rule: Rect,
     center: u16,
@@ -1421,6 +1420,14 @@ fn render_rule_ends(
         };
         let area = Rect::new(x, rule.y, width, 1);
         Clear.render(Rect::new(x - 1, rule.y, width + 2, 1), buf);
+        let (padding, symbol) = if from_left {
+            (x - 1, "╴")
+        } else {
+            (x + width, "╶")
+        };
+        buf[(padding, rule.y)]
+            .set_symbol(symbol)
+            .set_style(Style::default().dim());
         let mut text = text;
         for span in &mut text.spans {
             span.style = style;

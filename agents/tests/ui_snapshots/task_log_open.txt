@@ -13,9 +13,9 @@
                                                   │
                                                   │
                                                   │
-──────────────────────────────────────────────────┴─────────────────── Working ─────────── project ─
+──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
  Task log example · Running in a terminal; open it to type
-─ Unknown ─────────────────────────────────── ↑ Latest ─────────────────────────────────────────────
+─╴Unknown ─────────────────────────────────── ↑ Latest ─────────────────────────────────────────────
                                         run tests                                               35s
  A long response with bold words whose body must be cut before the right edge of the log…  11:59:20
                                   run a background job *                                         5s

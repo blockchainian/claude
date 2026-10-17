@@ -11,6 +11,6 @@
  │ › 1. Cancel                            │ │
  │   2. Permanently delete task and child │ │
  └────────────────────────────────────────┘ │
-                                            ├──────────────── Inactive ─────── project ─
+                                            ├──────────────── Inactive ─────── project╶─
  Unloaded task ›
  ↑/↓ move  enter select  esc back

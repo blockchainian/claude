@@ -2792,7 +2792,7 @@ mod details_header {
         (rule.x..rule.right())
             .map(|x| buf[(x, rule.y)].symbol())
             .collect::<String>()
-            .trim_matches('─')
+            .trim_matches(['─', '╶', '╴'])
             .trim()
             .to_owned()
     }
@@ -3052,7 +3052,7 @@ mod details_header {
             // a title cell, two spaces and two rule cells.
             let elapsed_width = " 3h 12m ".len() as u16;
             let reserved = if width + 3 >= 2 * elapsed_width + 7 {
-                assert!(top_text.ends_with(" 3h 12m "), "width {width}: {top_text}");
+                assert!(top_text.ends_with(" 3h 12m╶"), "width {width}: {top_text}");
                 2 * elapsed_width
             } else {
                 assert!(!top_text.contains("3h 12m"), "width {width}: {top_text}");
@@ -3975,7 +3975,7 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
                 assert_eq!(layout.details.bottom(), rule_y);
                 assert_eq!(log.bottom(), rule_y);
                 assert_eq!(buf[(log.x - 2, rule_y)].symbol(), "┴");
-                assert_eq!(buf[(log.x - 1, rule_y)].symbol(), " ");
+                assert_eq!(buf[(log.x - 1, rule_y)].symbol(), "╴");
                 assert_ne!(buf[(log.x, rule_y)].symbol(), " ");
             }
         }
@@ -8486,18 +8486,71 @@ fn dashboard_starts_with_tabs_and_one_header_rule() {
 }
 
 #[test]
-fn border_labels_touch_joint_spaces() {
-    let (view, now) = column_padding_fixture();
-    let area = Rect::new(0, 0, 200, 45);
-    let mut buf = Buffer::empty(area);
-    view.render_at(area, &mut buf, now);
-    let layout = view.center_layout(area);
-    for x in [layout.gap.x + 1, layout.log.x - 2] {
+fn border_labels_use_dim_half_lines_beside_separator_joints() {
+    let (mut view, now) = column_padding_fixture();
+    view.rows[0].started_at = Some(now - Duration::minutes(97));
+    for width in [120, 200] {
+        let area = Rect::new(0, 0, width, 45);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let layout = view.center_layout(area);
         let y = layout.details.bottom();
-        assert_eq!(buf[(x, y)].symbol(), "┴");
-        assert_eq!(buf[(x + 1, y)].symbol(), " ");
-        assert_ne!(buf[(x + 2, y)].symbol(), " ");
-        assert_ne!(buf[(x + 2, y)].symbol(), "─");
+        let joint = layout.gap.x + 1;
+        assert_eq!(buf[(joint, y)].symbol(), "┴");
+        let cell = &buf[(joint + 1, y)];
+        assert_eq!(cell.symbol(), "╴", "width {width}");
+        assert_eq!(cell.style(), buf[(joint, y)].style());
+        assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+        if width >= 150 {
+            let joint = layout.log.x - 2;
+            for (x, y, symbol) in [
+                (joint - 1, layout.log.y - 1, "╶"),
+                (joint - 1, layout.log.bottom(), "╶"),
+                (joint + 1, layout.log.bottom(), "╴"),
+            ] {
+                let cell = &buf[(x, y)];
+                assert_eq!(cell.symbol(), symbol, "width {width}, x {x}, y {y}");
+                assert_eq!(cell.style(), buf[(joint, y)].style());
+                assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+            }
+        }
+        let bottom: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+        assert!(bottom.contains(" Working "), "{bottom}");
+        let top: String = (0..width)
+            .map(|x| buf[(x, layout.header.y + 1)].symbol())
+            .collect();
+        assert!(top.contains(" Task log example "), "{top}");
+    }
+}
+
+#[test]
+fn border_labels_use_half_lines_beside_screen_edge_corners() {
+    let (mut view, now) = column_padding_fixture();
+    view.rows[0].effort = Some("medium".into());
+    for width in [120, 200] {
+        let area = Rect::new(0, 0, width, 45);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let model = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0;
+        let row: String = (0..width).map(|x| buf[(x, model.y)].symbol()).collect();
+        assert!(row.ends_with(" medium╶─"), "{row}");
+        for x in [model.x - 1, width - 2] {
+            assert!(
+                buf[(x, model.y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+        }
+        if width < 150 {
+            assert!(row.starts_with("─╴"), "{row}");
+        }
     }
 }
 

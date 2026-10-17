@@ -308,9 +308,9 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     assert!(details.starts_with('┴'), "{capture}");
     assert!(
         details.ends_with(if width >= 150 {
-            " claude ┴"
+            " claude╶┴"
         } else {
-            " claude ─"
+            " claude╶─"
         }),
         "{capture}"
     );
@@ -318,7 +318,7 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         details.chars().skip(1).take(start - 1).all(|c| c == '─'),
         "{capture}"
     );
-    let folder_start = details.chars().count() - " claude ─".chars().count();
+    let folder_start = details.chars().count() - " claude╶─".chars().count();
     assert!(
         details
             .chars()
@@ -346,7 +346,7 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         .find(|part| !part.trim_matches([' ', '┬']).is_empty())
         .unwrap();
     assert!(
-        elapsed.starts_with(' ') && elapsed.ends_with(' '),
+        elapsed.starts_with(' ') && elapsed.ends_with('╶'),
         "{capture}"
     );
     assert!(!elapsed.trim().is_empty(), "{capture}");
@@ -1092,16 +1092,16 @@ fn terminal_details_section_positions() {
                 .collect();
             assert!(
                 status.ends_with(if width >= 150 {
-                    " claude ┴"
+                    " claude╶┴"
                 } else {
-                    " claude ─"
+                    " claude╶─"
                 }),
                 "{status}"
             );
             assert!(status.contains(" Inactive "), "{status}");
             assert!(!status.contains("main"), "{status}");
             if has_pr {
-                assert!(status.starts_with("┴ #763 ─"), "{status}");
+                assert!(status.starts_with("┴╴#763 ─"), "{status}");
             } else {
                 assert!(!status.contains('#'), "{status}");
                 assert!(status.starts_with("┴────"), "{status}");
@@ -1120,13 +1120,13 @@ fn terminal_details_section_positions() {
                 .collect();
             assert!(
                 model.starts_with(if width >= 150 {
-                    "┴ claude-opus-5-5 "
+                    "┴╴claude-opus-5-5 "
                 } else {
-                    "─ claude-opus-5-5 "
+                    "─╴claude-opus-5-5 "
                 }),
                 "{model}"
             );
-            assert!(model.ends_with(" medium ─"), "{model}");
+            assert!(model.ends_with(" medium╶─"), "{model}");
             assert!(!model.contains("Model"));
             assert!(!model.contains('·'));
             let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);

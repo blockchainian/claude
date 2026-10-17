@@ -25,6 +25,6 @@
                                                             │
                                                             │
                                                             │
-                                                            ├───────────────────────── Ready ───────────────── project ─
+                                                            ├───────────────────────── Ready ───────────────── project╶─
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new  g group by project
