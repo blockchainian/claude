@@ -395,7 +395,42 @@ impl View {
             self.text_selection.borrow_mut().take();
             return None;
         }
+        let prompt = self.viewport.borrow().prompt;
+        if self.input_disabled().is_none()
+            && (self.input_box.mouse_selecting()
+                || (mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && prompt.contains((mouse.column, mouse.row).into())))
+            && matches!(
+                mouse.kind,
+                MouseEventKind::Down(MouseButton::Left)
+                    | MouseEventKind::Drag(MouseButton::Left)
+                    | MouseEventKind::Up(MouseButton::Left)
+            )
+        {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.mouse_press = None;
+                self.pending_click = None;
+                self.text_selection.borrow_mut().take();
+                self.focus_input();
+            }
+            return self.input_box.select_mouse(
+                prompt.inner(Margin::new(1, 0)),
+                &self.input_label(),
+                mouse,
+            );
+        }
         match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                if self.viewport.borrow().prompt.contains((mouse.column, mouse.row).into()) =>
+            {
+                let area = self.viewport.borrow().prompt.inner(Margin::new(1, 0));
+                self.input_box.scroll_mouse(
+                    area,
+                    &self.input_label(),
+                    mouse.kind == MouseEventKind::ScrollDown,
+                );
+                return None;
+            }
             MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) => {
                 self.mouse_press = Some((button, mouse.column, mouse.row, false));
                 if button == MouseButton::Left {

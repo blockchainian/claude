@@ -1,6 +1,9 @@
 use super::line_edit::LineEdit;
 use super::*;
 
+#[path = "prompt_mouse.rs"]
+mod prompt_mouse;
+
 #[path = "composer_history.rs"]
 mod composer_history;
 
@@ -20,6 +23,7 @@ pub(super) enum PromptAction {
 
 #[derive(Default)]
 pub(super) struct PromptBox {
+    mouse: prompt_mouse::PromptMouse,
     pub(super) editor: LineEdit,
     pub(super) focused: bool,
     pub(super) state: SendState,
@@ -113,7 +117,7 @@ impl PromptBox {
         }
         let layout = self.layout(area.width, label);
         let height = usize::from(area.height.min(5));
-        let start = layout.caret.1.saturating_sub(height.saturating_sub(1));
+        let start = self.mouse_scroll_start(&layout, height);
         let style = if self.focused {
             Style::default().cyan()
         } else {
@@ -135,6 +139,7 @@ impl PromptBox {
                 Style::default(),
             );
         }
+        self.highlight_mouse_selection(area, buf, &layout, start);
     }
 
     pub(super) fn cursor(&self, area: Rect, label: &str) -> Option<(u16, u16)> {
@@ -142,10 +147,12 @@ impl PromptBox {
             return None;
         }
         let layout = self.layout(area.width, label);
-        let row = layout
-            .caret
-            .1
-            .min(usize::from(area.height.min(5).saturating_sub(1)));
+        let height = usize::from(area.height.min(5));
+        let start = self.mouse_scroll_start(&layout, height);
+        let row = layout.caret.1.checked_sub(start)?;
+        if row >= height {
+            return None;
+        }
         Some((
             area.x + (layout.inset + layout.caret.0).min(area.width - 1),
             area.y + row as u16,
@@ -168,6 +175,9 @@ impl PromptBox {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
         let key = super::line_edit::normalize_key(key);
         if !self.focused || key.kind == KeyEventKind::Release {
+            return None;
+        }
+        if self.editor.selection_key(key) {
             return None;
         }
         if self.history_key(key) {

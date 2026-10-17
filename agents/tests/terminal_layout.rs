@@ -15,6 +15,9 @@ mod terminal_scripts;
 #[path = "support/terminal_disabled_prompt.rs"]
 mod terminal_disabled_prompt;
 
+#[path = "support/terminal_prompt_mouse.rs"]
+mod terminal_prompt_mouse;
+
 struct Tmux(String);
 
 impl Tmux {

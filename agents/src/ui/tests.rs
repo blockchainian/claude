@@ -1,6 +1,9 @@
 #[path = "panel_focus_tests.rs"]
 mod panel_focus_tests;
 
+#[path = "prompt_mouse_tests.rs"]
+mod prompt_mouse_tests;
+
 #[path = "log_center_tests.rs"]
 mod log_center_tests;
 

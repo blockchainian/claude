@@ -2,6 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+#[path = "line_edit_selection.rs"]
+mod selection;
+
 /// CSI-u can report an ASCII control code instead of its letter and Control modifier.
 pub(super) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
     if let KeyCode::Char(character @ '\u{1}'..='\u{1a}') = key.code {
@@ -13,6 +16,7 @@ pub(super) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
 
 #[derive(Clone, Default)]
 pub(super) struct LineEdit {
+    selection: Option<(usize, usize)>,
     text: String,
     /// Byte offset at a grapheme boundary.
     cursor: usize,
@@ -89,11 +93,16 @@ impl LineEdit {
         self.preferred_column = None;
         self.text = text.into();
         self.end();
+        self.clear_selection();
     }
     pub(super) fn clear(&mut self) {
         self.set_text("");
     }
     pub(super) fn insert(&mut self, text: impl ToString) {
+        if self.selection_range().is_some() {
+            self.replace_selection(text);
+            return;
+        }
         self.preferred_column = None;
         let text = text.to_string();
         self.text.insert_str(self.cursor, &text);
