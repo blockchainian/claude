@@ -181,18 +181,9 @@ impl View {
             usage_chart = row(list, input.height, list.height.saturating_sub(input.height));
             (usage_chart, input)
         } else if self.searching {
-            let entries = self
-                .center_rows(&self.selectable_indices(), self.grouping)
-                .len();
-            let chart_height = self.usage_chart_height(list, entries);
-            let above_chart = row(list, 0, list.height.saturating_sub(chart_height));
-            let input = log::search_input_rect(above_chart);
+            let input = log::search_input_rect(list);
             (
-                row(
-                    above_chart,
-                    0,
-                    above_chart.height.saturating_sub(input.height),
-                ),
+                row(list, 0, list.height.saturating_sub(input.height)),
                 input,
             )
         } else {
@@ -367,11 +358,12 @@ impl View {
             }
         }
         self.render_center_rows(layout.list, buf, now);
+        self.render_usage_chart(layout.usage_chart, buf, now);
         if self.searching || self.rename_target.is_some() {
             let (prompt, edit) = self.input();
+            Clear.render(layout.search, buf);
             render_input_row(prompt, edit, layout.search, buf);
         }
-        self.render_usage_chart(layout.usage_chart, buf, now);
         if let Some((notice, _)) = &self.notice
             && !layout.list.is_empty()
         {

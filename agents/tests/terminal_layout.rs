@@ -1483,7 +1483,7 @@ fn terminal_detail_right_click_and_double_click_copy() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_session_search_above_usage_chart() {
+fn terminal_session_search_overlays_chart_bottom() {
     // Move the real transcript's usage into the visible time window.
     let records: Vec<_> = include_str!("fixtures/transcript.jsonl")
         .lines()
@@ -1507,11 +1507,29 @@ fn terminal_session_search_above_usage_chart() {
             &height.to_string(),
         ]);
         tmux.wait_for(|capture| {
-            capture.lines().count() == height
-                && capture.lines().take(height / 2).any(&braille)
+            capture.lines().count() == height && capture.lines().take(height / 2).any(&braille)
         });
         std::thread::sleep(Duration::from_millis(200));
-        let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        // Compare within one fixed pair of five-second usage bins so the time axis
+        // cannot advance between the baseline and search captures.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let (before, after) = loop {
+            let pair = chrono::Utc::now().timestamp().div_euclid(10);
+            let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            tmux.run(&["send-keys", "-t", "probe", "/"]);
+            tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
+            tmux.wait_for(|capture| capture.contains("Search › Stop"));
+            let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            if pair == chrono::Utc::now().timestamp().div_euclid(10) {
+                break (before, after);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "capture crossed usage bins"
+            );
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            tmux.wait_for(|capture| !capture.contains("Search ›"));
+        };
         let list_width = before
             .lines()
             .nth(2)
@@ -1521,17 +1539,13 @@ fn terminal_session_search_above_usage_chart() {
             .unwrap();
         let left = |line: &str| line.chars().take(list_width).collect::<String>();
         let rows: Vec<_> = before.lines().map(left).collect();
-        let chart_top = rows.iter().position(|line| braille(line)).unwrap();
-        tmux.run(&["send-keys", "-t", "probe", "/"]);
-        tmux.run(&["send-keys", "-t", "probe", "-l", "Stop"]);
-        tmux.wait_for(|capture| capture.contains("Search › Stop"));
-        let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let panel_bottom = rows.iter().rposition(|line| braille(line)).unwrap();
         let searched: Vec<_> = after.lines().map(left).collect();
         let input = searched
             .iter()
             .position(|line| line.contains("Search › Stop"))
             .unwrap();
-        assert_eq!(input + 1, chart_top, "{width}x{height}: {after}");
+        assert_eq!(input, panel_bottom, "{width}x{height}: {after}");
         assert!(
             !braille(&searched[input]),
             "chart dots in search row: {after}"
@@ -1541,7 +1555,11 @@ fn terminal_session_search_above_usage_chart() {
                 && (searched[2].contains("claude") || searched[2].contains("Codex manager")),
             "top row must remain the list: {after}"
         );
-        for (y, row) in rows.iter().enumerate().filter(|(_, line)| braille(line)) {
+        for (y, row) in rows
+            .iter()
+            .enumerate()
+            .filter(|(y, line)| *y < input && braille(line))
+        {
             assert_eq!(&searched[y], row, "chart changed at row {y}: {after}");
         }
         let path = std::env::temp_dir().join(format!("agents-session-search-{width}x{height}.txt"));

@@ -41,21 +41,6 @@ impl View {
         self.selected_usage().is_some()
     }
 
-    /// Chart rows left below the task entries, before an input row takes list space.
-    pub(super) fn usage_chart_height(&self, area: Rect, entries: usize) -> u16 {
-        if !self.shows_usage() {
-            return 0;
-        }
-        let list_height = area.height.saturating_sub(u16::from(area.height >= 3));
-        if entries > usize::from(list_height) {
-            // The overflow arrows occupy the bottom row.
-            return 0;
-        }
-        chart_rows(area, self.cell_aspect)
-            .min(area.height.saturating_sub(entries as u16))
-            .min(area.height.saturating_sub(1))
-    }
-
     /// Draws the selected task's usage up to now into the blank rows below the list's content in
     /// `area`.
     pub(super) fn render_usage_chart(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {

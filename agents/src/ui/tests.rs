@@ -1378,6 +1378,21 @@ fn live_center_search_active() {
     for c in "find".chars() {
         key(&mut view, KeyCode::Char(c));
     }
+    let bin = crate::usage::bin_of(Utc::now());
+    view.set_usage(
+        &session_key("42"),
+        (bin - 100..=bin + 1)
+            .map(|bin| {
+                (
+                    bin,
+                    crate::usage::Bin {
+                        input: 100,
+                        output: 0,
+                    },
+                )
+            })
+            .collect(),
+    );
     assert_eq!(
         screen(&view, 88, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
@@ -9122,7 +9137,7 @@ fn claude_agent_display_from_real_records() {
 }
 
 #[test]
-fn session_search_sits_above_unchanged_usage_chart() {
+fn session_search_overlays_bottom_of_unchanged_usage_chart() {
     for (width, height) in [(200, 50), (120, 45), (80, 12), (60, 6)] {
         let (mut view, now) = log_fixture();
         view.set_usage(
@@ -9153,12 +9168,14 @@ fn session_search_sits_above_unchanged_usage_chart() {
         view.searching = true;
         view.search.insert("Task");
         let layout = view.center_layout(area);
-        assert_eq!(layout.search.bottom(), chart_top, "{width}x{height}");
+        assert_eq!(layout.usage_chart, baseline);
+        assert_eq!(layout.search.y, baseline.bottom() - 1, "{width}x{height}");
+        assert_eq!(layout.search.bottom(), baseline.bottom());
         assert_eq!(layout.list.y, baseline.y);
         assert_eq!(layout.list.bottom(), layout.search.y);
         let mut after = Buffer::empty(area);
         view.render_at(area, &mut after, now);
-        for y in chart_top..baseline.bottom() {
+        for y in chart_top..layout.search.y {
             for x in baseline.x..baseline.right() {
                 assert_eq!(after[(x, y)], before[(x, y)], "{width}x{height} ({x}, {y})");
             }
@@ -9172,6 +9189,18 @@ fn session_search_sits_above_unchanged_usage_chart() {
             }),
             "search row must not contain chart dots: {width}x{height}"
         );
+        view.set_notice(Some("Notice".into()));
+        view.render_at(area, &mut after, now);
+        if !layout.list.is_empty() {
+            let notice: String = (layout.list.x..layout.list.right())
+                .map(|x| after[(x, layout.list.bottom() - 1)].symbol())
+                .collect();
+            assert!(notice.contains("Notice"));
+        }
+        let input: String = (layout.search.x..layout.search.right())
+            .map(|x| after[(x, layout.search.y)].symbol())
+            .collect();
+        assert!(input.contains("Search › Task"));
         assert_eq!(view.cursor_pos(area).unwrap().1, layout.search.y);
         assert!(
             !view
@@ -9180,6 +9209,18 @@ fn session_search_sits_above_unchanged_usage_chart() {
                 .list_rows
                 .contains((layout.search.x, layout.search.y).into())
         );
+        view.searching = false;
+        key(&mut view, KeyCode::Char('r'));
+        let rename = view.center_layout(area);
+        assert_eq!(rename.search.y, baseline.y);
+        assert_eq!(rename.list.y, baseline.y + 1);
+        assert_eq!(rename.list.bottom(), baseline.bottom());
+        assert_eq!(rename.usage_chart, rename.list);
+        view.render_at(area, &mut after, now);
+        let input: String = (rename.search.x..rename.search.right())
+            .map(|x| after[(x, rename.search.y)].symbol())
+            .collect();
+        assert!(input.contains("Rename ›"));
     }
 }
 
