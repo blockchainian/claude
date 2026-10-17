@@ -15,7 +15,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example · Running in a terminal; open it to type
+ Task log example · Running in a terminal
 ─╴Unknown ──────────────────────────────────────────────────────────────────────────────────────────
                                         run tests                                               35s
  A long response whose whitespace collapses and whose body must be truncated before the …  11:59:20

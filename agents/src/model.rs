@@ -150,7 +150,7 @@ impl Session {
                 .as_ref()
                 .is_some_and(|process| process.label.as_deref() != Some("bg"))
         {
-            Some("Running in a terminal; open it to type")
+            Some("Running in a terminal")
         } else {
             None
         }

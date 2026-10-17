@@ -14,7 +14,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example · Running in a terminal; open it to type
+ Task log example · Running in a terminal
 ─╴Unknown ──────────────────────────────────────────────────────────────────────────────────────────
                                         run tests                                               35s
  A long response with bold words whose body must be cut before the right edge of the log…  11:59:20

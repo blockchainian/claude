@@ -313,8 +313,8 @@ mod tests {
             assert!(screen.contains("Task"));
             assert!(screen.contains(expected), "{screen}");
         }
-        let screen = rendered(&editor, 100, Some("Running in a terminal; open it to type"));
-        assert!(screen.contains("Running in a terminal; open it to type"));
+        let screen = rendered(&editor, 100, Some("Running in a terminal"));
+        assert!(screen.contains("Running in a terminal"));
         assert!(!screen.contains("denied"));
     }
 

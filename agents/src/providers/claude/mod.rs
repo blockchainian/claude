@@ -745,7 +745,7 @@ impl Provider for ClaudeProvider {
                 attach::send(&job_id, &session.cwd, &config.join("settings.json"), input)
             }
             Some(_) => Err(io::Error::other(
-                "Running in another terminal; open it to type",
+                "Running in a terminal",
             )),
             None => match input {
                 SessionInput::Prompt(text) => {

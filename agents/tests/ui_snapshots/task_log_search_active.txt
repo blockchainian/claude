@@ -7,7 +7,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example · Running in a terminal; open it to type
+ Task log example · Running in a terminal
 ─╴Unknown ──────────────────────────────────────────────────────────────────────────────────────────
                                         run tests                                               35s
                                   Also inspect the tests                                   11:59:00

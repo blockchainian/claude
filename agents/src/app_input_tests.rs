@@ -157,18 +157,18 @@ fn terminal_registry_session_refuses_provider_input() {
     let (_directory, mut app, _path, _registry) = registry_app("interactive");
     let id = app.view.selected_id().unwrap().clone();
     assert!(app.session(&id).unwrap().background_job.is_none());
-    assert!(screen(&mut app).contains("Running in a terminal; open it to type"));
+    assert!(screen(&mut app).contains("Running in a terminal"));
     app.handle_action(Some(Action::SendPrompt {
         id,
         text: "must not reach terminal".into(),
     }));
     let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(matches!(&event, Input::Sent { result: Err(error), .. }
-        if error.to_string() == "Running in another terminal; open it to type"));
+        if error.to_string() == "Running in a terminal"));
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
     assert!(app.pending_inputs.is_empty());
-    assert!(screen(&mut app).contains("Running in a terminal; open it to type"));
+    assert!(screen(&mut app).contains("Running in a terminal"));
 }
 
 #[test]
