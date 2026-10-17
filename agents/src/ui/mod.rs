@@ -11,6 +11,7 @@ pub(crate) use drafts::DraftSetup;
 #[cfg(test)]
 mod chronological_log_tests;
 mod content;
+mod detail_model;
 mod highlight;
 mod hints;
 mod hyperlink;

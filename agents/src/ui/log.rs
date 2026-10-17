@@ -792,7 +792,7 @@ pub(super) fn log_content_centered(area: Rect, width: u16) -> Rect {
 }
 
 /// Reserves the same trailing clock column and separator for every row.
-fn log_row_areas(area: Rect) -> (Rect, Rect) {
+pub(super) fn log_row_areas(area: Rect) -> (Rect, Rect) {
     let time_width = (CLOCK_WIDTH as u16).min(area.width);
     let content_width = area.width.saturating_sub(time_width + 2);
     (
