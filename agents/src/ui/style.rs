@@ -81,12 +81,12 @@ pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> 
     if light {
         Style::default()
             .bold()
-            .fg(Color::Indexed(18))
+            .fg(crate::theme::text_accent_for(true))
             .bg(Color::Indexed(111))
     } else {
         Style::default()
             .bold()
-            .fg(Color::Indexed(24))
+            .fg(crate::theme::text_accent_for(false))
             .bg(Color::Indexed(233))
     }
 }
@@ -114,13 +114,13 @@ pub(super) fn thread_color(slot: usize) -> Color {
     crate::theme::accent(slot)
 }
 
-/// Label and body styles for transcript events, using terminal palette colors.
+/// Label and body styles for transcript events, with the theme accent on tools.
 pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
     use crate::log::Kind;
     let body = match kind {
         Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
         Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
-        Kind::Tool | Kind::QueuedSystem => Style::default().fg(Color::Blue),
+        Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
         Kind::Error | Kind::Denied => Style::default().fg(Color::Red),
     };
     (body.bold(), body)

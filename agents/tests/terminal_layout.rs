@@ -133,6 +133,41 @@ fn start_probe_with_transcript(
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_inline_code_follows_neovim_accent() {
+    let (_directory, tmux, _transcript) = start_probe("text-accent");
+    for (mode, notification, index) in [
+        ("light", "\x1b[?997;2n", 18),
+        ("dark", "\x1b[?997;1n", 24),
+        ("light", "\x1b[?997;2n", 18),
+    ] {
+        tmux.run(&["send-keys", "-t", "probe", "-l", notification]);
+        tmux.wait_for(|_| {
+            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+            let parser = captured_screen(&capture, 200, 50);
+            let screen = parser.screen();
+            // The recorded assistant event contains the inline code `start`.
+            (25..49).any(|row| {
+                (0..195).any(|column| {
+                    "start".chars().enumerate().all(|(offset, ch)| {
+                        let cell = screen.cell(row, column + offset as u16).unwrap();
+                        cell.contents() == ch.to_string()
+                            && cell.fgcolor() == vt100::Color::Idx(index)
+                    })
+                })
+            })
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let path = std::env::temp_dir().join(format!("agents-accent-{mode}.ansi"));
+        std::fs::write(&path, &capture).unwrap();
+        println!(
+            "{{\"text_accent\":\"pass\",\"mode\":\"{mode}\",\"index\":{index},\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_leaving_list_search_preserves_detail() {
     for mouse_exit in [false, true] {
         let (_directory, tmux, _transcript) = start_probe(if mouse_exit {

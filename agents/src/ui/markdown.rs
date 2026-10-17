@@ -89,7 +89,7 @@ pub(super) fn render_with_options(
                             Some(Some(index)) => {
                                 let marker = Span::styled(
                                     format!("{:>padding$}{index}. ", ""),
-                                    Style::new().light_blue(),
+                                    Style::new().fg(crate::theme::text_accent_color()),
                                 );
                                 *index += 1;
                                 marker
@@ -284,18 +284,13 @@ mod tests {
     #[test]
     fn inline_styles() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        crate::theme::set_background(Some((0xa1, 0xca, 0xdc)), true);
         crate::theme::use_default_accents(true);
         let lines = render(
             "`code` **bold** *italic* ~~gone~~ [label](https://example.com)",
             80,
         );
         for (text, color, modifier) in [
-            (
-                "code",
-                Some(Color::Rgb(0x40, 0xa0, 0x2b)),
-                Modifier::empty(),
-            ),
+            ("code", Some(Color::Indexed(18)), Modifier::empty()),
             ("bold", None, Modifier::BOLD),
             ("italic", None, Modifier::ITALIC),
             ("gone", None, Modifier::CROSSED_OUT),
@@ -319,7 +314,10 @@ mod tests {
         );
         let ordered = render("3. item", 20);
         assert_eq!(ordered[0].to_string(), "3. item");
-        assert_eq!(ordered[0].spans[0].style.fg, Some(Color::LightBlue));
+        assert_eq!(
+            ordered[0].spans[0].style.fg,
+            Some(crate::theme::text_accent_color())
+        );
     }
 
     #[test]

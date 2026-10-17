@@ -162,10 +162,7 @@ impl App {
             let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
                 .ok()
                 .flatten();
-            self.apply_background(
-                background,
-                background.is_some_and(terminal_background::is_light),
-            );
+            self.apply_background(background.is_some_and(terminal_background::is_light));
             let result = self.event_loop(&mut terminal);
             leave_terminal(terminal)?;
             result?;
@@ -394,10 +391,8 @@ impl App {
         Ok(false)
     }
 
-    /// `background` is the terminal's reported color, when known.
-    fn apply_background(&mut self, background: Option<(u8, u8, u8)>, light: bool) {
+    fn apply_background(&mut self, light: bool) {
         crate::ui::set_light_background(light);
-        crate::theme::set_background(background, light);
         crate::theme::use_default_accents(light);
         if let Some(path) = &self.preferences.theme
             && let Err(error) = crate::theme::use_theme_file(path, light)
@@ -429,7 +424,7 @@ impl App {
                 return false;
             }
             Event::ThemeChanged(theme) => {
-                self.apply_background(None, theme == Theme::Light);
+                self.apply_background(theme == Theme::Light);
                 return false;
             }
             _ => return false,

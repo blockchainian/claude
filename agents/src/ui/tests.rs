@@ -2652,7 +2652,7 @@ fn details_activity_uses_tool_color() {
     for (offset, character) in "Run checks".chars().enumerate() {
         let cell = &buf[(offset as u16, y + 1)];
         assert_eq!(cell.symbol(), character.to_string());
-        assert_eq!(cell.fg, Color::Blue);
+        assert_eq!(cell.fg, crate::theme::text_accent_color());
         assert!(!cell.modifier.contains(Modifier::DIM));
     }
 }
@@ -4644,6 +4644,43 @@ fn selected_log_row_preserves_foreground_and_adds_bold() {
 }
 
 #[test]
+fn text_and_tool_styles_follow_neovim_accent_in_both_modes() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    for (light, expected) in [
+        (false, Color::Indexed(24)),
+        (true, Color::Indexed(18)),
+        (false, Color::Indexed(24)),
+    ] {
+        crate::theme::use_default_accents(light);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(if light {
+            "themes/light.tmTheme"
+        } else {
+            "themes/dark.tmTheme"
+        });
+        crate::theme::use_theme_file(&path, light).unwrap();
+        for kind in [crate::log::Kind::Tool, crate::log::Kind::QueuedSystem] {
+            let (label, body) = super::style::log_styles(&kind);
+            assert_eq!(label.fg, Some(expected), "{kind:?}, light={light}");
+            assert_eq!(body.fg, Some(expected), "{kind:?}, light={light}");
+        }
+        let lines = super::markdown::render("3. Run `cargo test`", 80);
+        for text in ["3. ", "cargo test"] {
+            let span = lines[0]
+                .spans
+                .iter()
+                .find(|span| span.content == text)
+                .unwrap();
+            assert_eq!(span.style.fg, Some(expected), "{text}, light={light}");
+        }
+        assert_eq!(crate::theme::text_accent_color(), expected);
+        assert_eq!(
+            super::style::selection_style_for(false, true, light).fg,
+            Some(expected)
+        );
+    }
+}
+
+#[test]
 fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     use crate::log::Kind;
     use ratatui::style::Modifier;
@@ -4656,7 +4693,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     for (offset, colour) in [
         (4, Color::Reset),
         (3, Color::Yellow),
-        (2, Color::Blue),
+        (2, crate::theme::text_accent_color()),
         (1, Color::Red),
         (0, Color::Reset),
     ] {
@@ -4682,11 +4719,11 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (Kind::Assistant, Color::Yellow),
         (Kind::Agent, Color::Yellow),
         (Kind::Session, Color::Yellow),
-        (Kind::Tool, Color::Blue),
+        (Kind::Tool, crate::theme::text_accent_color()),
         (Kind::Error, Color::Red),
         (Kind::Denied, Color::Red),
         (Kind::QueuedUser, Color::Reset),
-        (Kind::QueuedSystem, Color::Blue),
+        (Kind::QueuedSystem, crate::theme::text_accent_color()),
     ] {
         let (label_style, body_style) = super::style::log_styles(&kind);
         let foreground = (colour != Color::Reset).then_some(colour);
