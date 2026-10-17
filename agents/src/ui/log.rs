@@ -1,3 +1,4 @@
+use super::detail_model::{DetailColumns, Group, Section, detail_columns};
 use super::formatting::{format_log_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
@@ -29,52 +30,38 @@ impl View {
     fn selected_detail_layout(
         &self,
         event: &Event,
-        width: u16,
-        content_width: u16,
-        wide: bool,
+        panel: Rect,
+        list: Rect,
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> DetailLayout {
-        if self.log_detail_raw {
+        let columns = detail_columns(panel, list);
+        let (sections, raw) = if self.log_detail_raw {
             let source = self.detail_text(event);
             let drawn = source.replace('\t', "    ");
-            let mut layout = detail_parts_layout(
-                event,
-                width,
-                content_width,
-                wide,
-                cwd,
-                now,
-                vec![super::tool_detail::Part::raw_json(source)],
-            );
-            if super::highlight::JsonHighlight::enabled(&drawn) {
-                let widest = layout.lines.iter().map(Line::width).max().unwrap_or(0);
-                // Centering was already applied to plain rows by detail_parts_layout.
-                let content_width = super::highlight::plain_lines(&drawn)
-                    .iter()
-                    .map(Line::width)
-                    .max()
-                    .unwrap_or(0);
-                layout.raw = Some(RawHighlight {
-                    source: drawn,
-                    highlighter: super::highlight::JsonHighlight::default(),
-                    row: 0,
-                    padding: widest.saturating_sub(content_width),
-                    style: super::style::log_styles(&event.kind).1,
-                });
-            }
-            layout
-        } else {
-            detail_parts_layout(
-                event,
-                width,
-                content_width,
-                wide,
-                cwd,
-                now,
-                open_parts(event),
+            let raw = super::highlight::JsonHighlight::enabled(&drawn).then(|| RawHighlight {
+                source: drawn,
+                highlighter: super::highlight::JsonHighlight::default(),
+                row: 0,
+                padding: 0,
+                style: super::style::log_styles(&event.kind).1,
+            });
+            (
+                vec![Section {
+                    title: None,
+                    groups: vec![Group {
+                        parts: vec![super::tool_detail::Part::raw_json(source)],
+                    }],
+                }],
+                raw,
             )
-        }
+        } else {
+            (
+                super::tool_detail::detail(event, String::new(), Style::new().dim()).sections,
+                None,
+            )
+        };
+        detail_parts_layout(event, panel.width, columns, cwd, now, sections, raw)
     }
 
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -214,70 +201,24 @@ impl View {
         cwd: &std::path::Path,
         now: DateTime<Utc>,
     ) {
-        let wide = buf.area.width >= super::render::WIDE_LAYOUT_COLUMNS;
-        let content_width = log_row_areas(self.center_layout(buf.area).log)
-            .0
-            .width
-            .min(area.width);
-        let (label_style, _) = super::style::log_styles(&event.kind);
+        let list = self.center_layout(buf.area).log;
+        let columns = detail_columns(area, list);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
-        let mut header = Vec::new();
-        if let Some(sender) = &event.sender {
-            header.push(Span::styled(format!("({sender}) "), label_style));
-        }
-        if event.kind != Kind::Tool {
-            header.push(Span::styled(kind_label(&event.kind), label_style));
-        }
-        if event.kind == Kind::Tool || shows_calls(event) {
-            if event.kind != Kind::Tool {
-                header.push(" ".into());
-            }
-            let title = if event.calls.len() == 1 {
-                if super::tool_detail::input_label(&event.calls[0]).is_some() {
-                    crate::log::display_tool_name(&event.calls[0].name)
-                } else {
-                    event.calls[0].title.clone()
-                }
-            } else {
-                event.body.clone()
-            };
-            header.push(Span::styled(title, label_style));
-        }
-        let header_label = match event.calls.as_slice() {
-            [call] if call.name == "task-notification" => {
-                Some(Span::styled(format!("Task {}", call.id), time_style))
-            }
-            [call] => call
-                .agent
-                .as_ref()
-                .and_then(|agent| agent.header.as_ref())
-                .map(|header| Span::styled(header.clone(), time_style)),
-            _ => None,
-        };
-        let description = match event.calls.as_slice() {
-            [call] => super::tool_detail::input_label(call),
-            _ => None,
-        };
-        let header_row = super::render::row(area, LOG_TOP, 1);
-        let bar = detail_block(header_row, content_width, wide);
-        let left = description.unwrap_or_else(|| {
-            header_label.map_or_else(String::new, |label| label.content.into_owned())
-        });
-        let mut title = super::tool_detail::input_title_bar(
-            &left,
-            Line::from(header),
-            usize::from(bar.width),
-            time,
+        let detail = super::tool_detail::detail(event, time.to_owned(), time_style);
+        let header_row = super::render::row(columns.content, LOG_TOP, 1);
+        detail
+            .title
+            .line(usize::from(columns.content.width))
+            .0
+            .render(header_row, buf);
+        Line::from(Span::styled(time.to_owned(), time_style))
+            .right_aligned()
+            .render(super::render::row(columns.time, LOG_TOP, 1), buf);
+        let mut body_area = super::render::row(
+            columns.content,
+            LOG_TOP + 2,
+            area.height.saturating_sub(LOG_TOP + 2),
         );
-        if let Some(label) = title.spans.first_mut() {
-            label.style = time_style;
-        }
-        if let Some(time) = title.spans.last_mut() {
-            time.style = time_style;
-        }
-        title.render(bar, buf);
-        let mut body_area =
-            super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
         if self.log_detail_search.active() {
             body_area.height = body_area.height.saturating_sub(1);
             let input = search_input_rect(area);
@@ -297,20 +238,17 @@ impl View {
         }
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_detail_wide = wide;
         let mut layout = match viewport.log_detail_layout.take() {
             Some(layout)
-                if layout.width == area.width
-                    && layout.content_width == content_width
-                    && layout.wide == wide
+                if layout.panel_width == area.width
+                    && layout.columns == columns
                     && layout.height == height
                     && layout.theme_generation == super::highlight::theme_generation() =>
             {
                 layout
             }
             _ => {
-                let mut layout =
-                    self.selected_detail_layout(event, area.width, content_width, wide, cwd, now);
+                let mut layout = self.selected_detail_layout(event, area, list, cwd, now);
                 layout.height = height;
                 layout
             }
@@ -363,6 +301,7 @@ impl View {
             .collect();
         viewport.log_links = rows
             .iter()
+            .filter(|row| !row.cells.is_empty())
             .flat_map(|row| {
                 super::links::drawn_links(std::slice::from_ref(row), &layout.links[row.segment])
             })
@@ -376,20 +315,35 @@ impl View {
             [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
             .to_vec();
         let gutters = layout.gutters.clone();
+        let times = layout.times.clone();
         viewport.log_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
             highlight_matches(line, &self.log_detail_search);
         }
         Paragraph::new(visible).render(body_area, buf);
-        // A gutter column at the body's left edge falls in the panel's left padding.
+        for (row, time) in times {
+            if let Some(row) = row.checked_sub(scroll).filter(|&row| row < height) {
+                let time_area = Rect::new(
+                    columns.time.x,
+                    body_area.y + row as u16,
+                    columns.time.width,
+                    1,
+                );
+                Line::from(time)
+                    .dim()
+                    .right_aligned()
+                    .render(time_area, buf);
+            }
+        }
+        // Each gutter sits one column left of its group's shared content edge.
         for &(row, column, glyph) in &gutters {
             if let Some(y) = row
                 .checked_sub(scroll)
                 .filter(|&row| row < height)
                 .map(|row| body_area.y + row as u16)
             {
-                buf[((body_area.x + column).saturating_sub(1), y)]
+                buf[(columns.gutter_x() + column, y)]
                     .set_symbol(glyph)
                     .set_style(Style::new().dim());
             }
@@ -405,16 +359,14 @@ impl View {
             return;
         }
         let viewport = self.viewport.borrow();
-        let width = viewport.log_detail.width.max(1);
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
         let layout = self.selected_detail_layout(
             event,
-            width,
-            log_row_areas(viewport.log).0.width.min(width),
-            viewport.log_detail_wide,
+            viewport.log_detail,
+            viewport.log,
             cwd,
             DateTime::UNIX_EPOCH,
         );
@@ -892,9 +844,8 @@ struct RawHighlight {
 /// The open log event laid out for one panel size and highlight theme.
 pub(super) struct DetailLayout {
     raw: Option<RawHighlight>,
-    width: u16,
-    content_width: u16,
-    wide: bool,
+    columns: DetailColumns,
+    panel_width: u16,
     height: usize,
     theme_generation: u64,
     lines: Vec<Line<'static>>,
@@ -907,6 +858,8 @@ pub(super) struct DetailLayout {
     links: Vec<Vec<super::links::Link>>,
     /// Each decorated line's row, content column and the glyph drawn one column left of it.
     gutters: Vec<(usize, u16, &'static str)>,
+    /// Section title times, drawn separately in the time column.
+    times: Vec<(usize, String)>,
 }
 
 impl DetailLayout {
@@ -922,6 +875,10 @@ impl DetailLayout {
             for span in &mut line.spans {
                 span.style = raw.style.patch(span.style);
             }
+            line = truncate_line_with_ellipsis_if_overflow(
+                line,
+                usize::from(self.columns.content.width),
+            );
             if raw.padding > 0 {
                 line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
             }
@@ -939,159 +896,164 @@ fn detail_layout(
     cwd: &std::path::Path,
     now: DateTime<Utc>,
 ) -> DetailLayout {
+    let view = View::new(Grouping::Project, false);
+    let panel = Rect::new(0, 0, width, 1);
+    let list = view.center_layout(Rect::new(0, 0, width, 45)).log;
     detail_parts_layout(
         event,
-        width,
-        log_row_areas(Rect::new(0, 0, width, 1)).0.width,
-        width >= super::render::WIDE_LAYOUT_COLUMNS,
+        panel.width,
+        detail_columns(panel, list),
         cwd,
         now,
-        open_parts(event),
+        super::tool_detail::detail(event, String::new(), Style::new().dim()).sections,
+        None,
     )
 }
 
-/// Detail content differs between modes only in its horizontal placement.
-fn detail_block(area: Rect, width: u16, wide: bool) -> Rect {
-    let width = width.min(area.width);
-    Rect::new(
-        area.x + if wide { (area.width - width) / 2 } else { 0 },
-        area.y,
-        width,
-        area.height,
-    )
+/// Clip a rendered row while keeping its ellipsis selectable as the hidden source suffix.
+fn truncate_detail_line(line: Line<'static>, cells: &mut Cells, width: usize) -> Line<'static> {
+    let overflow = line.width() > width;
+    let line = truncate_line_with_ellipsis_if_overflow(line, width);
+    let visible = if overflow && width > 0 {
+        line.width().saturating_sub(1)
+    } else {
+        width
+    } as u16;
+    let hidden = cells.iter().filter(|(range, _)| range.end > visible);
+    let start = hidden.clone().map(|(_, bytes)| bytes.start).min();
+    let end = hidden.map(|(_, bytes)| bytes.end).max();
+    cells.retain(|(range, _)| range.end <= visible);
+    if overflow
+        && width > 0
+        && let (Some(start), Some(end)) = (start, end)
+    {
+        cells.push((visible..visible + 1, start..end));
+    }
+    line
 }
 
 fn detail_parts_layout(
     event: &Event,
-    width: u16,
-    content_width: u16,
-    wide: bool,
+    panel_width: u16,
+    columns: DetailColumns,
     cwd: &Path,
     now: DateTime<Utc>,
-    parts: Vec<super::tool_detail::Part>,
+    sections: Vec<Section>,
+    raw: Option<RawHighlight>,
 ) -> DetailLayout {
-    let theme_generation = super::highlight::theme_generation();
+    let width = usize::from(columns.content.width);
     let body_style = super::style::log_styles(&event.kind).1;
-    let rendered: Vec<_> = parts
-        .into_iter()
-        .map(|part| {
-            let lines = part.lines(usize::from(content_width), body_style, now);
-            (part, lines)
-        })
-        .collect();
-    let mut group_widths = vec![[0; 2]; rendered.len()];
-    for (part, lines) in &rendered {
-        if let Some(group) = part.group {
-            let widest = lines.iter().map(Line::width).max().unwrap_or(0);
-            let kind = part.content_kind() as usize;
-            group_widths[group][kind] = group_widths[group][kind].max(widest);
-        }
-    }
-    let parts: Vec<_> = rendered
-        .into_iter()
-        .map(|(part, mut lines)| {
-            let markdown = part.markdown();
-            let mut maps = part.maps(&lines);
-            let gutter = part.gutter();
-            let block_width = part.group.map_or_else(
-                || lines.iter().map(Line::width).max().unwrap_or(0),
-                |group| {
-                    let widths = group_widths[group];
-                    let widest = *widths.iter().max().expect("content kinds exist");
-                    if widest > usize::from(content_width) {
-                        widths[part.content_kind() as usize]
-                    } else {
-                        widest
-                    }
-                },
-            );
-            let padding = usize::from(
-                detail_block(
-                    Rect::new(0, 0, width, 1),
-                    block_width.min(usize::from(u16::MAX)) as u16,
-                    wide,
-                )
-                .x,
-            );
-            if padding > 0 {
-                // Every row keeps its position within the section, including its source cell map.
-                for (line, cells) in lines.iter_mut().zip(&mut maps) {
-                    line.spans.insert(0, Span::raw(" ".repeat(padding)));
-                    for (range, _) in cells {
-                        range.start += padding as u16;
-                        range.end += padding as u16;
-                    }
-                }
-            }
-            let links = if markdown
-                || (!shows_calls(event)
-                    && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
-            {
-                let images = if shows_calls(event) {
-                    &[][..]
-                } else {
-                    &event.images[..]
-                };
-                super::links::text_links(&part.source, cwd, images)
-            } else {
-                let paths = if !shows_calls(event) && part.source == event.body {
-                    tool_paths(event, cwd)
-                } else {
-                    super::paths::text_paths(&part.source, cwd)
-                };
-                super::links::path_links(&part.source, &paths, cwd)
-            };
-            (
-                part.running(),
-                part.source,
-                lines,
-                maps,
-                links,
-                gutter,
-                padding,
-            )
-        })
-        .collect();
     let mut layout = DetailLayout {
-        raw: None,
-        width,
-        content_width,
-        wide,
+        raw,
+        columns,
+        panel_width,
         height: 0,
-        theme_generation,
+        theme_generation: super::highlight::theme_generation(),
         lines: Vec::new(),
         running: Vec::new(),
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
         gutters: Vec::new(),
+        times: Vec::new(),
     };
-    for (id, (running, source, lines, mut maps, links, gutter, padding)) in
-        parts.into_iter().enumerate()
-    {
-        if running {
-            layout.running.push(layout.lines.len());
+    for (section_index, section) in sections.into_iter().enumerate() {
+        if section_index > 0 {
+            layout.lines.push(Line::default());
+            layout.rows.push((layout.sources.len(), Vec::new()));
         }
-        for cells in &mut maps {
-            cells.retain(|(range, _)| range.end <= width);
+        if let Some(title) = section.title {
+            let id = layout.sources.len();
+            let source = title.source();
+            let (line, cells) = title.line(width);
+            if let Some(time) = title.time {
+                layout.times.push((layout.lines.len(), time));
+            }
+            layout.lines.push(line);
+            layout.rows.push((id, cells));
+            layout
+                .links
+                .push(super::links::text_links(&source, cwd, &[]));
+            layout.sources.push(text_selection::Source {
+                id,
+                text: source.into(),
+                label: copied_label(event),
+            });
         }
-        layout
-            .rows
-            .extend(maps.into_iter().map(|cells| (id, cells)));
-        let first = layout.lines.len();
-        layout.gutters.extend(
-            gutter
+        for group in section.groups {
+            let rendered: Vec<_> = group
+                .parts
                 .into_iter()
-                .enumerate()
-                .filter_map(|(row, glyph)| Some((first + row, padding as u16, glyph?))),
-        );
-        layout.lines.extend(lines);
-        layout.sources.push(text_selection::Source {
-            id,
-            text: source.into(),
-            label: copied_label(event),
-        });
-        layout.links.push(links);
+                .map(|part| {
+                    let lines = part.lines(width, body_style, now);
+                    (part, lines)
+                })
+                .collect();
+            let group_width = rendered
+                .iter()
+                .flat_map(|(_, lines)| lines.iter())
+                .map(Line::width)
+                .max()
+                .unwrap_or(0)
+                .min(width);
+            let padding = (width - group_width) / 2;
+            if let Some(raw) = &mut layout.raw {
+                raw.padding = padding;
+            }
+            for (part, lines) in rendered {
+                let id = layout.sources.len();
+                let mut maps = part.maps(&lines);
+                let gutter = part.gutter();
+                let first = layout.lines.len();
+                if part.running() && width > 0 {
+                    layout.running.push(first);
+                }
+                let links = if part.markdown()
+                    || (!shows_calls(event)
+                        && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
+                {
+                    let images = if shows_calls(event) {
+                        &[][..]
+                    } else {
+                        &event.images[..]
+                    };
+                    super::links::text_links(&part.source, cwd, images)
+                } else {
+                    let paths = if !shows_calls(event) && part.source == event.body {
+                        tool_paths(event, cwd)
+                    } else {
+                        super::paths::text_paths(&part.source, cwd)
+                    };
+                    super::links::path_links(&part.source, &paths, cwd)
+                };
+                for (line, cells) in lines.into_iter().zip(&mut maps) {
+                    let mut line = truncate_detail_line(line, cells, width);
+                    if padding > 0 {
+                        line.spans.insert(0, Span::raw(" ".repeat(padding)));
+                        for (range, _) in cells.iter_mut() {
+                            range.start += padding as u16;
+                            range.end += padding as u16;
+                        }
+                    }
+                    layout.lines.push(line);
+                }
+                layout
+                    .rows
+                    .extend(maps.into_iter().map(|cells| (id, cells)));
+                layout.gutters.extend(
+                    gutter
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(row, glyph)| Some((first + row, padding as u16, glyph?))),
+                );
+                layout.sources.push(text_selection::Source {
+                    id,
+                    text: part.source.into(),
+                    label: copied_label(event),
+                });
+                layout.links.push(links);
+            }
+        }
     }
     layout
 }
@@ -1109,25 +1071,17 @@ pub(super) fn shows_calls(event: &Event) -> bool {
 
 /// The full text an open log event shows below its header.
 pub(super) fn open_text(event: &Event) -> String {
-    open_parts(event)
-        .into_iter()
-        .map(|part| part.source)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn open_parts(event: &Event) -> Vec<super::tool_detail::Part> {
-    if shows_calls(event) {
-        super::tool_detail::parts(event)
-    } else if event.kind == Kind::Tool {
-        Vec::new()
-    } else if is_prose(&event.kind) {
-        vec![super::tool_detail::Part::prose(event.body.clone(), true)]
-    } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
-        super::tool_detail::Part::prose_parts(event.body.clone(), false)
-    } else {
-        super::tool_detail::Part::text_parts(event.body.clone(), false)
+    let detail = super::tool_detail::detail(event, String::new(), Style::new().dim());
+    let mut sources = Vec::new();
+    for section in detail.sections {
+        if let Some(title) = section.title {
+            sources.push(title.source());
+        }
+        for group in section.groups {
+            sources.extend(group.parts.into_iter().map(|part| part.source));
+        }
     }
+    sources.join("\n")
 }
 
 /// The footer confirmation after copying an open log event, such as "Copied user message".
@@ -1452,7 +1406,11 @@ pub(super) mod log_markdown {
             calls: Vec::new(),
         };
         assert!(event.calls.is_empty());
-        assert!(open_parts(event).is_empty());
+        assert!(
+            super::tool_detail::detail(event, String::new(), Style::new().dim())
+                .sections
+                .is_empty()
+        );
         assert!(open_text(event).is_empty());
         assert_eq!(
             detail_layout(event, 100, std::path::Path::new("/"), DateTime::UNIX_EPOCH).height,
