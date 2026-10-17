@@ -83,7 +83,10 @@ fn list_search_keeps_selected_full_index() {
     view.select_log_event(Some(0));
     view.log_list_focused = true;
     view.log_detail_focused = false;
-    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    {
+        view.mouse_focus = Panel::LogList;
+        view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+    };
     assert!(view.log_search.editing);
     assert_eq!(view.log_selected, Some(0));
     view.log_search.query.set_text("Background command");

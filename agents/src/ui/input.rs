@@ -221,6 +221,34 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        let position = (mouse.column, mouse.row).into();
+        let previous_focus = self.mouse_focus;
+        self.mouse_focus = {
+            let viewport = self.viewport.borrow();
+            if viewport.list.contains(position) || viewport.tab_bar.contains(position) {
+                Panel::TaskList
+            } else if viewport.log.contains(position)
+                || viewport
+                    .log_borders
+                    .iter()
+                    .any(|rect| rect.contains(position))
+            {
+                Panel::LogList
+            } else if viewport.log_detail.contains(position) {
+                Panel::LogDetail
+            } else if viewport.details.contains(position) {
+                Panel::Details
+            } else if viewport.prompt.contains(position) {
+                Panel::Prompt
+            } else {
+                Panel::Other
+            }
+        };
+        if self.mouse_focus != previous_focus
+            && (self.searching || self.log_search.editing || self.log_detail_search.editing)
+        {
+            self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        }
         let previous = if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && let Some((MouseButton::Left, x, y, false)) = self.mouse_press
             && self.pending_click.as_ref().is_some_and(|pending| {
@@ -858,10 +886,33 @@ impl View {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if key.code == KeyCode::Char('/')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+            && !matches!(
+                self.mouse_focus,
+                Panel::TaskList | Panel::LogList | Panel::LogDetail
+            )
+            && !self.searching
+            && !self.log_search.editing
+            && !self.log_detail_search.editing
+        {
+            return None;
+        }
         if let Some(action) = self.control_key(key) {
             return action;
         }
-        if self.input_box.focused {
+        let open_search = key.code == KeyCode::Char('/')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+        if self.input_box.focused
+            && !self.searching
+            && !self.log_search.editing
+            && !self.log_detail_search.editing
+            && !open_search
+        {
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
                 Some(prompt_box::PromptAction::Submit(text)) => {
@@ -1033,20 +1084,6 @@ impl View {
                 return None;
             }
         }
-        if !self.searching
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && key.code == KeyCode::Char('r')
-        {
-            if self.log_detail_focused {
-                self.log_detail_search.editing = true;
-                self.jump_detail_match();
-            } else {
-                self.log_search.editing = true;
-                self.log_list_focused = true;
-                self.prepare_log_search();
-            }
-            return None;
-        }
         if self.searching {
             let before = self.search.text().to_owned();
             if self.search.handle(key) {
@@ -1095,8 +1132,20 @@ impl View {
             self.set_filter(idx);
             return None;
         }
-        if plain && matches!(key.code, KeyCode::Char('/') | KeyCode::F(3)) {
-            self.searching = !self.searching;
+        if plain && key.code == KeyCode::Char('/') {
+            match self.mouse_focus {
+                Panel::TaskList => self.searching = true,
+                Panel::LogList => {
+                    self.log_search.editing = true;
+                    self.log_list_focused = true;
+                    self.prepare_log_search();
+                }
+                Panel::LogDetail => {
+                    self.log_detail_search.editing = true;
+                    self.jump_detail_match();
+                }
+                _ => {}
+            }
             return None;
         }
         let navigation = super::navigation::list_navigation(key);

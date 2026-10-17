@@ -98,12 +98,12 @@ impl View {
             ),
             group(
                 "View",
-                &[("tab/⇧tab", "Filter"), ("f3", "Search"), ("g", "Group")],
+                &[("tab/⇧tab", "Filter"), ("/", "Search"), ("g", "Group")],
             ),
             group(
                 "Log",
                 &[
-                    ("⌃r", "Search"),
+                    ("/", "Search"),
                     ("2× click top border", "Latest"),
                     ("2× click bottom border", "Earliest"),
                 ],

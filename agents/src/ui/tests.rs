@@ -1,3 +1,6 @@
+#[path = "panel_focus_tests.rs"]
+mod panel_focus_tests;
+
 #[path = "log_center_tests.rs"]
 mod log_center_tests;
 
@@ -552,7 +555,10 @@ fn task_search_returns_but_selected_detail_resets_to_newest() {
         .collect::<Vec<_>>()
         .join("\n\n");
     let events = view.log.clone();
-    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    {
+        view.mouse_focus = Panel::LogList;
+        view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+    };
     for letter in "tool".chars() {
         key(&mut view, KeyCode::Char(letter));
     }
@@ -5173,7 +5179,10 @@ mod log_search {
     use ratatui::style::Modifier;
 
     fn open(view: &mut View) {
-        view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        {
+            view.mouse_focus = Panel::LogList;
+            view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+        };
     }
 
     fn panel(view: &View, now: chrono::DateTime<Utc>) -> Buffer {
@@ -5343,7 +5352,7 @@ mod line_edit {
     #[test]
     fn task_search_movement_does_not_reach_list_handlers() {
         let mut view = fixture();
-        key(&mut view, KeyCode::F(3));
+        key(&mut view, KeyCode::Char('/'));
         key(&mut view, KeyCode::Down);
         let selected = view.selected;
         for code in [KeyCode::Home, KeyCode::End, KeyCode::Right, KeyCode::Left] {
@@ -5377,7 +5386,10 @@ mod line_edit {
     #[test]
     fn log_search_caret_follows_cjk_inset_text() {
         let (mut view, now) = log_fixture();
-        view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        {
+            view.mouse_focus = Panel::LogList;
+            view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+        };
         for c in "你好".chars() {
             key(&mut view, KeyCode::Char(c));
         }
@@ -5418,7 +5430,10 @@ mod input_row {
         key(&mut task, KeyCode::Char('/'));
         task.search.set_text(query);
         let (mut log, _) = log_fixture();
-        log.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        {
+            log.mouse_focus = Panel::LogList;
+            log.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+        };
         log.log_search.query.set_text(query);
         if left {
             task.search.left();
@@ -5519,7 +5534,10 @@ mod input_row {
 #[test]
 fn task_log_search_active_snapshot() {
     let (mut view, now) = log_fixture();
-    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    {
+        view.mouse_focus = Panel::LogList;
+        view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+    };
     for c in "tests".chars() {
         key(&mut view, KeyCode::Char(c));
     }
@@ -8623,6 +8641,7 @@ mod log_navigation {
                     continue;
                 }
                 let (mut view, _) = log_fixture();
+                view.mouse_focus = Panel::LogList;
                 if search {
                     view.prepare_log_search();
                     view.log_search.query.set_text("a");

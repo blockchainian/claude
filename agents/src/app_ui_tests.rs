@@ -646,10 +646,15 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let (_directory, mut app) = fixture();
         select_archive(&mut app);
         let original = detail(&draw_size(&mut app, width, height));
-        app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('r'),
-            KeyModifiers::CONTROL,
-        )));
+        let initial = draw_size(&mut app, width, height);
+        let (column, row) = log_position(&initial, "Stop hook");
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
+        key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("Stop hook".into()));
         let buffer = draw_size(&mut app, width, height);
         assert!(lines(&buffer).join("\n").contains("Search › Stop hook"));
@@ -663,10 +668,13 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
         wait_for_click(&mut app);
-        app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('r'),
-            KeyModifiers::CONTROL,
-        )));
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 1,
+            row: height - 3,
+            modifiers: KeyModifiers::NONE,
+        }));
+        key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("await".into()));
         let buffer = draw_size(&mut app, width, height);
         assert!(

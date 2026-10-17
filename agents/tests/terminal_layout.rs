@@ -592,7 +592,9 @@ fn terminal_layout_tracks_width() {
                     .contains("run_in_background"),
                 "clicked user event missing from detail: {opened}"
             );
-            tmux.run(&["send-keys", "-t", "probe", "C-r"]);
+            // Search follows the last mouse panel, independently of the selected event.
+            tmux.mouse(0, 1, log_rule + 1, true);
+            tmux.run(&["send-keys", "-t", "probe", "/"]);
             tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
             std::thread::sleep(Duration::from_millis(200));
             let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);

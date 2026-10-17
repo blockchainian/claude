@@ -502,10 +502,8 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(1);
-    app.view.handle_key(crossterm::event::KeyEvent::new(
-        KeyCode::Char('r'),
-        KeyModifiers::CONTROL,
-    ));
+    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+    key(&mut app, KeyCode::Char('/'));
     app.refresh_log(1);
     for c in "Codex".chars() {
         key(&mut app, KeyCode::Char(c));
@@ -666,10 +664,8 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
     assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
     assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-    app.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('r'),
-        KeyModifiers::CONTROL,
-    )));
+    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+    key(&mut app, KeyCode::Char('/'));
     app.refresh_log(8);
     assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));

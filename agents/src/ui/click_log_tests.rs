@@ -415,18 +415,21 @@ fn selected_detail_refreshes_and_log_wheel_changes_it() {
 }
 
 #[test]
-fn detail_ctrl_r_search_jumps_and_highlights_without_closing() {
+fn detail_slash_search_jumps_and_highlights_without_closing() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
     let expected = view.log_selected;
     log_screen(&view, 100, 25, now);
     assert_eq!(
-        view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+        {
+            view.mouse_focus = Panel::LogDetail;
+            view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+        },
         None
     );
     assert_eq!(
         view.log_selected, expected,
-        "Ctrl+R must keep the open event"
+        "Search must keep the open event"
     );
     for ch in "globalState".chars() {
         assert_eq!(key(&mut view, KeyCode::Char(ch)), None);

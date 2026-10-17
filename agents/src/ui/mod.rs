@@ -188,7 +188,19 @@ impl ConfirmDialog {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Panel {
+    #[default]
+    TaskList,
+    LogList,
+    LogDetail,
+    Details,
+    Prompt,
+    Other,
+}
+
 pub struct View {
+    mouse_focus: Panel,
     startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
     selected_draft: Option<crate::model::DraftId>,
@@ -321,6 +333,7 @@ impl View {
 
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
+            mouse_focus: Panel::TaskList,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             log: Vec::new(),
             log_session: None,
