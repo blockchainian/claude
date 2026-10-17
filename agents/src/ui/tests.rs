@@ -26,6 +26,9 @@ mod details_project;
 #[path = "details_footer_tests.rs"]
 mod details_footer;
 
+#[path = "thread_clock_tests.rs"]
+mod thread_clock_tests;
+
 use super::*;
 
 #[path = "ask_question_tests.rs"]

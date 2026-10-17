@@ -13,6 +13,66 @@ fn fixture() -> (tempfile::TempDir, CodexProvider) {
 }
 
 #[test]
+fn thread_clock_uses_latest_recorded_turn_without_changing_thread_birth() {
+    let (dir, mut provider) = fixture();
+    let path = dir.path().join("clock.jsonl");
+    let records = include_str!("../../../tests/fixtures/codex-thread-clock.jsonl");
+    let manager = dir.path().join("manager");
+    std::fs::create_dir_all(manager.join("threads")).unwrap();
+    std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+    std::fs::write(
+        manager.join("threads/thread-12.json"),
+        include_str!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+    )
+    .unwrap();
+    std::fs::write(
+        manager.join("claude-parent/state.json"),
+        include_str!("../../../tests/fixtures/codex-manager/attached-state.json"),
+    )
+    .unwrap();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute(
+        "UPDATE threads SET rollout_path=?, created_at_ms=1792218925141 WHERE id='thread-12'",
+        [path.to_str().unwrap()],
+    )
+    .unwrap();
+    for count in [1, 2, 3, 4] {
+        std::fs::write(
+            &path,
+            records.lines().take(count).collect::<Vec<_>>().join("\n") + "\n",
+        )
+        .unwrap();
+        let snapshot = provider.refresh(1);
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap();
+        assert_eq!(
+            session.parent,
+            Some(SessionKey {
+                provider: ProviderId::Claude,
+                id: "claude-parent".into(),
+            })
+        );
+        let expected = if count <= 2 {
+            "2026-10-17T06:35:25.554Z"
+        } else {
+            "2026-10-17T15:46:56.983Z"
+        };
+        assert_eq!(
+            session.prompt_at,
+            Some(expected.parse().unwrap()),
+            "{count}"
+        );
+        assert_eq!(
+            session.started_at,
+            DateTime::from_timestamp_millis(1792218925141)
+        );
+    }
+}
+
+#[test]
 fn request_user_input_pending_answered_and_offline() {
     let (dir, mut provider) = fixture();
     let path = dir.path().join("rollout.jsonl");

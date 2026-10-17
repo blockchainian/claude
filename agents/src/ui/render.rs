@@ -807,19 +807,8 @@ impl View {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let prompt_header = if let Some(start) = session.prompt_at {
-            let end = if session.status == SessionStatus::Working {
-                now
-            } else {
-                session.last_record_at.unwrap_or(start)
-            };
-            centered_header(
-                "Prompt".dim().into(),
-                format_duration((end - start).num_seconds().max(0))
-                    .dim()
-                    .into(),
-                width,
-            )
+        let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+            centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
         } else {
             centered_header("Prompt".dim().into(), Line::default(), width)
         };
@@ -1237,9 +1226,13 @@ impl View {
                             usize::from(item_area.width.saturating_sub(2)),
                         )
                     });
-                    let elapsed = child
-                        .started_at
-                        .map(|at| format_duration((now - at).num_seconds().max(0)));
+                    // A known turn uses the same clock as its Prompt. Without a
+                    // turn timestamp, show the child's own age.
+                    let elapsed = turn_elapsed(child, now).or_else(|| {
+                        child
+                            .started_at
+                            .map(|at| format_duration((now - at).num_seconds().max(0)))
+                    });
                     render_background_box(
                         &child.title,
                         elapsed.as_deref(),
@@ -1274,6 +1267,16 @@ impl View {
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
     }
+}
+
+fn turn_elapsed(session: &Session, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let start = session.prompt_at?;
+    let end = if session.status == SessionStatus::Working {
+        now
+    } else {
+        session.last_record_at.unwrap_or(start)
+    };
+    Some(format_duration((end - start).num_seconds().max(0)))
 }
 
 /// Puts a blank row between a section and the one above it.

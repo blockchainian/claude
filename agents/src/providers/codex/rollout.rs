@@ -11,6 +11,7 @@ const CHUNK: u64 = 64 * 1024;
 
 #[derive(Default)]
 pub(super) struct Summary {
+    pub prompt_at: Option<DateTime<Utc>>,
     pub detail_sources: [Option<String>; 3],
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
@@ -862,6 +863,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             }
         }
         if record["type"] == "event_msg" && payload["type"] == "task_started" {
+            summary.prompt_at.get_or_insert(at);
             message_source_closed = true;
         }
         if !boundary && record["type"] == "event_msg" {
@@ -916,6 +918,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             }
         }
         Ok(!(boundary
+            && summary.prompt_at.is_some()
             && summary.last_message.is_some()
             && summary.activity.is_some()
             && (summary.detail_sources[1].is_some() || message_source_closed)))

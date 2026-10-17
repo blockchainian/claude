@@ -1,5 +1,5 @@
 use super::*;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::os::unix::fs::symlink;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -174,6 +174,7 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
     let output = root.join("adopted.output");
     fs::write(&output, b"").unwrap();
     let mut writer = HoldingProcess::start(&output, &output);
+    let shell_start = crate::processes::start_time(writer.child.id()).unwrap();
     adopt["shells"][0]["pid"] = writer.child.id().into();
     adopt["shells"][0]["outputPath"] = output.to_str().unwrap().into();
     fs::create_dir_all(root.join("jobs/50517e58")).unwrap();
@@ -197,6 +198,7 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
     let mut sessions = [session];
     tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert_eq!(sessions[0].background.len(), 1);
+    assert_eq!(sessions[0].background[0].started_at, shell_start);
     assert_eq!(
         sessions[0].background[0].description,
         adopt["shells"][0]["description"]
