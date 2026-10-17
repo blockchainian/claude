@@ -1,3 +1,7 @@
+                 Tasks               1/2
+● Working first
+○ Pending first
+
                  Update
 Task update
 
@@ -7,10 +11,6 @@ Session title
             Needs attention
 Open task to review.
 Waiting for your response.
-
-                 Tasks               1/2
-● Working first
-○ Pending first
 
 
 

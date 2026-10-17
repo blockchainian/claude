@@ -37,18 +37,11 @@ fn details_section_order_preserves_clicks_and_copies() {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n");
-        let mut sections = Vec::new();
+        let mut sections = vec!["Tasks", "Background"];
         if activity {
             sections.push("Latest activity");
         }
-        sections.extend([
-            "Background",
-            "Update",
-            "Prompt",
-            "Queued prompt",
-            "Needs attention",
-            "Tasks",
-        ]);
+        sections.extend(["Update", "Prompt", "Queued prompt", "Needs attention"]);
         assert!(!rendered.contains("Project"));
         assert!(!rendered.contains("Unknown"));
         let positions: Vec<_> = sections
