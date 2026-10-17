@@ -35,8 +35,8 @@ pub(super) struct Summary {
     pub completed_background: HashSet<String>,
     pub background_ids: HashSet<String>,
     pub model: Option<String>,
-    /// The newest model identity the transcript names: its id and human-readable name.
-    pub model_identity: Option<(String, String)>,
+    /// Human-readable names keyed by the model ids named in the transcript.
+    pub model_identities: HashMap<String, String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
 }
@@ -108,7 +108,7 @@ fn task_status(status: &str) -> Option<TaskStatus> {
     }
 }
 
-fn read_tasks(
+fn read_history(
     path: &Path,
     len: u64,
     previous: Option<&Summary>,
@@ -116,8 +116,25 @@ fn read_tasks(
     summary: &mut Summary,
 ) -> io::Result<()> {
     if let Some(previous) = previous.filter(|previous| previous.task_replay.offset <= len) {
+        summary
+            .model_identities
+            .extend(previous.model_identities.clone());
         summary.tasks = previous.tasks.clone();
         summary.task_replay = previous.task_replay.clone();
+    }
+    if previous.is_none() {
+        // Model attachments occur near the start, outside the bounded message tail.
+        let head = BufReader::new(File::open(path)?.take(CHUNK));
+        for line in head.lines().take(32) {
+            let line = line?;
+            if let Ok(record) = serde_json::from_str::<Value>(&line)
+                && (sidechains || record["isSidechain"] != true)
+                && let Some((id, name)) = model_identity(&record)
+            {
+                summary.model_identities.insert(id, name);
+                break;
+            }
+        }
     }
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(summary.task_replay.offset))?;
@@ -134,6 +151,9 @@ fn read_tasks(
             && (sidechains || record["isSidechain"] != true)
         {
             summary.task_replay.record(&record, &mut summary.tasks);
+            if let Some((id, name)) = model_identity(&record) {
+                summary.model_identities.insert(id, name);
+            }
         }
     }
     Ok(())
@@ -209,11 +229,6 @@ impl Summary {
                 }
             }
             Some("assistant") => self.record_assistant_metadata(record),
-            Some("attachment") => {
-                if let Some(identity) = model_identity(record) {
-                    self.model_identity = Some(identity);
-                }
-            }
             _ => {}
         }
     }
@@ -556,7 +571,6 @@ fn read_messages(
     let mut quiet_point = false;
     let mut questions_found = false;
     let mut model_found = false;
-    let mut identity_found = false;
     let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
@@ -570,10 +584,6 @@ fn read_messages(
                 summary.effort = Some(effort);
                 effort_found = true;
             }
-        }
-        if !identity_found && let Some(identity) = model_identity(&record) {
-            summary.model_identity = Some(identity);
-            identity_found = true;
         }
         images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
@@ -716,7 +726,7 @@ pub(super) fn read_cached(
     previous: Option<&Summary>,
 ) -> io::Result<Summary> {
     let mut summary = read_summary(path, len)?;
-    read_tasks(path, len, previous, false, &mut summary)?;
+    read_history(path, len, previous, false, &mut summary)?;
     Ok(summary)
 }
 
@@ -798,7 +808,7 @@ pub(super) fn read_subagent_cached(
     previous: Option<&Summary>,
 ) -> io::Result<Summary> {
     let mut summary = read_subagent_tail(&mut File::open(path)?, len)?;
-    read_tasks(path, len, previous, true, &mut summary)?;
+    read_history(path, len, previous, true, &mut summary)?;
     Ok(summary)
 }
 
@@ -838,6 +848,75 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
 pub(super) mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn model_identity_survives_bounded_reads_and_cached_appends() {
+        for (fixture, subagent, label) in [
+            (
+                include_str!("../../../tests/fixtures/claude-main-model-history.jsonl"),
+                false,
+                "Opus 5.5",
+            ),
+            (
+                include_str!("../../../tests/fixtures/claude-subagent-model-history.jsonl"),
+                true,
+                "Fable 5.1",
+            ),
+        ] {
+            let (identity, messages) = fixture.split_once('\n').unwrap();
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(
+                file,
+                "{identity}\n{}\n{messages}",
+                " ".repeat(CHUNK as usize * 3)
+            )
+            .unwrap();
+            let read = if subagent {
+                read_subagent_cached
+            } else {
+                read_cached
+            };
+            let first = read(file.path(), file.as_file().metadata().unwrap().len(), None).unwrap();
+            let session = super::super::session("test".into(), first.clone(), None, Utc::now());
+            assert_eq!(session.model_label(), label);
+            writeln!(file, "{messages}").unwrap();
+            let appended = read(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                Some(&first),
+            )
+            .unwrap();
+            let session = super::super::session("test".into(), appended, None, Utc::now());
+            assert_eq!(session.model_label(), label);
+        }
+    }
+
+    #[test]
+    fn model_identity_cache_keeps_names_across_model_switches() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let subagent = include_str!("../../../tests/fixtures/claude-subagent-model-history.jsonl");
+        let main = include_str!("../../../tests/fixtures/claude-main-model-history.jsonl");
+        let mut previous = None;
+        for (records, label) in [
+            (subagent, "Fable 5.1"),
+            (main, "Opus 5.5"),
+            (subagent, "Fable 5.1"),
+        ] {
+            writeln!(file, "{records}").unwrap();
+            let summary = read_subagent_cached(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                previous.as_ref(),
+            )
+            .unwrap();
+            let session = super::super::session("test".into(), summary.clone(), None, Utc::now());
+            assert_eq!(session.model_label(), label);
+            previous = Some(summary);
+        }
+        let summary = previous.unwrap();
+        assert_eq!(summary.model_identities["claude-fable-5-1"], "Fable 5.1");
+        assert_eq!(summary.model_identities["claude-opus-5-5"], "Opus 5.5");
+    }
 
     #[test]
     fn task_replay_uses_result_ids_and_keeps_creation_order() {

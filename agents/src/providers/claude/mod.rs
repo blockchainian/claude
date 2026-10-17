@@ -878,9 +878,9 @@ fn session(
         turn_messages: summary.turn_messages,
         last_record_at: summary.timestamp,
         model_label: summary
-            .model_identity
-            .filter(|(id, _)| summary.model.as_ref() == Some(id))
-            .map(|(_, name)| name),
+            .model
+            .as_ref()
+            .and_then(|id| summary.model_identities.get(id).cloned()),
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,
