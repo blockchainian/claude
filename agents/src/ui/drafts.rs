@@ -22,7 +22,8 @@ pub(super) struct Draft {
     pub branch_choice: Option<crate::tasks::BranchChoice>,
     pub job: Option<String>,
     pub working: bool,
-    pub error: Option<String>,
+    previous_task: Option<SessionKey>,
+    previous_filter: usize,
 }
 
 impl Draft {
@@ -40,6 +41,10 @@ impl View {
     }
 
     pub(crate) fn add_draft(&mut self, setup: DraftSetup) -> DraftId {
+        let (previous_task, previous_filter) = self.selected_draft().map_or_else(
+            || (self.selected_id().cloned(), self.status_filter),
+            |draft| (draft.previous_task.clone(), draft.previous_filter),
+        );
         let id = self.next_draft;
         self.next_draft += 1;
         self.drafts.push(Draft {
@@ -50,7 +55,8 @@ impl View {
             branch_choice: None,
             job: None,
             working: false,
-            error: None,
+            previous_task,
+            previous_filter,
         });
         self.status_filter = 0;
         self.select_draft(id);
@@ -85,16 +91,10 @@ impl View {
         match result {
             Ok(job) => {
                 draft.job = Some(job);
-                draft.error = None;
             }
             Err(error) => {
-                let reason = error.to_string();
-                draft.error = Some(reason.clone());
-                if self.selected_draft == Some(id) {
-                    self.input_box.state = prompt_box::SendState::Failed(reason);
-                } else {
-                    draft.input.state = prompt_box::SendState::Failed(reason);
-                }
+                self.drafts.retain(|draft| draft.id != id);
+                self.set_notice(Some(error.to_string()));
             }
         }
     }
@@ -103,7 +103,6 @@ impl View {
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             draft.setup.cwd = cwd;
             draft.setup.branch = branch;
-            draft.error = None;
         }
     }
 
@@ -118,7 +117,7 @@ impl View {
         if let Some(id) = self.selected_draft.take() {
             self.close_draft_selector(id);
             self.drafts
-                .retain(|draft| draft.id != id || draft.job.is_some());
+                .retain(|draft| draft.id != id || draft.working || draft.job.is_some());
             self.input_box = prompt_box::PromptBox::default();
         }
     }
@@ -148,8 +147,25 @@ impl View {
         }
     }
 
+    /// Hides a submitted draft while its worker continues, restoring the previous task's panels.
+    pub(super) fn submit_draft(&mut self, id: DraftId) {
+        let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) else {
+            return;
+        };
+        draft.working = true;
+        let previous = draft.previous_task.clone();
+        self.status_filter = draft.previous_filter;
+        self.leave_draft();
+        self.selected = previous
+            .as_ref()
+            .and_then(|id| self.rows.iter().position(|session| &session.id == id))
+            .unwrap_or(usize::MAX);
+        self.show_selected_panels();
+        self.mouse_focus = Panel::Prompt;
+        self.focus_input();
+    }
+
     pub(super) fn reconcile_drafts(&mut self) {
-        let selected = self.selected_draft;
         let arrived: Vec<_> = self
             .drafts
             .iter()
@@ -168,12 +184,11 @@ impl View {
             .collect();
         self.drafts
             .retain(|draft| !arrived.iter().any(|(id, _)| *id == draft.id));
-        if let Some((_, session)) = arrived.into_iter().find(|(id, _)| Some(*id) == selected) {
-            self.selected_draft = None;
-            self.input_box = prompt_box::PromptBox::default();
-            if let Some(index) = self.rows.iter().position(|row| row.id == session) {
-                self.select(index);
-            }
+        if let Some((_, session)) = arrived.last()
+            && let Some(index) = self.rows.iter().position(|row| &row.id == session)
+        {
+            self.status_filter = tab_for_status(Some(self.rows[index].status), self.status_filter);
+            self.select(index);
         }
     }
 }
@@ -220,10 +235,11 @@ mod tests {
         assert_eq!(view.selected_draft, Some(second));
         assert_eq!(view.drafts.len(), 1);
         assert_eq!(view.drafts[0].setup.branch, "feature");
-        view.draft_worktree_created(second, Err(std::io::Error::other("taken")));
-        assert_eq!(view.drafts[0].error.as_deref(), Some("taken"));
         view.draft_created(first, Ok("stale-job-id".into()));
         view.draft_created(second, Ok("real-job-id".into()));
         assert_eq!(view.drafts[0].job.as_deref(), Some("real-job-id"));
+        view.draft_worktree_created(second, Err(std::io::Error::other("taken")));
+        assert!(view.drafts.is_empty());
+        assert_eq!(view.notice.as_ref().unwrap().0, "taken");
     }
 }

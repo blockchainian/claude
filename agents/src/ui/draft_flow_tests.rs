@@ -129,14 +129,15 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
 }
 
 #[test]
-fn pending_job_draft_survives_escape_and_leaving_until_its_session_arrives() {
+fn pending_job_survives_leaving_until_its_session_arrives() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
+    view.drafts[0].name = Some("probe".into());
     view.handle_paste("typed prompt");
+    key(&mut view, KeyCode::Enter);
     view.draft_created(id, Ok("e772d00b".into()));
-    assert!(view.input_disabled().is_none());
+    assert_eq!(view.selected_draft, None);
     key(&mut view, KeyCode::Esc);
-    assert_eq!(view.selected_draft, Some(id));
     view.input_box.focused = false;
     key(&mut view, KeyCode::Tab);
     assert_eq!(view.selected_draft, None);
@@ -367,7 +368,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
 }
 
 #[test]
-fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
+fn draft_first_message_accepts_images_and_reports_background_failure() {
     for text in ["describe this", ""] {
         let (directory, mut view) = fixture();
         let id = view.add_draft(setup(directory.path()));
@@ -392,11 +393,9 @@ fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
         assert_eq!(request.images, paths);
         assert!(view.drafts[0].working);
         view.draft_created(id, Err(std::io::Error::other("delivery failed")));
-        assert_eq!(view.selected_draft, Some(id));
-        assert_eq!(view.input_box.editor.prompt_text(), text);
-        assert_eq!(view.input_box.editor.image_paths(), paths);
-        assert_eq!(view.drafts[0].error.as_deref(), Some("delivery failed"));
-        assert!(!view.drafts[0].working);
+        assert_eq!(view.selected_draft, None);
+        assert!(view.drafts.is_empty());
+        assert_eq!(view.notice.as_ref().unwrap().0, "delivery failed");
     }
 }
 
@@ -566,8 +565,90 @@ fn new_task_takes_its_name_then_its_prompt() {
         .collect::<String>();
     assert!(!screen.contains("Creating"), "{screen}");
     assert!(!screen.contains("waiting for session"), "{screen}");
-    assert!(screen.contains("New prompt ❯"), "{screen}");
+    assert!(!screen.contains("New prompt ❯"), "{screen}");
     view.input_box.history.borrow().iter().for_each(|entry| {
         assert_ne!(entry.text(), "改 Claude Code 的颜色");
     });
+}
+
+#[test]
+fn submitted_draft_returns_to_prior_task_and_selects_arriving_job_after_refresh() {
+    let (directory, mut view) = fixture();
+    let original = view.selected_id().unwrap().clone();
+    view.focus_input();
+    view.handle_paste("prior input");
+    let id = view.add_draft(setup(directory.path()));
+    view.drafts[0].name = Some("background task".into());
+    view.drafts[0].branch_choice =
+        Some(crate::tasks::BranchChoice::New("feature/background".into()));
+    view.handle_paste("background prompt");
+    assert!(matches!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::CreateTask { .. })
+    ));
+    assert_eq!(view.selected_draft, None);
+    assert_eq!(view.selected_id(), Some(&original));
+    assert!(view.selector.is_none());
+    assert_eq!(view.input_box.editor.text(), "prior input");
+    view.handle_paste(" continued");
+    assert_eq!(view.input_box.editor.text(), "prior input continued");
+    view.set_sessions(view.rows.clone(), false);
+    assert_eq!(view.drafts.len(), 1);
+    view.draft_worktree_created(
+        id,
+        Ok((
+            directory.path().join("worktree"),
+            "feature/background".into(),
+        )),
+    );
+    view.draft_created(id, Ok("e772d00b".into()));
+    let mut arrived = view.rows[0].clone();
+    arrived.id.id = "d6e5280c-6bcd-42c4-8bb9-6ff96d1b0744".into();
+    arrived.background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+    });
+    let expected = arrived.id.clone();
+    let mut sessions = view.rows.clone();
+    sessions.push(arrived);
+    view.set_sessions(sessions, false);
+    assert_eq!(view.selected_id(), Some(&expected));
+    assert!(view.drafts.is_empty());
+}
+
+#[test]
+fn submitted_drafts_without_a_prior_selection_stay_hidden_and_fail_with_notice() {
+    for worktree in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut view = View::default();
+        let id = view.add_draft(setup(directory.path()));
+        view.drafts[0].name = Some("background task".into());
+        view.handle_paste("background prompt");
+        assert!(matches!(
+            key(&mut view, KeyCode::Enter),
+            Some(Action::CreateTask { .. })
+        ));
+        assert_eq!(view.selected_draft, None);
+        assert_eq!(view.selected_id(), None);
+        assert_eq!(view.input_label(), "No task");
+        assert!(view.selector.is_none());
+        let next = view.add_draft(setup(directory.path()));
+        view.handle_paste("next task");
+        assert_eq!(view.drafts.len(), 2);
+        let error = std::io::Error::other("background creation failed");
+        if worktree {
+            view.draft_worktree_created(id, Err(error));
+        } else {
+            view.draft_created(id, Err(error));
+        }
+        assert_eq!(view.selected_draft, Some(next));
+        assert_eq!(view.input_box.editor.text(), "next task");
+        assert_eq!(view.drafts.len(), 1);
+        let text = render(&view)
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("background creation failed"), "{text}");
+    }
 }

@@ -991,8 +991,7 @@ impl View {
                         if draft.working || draft.job.is_some() {
                             return None;
                         }
-                        draft.working = true;
-                        Some(Action::CreateTask {
+                        let action = Action::CreateTask {
                             draft_id: id,
                             provider: draft.setup.provider,
                             branch: draft.branch_choice.clone(),
@@ -1004,7 +1003,9 @@ impl View {
                                 prompt: text,
                                 images,
                             },
-                        })
+                        };
+                        self.submit_draft(id);
+                        Some(action)
                     } else {
                         self.selected_id()
                             .cloned()

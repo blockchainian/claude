@@ -752,15 +752,8 @@ impl View {
             viewport.details_links.clear();
             viewport.details_text = text_selection::TextRegion::default();
         }
-        if let Some(draft) = self.selected_draft() {
+        if self.selected_draft().is_some() {
             self.viewport.borrow_mut().details = area;
-            if let Some(error) = &draft.error {
-                line(
-                    error.clone().red(),
-                    row(area, area.height.saturating_sub(1), 1),
-                    buf,
-                );
-            }
             return;
         }
         let Some(session) = self.selected_row() else {

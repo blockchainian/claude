@@ -107,6 +107,14 @@ fn start_probe_with_transcript(
     name: &str,
     contents: &str,
 ) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
+    start_probe_with_setup(name, contents, |_| {})
+}
+
+fn start_probe_with_setup(
+    name: &str,
+    contents: &str,
+    setup: impl FnOnce(&Path),
+) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
@@ -116,6 +124,7 @@ fn start_probe_with_transcript(
     std::fs::create_dir(directory.path().join("clipboard")).unwrap();
     let codex = directory.path().join("codex");
     std::fs::create_dir(&codex).unwrap();
+    setup(directory.path());
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
