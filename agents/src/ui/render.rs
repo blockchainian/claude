@@ -430,7 +430,7 @@ impl View {
                 rule(border, buf);
                 border.y
             };
-            let log_rule = self.viewport.borrow().log_borders[0];
+            let log_rule = self.viewport.borrow().log_borders[1];
             self.render_log_jump(log_rule, buf);
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
