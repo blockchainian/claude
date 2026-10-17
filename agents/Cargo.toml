@@ -36,5 +36,11 @@ unicode-width = "0.2"
 url = "2"
 vt100 = "0.16"
 
+# macOS's default `unpacked` keeps one .o per codegen unit in target/debug/deps for
+# every incremental build, and Gatekeeper lists that directory on each exec of a test
+# binary; past ~100k entries syspolicyd pins several cores. Applies to `test` too.
+[profile.dev]
+split-debuginfo = "off"
+
 [patch.crates-io]
 crossterm = { git = "https://github.com/blockchainian/crossterm", rev = "03622784292936a1950cfae866c02f584c21b848" }
