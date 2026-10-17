@@ -37,7 +37,7 @@ fn details_section_order_preserves_clicks_and_copies() {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n");
-        let mut sections = vec!["Background", "Prompt", "Queued prompt", "Tasks", "Update"];
+        let mut sections = vec!["Prompt", "Queued prompt", "Tasks", "Background", "Update"];
         if activity {
             sections.push("Last activity");
         }

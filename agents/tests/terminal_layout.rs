@@ -125,6 +125,8 @@ fn start_probe_with_transcript(
         "-e",
         &format!("CLAUDE_CONFIG_DIR={}", config.display()),
         "-e",
+        &format!("CLAUDE_CODE_TMPDIR={}", directory.path().display()),
+        "-e",
         &format!("CODEX_HOME={}", codex.display()),
         "-e",
         &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
@@ -1363,9 +1365,41 @@ fn terminal_running_tool_animates_without_input() {
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_details_section_positions() {
-    let (_directory, tmux, transcript) = start_probe("details-sections");
+    let (directory, tmux, transcript) = start_probe("details-sections");
+    let background = include_str!("fixtures/background/records.jsonl");
+    let record: serde_json::Value =
+        serde_json::from_str(background.lines().next().unwrap()).unwrap();
+    let slug: String = record["cwd"]
+        .as_str()
+        .unwrap()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let outputs = directory
+        .path()
+        .join(format!("claude-{}", unsafe { libc::getuid() }))
+        .join(slug)
+        .join(transcript.file_stem().unwrap())
+        .join("tasks");
+    std::fs::create_dir_all(&outputs).unwrap();
+    let result: serde_json::Value =
+        serde_json::from_str(background.lines().nth(1).unwrap()).unwrap();
+    let output = outputs.join(format!(
+        "{}.output",
+        result["toolUseResult"]["backgroundTaskId"]
+            .as_str()
+            .unwrap()
+    ));
+    std::fs::write(&output, "Running checks\n").unwrap();
+    tmux.run(&[
+        "new-window",
+        "-d",
+        "-n",
+        "writer",
+        &format!("sleep 300 > '{}'", output.display()),
+    ]);
     let original = format!(
-        "{}\n{}",
+        "{}\n{background}\n{}",
         std::fs::read_to_string(&transcript).unwrap(),
         include_str!("fixtures/claude-todos.jsonl")
     );
@@ -1376,7 +1410,11 @@ fn terminal_details_section_positions() {
             original.clone()
         };
         std::fs::write(&transcript, content).unwrap();
-        tmux.wait_for(|capture| capture.contains("#763") == has_pr && capture.contains("Task 1"));
+        tmux.wait_for(|capture| {
+            capture.contains("#763") == has_pr
+                && capture.contains("Task 1")
+                && capture.contains("Background")
+        });
         for width in [112, 200] {
             tmux.run(&[
                 "resize-window",
@@ -1415,7 +1453,7 @@ fn terminal_details_section_positions() {
                         .collect()
                 })
                 .collect();
-            let positions = ["Prompt", "Tasks", "Update"]
+            let positions = ["Prompt", "Tasks", "Background", "Update", "Last activity"]
                 .map(|label| panel.iter().position(|row| row.contains(label)).unwrap());
             assert!(positions.is_sorted(), "{panel:?}");
             for label in ["Update", "Prompt", "Tasks"] {

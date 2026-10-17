@@ -65,7 +65,18 @@ mod details_budget {
             .iter()
             .position(|line| line.trim() == "Prompt")
             .unwrap();
-        assert_eq!(rows[..prompt].iter().filter(|line| *line == "…").count(), 1);
+        let background = rows
+            .iter()
+            .position(|line| line.trim() == "Background")
+            .unwrap();
+        assert!(prompt < background);
+        assert_eq!(
+            rows[background + 1..18]
+                .iter()
+                .filter(|line| *line == "…")
+                .count(),
+            1
+        );
         assert_eq!(
             &rows[prompt + 1..prompt + 4],
             ["Prompt text", "…", "Queued work"]
