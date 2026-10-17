@@ -356,7 +356,7 @@ fn with_background() -> (View, chrono::DateTime<Utc>, tempfile::NamedTempFile) {
 
 fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
     let screen = log_screen(view, 160, 40, now);
-    let (x, y) = rendered_cell(&screen, "Real background output");
+    let (x, y) = rendered_cell(&screen, "Real background");
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert!(

@@ -1383,23 +1383,6 @@ fn centered_header(label: Line<'static>, value: Line<'static>, width: usize) -> 
     header
 }
 
-/// Keeps the label intact before fitting a trailing group into the remaining cells.
-/// Returns the group's column offset for links drawn inside it.
-fn left_right(label: Line<'static>, group: Line<'static>, width: usize) -> (Line<'static>, usize) {
-    let label = truncate_line_with_ellipsis_if_overflow(label, width);
-    if group.width() == 0 {
-        return (label, width);
-    }
-    let group =
-        truncate_line_with_ellipsis_if_overflow(group, width.saturating_sub(label.width() + 1));
-    let start = width - group.width();
-    let mut spans = label.spans;
-    let used: usize = spans.iter().map(Span::width).sum();
-    spans.push(" ".repeat(start - used).dim());
-    spans.extend(group.spans);
-    (Line::from(spans), start)
-}
-
 /// Joins each vertical separator, given as its column and rows, to the rules above and below it.
 fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer) {
     for &(x, top, bottom) in separators {
@@ -1544,28 +1527,12 @@ fn render_background_box(
         .border_style(Style::default().dim());
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    let label = Line::from(vec!["─ ".dim(), description.to_owned().not_dim()]);
-    let time = elapsed
-        .map(|text| Line::from(text.to_owned().dim()))
-        .unwrap_or_default();
-    let label = truncate_line_with_ellipsis_if_overflow(
-        label,
-        usize::from(box_area.width).saturating_sub(time.width() + 1),
+    line(
+        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed),
+        row(box_area, 0, 1),
+        buf,
     );
-    let (title, _) = left_right(label, time, usize::from(box_area.width));
-    if elapsed.is_some() {
-        line(title, row(box_area, 0, 1), buf);
-    } else {
-        line(
-            super::title_rule::title_rule(description, usize::from(box_area.width), None),
-            row(box_area, 0, 1),
-            buf,
-        );
-        if !box_area.is_empty() {
-            buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
-        }
-    }
-    // Output lines up with the title text under the rule.
+    // Keep output indented two cells under the rule.
     let inner = Rect {
         x: inner.x + 2,
         width: inner.width.saturating_sub(2),
@@ -1707,5 +1674,39 @@ mod wrapped_path_tests {
             ]
         );
         assert!(lines.iter().all(|line| line.width() <= 40));
+    }
+}
+
+#[cfg(test)]
+mod background_title_tests {
+    use super::*;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn background_titles_are_centered_with_optional_time_and_cjk() {
+        for (title, left, right) in [("Check files", 13, 14), ("中文答题卡住", 13, 13)] {
+            for time in [None, Some("35s")] {
+                let area = Rect::new(0, 0, 40, 2);
+                let mut buf = Buffer::empty(area);
+                render_background_box(title, time, vec![Line::from("output")], area, &mut buf);
+                let text: String = buf.content[..40]
+                    .iter()
+                    .enumerate()
+                    .filter(|(x, _)| *x == 0 || buf.content[x - 1].symbol().width() < 2)
+                    .map(|(_, c)| c.symbol())
+                    .collect();
+                let suffix = time.map(|t| format!(" {t}")).unwrap_or_default();
+                assert_eq!(
+                    text,
+                    format!(
+                        "{} {title} {}{suffix}",
+                        "─".repeat(left),
+                        "─".repeat(right - suffix.width())
+                    ),
+                    "{title} {time:?}"
+                );
+                assert_eq!(buf[(2, 1)].symbol(), "o");
+            }
+        }
     }
 }

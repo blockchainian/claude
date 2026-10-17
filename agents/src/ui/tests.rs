@@ -3462,13 +3462,13 @@ fn details_background_includes_only_working_subagents() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(text.contains(&format!("Worker command{:>24}", "0s")));
+    assert!(text.contains("──────────── Worker command ───────── 0s"));
     assert!(!text.contains("Nested agent"));
     assert!(!text.contains("Review files"));
 }
 
 #[test]
-fn background_box_dims_border_but_not_title_or_output() {
+fn background_box_dims_title_rule_but_not_output() {
     use ratatui::style::Modifier;
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();
@@ -3489,8 +3489,8 @@ fn background_box_dims_border_but_not_title_or_output() {
         .expect("box top border");
     assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
     assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
-    assert_eq!(buf[(2, top)].symbol(), "R");
-    assert!(!buf[(2, top)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(15, top)].symbol(), "R");
+    assert!(buf[(15, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.log[7].clone();
     event.calls[0].title = "Run checks".into();
