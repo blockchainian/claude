@@ -184,7 +184,9 @@ fn history_search_receives_slash_before_panel_search_routing() {
     let mut view = View::new(Grouping::Project, false);
     view.mouse_focus = Panel::Details;
     view.input_box.focused = true;
-    view.prompt_history.borrow_mut().push("path/to/file".into());
+    let mut entry = LineEdit::default();
+    entry.set_text("path/to/file");
+    view.prompt_history.borrow_mut().push(entry);
     view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
     view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
     assert_eq!(view.input_box.editor.text(), "path/to/file");

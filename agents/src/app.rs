@@ -445,7 +445,15 @@ impl App {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::Paste(text) => {
-                self.view.handle_paste(&text);
+                if self.view.pasting_prompt() {
+                    match crate::images::ImageAttachment::from_paste(&text) {
+                        Ok(Some(image)) => self.view.attach_image(image),
+                        Ok(None) => self.view.handle_paste(&text),
+                        Err(error) => self.view.set_notice(Some(error.to_string())),
+                    }
+                } else {
+                    self.view.handle_paste(&text);
+                }
                 return false;
             }
             Event::ThemeChanged(theme) => {
@@ -890,6 +898,13 @@ impl App {
             Action::SendPrompt { id, text } => {
                 self.send_input(id, SessionInput::Prompt(text));
             }
+            Action::SendImages { id, text, images } => {
+                self.send_input(id, SessionInput::PromptWithImages { text, images })
+            }
+            Action::PasteImage => match self.clipboard.image() {
+                Ok(image) => self.view.attach_image(image),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            },
             Action::Back => {
                 let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {

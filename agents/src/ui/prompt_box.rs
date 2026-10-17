@@ -1,6 +1,13 @@
 use super::line_edit::LineEdit;
 use super::*;
 
+#[path = "prompt_images.rs"]
+mod prompt_images;
+
+#[cfg(test)]
+#[path = "composer_images_tests.rs"]
+mod image_tests;
+
 #[path = "prompt_mouse.rs"]
 mod prompt_mouse;
 
@@ -18,11 +25,13 @@ pub(super) enum SendState {
 #[derive(Debug, Eq, PartialEq)]
 pub(super) enum PromptAction {
     Submit(String),
+    PasteImage,
     Quit,
 }
 
 #[derive(Default)]
 pub(super) struct PromptBox {
+    pending_editor: Option<LineEdit>,
     mouse: prompt_mouse::PromptMouse,
     pub(super) editor: LineEdit,
     pub(super) focused: bool,
@@ -177,6 +186,12 @@ impl PromptBox {
         if !self.focused || key.kind == KeyEventKind::Release {
             return None;
         }
+        if key.code == KeyCode::Char('v')
+            && key.modifiers == KeyModifiers::CONTROL
+            && self.search.is_none()
+        {
+            return Some(PromptAction::PasteImage);
+        }
         if self.editor.selection_key(key) {
             return None;
         }
@@ -216,7 +231,7 @@ impl PromptBox {
             if !self.editor.is_empty() && self.state != SendState::Sending {
                 self.record_submission();
                 self.state = SendState::Sending;
-                return Some(PromptAction::Submit(self.editor.text().to_owned()));
+                return Some(PromptAction::Submit(self.editor.prompt_text()));
             }
         } else {
             self.editor.handle(key);

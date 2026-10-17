@@ -16,7 +16,7 @@ impl LineEdit {
     pub(in crate::ui) fn set_cursor(&mut self, offset: usize) {
         self.assert_boundary(offset);
         self.home();
-        self.cursor = offset;
+        self.cursor = self.image_caret(offset);
         self.clear_selection();
     }
 
@@ -32,7 +32,9 @@ impl LineEdit {
 
     pub(in crate::ui) fn selection_range(&self) -> Option<Range<usize>> {
         let (anchor, end) = self.selection?;
-        (anchor != end).then_some(anchor.min(end)..anchor.max(end))
+        (anchor != end).then(|| {
+            self.image_boundary(anchor.min(end), false)..self.image_boundary(anchor.max(end), true)
+        })
     }
 
     pub(in crate::ui) fn selected_text(&self) -> Option<&str> {
@@ -48,7 +50,7 @@ impl LineEdit {
             return false;
         };
         let text = text.to_string();
-        self.text.replace_range(range.clone(), &text);
+        let range = self.replace_images(range, &text);
         self.cursor = range.start + text.len();
         self.align_cursor();
         self.set_cursor(self.cursor);

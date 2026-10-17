@@ -199,6 +199,12 @@ pub enum Action {
         id: SessionKey,
         text: String,
     },
+    PasteImage,
+    SendImages {
+        id: SessionKey,
+        text: String,
+        images: Vec<PathBuf>,
+    },
     /// `n` or a project heading double click: add a draft in that project.
     NewDraft {
         cwd: PathBuf,

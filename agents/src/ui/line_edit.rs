@@ -14,8 +14,12 @@ pub(super) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
     key
 }
 
+#[path = "line_images.rs"]
+mod images;
+
 #[derive(Clone, Default)]
 pub(super) struct LineEdit {
+    images: Vec<images::ImageSpan>,
     selection: Option<(usize, usize)>,
     text: String,
     /// Byte offset at a grapheme boundary.
@@ -76,6 +80,7 @@ impl LineEdit {
             .or_else(|| positions.iter().find(|p| p.2 == target_row))
             .expect("visual row has caret")
             .0;
+        self.cursor = self.caret_boundary(self.cursor, down);
         true
     }
 
@@ -91,6 +96,7 @@ impl LineEdit {
     }
     pub(super) fn set_text(&mut self, text: &str) {
         self.preferred_column = None;
+        self.images.clear();
         self.text = text.into();
         self.end();
         self.clear_selection();
@@ -105,18 +111,14 @@ impl LineEdit {
         }
         self.preferred_column = None;
         let text = text.to_string();
-        self.text.insert_str(self.cursor, &text);
-        self.cursor += text.len();
+        let range = self.replace_images(self.cursor..self.cursor, &text);
+        self.cursor = range.start + text.len();
         self.align_cursor();
     }
     // Insertion or deletion can join the graphemes on either side of the edit.
     fn align_cursor(&mut self) {
-        self.cursor = self
-            .text
-            .grapheme_indices(true)
-            .map(|(i, _)| i)
-            .find(|&i| i >= self.cursor)
-            .unwrap_or(self.text.len());
+        self.relabel_images();
+        self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(super) fn left(&mut self) {
         self.preferred_column = None;
@@ -124,12 +126,14 @@ impl LineEdit {
             .grapheme_indices(true)
             .next_back()
             .map_or(0, |(i, _)| i);
+        self.cursor = self.caret_boundary(self.cursor, false);
     }
     pub(super) fn right(&mut self) {
         self.preferred_column = None;
         if let Some(g) = self.text[self.cursor..].graphemes(true).next() {
             self.cursor += g.len();
         }
+        self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(super) fn home(&mut self) {
         self.preferred_column = None;
@@ -142,14 +146,13 @@ impl LineEdit {
     pub(super) fn backspace(&mut self) {
         let end = self.cursor;
         self.left();
-        self.text.drain(self.cursor..end);
+        self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(super) fn delete(&mut self) {
         let start = self.cursor;
         self.right();
-        self.text.drain(start..self.cursor);
-        self.cursor = start;
+        self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
     pub(super) fn word_left(&mut self) {
@@ -165,6 +168,7 @@ impl LineEdit {
             }
             self.cursor = i;
         }
+        self.cursor = self.caret_boundary(self.cursor, false);
     }
     pub(super) fn word_right(&mut self) {
         self.preferred_column = None;
@@ -180,26 +184,28 @@ impl LineEdit {
             }
             self.cursor = start + i + g.len();
         }
+        self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(super) fn kill_to_end(&mut self) {
         self.preferred_column = None;
-        self.text.truncate(self.cursor);
+        self.replace_images(self.cursor..self.text.len(), "");
+        self.align_cursor();
     }
     pub(super) fn kill_to_start(&mut self) {
-        self.text.drain(..self.cursor);
+        self.replace_images(0..self.cursor, "");
         self.home();
+        self.align_cursor();
     }
     pub(super) fn kill_word_back(&mut self) {
         let end = self.cursor;
         self.word_left();
-        self.text.drain(self.cursor..end);
+        self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(super) fn kill_word_forward(&mut self) {
         let start = self.cursor;
         self.word_right();
-        self.text.drain(start..self.cursor);
-        self.cursor = start;
+        self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
     pub(super) fn window(&self, available_cols: usize) -> (&str, u16) {

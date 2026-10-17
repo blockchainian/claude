@@ -18,6 +18,9 @@ mod terminal_disabled_prompt;
 #[path = "support/terminal_prompt_mouse.rs"]
 mod terminal_prompt_mouse;
 
+#[path = "support/terminal_images.rs"]
+mod terminal_images;
+
 struct Tmux(String);
 
 impl Tmux {

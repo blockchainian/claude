@@ -960,7 +960,20 @@ impl View {
             self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
+                Some(prompt_box::PromptAction::PasteImage) => Some(Action::PasteImage),
                 Some(prompt_box::PromptAction::Submit(text)) => {
+                    let images = self.input_box.editor.image_paths();
+                    if !images.is_empty() {
+                        if self.selected_draft.is_some() {
+                            self.input_failed("This task cannot receive that input".into());
+                            return None;
+                        }
+                        return self.selected_id().cloned().map(|id| Action::SendImages {
+                            id,
+                            text,
+                            images,
+                        });
+                    }
                     if let Some(id) = self.selected_draft {
                         let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
                         if draft.working || draft.job.is_some() {

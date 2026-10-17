@@ -2,7 +2,7 @@ use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub(super) type History = Rc<RefCell<Vec<String>>>;
+pub(super) type History = Rc<RefCell<Vec<LineEdit>>>;
 
 #[derive(Default)]
 pub(super) struct Recall {
@@ -18,9 +18,10 @@ pub(super) struct Search {
 
 impl PromptBox {
     pub(super) fn record_submission(&mut self) {
-        self.history
-            .borrow_mut()
-            .push(self.editor.text().to_owned());
+        let mut entry = self.editor.clone();
+        entry.clear_selection();
+        entry.end();
+        self.history.borrow_mut().push(entry);
         self.recall = Recall::default();
         self.search = None;
     }
@@ -43,7 +44,7 @@ impl PromptBox {
             self.editor = self.recall.draft.take().expect("history draft");
             self.recall.position = None;
         } else {
-            self.editor.set_text(&history[position]);
+            self.editor = history[position].clone();
             self.recall.position = Some(position);
         }
     }
@@ -57,7 +58,10 @@ impl PromptBox {
             .iter()
             .enumerate()
             .rev()
-            .filter(|(_, text)| text.to_lowercase().contains(&query) && seen.insert(text.as_str()))
+            .filter(|(_, entry)| {
+                entry.text().to_lowercase().contains(&query)
+                    && seen.insert((entry.text(), entry.image_paths()))
+            })
             .map(|(index, _)| index)
             .collect();
         let position = match (restart, search.position, down) {
@@ -69,7 +73,7 @@ impl PromptBox {
             (false, Some(current), false) => matches.iter().copied().find(|&index| index < current),
         };
         if let Some(position) = position {
-            self.editor.set_text(&history[position]);
+            self.editor = history[position].clone();
             search.position = Some(position);
         } else if restart {
             self.editor = search.original.clone();

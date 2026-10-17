@@ -230,7 +230,7 @@ pub struct View {
     log_background_return: Option<BackgroundReturn>,
     log_detail_search: log_search::LogSearch,
     input_box: prompt_box::PromptBox,
-    prompt_history: std::rc::Rc<RefCell<Vec<String>>>,
+    prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -412,6 +412,22 @@ impl View {
         self.double_click_interval = Duration::from_millis(milliseconds);
     }
 
+    pub(crate) fn pasting_prompt(&self) -> bool {
+        self.confirm_dialog.is_none()
+            && !self.help
+            && self.picker.is_none()
+            && self.branch_editor.is_none()
+            && self.input_box.focused
+            && !self.input_box.searching_history()
+            && self.input_disabled().is_none()
+    }
+
+    pub(crate) fn attach_image(&mut self, image: crate::images::ImageAttachment) {
+        if self.pasting_prompt() {
+            self.input_box.editor.insert_image(image);
+        }
+    }
+
     pub(crate) fn handle_paste(&mut self, text: &str) {
         if self.confirm_dialog.is_some() || self.help || self.picker.is_some() {
             return;
@@ -480,8 +496,10 @@ impl View {
         input: &crate::providers::SessionInput,
     ) {
         let target = self.task_input(id);
-        if matches!(input, crate::providers::SessionInput::Prompt(_)) {
-            target.editor.clear();
+        if let crate::providers::SessionInput::Prompt(text)
+        | crate::providers::SessionInput::PromptWithImages { text, .. } = input
+        {
+            target.begin_send(text);
         }
         target.state = prompt_box::SendState::Sending;
     }
@@ -494,20 +512,16 @@ impl View {
     ) {
         let target = self.task_input(id);
         let error = result.as_ref().err().map(ToString::to_string);
+        if matches!(
+            input,
+            crate::providers::SessionInput::Prompt(_)
+                | crate::providers::SessionInput::PromptWithImages { .. }
+        ) {
+            target.finish_send(result.is_ok());
+        }
         target.state = match result {
             Ok(()) => prompt_box::SendState::Ready,
-            Err(error) => {
-                if let crate::providers::SessionInput::Prompt(text) = input {
-                    let draft = target.editor.text();
-                    let restored = if draft.is_empty() {
-                        text.clone()
-                    } else {
-                        format!("{text}\n{draft}")
-                    };
-                    target.editor.set_text(&restored);
-                }
-                prompt_box::SendState::Failed(error.to_string())
-            }
+            Err(error) => prompt_box::SendState::Failed(error.to_string()),
         };
         if let Some(error) = error {
             self.set_notice(Some(error));
