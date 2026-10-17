@@ -30,12 +30,10 @@ impl View {
     fn selected_detail_layout(
         &self,
         event: &Event,
-        panel: Rect,
-        list: Rect,
+        columns: DetailColumns,
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> DetailLayout {
-        let columns = detail_columns(panel, list);
         let (sections, raw) = if self.log_detail_raw {
             let source = self.detail_text(event);
             let drawn = source.replace('\t', "    ");
@@ -61,7 +59,7 @@ impl View {
                 None,
             )
         };
-        detail_parts_layout(event, panel.width, columns, cwd, now, sections, raw)
+        detail_parts_layout(event, columns, cwd, now, sections, raw)
     }
 
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -205,17 +203,15 @@ impl View {
         let columns = detail_columns(area, list);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
         let detail = super::tool_detail::detail(event, time.to_owned(), time_style);
-        let header_row = super::render::row(columns.content, LOG_TOP, 1);
-        detail
-            .title
-            .line(usize::from(columns.content.width))
-            .0
-            .render(header_row, buf);
-        Line::from(Span::styled(time.to_owned(), time_style))
-            .right_aligned()
-            .render(super::render::row(columns.time, LOG_TOP, 1), buf);
+        let header_row = super::render::row(columns.text, LOG_TOP, 1);
+        detail.title.line(columns).0.render(header_row, buf);
+        if let Some(time) = detail.title.time {
+            Line::from(Span::styled(time, detail.title.meta_style))
+                .right_aligned()
+                .render(super::render::row(columns.time, LOG_TOP, 1), buf);
+        }
         let mut body_area = super::render::row(
-            columns.content,
+            columns.text,
             LOG_TOP + 2,
             area.height.saturating_sub(LOG_TOP + 2),
         );
@@ -240,15 +236,14 @@ impl View {
         let mut viewport = self.viewport.borrow_mut();
         let mut layout = match viewport.log_detail_layout.take() {
             Some(layout)
-                if layout.panel_width == area.width
-                    && layout.columns == columns
+                if layout.columns == columns
                     && layout.height == height
                     && layout.theme_generation == super::highlight::theme_generation() =>
             {
                 layout
             }
             _ => {
-                let mut layout = self.selected_detail_layout(event, area, list, cwd, now);
+                let mut layout = self.selected_detail_layout(event, columns, cwd, now);
                 layout.height = height;
                 layout
             }
@@ -330,22 +325,19 @@ impl View {
                     columns.time.width,
                     1,
                 );
-                Line::from(time)
-                    .dim()
-                    .right_aligned()
-                    .render(time_area, buf);
+                Line::from(time).right_aligned().render(time_area, buf);
             }
         }
-        // The command gutter stays just outside the content column.
-        for &(row, glyph) in &gutters {
+        // Each command gutter stays one cell left of its group's shared origin.
+        for &(row, x, glyph) in &gutters {
             if let Some(y) = row
                 .checked_sub(scroll)
                 .filter(|&row| row < height)
                 .map(|row| body_area.y + row as u16)
             {
-                buf[(columns.gutter_x(), y)]
-                    .set_symbol(glyph)
-                    .set_style(Style::new().dim());
+                if x >= buf.area.x && x < buf.area.right() {
+                    buf[(x, y)].set_symbol(glyph).set_style(Style::new().dim());
+                }
             }
         }
         self.highlight_text_selection(text_selection::Panel::Log, buf);
@@ -365,8 +357,7 @@ impl View {
             .unwrap_or(Path::new("."));
         let layout = self.selected_detail_layout(
             event,
-            viewport.log_detail,
-            viewport.log,
+            detail_columns(viewport.log_detail, viewport.log),
             cwd,
             DateTime::UNIX_EPOCH,
         );
@@ -847,7 +838,6 @@ struct RawHighlight {
 pub(super) struct DetailLayout {
     raw: Option<RawHighlight>,
     columns: DetailColumns,
-    panel_width: u16,
     height: usize,
     theme_generation: u64,
     lines: Vec<Line<'static>>,
@@ -858,10 +848,10 @@ pub(super) struct DetailLayout {
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
-    /// Each decorated line's row and its glyph in the content column's left gutter.
-    gutters: Vec<(usize, &'static str)>,
+    /// Each decorated line's row, gutter column and glyph, one cell left of its group.
+    gutters: Vec<(usize, u16, &'static str)>,
     /// Section title times, drawn separately in the time column.
-    times: Vec<(usize, String)>,
+    times: Vec<(usize, Span<'static>)>,
 }
 
 impl DetailLayout {
@@ -877,9 +867,10 @@ impl DetailLayout {
             for span in &mut line.spans {
                 span.style = raw.style.patch(span.style);
             }
-            line = truncate_line_with_ellipsis_if_overflow(
+            line = truncate_detail_line(
                 line,
-                usize::from(self.columns.content.width),
+                &mut Vec::new(),
+                usize::from(self.columns.text.width),
             );
             if raw.padding > 0 {
                 line.spans.insert(0, Span::raw(" ".repeat(raw.padding)));
@@ -903,7 +894,6 @@ fn detail_layout(
     let list = view.center_layout(Rect::new(0, 0, width, 45)).log;
     detail_parts_layout(
         event,
-        panel.width,
         detail_columns(panel, list),
         cwd,
         now,
@@ -913,9 +903,13 @@ fn detail_layout(
 }
 
 /// Clip a rendered row while keeping its ellipsis selectable as the hidden source suffix.
-fn truncate_detail_line(line: Line<'static>, cells: &mut Cells, width: usize) -> Line<'static> {
+pub(super) fn truncate_detail_line(
+    line: Line<'static>,
+    cells: &mut Cells,
+    width: usize,
+) -> Line<'static> {
     let overflow = line.width() > width;
-    let line = truncate_line_with_ellipsis_if_overflow(line, width);
+    let mut line = truncate_line_with_ellipsis_if_overflow(line, width);
     let visible = if overflow && width > 0 {
         line.width().saturating_sub(1)
     } else {
@@ -929,26 +923,31 @@ fn truncate_detail_line(line: Line<'static>, cells: &mut Cells, width: usize) ->
         && width > 0
         && let (Some(start), Some(end)) = (start, end)
     {
-        cells.push((visible..visible + 1, start..end));
+        cells.push((width as u16 - 1..width as u16, start..end));
+    }
+    if overflow && width > 0 && line.width() < width {
+        let ellipsis = line.spans.pop().expect("overflow has an ellipsis");
+        // A wide grapheme can leave a cell unused; the ellipsis still sits at the text edge.
+        line.spans
+            .push(Span::raw(" ".repeat(width - line.width() - 1)));
+        line.spans.push(ellipsis);
     }
     line
 }
 
 fn detail_parts_layout(
     event: &Event,
-    panel_width: u16,
     columns: DetailColumns,
     cwd: &Path,
     now: DateTime<Utc>,
     sections: Vec<Section>,
     raw: Option<RawHighlight>,
 ) -> DetailLayout {
-    let width = usize::from(columns.content.width);
+    let width = usize::from(columns.text.width);
     let body_style = super::style::log_styles(&event.kind).1;
     let mut layout = DetailLayout {
         raw,
         columns,
-        panel_width,
         height: 0,
         theme_generation: super::highlight::theme_generation(),
         lines: Vec::new(),
@@ -967,9 +966,11 @@ fn detail_parts_layout(
         if let Some(title) = section.title {
             let id = layout.sources.len();
             let source = title.source();
-            let (line, cells) = title.line(width);
+            let (line, cells) = title.line(columns);
             if let Some(time) = title.time {
-                layout.times.push((layout.lines.len(), time));
+                layout
+                    .times
+                    .push((layout.lines.len(), Span::styled(time, title.meta_style)));
             }
             layout.lines.push(line);
             layout.rows.push((id, cells));
@@ -987,7 +988,11 @@ fn detail_parts_layout(
                 .parts
                 .into_iter()
                 .map(|part| {
-                    let lines = part.lines(width, body_style, now);
+                    let lines = part.lines(
+                        usize::from(columns.reading_width.min(columns.text.width)),
+                        body_style,
+                        now,
+                    );
                     (part, lines)
                 })
                 .collect();
@@ -998,7 +1003,9 @@ fn detail_parts_layout(
                 .max()
                 .unwrap_or(0)
                 .min(width);
-            let padding = (width - group_width) / 2;
+            let group_x =
+                super::centering::centered_x(columns.panel, columns.text, group_width as u16);
+            let padding = usize::from(group_x - columns.text.x);
             if let Some(raw) = &mut layout.raw {
                 raw.padding = padding;
             }
@@ -1042,12 +1049,11 @@ fn detail_parts_layout(
                 layout
                     .rows
                     .extend(maps.into_iter().map(|cells| (id, cells)));
-                layout.gutters.extend(
-                    gutter
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(row, glyph)| Some((first + row, glyph?))),
-                );
+                layout
+                    .gutters
+                    .extend(gutter.into_iter().enumerate().filter_map(|(row, glyph)| {
+                        Some((first + row, group_x.checked_sub(1)?, glyph?))
+                    }));
                 layout.sources.push(text_selection::Source {
                     id,
                     text: part.source.into(),
@@ -1852,3 +1858,246 @@ pub(super) mod log_markdown {
 #[cfg(test)]
 #[path = "log_reading_tests.rs"]
 mod reading_tests;
+
+#[cfg(test)]
+mod panel_detail_tests {
+    use super::super::tool_detail::Part;
+    use super::*;
+
+    fn fixture_events(fixture: &str) -> Vec<Event> {
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, fixture).unwrap();
+        crate::providers::claude::log::tail(&transcript, 200).unwrap()
+    }
+
+    fn fixture_event() -> Event {
+        fixture_events(include_str!("../../tests/fixtures/transcript.jsonl"))
+            .into_iter()
+            .find(|event| event.kind == Kind::Assistant)
+            .unwrap()
+    }
+
+    fn columns(width: u16) -> DetailColumns {
+        detail_columns(Rect::new(10, 2, width, 20), Rect::new(0, 0, 50, 20))
+    }
+
+    fn layout_part(columns: DetailColumns, part: Part, raw: Option<RawHighlight>) -> DetailLayout {
+        detail_parts_layout(
+            &fixture_event(),
+            columns,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            vec![Section {
+                title: None,
+                groups: vec![Group { parts: vec![part] }],
+            }],
+            raw,
+        )
+    }
+
+    #[test]
+    fn preformatted_rows_fill_text_and_ellipsis_copies_the_full_source() {
+        let event = fixture_event();
+        let source = event.body.lines().next().unwrap();
+        for width in [200, 35] {
+            let columns = columns(width);
+            let layout = layout_part(columns, Part::text(source.into(), false), None);
+            assert_eq!(layout.lines.len(), 1);
+            assert_eq!(layout.lines[0].width(), usize::from(columns.text.width));
+            assert!(layout.lines[0].to_string().ends_with('…'));
+            let cells = &layout.rows[0].1;
+            assert_eq!(cells.first().unwrap().0.start, 0);
+            assert_eq!(cells.last().unwrap().0.end, columns.text.width);
+            assert_eq!(
+                cells
+                    .iter()
+                    .map(|(_, bytes)| &layout.sources[0].text[bytes.clone()])
+                    .collect::<String>(),
+                layout.sources[0].text.as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn prose_wraps_at_the_smaller_reading_or_text_width() {
+        let event = fixture_event();
+        let source = event
+            .body
+            .lines()
+            .find(|line| line.starts_with("界面"))
+            .unwrap();
+        for width in [200, 35] {
+            let columns = columns(width);
+            let layout = layout_part(columns, Part::prose(source.into(), false), None);
+            assert!(layout.lines.len() > 1);
+            let wrap_width = columns.reading_width.min(columns.text.width);
+            for (_, cells) in &layout.rows {
+                let start = cells.first().unwrap().0.start;
+                let end = cells.last().unwrap().0.end;
+                assert!(end - start <= wrap_width);
+                assert!(columns.text.x + end <= columns.time.x - 2);
+            }
+            let longest = layout
+                .rows
+                .iter()
+                .map(|(_, cells)| cells.last().unwrap().0.end - cells.first().unwrap().0.start)
+                .max()
+                .unwrap();
+            assert!(longest >= wrap_width - 2);
+        }
+    }
+
+    #[test]
+    fn parts_share_the_group_origin() {
+        for width in [200, 35] {
+            let columns = columns(width);
+            let source = "first\nsecond";
+            let layout = detail_parts_layout(
+                &fixture_event(),
+                columns,
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+                vec![Section {
+                    title: None,
+                    groups: vec![Group {
+                        parts: vec![
+                            Part::text(source.into(), false),
+                            Part::text("third".into(), false),
+                        ],
+                    }],
+                }],
+                None,
+            );
+            let expected_x = columns.panel.x + columns.panel.width / 2 - 3;
+            assert_eq!(
+                layout
+                    .rows
+                    .iter()
+                    .map(|(_, cells)| columns.text.x + cells[0].0.start)
+                    .collect::<Vec<_>>(),
+                vec![expected_x; 3]
+            );
+        }
+    }
+
+    #[test]
+    fn raw_highlighting_keeps_the_same_clipped_geometry_and_source_maps() {
+        let source = include_str!("../../tests/fixtures/transcript.jsonl")
+            .lines()
+            .next()
+            .unwrap();
+        for width in [200, 35] {
+            let columns = columns(width);
+            let raw = RawHighlight {
+                source: source.into(),
+                highlighter: super::super::highlight::JsonHighlight::default(),
+                row: 0,
+                padding: 0,
+                style: Style::new(),
+            };
+            let mut layout = layout_part(columns, Part::raw_json(source.into()), Some(raw));
+            let before = layout.lines[0].to_string();
+            let maps = layout.rows.clone();
+            layout.highlight_raw(1);
+            assert_eq!(layout.lines[0].to_string(), before);
+            assert_eq!(layout.rows, maps);
+            assert_eq!(layout.lines[0].width(), usize::from(columns.text.width));
+        }
+    }
+
+    #[test]
+    fn event_time_ends_at_panel_edge_and_body_leaves_the_time_column_empty() {
+        let event = fixture_event();
+        for width in [200, 35] {
+            let panel = Rect::new(10, 2, width, 20);
+            let columns = columns(width);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, width + 20, 24));
+            let view = View::new(Grouping::Project, false);
+            view.render_event_detail(
+                &event,
+                "12:34:56",
+                panel,
+                &mut buffer,
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+            );
+            assert_eq!(
+                (columns.time.x..columns.time.right())
+                    .map(|x| buffer[(x, panel.y + LOG_TOP)].symbol())
+                    .collect::<String>(),
+                "12:34:56"
+            );
+            for y in panel.y + LOG_TOP + 2..panel.bottom() {
+                assert!(
+                    (columns.text.right()..panel.right()).all(|x| buffer[(x, y)].symbol() == " ")
+                );
+            }
+        }
+    }
+    #[test]
+    fn tool_times_use_the_panel_edge_and_the_title_metadata_style() {
+        let dir = tempfile::tempdir().unwrap();
+        let event = fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+            .into_iter()
+            .find(|event| event.calls.len() > 1)
+            .unwrap();
+        for width in [200, 35] {
+            let panel = Rect::new(10, 2, width, 100);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, width + 20, 104));
+            let view = View::new(Grouping::Project, false);
+            view.render_event_detail(
+                &event,
+                "12:34:56",
+                panel,
+                &mut buffer,
+                dir.path(),
+                DateTime::UNIX_EPOCH,
+            );
+            let viewport = view.viewport.borrow();
+            let layout = viewport.log_detail_layout.as_ref().unwrap();
+            assert!(!layout.times.is_empty());
+            assert_eq!(layout.columns.time.right(), panel.right());
+            for (row, time) in &layout.times {
+                let y = panel.y + LOG_TOP + 2 + *row as u16;
+                let start = panel.right() - time.width() as u16;
+                assert_eq!(
+                    (start..panel.right())
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>(),
+                    time.content.as_ref()
+                );
+                assert!(
+                    buffer[(start, y)]
+                        .style()
+                        .add_modifier
+                        .contains(time.style.add_modifier)
+                );
+                assert!(
+                    (layout.columns.text.right()..layout.columns.time.x)
+                        .all(|x| buffer[(x, y)].symbol() == " ")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shell_gutters_stay_one_cell_left_of_their_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let event = fixture_events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+            .into_iter()
+            .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
+            .unwrap();
+        for width in [200, 35] {
+            let layout = detail_layout(&event, width, dir.path(), DateTime::UNIX_EPOCH);
+            assert!(!layout.gutters.is_empty());
+            for &(row, x, _) in &layout.gutters {
+                let (_, cells) = &layout.rows[row];
+                assert_eq!(
+                    x + 1,
+                    layout.columns.text.x + cells.first().unwrap().0.start
+                );
+            }
+        }
+    }
+}
