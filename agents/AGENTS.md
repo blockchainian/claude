@@ -32,7 +32,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Log panels
 
-- The log list selects one event, newest first; the detail shows that event.
+- The log list selects one event, oldest first, newest at the bottom; the detail shows that event.
 - Selected rows use the task cursor style across the column, including both padding cells.
 - A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. The detail wheel scrolls only its content.
 - Selecting the newest event follows arriving events. Older selections stay on their event and show the border's Latest/New jump; clicking it selects newest and follows again.

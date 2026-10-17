@@ -214,7 +214,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     let wheel = || {
         Input::Terminal(Ok(Event::Mouse(crossterm::event::MouseEvent {
-            kind: crossterm::event::MouseEventKind::ScrollDown,
+            kind: crossterm::event::MouseEventKind::ScrollUp,
             column: 2,
             row: 13,
             modifiers: KeyModifiers::NONE,
@@ -229,7 +229,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             .unwrap()
     );
     assert!(app.receiver.try_recv().is_err());
-    assert_eq!(app.view.log_scroll(), 1);
+    assert_eq!(app.view.log_scroll(), 2);
     let detail = log_detail(&app);
     assert!(detail.contains("Transcript copy 17"), "{detail}");
     assert!(detail.contains("User"), "{detail}");
@@ -243,13 +243,13 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(8);
-    for _ in 0..6 {
-        scroll_log(&mut app, ScrollDown);
+    for _ in 0..7 {
+        scroll_log(&mut app, ScrollUp);
     }
     app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 2);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 10);
-    assert_eq!(app.view.log.len(), 10);
+    assert_eq!(app.view.log_scroll(), 8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 16);
+    assert_eq!(app.view.log.len(), 16);
     assert!(log_detail(&app).contains("Transcript copy 16"));
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
@@ -266,13 +266,13 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap();
     app.refresh_log(8);
     assert_eq!(app.view.log, cached);
-    for _ in 0..6 {
-        scroll_log(&mut app, ScrollUp);
+    for _ in 0..7 {
+        scroll_log(&mut app, ScrollDown);
     }
     app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 0);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
-    assert_eq!(app.view.log.len(), 10);
+    assert_eq!(app.view.log_scroll(), 8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 16);
+    assert_eq!(app.view.log.len(), 16);
     assert_eq!(app.view.log, cached);
     assert!(log_detail(&app).contains("Transcript copy 19"));
 }
@@ -280,7 +280,7 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
 #[test]
 fn task_log_wheel_reverses_across_reloaded_windows() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    for navigation in [None, Some(KeyCode::Up), Some(KeyCode::Char('k'))] {
+    for navigation in [None, Some(KeyCode::Down), Some(KeyCode::Char('j'))] {
         let (_dir, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
         let payload = std::fs::read_to_string(&path).unwrap();
@@ -308,7 +308,7 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
         for _ in 0..45 {
-            wheel(&mut app, MouseEventKind::ScrollDown);
+            wheel(&mut app, MouseEventKind::ScrollUp);
         }
         let before = log_detail_at(&app, area);
         if let Some(code) = navigation {
@@ -319,11 +319,11 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
                 app.handle_event(Event::Mouse(MouseEvent {
                     kind,
                     column: 134,
-                    row: 21,
+                    row: 2,
                     modifiers: KeyModifiers::NONE,
                 }));
             }
-            // Clicking the selected bottom row gives keyboard navigation to the log list.
+            // Clicking the selected top row gives keyboard navigation to the log list.
             for _ in 0..6 {
                 app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
                 app.refresh_log(visible);
@@ -332,7 +332,7 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
             }
         } else {
             for _ in 0..6 {
-                wheel(&mut app, MouseEventKind::ScrollUp);
+                wheel(&mut app, MouseEventKind::ScrollDown);
             }
         }
         let after = log_detail_at(&app, area);
@@ -342,17 +342,17 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
         );
         for _ in 0..6 {
             if let Some(code) = navigation {
-                let code = if code == KeyCode::Up {
-                    KeyCode::Down
+                let code = if code == KeyCode::Down {
+                    KeyCode::Up
                 } else {
-                    KeyCode::Char('j')
+                    KeyCode::Char('k')
                 };
                 app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
                 app.refresh_log(visible);
                 app.view
                     .render(area, &mut ratatui::buffer::Buffer::empty(area));
             } else {
-                wheel(&mut app, MouseEventKind::ScrollDown);
+                wheel(&mut app, MouseEventKind::ScrollUp);
             }
         }
         assert_eq!(log_detail_at(&app, area), before);
@@ -360,7 +360,7 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
 }
 
 #[test]
-fn bottom_border_loads_first_event_of_whole_log() {
+fn top_border_loads_first_event_of_whole_log() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
@@ -414,24 +414,24 @@ fn bottom_border_loads_first_event_of_whole_log() {
             )
         });
     for latest in [false, true] {
-        click(&mut app, bottom);
-        click(&mut app, bottom);
+        click(&mut app, 1);
+        click(&mut app, 1);
         app.refresh_log(visible);
         let detail = log_detail_at(&app, area);
         assert!(detail.contains("Transcript copy 0"), "{detail}");
-        scroll(&mut app, MouseEventKind::ScrollUp);
-        scroll(&mut app, MouseEventKind::ScrollUp);
+        scroll(&mut app, MouseEventKind::ScrollDown);
+        scroll(&mut app, MouseEventKind::ScrollDown);
         app.refresh_log(visible);
         assert!(log_detail_at(&app, area).contains("Transcript copy 1"));
-        scroll(&mut app, MouseEventKind::ScrollDown);
-        scroll(&mut app, MouseEventKind::ScrollDown);
+        scroll(&mut app, MouseEventKind::ScrollUp);
+        scroll(&mut app, MouseEventKind::ScrollUp);
         app.refresh_log(visible);
         assert!(log_detail_at(&app, area).contains("Transcript copy 0"));
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
         if latest {
-            click(&mut app, 1);
-            click(&mut app, 1);
+            click(&mut app, bottom);
+            click(&mut app, bottom);
         } else {
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.view.render(area, &mut buffer);
@@ -440,13 +440,13 @@ fn bottom_border_loads_first_event_of_whole_log() {
                     (130..200)
                         .map(|x| buffer[(x, y)].symbol())
                         .collect::<String>()
-                        .contains("↑ Latest")
+                        .contains("↓ Latest")
                 })
                 .unwrap();
             let line = (0..200)
                 .map(|x| buffer[(x, row)].symbol())
                 .collect::<String>();
-            let column = line.chars().position(|c| c == '↑').unwrap() as u16;
+            let column = line.chars().position(|c| c == '↓').unwrap() as u16;
             for kind in [
                 MouseEventKind::Down(MouseButton::Left),
                 MouseEventKind::Up(MouseButton::Left),
@@ -461,32 +461,43 @@ fn bottom_border_loads_first_event_of_whole_log() {
         }
         app.refresh_log(visible);
         assert!(log_detail_at(&app, area).contains("Transcript copy 199"));
-        assert_eq!(app.view.log_scroll(), 0);
+        assert_eq!(app.view.log_scroll(), app.view.log_max_scroll());
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
     }
 }
 
 #[test]
-fn task_log_growth_keeps_distance_from_end() {
-    use crossterm::event::MouseEventKind::ScrollDown;
+fn task_log_growth_keeps_older_selection_and_viewport() {
+    use crossterm::event::MouseEventKind::ScrollUp;
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_log(8);
-    scroll_log(&mut app, ScrollDown);
-    app.refresh_log(8);
+    app.refresh_log(
+        app.view
+            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+    );
+    scroll_log(&mut app, ScrollUp);
+    app.refresh_log(
+        app.view
+            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+    );
     let before = app.view.log.clone();
+    let selected = log_detail(&app);
+    let scroll = app.view.log_scroll();
     std::fs::write(
         &path,
         transcript_copies(&payload, 20, 0)
             + &transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20),
     )
     .unwrap();
-    app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 2);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 10);
+    app.refresh_log(
+        app.view
+            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+    );
+    assert_eq!(app.view.log_scroll(), scroll);
+    assert_eq!(log_detail(&app), selected);
     assert_ne!(app.view.log, before);
     let detail = log_detail(&app);
     assert!(detail.contains("Transcript copy 19"), "{detail}");
@@ -502,7 +513,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     app.refresh_log(1);
-    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
     key(&mut app, KeyCode::Char('/'));
     app.refresh_log(1);
     for c in "Codex".chars() {
@@ -512,13 +523,10 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     app.refresh_log(1);
     assert_eq!(app.view.matching_log_count(), 20);
     for _ in 0..30 {
-        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
+        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
     app.refresh_log(1);
-    let visible = app
-        .view
-        .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23));
-    assert_eq!(app.view.log_scroll(), 20 - visible);
+    assert_eq!(app.view.log_scroll(), 0);
     let detail = log_detail(&app);
     assert!(detail.contains("Transcript copy 0"), "{detail}");
     assert!(detail.contains("User"), "{detail}");
@@ -562,16 +570,16 @@ fn task_log_scroll_clamps_at_transcript_start() {
     assert_eq!(app.view.log.len(), 2);
     app.refresh_log(1);
     for _ in 0..5 {
-        scroll_log(&mut app, ScrollDown);
+        scroll_log(&mut app, ScrollUp);
     }
     app.refresh_log(1);
     assert_eq!(app.view.log.len(), 2);
-    scroll_log(&mut app, ScrollUp);
+    scroll_log(&mut app, ScrollDown);
     app.refresh_log(1);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 2);
     assert_eq!(app.view.log.len(), 2);
     // A transcript shorter than the visible window clamps all the way to zero.
-    scroll_log(&mut app, ScrollDown);
+    scroll_log(&mut app, ScrollUp);
     app.refresh_log(8);
     app.refresh_log(8);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
@@ -665,7 +673,7 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
     assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
     assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+    scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
     key(&mut app, KeyCode::Char('/'));
     app.refresh_log(8);
     assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);

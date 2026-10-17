@@ -611,7 +611,7 @@ fn log_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
     let area = Rect::new(0, 0, 100, 30);
     dashboard(&view, area);
     let log = view.viewport.borrow().log;
-    let at = (log.x, log.y + 1);
+    let at = (log.x, log.y);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()

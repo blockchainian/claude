@@ -8,6 +8,8 @@ mod drafts;
 use draft_controls::{BranchEditor, Field, Picker};
 mod formatting;
 pub(crate) use drafts::DraftSetup;
+#[cfg(test)]
+mod chronological_log_tests;
 mod highlight;
 mod hints;
 mod hyperlink;
@@ -106,8 +108,9 @@ struct Viewport {
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
+    /// Index of the first visible event in the chronological shown log.
     log_scroll: usize,
-    /// Events that arrived above the rows on screen since the log left its newest row.
+    /// Events that arrived below the rows on screen since the log left its newest row.
     log_unseen: usize,
     /// Where the last render drew the button that jumps back to the newest log row.
     log_jump: Rect,
@@ -745,12 +748,35 @@ impl View {
         viewport.log_scroll = viewport.log_scroll.min(max);
     }
 
+    pub(crate) fn log_max_scroll(&self) -> usize {
+        let height = usize::from(
+            self.viewport
+                .borrow()
+                .log
+                .height
+                .saturating_sub(u16::from(self.log_search.active())),
+        );
+        self.matching_log_count().saturating_sub(height)
+    }
+
+    pub(crate) fn log_read_count(&self, visible: usize, has_older: bool) -> usize {
+        let loaded = self.log.len().max(visible);
+        if has_older
+            && (self.log_page_pending() || (self.log_scroll() == 0 && !self.following_log()))
+        {
+            loaded.saturating_add(visible.max(self.log_pending_older).max(1))
+        } else {
+            loaded
+        }
+    }
+
     /// Selects the newest shown event and resumes following the log.
     fn show_newest_log(&mut self) {
         self.select_log_event(None);
         self.log_detail_search.clear();
+        let max = self.log_max_scroll();
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_scroll = 0;
+        viewport.log_scroll = max;
         viewport.log_detail_scroll = 0;
         viewport.log_unseen = 0;
         self.log_pending_older = 0;

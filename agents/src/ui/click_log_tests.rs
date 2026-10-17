@@ -408,7 +408,7 @@ fn selected_detail_refreshes_and_log_wheel_changes_it() {
     view.set_log(refreshed);
     assert_eq!(view.visible_log_event(), Some(&previous));
     let area = view.viewport.borrow().log;
-    view.handle_mouse(mouse(MouseEventKind::ScrollUp, area.x + 22, area.y + 3));
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x + 22, area.y + 3));
     assert_eq!(view.visible_log_event(), view.log.get(1));
     release_click(&mut view, MouseButton::Right, area.x + 22, area.y + 3);
     assert_eq!(view.visible_log_event(), view.log.last());

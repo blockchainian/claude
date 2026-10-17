@@ -74,14 +74,13 @@ fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
             let row = view
                 .log
                 .iter()
-                .rev()
                 .position(|event| !log::shows_calls(event))
                 .unwrap();
             assert!(row < viewport.log_rows.len());
             (
                 viewport.log.x + 11,
                 viewport.log.y + row as u16,
-                view.log.iter().rev().nth(row).unwrap().clone(),
+                view.log[row].clone(),
             )
         };
         let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);

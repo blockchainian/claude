@@ -77,6 +77,7 @@ impl View {
         }
         {
             let mut viewport = self.viewport.borrow_mut();
+            viewport.log = area;
             viewport.log_rows.clear();
             viewport.log_jump = Rect::default();
             viewport.log_links.clear();
@@ -106,19 +107,26 @@ impl View {
                     .render(input, buf);
             }
         }
+        let max_scroll = self.log_max_scroll();
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll = viewport.log_scroll.min(max_scroll);
+        }
         self.reveal_log_selection();
         let scroll = self.log_scroll();
         let matching: Vec<_> = self.shown_log_events().collect();
         let selected_index = self.log_selected;
-        let end = matching.len().saturating_sub(scroll);
-        let start = end.saturating_sub(usize::from(
-            area.height
-                .saturating_sub(u16::from(self.log_search.active())),
-        ));
+        let start = scroll.min(matching.len());
+        let end = (start
+            + usize::from(
+                area.height
+                    .saturating_sub(u16::from(self.log_search.active())),
+            ))
+        .min(matching.len());
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
-        for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
-            let last = scroll == 0 && index == 0;
+        for (index, &(log_index, event)) in matching[start..end].iter().enumerate() {
+            let last = start + index + 1 == matching.len();
             let time = event_time(event, session, last, now);
             let links = render_event(
                 event,
@@ -129,7 +137,7 @@ impl View {
                 Some(&self.log_search),
                 &session.cwd,
             );
-            if selected_index == Some(end - index - 1) {
+            if selected_index == Some(start + index) {
                 super::render::fill_list_row(
                     super::render::row(area, index as u16, 1),
                     buf,
@@ -181,8 +189,8 @@ impl View {
             return;
         }
         let label = match viewport.log_unseen {
-            0 => " ↑ Latest ".to_owned(),
-            unseen => format!(" ↑ {unseen} New "),
+            0 => " ↓ Latest ".to_owned(),
+            unseen => format!(" ↓ {unseen} New "),
         };
         let jump = log_content_centered(area, label.width() as u16);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
@@ -452,7 +460,7 @@ impl View {
         self.select_log_event(index);
     }
 
-    fn following_log(&self) -> bool {
+    pub(super) fn following_log(&self) -> bool {
         (self.log_selected.is_none()
             || self.log_selected == self.matching_log_count().checked_sub(1))
             && self.log_background_return.is_none()
@@ -469,7 +477,8 @@ impl View {
         let Some(selected) = self.log_selected else {
             return;
         };
-        let offset = self.matching_log_count().saturating_sub(selected + 1);
+        let offset = selected;
+        let max = self.log_max_scroll();
         let mut viewport = self.viewport.borrow_mut();
         let height = usize::from(
             viewport
@@ -480,6 +489,7 @@ impl View {
         if height == 0 {
             return;
         }
+        viewport.log_scroll = viewport.log_scroll.min(max);
         if offset < viewport.log_scroll {
             viewport.log_scroll = offset;
         } else if offset >= viewport.log_scroll + height {
@@ -512,32 +522,29 @@ impl View {
     }
 
     /// Moves one displayed event; App loads older rows at the oldest loaded boundary.
-    pub(super) fn move_log_selection(&mut self, older: bool) {
+    pub(super) fn move_log_selection(&mut self, forward: bool) {
         self.pending_click = None;
         self.log_background_return = None;
         self.log_background_event = None;
-        if !older && self.log_pending_older > 0 {
+        if forward && self.log_pending_older > 0 {
             self.log_pending_older -= 1;
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.log_scroll = viewport.log_scroll.saturating_sub(1);
             return;
         }
         let Some(index) = self.log_selected else {
             self.show_newest_log();
             return;
         };
-        if older && index == 0 {
+        if !forward && index == 0 {
             if self.log_search.active() {
                 return;
             }
             self.log_pending_older += 1;
-            self.viewport.borrow_mut().log_scroll += 1;
             return;
         }
-        let next = if older {
-            index.saturating_sub(1)
-        } else {
+        let next = if forward {
             index.saturating_add(1)
+        } else {
+            index.saturating_sub(1)
         };
         self.log_pending_older = 0;
         self.select_log_event(Some(next));
@@ -575,6 +582,10 @@ impl View {
             .shown_log_events()
             .filter(|(full, _)| *full >= appended_start)
             .count();
+        let prepended = self
+            .shown_log_events()
+            .filter(|(full, _)| *full < update.prepended)
+            .count();
         let len = self.matching_log_count();
         self.log_selected = if update.reset || following {
             len.checked_sub(1)
@@ -595,19 +606,20 @@ impl View {
         self.cancel_detail_selection();
         self.viewport.borrow_mut().log_detail_layout = None;
         self.viewport.borrow_mut().log_detail_other_layout = None;
+        let max_scroll = self.log_max_scroll();
         if update.reset {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log_scroll = 0;
+            viewport.log_scroll = max_scroll;
             viewport.log_unseen = 0;
             viewport.log_detail_scroll = 0;
         } else if !following || self.mouse_press.is_some() {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log_scroll += added;
+            viewport.log_scroll += prepended;
             viewport.log_unseen += added;
             drop(viewport);
-            self.shift_list_selection(text_selection::Panel::LogList, added);
+            self.shift_list_selection(text_selection::Panel::LogList, prepended);
         } else {
-            self.viewport.borrow_mut().log_scroll = 0;
+            self.viewport.borrow_mut().log_scroll = max_scroll;
         }
         let pending = std::mem::take(&mut self.log_pending_older);
         if pending > 0
@@ -642,14 +654,14 @@ impl View {
             .then(|| super::tool_detail::running_redraw_in(now))
     }
 
-    /// How long until the top log row's time reads differently, or `None` if it never does.
+    /// How long until the newest visible row's time changes, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
         let session = self.selected_row()?;
         if self.log_session.as_ref() != Some(&session.id) {
             return None;
         }
         let event = self.shown_log_events().last()?.1;
-        if self.log_scroll() != 0 && !self.following_log() {
+        if self.viewport.borrow().log.height > 0 && self.log_scroll() < self.log_max_scroll() {
             return None;
         }
         row_time_changes_in(&row_time(event, session, true), now)

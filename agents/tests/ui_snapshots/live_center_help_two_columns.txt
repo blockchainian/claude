@@ -16,8 +16,8 @@
 
  View                Log
  tab/⇧tab  Filter    /                       Search
- /         Search    2× click top border     Latest
- g         Group     2× click bottom border  Earliest
+ /         Search    2× click top border     Earliest
+ g         Group     2× click bottom border  Latest
 
 
 

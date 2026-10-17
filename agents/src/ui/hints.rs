@@ -104,8 +104,8 @@ impl View {
                 "Log",
                 &[
                     ("/", "Search"),
-                    ("2× click top border", "Latest"),
-                    ("2× click bottom border", "Earliest"),
+                    ("2× click top border", "Earliest"),
+                    ("2× click bottom border", "Latest"),
                 ],
             ),
         ];

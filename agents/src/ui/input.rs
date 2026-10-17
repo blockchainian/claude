@@ -345,7 +345,7 @@ impl View {
         {
             return Some(ClickTarget::LogBorder {
                 row: position.y,
-                latest: border == 0,
+                latest: border == 1,
             });
         }
         if viewport.log.contains(position)

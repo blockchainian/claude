@@ -461,7 +461,7 @@ impl App {
         let count = if self.view.log_start_requested || self.view.log_search.active() {
             usize::MAX
         } else {
-            visible.saturating_add(self.view.log_scroll())
+            self.view.log_read_count(visible, self.log_oldest_offset > 0)
         };
         let selected = self
             .view
@@ -591,7 +591,7 @@ impl App {
         visible: usize,
     ) {
         match result {
-            Ok((mut stamp, update)) => {
+            Ok((stamp, update)) => {
                 self.log_parsed_bytes += update.parsed_bytes;
                 self.log_oldest_offset = update.oldest_offset;
                 debug_assert!(update.oldest_offset <= update.read_offset);
@@ -612,7 +612,6 @@ impl App {
                     self.log_stamp = None;
                 } else {
                     self.full_log_stamp = None;
-                    stamp.count = visible.saturating_add(self.view.log_scroll());
                     self.log_stamp = Some(stamp);
                 }
             }

@@ -198,16 +198,20 @@ fn log_selection_wheel_updates_detail_and_cursor_through_app() {
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
         let (x, newest) = log_position(&buffer, "对");
-        wheel(&mut app, MouseEventKind::ScrollDown, x, newest);
+        assert!(
+            log_position(&buffer, "⏺").1 < newest,
+            "older rows are above latest"
+        );
+        wheel(&mut app, MouseEventKind::ScrollUp, x, newest);
         let buffer = draw_size(&mut app, width, height);
         assert!(detail(&buffer).contains("run_in_background"));
         let (_, older) = log_position(&buffer, "⏺");
         assert_log_cursor(&buffer, older);
-        assert!(lines(&buffer).join("\n").contains("↑ Latest"));
-        wheel(&mut app, MouseEventKind::ScrollUp, x, older);
+        assert!(lines(&buffer).join("\n").contains("↓ Latest"));
+        wheel(&mut app, MouseEventKind::ScrollDown, x, older);
         let buffer = draw_size(&mut app, width, height);
         assert!(detail(&buffer).contains("decision"));
-        assert!(!lines(&buffer).join("\n").contains("↑ Latest"));
+        assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
     }
 }
 
@@ -231,7 +235,7 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         let buffer = draw_size(&mut app, width, height);
         assert!(detail(&buffer).contains("run_in_background"));
         assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
-        assert!(lines(&buffer).join("\n").contains("↑ Latest"));
+        assert!(lines(&buffer).join("\n").contains("↓ Latest"));
         let mut arrival: serde_json::Value = serde_json::from_str(first).unwrap();
         arrival["timestamp"] = "2026-10-06T16:40:00Z".into();
         arrival["uuid"] = "tail-arrival".into();
@@ -245,13 +249,13 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         let buffer = draw_size(&mut app, width, height);
         assert!(!detail(&buffer).contains("tail-arrival-proof"));
         assert!(detail(&buffer).contains("run_in_background"));
-        assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
-        let (x, y) = position(&buffer, "↑ 1 New");
+        assert_log_cursor(&buffer, y);
+        let (x, y) = position(&buffer, "↓ 1 New");
         click(&mut app, x, y);
         let buffer = draw_size(&mut app, width, height);
         assert!(detail(&buffer).contains("tail-arrival-proof"));
         assert_log_cursor(&buffer, log_position(&buffer, "tail-arrival-proof").1);
-        assert!(!lines(&buffer).join("\n").contains("↑ 1 New"));
+        assert!(!lines(&buffer).join("\n").contains("↓ 1 New"));
         let previous = arrival.to_string();
         arrival["uuid"] = "tail-following".into();
         arrival["timestamp"] = "2026-10-06T16:41:00Z".into();
@@ -295,11 +299,12 @@ fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         let (x, y) = log_position(&buffer, "event-39");
         // A burst is dispatched before the next frame, just like the real App loop.
         for _ in 0..12 {
-            wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+            wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         }
         let buffer = draw_size(&mut app, width, 30);
         assert!(detail(&buffer).contains("event-27"));
         assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
+        let selected_position = log_position(&buffer, "event-27");
         record["uuid"] = "selection-40".into();
         record["timestamp"] = (start + chrono::Duration::seconds(40)).to_rfc3339().into();
         record["message"]["content"] = format!("event-40 {body}").into();
@@ -309,15 +314,16 @@ fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         let buffer = draw_size(&mut app, width, 30);
         assert!(detail(&buffer).contains("event-27"));
         assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
-        assert!(lines(&buffer).join("\n").contains("↑ 1 New"));
+        assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
+        assert_eq!(log_position(&buffer, "event-27"), selected_position);
         for expected in (0..27).rev() {
-            wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+            wheel(&mut app, MouseEventKind::ScrollUp, x, y);
             let buffer = draw_size(&mut app, width, 30);
             let label = format!("event-{expected:02}");
             assert!(detail(&buffer).contains(&label));
             assert_log_cursor(&buffer, log_position(&buffer, &label).1);
         }
-        wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+        wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         assert!(detail(&draw_size(&mut app, width, 30)).contains("event-00"));
     }
 }
@@ -339,7 +345,7 @@ fn log_selection_switching_tasks_resets_following_through_app() {
         let first = app.view.selected_id().cloned().unwrap();
         let buffer = draw(&mut app, width);
         let (x, y) = log_position(&buffer, "对");
-        wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+        wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         assert!(detail(&draw(&mut app, width)).contains("run_in_background"));
         key(&mut app, KeyCode::Down);
         let buffer = draw(&mut app, width);
@@ -351,7 +357,7 @@ fn log_selection_switching_tasks_resets_following_through_app() {
         assert_eq!(app.view.selected_id(), Some(&first));
         assert!(detail(&buffer).contains("decision"));
         assert_log_cursor(&buffer, log_position(&buffer, "对").1);
-        assert!(!lines(&buffer).join("\n").contains("↑ Latest"));
+        assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
     }
 }
 
@@ -780,9 +786,12 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
             "copy the real event body at {width}x{height}"
         );
         let before = detail(&buffer);
-        for (column, row) in [(x, y), (text_x, text_y)] {
+        for (kind, column, row) in [
+            (MouseEventKind::ScrollUp, x, y),
+            (MouseEventKind::ScrollDown, text_x, text_y),
+        ] {
             app.handle_event(Event::Mouse(MouseEvent {
-                kind: MouseEventKind::ScrollDown,
+                kind,
                 column,
                 row,
                 modifiers: KeyModifiers::NONE,
@@ -791,18 +800,21 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         }
         let scrolled = draw_size(&mut app, width, height);
         assert_ne!(detail(&scrolled), before);
-        assert!(lines(&scrolled).join("\n").contains("↑ Latest"));
+        assert!(lines(&scrolled).join("\n").contains("↓ Latest"));
         assert!(lines(&scrolled).join("\n").contains("↑ Top"));
         let (jump_x, jump_y) = position(&scrolled, "↑ Top");
         click(&mut app, jump_x, jump_y);
         let top = draw_size(&mut app, width, height);
         assert!(!lines(&top).join("\n").contains("↑ Top"));
-        assert!(lines(&top).join("\n").contains("↑ Latest"));
-        assert_eq!(detail(&top), before);
-        let (jump_x, jump_y) = position(&top, "↑ Latest");
+        assert!(lines(&top).join("\n").contains("↓ Latest"));
+        assert_eq!(
+            detail(&top).lines().skip(1).collect::<Vec<_>>(),
+            before.lines().skip(1).collect::<Vec<_>>()
+        );
+        let (jump_x, jump_y) = position(&top, "↓ Latest");
         click(&mut app, jump_x, jump_y);
         let latest = draw_size(&mut app, width, height);
-        assert!(!lines(&latest).join("\n").contains("↑ Latest"));
+        assert!(!lines(&latest).join("\n").contains("↓ Latest"));
         assert_eq!(
             detail(&latest).lines().skip(1).collect::<Vec<_>>(),
             before.lines().skip(1).collect::<Vec<_>>()
@@ -928,22 +940,22 @@ fn wide_border_labels_stay_in_their_columns() {
         // Scroll the real event list through App, so its existing jump control
         // must move to the same border without adding a row inside the list.
         app.handle_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::ScrollDown,
+            kind: MouseEventKind::ScrollUp,
             column: log.start,
             row: 5,
             modifiers: KeyModifiers::NONE,
         }));
         let buffer = draw(&mut app, width);
-        assert!(segment(&buffer, log.clone(), middle).contains("↑ Latest"));
+        assert!(segment(&buffer, log.clone(), middle).contains("↓ Latest"));
         for y in 2..middle {
-            assert!(!segment(&buffer, log.clone(), y).contains("↑ Latest"));
+            assert!(!segment(&buffer, log.clone(), y).contains("↓ Latest"));
         }
-        let (x, y) = position(&buffer, "↑ Latest");
+        let (x, y) = position(&buffer, "↓ Latest");
         click(&mut app, x, y);
         assert!(
             !lines(&draw(&mut app, width))
                 .join("\n")
-                .contains("↑ Latest")
+                .contains("↓ Latest")
         );
     }
 }
@@ -1023,7 +1035,7 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
                 2 * ((width - 8) / 4) + 7
             }
         );
-        for (offset, time) in ["2s", "9m 50s", "10:06:26"].into_iter().enumerate() {
+        for (offset, time) in ["10:06:26", "9m 50s", "2s"].into_iter().enumerate() {
             let y = top - offset as u16;
             let clock: String = (right - 8..right)
                 .map(|x| buffer[(x, y)].symbol())
