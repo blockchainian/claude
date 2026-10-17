@@ -1,8 +1,9 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pikepdf>=9", "markdown>=3.5", "pillow>=10"]
+# dependencies = ["pikepdf>=9", "markdown>=3.5,<3.11.1", "pillow>=10"]
 # ///
+# Markdown 3.11.1 leaves **bold punctuation。**中文 literal, breaking dialogue and figure captions.
 # ABOUTME: Tests render.py: Markdown typesetting, LaTeX repair, page CSS, and (when Chrome is present) a real
 # ABOUTME: render of a small generated EPUB with cover and bookmarks. extract/translate are tested in the .mjs files.
 import importlib.util
