@@ -11,6 +11,19 @@ pub(super) fn message_width(capture: &str, width: usize) -> usize {
     width - 1 - list_left - 10
 }
 
+// Detail panels occupy the terminal interior. Their clock and two-cell gap
+// reserve ten cells at the right edge; reading width is independent of that.
+pub(super) fn content_width(width: usize) -> usize {
+    width - 2 - 10
+}
+
+pub(super) fn detail_center(width: usize, content_width: usize) -> usize {
+    (1 + (width - 2) / 2)
+        .saturating_sub(content_width / 2)
+        .min((width - 11).saturating_sub(content_width))
+        .max(1)
+}
+
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_preformatted_detail_stays_in_content_column() {
@@ -71,14 +84,18 @@ fn terminal_preformatted_detail_stays_in_content_column() {
             .min()
             .unwrap();
         let right = body.iter().map(|line| line.width()).max().unwrap();
-        let cap = message_width(&capture, usize::from(width));
-        let column_left = 1 + (usize::from(width) - 2 - cap - 10) / 2;
+        let cap = content_width(usize::from(width));
+        let column_left = 1;
         assert!(
             right - left <= cap,
             "detail width {} exceeds detail viewport {cap}: {capture}",
             right - left
         );
-        assert_eq!(left, column_left + (cap - (right - left)) / 2, "{capture}");
+        assert_eq!(
+            left,
+            detail_center(usize::from(width), right - left),
+            "{capture}"
+        );
         assert!(right <= column_left + cap, "{capture}");
         println!(
             "{{\"detail_message_width\":\"pass\",\"width\":{width},\"cap\":{cap},\"capture\":\"{}\"}}",
@@ -142,8 +159,8 @@ fn terminal_raw_detail_stays_in_content_column() {
             .min()
             .unwrap();
         let right = body.iter().map(|line| line.width()).max().unwrap();
-        let cap = message_width(&capture, usize::from(width));
-        let column_left = 1 + (usize::from(width) - 2 - cap - 10) / 2;
+        let cap = content_width(usize::from(width));
+        let column_left = 1;
         assert!(
             right - left <= cap,
             "raw width {} exceeds detail viewport {cap}: {capture}",

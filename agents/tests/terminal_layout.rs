@@ -1356,12 +1356,7 @@ fn terminal_running_tool_animates_without_input() {
             assert_eq!((x, y), previous, "animation must stay centered");
         }
         position = Some((x, y));
-        let cap = terminal_detail_width::message_width(
-            &tmux.run(&["capture-pane", "-t", "probe", "-p"]),
-            200,
-        );
-        let content_left = 1 + (198 - cap - 10) / 2;
-        assert_eq!(x, content_left + (cap - 3) / 2);
+        assert_eq!(x, terminal_detail_width::detail_center(200, 3));
         for offset in 0..3 {
             let cell = screen.cell(y as u16, (x + offset) as u16).unwrap();
             assert!(cell.dim(), "running output stays dim: x={x}, raw={raw:?}");
@@ -1620,7 +1615,11 @@ fn terminal_log_latest_uses_list_bottom_border() {
         );
         let byte = rows[bottom].find("↓ Latest").unwrap();
         let jump = rows[bottom][..byte].width();
-        assert_eq!(jump - 1, column + (width - column - 1 - 10 - 10) / 2);
+        let panel_width = width - column - 1;
+        let button_width = " ↓ Latest ".width();
+        let expected = (column + panel_width / 2 - button_width / 2)
+            .min(column + panel_width - 10 - button_width);
+        assert_eq!(jump - 1, expected);
         if width < 150 {
             tmux.mouse(65, 2, bottom + 3, false);
             tmux.wait_for(|capture| capture.contains("↑ Top"));
@@ -2036,12 +2035,27 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                     "{kind} exceeds actual message column {cap}: {capture}"
                 );
             }
-            let expected_left = if width >= 150 {
-                1 + (usize::from(width) - 2 - (group_right - group_left)) / 2
+            // A group can continue below the viewport: its widest source row
+            // need not be among the captured rows used for these bounds.
+            let maximum_width = if prose {
+                cap
             } else {
-                1
+                terminal_detail_width::content_width(usize::from(width))
             };
-            assert_eq!(group_left, expected_left, "{kind} at {width}: {capture}");
+            let leftmost = terminal_detail_width::detail_center(usize::from(width), maximum_width);
+            let rightmost = terminal_detail_width::detail_center(
+                usize::from(width),
+                group_right - group_left,
+            );
+            assert!(
+                (leftmost..=rightmost).contains(&group_left),
+                "{kind} group center outside {leftmost}..={rightmost} at {width}: {capture}"
+            );
+            assert!(
+                group_right <= usize::from(width) - 11,
+                "{kind} enters the time column at {width}: {capture}"
+            );
+            let expected_left = group_left;
             if kind == "send" {
                 assert!(
                     rows[rule + 1]
@@ -2195,25 +2209,19 @@ fn terminal_manager_detach_title() {
             .find(|line| line.contains("threadId: 01a1489e"))
             .expect("thread input block");
         let input_left = input.width() - input.trim_start().width();
-        let cap = terminal_detail_width::message_width(&capture, usize::from(width));
-        let block_left = if width >= 150 {
-            1 + (usize::from(width) - 2 - cap) / 2
-        } else {
-            1
-        };
         assert_eq!(
             title_left,
-            block_left + (cap - "codex-manager detach".width()) / 2,
+            terminal_detail_width::detail_center(
+                usize::from(width),
+                "codex-manager detach".width()
+            ),
             "{capture}"
         );
-        if width >= 150 {
-            assert!(
-                input_left.abs_diff(usize::from(width) - input.trim_end().width()) <= 1,
-                "{capture}"
-            );
-        } else {
-            assert_eq!(input_left, 1, "{capture}");
-        }
+        assert_eq!(
+            input_left,
+            terminal_detail_width::detail_center(usize::from(width), input.trim().width()),
+            "{capture}"
+        );
         assert!(
             capture.contains("\"archived\": true") && capture.contains("\"detached\": true"),
             "{capture}"
@@ -2224,14 +2232,11 @@ fn terminal_manager_detach_title() {
             .find(|line| line.trim() == "↓")
             .unwrap();
         let arrow_left = arrow.width() - arrow.trim_start().width();
-        if width >= 150 {
-            assert!(
-                arrow_left.abs_diff((usize::from(width) - 1) / 2) <= 1,
-                "{capture}"
-            );
-        } else {
-            assert_eq!(arrow_left, 1, "{capture}");
-        }
+        assert_eq!(
+            arrow_left,
+            terminal_detail_width::detail_center(usize::from(width), 1),
+            "{capture}"
+        );
         let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
         std::fs::write(&path, &capture).unwrap();
         println!(
@@ -2268,8 +2273,8 @@ fn terminal_start_description_header() {
         tmux.wait_for(|capture| {
             capture.lines().count() == 50
                 && capture.lines().any(|line| {
-                    line.trim_start().starts_with("Claude 图片链接")
-                        && line.contains("codex-manager start")
+                    line.trim_start().starts_with("codex-manager start")
+                        && line.contains("Claude 图片链接")
                         && line
                             .split_once("codex-manager start")
                             .is_some_and(|(_, tail)| !tail.trim().is_empty())
@@ -2287,26 +2292,19 @@ fn terminal_start_description_header() {
             })
             .expect("three-slot title bar");
         let bar = rows[header];
-        let cap = terminal_detail_width::message_width(&capture, usize::from(width));
-        let left = if width >= 150 {
-            1 + (usize::from(width) - 2 - cap) / 2
-        } else {
-            1
-        };
-        assert_eq!(
-            bar.trim_end().width(),
-            left + cap,
-            "time must end at the bar edge: {capture}"
-        );
-        assert_eq!(
-            bar[..bar.find("Claude 图片链接").unwrap()].width(),
-            left,
-            "{capture}"
+        assert!(
+            bar.trim_end().width() <= usize::from(width) - 11,
+            "tool call without a result leaves the time column empty: {capture}"
         );
         assert_eq!(
             bar[..bar.find("codex-manager start").unwrap()].width(),
-            left + (cap - "codex-manager start".width()) / 2,
-            "{capture}"
+            1,
+            "tool name stays in the left segment: {capture}"
+        );
+        assert_eq!(
+            bar[..bar.find("Claude 图片链接").unwrap()].width(),
+            terminal_detail_width::detail_center(usize::from(width), "Claude 图片链接".width()),
+            "description stays on the panel midline: {capture}"
         );
         assert!(
             !rows
