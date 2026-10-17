@@ -170,15 +170,16 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
     let area = Rect::new(0, 0, 180, 52);
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
-    let (x, y) = (0..area.height)
-        .find_map(|y| {
-            let text = (0..area.width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>();
-            text.find("Model:")
-                .map(|x| ((x + "Model:".len() + 1) as u16, y))
-        })
-        .unwrap();
+    let model = view
+        .viewport
+        .borrow()
+        .field_targets
+        .iter()
+        .find(|(_, field)| *field == Field::Model)
+        .unwrap()
+        .0;
+    assert_eq!(buffer[(model.x, model.y)].symbol(), "D");
+    let (x, y) = (model.x, model.y);
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(click(&mut view, x, y), None);
     assert!(view.picker.is_some());

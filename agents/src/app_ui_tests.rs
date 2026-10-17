@@ -58,6 +58,20 @@ fn position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     panic!("missing {text:?}:\n{}", lines(buffer).join("\n"));
 }
 
+/// The leftmost and rightmost cells where `text` starts on its bottommost row.
+fn row_ends(buffer: &ratatui::buffer::Buffer, text: &str) -> ((u16, u16), (u16, u16)) {
+    let (_, y) = position(buffer, text);
+    let starts: Vec<_> = (0..buffer.area.width)
+        .filter(|x| {
+            (*x..buffer.area.width)
+                .map(|column| buffer[(column, y)].symbol())
+                .collect::<String>()
+                .starts_with(text)
+        })
+        .collect();
+    ((starts[0], y), (*starts.last().unwrap(), y))
+}
+
 fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let separators: Vec<_> = (0..buffer.area.width)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
@@ -435,18 +449,18 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
         cwd: directory.path().to_owned(),
     }));
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "Model:");
-    click(&mut app, x + 7, y);
-    click(&mut app, x + 7, y);
+    let ((x, y), _) = row_ends(&buffer, "Default");
+    click(&mut app, x, y);
+    click(&mut app, x, y);
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "haiku");
     click(&mut app, x, y);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("Model: haiku"), "{rendered}");
+    assert!(rendered.contains("╴haiku "), "{rendered}");
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "Effort:");
-    click(&mut app, x + 8, y);
-    click(&mut app, x + 8, y);
+    let (_, (x, y)) = row_ends(&buffer, "Default");
+    click(&mut app, x, y);
+    click(&mut app, x, y);
     let picker = lines(&draw(&mut app, 180)).join("\n");
     assert!(picker.contains("high"), "{picker}");
     app.handle_event(Event::Key(KeyEvent::new(
@@ -454,7 +468,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
         KeyModifiers::CONTROL,
     )));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("Model: haiku"), "{rendered}");
+    assert!(rendered.contains("╴haiku "), "{rendered}");
     assert!(!rendered.contains("❯ high"), "{rendered}");
 }
 
@@ -491,15 +505,15 @@ fn rendered_branch_editor_accepts_paste_and_escape_cancels_without_worktree() {
         cwd: repository.clone(),
     }));
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "Branch:");
-    click(&mut app, x + 8, y);
-    click(&mut app, x + 8, y);
+    let (x, y) = position(&buffer, "╴main ");
+    click(&mut app, x + 1, y);
+    click(&mut app, x + 1, y);
     app.handle_event(Event::Paste("feature/paste-route-proof".into()));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("feature/paste-route-proof"), "{rendered}");
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("Branch: main"), "{rendered}");
+    assert!(rendered.contains("╴main "), "{rendered}");
     assert!(
         !rendered.contains("feature/paste-route-proof"),
         "{rendered}"
@@ -832,7 +846,7 @@ fn new_key_without_selection_prepares_the_startup_repository() {
     let rendered = lines(&buffer).join("\n");
     assert!(rendered.contains("New task"), "{rendered}");
     assert!(
-        rendered.contains(&format!("Branch: {}", branch.trim())),
+        rendered.contains(&format!("╴{} ", branch.trim())),
         "startup repository was not prepared:\n{rendered}"
     );
 }

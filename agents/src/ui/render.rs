@@ -575,13 +575,14 @@ impl View {
         buf: &mut Buffer,
         now: chrono::DateTime<chrono::Utc>,
     ) {
-        let Some(session) = self.selected_row() else {
+        let session = self.selected_row();
+        if session.is_none() && self.selected_draft().is_none() {
             return;
-        };
+        }
         self::rule(rule, buf);
         // The title stays centered on the whole rule, so the time's width is kept clear on both sides.
         let mut reserved = 0;
-        if let Some(at) = session.started_at {
+        if let Some(at) = session.and_then(|session| session.started_at) {
             let elapsed = format_session_duration((now - at).num_seconds());
             // Keep a title cell, its spaces and the rule cells and corners around it.
             if usize::from(rule.width) >= 2 * (elapsed.width() + 2) + 7 {
@@ -591,15 +592,18 @@ impl View {
         }
         // The corner, one rule cell and a space on each side.
         let width = usize::from(rule.width).saturating_sub(6 + reserved);
-        let title_style = self.title_style(&session.id).bold();
+        let (title, title_style) = match session {
+            Some(session) => (
+                session.display_title().to_owned(),
+                self.title_style(&session.id).bold(),
+            ),
+            None => ("New task".to_owned(), Style::default().bold()),
+        };
         let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))
         } else {
             truncate_line_with_ellipsis_if_overflow(
-                Line::from(Span::styled(
-                    session.display_title().to_owned(),
-                    title_style,
-                )),
+                Line::from(Span::styled(title, title_style)),
                 width,
             )
         };
@@ -615,8 +619,19 @@ impl View {
     /// Centers the bold status on the rule between its two corner cells, a space apart on each
     /// side.
     fn render_details_status(&self, rule: Rect, buf: &mut Buffer) {
-        let Some(session) = self.selected_row() else {
-            return;
+        let session = self.selected_row();
+        let draft = self.selected_draft();
+        let (status, cwd) = match (session, draft) {
+            (Some(session), _) => (Self::status(session).0, &session.cwd),
+            (None, Some(draft)) => (
+                if draft.working || draft.job.is_some() {
+                    "Creating"
+                } else {
+                    "New"
+                },
+                &draft.setup.cwd,
+            ),
+            (None, None) => return,
         };
         // The left corner is a joint, or the separator that keeps going down beside the prompt.
         self::rule(
@@ -626,7 +641,15 @@ impl View {
         if buf[(rule.x, rule.y)].symbol() == "│" {
             buf[(rule.x, rule.y)].set_symbol("├");
         }
-        let (status, _) = Self::status(session);
+        if session.is_none() && self.branch_editor.is_some() {
+            // The branch editor takes the whole rule between its corners.
+            let area = Rect::new(rule.x + 2, rule.y, rule.width.saturating_sub(4), 1);
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .push((area, Field::Branch));
+            return;
+        }
         let width = usize::from(rule.width).saturating_sub(4);
         let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
         status.spans.insert(0, " ".into());
@@ -640,28 +663,39 @@ impl View {
         );
         Clear.render(status_area, buf);
         line(status, status_area, buf);
-        // The pull request on the left and the project folder's name on the right flank the
-        // status.
-        let folder = session.cwd.file_name().map_or_else(
-            || session.cwd.display().to_string(),
+        // The pull request, or a new task's branch, on the left and the project folder's name on
+        // the right flank the status.
+        let folder = cwd.file_name().map_or_else(
+            || cwd.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
         );
-        let pr = session
-            .pr
-            .as_ref()
-            .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)));
-        let (pr_area, folder_area) = render_rule_ends(
+        let left = match (session, draft) {
+            (Some(session), _) => session
+                .pr
+                .as_ref()
+                .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id))),
+            (None, Some(draft)) => (!draft.setup.branch.is_empty())
+                .then(|| Span::styled(draft.setup.branch.clone(), style::time_style())),
+            _ => None,
+        };
+        let (left_area, folder_area) = render_rule_ends(
             rule,
             status_width,
-            pr,
+            left,
             Some(Span::styled(folder, style::time_style())),
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();
         if let Some(area) = folder_area {
-            viewport.details_links.push((area, session.cwd.clone()));
+            viewport.details_links.push((area, cwd.clone()));
         }
-        if let (Some(area), Some(pr)) = (pr_area, &session.pr) {
+        let Some(session) = session else {
+            if let Some(area) = left_area {
+                viewport.field_targets.push((area, Field::Branch));
+            }
+            return;
+        };
+        if let (Some(area), Some(pr)) = (left_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
             super::hyperlink::hyperlink(buf, area, &url);
@@ -672,8 +706,24 @@ impl View {
     /// Writes the selected session's model on the left of the log's border and its effort on
     /// the right; both open their pickers when clicked.
     fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
-        let Some(session) = self.selected_row() else {
-            return;
+        let (model, effort) = match (self.selected_row(), self.selected_draft()) {
+            (Some(session), _) => (
+                session.model_label().map(str::to_owned),
+                session.effort.clone(),
+            ),
+            // A new task shows its defaults too, so both stay clickable.
+            (None, Some(draft)) => (
+                Some(draft.setup.model.as_deref().unwrap_or("Default").to_owned()),
+                Some(
+                    draft
+                        .setup
+                        .effort
+                        .as_deref()
+                        .unwrap_or("Default")
+                        .to_owned(),
+                ),
+            ),
+            (None, None) => return,
         };
         // The jump centers without the clock column; both end labels must stay outside it.
         let jump = self.viewport.borrow().log_jump;
@@ -686,13 +736,8 @@ impl View {
         let (model_area, effort_area) = render_rule_ends(
             rule,
             center,
-            session
-                .model_label()
-                .map(|model| Span::styled(model.to_owned(), style::time_style())),
-            session
-                .effort
-                .as_deref()
-                .map(|effort| Span::styled(effort.to_owned(), style::time_style())),
+            model.map(|model| Span::styled(model, style::time_style())),
+            effort.map(|effort| Span::styled(effort, style::time_style())),
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();
@@ -718,43 +763,8 @@ impl View {
         }
         if let Some(draft) = self.selected_draft() {
             self.viewport.borrow_mut().details = area;
-            let lines = [
-                "New task".to_owned(),
-                draft.setup.cwd.display().to_string(),
-                format!(
-                    "Model: {}",
-                    draft.setup.model.as_deref().unwrap_or("Default")
-                ),
-                format!(
-                    "Effort: {}",
-                    draft.setup.effort.as_deref().unwrap_or("Default")
-                ),
-                format!(
-                    "Branch: {}",
-                    if draft.setup.branch.is_empty() {
-                        "—"
-                    } else {
-                        &draft.setup.branch
-                    }
-                ),
-            ];
-            for (index, text) in lines.into_iter().enumerate() {
-                line(text, row(area, index as u16, 1), buf);
-            }
-            for (index, field) in [(2, Field::Model), (3, Field::Effort), (4, Field::Branch)] {
-                if field == Field::Branch && draft.setup.branch.is_empty() {
-                    continue;
-                }
-                let rect = row(area, index, 1);
-                if !rect.is_empty() {
-                    self.viewport.borrow_mut().field_targets.push((rect, field));
-                }
-            }
-            if draft.working || draft.job.is_some() {
-                line("Creating…", row(area, 5, 1), buf);
-            }
             if let Some(error) = &draft.error {
-                line(error.clone().red(), row(area, 6, 1), buf);
+                line(error.clone().red(), row(area, 0, 1), buf);
             }
             return;
         }

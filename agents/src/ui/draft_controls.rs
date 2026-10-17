@@ -268,7 +268,6 @@ mod tests {
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer);
         let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
-        assert!(text.contains("Branch: —"));
         assert!(
             view.viewport
                 .borrow()
