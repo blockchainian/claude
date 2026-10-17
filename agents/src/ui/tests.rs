@@ -493,7 +493,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
         (jump.0, jump.1),
         (
             rect.x + (rect.width - LOG_CLOCK_COLUMNS - label) / 2 + 1,
-            rect.y - 1
+            rect.bottom()
         )
     );
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
@@ -8162,7 +8162,7 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
 }
 
 #[test]
-fn log_jump_buttons_center_on_separate_panel_borders() {
+fn log_jump_buttons_keep_centering_and_distinct_targets() {
     for width in [60, 100, 149, 150, 200] {
         for unseen in [0, 3] {
             let (mut view, now) = log_fixture();
@@ -8179,12 +8179,7 @@ fn log_jump_buttons_center_on_separate_panel_borders() {
             let viewport = view.viewport.borrow();
             let latest = viewport.log_jump;
             let top = viewport.log_detail_jump;
-            let border_y = if width < super::render::WIDE_LAYOUT_COLUMNS {
-                assert_eq!(layout.log.y, layout.prompt.bottom() + 1);
-                layout.log.y - 1
-            } else {
-                layout.log.bottom()
-            };
+            let border_y = layout.log.bottom();
             assert_eq!(
                 latest.x,
                 layout.log.x + (layout.log.width - LOG_CLOCK_COLUMNS - latest.width) / 2
@@ -8192,12 +8187,16 @@ fn log_jump_buttons_center_on_separate_panel_borders() {
             assert_eq!(latest.y, border_y);
             assert_eq!(
                 top.x,
-                layout.log_detail.x
-                    + 1
-                    + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - top.width) / 2
+                if width < super::render::WIDE_LAYOUT_COLUMNS {
+                    latest.right()
+                } else {
+                    layout.log_detail.x
+                        + 1
+                        + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - top.width) / 2
+                }
             );
             assert_eq!(top.y, layout.log_detail.y);
-            assert_ne!(latest.y, top.y);
+            assert!(!latest.intersects(top));
             let label = if unseen == 0 {
                 " ↑ Latest "
             } else {

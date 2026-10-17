@@ -416,14 +416,14 @@ impl View {
                 ),
                 Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
             ];
-            let jump_y = if area.width >= WIDE_LAYOUT_COLUMNS {
+            let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
                 layout.log.bottom()
             } else {
                 let border = row(area, layout.prompt.bottom() - area.y, 1);
                 rule(border, buf);
                 border.y
             };
-            let log_rule = Rect::new(layout.log.x, jump_y, layout.log.width, 1);
+            let log_rule = Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1);
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
             let left = if area.width >= WIDE_LAYOUT_COLUMNS {
@@ -432,7 +432,7 @@ impl View {
                 area.x
             };
             self.render_log_model(
-                Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
+                Rect::new(left, model_y, area.right().saturating_sub(left), 1),
                 buf,
             );
             self.render_log_jump(log_rule, buf);
@@ -471,8 +471,15 @@ impl View {
         join_separators(&separators, area, buf);
         if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
-            let jump =
+            let mut jump =
                 super::log::log_content_centered(inset(layout.log_detail), label.width() as u16);
+            let latest = self.viewport.borrow().log_jump;
+            if jump.intersects(latest) {
+                jump.x = latest.right();
+                jump.width = jump
+                    .width
+                    .min(layout.log_detail.right().saturating_sub(jump.x));
+            }
             Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
             self.viewport.borrow_mut().log_detail_jump = jump;
         }

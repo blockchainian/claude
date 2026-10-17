@@ -653,7 +653,7 @@ fn terminal_layout_tracks_width() {
                 list,
                 "event list hidden after click: {opened}"
             );
-            assert!(opened_lines[prompt + 1].contains("↑ Latest"), "{opened}");
+            assert!(opened_lines[log_rule].contains("↑ Latest"), "{opened}");
             assert!(
                 opened_lines[log_rule + 1..opened_lines.len() - 1]
                     .join("\n")
@@ -1226,6 +1226,106 @@ fn terminal_details_section_positions() {
 
 #[path = "support/terminal_codex_exit.rs"]
 mod terminal_codex_exit;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_log_latest_uses_list_bottom_border() {
+    for width in [80, 200] {
+        let (_directory, tmux, _transcript) = start_probe("log-latest-border");
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        tmux.wait_for(|capture| {
+            capture
+                .lines()
+                .any(|row| row.contains("medium") && row.width() == width)
+        });
+        let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = before.lines().collect();
+        let model = rows
+            .iter()
+            .position(|row| row.contains("claude-opus-5-5") || row.contains("Opus 5.5"))
+            .unwrap_or_else(|| panic!("model border missing: {before}"));
+        let (column, top, bottom) = if width < 150 {
+            let bottom = (model + 1..rows.len())
+                .find(|&row| rows[row].matches('─').count() > width / 2)
+                .unwrap();
+            (1, model, bottom)
+        } else {
+            let separator = rows[2].rfind('│').unwrap();
+            (rows[2][..separator].width() + 2, 1, model)
+        };
+        tmux.mouse(65, column, top + 1, false);
+        tmux.wait_for(|capture| capture.contains("↑ Latest"));
+        let older = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = older.lines().collect();
+        assert!(
+            rows[bottom].contains("↑ Latest"),
+            "Latest missing from bottom border: {older}"
+        );
+        assert!(
+            !rows[top].contains("Latest"),
+            "Latest on top border: {older}"
+        );
+        assert!(
+            (rows[model].contains("claude-opus-5-5") || rows[model].contains("Opus 5.5"))
+                && rows[model].contains("medium"),
+            "{older}"
+        );
+        let byte = rows[bottom].find("↑ Latest").unwrap();
+        let jump = rows[bottom][..byte].width();
+        assert_eq!(jump - 1, column + (width - column - 1 - 10 - 10) / 2);
+        if width < 150 {
+            tmux.mouse(65, 2, bottom + 3, false);
+            tmux.wait_for(|capture| capture.contains("↑ Top"));
+            let scrolled = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let (top_row, top_line) = scrolled
+                .lines()
+                .enumerate()
+                .find(|(_, row)| row.contains("↑ Top"))
+                .unwrap();
+            assert!(
+                scrolled.lines().nth(bottom).unwrap().contains("↑ Latest"),
+                "{scrolled}"
+            );
+            let top_column = top_line[..top_line.find("↑ Top").unwrap()].width();
+            tmux.mouse(0, top_column, top_row, true);
+            tmux.wait_for(|capture| !capture.contains("↑ Top") && capture.contains("↑ Latest"));
+        }
+        tmux.mouse(0, jump, bottom, true);
+        tmux.wait_for(|capture| !capture.contains("↑ Latest") && capture.contains("decision"));
+        let double_click = |column: usize, row: usize| {
+            let column = column + 1;
+            let row = row + 1;
+            let sequence = format!("\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").repeat(2);
+            tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
+        };
+        // The surrounding bottom border still selects oldest on double click.
+        let border_column = column + (width - column) / 3;
+        double_click(border_column, bottom);
+        tmux.wait_for(|capture| {
+            capture.contains("↑ Latest") && capture.contains("run_in_background")
+        });
+        double_click(jump, bottom);
+        tmux.wait_for(|capture| !capture.contains("↑ Latest") && capture.contains("decision"));
+        tmux.mouse(65, column, top + 1, false);
+        tmux.wait_for(|capture| capture.contains("↑ Latest"));
+        double_click(border_column, top);
+        tmux.wait_for(|capture| !capture.contains("↑ Latest") && capture.contains("decision"));
+        let path = std::env::temp_dir().join(format!("agents-latest-border-{width}x50.txt"));
+        std::fs::write(&path, older).unwrap();
+        println!(
+            "{{\"latest_bottom_border\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
+}
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
