@@ -767,7 +767,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: tasks, background, prompt, message, activity,
+        // Sections top to bottom: background, prompt, tasks, message, activity,
         // needs attention. The title
         // sits on the rule above the panel.
         let content_top = area.y;
@@ -807,40 +807,6 @@ impl View {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        if !tasks.is_empty() {
-            separate_section(&mut items);
-            let in_progress = tasks
-                .iter()
-                .filter(|(_, status)| *status == SessionStatus::Working)
-                .count();
-            items.push(
-                centered_header(
-                    "Tasks".dim().into(),
-                    format!("{in_progress}/{}", tasks.len()).dim().into(),
-                    width,
-                )
-                .into(),
-            );
-            let start = items.len();
-            for (task, status) in tasks {
-                items.push(
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(vec![
-                            Self::status_indicator(status),
-                            Span::raw(format!(" {}", task.subject)),
-                        ]),
-                        width,
-                    )
-                    .into(),
-                );
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key("Tasks", &tasks_text));
-            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
-            body_links.push(Vec::new());
-            item_links.resize(items.len(), Vec::new());
-        }
-
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
         let boxes = session
@@ -930,6 +896,40 @@ impl View {
         }
 
         item_links.resize(items.len(), Vec::new());
+
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(
+                centered_header(
+                    "Tasks".dim().into(),
+                    format!("{in_progress}/{}", tasks.len()).dim().into(),
+                    width,
+                )
+                .into(),
+            );
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
+                );
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
+        }
 
         if let Some(message) = session.last_message.as_ref() {
             let mut header = Line::default();

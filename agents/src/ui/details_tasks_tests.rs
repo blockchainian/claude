@@ -39,7 +39,8 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     let view = tasks_view();
     let (buf, rows) = render(&view, 40, 40);
     let find = |s: &str| rows.iter().position(|line| line.contains(s)).unwrap();
-    assert!(find("Tasks") < find("Prompt"));
+    assert!(find("Prompt") < find("Tasks"));
+    assert!(find("Tasks") < find("Update"));
     assert!(find("Prompt") < find("Update"));
     assert!(find("Tasks") < find("Needs attention"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
@@ -156,9 +157,12 @@ fn tasks_long_list_uses_details_scroll_and_keeps_other_sections() {
         1
     );
     assert!(after.iter().any(|row| row.contains("Task row 2")));
-    for label in ["Prompt", "Needs attention", "Waiting for your response."] {
-        assert!(before.iter().any(|row| row.trim() == label));
-        assert!(after.iter().any(|row| row.trim() == label));
+    assert!(before.iter().any(|row| row.trim() == "Prompt"));
+    assert_eq!(view.viewport.borrow().details_scroll.reveal[0], 0);
+    assert_eq!(view.viewport.borrow().details_scroll.reveal[1], 1);
+    for label in ["Needs attention", "Waiting for your response."] {
+        let position = |rows: &[String]| rows.iter().position(|row| row.trim() == label).unwrap();
+        assert_eq!(position(&before), position(&after));
     }
     view.scroll_content_row(false, false, y.saturating_sub(1));
     assert_eq!(render(&view, 40, 24).1, before);
