@@ -279,7 +279,7 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .collect();
             assert_eq!(rows.len(), lines.len());
             for (row, line) in rows.iter().zip(&lines) {
-                let mut x = region.area.x + offset as u16;
+                let mut x = region.area.x + offset;
                 for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(
                     super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
                         line.clone(),
@@ -292,10 +292,10 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                     assert_eq!(buf[(x, row.y)].symbol(), grapheme);
                     x += grapheme.width() as u16;
                 }
-                assert_eq!(row.cells.first().unwrap().0.start, offset as u16);
+                assert_eq!(row.cells.first().unwrap().0.start, offset);
             }
             (
-                region.area.x + offset as u16,
+                region.area.x + offset,
                 rows[0].y,
                 Action::Copy {
                     text: copy,

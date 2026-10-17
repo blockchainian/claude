@@ -17,14 +17,14 @@
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
  Task log example ❮ Running in a terminal
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-                                 Please inspect the task                                   11:58:00
-                                  I will check the files                                        10s
-                            Read src/main.rs， Read src/app.rs                                   15s
-                                       failed check                                             15s
-                                  Also inspect the tests                                   11:59:00
-                                  run a background job *                                         5s
+                                       Please inspect the task                             11:58:00
+                                       I will check the files                                   10s
+                                  Read src/main.rs， Read src/app.rs                             15s
+                                            failed check                                        15s
+                                       Also inspect the tests                              11:59:00
+                                       run a background job *                                    5s
  A long response whose whitespace collapses and whose body must be truncated before the …  11:59:20
-                                        run tests                                               35s
+                                              run tests                                         35s
 
 
 
@@ -32,17 +32,17 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-                                        run tests                                               35s
+                                              run tests                                         35s
 
- ───────────────────────────────────────── Bash ─────────────────────────────────────────       12s
-                                        cargo test
-                                            ↓
-                                     running 3 tests
-                                     ...
+ ───────────────────────────────────────────────Bash─────────────────────────────────────       12s
+                                             cargo test
+                                                  ↓
+                                           running 3 tests
+                                           ...
 
- ───────────────────────────────────────── Read ─────────────────────────────────────────
-                                  agents/src/log.rs:1-40
-                                            ↓
-                                           •··
+ ───────────────────────────────────────────────Read─────────────────────────────────────
+                                       agents/src/log.rs:1-40
+                                                  ↓
+                                                 •··
 
  ? help  esc back  ↑/↓ move  enter open  n new

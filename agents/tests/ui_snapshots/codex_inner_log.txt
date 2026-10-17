@@ -1,10 +1,10 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────── Task log example ───────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │                              type → 1
- ● Task log example         Working     │ Task log example                       │    apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md         17ms
-                                        │                                        │                         claude.ask_claude                                28s
-                                        │                                        │      web.search site:pond.dflow.net "dev-quote-api.dflow.net"             1s
-                                        │                                        │           view_image /tmp/affiliates-page-1791341607.png
+              /tmp/project              │                 Prompt                 │                                   type → 1
+ ● Task log example         Working     │ Task log example                       │       apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms
+                                        │                                        │                               claude.ask_claude                          28s
+                                        │                                        │           web.search site:pond.dflow.net "dev-quote-api.dflow.net"        1s
+                                        │                                        │                view_image /tmp/affiliates-page-1791341607.png
                                         │                                        │
                                         │                                        │
                                         │                                        │
@@ -13,13 +13,13 @@
 ────────────────────────────────────────┴─────────────── Working ─────── project╶┴──────────────────────────────────────────────────────────────────────────────
  Task log example ❯
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                                      ImageView
+                                                                            ImageView
 
-                                                   id: exec-c4bea048-8537-4b20-9429-9fc6872f9a04
-                                                   path: file:///tmp/affiliates-page-1791341607.png
-                                                   type: ImageView
-                                                                          ↓
-                                                                         •··
+                                                        id: exec-c4bea048-8537-4b20-9429-9fc6872f9a04
+                                                        path: file:///tmp/affiliates-page-1791341607.png
+                                                        type: ImageView
+                                                                                ↓
+                                                                               •··
 
 
  ? help  esc back  ↑/↓ move  enter open  n new

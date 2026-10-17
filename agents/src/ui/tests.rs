@@ -36,9 +36,6 @@ mod ask_question_tests;
 use chrono::{Duration, Utc};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
-/// The log rows' trailing clock column and the two spaces before it.
-const LOG_CLOCK_COLUMNS: u16 = 10;
-
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind,
@@ -500,7 +497,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     assert_eq!(
         (jump.0, jump.1),
         (
-            rect.x + (rect.width - LOG_CLOCK_COLUMNS - label) / 2 + 1,
+            super::centering::centered_x(rect, super::log::log_row_areas(rect).0, label) + 1,
             rect.bottom()
         )
     );
@@ -3535,12 +3532,23 @@ fn background_box_dims_title_rule_but_not_output() {
     event.calls[0].title = "Run checks".into();
     let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
-    (&detail.sections[0].title.as_ref().unwrap().line(40).0).render(title_buf.area, &mut title_buf);
+    let columns = super::detail_model::detail_columns(title_buf.area, title_buf.area);
+    (&detail.sections[0].title.as_ref().unwrap().line(columns).0)
+        .render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
         .find(|x| title_buf[(*x, 0)].symbol() == "R")
         .unwrap();
     assert_eq!(title_buf[(0, 0)].modifier, buf[(0, top)].modifier);
-    assert!(title_buf[(title_x, 0)].modifier.contains(Modifier::DIM));
+    assert_eq!(
+        title_buf[(title_x, 0)].fg,
+        detail.sections[0]
+            .title
+            .as_ref()
+            .unwrap()
+            .title_style
+            .fg
+            .unwrap()
+    );
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
     assert!(!buf[(2, top + 1)].modifier.contains(Modifier::DIM));
 }
@@ -4015,7 +4023,7 @@ fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
 }
 
 #[test]
-fn dashboard_log_bodies_center_in_the_content_column() {
+fn dashboard_log_bodies_center_on_the_panel() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = log_fixture();
         for event in view.log.clone() {
@@ -4029,8 +4037,12 @@ fn dashboard_log_bodies_center_in_the_content_column() {
                 super::log::body_line(&event, usize::from(log.width - 10), &view.rows[0].cwd)
                     .to_string();
             for (offset, ch) in body.chars().take(12).enumerate() {
-                let padding = (usize::from(log.width - 10).saturating_sub(body.width())) / 2;
-                let cell = &buf[(log.x + padding as u16 + offset as u16, y)];
+                let x = super::centering::centered_x(
+                    log,
+                    super::log::log_row_areas(log).0,
+                    body.width() as u16,
+                );
+                let cell = &buf[(x + offset as u16, y)];
                 assert_eq!(
                     cell.symbol(),
                     ch.to_string(),
@@ -4078,7 +4090,11 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
             let log = view.viewport.borrow().log;
             let body =
                 super::log::body_line(&body_event, usize::from(log.width - 10), &view.rows[0].cwd);
-            let x = log.x + (usize::from(log.width - 10).saturating_sub(body.width()) / 2) as u16;
+            let x = super::centering::centered_x(
+                log,
+                super::log::log_row_areas(log).0,
+                body.width() as u16,
+            );
             let first_symbol = body.to_string().chars().next().unwrap().to_string();
             let first = log.y;
             let last = log.bottom() - 1 - u16::from(search);
@@ -4296,8 +4312,8 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
                     view.viewport.borrow().log_detail,
                     view.center_layout(buf.area).log,
                 );
-                assert_eq!(detail.x, columns.content.x);
-                assert_eq!(detail.right(), columns.content.right());
+                assert_eq!(detail.x, columns.text.x);
+                assert_eq!(detail.right(), columns.text.right());
             }
         }
     }
@@ -4380,13 +4396,13 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
         let jump = view.viewport.borrow().log_jump;
         assert_eq!(
             jump.x,
-            log.x + (log.width - LOG_CLOCK_COLUMNS - jump.width) / 2
+            super::centering::centered_x(log, super::log::log_row_areas(log).0, jump.width)
         );
     }
 }
 
 #[test]
-fn task_log_body_centers_within_its_content_column() {
+fn task_log_body_centers_on_its_panel() {
     let (mut view, now) = log_fixture();
     view.log.pop();
     let rendered = log_screen(&view, 100, 32, now);
@@ -4395,7 +4411,7 @@ fn task_log_body_centers_within_its_content_column() {
             .lines()
             .nth(view.viewport.borrow().log.y as usize)
             .unwrap()
-            .starts_with(&format!("{}Please", " ".repeat(1 + (88 - 23) / 2)))
+            .starts_with(&format!("{}Please", " ".repeat(39)))
     );
 }
 
@@ -4926,7 +4942,7 @@ fn task_log_right_aligns_mixed_width_times_and_centers_content() {
             .collect::<Vec<_>>(),
         ["Please in", "I will ch", "Read src/"]
     );
-    for (line, (time, label)) in rendered
+    for (index, (line, (time, label))) in rendered
         .lines()
         .skip(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
         .take(3)
@@ -4935,14 +4951,15 @@ fn task_log_right_aligns_mixed_width_times_and_centers_content() {
             ("12:03:45", "I will ch"),
             ("44m ago", "Read src/"),
         ])
+        .enumerate()
     {
         assert_eq!(
             line[..line.find(time).unwrap()].chars().count() + time.len(),
             99,
             "times end at the same column"
         );
-        let content = line[..89].trim();
-        assert_eq!(line.find(label), Some(1 + (88 - content.width()) / 2));
+        let body = super::log::body_line(&view.log[index], 88, &view.rows[0].cwd);
+        assert_eq!(line.find(label), Some(50 - body.width() / 2));
     }
 }
 
@@ -6766,7 +6783,7 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
-fn merged_tool_title_rules_copy_only_titles_and_arrows_center_in_content() {
+fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
     for (width, title) in [
         (100, "Bash"),
         (99, "看探针结果"),
@@ -6801,13 +6818,11 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_in_content() {
             let row = &rows[0];
             let start = row.cells.first().unwrap().0.start;
             let end = row.cells.last().unwrap().0.end;
-            let cap = view
-                .center_layout(buf.area)
-                .log
-                .width
-                .saturating_sub(10)
-                .min(body.width);
-            assert!(start.abs_diff((cap - (end - start)) / 2) <= 1);
+            let panel = view.viewport.borrow().log_detail;
+            assert_eq!(
+                body.x + start,
+                super::centering::centered_x(panel, body, end - start)
+            );
             if start > 1 {
                 assert_eq!(buf[(body.x + start - 2, row.y)].symbol(), "─");
             }
@@ -6819,20 +6834,22 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_in_content() {
                 let viewport = view.viewport.borrow();
                 assert_eq!(row.y, viewport.log_text.rows.first().unwrap().y);
             }
+            if start > 0 {
+                assert!(
+                    buf[(body.x, row.y)]
+                        .modifier
+                        .contains(ratatui::style::Modifier::DIM)
+                );
+            }
             assert!(
-                buf[(body.x, row.y)]
+                !buf[(body.x + start, row.y)]
                     .modifier
                     .contains(ratatui::style::Modifier::DIM)
             );
-            assert!(
-                buf[(body.x + start, row.y)]
-                    .modifier
-                    .contains(ratatui::style::Modifier::DIM)
-            );
-            let arrow_x = body.x + (body.width - 1) / 2;
+            let arrow_x = super::centering::centered_x(panel, body, 1);
             let arrow = (body.y..body.bottom())
                 .find(|y| buf[(arrow_x, *y)].symbol() == "↓")
-                .expect("arrow centered in content column");
+                .expect("arrow centered on panel midline");
             assert!(
                 (body.x..body.right())
                     .filter(|x| *x != arrow_x)
@@ -6844,7 +6861,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_in_content() {
                     .contains(ratatui::style::Modifier::BOLD)
             );
             let x1 = body.x + start;
-            let x2 = body.right() - 1;
+            let x2 = body.x + end;
             view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, row.y));
             view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, row.y));
             view.render_at(buf.area, &mut buf, now);
@@ -6891,7 +6908,11 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             .cloned()
             .collect();
         assert_eq!(rows.len(), 4);
-        let offset = (region.area.width - "cat /workspace/a".width() as u16) / 2;
+        let offset = super::centering::centered_x(
+            viewport.log_detail,
+            region.area,
+            "cat /workspace/a".width() as u16,
+        ) - region.area.x;
         assert!(
             rows.iter()
                 .all(|row| row.cells.first().unwrap().0.start == offset)
@@ -6907,8 +6928,8 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             .find(|row| row.segment == fields.id)
             .unwrap();
         assert_eq!(fields_row.cells.first().unwrap().0.start, offset);
-        // Brackets sit in the panel padding left of the commands, outside every cell map.
-        let gutter = region.area.x - 1;
+        // Brackets follow the group's left edge, outside every command's cell map.
+        let gutter = region.area.x + offset - 1;
         for (row, glyph) in rows.iter().zip(["┌", "└", "┌", "└"]) {
             assert_eq!(buf[(gutter, row.y)].symbol(), glyph);
             // Muted like the time labels: the default foreground dimmed, not the tool accent.
@@ -6973,7 +6994,11 @@ fn running_tool_redraws_cached_detail_only_while_visible() {
         let text = screen.lines().nth(usize::from(row.y)).unwrap();
         assert_eq!(
             text.find(frame),
-            Some(usize::from(region.area.x) + (usize::from(region.area.width) - frame.width()) / 2)
+            Some(usize::from(super::centering::centered_x(
+                viewport.log_detail,
+                region.area,
+                frame.width() as u16,
+            )))
         );
         drop(viewport);
         assert_eq!(
@@ -7131,20 +7156,22 @@ fn task_log_selected_event_header_centers_kind_and_keeps_time_right() {
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
         let detail = view.viewport.borrow().log_detail;
-        let cap = view
-            .center_layout(Rect::new(0, 0, 100, 25))
-            .log
-            .width
-            .saturating_sub(10)
-            .min(detail.width);
+        let columns = super::detail_model::detail_columns(
+            detail,
+            view.center_layout(Rect::new(0, 0, 100, 25)).log,
+        );
         let header = open.lines().nth(usize::from(detail.y + 1)).unwrap();
         assert_eq!(
             header.find("Assistant"),
-            Some(usize::from(detail.x) + (usize::from(cap) - "Assistant".len()) / 2)
+            Some(usize::from(super::centering::centered_x(
+                columns.panel,
+                columns.text,
+                "Assistant".len() as u16
+            )))
         );
         assert_eq!(
             header.find(time),
-            Some(usize::from(detail.x + cap + 10) - time.len())
+            Some(usize::from(columns.time.right()) - time.len())
         );
     }
 }
@@ -7801,7 +7828,10 @@ fn open_tool_layout_titles_and_rules() {
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "↓");
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(x, area.x + (area.width - 1) / 2);
+    assert_eq!(
+        x,
+        super::centering::centered_x(view.viewport.borrow().log_detail, area, 1)
+    );
     assert_eq!(buf[(x, y)].fg, Color::Reset);
     assert!(
         buf[(x, y)]
@@ -7877,9 +7907,7 @@ fn open_view_top_button_and_scrollbar() {
     let jump = view.viewport.borrow().log_detail_jump;
     assert_eq!(
         jump.x,
-        layout.log_detail.x
-            + 1
-            + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - jump.width) / 2
+        super::log::log_content_centered(layout.log_detail.inner(Margin::new(1, 0)), jump.width,).x
     );
     assert_eq!(jump.y, layout.log_detail.y);
     view.render_at(buf.area, &mut buf, now);
@@ -7946,7 +7974,9 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
                         "{}{}",
                         super::log::kind_label(&event.kind),
                         if super::tool_detail::input_label(call).is_some() {
-                            crate::log::display_tool_name(&call.name).replace(' ', "")
+                            super::tool_detail::input_label(call)
+                                .unwrap()
+                                .replace(' ', "")
                         } else {
                             call.title.replace(' ', "")
                         }
@@ -8387,7 +8417,11 @@ fn log_jump_buttons_keep_centering_and_distinct_targets() {
             let border_y = layout.log.bottom();
             assert_eq!(
                 latest.x,
-                layout.log.x + (layout.log.width - LOG_CLOCK_COLUMNS - latest.width) / 2
+                super::centering::centered_x(
+                    layout.log,
+                    super::log::log_row_areas(layout.log).0,
+                    latest.width,
+                )
             );
             assert_eq!(latest.y, border_y);
             let centered_top = super::log::log_content_centered(
@@ -8468,9 +8502,11 @@ fn open_top_button_centers_on_the_detail_panel_for_every_kind_and_width() {
             let jump = view.viewport.borrow().log_detail_jump;
             assert_eq!(
                 jump.x,
-                layout.log_detail.x
-                    + 1
-                    + (layout.log_detail.width - 2 - LOG_CLOCK_COLUMNS - jump.width) / 2
+                super::log::log_content_centered(
+                    layout.log_detail.inner(Margin::new(1, 0)),
+                    jump.width,
+                )
+                .x
             );
             assert_eq!(jump.y, layout.log_detail.y);
             click_text(&mut view, &screen, " ↑ Top ");
@@ -8856,7 +8892,7 @@ fn task_notification_detail_shows_task_id_and_output_content() {
         );
         let label_x =
             super::detail_model::detail_columns(area, view.center_layout(buffer.area).log)
-                .content
+                .text
                 .x;
         let time_x = lines[header].trim_end().width() as u16 - 1;
         assert_eq!(

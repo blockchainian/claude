@@ -16,25 +16,25 @@
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
  Task log example ❮ Running in a terminal
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-                                 Please inspect the task                                   11:58:00
-                                  I will check the files                                        10s
-                            Read src/main.rs， Read src/app.rs                                   15s
-                                       failed check                                             15s
-                                  Also inspect the tests                                   11:59:00
-                                  run a background job *                                         5s
+                                       Please inspect the task                             11:58:00
+                                       I will check the files                                   10s
+                                  Read src/main.rs， Read src/app.rs                             15s
+                                            failed check                                        15s
+                                       Also inspect the tests                              11:59:00
+                                       run a background job *                                    5s
  A long response with bold words whose body must be cut before the right edge of the log…  11:59:20
-                                        run tests                                               35s
+                                              run tests                                         35s
 
 
 
 
 
-──────────────────────────────────────── ↓ Latest ──────────────────────────────────────────────────
-                                        Assistant                                          11:59:20
+───────────────────────────────────────────── ↓ Latest ─────────────────────────────────────────────
+                                              Assistant                                    11:59:20
 
- A long response with bold words whose body must be cut before the right edge of the log
+  A long response with bold words whose body must be cut before the right edge of the log
 
- A second paragraph
+  A second paragraph
 
 
 

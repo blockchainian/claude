@@ -1083,16 +1083,10 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 detail_y > prompt_y,
                 "clicked event must open below the prompt"
             );
-            let cap = (width - 1 - left).saturating_sub(10);
-            let block_left = 1 + if width >= 150 {
-                (width - 2 - cap - 10) / 2
-            } else {
-                0
-            };
-            assert_eq!(detail_x, block_left + (cap - "User".len() as u16) / 2);
+            assert_eq!(detail_x, width / 2 - "User".len() as u16 / 2);
             assert_eq!(
                 (1..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
-                Some(block_left + cap + 9)
+                Some(width - 2)
             );
             assert!(
                 lines(&buffer)[usize::from(detail_y)..]
