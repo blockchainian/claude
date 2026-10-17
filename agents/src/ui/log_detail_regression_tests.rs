@@ -39,13 +39,14 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
-            subagent_type: None,
+            display_name: "Bash".into(),
+            detail_title: None,
+            expand: true,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
-            input: vec![Section::Code {
-                label: "command".into(),
-                lang: "bash".into(),
+            input: vec![Section::Shell {
+                prefix: String::new(),
                 text: "cargo test".into(),
             }],
             output: Some(vec![Section::Text {
@@ -57,7 +58,9 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
-            subagent_type: None,
+            display_name: "Read".into(),
+            detail_title: None,
+            expand: true,
             id: "Read-fixture".into(),
             title: "Read".into(),
             name: "Read".into(),

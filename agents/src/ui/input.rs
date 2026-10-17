@@ -165,6 +165,7 @@ impl View {
             kind: crate::log::Kind::Tool,
             source: None,
             source_records: Vec::new(),
+            tool_time: crate::log::ToolTime::Turn,
             sender: None,
             body: task.description.clone(),
             paths: Vec::new(),
@@ -174,7 +175,9 @@ impl View {
             previous_end: None,
             images: Vec::new(),
             calls: vec![crate::log::ToolCall {
-                subagent_type: None,
+                display_name: "background".into(),
+                detail_title: None,
+                expand: true,
                 id: String::new(),
                 title: task.description,
                 name: "background".into(),

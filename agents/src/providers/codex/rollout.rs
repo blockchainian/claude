@@ -1,4 +1,5 @@
-use crate::log::{Event, Image, Kind, Section, ToolCall, participant_text, question_texts};
+use crate::ask::{Question, QuestionOption};
+use crate::log::{Event, Image, Kind, Section, ToolCall, participant_text};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -364,10 +365,54 @@ fn optional<T: serde::de::DeserializeOwned>(value: &Value, key: &str) -> io::Res
     field(value, key)
 }
 
+fn tool_kind(name: &str) -> Kind {
+    if name.rsplit('.').next() == Some("request_user_input") {
+        Kind::Assistant
+    } else {
+        Kind::Tool
+    }
+}
+
+fn tool_title(name: &str, input: &Value) -> String {
+    use crate::providers::presentation;
+    match name.rsplit('.').next().unwrap_or(name) {
+        "spawn_agent" => presentation::agent_title(input),
+        "send_message" | "followup_task" => presentation::recipient_title(name, input),
+        "exec" | "exec_command" | "shell" => presentation::shell_title(name, input),
+        _ => presentation::default_title(name, input),
+    }
+}
+
+fn questions(input: &Value) -> io::Result<Vec<Question>> {
+    let values: Vec<Value> = field(input, "questions")?;
+    values
+        .iter()
+        .map(|question| {
+            let options: Vec<QuestionOption> = field(question, "options")?;
+            Ok(Question {
+                id: required_text(question, "id")?.to_owned(),
+                header: required_text(question, "header")?.to_owned(),
+                text: required_text(question, "question")?.to_owned(),
+                options,
+                multi: false,
+                other: true,
+                secret: false,
+            })
+        })
+        .collect()
+}
+
 fn tool_body(payload: &Value) -> Option<String> {
     let name = payload["name"].as_str()?;
     if name.rsplit('.').next() == Some("request_user_input") {
-        return Some(question_texts(&tool_arguments(payload)?).join(" · "));
+        return Some(
+            questions(&tool_arguments(payload)?)
+                .ok()?
+                .into_iter()
+                .map(|question| question.text)
+                .collect::<Vec<_>>()
+                .join(" · "),
+        );
     }
     if matches!(
         name.rsplit('.').next(),
@@ -485,18 +530,24 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         }
     };
     if let Some(arguments) = tool_arguments(payload) {
-        crate::log::include_description(&mut input, &arguments);
+        crate::providers::presentation::include_description(&mut input, &arguments);
     }
     ToolCall {
-        subagent_type: None,
+        display_name: crate::providers::presentation::display_tool_name(
+            payload["name"].as_str().unwrap_or(""),
+        ),
+        detail_title: crate::providers::presentation::detail_title(&input),
+        expand: tool_kind(payload["name"].as_str().unwrap_or("")) == Kind::Tool,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: crate::log::tool_title(
+        title: tool_title(
             payload["name"].as_str().unwrap_or(""),
             &tool_arguments(payload).unwrap_or(Value::Null),
         ),
         name: payload["name"].as_str().unwrap_or("").to_owned(),
-        input,
-        output: output.map(|text| vec![text_section("output", text)]),
+        input: crate::providers::presentation::input_sections(input),
+        output: output.map(|text| {
+            crate::providers::presentation::output_sections(vec![text_section("output", text)])
+        }),
         exit_code: None,
         is_error: false,
         duration: None,
@@ -587,23 +638,25 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             None,
         ),
     };
-    crate::log::include_description(&mut input, &item["arguments"]);
+    crate::providers::presentation::include_description(&mut input, &item["arguments"]);
     let title = if name == "exec_command" {
         if let Some(Section::Code { text, .. }) = input.first() {
-            crate::log::tool_title(&name, &serde_json::json!({ "command": text }))
+            tool_title(&name, &serde_json::json!({ "command": text }))
         } else {
             name.clone()
         }
     } else {
-        crate::log::tool_title(&name, &item["arguments"])
+        tool_title(&name, &item["arguments"])
     };
     ToolCall {
-        subagent_type: None,
+        display_name: crate::providers::presentation::display_tool_name(&name),
+        detail_title: crate::providers::presentation::detail_title(&input),
+        expand: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
         title,
         name,
-        input,
-        output,
+        input: crate::providers::presentation::input_sections(input),
+        output: output.map(crate::providers::presentation::output_sections),
         exit_code: item["exit_code"]
             .as_i64()
             .filter(|code| item_type == "CommandExecution" && *code != 0),
@@ -761,6 +814,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         None => ended_at,
     };
     Ok(Some(Event {
+        tool_time: crate::log::ToolTime::Execution,
         source: None,
         source_records: Vec::new(),
         sender: None,
@@ -856,7 +910,12 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                         && !outputs.contains(id)
                         && let Some(args) = tool_arguments(payload)
                     {
-                        pending.push(question_texts(&args));
+                        pending.push(
+                            questions(&args)?
+                                .into_iter()
+                                .map(|question| question.text)
+                                .collect::<Vec<_>>(),
+                        );
                     }
                 }
                 _ => {}
@@ -903,12 +962,8 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         }
         if summary.activity.is_none() && record["type"] == "response_item" {
             let activity = match payload["type"].as_str() {
-                Some("function_call" | "custom_tool_call") => tool_body(payload).map(|label| {
-                    (
-                        crate::log::tool_kind(payload["name"].as_str().unwrap()),
-                        label,
-                    )
-                }),
+                Some("function_call" | "custom_tool_call") => tool_body(payload)
+                    .map(|label| (tool_kind(payload["name"].as_str().unwrap()), label)),
                 Some("reasoning") => Some((Kind::Tool, "Thinking".to_owned())),
                 _ => None,
             };
@@ -1240,7 +1295,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     source_records.insert(0, reference(*offset));
                 }
                 (
-                    crate::log::tool_kind(payload["name"].as_str().unwrap()),
+                    tool_kind(payload["name"].as_str().unwrap()),
                     body,
                     ended.map(|(at, _, _)| at),
                 )
@@ -1299,6 +1354,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         entries.push((
             offset,
             Event {
+                tool_time: crate::log::ToolTime::Execution,
                 source: Some(source(record, offset)),
                 source_records,
                 sender: None,
@@ -1613,10 +1669,10 @@ mod tests {
         empty["payload"]["item"]["stderr"] = record["payload"]["item"]["stdout"].clone();
         assert_eq!(
             completed_tool(&empty).unwrap().unwrap().calls[0].output,
-            Some(vec![text_section(
-                "stderr",
-                record["payload"]["item"]["stdout"].as_str().unwrap()
-            )])
+            Some(vec![
+                Section::Heading("stderr".to_owned()),
+                text_section("", record["payload"]["item"]["stdout"].as_str().unwrap()),
+            ])
         );
     }
 
@@ -1632,7 +1688,7 @@ mod tests {
             .collect();
         assert_eq!(spawn.len(), 2);
         assert!(
-            matches!(&spawn[0].input[0], crate::log::Section::Fields(fields) if fields.iter().any(|(key, value)| key == "message" && value == "[scrubbed]"))
+            spawn[0].input.iter().any(|section| matches!(section, Section::Prose { text, markdown: true } if text == "[scrubbed]"))
         );
         assert!(spawn[0].output.is_some());
         assert_eq!(spawn[1].output, None);
@@ -1656,7 +1712,7 @@ mod tests {
         let event = completed_tool(command).unwrap().unwrap();
         assert_eq!(event.calls.len(), 1);
         assert!(
-            matches!(&event.calls[0].input[0], crate::log::Section::Code { lang, text, .. } if lang == "bash" && text == command["payload"]["item"]["command"][2].as_str().unwrap())
+            matches!(&event.calls[0].input[0], crate::log::Section::Shell { text, .. } if text == command["payload"]["item"]["command"][2].as_str().unwrap())
         );
         assert!(
             matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text == command["payload"]["item"]["aggregated_output"].as_str().unwrap())
@@ -1750,6 +1806,42 @@ mod tests {
     }
 
     #[test]
+    fn request_user_input_keeps_full_question_model() {
+        let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/codex-input/plan-pending.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let input = tool_arguments(&records[1]["payload"]).unwrap();
+        assert_eq!(
+            questions(&input).unwrap(),
+            vec![Question {
+                id: "color".to_owned(),
+                header: "Color".to_owned(),
+                text: "Pick a color?".to_owned(),
+                options: vec![
+                    QuestionOption {
+                        label: "Red".to_owned(),
+                        description: "Choose red.".to_owned(),
+                        preview: None
+                    },
+                    QuestionOption {
+                        label: "Blue".to_owned(),
+                        description: "Choose blue.".to_owned(),
+                        preview: None
+                    },
+                ],
+                multi: false,
+                other: true,
+                secret: false,
+            }]
+        );
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex-input/plan-pending.jsonl");
+        assert_eq!(summary(&path).unwrap().pending_questions, ["Pick a color?"]);
+    }
+
+    #[test]
     fn request_user_input_log_and_activity_show_question_texts() {
         for mode in ["default", "plan"] {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1760,6 +1852,8 @@ mod tests {
                 .find(|event| event.body == "Pick a color?")
                 .unwrap();
             assert_eq!(question.kind, Kind::Assistant);
+            assert!(!question.calls[0].expand);
+            assert_eq!(question.tool_time, crate::log::ToolTime::Execution);
             assert_eq!(question.body, "Pick a color?");
             assert!(question.ended_at.is_none());
             let activity = summary(&path).unwrap().activity.unwrap();

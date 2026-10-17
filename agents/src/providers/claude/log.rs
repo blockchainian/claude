@@ -23,23 +23,50 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
         .find_map(|key| input_text(input, key).map(|text| (key, text)))
 }
 
-fn tool_title(name: &str, input: &serde_json::Value) -> String {
-    if name == "Agent" {
-        return name.to_owned();
-    }
-    let title = crate::log::tool_title(name, input);
-    if name == "Skill"
-        && let Some(args) = input["args"].as_str().filter(|args| !args.is_empty())
-    {
-        format!("{title} {args}")
+pub(super) fn tool_kind(name: &str) -> Kind {
+    if name == "AskUserQuestion" {
+        Kind::Assistant
     } else {
-        title
+        Kind::Tool
+    }
+}
+
+fn tool_title(name: &str, input: &serde_json::Value) -> String {
+    use crate::providers::presentation;
+    match name {
+        "AskUserQuestion" => std::iter::once(name)
+            .chain(
+                input["questions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|question| {
+                        question["header"]
+                            .as_str()
+                            .filter(|header| !header.trim().is_empty())
+                    }),
+            )
+            .collect::<Vec<_>>()
+            .join(" · "),
+        "Agent" => name.to_owned(),
+        "Task" => presentation::agent_title(input),
+        "Skill" => {
+            let title = input_text(input, "skill").unwrap_or(name);
+            if let Some(args) = input["args"].as_str().filter(|args| !args.is_empty()) {
+                format!("{title} {args}")
+            } else {
+                title.to_owned()
+            }
+        }
+        "SendMessage" => presentation::recipient_title(name, input),
+        "Bash" => presentation::shell_title(name, input),
+        _ => presentation::default_title(name, input),
     }
 }
 
 fn tool_detail(name: &str, input: &serde_json::Value) -> String {
     match name {
-        "AskUserQuestion" => crate::log::question_texts(input).join(" · "),
+        "AskUserQuestion" => crate::providers::presentation::question_texts(input).join(" · "),
         "Bash" => input_text(input, "description")
             .map(str::to_owned)
             .unwrap_or_else(|| {
@@ -83,11 +110,11 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
 fn tool_label(name: &str, detail: &str) -> String {
     let name = if name == "SendMessage" { "To" } else { name };
     if detail.is_empty() {
-        crate::log::display_tool_name(name)
+        crate::providers::presentation::display_tool_name(name)
     } else if matches!(name, "Bash" | "AskUserQuestion" | "Agent") {
         detail.to_owned()
     } else {
-        let label = crate::log::display_tool_name(name);
+        let label = crate::providers::presentation::display_tool_name(name);
         if label == name {
             format!("{label} {detail}")
         } else {
@@ -109,10 +136,10 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     {
         Some(tool_label(name, &tool_detail(name, input)))
     } else {
-        Some(
-            input_text(input, "description")
-                .map_or_else(|| crate::log::display_tool_name(name), str::to_owned),
-        )
+        Some(input_text(input, "description").map_or_else(
+            || crate::providers::presentation::display_tool_name(name),
+            str::to_owned,
+        ))
     }
 }
 
@@ -756,14 +783,22 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             _ => fallback(),
         }
     });
-    crate::log::include_description(&mut sections, input);
+    crate::providers::presentation::include_description(&mut sections, input);
     ToolCall {
-        subagent_type: None,
+        display_name: if name == "Agent" {
+            input_text(input, "subagent_type")
+                .map(str::to_owned)
+                .unwrap_or_else(|| crate::providers::presentation::display_tool_name(name))
+        } else {
+            crate::providers::presentation::display_tool_name(name)
+        },
+        detail_title: crate::providers::presentation::detail_title(&sections),
+        expand: true,
         id: String::new(),
         title: tool_title(name, input),
         name: name.to_owned(),
-        input: sections,
-        output,
+        input: crate::providers::presentation::input_sections(sections),
+        output: output.map(crate::providers::presentation::output_sections),
         exit_code: None,
         is_error: result.is_some_and(|result| result.error),
         duration: None,
@@ -1007,7 +1042,9 @@ impl Log {
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
-                subagent_type: None,
+                display_name: format!("Task {}", field("task-id").unwrap_or("")),
+                detail_title: None,
+                expand: true,
                 id: field("task-id").unwrap_or("").to_owned(),
                 title: summary.to_owned(),
                 name: "task-notification".to_owned(),
@@ -1026,6 +1063,7 @@ impl Log {
         self.entries.push(Entry {
             offset: self.offset,
             event: Event {
+                tool_time: crate::log::ToolTime::Turn,
                 source: None,
                 source_records: self.source_records(),
                 sender: None,
@@ -1061,7 +1099,7 @@ impl Log {
             .filter(|_| result.is_none_or(|result| result.denial.is_none()))
             .map(|(_, path)| path);
         let detail = tool_detail(name, input);
-        let display_name = crate::log::display_tool_name(name);
+        let display_name = crate::providers::presentation::display_tool_name(name);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
             if display_name == name {
                 format!("{display_name}: {reason}")
@@ -1075,7 +1113,7 @@ impl Log {
         } else {
             tool_label(name, &detail)
         };
-        let kind = crate::log::tool_kind(name);
+        let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
             (self.entries[index].event.kind == Kind::Assistant) != (kind == Kind::Assistant)
         }) {
@@ -1087,6 +1125,7 @@ impl Log {
             Entry {
                 offset: self.offset,
                 event: Event {
+                    tool_time: crate::log::ToolTime::Turn,
                     source: None,
                     source_records: self.source_records(),
                     sender: None,
@@ -1157,13 +1196,11 @@ impl Log {
         let mut detail = tool_call(name, input, result);
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
-        if name == "Agent" {
-            detail.subagent_type = input_text(input, "subagent_type").map(str::to_owned);
-        }
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
             entry.event.body.push_str(" *");
+            entry.event.tool_time = crate::log::ToolTime::Background;
         }
         entry.event.started_at = at;
         if let Some(result) = result {
@@ -1633,16 +1670,9 @@ pub(crate) mod tests {
         let types: Vec<_> = events
             .iter()
             .flat_map(|event| &event.calls)
-            .map(|call| call.subagent_type.as_deref())
+            .map(|call| call.display_name.as_str())
             .collect();
-        assert_eq!(
-            types,
-            [
-                Some("general-purpose"),
-                Some("fork"),
-                Some("feature:ux-implementer")
-            ]
-        );
+        assert_eq!(types, ["general-purpose", "fork", "feature:ux-implementer"]);
     }
 
     #[test]
@@ -1706,9 +1736,14 @@ pub(crate) mod tests {
                 .find(|call| call.name == name)
                 .unwrap();
 
-            assert!(
-                matches!(call.input.last(), Some(Section::Fields(fields)) if fields[0].0 == "description")
-            );
+            assert!(call.detail_title.is_some());
+            assert!(call.input.iter().all(|section| match section {
+                Section::Fields(fields) => fields.iter().all(|(key, _)| !matches!(
+                    key.as_str(),
+                    "description" | "name" | "subagent_type"
+                )),
+                _ => true,
+            }));
         }
     }
 
@@ -1805,16 +1840,28 @@ pub(crate) mod tests {
             .collect();
         let parallel_inputs: Vec<_> = records[16..18]
             .iter()
-            .map(|record| all_fields(&record["message"]["content"][0]["input"]))
+            .map(|record| {
+                let input = &record["message"]["content"][0]["input"];
+                vec![
+                    Section::Fields(vec![(
+                        "cwd".to_owned(),
+                        input["cwd"].as_str().unwrap().to_owned(),
+                    )]),
+                    Section::Prose {
+                        text: input["prompt"].as_str().unwrap().to_owned(),
+                        markdown: true,
+                    },
+                ]
+            })
             .collect();
         let events = events_from(records.clone());
         let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
         assert!(calls.len() >= 10);
         let bash = calls.iter().find(|call| call.name == "Bash").unwrap();
-        assert!(matches!(&bash.input[0], Section::Code { lang, .. } if lang == "bash"));
+        assert!(matches!(&bash.input[0], Section::Shell { .. }));
         let output = bash.output.as_ref().unwrap();
         assert!(matches!(&output[0], Section::Text { label, .. } if label == "stdout"));
-        assert!(matches!(&output[1], Section::Text { label, .. } if label == "stderr"));
+        assert!(matches!(&output[1], Section::Heading(label) if label == "stderr"));
         let read = calls.iter().find(|call| call.name == "Read").unwrap();
         assert!(
             matches!(&read.output.as_ref().unwrap()[0], Section::Code { lang, text, .. }
@@ -1903,7 +1950,7 @@ pub(crate) mod tests {
             parallel
                 .calls
                 .iter()
-                .map(|call| call.input[0].clone())
+                .map(|call| call.input.clone())
                 .collect::<Vec<_>>(),
             parallel_inputs
         );
@@ -2040,11 +2087,10 @@ pub(crate) mod tests {
         let events = events_from(vec![record]);
         assert_eq!(
             events[0].calls[0].input[0],
-            code_section(
-                "command",
-                "bash",
-                bash["input"]["command"].as_str().unwrap()
-            )
+            Section::Shell {
+                text: bash["input"]["command"].as_str().unwrap().to_owned(),
+                prefix: String::new(),
+            }
         );
         assert_eq!(
             all_fields(&json!({"flag":true,"nested":{"n":1}})),
@@ -2076,6 +2122,14 @@ pub(crate) mod tests {
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, "AskUserQuestion · 子命令 · cd");
             assert_eq!(events[0].kind, Kind::Assistant);
+            assert!(events[0].calls[0].expand);
+            assert!(matches!(
+                events[0].calls[0].input[0],
+                Section::Prose {
+                    markdown: false,
+                    ..
+                }
+            ));
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
             let activity = summary.activity.unwrap();
