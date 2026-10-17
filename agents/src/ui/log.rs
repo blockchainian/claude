@@ -365,6 +365,7 @@ impl View {
             self.log_detail_search.clear();
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_detail_layout = None;
+            viewport.log_detail_other_layout = None;
             viewport.log_detail_scroll = 0;
         }
         if self.following_log() {
@@ -533,6 +534,7 @@ impl View {
         }
         self.cancel_detail_selection();
         self.viewport.borrow_mut().log_detail_layout = None;
+        self.viewport.borrow_mut().log_detail_other_layout = None;
         if update.reset {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_scroll = 0;

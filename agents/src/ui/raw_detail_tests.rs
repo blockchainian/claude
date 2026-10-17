@@ -221,3 +221,60 @@ fn raw_detail_top_button_scrolls_without_toggle() {
         assert_eq!(view.log_detail_raw, raw);
     }
 }
+
+#[test]
+fn raw_detail_layout_survives_mode_round_trip_without_reading_source_again() {
+    let (mut view, now, _) = source_view(ProviderId::Claude);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("transcript.jsonl");
+    let original = view.visible_log_event().unwrap().source_records[0]
+        .path
+        .clone();
+    std::fs::copy(original, &path).unwrap();
+    for event in &mut view.log {
+        for record in &mut event.source_records {
+            record.path = path.clone();
+        }
+    }
+    log_screen(&view, 200, 45, now);
+    let (x, y) = body_position(&view);
+    click(&mut view, MouseButton::Left, x, y);
+    flush(&mut view);
+    let raw = log_screen(&view, 200, 45, now);
+    std::fs::remove_file(path).unwrap();
+    let (x, y) = body_position(&view);
+    click(&mut view, MouseButton::Left, x, y);
+    flush(&mut view);
+    log_screen(&view, 200, 45, now);
+    let (x, y) = body_position(&view);
+    click(&mut view, MouseButton::Left, x, y);
+    flush(&mut view);
+    assert_eq!(log_screen(&view, 200, 45, now), raw);
+}
+
+#[test]
+fn raw_detail_cached_modes_follow_event_changes_and_resize() {
+    let (mut view, now, _) = source_view(ProviderId::Claude);
+    log_screen(&view, 200, 45, now);
+    let (x, y) = body_position(&view);
+    click(&mut view, MouseButton::Left, x, y);
+    flush(&mut view);
+    log_screen(&view, 200, 45, now);
+    view.select_log_event(Some(1));
+    for (width, height) in [(200, 45), (204, 100)] {
+        for raw in [true, false] {
+            if view.log_detail_raw != raw {
+                let (x, y) = body_position(&view);
+                click(&mut view, MouseButton::Left, x, y);
+                flush(&mut view);
+            }
+            let (mut expected, _, _) = source_view(ProviderId::Claude);
+            expected.select_log_event(Some(1));
+            expected.log_detail_raw = raw;
+            assert_eq!(
+                log_screen(&view, width, height, now),
+                log_screen(&expected, width, height, now)
+            );
+        }
+    }
+}

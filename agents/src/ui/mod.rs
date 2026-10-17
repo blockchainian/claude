@@ -116,6 +116,7 @@ struct Viewport {
     log_detail_max: usize,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,
+    log_detail_other_layout: Option<log::DetailLayout>,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
@@ -774,6 +775,7 @@ impl View {
         viewport.log_unseen = 0;
         viewport.log_detail_scroll = 0;
         viewport.log_detail_layout = None;
+        viewport.log_detail_other_layout = None;
         self.input_box = shown.input_box;
         self.log_search = shown.log_search;
         self.log_selected = None;

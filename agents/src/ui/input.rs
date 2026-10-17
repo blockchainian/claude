@@ -57,7 +57,9 @@ impl View {
                     self.log_detail_raw = !self.log_detail_raw;
                     self.cancel_detail_selection();
                     let mut viewport = self.viewport.borrow_mut();
-                    viewport.log_detail_layout = None;
+                    let cached = viewport.log_detail_other_layout.take();
+                    viewport.log_detail_other_layout = viewport.log_detail_layout.take();
+                    viewport.log_detail_layout = cached;
                     viewport.log_detail_scroll = 0;
                 }
                 None
@@ -195,6 +197,7 @@ impl View {
         });
         self.log_detail_focused = true;
         self.viewport.borrow_mut().log_detail_layout = None;
+        self.viewport.borrow_mut().log_detail_other_layout = None;
         self.viewport.borrow_mut().log_detail_scroll = 0;
     }
 
@@ -590,11 +593,6 @@ impl View {
                     .iter()
                     .find(|(rows, _, _)| rows.contains(&mouse.row))
                     .map(|(_, text, label)| (text.clone(), (*label).to_owned()))
-            } else if viewport.log_detail.contains(position)
-                && mouse.row >= viewport.log_detail.y + super::log::LOG_TOP + 2
-            {
-                self.visible_log_event()
-                    .map(|event| (self.detail_text(event), super::log::copied_label(event)))
             } else {
                 None
             };
@@ -658,9 +656,12 @@ impl View {
                     self.click_target_at(position)
                 {
                     if self.defer_click(target)
-                        && let Some((text, label)) = copy_text
+                        && let Some(event) = self.visible_log_event()
                     {
-                        return Some(Action::Copy { text, label });
+                        return Some(Action::Copy {
+                            text: self.detail_text(event),
+                            label: super::log::copied_label(event),
+                        });
                     }
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();

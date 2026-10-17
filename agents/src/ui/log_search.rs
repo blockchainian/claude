@@ -101,6 +101,7 @@ impl View {
     pub(super) fn rematch_log_at(&mut self, selected_full: Option<usize>) {
         self.cancel_detail_selection();
         self.viewport.borrow_mut().log_detail_layout = None;
+        self.viewport.borrow_mut().log_detail_other_layout = None;
         let pattern = self.log_search.pattern();
         let mut matcher = self.log_search.matcher.borrow_mut();
         let mut buffer = Vec::new();

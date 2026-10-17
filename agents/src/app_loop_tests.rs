@@ -105,3 +105,72 @@ fn idle_loop_finishes_click_without_delaying_log_selection() {
         "real tool body missing:\n{after}"
     );
 }
+
+#[test]
+fn deferred_detail_toggle_returns_to_draw_without_another_input() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = directory.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_bytes!("../tests/fixtures/claude-raw-detail.jsonl"),
+    )
+    .unwrap();
+    Preferences {
+        double_click_ms: 200,
+        ..Preferences::default()
+    }
+    .save(directory.path())
+    .unwrap();
+    let mut app = App::new(
+        Hub::new(vec![Box::new(
+            crate::providers::claude::ClaudeProvider::new(directory.path().into()),
+        )]),
+        directory.path().into(),
+    );
+    app.refresh();
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::BackTab,
+        KeyModifiers::NONE,
+    )));
+    let now = chrono::Utc::now();
+    let mut terminal = Terminal::new(TestBackend::new(200, 45)).unwrap();
+    app.draw_at(&mut terminal, now).unwrap();
+    let parsed = screen(&terminal);
+    let (row, line) = parsed
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, line)| line.contains("cctail"))
+        .unwrap_or_else(|| panic!("real tool result missing:\n{}", parsed.join("\n")));
+    let column = line.find("cctail").unwrap() as u16;
+    let mut schedule = RefreshSchedule::new(Instant::now(), Duration::from_secs(5));
+    for raw in [true, false] {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            assert!(!app.handle_event(Event::Mouse(MouseEvent {
+                kind,
+                column,
+                row: row as u16,
+                modifiers: KeyModifiers::NONE,
+            })));
+        }
+        assert!(app.view.pending_click_in(Instant::now()).is_some());
+        // Match event_loop: draw the deferred click, wait once, then draw again.
+        app.draw_at(&mut terminal, now).unwrap();
+        assert!(
+            !app.wait_for_input(&mut None, &mut schedule, Instant::now())
+                .unwrap()
+        );
+        assert!(app.view.pending_click_in(Instant::now()).is_none());
+        app.draw_at(&mut terminal, now).unwrap();
+        if raw {
+            assert_ne!(screen(&terminal), parsed);
+            assert!(screen(&terminal).join("\n").contains("\"message\""));
+        } else {
+            assert_eq!(screen(&terminal), parsed);
+        }
+    }
+}
