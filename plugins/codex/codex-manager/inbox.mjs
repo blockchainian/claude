@@ -149,6 +149,7 @@ export class SessionStore {
    * delivers an event once. Returns [] when the lock is busy or nothing is unread.
    */
   claim(threadId, reader) {
+    if (!this.unread(threadId, reader).lines.length) return [];
     const lock = `${this.inboxPath(threadId)}.lock`;
     if (!this.acquire(lock)) return [];
     try {
