@@ -152,10 +152,7 @@ impl Selector {
                     .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
                     .collect();
                 rows.push(ListRow::Text(Line::default()));
-                rows.push(ListRow::Choice(
-                    branches.len(),
-                    Line::from(format!("  {CREATE_BRANCH}")),
-                ));
+                rows.push(ListRow::Choice(branches.len(), Line::from(CREATE_BRANCH)));
                 rows
             }
             SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. } => values
@@ -652,7 +649,7 @@ mod tests {
                     .to_owned()
             })
             .collect();
-        assert_eq!(rows, ["feature/a", "main", "", "  Create new branch"]);
+        assert_eq!(rows, ["feature/a", "main", "", "Create new branch"]);
         let feature = row_of(&view, 0);
         click(&mut view, feature);
         click(&mut view, feature);
