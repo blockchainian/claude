@@ -76,6 +76,7 @@ pub struct Snapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionInput {
     Prompt(String),
+    PromptWithImages { text: String, images: Vec<PathBuf> },
     Interrupt,
     SetModel(String),
     SetEffort(String),

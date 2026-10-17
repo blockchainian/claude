@@ -26,6 +26,18 @@ pub(super) fn send(
     }
     match &input {
         SessionInput::Prompt(text) => validate_text(text)?,
+        SessionInput::PromptWithImages { text, images } => {
+            validate_text(text)?;
+            if images.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "No image attachments",
+                ));
+            }
+            for path in images {
+                image_path(path)?;
+            }
+        }
         SessionInput::SetModel(value) | SessionInput::SetEffort(value) => {
             if value.is_empty() || value.chars().any(char::is_whitespace) {
                 return Err(io::Error::new(
@@ -79,6 +91,55 @@ fn validate_text(text: &str) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// A separate bracketed paste makes Claude load the file as an image attachment.
+fn image_path(path: &Path) -> io::Result<String> {
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Image path is not valid UTF-8")
+    })?;
+    if text.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid image path",
+        ));
+    }
+    let path = path.canonicalize()?;
+    if !path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Image path is not a file",
+        ));
+    }
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Image path is not valid UTF-8")
+    })?;
+    Ok(format!("'{}'", text.replace('\'', "'\\''")))
+}
+
+fn editor_text(screen: &str) -> String {
+    let Some((row, _)) = prompt(screen) else {
+        return String::new();
+    };
+    screen
+        .lines()
+        .skip(row)
+        .take_while(|line| !line.trim_start().starts_with('─'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn image_visible(screen: &str, count: usize) -> bool {
+    editor_text(screen)
+        .split("[Image #")
+        .skip(1)
+        .filter(|suffix| {
+            suffix.split_once(']').is_some_and(|(number, _)| {
+                !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        })
+        .count()
+        == count
 }
 
 struct Terminal {
@@ -256,12 +317,19 @@ impl Terminal {
         self.master.flush()
     }
 
-    fn submit(&mut self, text: &str) -> io::Result<String> {
+    fn paste(&mut self, text: &str) -> io::Result<()> {
         self.write(b"\x1b[200~")?;
         self.write(text.as_bytes())?;
-        self.write(b"\x1b[201~")?;
+        self.write(b"\x1b[201~")
+    }
+
+    fn submit(&mut self, text: &str) -> io::Result<String> {
+        let before = editor_text(&self.screen());
+        self.paste(text)?;
         // Observe the paste before Enter, so the unchanged empty prompt cannot acknowledge it.
-        self.wait_at("paste-visible", paste_visible)?;
+        self.wait_at("paste-visible", |screen| {
+            paste_visible(screen) && editor_text(screen) != before
+        })?;
         let screen = self.screen();
         let pasted_input = prompt(&screen)
             .ok_or_else(|| self.unexpected("Claude input disappeared before submission"))?
@@ -280,6 +348,25 @@ impl Terminal {
                 }
                 let pasted_input = self.submit(&text)?;
                 self.wait_at("submission-accepted", |screen| {
+                    prompt_accepted(screen, &pasted_input)
+                })
+            }
+            SessionInput::PromptWithImages { text, images } => {
+                for (index, path) in images.iter().enumerate() {
+                    self.paste(&image_path(path)?)?;
+                    self.wait_at("image-attached", |screen| image_visible(screen, index + 1))?;
+                }
+                let pasted_input = if text.is_empty() {
+                    let pasted = prompt(&self.screen())
+                        .ok_or_else(|| self.unexpected("Claude image input disappeared"))?
+                        .1
+                        .to_owned();
+                    self.write(b"\r")?;
+                    pasted
+                } else {
+                    self.submit(&text)?
+                };
+                self.wait_at("image-submission-accepted", |screen| {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
@@ -540,3 +627,7 @@ mod tests {
 #[cfg(test)]
 #[path = "attach_input_tests.rs"]
 mod input_tests;
+
+#[cfg(test)]
+#[path = "attach_image_tests.rs"]
+mod image_tests;

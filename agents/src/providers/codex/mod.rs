@@ -532,7 +532,12 @@ impl Provider for CodexProvider {
         Some(Box::new(move || {
             let mut client = app_server::Client::connect(&home)?;
             match input {
-                SessionInput::Prompt(text) => app_server::thread::prompt(&mut client, &id, &text),
+                SessionInput::Prompt(text) => {
+                    app_server::thread::prompt(&mut client, &id, &text, &[])
+                }
+                SessionInput::PromptWithImages { text, images } => {
+                    app_server::thread::prompt(&mut client, &id, &text, &images)
+                }
                 SessionInput::Interrupt => {
                     match app_server::thread::running_turn(&mut client, &id)? {
                         Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),

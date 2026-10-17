@@ -44,21 +44,27 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
         "created session must be keyboard selectable"
     );
     let action = match input.clone() {
-        SessionInput::Prompt(text) => Action::SendPrompt {
+        SessionInput::PromptWithImages { .. } => {
+            app.send_input(id.clone(), input.clone());
+            None
+        }
+        SessionInput::Prompt(text) => Some(Action::SendPrompt {
             id: id.clone(),
             text,
-        },
-        SessionInput::Interrupt => Action::Stop(id.clone()),
-        SessionInput::SetModel(model) => Action::SetModel {
+        }),
+        SessionInput::Interrupt => Some(Action::Stop(id.clone())),
+        SessionInput::SetModel(model) => Some(Action::SetModel {
             id: id.clone(),
             model,
-        },
-        SessionInput::SetEffort(effort) => Action::SetEffort {
+        }),
+        SessionInput::SetEffort(effort) => Some(Action::SetEffort {
             id: id.clone(),
             effort,
-        },
+        }),
     };
-    self::action(app, action);
+    if let Some(action) = action {
+        self::action(app, action);
+    }
     assert!(
         app.pending_inputs.contains(&id),
         "App did not launch provider input"

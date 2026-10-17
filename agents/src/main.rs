@@ -1,6 +1,7 @@
 mod activity;
 mod app;
 mod clipboard;
+mod images;
 mod jsonl;
 mod log;
 mod model;
