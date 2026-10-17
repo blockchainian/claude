@@ -117,7 +117,7 @@ before any fan-out.
 
 Give every codex workstream whose Dependencies are already merged with their batch's Checks green
 (none, at the start) its own thread, all in one message: `workstream.sh open <id>`, then
-codex-manager `start` with `cwd` the printed path, `description` the id, and a prompt made of the
+codex-manager `start` with `cwd` the printed path, `name` the id, and a prompt made of the
 workstream block verbatim, the plan's Dependencies and Checks, and
 `$SKILL_DIR/codex-standing-instructions.md` verbatim. Copy any untracked env file a module needs
 into the worktree before starting the thread. Run each returned await command with
