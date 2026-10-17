@@ -8,6 +8,7 @@ mod log;
 mod model;
 mod processes;
 mod providers;
+mod pty;
 mod refresh;
 mod repository;
 mod sessions;

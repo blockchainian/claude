@@ -1,5 +1,6 @@
 //! Opt-in, disposable AskUserQuestion delivery checks against Claude Code.
 use super::*;
+use std::io::Read;
 use std::{fs, path::PathBuf, process::Stdio, thread};
 
 struct Probe {

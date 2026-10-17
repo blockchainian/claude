@@ -2,11 +2,9 @@
 
 use crate::providers::SessionInput;
 use std::fs::File;
-use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::process::CommandExt;
+use std::io;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -200,8 +198,7 @@ impl OutputScreen {
 }
 
 struct Terminal {
-    child: Child,
-    master: File,
+    pty: crate::pty::Pty,
     parser: OutputScreen,
     // Attach clients share Claude's cursor and editor. Hold this through detach so
     // page inspection cannot navigate while another client is answering.
@@ -240,58 +237,11 @@ impl Terminal {
                 Err(std::fs::TryLockError::Error(error)) => return Err(error),
             }
         }
-        let mut master = -1;
-        let mut slave = -1;
-        let mut size = libc::winsize {
-            ws_row: 50,
-            ws_col: 200,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        // openpty returns independent owned descriptors on success.
-        if unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut size,
-            )
-        } != 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let master = unsafe { File::from_raw_fd(master) };
-        let slave = unsafe { File::from_raw_fd(slave) };
-        // Only the standard descriptors belong in the executed attach process.
-        for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
-            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
-                return Err(io::Error::last_os_error());
-            }
-        }
         let mut command = Command::new("claude");
-        command
-            .args(["attach", job_id])
-            .current_dir(cwd)
-            .env("TERM", "xterm-256color")
-            .stdin(Stdio::from(slave.try_clone()?))
-            .stdout(Stdio::from(slave.try_clone()?))
-            .stderr(Stdio::from(slave));
-        unsafe {
-            command.pre_exec(move || {
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let child = command.spawn()?;
+        command.args(["attach", job_id]).current_dir(cwd);
+        let pty = crate::pty::Pty::spawn(command, 50, 200)?;
         Ok(Self {
-            child,
-            master,
+            pty,
             parser: OutputScreen::new(),
             _input_lock: input_lock,
             #[cfg(test)]
@@ -311,7 +261,7 @@ impl Terminal {
         #[cfg(test)]
         {
             let directory = std::env::temp_dir().join("agents-stage3-live");
-            let name = format!("driver-{}-{stage}", self.child.id());
+            let name = format!("driver-{}-{stage}", self.pty.pid());
             let saved = std::fs::create_dir_all(&directory)
                 .and_then(|()| {
                     std::fs::write(directory.join(format!("{name}.screen.txt")), self.screen())
@@ -353,7 +303,7 @@ impl Terminal {
                     return Err(self.unexpected("Claude attach needs a response"));
                 }
             }
-            if self.child.try_wait()?.is_some() {
+            if self.pty.exited()? {
                 return Err(self.unexpected("Claude attach exited"));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -365,46 +315,18 @@ impl Terminal {
     }
 
     fn read(&mut self, timeout: Duration) -> io::Result<()> {
-        let mut descriptor = libc::pollfd {
-            fd: self.master.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let result = unsafe {
-            libc::poll(
-                &mut descriptor,
-                1,
-                timeout.as_millis().min(i32::MAX as u128) as i32,
-            )
-        };
-        if result < 0 {
-            let error = io::Error::last_os_error();
-            return if error.kind() == io::ErrorKind::Interrupted {
-                Ok(())
-            } else {
-                Err(error)
-            };
+        let mut bytes = Vec::new();
+        if !self.pty.read(timeout, &mut bytes)? {
+            return Err(self.unexpected("Claude attach closed its terminal"));
         }
-        if result == 0 {
-            return Ok(());
-        }
-        let mut bytes = [0; 65536];
-        match self.master.read(&mut bytes) {
-            Ok(0) => Err(self.unexpected("Claude attach closed its terminal")),
-            Ok(count) => {
-                #[cfg(test)]
-                self.raw.extend_from_slice(&bytes[..count]);
-                self.parser.process(&bytes[..count]);
-                Ok(())
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(()),
-            Err(error) => Err(error),
-        }
+        #[cfg(test)]
+        self.raw.extend_from_slice(&bytes);
+        self.parser.process(&bytes);
+        Ok(())
     }
 
     fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.master.write_all(bytes)?;
-        self.master.flush()
+        self.pty.write(bytes)
     }
 
     fn paste(&mut self, text: &str) -> io::Result<()> {
@@ -491,32 +413,7 @@ impl Terminal {
     }
 
     fn detach(&mut self) -> io::Result<()> {
-        let write = self.write(b"\x1a");
-        let deadline = Instant::now() + DETACH_TIMEOUT;
-        loop {
-            if self.child.try_wait()?.is_some() {
-                return write;
-            }
-            if Instant::now() >= deadline {
-                self.child.kill()?;
-                self.child.wait()?;
-                return write;
-            }
-            // Drain output while waiting: a full PTY buffer must not block the child's exit.
-            let _ = self.read(Duration::from_millis(50));
-        }
-    }
-}
-
-impl Drop for Terminal {
-    fn drop(&mut self) {
-        match self.child.try_wait() {
-            Ok(Some(_)) => {}
-            _ => {
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-            }
-        }
+        self.pty.close(Some(b"\x1a"), DETACH_TIMEOUT)
     }
 }
 
