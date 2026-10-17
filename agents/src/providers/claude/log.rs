@@ -778,7 +778,7 @@ impl Log {
                 });
                 if record["isMeta"] != true
                     && let Some(text) = text.filter(|text| !text.trim().is_empty())
-                    && !self.notification(&text, at, record["uuid"].as_str())
+                    && !text.trim_start().starts_with("<task-notification>")
                 {
                     if let Some((kind, sender, body)) = wrapped_message(&text) {
                         self.push(kind, body, at);
@@ -1130,6 +1130,49 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn task_notification_delivery_keeps_only_enqueue_rows() {
+        use std::io::Write;
+        let fixture =
+            include_str!("../../../tests/fixtures/claude-task-notification-delivery.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = super::Reader::new(file.path().to_owned(), false);
+        let mut enqueued = Vec::new();
+        for line in fixture.lines() {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            writeln!(file, "{line}").unwrap();
+            if record["type"] == "queue-operation" {
+                enqueued.push(record.clone());
+            }
+            let update = reader.refresh(usize::MAX).unwrap();
+            if record["type"] != "queue-operation" {
+                assert_eq!(update.appended, 0, "delivery must not append a row");
+            }
+            let events = super::tail(file.path(), usize::MAX).unwrap();
+            assert_eq!(update.events, events);
+            assert_eq!(events.len(), enqueued.len(), "delivery must not add a row");
+            for enqueue in &enqueued {
+                let text = enqueue["content"].as_str().unwrap();
+                let id = text
+                    .split_once("<task-id>")
+                    .unwrap()
+                    .1
+                    .split_once("</task-id>")
+                    .unwrap()
+                    .0;
+                let rows: Vec<_> = events
+                    .iter()
+                    .filter(|event| event.calls[0].id == id)
+                    .collect();
+                assert_eq!(rows.len(), 1, "task {id}");
+                let at =
+                    chrono::DateTime::parse_from_rfc3339(enqueue["timestamp"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(rows[0].started_at, at);
+            }
+        }
+    }
+
     #[test]
     #[ignore = "requires AGENTS_MEASURE_TRANSCRIPT pointing to a real large transcript"]
     fn measure_incremental_transcript_bytes() {
@@ -2329,9 +2372,7 @@ pub(crate) mod tests {
     fn wrapped_messages_extract_bodies_and_keep_queue_origin() {
         let file = wrapped_fixture();
         let events = tail(file.path(), 20).unwrap();
-        assert_eq!(events.len(), 13);
-        assert_eq!(events[12].kind, Kind::Tool);
-        assert_eq!(events[12].body, "finished");
+        assert_eq!(events.len(), 12);
         let peer_body = include_str!("../../../tests/fixtures/claude-peer-message.txt").trim();
         assert_eq!(peer_body.matches('\n').count(), 11);
         for (pair, kind, sender, body) in [
@@ -2580,7 +2621,7 @@ pub(crate) mod tests {
     fn groups_interleaved_parallel_calls_and_tracks_predecessors() {
         let file = fixture();
         let events = tail(file.path(), 8).unwrap();
-        assert_eq!(events.len(), 8);
+        assert_eq!(events.len(), 7);
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             [
@@ -2590,7 +2631,6 @@ pub(crate) mod tests {
                 &Kind::Tool,
                 &Kind::QueuedUser,
                 &Kind::QueuedSystem,
-                &Kind::Tool,
                 &Kind::Tool
             ]
         );
@@ -2620,9 +2660,6 @@ pub(crate) mod tests {
         );
         assert_eq!(events[6].started_at, at(43));
         assert_eq!(events[6].ended_at, Some(at(43)));
-        assert_eq!(events[7].body, "finished");
-        assert_eq!(events[7].started_at, at(41));
-        assert_eq!(events[7].ended_at, Some(at(41)));
         assert_eq!(events[0].previous_end, None);
         for pair in events.windows(2) {
             let end = if matches!(pair[0].kind, Kind::Tool | Kind::Error) {
@@ -2632,7 +2669,7 @@ pub(crate) mod tests {
             };
             assert_eq!(pair[1].previous_end, end);
         }
-        assert_eq!(tail(file.path(), 2).unwrap(), events[6..]);
+        assert_eq!(tail(file.path(), 2).unwrap(), events[5..]);
         assert!(tail(file.path(), 0).unwrap().is_empty());
     }
     #[test]
@@ -2741,7 +2778,10 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(measured.bytes_read, 64 * 1024);
         assert_eq!(measured.earliest, len - 64 * 1024);
-        assert_eq!(log.entries[0].event.body, "finished");
+        assert_eq!(
+            log.entries[0].event.body,
+            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
+        );
     }
 
     #[test]

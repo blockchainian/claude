@@ -1,9 +1,15 @@
 use super::*;
 
+fn paired_notifications(dir: &std::path::Path) -> Vec<crate::log::Event> {
+    let events = super::super::log::log_markdown::notification_events(dir, None);
+    // Repeated enqueues for a resumed background task remain separate rows.
+    [events.clone(), events].concat()
+}
+
 #[test]
 fn paired_notifications_move_newer_by_index_with_all_bindings() {
     let dir = tempfile::tempdir().unwrap();
-    let events = super::super::log::log_markdown::notification_events(dir.path(), None);
+    let events = paired_notifications(dir.path());
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].calls[0].id, events[1].calls[0].id);
     let (mut view, now) = log_fixture();
@@ -29,7 +35,7 @@ fn paired_notifications_move_newer_by_index_with_all_bindings() {
 #[test]
 fn structural_updates_keep_selection_and_following() {
     let dir = tempfile::tempdir().unwrap();
-    let events = super::super::log::log_markdown::notification_events(dir.path(), None);
+    let events = paired_notifications(dir.path());
     let (mut view, _) = log_fixture();
     view.set_log(events.clone());
     view.select_log_event(Some(0));
@@ -71,7 +77,7 @@ fn structural_updates_keep_selection_and_following() {
 #[test]
 fn list_search_keeps_selected_full_index() {
     let dir = tempfile::tempdir().unwrap();
-    let events = super::super::log::log_markdown::notification_events(dir.path(), None);
+    let events = paired_notifications(dir.path());
     let (mut view, _) = log_fixture();
     view.set_log(events);
     view.select_log_event(Some(0));

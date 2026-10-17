@@ -310,6 +310,7 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
         for _ in 0..45 {
             wheel(&mut app, MouseEventKind::ScrollDown);
         }
+        let before = log_detail_at(&app, area);
         if let Some(code) = navigation {
             for kind in [
                 MouseEventKind::Down(MouseButton::Left),
@@ -337,7 +338,7 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
         let after = log_detail_at(&app, area);
         assert!(
             after.contains("Transcript copy 20"),
-            "newer navigation must leave both notifications: {after}"
+            "newer navigation must pass the notification: {after}"
         );
         for _ in 0..6 {
             if let Some(code) = navigation {
@@ -354,7 +355,7 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
                 wheel(&mut app, MouseEventKind::ScrollDown);
             }
         }
-        assert!(log_detail_at(&app, area).contains("Transcript copy 18"));
+        assert_eq!(log_detail_at(&app, area), before);
     }
 }
 
