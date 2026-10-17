@@ -200,6 +200,7 @@ pub struct View {
     /// The selected event, shared by the list cursor and detail panel.
     log_selected: Option<crate::log::Event>,
     log_detail_focused: bool,
+    log_list_focused: bool,
     /// Older wheel steps waiting for App to extend the loaded transcript window.
     log_pending_older: usize,
     log_background_return: Option<BackgroundReturn>,
@@ -320,6 +321,7 @@ impl View {
             log_session: None,
             log_selected: None,
             log_detail_focused: false,
+            log_list_focused: false,
             log_pending_older: 0,
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
@@ -620,7 +622,9 @@ impl View {
             return self.is_pinned(left) && self.is_pinned(right);
         }
         match grouping {
-            Grouping::Project => self.project_groups[left].key() == self.project_groups[right].key(),
+            Grouping::Project => {
+                self.project_groups[left].key() == self.project_groups[right].key()
+            }
             Grouping::Status => true,
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
@@ -671,9 +675,8 @@ impl View {
             .partition(|i| self.is_pinned(*i));
         pinned.sort_by_key(|i| self.pinned.iter().position(|id| *id == self.rows[*i].id));
         match self.grouping {
-            Grouping::Project => visible.sort_by_key(|i| {
-                (self.project_groups[*i].key(), session_order(&self.rows[*i]))
-            }),
+            Grouping::Project => visible
+                .sort_by_key(|i| (self.project_groups[*i].key(), session_order(&self.rows[*i]))),
             Grouping::Status => {}
             Grouping::Model => {
                 visible.sort_by_key(|i| (self.rows[*i].model_name(), session_order(&self.rows[*i])))
@@ -767,6 +770,7 @@ impl View {
         self.log_search = shown.log_search;
         self.log_selected = None;
         self.log_detail_focused = false;
+        self.log_list_focused = false;
         self.log_pending_older = 0;
         self.log_background_return = None;
         self.log_detail_search.clear();

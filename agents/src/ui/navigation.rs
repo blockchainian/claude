@@ -1,5 +1,35 @@
 use super::*;
 
+/// Maps the dashboard list bindings to their navigation action.
+pub(super) fn list_navigation(key: KeyEvent) -> Option<KeyCode> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return match key.code {
+            KeyCode::Char('p' | 'k') => Some(KeyCode::Up),
+            KeyCode::Char('n' | 'j') => Some(KeyCode::Down),
+            KeyCode::Char('b') => Some(KeyCode::PageUp),
+            KeyCode::Char('f') => Some(KeyCode::PageDown),
+            _ => None,
+        };
+    }
+    if key
+        .modifiers
+        .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('k') => Some(KeyCode::Up),
+        KeyCode::Char('j') => Some(KeyCode::Down),
+        code @ (KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::PageUp
+        | KeyCode::PageDown
+        | KeyCode::Home
+        | KeyCode::End) => Some(code),
+        _ => None,
+    }
+}
+
 pub(super) enum CenterRow {
     Group(usize),
     DraftGroup(crate::model::DraftId),

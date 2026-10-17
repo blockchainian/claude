@@ -443,6 +443,7 @@ impl View {
                     .and_then(|&index| self.log.get(index))
                     .cloned()
             };
+            self.log_list_focused = self.viewport.borrow().log.contains(position);
             if let Some(event) = event {
                 self.log_background_return = None;
                 self.select_log_event(Some(event));
@@ -955,19 +956,27 @@ impl View {
         }
         if self.log_search.editing {
             match key.code {
-                KeyCode::Esc => self.log_search.clear(),
+                KeyCode::Esc => {
+                    self.log_search.clear();
+                    self.log_list_focused = false;
+                }
                 KeyCode::Enter => self.log_search.editing = false,
                 _ => {
                     let before = self.log_search.query.text().to_owned();
-                    if !self.log_search.query.handle(key) || self.log_search.query.text() == before
-                    {
+                    if self.log_search.query.handle(key) {
+                        if self.log_search.query.text() != before {
+                            self.rematch_log();
+                            self.show_newest_log();
+                        }
                         return None;
                     }
                 }
             }
-            self.rematch_log();
-            self.show_newest_log();
-            return None;
+            if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                self.rematch_log();
+                self.show_newest_log();
+                return None;
+            }
         }
         if !self.searching
             && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -978,6 +987,7 @@ impl View {
                 self.jump_detail_match();
             } else {
                 self.log_search.editing = true;
+                self.log_list_focused = true;
                 self.prepare_log_search();
                 self.show_newest_log();
             }
@@ -1035,23 +1045,29 @@ impl View {
             self.searching = !self.searching;
             return None;
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            match key.code {
-                KeyCode::Char('p' | 'k') => self.move_selection(false),
-                KeyCode::Char('n' | 'j') => self.move_selection(true),
-                KeyCode::Char('b') => self.page_selection(false),
-                KeyCode::Char('f') => self.page_selection(true),
-                KeyCode::Char('l') => return self.activate(),
-                _ => {}
+        let navigation = super::navigation::list_navigation(key);
+        if let Some(code) = navigation
+            && !self.searching
+            && self.log_list_focused
+        {
+            self.navigate_log(code);
+            return None;
+        }
+        if navigation.is_none() {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                return if key.code == KeyCode::Char('l') {
+                    self.activate()
+                } else {
+                    None
+                };
             }
-            return None;
+            if !plain {
+                return None;
+            }
         }
-        if !plain {
-            return None;
-        }
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
+        match navigation.unwrap_or(key.code) {
+            KeyCode::Up => self.move_selection(false),
+            KeyCode::Down => self.move_selection(true),
             KeyCode::PageUp => self.page_selection(false),
             KeyCode::PageDown => self.page_selection(true),
             KeyCode::Home if self.status_filter == 0 && !self.drafts.is_empty() => {

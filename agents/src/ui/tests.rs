@@ -8503,3 +8503,119 @@ fn border_labels_touch_joint_spaces() {
         assert_ne!(buf[(x + 2, y)].symbol(), "─");
     }
 }
+
+mod log_navigation {
+    use super::*;
+
+    fn check(code: KeyCode, modifiers: KeyModifiers, forward: bool, edge: bool) {
+        for search in [false, true] {
+            for editing in [false, true] {
+                if editing && !search {
+                    continue;
+                }
+                let (mut view, _) = log_fixture();
+                if search {
+                    view.prepare_log_search();
+                    view.log_search.query.set_text("a");
+                    view.rematch_log();
+                    view.log_search.editing = editing;
+                }
+                screen(&view, 200, 45);
+                let rect = view.viewport.borrow().log;
+                for kind in [
+                    MouseEventKind::Down(MouseButton::Left),
+                    MouseEventKind::Up(MouseButton::Left),
+                ] {
+                    view.handle_mouse(mouse(kind, rect.x + 1, rect.y));
+                }
+                assert!(view.log_list_focused);
+                view.viewport.borrow_mut().log.height = 40;
+                let events: Vec<_> = view.shown_log_events().map(|(_, e)| e.clone()).collect();
+                assert!(events.len() >= 3);
+                let current = events.len() / 2;
+                view.select_log_event(Some(events[current].clone()));
+                let key = KeyEvent::new(code, modifiers);
+                let mut editor = super::super::line_edit::LineEdit::default();
+                editor.set_text("a");
+                let consumed = editing && editor.handle(key);
+                if consumed {
+                    view.handle_key(key);
+                    assert_eq!(view.log_search.query.text(), editor.text());
+                    continue;
+                }
+                let target = if edge {
+                    if forward { 0 } else { events.len() - 1 }
+                } else if forward {
+                    current - 1
+                } else {
+                    current + 1
+                };
+                view.handle_key(key);
+                assert_eq!(
+                    view.log_selected.as_ref(),
+                    Some(&events[target]),
+                    "{key:?}, search={search}, editing={editing}"
+                );
+            }
+        }
+    }
+
+    macro_rules! binding {
+        ($name:ident, $code:expr, $mods:expr, $forward:expr, $edge:expr) => {
+            #[test]
+            fn $name() {
+                check($code, $mods, $forward, $edge);
+            }
+        };
+    }
+    binding!(up, KeyCode::Up, KeyModifiers::NONE, false, false);
+    binding!(down, KeyCode::Down, KeyModifiers::NONE, true, false);
+    binding!(j, KeyCode::Char('j'), KeyModifiers::NONE, true, false);
+    binding!(k, KeyCode::Char('k'), KeyModifiers::NONE, false, false);
+    binding!(
+        ctrl_j,
+        KeyCode::Char('j'),
+        KeyModifiers::CONTROL,
+        true,
+        false
+    );
+    binding!(
+        ctrl_k,
+        KeyCode::Char('k'),
+        KeyModifiers::CONTROL,
+        false,
+        false
+    );
+    binding!(
+        ctrl_n,
+        KeyCode::Char('n'),
+        KeyModifiers::CONTROL,
+        true,
+        false
+    );
+    binding!(
+        ctrl_p,
+        KeyCode::Char('p'),
+        KeyModifiers::CONTROL,
+        false,
+        false
+    );
+    binding!(page_up, KeyCode::PageUp, KeyModifiers::NONE, false, true);
+    binding!(page_down, KeyCode::PageDown, KeyModifiers::NONE, true, true);
+    binding!(
+        ctrl_b,
+        KeyCode::Char('b'),
+        KeyModifiers::CONTROL,
+        false,
+        true
+    );
+    binding!(
+        ctrl_f,
+        KeyCode::Char('f'),
+        KeyModifiers::CONTROL,
+        true,
+        true
+    );
+    binding!(home, KeyCode::Home, KeyModifiers::NONE, false, true);
+    binding!(end, KeyCode::End, KeyModifiers::NONE, true, true);
+}

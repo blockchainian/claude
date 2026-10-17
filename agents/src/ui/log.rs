@@ -380,6 +380,34 @@ impl View {
         }
     }
 
+    pub(super) fn navigate_log(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Up | KeyCode::Down => self.move_log_selection(code == KeyCode::Down),
+            KeyCode::PageUp | KeyCode::PageDown => {
+                let height = self.viewport.borrow().log.height;
+                let steps = height
+                    .saturating_sub(u16::from(self.log_search.active()))
+                    .max(1);
+                for _ in 0..steps {
+                    self.move_log_selection(code == KeyCode::PageDown);
+                }
+            }
+            KeyCode::Home | KeyCode::End => {
+                let events: Vec<_> = self.shown_log_events().collect();
+                let event = if code == KeyCode::Home {
+                    events.last()
+                } else {
+                    events.first()
+                }
+                .map(|(_, event)| (*event).clone());
+                self.log_pending_older = 0;
+                self.select_log_event(event);
+                self.reveal_log_selection();
+            }
+            _ => unreachable!("list navigation action"),
+        }
+    }
+
     /// Moves one displayed event; App loads older rows when the cursor reaches the tail window.
     pub(super) fn move_log_selection(&mut self, older: bool) {
         self.pending_click = None;
