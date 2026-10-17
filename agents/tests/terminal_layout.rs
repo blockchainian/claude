@@ -1107,3 +1107,37 @@ fn terminal_details_section_positions() {
 
 #[path = "support/terminal_codex_exit.rs"]
 mod terminal_codex_exit;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_log_border_double_clicks() {
+    let (_directory, tmux, _transcript) = start_probe("log-borders");
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
+    tmux.wait_for(|capture| capture.lines().count() == 45 && capture.contains("对，必须"));
+    let capture = |name: &str| {
+        let text = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let path = std::env::temp_dir().join(format!("agents-log-border-{name}-200x45.txt"));
+        std::fs::write(&path, &text).unwrap();
+        println!("capture: {}", path.display());
+        text
+    };
+    let before = capture("before");
+    let rows: Vec<_> = before.lines().collect();
+    let bottom = rows
+        .iter()
+        .position(|line| line.contains("claude-opus") || line.contains("Opus"))
+        .unwrap();
+    let double_click = |row: usize| {
+        let sequence = format!("\x1b[<0;135;{row}M\x1b[<0;135;{row}m").repeat(2);
+        tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
+    };
+    double_click(bottom + 1);
+    tmux.wait_for(|capture| capture.contains("↑ Latest"));
+    let oldest = capture("oldest");
+    assert!(oldest.contains("Codex Manager 在一个 turn"), "{oldest}");
+    double_click(2);
+    tmux.wait_for(|capture| !capture.contains("↑ Latest") && capture.contains("对，必须"));
+    let latest = capture("latest");
+    assert!(latest.contains("对，必须"));
+    println!("{{\"log_border_double_clicks\":\"pass\",\"width\":200,\"height\":45}}");
+}

@@ -15,9 +15,9 @@
                      p          Pin/unpin
 
  View                Log
- tab/⇧tab  Filter    ⌃r  Search
- f3        Search
- g         Group
+ tab/⇧tab  Filter    ⌃r                      Search
+ f3        Search    2× click top border     Latest
+ g         Group     2× click bottom border  Earliest
 
 
 

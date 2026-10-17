@@ -5141,10 +5141,7 @@ mod log_help {
         let mut view = simple_fixture();
         key(&mut view, KeyCode::Char('?'));
         let rendered = screen(&view, 100, 24);
-        let headings = rendered
-            .lines()
-            .find(|line| line.contains("Navigate"))
-            .unwrap();
+        let headings = rendered.lines().find(|line| line.contains("View")).unwrap();
         assert!(headings.find("Log").unwrap() > headings.find("View").unwrap());
         assert_eq!(
             rendered,
@@ -8618,4 +8615,135 @@ mod log_navigation {
     );
     binding!(home, KeyCode::Home, KeyModifiers::NONE, false, true);
     binding!(end, KeyCode::End, KeyModifiers::NONE, true, true);
+}
+
+#[test]
+fn log_border_double_clicks_select_both_ends_in_both_layouts() {
+    for width in [100, 149, 150, 200] {
+        let (mut view, now) = log_fixture();
+        log_screen(&view, width, 20, now);
+        let log = view.viewport.borrow().log;
+        let click = |view: &mut View, y| {
+            click_mouse(
+                view,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: log.x + log.width / 3,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            )
+        };
+        let newest = view.shown_log_events().last().unwrap().1.clone();
+        let oldest = view.shown_log_events().next().unwrap().1.clone();
+        assert_eq!(click(&mut view, log.bottom()), None);
+        assert_eq!(view.log_selected.as_ref(), Some(&newest));
+        assert_eq!(click(&mut view, log.bottom()), None);
+        assert_eq!(view.log_selected.as_ref(), Some(&oldest), "width {width}");
+        log_screen(&view, width, 20, now);
+        assert!(view.viewport.borrow().log_rows.contains(&0));
+        assert!(view.log_scroll() > 0);
+        assert!(!view.viewport.borrow().log_jump.is_empty());
+        click(&mut view, log.y - 1);
+        assert_eq!(view.log_selected.as_ref(), Some(&oldest));
+        click(&mut view, log.y - 1);
+        assert_eq!(view.log_selected.as_ref(), Some(&newest));
+        assert_eq!(view.log_scroll(), 0);
+        log_screen(&view, width, 20, now);
+        assert!(view.viewport.borrow().log_jump.is_empty());
+        // The existing jump remains the return path after jumping to the oldest.
+        click(&mut view, log.bottom());
+        click(&mut view, log.bottom());
+        log_screen(&view, width, 20, now);
+        let jump = view.viewport.borrow().log_jump;
+        click_mouse(
+            &mut view,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: jump.x,
+                row: jump.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(view.log_selected.as_ref(), Some(&newest));
+    }
+}
+
+#[test]
+fn log_border_fields_keep_click_actions_without_jumping() {
+    for width in [100, 200] {
+        for field in [Field::Model, Field::Effort] {
+            let (mut view, now) = log_fixture();
+            view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
+                id: "e772d00b".into(),
+                needs: None,
+            });
+            view.rows[view.selected].effort = Some("high".into());
+            view.rows[view.selected].process.as_mut().unwrap().label = Some("bg".into());
+            let provider = crate::providers::claude::ClaudeProvider::new(PathBuf::new());
+            view.set_input_choices(HashMap::from([(
+                ProviderId::Claude,
+                crate::providers::Provider::input_choices(&provider),
+            )]));
+            let selected = view.log[3].clone();
+            view.select_log_event(Some(selected.clone()));
+            log_screen(&view, width, 45, now);
+            let rect = view
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .find(|(_, candidate)| *candidate == field)
+                .unwrap()
+                .0;
+            let mouse = MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: rect.x,
+                row: rect.y,
+                modifiers: KeyModifiers::NONE,
+            };
+            click_mouse(&mut view, mouse);
+            assert_eq!(view.log_selected.as_ref(), Some(&selected));
+            click_mouse(&mut view, mouse);
+            assert_eq!(view.log_selected.as_ref(), Some(&selected));
+            assert!(view.picker.is_some());
+        }
+    }
+}
+
+#[test]
+fn log_border_help_entries_fit() {
+    let view = View::default();
+    for width in [40, 54, 58, 100, 200] {
+        let lines = view.center_help_lines(width);
+        assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
+        let text = lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("2× click top border"));
+        assert!(text.contains("Latest"));
+        assert!(text.contains("2× click bottom border"));
+        assert!(text.contains("Earliest"));
+    }
+}
+
+#[test]
+fn log_border_top_double_click_selects_latest_in_both_layouts() {
+    for width in [100, 149, 150, 200] {
+        let (mut view, now) = log_fixture();
+        view.select_log_event(Some(view.log[0].clone()));
+        log_screen(&view, width, 20, now);
+        let log = view.viewport.borrow().log;
+        let mouse = mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            log.x + log.width / 3,
+            log.y - 1,
+        );
+        click_mouse(&mut view, mouse);
+        click_mouse(&mut view, mouse);
+        assert_eq!(view.log_selected.as_ref(), view.log.last(), "width {width}");
+        assert_eq!(view.log_scroll(), 0);
+    }
 }

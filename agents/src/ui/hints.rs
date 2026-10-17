@@ -100,7 +100,14 @@ impl View {
                 "View",
                 &[("tab/⇧tab", "Filter"), ("f3", "Search"), ("g", "Group")],
             ),
-            group("Log", &[("⌃r", "Search")]),
+            group(
+                "Log",
+                &[
+                    ("⌃r", "Search"),
+                    ("2× click top border", "Latest"),
+                    ("2× click bottom border", "Earliest"),
+                ],
+            ),
         ];
         let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];
         for line in super::shortcut_help::group_lines(groups, width) {

@@ -272,6 +272,7 @@ impl View {
             viewport.field_targets.clear();
             viewport.details = Rect::default();
             viewport.log = Rect::default();
+            viewport.log_borders = [Rect::default(); 2];
             viewport.log_detail = Rect::default();
             viewport.log_detail_jump = Rect::default();
             viewport.details_links.clear();
@@ -390,6 +391,15 @@ impl View {
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
         if !layout.log.is_empty() {
+            self.viewport.borrow_mut().log_borders = [
+                Rect::new(
+                    layout.log.x,
+                    layout.log.y.saturating_sub(1),
+                    layout.log.width,
+                    1,
+                ),
+                Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
+            ];
             let jump_y = if area.width >= WIDE_LAYOUT_COLUMNS {
                 layout.log.bottom()
             } else {

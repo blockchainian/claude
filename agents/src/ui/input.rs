@@ -5,6 +5,10 @@ const WHEEL_ROWS: usize = 3;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
+    LogBorder {
+        row: u16,
+        latest: bool,
+    },
     Log {
         event: crate::log::Event,
     },
@@ -43,7 +47,7 @@ impl View {
         }
         let click = self.pending_click.take().expect("click is due");
         match click.target {
-            ClickTarget::Log { .. } => None,
+            ClickTarget::Log { .. } | ClickTarget::LogBorder { .. } => None,
             ClickTarget::Details {
                 session, source, ..
             } => {
@@ -296,6 +300,17 @@ impl View {
                 label,
             });
         }
+        if !viewport.log_jump.contains(position)
+            && let Some(border) = viewport
+                .log_borders
+                .iter()
+                .position(|rect| rect.contains(position))
+        {
+            return Some(ClickTarget::LogBorder {
+                row: position.y,
+                latest: border == 0,
+            });
+        }
         if viewport.log.contains(position)
             && let Some(&index) = viewport
                 .log_rows
@@ -430,6 +445,24 @@ impl View {
             && self.viewport.borrow().log_detail_jump.contains(position)
         {
             self.viewport.borrow_mut().log_detail_scroll = 0;
+            return None;
+        }
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left)
+            && let Some(target @ ClickTarget::LogBorder { latest, .. }) =
+                self.click_target_at(position)
+        {
+            if self.defer_click(target) {
+                if latest {
+                    self.show_newest_log();
+                } else {
+                    let oldest = self
+                        .shown_log_events()
+                        .next()
+                        .map(|(_, event)| event.clone());
+                    self.log_background_return = None;
+                    self.select_log_event(oldest);
+                }
+            }
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {

@@ -2,10 +2,10 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  Task shortcuts
 
- Navigate            Tasks                      View                Log
- ↑      Up           n          New             tab/⇧tab  Filter    ⌃r  Search
- ↓      Down         w          New worktree    f3        Search
- enter  Open         o          Resume          g         Group
+ Navigate            Tasks
+ ↑      Up           n          New
+ ↓      Down         w          New worktree
+ enter  Open         o          Resume
  pgup   Page up      f          Fork
  pgdn   Page down    r          Rename
  ⌃c     Quit         x          Stop
@@ -14,10 +14,10 @@
                      backspace  Delete
                      p          Pin/unpin
 
-
-
-
-
+ View                Log
+ tab/⇧tab  Filter    ⌃r                      Search
+ f3        Search    2× click top border     Latest
+ g         Group     2× click bottom border  Earliest
 
 
 

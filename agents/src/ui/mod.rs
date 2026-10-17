@@ -107,6 +107,7 @@ struct Viewport {
     log_unseen: usize,
     /// Where the last render drew the button that jumps back to the newest log row.
     log_jump: Rect,
+    log_borders: [Rect; 2],
     log_detail_jump: Rect,
     /// Index into the task log of each drawn log row, top down.
     log_rows: Vec<usize>,
