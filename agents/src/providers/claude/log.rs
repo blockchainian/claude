@@ -23,6 +23,17 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
         .find_map(|key| input_text(input, key).map(|text| (key, text)))
 }
 
+fn tool_title(name: &str, input: &serde_json::Value) -> String {
+    let title = crate::log::tool_title(name, input);
+    if name == "Skill"
+        && let Some(args) = input["args"].as_str().filter(|args| !args.is_empty())
+    {
+        format!("{title} {args}")
+    } else {
+        title
+    }
+}
+
 fn tool_detail(name: &str, input: &serde_json::Value) -> String {
     match name {
         "AskUserQuestion" => crate::log::question_texts(input).join(" · "),
@@ -677,7 +688,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     });
     ToolCall {
         id: String::new(),
-        title: crate::log::tool_title(name, input),
+        title: tool_title(name, input),
         name: name.to_owned(),
         input: sections,
         output,
@@ -937,8 +948,8 @@ impl Log {
             } else {
                 tool_label(name, reason)
             }
-        } else if name == "AskUserQuestion" {
-            crate::log::tool_title(name, input)
+        } else if matches!(name, "AskUserQuestion" | "Skill") {
+            tool_title(name, input)
         } else if let Some(path) = path {
             tool_label(name, path)
         } else {
@@ -1315,6 +1326,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn skill_rows_and_titles_use_name_and_optional_args() {
+        use std::io::Write;
+        let fixture = include_str!("../../../tests/fixtures/claude-skill-call.jsonl");
+        for args in [Some("Visual Studio Code"), Some(""), None] {
+            let mut records: Vec<serde_json::Value> = fixture
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let input = records[0]["message"]["content"][0]["input"]
+                .as_object_mut()
+                .unwrap();
+            match args {
+                Some(args) => {
+                    input.insert("args".to_owned(), args.into());
+                }
+                None => {
+                    input.remove("args");
+                }
+            }
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for record in records {
+                writeln!(file, "{record}").unwrap();
+            }
+            let events = super::tail(file.path(), 100).unwrap();
+            assert_eq!(events.len(), 1);
+            let expected = if args == Some("Visual Studio Code") {
+                "computer-use:capture-window Visual Studio Code"
+            } else {
+                "computer-use:capture-window"
+            };
+            assert_eq!(events[0].body, expected);
+            assert_eq!(events[0].calls[0].title, expected);
+            assert_eq!(events[0].calls[0].name, "Skill");
+        }
+    }
+
+    #[test]
     fn real_call_titles_and_ids_match_inputs() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-tool-calls.jsonl");
@@ -1326,7 +1374,7 @@ pub(crate) mod tests {
         let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
         assert_eq!(agent.title, "Plan agent 写工具详情计划");
         let skill = calls.iter().find(|call| call.name == "Skill").unwrap();
-        assert_eq!(skill.title, "secrets:secrets-manager");
+        assert_eq!(skill.title, "secrets:secrets-manager [scrubbed]");
         assert_eq!(skill.input, vec![super::text_section("args", "[scrubbed]")]);
         let records: Vec<serde_json::Value> =
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
