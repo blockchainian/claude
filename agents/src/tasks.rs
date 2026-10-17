@@ -145,11 +145,17 @@ pub fn create_worktree(
             OsStr::new(name),
         ],
     )?;
-    if root.as_os_str().is_empty() || !root.is_dir() {
-        return Err(io::Error::other(
-            "Worktree root is unset or is not a directory",
-        ));
+    if root.as_os_str().is_empty() {
+        return Err(io::Error::other("Worktree root is unset"));
     }
+    // Worktrees of one repository share a folder named after its primary checkout.
+    let primary = crate::repository::repository_identity(&repo.root)
+        .map_or_else(|| repo.root.clone(), |identity| identity.primary_root);
+    let repository = primary
+        .file_name()
+        .ok_or_else(|| io::Error::other("Repository has no name"))?;
+    let root = root.join(repository);
+    fs::create_dir_all(&root)?;
     let target = root.join(name);
     match fs::symlink_metadata(&target) {
         Ok(_) => {
@@ -176,7 +182,6 @@ pub fn create_worktree(
         .directory
         .strip_prefix(&repo.root)
         .map_err(io::Error::other)?;
-    let trunk = trunk_ref(&repo.root)?;
     git(
         &repo.root,
         &[
@@ -185,7 +190,7 @@ pub fn create_worktree(
             OsStr::new("-b"),
             OsStr::new(name),
             target.as_os_str(),
-            OsStr::new(&trunk),
+            OsStr::new("HEAD"),
         ],
     )?;
     let prepared = (|| {
@@ -483,18 +488,50 @@ mod tests {
         let r = repository(&d.path().join("sub")).unwrap();
         assert_eq!(r.branch, "main");
         assert_eq!(r.trunk, "main");
+        let repository = d.path().file_name().unwrap();
         let cwd = create_worktree(&r.directory, trees.path(), "task", &config).unwrap();
-        assert_eq!(cwd, trees.path().join("task/sub"));
+        assert_eq!(cwd, trees.path().join(repository).join("task/sub"));
         assert_eq!(git(&cwd, &["branch", "--show-current"]), "task");
         assert_eq!(fs::read_to_string(cwd.join("file")).unwrap(), "tracked");
         let v: serde_json::Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
         assert_eq!(
-            v["projects"][fs::canonicalize(trees.path().join("task"))
+            v["projects"][fs::canonicalize(trees.path().join(repository).join("task"))
                 .unwrap()
                 .to_str()
                 .unwrap()]["hasTrustDialogAccepted"],
             true
         );
+    }
+    #[test]
+    fn worktree_starts_from_the_checked_out_branch_and_names_its_repository() {
+        let d = repo();
+        git(d.path(), &["checkout", "-b", "feature"]);
+        fs::write(d.path().join("sub/feature"), "feature").unwrap();
+        git(d.path(), &["add", "sub/feature"]);
+        git(
+            d.path(),
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-m",
+                "feature",
+            ],
+        );
+        let trees = tempfile::tempdir().unwrap();
+        let root = trees.path().join("missing/root");
+        let config = trees.path().join("claude.json");
+        let first = create_worktree(d.path(), &root, "task", &config).unwrap();
+        let repository = d.path().file_name().unwrap();
+        assert_eq!(first, root.join(repository).join("task"));
+        assert_eq!(
+            fs::read_to_string(first.join("sub/feature")).unwrap(),
+            "feature"
+        );
+        let second = create_worktree(&first, &root, "nested", &config).unwrap();
+        assert_eq!(second, root.join(repository).join("nested"));
     }
     #[test]
     fn origin_head_wins_and_master_is_supported() {
@@ -524,7 +561,7 @@ mod tests {
     fn rejects_invalid_name_and_collision_without_new_branch() {
         let d = repo();
         let t = tempfile::tempdir().unwrap();
-        fs::create_dir(t.path().join("taken")).unwrap();
+        fs::create_dir_all(t.path().join(d.path().file_name().unwrap()).join("taken")).unwrap();
         for name in ["bad name", "taken"] {
             assert!(create_worktree(d.path(), t.path(), name, &t.path().join("config")).is_err());
             assert!(
@@ -617,11 +654,12 @@ mod tests {
         fs::write(&config, "{broken").unwrap();
         let error = create_worktree(source.path(), trees.path(), "task", &config).unwrap_err();
         assert!(error.to_string().contains("worktree remains at"));
-        assert!(trees.path().join("task/.git").is_file());
-        assert_eq!(
-            git(&trees.path().join("task"), &["branch", "--show-current"]),
-            "task"
-        );
+        let target = trees
+            .path()
+            .join(source.path().file_name().unwrap())
+            .join("task");
+        assert!(target.join(".git").is_file());
+        assert_eq!(git(&target, &["branch", "--show-current"]), "task");
     }
     #[test]
     fn trust_decodes_escaped_path_and_inserts_only_missing_flag() {

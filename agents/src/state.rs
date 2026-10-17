@@ -41,22 +41,14 @@ struct StoredPreferences {
     dark_theme: Option<PathBuf>,
 }
 
-fn worktree_root(
-    worktrees: Option<std::ffi::OsString>,
-    workspace: Option<std::ffi::OsString>,
-) -> Option<PathBuf> {
-    worktrees
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            workspace
-                .filter(|value| !value.is_empty())
-                .map(|value| PathBuf::from(value).join(".worktrees"))
-        })
+/// New worktrees go under `~/.agents/worktrees` unless `agents.json` names another root.
+fn worktree_root(home: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    home.filter(|value| !value.is_empty())
+        .map(|home| PathBuf::from(home).join(".agents/worktrees"))
 }
 
 fn default_worktree_root() -> Option<PathBuf> {
-    worktree_root(std::env::var_os("WORKTREES"), std::env::var_os("WORKSPACE"))
+    worktree_root(std::env::var_os("HOME"))
 }
 
 fn default_double_click_ms() -> u64 {
@@ -142,14 +134,11 @@ mod tests {
     #[test]
     fn worktree_root_defaults_and_round_trips() {
         assert_eq!(
-            worktree_root(Some("/tmp/trees".into()), Some("/tmp/workspace".into())),
-            Some(PathBuf::from("/tmp/trees"))
+            worktree_root(Some("/Users/probe".into())),
+            Some(PathBuf::from("/Users/probe/.agents/worktrees"))
         );
-        assert_eq!(
-            worktree_root(None, Some("/tmp/workspace".into())),
-            Some(PathBuf::from("/tmp/workspace/.worktrees"))
-        );
-        assert_eq!(worktree_root(None, None), None);
+        assert_eq!(worktree_root(Some("".into())), None);
+        assert_eq!(worktree_root(None), None);
         let directory = tempfile::tempdir().unwrap();
         let preferences = Preferences {
             worktree_root: Some(directory.path().join("trees")),

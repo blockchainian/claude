@@ -469,7 +469,8 @@ impl App {
         let count = if self.view.log_start_requested || self.view.log_search.active() {
             usize::MAX
         } else {
-            self.view.log_read_count(visible, self.log_oldest_offset > 0)
+            self.view
+                .log_read_count(visible, self.log_oldest_offset > 0)
         };
         let selected = self
             .view
@@ -824,9 +825,7 @@ impl App {
         let Some(root) = self.preferences.worktree_root.clone() else {
             self.view.draft_worktree_complete(
                 draft_id,
-                Err(io::Error::other(
-                    "Set worktree_root, WORKTREES, or WORKSPACE",
-                )),
+                Err(io::Error::other("Set worktree_root in agents.json")),
             );
             return;
         };
