@@ -186,25 +186,25 @@ fn raw_answers(ask: &Ask, answer: &Answer) -> io::Result<BTreeMap<String, String
     }
     let mut result = BTreeMap::new();
     for q in questions {
-        let values = &answer.answers.get(&q.id).ok_or_else(mismatch)?.answers;
-        if values.is_empty() || (!q.multi && values.len() != 1) {
+        let values = answer.answers.get(&q.id).ok_or_else(mismatch)?;
+        let count = values.answers.len() + usize::from(values.other.is_some());
+        if count == 0 || (!q.multi && count != 1) {
             return Err(mismatch());
         }
         let mut raw = Vec::new();
-        for value in values {
-            let text = if let Some(note) = value.strip_prefix("user_note: ") {
-                if !q.other || note.is_empty() {
-                    return Err(mismatch());
-                }
-                note
-            } else {
-                if !q.options.iter().any(|o| &o.label == value) {
-                    return Err(mismatch());
-                }
-                value
-            };
-            validate_text(text)?;
-            raw.push(text.to_owned());
+        for value in &values.answers {
+            if !q.options.iter().any(|o| &o.label == value) {
+                return Err(mismatch());
+            }
+            validate_text(value)?;
+            raw.push(value.to_owned());
+        }
+        if let Some(note) = &values.other {
+            if !q.other || note.is_empty() {
+                return Err(mismatch());
+            }
+            validate_text(note)?;
+            raw.push(note.to_owned());
         }
         result.insert(q.text.clone(), raw.join(", "));
     }
@@ -359,7 +359,9 @@ impl<'a> AnswerFlow<'a> {
         if parse_page(screen, &question_value(q))? != *q || checked(screen) != self.selected {
             return Err(mismatch());
         }
-        let choices = &self.answer.answers[&q.id].answers;
+        let answer = &self.answer.answers[&q.id];
+        let choices = &answer.answers;
+        let choice_count = choices.len() + usize::from(answer.other.is_some());
         if self.phase == Phase::OtherSubmitRow {
             if !body(screen)?.lines().any(|line| {
                 line.trim()
@@ -383,13 +385,10 @@ impl<'a> AnswerFlow<'a> {
         let other = q.options.len() + 1;
         let editing_other = self.phase == Phase::Select
             && focus == other
-            && choices
-                .get(self.choice)
-                .is_some_and(|choice| choice.starts_with("user_note: "));
+            && self.choice == choices.len()
+            && answer.other.is_some();
         if matches!(self.phase, Phase::OtherFocus | Phase::OtherPasted) || editing_other {
-            let note = choices[self.choice]
-                .strip_prefix("user_note: ")
-                .ok_or_else(mismatch)?;
+            let note = answer.other.as_deref().ok_or_else(mismatch)?;
             if focus != other {
                 if self.phase != Phase::OtherFocus || focus > other {
                     return Err(mismatch());
@@ -437,16 +436,15 @@ impl<'a> AnswerFlow<'a> {
         if !focused_option(screen, q) {
             return Err(mismatch());
         }
-        if self.choice == choices.len() {
+        if self.choice == choice_count {
             if !q.multi {
                 return Err(mismatch());
             }
             next.advance_page();
             return Ok((next, Delivery::Keys(vec![b'\t'])));
         }
-        let choice = &choices[self.choice];
-        let n = if choice.starts_with("user_note: ") {
-            if self.choice + 1 != choices.len() {
+        let n = if self.choice == choices.len() {
+            if answer.other.is_none() {
                 return Err(mismatch());
             }
             next.phase = Phase::OtherFocus;
@@ -455,7 +453,7 @@ impl<'a> AnswerFlow<'a> {
         } else {
             q.options
                 .iter()
-                .position(|o| &o.label == choice)
+                .position(|o| o.label == choices[self.choice])
                 .ok_or_else(mismatch)?
                 + 1
         };
@@ -624,7 +622,8 @@ mod tests {
             answers: BTreeMap::from([(
                 "Cold Other?".into(),
                 crate::ask::QuestionAnswer {
-                    answers: vec!["user_note: hey".into()],
+                    answers: Vec::new(),
+                    other: Some("hey".into()),
                 },
             )]),
         };
@@ -645,7 +644,8 @@ mod tests {
             answers: BTreeMap::from([(
                 "Probe single choice?".into(),
                 crate::ask::QuestionAnswer {
-                    answers: vec!["user_note: 嗨".into()],
+                    answers: Vec::new(),
+                    other: Some("嗨".into()),
                 },
             )]),
         };
@@ -756,7 +756,8 @@ mod tests {
             answers: BTreeMap::from([(
                 "Transport multi Other?".into(),
                 crate::ask::QuestionAnswer {
-                    answers: vec!["Red".into(), "user_note: custom multi note".into()],
+                    answers: vec!["Red".into()],
+                    other: Some("custom multi note".into()),
                 },
             )]),
         };
@@ -796,25 +797,25 @@ mod tests {
             (
                 "Single",
                 "Transport single?",
-                vec![vec!["Green"]],
+                vec![(vec!["Green"], None)],
                 keys(&[b"2"]),
             ),
             (
                 "Multi",
                 "Transport multi?",
-                vec![vec!["Blue", "Red"]],
+                vec![(vec!["Blue", "Red"], None)],
                 keys(&[b"3", b"1", b"\t", b"\r"]),
             ),
             (
                 "First",
                 "Transport first?",
-                vec![vec!["Green"], vec!["Green"]],
+                vec![(vec!["Green"], None), (vec!["Green"], None)],
                 keys(&[b"2", b"2", b"\r"]),
             ),
             (
                 "Other",
                 "Transport other?",
-                vec![vec!["user_note: custom transport note"]],
+                vec![(vec![], Some("custom transport note"))],
                 vec![
                     Delivery::Keys(b"4".to_vec()),
                     Delivery::Paste("custom transport note".into()),
@@ -824,7 +825,7 @@ mod tests {
             (
                 "MultiOther",
                 "Transport multi Other?",
-                vec![vec!["Red", "user_note: custom multi note"]],
+                vec![(vec!["Red"], Some("custom multi note"))],
                 vec![
                     Delivery::Keys(b"1".to_vec()),
                     Delivery::Keys(b"4".to_vec()),
@@ -842,11 +843,12 @@ mod tests {
                 answers: questions
                     .iter()
                     .zip(values)
-                    .map(|(q, answers)| {
+                    .map(|(q, (answers, other))| {
                         (
                             q.id.clone(),
                             crate::ask::QuestionAnswer {
                                 answers: answers.into_iter().map(str::to_owned).collect(),
+                                other: other.map(str::to_owned),
                             },
                         )
                     })

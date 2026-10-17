@@ -207,7 +207,8 @@ fn ask_live_other_focus_after_restart() {
         answers: BTreeMap::from([(
             "Cold Other?".into(),
             crate::ask::QuestionAnswer {
-                answers: vec!["user_note: hey".into()],
+                answers: Vec::new(),
+                other: Some("hey".into()),
             },
         )]),
     };
@@ -287,16 +288,19 @@ fn ask_live_single_multi_two_other() {
     let mut probe = Probe::new().unwrap();
     probe.start().unwrap();
     for (text, answers) in [
-        ("Transport single?", vec![vec!["Green"]]),
-        ("Transport multi?", vec![vec!["Blue", "Red"]]),
-        ("Transport first?", vec![vec!["Green"], vec!["Green"]]),
+        ("Transport single?", vec![(vec!["Green"], None)]),
+        ("Transport multi?", vec![(vec!["Blue", "Red"], None)]),
+        (
+            "Transport first?",
+            vec![(vec!["Green"], None), (vec!["Green"], None)],
+        ),
         (
             "Transport other?",
-            vec![vec!["user_note: custom transport note"]],
+            vec![(vec![], Some("custom transport note"))],
         ),
         (
             "Transport multi Other?",
-            vec![vec!["Red", "user_note: custom multi note"]],
+            vec![(vec!["Red"], Some("custom multi note"))],
         ),
     ] {
         let state = probe.waiting(text).unwrap();
@@ -346,7 +350,10 @@ fn ask_live_single_multi_two_other() {
             session,
             answers
                 .into_iter()
-                .map(|values| values.into_iter().map(str::to_owned).collect())
+                .map(|(values, other)| crate::ask::QuestionAnswer {
+                    answers: values.into_iter().map(str::to_owned).collect(),
+                    other: other.map(str::to_owned),
+                })
                 .collect(),
         );
         if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
