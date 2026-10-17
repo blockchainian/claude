@@ -6696,7 +6696,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         assert_eq!(fields_row.cells.first().unwrap().0.start, offset);
         for row in &rows {
             for x in region.area.x..region.area.right() {
-                if matches!(buf[(x, row.y)].symbol(), "⎤" | "⎥" | "⎦") {
+                if matches!(buf[(x, row.y)].symbol(), "┐" | "│" | "┘") {
                     assert!(
                         !row.cells
                             .iter()

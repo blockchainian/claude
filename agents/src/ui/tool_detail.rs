@@ -289,6 +289,12 @@ fn shell_part(source: String, prefix: usize) -> Part {
     Part::new(source, Body::Shell(commands))
 }
 
+const SHELL_BRACKET: [&str; 3] = [
+    ratatui::symbols::border::PLAIN.top_right,
+    ratatui::symbols::border::PLAIN.vertical_right,
+    ratatui::symbols::border::PLAIN.bottom_right,
+];
+
 fn shell_lines(
     source: &str,
     commands: &[super::shell_commands::Command],
@@ -333,11 +339,11 @@ fn shell_lines(
         }
         for row in run.clone() {
             let glyph = if row == run.start {
-                '⎤'
+                SHELL_BRACKET[0]
             } else if row + 1 == run.end {
-                '⎦'
+                SHELL_BRACKET[2]
             } else {
-                '⎥'
+                SHELL_BRACKET[1]
             };
             connectors[row].insert(column, glyph);
         }
@@ -378,7 +384,7 @@ fn shell_maps(
                 span.style
                     .add_modifier
                     .contains(ratatui::style::Modifier::DIM)
-                    && span.content.contains(['┐', '┘', '┤'])
+                    && SHELL_BRACKET.iter().any(|glyph| span.content.ends_with(glyph))
             }) {
                 line.spans.pop();
             }
@@ -1109,7 +1115,7 @@ mod tests {
             assert!(lines[row].to_string().starts_with(command));
             assert_eq!(maps[row].last().unwrap().0.end as usize, command.width());
         }
-        for (run, glyphs) in [(0..3, &['⎤', '⎥', '⎦'][..]), (3..5, &['⎤', '⎦'][..])] {
+        for (run, glyphs) in [(0..3, &['┐', '│', '┘'][..]), (3..5, &['┐', '┘'][..])] {
             let column = commands[run.clone()]
                 .iter()
                 .map(|command| command.width())
@@ -1125,7 +1131,7 @@ mod tests {
             lines
                 .iter()
                 .flat_map(|line| &line.spans)
-                .filter(|span| span.content.contains(['⎤', '⎥', '⎦']))
+                .filter(|span| span.content.contains(['┐', '│', '┘']))
                 .all(|span| span
                     .style
                     .add_modifier
@@ -1137,7 +1143,7 @@ mod tests {
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            ["a    ⎤", "bb   ⎥", "cccc ⎦"]
+            ["a    ┐", "bb   │", "cccc ┘"]
         );
         assert_eq!(command_part("a && b\n").source, "a && b\n");
     }
@@ -1201,7 +1207,7 @@ mod tests {
         );
         assert_eq!(
             texts(&parts, 80),
-            ["command: a ⎤", "bb         ⎦", "timeout: 1000"]
+            ["command: a ┐", "bb         ┘", "timeout: 1000"]
         );
         assert_eq!(
             command_part("echo 'broken && next").lines(
