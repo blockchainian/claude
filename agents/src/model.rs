@@ -213,12 +213,12 @@ pub enum Action {
     NewDraft {
         cwd: PathBuf,
     },
-    /// Creates a task, first in a new worktree on `branch` when one is given.
+    /// Creates a task, first moving it to the checkout of `branch` when one is chosen.
     CreateTask {
         draft_id: DraftId,
         provider: ProviderId,
         request: crate::tasks::NewTask,
-        branch: Option<String>,
+        branch: Option<crate::tasks::BranchChoice>,
     },
     /// Moves a new task into another repository.
     ChangeDraftDirectory {

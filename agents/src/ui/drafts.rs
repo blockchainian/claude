@@ -1,7 +1,6 @@
 use super::*;
 use crate::model::DraftId;
 use crate::providers::InputChoices;
-use crate::repository::{BrowseEntry, browse_entries};
 use std::io;
 
 pub(crate) struct DraftSetup {
@@ -17,12 +16,8 @@ pub(super) struct Draft {
     pub id: DraftId,
     pub setup: DraftSetup,
     pub input: prompt_box::PromptBox,
-    /// The branch, and worktree, to create for the task when its first prompt is sent.
-    pub new_branch: Option<String>,
-    /// The folder the details panel browses for the task's repository, and its rows.
-    pub browse_dir: PathBuf,
-    pub browse: Vec<BrowseEntry>,
-    pub browse_scroll: usize,
+    /// The branch the task runs on instead of the repository's checked-out one.
+    pub branch_choice: Option<crate::tasks::BranchChoice>,
     pub job: Option<String>,
     pub working: bool,
     pub error: Option<String>,
@@ -49,16 +44,14 @@ impl View {
             id,
             setup,
             input: prompt_box::PromptBox::default(),
-            new_branch: None,
-            browse: browse_entries(&self.startup_cwd),
-            browse_dir: self.startup_cwd.clone(),
-            browse_scroll: 0,
+            branch_choice: None,
             job: None,
             working: false,
             error: None,
         });
         self.status_filter = 0;
         self.select_draft(id);
+        self.open_repositories(self.startup_cwd.clone(), None);
         self.input_box.focused = true;
         id
     }
@@ -78,7 +71,7 @@ impl View {
         };
         draft.setup.cwd = cwd;
         draft.setup.branch = branch;
-        draft.new_branch = None;
+        draft.branch_choice = None;
     }
 
     pub(crate) fn draft_created(&mut self, id: DraftId, result: io::Result<String>) {
@@ -111,80 +104,6 @@ impl View {
         }
     }
 
-    /// Lists the browsed folder under its path; the selected draft's repository is highlighted.
-    pub(super) fn render_browser(&self, area: Rect, buf: &mut Buffer) {
-        let Some(draft) = self.selected_draft() else {
-            return;
-        };
-        render::line(
-            super::formatting::format_directory_display(&draft.browse_dir).dim(),
-            render::row(area, 0, 1),
-            buf,
-        );
-        let rows = area.height.saturating_sub(1);
-        for (offset, entry) in draft
-            .browse
-            .iter()
-            .skip(draft.browse_scroll)
-            .take(usize::from(rows))
-            .enumerate()
-        {
-            let rect = render::row(area, offset as u16 + 1, 1);
-            let name = |path: &PathBuf| {
-                path.file_name().map_or_else(
-                    || path.display().to_string(),
-                    |name| name.to_string_lossy().into_owned(),
-                )
-            };
-            let text = match entry {
-                BrowseEntry::Parent(_) => "..".dim(),
-                BrowseEntry::Folder(path) => Span::styled(name(path), style::time_style()),
-                BrowseEntry::Repository(path) => {
-                    if std::fs::canonicalize(path)
-                        .is_ok_and(|path| draft.setup.cwd.starts_with(path))
-                    {
-                        render::fill_list_row(rect, buf, style::selection_style());
-                        Span::styled(name(path), style::selection_style())
-                    } else {
-                        Span::raw(name(path))
-                    }
-                }
-            };
-            render::line(text, rect, buf);
-        }
-    }
-
-    /// Opens a clicked folder, or asks to move the draft into a clicked repository.
-    pub(super) fn browse_click(&mut self, row: u16) -> Option<Action> {
-        let id = self.selected_draft?;
-        let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
-        let index = usize::from(row.checked_sub(1)?) + draft.browse_scroll;
-        match draft.browse.get(index)?.clone() {
-            BrowseEntry::Parent(path) | BrowseEntry::Folder(path) => {
-                draft.browse = browse_entries(&path);
-                draft.browse_dir = path;
-                draft.browse_scroll = 0;
-                None
-            }
-            BrowseEntry::Repository(cwd) => {
-                Some(Action::ChangeDraftDirectory { draft_id: id, cwd })
-            }
-        }
-    }
-
-    pub(super) fn scroll_browser(&mut self, forward: bool) {
-        let Some(id) = self.selected_draft else {
-            return;
-        };
-        if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
-            draft.browse_scroll = if forward {
-                (draft.browse_scroll + 1).min(draft.browse.len().saturating_sub(1))
-            } else {
-                draft.browse_scroll.saturating_sub(1)
-            };
-        }
-    }
-
     pub(super) fn selected_draft(&self) -> Option<&Draft> {
         self.selected_draft
             .and_then(|id| self.drafts.iter().find(|draft| draft.id == id))
@@ -194,6 +113,7 @@ impl View {
     /// until the task's session arrives.
     pub(super) fn leave_draft(&mut self) {
         if let Some(id) = self.selected_draft.take() {
+            self.close_draft_selector(id);
             self.drafts
                 .retain(|draft| draft.id != id || draft.job.is_some());
             self.input_box = prompt_box::PromptBox::default();

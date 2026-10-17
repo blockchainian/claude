@@ -858,7 +858,7 @@ impl App {
         draft_id: DraftId,
         provider: ProviderId,
         request: crate::tasks::NewTask,
-        branch: String,
+        branch: crate::tasks::BranchChoice,
     ) {
         let Some(root) = self.preferences.worktree_root.clone() else {
             self.view.draft_worktree_created(
@@ -875,7 +875,7 @@ impl App {
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     crate::tasks::create_worktree(&cwd, &root, &branch, &config)
-                        .map(|cwd| (cwd, branch))
+                        .map(|cwd| (cwd, branch.name().to_owned()))
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
                 let _ = sender.send(Input::WorktreeCreated {

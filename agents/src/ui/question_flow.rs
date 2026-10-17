@@ -80,8 +80,7 @@ impl View {
     pub(super) fn question_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
         if self.help
             || self.confirm_dialog.is_some()
-            || self.picker.is_some()
-            || self.branch_editor.is_some()
+            || self.selector.is_some()
             || self.searching
             || self.rename_target.is_some()
             || self.log_search.editing

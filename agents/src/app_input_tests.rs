@@ -353,7 +353,7 @@ fn app_creates_worktree_with_the_task_request() {
             prompt: "probe".into(),
             images: Vec::new(),
         },
-        branch: Some("feature-path".into()),
+        branch: Some(crate::tasks::BranchChoice::New("feature-path".into())),
     }));
     let worktree = trees.join("repo/feature-path");
     // The worktree arrives with the request; handling it would start a real task.

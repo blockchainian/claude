@@ -21,7 +21,8 @@ pub(super) enum ClickTarget {
     Background(crate::model::BackgroundTask),
     Link(PathBuf),
     Heading(PathBuf),
-    Field(Field),
+    /// A row of the details panel's selector.
+    Choice(usize),
 }
 
 pub(super) struct PendingClick {
@@ -70,7 +71,7 @@ impl View {
             }
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
             ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
-            ClickTarget::Field(_) => None,
+            ClickTarget::Choice(index) => self.single_choice(index),
             ClickTarget::Background(_) => None,
         }
     }
@@ -95,12 +96,6 @@ impl View {
 
     fn right_click(&mut self) {
         self.pending_click = None;
-        if self.picker.take().is_some() {
-            return;
-        }
-        if self.branch_editor.take().is_some() {
-            return;
-        }
         if self.confirm_dialog.take().is_some() {
             return;
         }
@@ -295,12 +290,12 @@ impl View {
 
     fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
         let viewport = self.viewport.borrow();
-        if let Some((_, field)) = viewport
-            .field_targets
+        if let Some((_, index)) = viewport
+            .picker_rows
             .iter()
             .find(|(rect, _)| rect.contains(position))
         {
-            return Some(ClickTarget::Field(*field));
+            return Some(ClickTarget::Choice(*index));
         }
         if let Some(cwd) = self.heading_at(position) {
             return Some(ClickTarget::Heading(cwd));
@@ -370,7 +365,18 @@ impl View {
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
                 self.last_detail_click = None;
-                self.right_click();
+                if self.selector.is_some()
+                    && self
+                        .viewport
+                        .borrow()
+                        .details
+                        .contains((mouse.column, mouse.row).into())
+                {
+                    self.pending_click = None;
+                    self.close_selector();
+                } else {
+                    self.right_click();
+                }
             }
             return None;
         }
@@ -471,22 +477,25 @@ impl View {
         };
         let position = (mouse.column, mouse.row).into();
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-            if self.picker.is_some() {
-                let chosen = self
-                    .viewport
-                    .borrow()
-                    .picker_rows
-                    .iter()
-                    .find(|(rect, _)| rect.contains(position))
-                    .map(|(_, index)| *index);
-                return chosen.and_then(|index| self.apply_choice(index));
-            }
-            if self.branch_editor.is_some() {
+            let choice = self
+                .viewport
+                .borrow()
+                .picker_rows
+                .iter()
+                .find(|(rect, _)| rect.contains(position))
+                .map(|(_, index)| *index);
+            if let Some(index) = choice
+                && let Some(selector) = self.selector.as_mut()
+            {
+                if selector.editing() && Some(index) == selector.create_index() {
+                    return None;
+                }
+                selector.selected = index;
+                self.input_box.focused = false;
+                if self.defer_click(ClickTarget::Choice(index)) {
+                    return self.apply_choice(index);
+                }
                 return None;
-            }
-            let details = self.viewport.borrow().details;
-            if self.selected_draft.is_some() && details.contains(position) {
-                return self.browse_click(mouse.row - details.y);
             }
             let field = self
                 .viewport
@@ -496,9 +505,8 @@ impl View {
                 .find(|(rect, _)| rect.contains(position))
                 .map(|(_, field)| *field);
             if let Some(field) = field {
-                if self.defer_click(ClickTarget::Field(field)) {
-                    self.open_field(field);
-                }
+                self.pending_click = None;
+                self.open_field(field);
                 return None;
             }
             if let Some(cwd) = self.heading_at(position) {
@@ -743,10 +751,10 @@ impl View {
                     self.move_selection(forward);
                 } else if over_log && self.viewport.borrow().log.contains(position) {
                     self.move_log_selection(forward);
-                } else if over_details && self.selected_draft.is_some() {
-                    for _ in 0..WHEEL_ROWS {
-                        self.scroll_browser(forward);
-                    }
+                } else if over_details && let Some(selector) = self.selector.as_mut() {
+                    let code = if forward { KeyCode::Down } else { KeyCode::Up };
+                    selector.selected =
+                        super::navigation::step(selector.selected, selector.len(), 1, code);
                 } else if over_log || over_details {
                     for _ in 0..WHEEL_ROWS {
                         self.scroll_content_row(forward, over_log, mouse.row);
@@ -835,11 +843,8 @@ impl View {
             .iter()
             .position(|i| *i == self.selected)
             .unwrap_or(0);
-        let selected = visible[if forward {
-            (current + 1) % visible.len()
-        } else {
-            current.checked_sub(1).unwrap_or(visible.len() - 1)
-        }];
+        let code = if forward { KeyCode::Down } else { KeyCode::Up };
+        let selected = visible[super::navigation::step(current, visible.len(), 1, code)];
         self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {
@@ -903,7 +908,7 @@ impl View {
         {
             return None;
         }
-        if let Some(action) = self.control_key(key) {
+        if let Some(action) = self.selector_key(key) {
             return action;
         }
         if self.input_box.focused
@@ -937,7 +942,7 @@ impl View {
                         Some(Action::CreateTask {
                             draft_id: id,
                             provider: draft.setup.provider,
-                            branch: draft.new_branch.clone(),
+                            branch: draft.branch_choice.clone(),
                             request: crate::tasks::NewTask {
                                 cwd: draft.setup.cwd.clone(),
                                 model: draft.setup.model.clone(),

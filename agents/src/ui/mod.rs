@@ -5,7 +5,7 @@ mod draft_controls;
 #[cfg(test)]
 mod draft_flow_tests;
 mod drafts;
-use draft_controls::{BranchEditor, Field, Picker};
+use draft_controls::{Field, Selector};
 mod formatting;
 pub(crate) use drafts::DraftSetup;
 #[cfg(test)]
@@ -217,8 +217,7 @@ pub struct View {
     selected_draft: Option<crate::model::DraftId>,
     next_draft: crate::model::DraftId,
     input_choices: HashMap<ProviderId, crate::providers::InputChoices>,
-    picker: Option<Picker>,
-    branch_editor: Option<BranchEditor>,
+    selector: Option<Selector>,
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_search: log_search::LogSearch,
@@ -363,8 +362,7 @@ impl View {
             selected_draft: None,
             next_draft: 1,
             input_choices: HashMap::new(),
-            picker: None,
-            branch_editor: None,
+            selector: None,
             input_box: prompt_box::PromptBox::default(),
             prompt_history: Default::default(),
             questions: question_flow::Questions::default(),
@@ -419,8 +417,7 @@ impl View {
     pub(crate) fn pasting_prompt(&self) -> bool {
         self.confirm_dialog.is_none()
             && !self.help
-            && self.picker.is_none()
-            && self.branch_editor.is_none()
+            && !self.selector.as_ref().is_some_and(Selector::editing)
             && self.input_box.focused
             && !self.input_box.searching_history()
             && self.input_disabled().is_none()
@@ -433,15 +430,20 @@ impl View {
     }
 
     pub(crate) fn handle_paste(&mut self, text: &str) {
-        if self.confirm_dialog.is_some() || self.help || self.picker.is_some() {
+        if self.confirm_dialog.is_some() || self.help {
+            return;
+        }
+        if let Some(editor) = self.selector.as_mut().and_then(Selector::editor) {
+            editor.insert(text);
+            return;
+        }
+        if self.selector.is_some() && !self.input_box.focused {
             return;
         }
         if self.question_paste(text) {
             return;
         }
-        if let Some(editor) = &mut self.branch_editor {
-            editor.editor.insert(text);
-        } else if self.input_box.focused {
+        if self.input_box.focused {
             self.input_box.paste(text);
         } else if self.rename_target.is_some() {
             self.rename.insert(text);
@@ -863,6 +865,7 @@ impl View {
         if self.panels_task == selected {
             return;
         }
+        self.selector = None;
         self.text_selection.borrow_mut().take();
         let viewport = self.viewport.get_mut();
         self.input_box.focused = false;

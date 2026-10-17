@@ -129,14 +129,78 @@ pub fn repository(directory: &Path) -> io::Result<Repository> {
         trunk,
     })
 }
+/// The branch a new task runs on: one the repository has, or a new one from its checked-out commit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BranchChoice {
+    Existing(String),
+    New(String),
+}
+
+impl BranchChoice {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Existing(name) | Self::New(name) => name,
+        }
+    }
+}
+
+/// The repository's local branches, by name.
+pub fn local_branches(directory: &Path) -> io::Result<Vec<String>> {
+    use std::ffi::OsStr;
+    let output = git(
+        directory,
+        &[
+            OsStr::new("for-each-ref"),
+            OsStr::new("--format=%(refname:short)"),
+            OsStr::new("refs/heads"),
+        ],
+    )?;
+    let mut branches: Vec<_> = output.lines().map(str::to_owned).collect();
+    branches.sort();
+    Ok(branches)
+}
+
+/// The checkout, primary or linked, that has `branch` checked out.
+fn branch_checkout(root: &Path, branch: &str) -> io::Result<Option<PathBuf>> {
+    use std::ffi::OsStr;
+    let list = git(
+        root,
+        &[
+            OsStr::new("worktree"),
+            OsStr::new("list"),
+            OsStr::new("--porcelain"),
+        ],
+    )?;
+    let reference = format!("branch refs/heads/{branch}");
+    Ok(list.split("\n\n").find_map(|entry| {
+        let mut lines = entry.lines();
+        let path = lines.next()?.strip_prefix("worktree ")?;
+        lines
+            .any(|line| line == reference)
+            .then(|| PathBuf::from(path))
+    }))
+}
+
+/// The directory a new task on `choice` runs in: the checkout that already has the branch, or a
+/// new worktree under `root/<repository>/<branch>`, with `/` in the branch written as `+`.
 pub fn create_worktree(
     directory: &Path,
     root: &Path,
-    name: &str,
+    choice: &BranchChoice,
     config_path: &Path,
 ) -> io::Result<PathBuf> {
     use std::ffi::OsStr;
     let repo = repository(directory)?;
+    let relative = repo
+        .directory
+        .strip_prefix(&repo.root)
+        .map_err(io::Error::other)?;
+    let name = choice.name();
+    if let BranchChoice::Existing(branch) = choice
+        && let Some(checkout) = branch_checkout(&repo.root, branch)?
+    {
+        return Ok(checkout.join(relative));
+    }
     git(
         &repo.root,
         &[
@@ -156,7 +220,7 @@ pub fn create_worktree(
         .ok_or_else(|| io::Error::other("Repository has no name"))?;
     let root = root.join(repository);
     fs::create_dir_all(&root)?;
-    let target = root.join(name);
+    let target = root.join(name.replace('/', "+"));
     match fs::symlink_metadata(&target) {
         Ok(_) => {
             return Err(io::Error::new(
@@ -178,13 +242,14 @@ pub fn create_worktree(
         .open(&probe)?;
     drop(file);
     fs::remove_file(probe)?;
-    let relative = repo
-        .directory
-        .strip_prefix(&repo.root)
-        .map_err(io::Error::other)?;
-    git(
-        &repo.root,
-        &[
+    let add = match choice {
+        BranchChoice::Existing(_) => vec![
+            OsStr::new("worktree"),
+            OsStr::new("add"),
+            target.as_os_str(),
+            OsStr::new(name),
+        ],
+        BranchChoice::New(_) => vec![
             OsStr::new("worktree"),
             OsStr::new("add"),
             OsStr::new("-b"),
@@ -192,7 +257,8 @@ pub fn create_worktree(
             target.as_os_str(),
             OsStr::new("HEAD"),
         ],
-    )?;
+    };
+    git(&repo.root, &add)?;
     let prepared = (|| {
         copy_environment(&repo.root, &target)?;
         trust_directory(config_path, &target)?;
@@ -489,7 +555,7 @@ mod tests {
         assert_eq!(r.branch, "main");
         assert_eq!(r.trunk, "main");
         let repository = d.path().file_name().unwrap();
-        let cwd = create_worktree(&r.directory, trees.path(), "task", &config).unwrap();
+        let cwd = create_worktree(&r.directory, trees.path(), &new("task"), &config).unwrap();
         assert_eq!(cwd, trees.path().join(repository).join("task/sub"));
         assert_eq!(git(&cwd, &["branch", "--show-current"]), "task");
         assert_eq!(fs::read_to_string(cwd.join("file")).unwrap(), "tracked");
@@ -501,6 +567,42 @@ mod tests {
                 .unwrap()]["hasTrustDialogAccepted"],
             true
         );
+    }
+    fn new(name: &str) -> BranchChoice {
+        BranchChoice::New(name.into())
+    }
+    #[test]
+    fn existing_branches_reuse_their_worktree_or_get_one_and_slashes_become_plus() {
+        let d = repo();
+        let repository = d.path().file_name().unwrap();
+        git(d.path(), &["branch", "zeta"]);
+        git(d.path(), &["branch", "feature/old"]);
+        assert_eq!(
+            local_branches(d.path()).unwrap(),
+            ["feature/old", "main", "zeta"]
+        );
+        let trees = tempfile::tempdir().unwrap();
+        let root = trees.path();
+        let config = trees.path().join("claude.json");
+        let existing = |name: &str| BranchChoice::Existing(name.into());
+        let checkout = create_worktree(&d.path().join("sub"), root, &existing("main"), &config);
+        assert_eq!(
+            checkout.unwrap(),
+            fs::canonicalize(d.path()).unwrap().join("sub")
+        );
+        let old = create_worktree(d.path(), root, &existing("feature/old"), &config).unwrap();
+        assert_eq!(old, root.join(repository).join("feature+old"));
+        assert_eq!(git(&old, &["branch", "--show-current"]), "feature/old");
+        let again = create_worktree(d.path(), root, &existing("feature/old"), &config).unwrap();
+        assert_eq!(
+            fs::canonicalize(again).unwrap(),
+            fs::canonicalize(&old).unwrap()
+        );
+        let created = create_worktree(d.path(), root, &new("feature/x"), &config).unwrap();
+        assert_eq!(created, root.join(repository).join("feature+x"));
+        assert_eq!(git(&created, &["branch", "--show-current"]), "feature/x");
+        fs::create_dir_all(root.join(repository).join("taken+x")).unwrap();
+        assert!(create_worktree(d.path(), root, &new("taken/x"), &config).is_err());
     }
     #[test]
     fn worktree_starts_from_the_checked_out_branch_and_names_its_repository() {
@@ -523,14 +625,14 @@ mod tests {
         let trees = tempfile::tempdir().unwrap();
         let root = trees.path().join("missing/root");
         let config = trees.path().join("claude.json");
-        let first = create_worktree(d.path(), &root, "task", &config).unwrap();
+        let first = create_worktree(d.path(), &root, &new("task"), &config).unwrap();
         let repository = d.path().file_name().unwrap();
         assert_eq!(first, root.join(repository).join("task"));
         assert_eq!(
             fs::read_to_string(first.join("sub/feature")).unwrap(),
             "feature"
         );
-        let second = create_worktree(&first, &root, "nested", &config).unwrap();
+        let second = create_worktree(&first, &root, &new("nested"), &config).unwrap();
         assert_eq!(second, root.join(repository).join("nested"));
     }
     #[test]
@@ -563,7 +665,9 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         fs::create_dir_all(t.path().join(d.path().file_name().unwrap()).join("taken")).unwrap();
         for name in ["bad name", "taken"] {
-            assert!(create_worktree(d.path(), t.path(), name, &t.path().join("config")).is_err());
+            assert!(
+                create_worktree(d.path(), t.path(), &new(name), &t.path().join("config")).is_err()
+            );
             assert!(
                 !Command::new("git")
                     .args(["show-ref", "--verify", &format!("refs/heads/{name}")])
@@ -652,7 +756,8 @@ mod tests {
         let trees = tempfile::tempdir().unwrap();
         let config = trees.path().join("config");
         fs::write(&config, "{broken").unwrap();
-        let error = create_worktree(source.path(), trees.path(), "task", &config).unwrap_err();
+        let error =
+            create_worktree(source.path(), trees.path(), &new("task"), &config).unwrap_err();
         assert!(error.to_string().contains("worktree remains at"));
         let target = trees
             .path()

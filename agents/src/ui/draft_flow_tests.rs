@@ -165,7 +165,7 @@ fn prompt_model_label_does_not_become_a_metadata_picker_target() {
 }
 
 #[test]
-fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
+fn rendered_draft_model_click_opens_and_double_click_applies_provider_choice() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
     let area = Rect::new(0, 0, 180, 52);
@@ -180,28 +180,26 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
         .unwrap()
         .0;
     assert_eq!(buffer[(model.x, model.y)].symbol(), "D");
-    let (x, y) = (model.x, model.y);
-    assert_eq!(click(&mut view, x, y), None);
-    assert_eq!(click(&mut view, x, y), None);
-    assert!(view.picker.is_some());
+    assert_eq!(click(&mut view, model.x, model.y), None);
+    assert_eq!(view.selector.as_ref().unwrap().field(), Field::Model);
     view.render_at(area, &mut buffer, Utc::now());
-    let index = view
-        .picker
-        .as_ref()
-        .unwrap()
-        .values
-        .iter()
-        .position(|value| value == "claude-haiku-5-5")
-        .unwrap();
     let (rect, _) = view
         .viewport
         .borrow()
         .picker_rows
         .iter()
-        .find(|(_, row)| *row == index)
+        .find(|(rect, _)| {
+            (rect.x..rect.right())
+                .map(|x| buffer[(x, rect.y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                == "claude-haiku-5-5"
+        })
         .copied()
         .unwrap();
     assert_eq!(click(&mut view, rect.x + 2, rect.y), None);
+    assert_eq!(click(&mut view, rect.x + 2, rect.y), None);
+    assert!(view.selector.is_none());
     assert_eq!(
         view.selected_draft().unwrap().setup.model.as_deref(),
         Some("claude-haiku-5-5")
@@ -265,8 +263,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
         assert_eq!(text(effort.x, effort.y, effort.width), "high");
         for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
             assert_eq!(click(&mut view, rect.x, rect.y), None);
-            assert_eq!(click(&mut view, rect.x, rect.y), None);
-            assert_eq!(view.picker.as_ref().unwrap().field, field);
+            assert_eq!(view.selector.as_ref().unwrap().field(), field);
             key(&mut view, KeyCode::Esc);
         }
     }
@@ -360,8 +357,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                             .contains(ratatui::style::Modifier::DIM)
                     );
                     assert_eq!(click(&mut view, x, y), None);
-                    assert_eq!(click(&mut view, x, y), None);
-                    assert_eq!(view.picker.as_ref().unwrap().field, field);
+                    assert_eq!(view.selector.as_ref().unwrap().field(), field);
                     key(&mut view, KeyCode::Esc);
                 }
             }
@@ -434,36 +430,11 @@ fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
 }
 
 #[test]
-fn new_branch_is_typed_in_the_prompt_row_and_rides_with_the_first_prompt() {
+fn chosen_branch_rides_with_the_first_prompt() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
+    view.drafts[0].branch_choice = Some(crate::tasks::BranchChoice::New("feature/probe".into()));
     view.handle_paste("start the work");
-    view.open_field(Field::Branch);
-    view.handle_paste("feature/probe");
-    let area = Rect::new(0, 0, 160, 40);
-    let mut buffer = Buffer::empty(area);
-    view.render_at(area, &mut buffer, Utc::now());
-    let prompt = view.center_layout(area).prompt;
-    let row = (prompt.left()..prompt.right())
-        .map(|x| buffer[(x, prompt.y)].symbol())
-        .collect::<String>();
-    assert!(row.contains("New branch ❯ feature/probe"), "{row}");
-    let (x, y) = view.cursor_pos(area).unwrap();
-    assert_eq!(y, prompt.y);
-    assert!(x > prompt.x);
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert!(view.branch_editor.is_none());
-    assert_eq!(view.drafts[0].new_branch.as_deref(), Some("feature/probe"));
-    assert!(view.input_box.focused);
-    assert_eq!(view.input_box.editor.text(), "start the work");
-    view.open_field(Field::Branch);
-    assert_eq!(
-        view.branch_editor.as_ref().unwrap().editor.text(),
-        "feature/probe"
-    );
-    key(&mut view, KeyCode::Esc);
-    assert!(view.branch_editor.is_none());
-    assert_eq!(view.drafts.len(), 1);
     let action = key(&mut view, KeyCode::Enter);
     let Some(Action::CreateTask {
         draft_id, branch, ..
@@ -472,11 +443,14 @@ fn new_branch_is_typed_in_the_prompt_row_and_rides_with_the_first_prompt() {
         panic!("{action:?}");
     };
     assert_eq!(draft_id, id);
-    assert_eq!(branch.as_deref(), Some("feature/probe"));
+    assert_eq!(
+        branch,
+        Some(crate::tasks::BranchChoice::New("feature/probe".into()))
+    );
 }
 
 #[test]
-fn details_browser_walks_up_and_picks_a_sibling_repository() {
+fn details_browser_opens_folders_on_click_and_applies_a_repository_on_double_click() {
     let (directory, mut view) = fixture();
     let parent = std::fs::canonicalize(directory.path())
         .unwrap()
@@ -488,14 +462,14 @@ fn details_browser_walks_up_and_picks_a_sibling_repository() {
     }
     view.startup_cwd = parent.join("a");
     let id = view.add_draft(setup(&parent.join("a")));
+    assert!(view.input_box.focused);
     view.handle_paste("keep this prompt");
-    view.drafts[0].new_branch = Some("feature".into());
     let area = Rect::new(0, 0, 160, 40);
-    let click_text = |view: &mut View, text: &str| {
+    let row_with = |view: &mut View, text: &str| {
         let mut buffer = Buffer::empty(area);
         view.render_at(area, &mut buffer, Utc::now());
         let details = view.center_layout(area).details;
-        let y = (details.top()..details.bottom())
+        (details.top()..details.bottom())
             .find(|y| {
                 (details.left()..details.right())
                     .map(|x| buffer[(x, *y)].symbol())
@@ -503,33 +477,38 @@ fn details_browser_walks_up_and_picks_a_sibling_repository() {
                     .trim_end()
                     == text
             })
-            .unwrap_or_else(|| panic!("missing {text:?}"));
-        click(view, details.x, y)
+            .map(|y| (details.x, y))
+            .unwrap_or_else(|| panic!("missing {text:?}"))
     };
-    assert_eq!(click_text(&mut view, ".."), None);
-    let action = click_text(&mut view, "b");
+    let (x, y) = row_with(&mut view, "..");
+    assert_eq!(click(&mut view, x, y), None);
+    assert!(!view.input_box.focused);
+    view.flush_pending_click(std::time::Instant::now() + std::time::Duration::from_secs(1));
+    let (x, y) = row_with(&mut view, "b");
+    assert_eq!(click(&mut view, x, y), None);
+    let action = click(&mut view, x, y);
     let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = action else {
         panic!("{action:?}");
     };
-    assert_eq!(draft_id, id);
-    assert_eq!(cwd, parent.join("b"));
+    assert_eq!((draft_id, &cwd), (id, &parent.join("b")));
+    assert!(view.selector.is_none());
+    assert!(view.input_box.focused);
     view.draft_directory_changed(id, cwd, "work".into());
+    assert_eq!(view.input_box.editor.text(), "keep this prompt");
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
-    let text = buffer
-        .content
+    let folder = view
+        .viewport
+        .borrow()
+        .field_targets
         .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(text.contains("╴feature "), "{text}");
-    assert!(text.contains(" b╶"), "{text}");
-    assert_eq!(view.input_box.editor.text(), "keep this prompt");
-    view.drafts[0].new_branch = None;
-    view.render_at(area, &mut buffer, Utc::now());
-    let text = buffer
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(text.contains("╴work "), "{text}");
+        .find(|(_, field)| *field == Field::Directory)
+        .unwrap()
+        .0;
+    assert_eq!(buffer[(folder.x, folder.y)].symbol(), "b");
+    assert!(view.viewport.borrow().details_links.is_empty());
+    assert_eq!(click(&mut view, folder.x, folder.y), None);
+    let selector = view.selector.as_ref().unwrap();
+    assert_eq!(selector.field(), Field::Directory);
+    assert_eq!(selector.selected, 2);
 }

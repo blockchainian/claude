@@ -1,3 +1,4 @@
+use super::draft_controls::{NEW_BRANCH_LABEL, SelectorKind};
 use super::formatting::{
     format_duration, format_relative_time, format_session_duration, tail_lines,
 };
@@ -61,7 +62,6 @@ pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
 }
 
 pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
-const NEW_BRANCH_LABEL: &str = "New branch";
 
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
@@ -225,16 +225,22 @@ impl View {
         {
             return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
         }
-        if let Some(editor) = &self.branch_editor {
-            let rect = row(
-                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
-                0,
-                1,
-            );
+        if let Some(selector) = &self.selector
+            && let SelectorKind::Branch {
+                editor: Some(editor),
+                ..
+            } = &selector.kind
+            && let Some((rect, _)) = self
+                .viewport
+                .borrow()
+                .picker_rows
+                .iter()
+                .find(|(_, index)| Some(*index) == selector.create_index())
+        {
             let (_, caret) = input_row(
-                &format!("{NEW_BRANCH_LABEL} {PROMPT_MARKER} "),
-                &editor.editor,
-                rect,
+                &format!("  {NEW_BRANCH_LABEL} {PROMPT_MARKER} "),
+                editor,
+                *rect,
             );
             return Some((rect.x + caret, rect.y));
         }
@@ -302,16 +308,6 @@ impl View {
         self.viewport.borrow_mut().prompt = layout.prompt;
         if let Some(question) = self.active_question() {
             question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
-        } else if let Some(editor) = &self.branch_editor {
-            // The new branch's name is typed where the prompt goes; the prompt waits unchanged.
-            let prompt = layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0));
-            Clear.render(prompt, buf);
-            render_input_row(
-                &format!("{NEW_BRANCH_LABEL} {PROMPT_MARKER} "),
-                &editor.editor,
-                row(prompt, 0, 1),
-                buf,
-            );
         } else {
             self.input_box.render(
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
@@ -664,8 +660,9 @@ impl View {
                 .as_ref()
                 .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id))),
             (None, Some(draft)) => draft
-                .new_branch
-                .clone()
+                .branch_choice
+                .as_ref()
+                .map(|choice| choice.name().to_owned())
                 .or_else(|| (!draft.setup.branch.is_empty()).then(|| draft.setup.branch.clone()))
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
@@ -678,15 +675,18 @@ impl View {
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();
-        if let Some(area) = folder_area {
-            viewport.details_links.push((area, cwd.clone()));
-        }
         let Some(session) = session else {
-            if let Some(area) = left_area {
-                viewport.field_targets.push((area, Field::Branch));
+            // A new task's folder is still a choice, so it opens the repository browser, not the folder.
+            for (area, field) in [(left_area, Field::Branch), (folder_area, Field::Directory)] {
+                if let Some(area) = area {
+                    viewport.field_targets.push((area, field));
+                }
             }
             return;
         };
+        if let Some(area) = folder_area {
+            viewport.details_links.push((area, cwd.clone()));
+        }
         if let (Some(area), Some(pr)) = (left_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
@@ -755,7 +755,6 @@ impl View {
         }
         if let Some(draft) = self.selected_draft() {
             self.viewport.borrow_mut().details = area;
-            self.render_browser(area, buf);
             if let Some(error) = &draft.error {
                 line(
                     error.clone().red(),

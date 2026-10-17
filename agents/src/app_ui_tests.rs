@@ -452,29 +452,28 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
     let buffer = draw(&mut app, 180);
     let ((x, y), _) = row_ends(&buffer, "Default");
     click(&mut app, x, y);
-    click(&mut app, x, y);
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "claude-haiku-5-5");
+    click(&mut app, x, y);
     click(&mut app, x, y);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("╴claude-haiku-5-5 "), "{rendered}");
     let buffer = draw(&mut app, 180);
     let (_, (x, y)) = row_ends(&buffer, "Default");
     click(&mut app, x, y);
-    click(&mut app, x, y);
-    let picker = lines(&draw(&mut app, 180)).join("\n");
-    assert!(picker.contains("high"), "{picker}");
+    let selector = lines(&draw(&mut app, 180)).join("\n");
+    assert!(selector.contains("xhigh"), "{selector}");
     app.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Char('c'),
         KeyModifiers::CONTROL,
     )));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("╴claude-haiku-5-5 "), "{rendered}");
-    assert!(!rendered.contains("❯ high"), "{rendered}");
+    assert!(!rendered.contains("xhigh"), "{rendered}");
 }
 
 #[test]
-fn rendered_branch_editor_accepts_paste_and_escape_cancels_without_worktree() {
+fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() {
     let (directory, mut app) = fixture();
     let repository = directory.path().join("repository");
     std::fs::create_dir(&repository).unwrap();
@@ -508,17 +507,23 @@ fn rendered_branch_editor_accepts_paste_and_escape_cancels_without_worktree() {
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "╴main ");
     click(&mut app, x + 1, y);
-    click(&mut app, x + 1, y);
+    let buffer = draw(&mut app, 180);
+    let (x, y) = position(&buffer, "Create new branch");
+    click(&mut app, x, y);
+    assert!(
+        app.view
+            .flush_pending_click(Instant::now() + Duration::from_secs(1))
+            .is_none()
+    );
+    draw(&mut app, 180);
     app.handle_event(Event::Paste("feature/paste-route-proof".into()));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("feature/paste-route-proof"), "{rendered}");
+    // The details column scrolls the name to keep its end and the caret in view.
+    assert!(rendered.contains("/paste-route-proof"), "{rendered}");
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("╴main "), "{rendered}");
-    assert!(
-        !rendered.contains("feature/paste-route-proof"),
-        "{rendered}"
-    );
+    assert!(!rendered.contains("paste-route-proof"), "{rendered}");
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repository)

@@ -3917,14 +3917,15 @@ fn list_row_highlights_include_column_padding() {
                     view.selected = usize::MAX;
                 }
                 "picker" => {
-                    view.picker = Some(super::draft_controls::Picker {
-                        field: Field::Model,
-                        target: super::draft_controls::ControlTarget::Session(
-                            view.rows[0].id.clone(),
-                        ),
-                        values: vec!["sonnet".into(), "haiku".into()],
-                        selected: 0,
-                    });
+                    view.selector = Some(super::draft_controls::Selector::new(
+                        super::draft_controls::SelectorKind::Model {
+                            target: super::draft_controls::ControlTarget::Session(
+                                view.rows[0].id.clone(),
+                            ),
+                            values: vec!["claude-sonnet-5-5".into(), "claude-haiku-5-5".into()],
+                        },
+                        0,
+                    ));
                 }
                 _ => {}
             }
@@ -3941,7 +3942,7 @@ fn list_row_highlights_include_column_padding() {
             };
             let marker_x = content.x;
             if kind == "picker" {
-                assert_eq!(buf[(marker_x, y)].symbol(), "❯");
+                assert_eq!(buf[(marker_x, y)].symbol(), "c");
             } else {
                 assert!(!(content.x..content.right()).any(|x| buf[(x, y)].symbol() == "❯"));
             }
@@ -9096,7 +9097,7 @@ fn log_border_fields_keep_click_actions_without_jumping() {
             assert_eq!(view.visible_log_event(), Some(&selected));
             click_mouse(&mut view, mouse);
             assert_eq!(view.visible_log_event(), Some(&selected));
-            assert!(view.picker.is_some());
+            assert!(view.selector.is_some());
         }
     }
 }

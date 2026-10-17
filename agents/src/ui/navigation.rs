@@ -30,6 +30,68 @@ pub(super) fn list_navigation(key: KeyEvent) -> Option<KeyCode> {
     }
 }
 
+/// The choice a list navigation key moves to among `len` choices: up and down wrap around.
+pub(super) fn step(selected: usize, len: usize, page: usize, code: KeyCode) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    match code {
+        KeyCode::Up => (selected + len - 1) % len,
+        KeyCode::Down => (selected + 1) % len,
+        KeyCode::PageUp => selected.saturating_sub(page.max(1)),
+        KeyCode::PageDown => (selected + page.max(1)).min(len - 1),
+        KeyCode::Home => 0,
+        KeyCode::End => len - 1,
+        _ => selected,
+    }
+}
+
+/// One row of a choice list: plain text, or the choice it shows.
+pub(super) enum ListRow {
+    Text(Line<'static>),
+    Choice(usize, Line<'static>),
+}
+
+/// Draws `rows` from `scroll`, moved so the selected choice stays visible, highlighting it like
+/// the task list's cursor row; returns each drawn choice's row.
+pub(super) fn render_list(
+    rows: &[ListRow],
+    selected: usize,
+    scroll: &std::cell::Cell<usize>,
+    area: Rect,
+    buf: &mut Buffer,
+) -> Vec<(Rect, usize)> {
+    let height = usize::from(area.height);
+    let position = rows
+        .iter()
+        .position(|row| matches!(row, ListRow::Choice(index, _) if *index == selected))
+        .unwrap_or_default();
+    let mut start = scroll.get().min(rows.len().saturating_sub(height));
+    if position < start {
+        start = position;
+    } else if position >= start + height {
+        start = position + 1 - height;
+    }
+    scroll.set(start);
+    let mut drawn = Vec::new();
+    for (offset, row) in rows.iter().skip(start).take(height).enumerate() {
+        let rect = render::row(area, offset as u16, 1);
+        match row {
+            ListRow::Text(text) => render::line(text.clone(), rect, buf),
+            ListRow::Choice(index, text) => {
+                let mut text = text.clone();
+                if *index == selected {
+                    render::fill_list_row(rect, buf, style::cursor_style());
+                    text = text.patch_style(style::cursor_style());
+                }
+                render::line(text, rect, buf);
+                drawn.push((rect, *index));
+            }
+        }
+    }
+    drawn
+}
+
 pub(super) enum CenterRow {
     Group(usize),
     Task(usize),
