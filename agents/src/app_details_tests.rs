@@ -79,12 +79,12 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
             let buffer = terminal.backend().buffer();
             let status_y = position(buffer, "›").1 - 1;
             let separators: Vec<_> = (0..width)
-                .filter(|&x| cell_text(buffer, x, 3) == "│")
+                .filter(|&x| cell_text(buffer, x, 2) == "│")
                 .collect();
             let left = separators[0] + 2;
             if separators[0] - 2 >= 56 {
                 let updated_end = (1..separators[0])
-                    .rfind(|&x| cell_text(buffer, x, 4) != " ")
+                    .rfind(|&x| cell_text(buffer, x, 3) != " ")
                     .unwrap()
                     + 1;
                 assert_eq!(updated_end, separators[0] - 1);
@@ -111,8 +111,8 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
                 assert!(actual.ends_with(value), "{width}: {actual:?}");
                 assert!(!actual.contains("messages"));
             }
-            let folder_x = left + 1;
-            let pr_x = right - if width >= 150 { 4 } else { 5 };
+            let pr_x = left;
+            let folder_x = right - if width >= 150 { 7 } else { 8 };
             assert_eq!(
                 row_text(buffer, status_y, folder_x, folder_x + 7),
                 "project"
@@ -124,7 +124,7 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
                     .contains(Modifier::DIM)
             );
             assert!(buffer[(pr_x, status_y)].symbol().contains("\x1b]8;;"));
-            let rendered = (3..status_y)
+            let rendered = (2..status_y)
                 .map(|y| row_text(buffer, y, left, right))
                 .collect::<Vec<_>>();
             assert!(
@@ -169,7 +169,7 @@ fn app_details_without_pr_has_only_folder_link_and_no_branch() {
         let buffer = terminal.backend().buffer();
         let y = position(buffer, "›").1 - 1;
         let separators: Vec<_> = (0..width)
-            .filter(|&x| cell_text(buffer, x, 3) == "│")
+            .filter(|&x| cell_text(buffer, x, 2) == "│")
             .collect();
         let left = separators[0] + 2;
         let end = if width >= 150 {
@@ -180,7 +180,7 @@ fn app_details_without_pr_has_only_folder_link_and_no_branch() {
         let rule = row_text(buffer, y, left, end);
         assert!(!rule.contains("#13"));
         assert!(!rule.contains("分支"));
-        for x in end.saturating_sub(5)..end {
+        for x in left..left + 5 {
             assert_eq!(
                 click_link(
                     &mut app,

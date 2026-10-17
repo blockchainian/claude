@@ -103,7 +103,7 @@ fn task_log_cache_rereads_when_event_count_changes() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
-    for (height, count) in [(24, 5), (40, 11), (60, 17), (19, 0), (24, 5)] {
+    for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 0), (24, 6)] {
         app.refresh_log(
             app.view
                 .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
@@ -158,7 +158,7 @@ fn transcript_copies(payload: &str, copies: usize, first: usize) -> String {
 }
 
 fn log_detail(app: &App) -> String {
-    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
     let rule = (0..area.height)
@@ -181,13 +181,13 @@ fn log_detail(app: &App) -> String {
 }
 
 pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
-    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
     app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
         kind,
         column: 2,
-        row: 14,
+        row: 13,
         modifiers: KeyModifiers::NONE,
     }));
 }
@@ -199,14 +199,14 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let payload = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
     app.refresh_log(8);
-    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     let wheel = || {
         Input::Terminal(Ok(Event::Mouse(crossterm::event::MouseEvent {
             kind: crossterm::event::MouseEventKind::ScrollDown,
             column: 2,
-            row: 14,
+            row: 13,
             modifiers: KeyModifiers::NONE,
         })))
     };
@@ -318,7 +318,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     app.refresh_log(1);
     let visible = app
         .view
-        .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 24));
+        .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23));
     assert_eq!(app.view.log_scroll(), 20 - visible);
     let detail = log_detail(&app);
     assert!(detail.contains("Transcript copy 0"), "{detail}");

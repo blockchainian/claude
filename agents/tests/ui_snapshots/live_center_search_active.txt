@@ -1,6 +1,5 @@
- Agent command center  Group: Project  g
   Active 1                                                                  Inactive 0
- ───────────────────────────────────────────┬────────────── Task to find ──────────────
+────────────────────────────────────────────┬────────────── Task to find ───────────────
  Search › find                              │                  Prompt
                 /tmp/project                │ Task to find
  ○ Task to find                 Ready       │
@@ -11,6 +10,7 @@
                                             │
                                             │
                                             │
-                                            │─ project ─────── Ready ──────────────────
+                                            │
+                                            ├───────────────── Ready ───────── project ─
  Task to find ›
  esc back  enter open

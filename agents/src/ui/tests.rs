@@ -1370,7 +1370,7 @@ fn live_center_search_active() {
         screen(&view, 88, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
     );
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 3)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 2)));
 }
 #[test]
 fn show_more_is_only_listed_on_inactive() {
@@ -1602,7 +1602,7 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
     assert_eq!(
         rendered
             .lines()
-            .nth(3)
+            .nth(2)
             .unwrap()
             .split('│')
             .next()
@@ -1614,7 +1614,7 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
     // The reference loads ten rows. Twelve rows change only counts and append Task 2 / Task 1.
     for (actual, expected) in rendered
         .lines()
-        .skip(4)
+        .skip(3)
         .take(10)
         .zip(expected.lines().skip(4).take(10))
     {
@@ -1736,7 +1736,7 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::Home);
     screen(&view, 110, 18);
     key(&mut view, KeyCode::PageDown);
-    assert_eq!(view.selected_id(), Some(&session_key("10")));
+    assert_eq!(view.selected_id(), Some(&session_key("11")));
     key(&mut view, KeyCode::PageUp);
     assert_eq!(view.selected_id(), Some(&session_key("0")));
     for _ in 0..40 {
@@ -1860,7 +1860,7 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     let notice_row = view.center_layout(Rect::new(0, 0, 80, 12)).list.bottom() - 1;
     assert_eq!(
         lines[usize::from(notice_row)]
-            .split('│')
+            .split(['│', '├'])
             .next()
             .unwrap()
             .trim_end(),
@@ -1919,7 +1919,7 @@ fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     assert!(screen(&view, 88, 16).contains("Rename › Current task"));
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 3)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 2)));
     for c in " updated  ".chars() {
         key(&mut view, KeyCode::Char(c));
     }
@@ -2014,14 +2014,14 @@ fn live_center_rename_active() {
     let area = Rect::new(0, 0, 88, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
-    assert_eq!(buf[(2, 3)].fg, Color::Cyan);
+    assert_eq!(buf[(2, 2)].fg, Color::Cyan);
     assert!(
-        buf[(2, 3)]
+        buf[(2, 2)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert_eq!(
-        buf[(view.center_layout(area).search.right() - 1, 3)].style(),
+        buf[(view.center_layout(area).search.right() - 1, 2)].style(),
         Style::default()
             .fg(Color::Reset)
             .bg(Color::Reset)
@@ -2291,7 +2291,7 @@ fn details_folder_and_pr_use_rule_styles_and_keep_links() {
             .unwrap();
         assert_eq!(folder.y, y);
         assert_eq!(pr.y, y);
-        assert!(folder.right() < pr.x);
+        assert!(pr.right() < folder.x);
         for (offset, symbol) in "project".chars().enumerate() {
             let cell = &buf[(folder.x + offset as u16, y)];
             assert_eq!(cell.symbol(), symbol.to_string());
@@ -2370,9 +2370,9 @@ fn log_model_and_effort_use_dim_style_and_picker_targets() {
                                 layout.log.x - 2
                             } else {
                                 area.x
-                            }) + 3
+                            }) + 2
                         } else {
-                            area.right() - 3 - rect.width
+                            area.right() - 2 - rect.width
                         }
                     );
                     for (offset, symbol) in text.chars().enumerate() {
@@ -2782,7 +2782,7 @@ mod details_header {
     fn rule_at_width(view: &View, now: chrono::DateTime<Utc>, width: u16) -> (Buffer, Rect) {
         let area = Rect::new(0, 0, width, 25);
         let layout = view.center_layout(area);
-        let y = layout.header.y + 2;
+        let y = layout.header.y + 1;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         (buf, Rect::new(layout.details.x, y, layout.details.width, 1))
@@ -2839,7 +2839,7 @@ mod details_header {
                             1,
                         );
                         let header = label(&buf, rule);
-                        assert!(label(&buf, bottom).ends_with("Working"));
+                        assert!(label(&buf, bottom).contains("Working"));
                         assert!(header.contains("Fix login bug"));
                         assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
@@ -2977,8 +2977,10 @@ mod details_header {
                 let layout = view.center_layout(buf.area);
                 let bottom = view.viewport.borrow().details.bottom();
                 let expected = " Task log example ";
-                // The title centers on the whole segment, not the space left of the time.
-                let start = top.x + (top.width - expected.width() as u16) / 2;
+                // The title centers on the whole segment between the separator's joint and the
+                // log's joint or the screen's edge, not the space left of the time.
+                let segment = top.width + if width >= 150 { 4 } else { 3 };
+                let start = top.x + (segment - expected.width() as u16) / 2 - 2;
                 for (offset, symbol) in expected.chars().enumerate() {
                     assert_eq!(
                         buf[(start + offset as u16, top.y)].symbol(),
@@ -2986,8 +2988,10 @@ mod details_header {
                     );
                 }
                 assert!((top.x..start).all(|x| buf[(x, top.y)].symbol() == "─"));
+                // The time ends a space before the log's joint or the screen's edge.
+                let time_end = top.right() - u16::from(width < 150);
                 assert!(
-                    (start + expected.width() as u16..top.right() - " 3h 12m".len() as u16)
+                    (start + expected.width() as u16..time_end - " 3h 12m ".len() as u16)
                         .all(|x| buf[(x, top.y)].symbol() == "─")
                 );
                 let bottom_text = (top.x..top.right())
@@ -3003,7 +3007,7 @@ mod details_header {
                     " Working "
                 );
                 assert!(bottom_text.contains("project"));
-                for x in top.right() - 6..top.right() {
+                for x in time_end - 6..time_end {
                     let cell = &buf[(x, top.y)];
                     assert!(cell.modifier.contains(Modifier::DIM));
                     assert!(!cell.modifier.contains(Modifier::BOLD));
@@ -3044,19 +3048,20 @@ mod details_header {
             let top_text = (top.x..top.right())
                 .map(|x| buf[(x, top.y)].symbol())
                 .collect::<String>();
-            // The centered title keeps elapsed's width clear on both sides, plus a
-            // title cell, two spaces and two rule cells.
-            let elapsed_width = " 3h 12m".len() as u16;
-            let reserved = if width >= 2 * elapsed_width + 5 {
-                assert!(top_text.ends_with(" 3h 12m"), "width {width}: {top_text}");
+            // The centered title keeps elapsed's width and its spaces clear on both sides, plus
+            // a title cell, two spaces and two rule cells.
+            let elapsed_width = " 3h 12m ".len() as u16;
+            let reserved = if width + 3 >= 2 * elapsed_width + 7 {
+                assert!(top_text.ends_with(" 3h 12m "), "width {width}: {top_text}");
                 2 * elapsed_width
             } else {
                 assert!(!top_text.contains("3h 12m"), "width {width}: {top_text}");
                 0
             };
-            let title_width = width;
-            if title_width >= reserved + 5 {
-                let available = usize::from(title_width - reserved - 4);
+            // The rule runs from the separator's joint to the screen's edge or the log's joint,
+            // a cell beyond the details panel on each side.
+            let available = usize::from(width + 3).saturating_sub(6 + usize::from(reserved));
+            if available >= 1 {
                 let title = "Task log example";
                 let expected = if title.len() > available {
                     format!("{}…", &title[..available - 1])
@@ -3064,7 +3069,7 @@ mod details_header {
                     title.to_owned()
                 };
                 let expected = format!(" {expected} ");
-                let start = (usize::from(title_width) - expected.chars().count()) / 2;
+                let start = (usize::from(width) + 3 - expected.chars().count()) / 2 - 2;
                 let chars: Vec<_> = top_text.chars().collect();
                 assert_eq!(
                     chars[start..start + expected.chars().count()]
@@ -3091,7 +3096,7 @@ mod details_header {
             layout.details.width,
             1,
         );
-        assert!(label(&buf, bottom).ends_with("Working"));
+        assert!(label(&buf, bottom).contains("Working"));
     }
 }
 
@@ -3970,7 +3975,8 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
                 assert_eq!(layout.details.bottom(), rule_y);
                 assert_eq!(log.bottom(), rule_y);
                 assert_eq!(buf[(log.x - 2, rule_y)].symbol(), "┴");
-                assert_eq!(buf[(log.x, rule_y)].symbol(), " ");
+                assert_eq!(buf[(log.x - 1, rule_y)].symbol(), " ");
+                assert_ne!(buf[(log.x, rule_y)].symbol(), " ");
             }
         }
     }
@@ -4003,17 +4009,24 @@ fn dashboard_screen_padding_is_one_cell() {
         view.render_at(area, &mut buf, now);
         let layout = view.center_layout(area);
         assert_eq!(layout.list.x, 1);
-        assert_eq!(buf[(1, 0)].symbol(), "A");
+        assert_eq!(buf[(1, 0)].symbol(), " ");
+        assert_eq!(buf[(2, 0)].symbol(), "A");
         assert_eq!(view.viewport.borrow().tab_bar.x, 1);
         for x in 1..width - 1 {
             if x < layout.details.x || x >= layout.details.right() {
                 let joint = x == layout.gap.x + 1 || (width >= 150 && x == layout.log.x - 2);
-                assert_eq!(buf[(x, 2)].symbol(), if joint { "┬" } else { "─" });
+                assert_eq!(buf[(x, 1)].symbol(), if joint { "┬" } else { "─" });
             }
         }
         for y in 0..area.height {
-            assert_eq!(buf[(0, y)].symbol(), " ");
-            assert_eq!(buf[(width - 1, y)].symbol(), " ");
+            // Rules run edge to edge; everything else keeps the padding cell.
+            let rule = buf[(0, y)].symbol() == "─";
+            assert_eq!(buf[(0, y)].symbol() == "─", rule, "row {y}");
+            assert_eq!(buf[(width - 1, y)].symbol() == "─", rule, "row {y}");
+            if !rule {
+                assert_eq!(buf[(0, y)].symbol(), " ", "row {y}");
+                assert_eq!(buf[(width - 1, y)].symbol(), " ", "row {y}");
+            }
         }
         let prompt_y = layout.prompt.y;
         assert_ne!(buf[(1, prompt_y)].symbol(), " ");
@@ -4039,18 +4052,18 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
                 .collect::<String>()
         };
         let separators: Vec<_> = (0..width)
-            .filter(|&x| buf[(x, 3)].symbol() == "│")
+            .filter(|&x| buf[(x, 2)].symbol() == "│")
             .collect();
         let left = separators[0];
         let right = separators.get(1).copied().unwrap_or(width);
-        let updated = text(4, 0, left);
+        let updated = text(3, 0, left);
         if view.center_layout(area).list.width >= 4 + 20 + 24 {
             assert_eq!(updated.trim_end().chars().count() as u16, left - 1);
         } else {
             assert!(!updated.contains("ago"));
         }
         for label in ["Background", "Update", "Prompt"] {
-            let y = (3..35)
+            let y = (2..35)
                 .find(|&y| text(y, left + 1, right).contains(label))
                 .unwrap_or_else(|| panic!("missing {label} at width {width}"));
             let cells = text(y, left + 1, right);
@@ -4067,7 +4080,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
                 );
             }
         }
-        let y = (3..35)
+        let y = (2..35)
             .find(|&y| text(y, left + 1, right).contains("Run checks"))
             .unwrap();
         assert!(text(y, left + 1, right).trim_end().ends_with("25s"));
@@ -4108,11 +4121,11 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             view.render_at(area, &mut buf, now);
             let wide = width >= 150;
             let separators: Vec<_> = (0..width)
-                .filter(|&x| buf[(x, 3)].symbol() == "│")
+                .filter(|&x| buf[(x, 2)].symbol() == "│")
                 .collect();
             let left = if wide { separators[1] + 2 } else { 1 };
             let y = if wide {
-                4
+                3
             } else {
                 view.center_layout(area).log.y + 1
             };
@@ -4361,7 +4374,7 @@ fn task_log_short_terminal_splits_content_equally() {
     view.log_session = view.selected_id().cloned();
     let layout = view.center_layout(Rect::new(0, 0, 140, 22));
     assert_eq!(layout.log.height, 5);
-    assert_eq!(layout.log_detail.height, 5);
+    assert_eq!(layout.log_detail.height, 6);
     assert_eq!(layout.list.height, 5);
     let rendered = screen(&view, 140, 22);
     assert!(rendered.contains("Also inspect the tests"));
@@ -4371,10 +4384,10 @@ fn task_log_short_terminal_splits_content_equally() {
 #[test]
 fn task_log_requires_room_for_header_and_six_body_rows() {
     let (mut view, now) = log_fixture();
-    let hidden = log_screen(&view, 100, 19, now);
+    let hidden = log_screen(&view, 100, 18, now);
     assert!(!hidden.contains("Please inspect"));
     view.rows[view.selected].transcript = None;
-    assert_eq!(hidden, log_screen(&view, 100, 19, now));
+    assert_eq!(hidden, log_screen(&view, 100, 18, now));
 }
 
 #[test]
@@ -4394,9 +4407,9 @@ fn task_log_rules_match_header_and_footer_gap_is_empty() {
             for y in [middle, layout.log_detail.y] {
                 if y != middle || x < layout.details.x || x >= layout.details.right() {
                     let rule = if (layout.details.x..layout.details.right()).contains(&x) {
-                        &buf[(1, 2)]
+                        &buf[(1, 1)]
                     } else {
-                        &buf[(x, 2)]
+                        &buf[(x, 1)]
                     };
                     let expected = if y == middle && x == layout.gap.x + 1 {
                         "┴"
@@ -4476,7 +4489,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
     let rendered = log_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
     assert!(!rendered.lines().nth(14).unwrap().contains('─'));
-    assert!(rendered.lines().nth(22).unwrap().contains('│'));
+    assert!(rendered.lines().nth(21).unwrap().contains('│'));
 }
 
 #[test]
@@ -4940,15 +4953,15 @@ fn assert_wide_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
     for (width, height, top, log_height, list_width, details_width, body_height, list_height) in [
-        (80, 24, 17, 6, 38, 37, 6, 5),
-        (120, 40, 28, 11, 58, 57, 11, 11),
-        (200, 60, 32, 27, 48, 48, 27, 27),
-        (80, 24, 17, 6, 38, 37, 6, 5),
+        (80, 24, 17, 6, 38, 37, 6, 6),
+        (120, 40, 27, 12, 58, 57, 11, 11),
+        (200, 60, 31, 28, 48, 48, 27, 27),
+        (80, 24, 17, 6, 38, 37, 6, 6),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
-        assert_eq!(layout.header, Rect::new(5, 7, width, 3));
-        assert_eq!(layout.list, Rect::new(6, 10, list_width, body_height));
+        assert_eq!(layout.header, Rect::new(5, 7, width, 2));
+        assert_eq!(layout.list, Rect::new(6, 9, list_width, body_height));
         let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
             assert_eq!(layout.log.y, layout.list.y);
             assert_eq!(layout.log.width, width - 8 - 2 * list_width);
@@ -4956,7 +4969,7 @@ fn center_layout_golden_rects_follow_each_area() {
         } else {
             assert_eq!(
                 layout.log,
-                Rect::new(6, 10 + body_height + 3, width - 2, list_height)
+                Rect::new(6, 9 + body_height + 3, width - 2, list_height)
             );
             layout.log_detail
         };
@@ -4966,10 +4979,10 @@ fn center_layout_golden_rects_follow_each_area() {
             assert_eq!(layout.details, Rect::default());
             assert_eq!(layout.gap, Rect::default());
         } else {
-            assert_eq!(layout.gap, Rect::new(6 + list_width, 10, 3, body_height));
+            assert_eq!(layout.gap, Rect::new(6 + list_width, 9, 3, body_height));
             assert_eq!(
                 layout.details,
-                Rect::new(9 + list_width, 10, details_width, body_height)
+                Rect::new(9 + list_width, 9, details_width, body_height)
             );
         }
     }
@@ -4978,11 +4991,11 @@ fn center_layout_golden_rects_follow_each_area() {
 #[test]
 fn center_layout_log_and_details_hide_thresholds() {
     let (mut view, _) = log_fixture();
-    for height in 0..20 {
+    for height in 0..19 {
         let layout = view.center_layout(Rect::new(0, 0, 94, height));
         assert_eq!(layout.log.height, 0, "height {height}");
     }
-    let layout = view.center_layout(Rect::new(0, 0, 94, 20));
+    let layout = view.center_layout(Rect::new(0, 0, 94, 19));
     assert_eq!(layout.log.height, 4);
     assert_eq!(layout.list.height, 4);
     assert_eq!(layout.log_detail.height, 5);
@@ -4997,7 +5010,7 @@ fn center_layout_log_and_details_hide_thresholds() {
     for height in [24, 40, 60] {
         let layout = view.center_layout(Rect::new(0, 0, 120, height));
         assert_eq!(layout.log.height, 0);
-        assert_eq!(layout.list.height, height - 5);
+        assert_eq!(layout.list.height, height - 4);
     }
 }
 
@@ -5012,7 +5025,7 @@ fn task_log_event_count_follows_height() {
             event
         })
         .collect();
-    for (height, count) in [(24, 5), (40, 11), (60, 17), (19, 0), (24, 5)] {
+    for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 0), (24, 6)] {
         let rendered = log_list_screen(&view, 120, height, now);
         let events: Vec<_> = rendered
             .lines()
@@ -5301,7 +5314,8 @@ mod log_search {
                 ("esc", "back"),
                 ("↑/↓", "move"),
                 ("enter", "open"),
-                ("n", "new")
+                ("n", "new"),
+                ("g", "group by project")
             ])
             .to_string()
         );
@@ -5928,7 +5942,7 @@ mod subagent_rows {
         let layout = view.center_layout(Rect::new(0, 0, 120, 30));
         let header = rendered
             .lines()
-            .nth(usize::from(layout.header.y + 2))
+            .nth(usize::from(layout.header.y + 1))
             .unwrap();
         assert!(header.contains("Check files"), "{header}");
         assert!(!header.contains("Working"), "{header}");
@@ -6135,7 +6149,7 @@ mod subagent_actions {
         let view = fixture();
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "? help  esc back  ↑/↓ move  n new"
+            "? help  esc back  ↑/↓ move  n new  g group by project"
         );
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),
@@ -7999,7 +8013,7 @@ fn log_jump_buttons_center_on_separate_panel_borders() {
             assert_eq!(rendered_cell(&screen, label), (latest.x, latest.y));
             assert_eq!(rendered_cell(&screen, " ↑ Top "), (top.x, top.y));
             let row = screen.lines().nth(usize::from(border_y)).unwrap();
-            assert_eq!(row.chars().nth(1), Some('─'));
+            assert_eq!(row.chars().next(), Some('─'));
         }
     }
 }
@@ -8457,5 +8471,35 @@ fn wide_separators_join_the_rules_above_and_below() {
             assert_eq!(buf[(x, bottom - 1)].symbol(), "│");
             assert_eq!(buf[(x, bottom)].symbol(), "┴");
         }
+    }
+}
+
+#[test]
+fn dashboard_starts_with_tabs_and_one_header_rule() {
+    for width in [120, 200] {
+        let view = fixture();
+        let rendered = screen(&view, width, 45);
+        let layout = view.center_layout(Rect::new(0, 0, width, 45));
+        assert_eq!(layout.header.height, 2);
+        assert_eq!(view.viewport.borrow().tab_bar.y, 0);
+        assert!(rendered.lines().next().unwrap().contains("Active"));
+        assert!(rendered.lines().nth(1).unwrap().contains('─'));
+        assert!(!rendered.contains("Agent command center"));
+    }
+}
+
+#[test]
+fn border_labels_touch_joint_spaces() {
+    let (view, now) = column_padding_fixture();
+    let area = Rect::new(0, 0, 200, 45);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let layout = view.center_layout(area);
+    for x in [layout.gap.x + 1, layout.log.x - 2] {
+        let y = layout.details.bottom();
+        assert_eq!(buf[(x, y)].symbol(), "┴");
+        assert_eq!(buf[(x + 1, y)].symbol(), " ");
+        assert_ne!(buf[(x + 2, y)].symbol(), " ");
+        assert_ne!(buf[(x + 2, y)].symbol(), "─");
     }
 }

@@ -14,7 +14,7 @@ pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
 }
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        if self.confirm_dialog.is_some() {
+        let mut hints = if self.confirm_dialog.is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
@@ -42,7 +42,20 @@ impl View {
                 ("enter", "open"),
                 ("n", "new"),
             ])
+        };
+        if !self.input_box.focused
+            && self.confirm_dialog.is_none()
+            && !self.help
+            && self.rename_target.is_none()
+            && !self.log_search.editing
+            && !self.log_detail_search.editing
+            && !self.searching
+        {
+            let grouping = format!("group by {}", self.grouping().label().to_lowercase());
+            hints.spans.push("  ".dim());
+            hints.spans.extend(hint_line(&[("g", &grouping)]).spans);
         }
+        hints
     }
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
         let group = |title, entries: &[(&str, &'static str)]| Group {
@@ -102,5 +115,68 @@ impl View {
             }
         }
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouping_hint_tracks_the_grouping_key() {
+        let mut view = View::new(Grouping::Project, false);
+        for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+            assert_eq!(view.grouping(), grouping);
+            assert!(
+                view.center_footer_hints()
+                    .to_string()
+                    .contains(&format!("g group by {}", grouping.as_str()))
+            );
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+                Some(Action::PersistGrouping(grouping.next()))
+            );
+        }
+    }
+
+    #[test]
+    fn grouping_hint_is_hidden_when_the_grouping_key_is_consumed() {
+        for mode in 0..7 {
+            let mut view = View::new(Grouping::Project, false);
+            let id = SessionKey {
+                provider: ProviderId::Claude,
+                id: "task".into(),
+            };
+            match mode {
+                0 => view.input_box.focused = true,
+                1 => {
+                    view.confirm_dialog = Some(ConfirmDialog {
+                        removal: Removal::Delete,
+                        id,
+                        title: "Task".into(),
+                        confirm: false,
+                    });
+                }
+                2 => view.help = true,
+                3 => view.rename_target = Some(id),
+                4 => view.log_search.editing = true,
+                5 => view.log_detail_search.editing = true,
+                6 => view.searching = true,
+                _ => unreachable!(),
+            }
+            assert!(
+                !view
+                    .center_footer_hints()
+                    .to_string()
+                    .contains("g group by"),
+                "mode {mode}"
+            );
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+                None,
+                "mode {mode}"
+            );
+            assert_eq!(view.grouping(), Grouping::Project, "mode {mode}");
+        }
     }
 }

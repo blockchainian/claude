@@ -60,11 +60,11 @@ fn position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
 
 fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let separators: Vec<_> = (0..buffer.area.width)
-        .filter(|&x| buffer[(x, 3)].symbol() == "│")
+        .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
     let (_, prompt) = position(buffer, "›");
     let (left, rows) = if separators.len() == 2 {
-        (separators[1] + 2, 3..prompt - 1)
+        (separators[1] + 2, 2..prompt - 1)
     } else {
         (1, prompt + 2..log_list_end(buffer, prompt))
     };
@@ -117,9 +117,9 @@ fn wheel(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
 
 fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
     let separators: Vec<_> = (0..buffer.area.width)
-        .filter(|&x| buffer[(x, 3)].symbol() == "│")
+        .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
-    let task_row = (3..position(buffer, "›").1)
+    let task_row = (2..position(buffer, "›").1)
         .find(|&y| {
             buffer[(0, y)]
                 .modifier
@@ -692,7 +692,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
 
 #[test]
 fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
-    for (width, height, expected) in [(120, 60, [18, 17, 17]), (100, 45, [13, 12, 12])] {
+    for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
         let (_directory, mut app) = fixture();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
@@ -700,7 +700,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         let middle = prompt - 1;
         let list_end = log_list_end(&buffer, prompt);
         let heights = [
-            middle - 3,
+            middle - 2,
             list_end.saturating_sub(prompt + 2),
             height.saturating_sub(2 + list_end),
         ];
@@ -732,7 +732,8 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
 
 #[test]
 fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
-    for (width, height) in [(120, 30), (100, 30), (180, 24)] {
+    // The wide detail must stay one row short of its event so that the wheel has room to scroll.
+    for (width, height) in [(120, 30), (100, 30), (180, 23)] {
         let (_directory, mut app) = border_fixture();
         let buffer = draw_size(&mut app, width, height);
         let (x, y) = log_position(&buffer, "⏺");
@@ -876,7 +877,7 @@ fn wide_border_labels_stay_in_their_columns() {
         let buffer = draw(&mut app, width);
         let rendered = lines(&buffer);
         let separators: Vec<_> = (0..width)
-            .filter(|&x| buffer[(x, 3)].symbol() == "│")
+            .filter(|&x| buffer[(x, 2)].symbol() == "│")
             .collect();
         assert_eq!(separators.len(), 2);
         let prompt = position(&buffer, "›").1;
@@ -902,12 +903,12 @@ fn wide_border_labels_stay_in_their_columns() {
             " Working "
         );
         assert!(!bottom.contains("2m 0s"));
-        assert!(segment(&buffer, details.clone(), 2).ends_with(" 2m 0s"));
+        assert!(segment(&buffer, details.clone(), 1).ends_with(" 2m 0s"));
         let title_prefix: String = app.sessions[0].display_title().chars().take(8).collect();
-        assert!(segment(&buffer, details.clone(), 2).contains(&title_prefix));
-        assert!(segment(&buffer, tasks.clone(), 2).chars().all(|c| c == '─'));
-        assert!(segment(&buffer, log.clone(), 2).chars().all(|c| c == '─'));
-        for y in 3..middle {
+        assert!(segment(&buffer, details.clone(), 1).contains(&title_prefix));
+        assert!(segment(&buffer, tasks.clone(), 1).chars().all(|c| c == '─'));
+        assert!(segment(&buffer, log.clone(), 1).chars().all(|c| c == '─'));
+        for y in 2..middle {
             for range in [details.clone(), log.clone()] {
                 let text = segment(&buffer, range, y);
                 assert!(
@@ -926,7 +927,7 @@ fn wide_border_labels_stay_in_their_columns() {
         }));
         let buffer = draw(&mut app, width);
         assert!(segment(&buffer, log.clone(), middle).contains("↑ Latest"));
-        for y in 3..middle {
+        for y in 2..middle {
             assert!(!segment(&buffer, log.clone(), y).contains("↑ Latest"));
         }
         let (x, y) = position(&buffer, "↑ Latest");
@@ -1039,7 +1040,7 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
             select_archive(&mut app);
             let buffer = draw(&mut app, width);
             let separators: Vec<_> = (0..width)
-                .filter(|&x| buffer[(x, 3)].symbol() == "│")
+                .filter(|&x| buffer[(x, 2)].symbol() == "│")
                 .collect();
             let left = if width == 200 { separators[1] + 2 } else { 1 };
             let (x, y) = log_position(&buffer, "⏺ Ran 4 stop hooks");

@@ -7,7 +7,9 @@ fn terminal_group_headings_center_at_wide_and_narrow_widths() {
     for grouping in ["Project", "Status", "Model"] {
         if grouping != "Project" {
             tmux.run(&["send-keys", "-t", "probe", "g"]);
-            tmux.wait_for(|capture| capture.contains(&format!("Group: {grouping}")));
+            tmux.wait_for(|capture| {
+                capture.contains(&format!("g group by {}", grouping.to_lowercase()))
+            });
         }
         for width in [80, 112, 200, 300] {
             tmux.run(&[
@@ -21,7 +23,7 @@ fn terminal_group_headings_center_at_wide_and_narrow_widths() {
             ]);
             std::thread::sleep(Duration::from_millis(300));
             let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-            let row = capture.lines().nth(3).unwrap();
+            let row = capture.lines().nth(2).unwrap();
             let separator = row.find('│').unwrap();
             let list: String = row.chars().take(separator - 1).skip(1).collect();
             let label = list.trim();

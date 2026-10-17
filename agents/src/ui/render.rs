@@ -85,7 +85,7 @@ impl View {
 
     pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
-        let header_height = if area.height >= 6 { 3 } else { 0 };
+        let header_height = if area.height >= 6 { 2 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
         let wide = area.width >= WIDE_LAYOUT_COLUMNS;
@@ -286,14 +286,6 @@ impl View {
             self.input_disabled(),
         );
         let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
-        line(
-            vec![
-                "Agent command center".bold(),
-                format!("  Group: {}  g", self.grouping().label()).dim(),
-            ],
-            inset(layout.header),
-            buf,
-        );
         let labels = TASK_FILTERS
             .iter()
             .map(|(label, group)| {
@@ -312,7 +304,7 @@ impl View {
                 format!("{label} {count}")
             })
             .collect::<Vec<_>>();
-        let tabs = inset(row(layout.header, 1, 1));
+        let tabs = inset(row(layout.header, 0, 1));
         self.viewport.borrow_mut().tab_bar = tabs;
         self.viewport.borrow_mut().tabs = super::selection_tabs::render_filled_tab_bar(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -320,11 +312,7 @@ impl View {
             tabs,
             buf,
         );
-        line(
-            "─".repeat(usize::from(inset(layout.header).width)).dim(),
-            inset(row(layout.header, 2, 1)),
-            buf,
-        );
+        rule(row(layout.header, 1, 1), buf);
         if self.searching || self.rename_target.is_some() {
             let (prompt, edit) = self.input();
             render_input_row(prompt, edit, layout.search, buf);
@@ -377,11 +365,7 @@ impl View {
         // Activity and task status share the rule immediately above the prompt.
         let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
         if !layout.log_detail.is_empty() {
-            line(
-                "─".repeat(usize::from(inset(middle).width)).dim(),
-                inset(middle),
-                buf,
-            );
+            rule(middle, buf);
         }
         let mut details = layout.details;
         let details_rule = if details.is_empty() {
@@ -402,19 +386,20 @@ impl View {
         }
         self.render_log(layout.log, buf, now);
         if !layout.log_detail.is_empty() {
+            rule(row(layout.log_detail, 0, 1), buf);
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
         if !layout.log.is_empty() {
             let jump_y = if area.width >= WIDE_LAYOUT_COLUMNS {
                 layout.log.bottom()
             } else {
-                let border = inset(row(area, layout.prompt.bottom() - area.y, 1));
-                line("─".repeat(usize::from(border.width)).dim(), border, buf);
+                let border = row(area, layout.prompt.bottom() - area.y, 1);
+                rule(border, buf);
                 border.y
             };
             let log_rule = Rect::new(layout.log.x, jump_y, layout.log.width, 1);
-            // The model and effort sit between the separator's joint, or the left padding in the
-            // narrow layout, and the right padding.
+            // The model and effort sit between the separator's joint, or the screen's left
+            // edge in the narrow layout, and the screen's right edge.
             let left = if area.width >= WIDE_LAYOUT_COLUMNS {
                 layout.log.x.saturating_sub(2)
             } else {
@@ -428,23 +413,23 @@ impl View {
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
-        if let Some(rule) = details_rule {
-            if layout.header.height >= 3 {
-                self.render_details_title(
-                    Rect::new(rule.x, layout.header.y + 2, rule.width, 1),
-                    buf,
-                    now,
-                );
-            }
-            // The status line runs from the separator's joint on the left to the log's joint or
-            // the right padding.
+        if let Some(details_rule) = details_rule {
+            // The title and status rules run from the separator's joint on the left to the log's
+            // joint or the screen's right edge.
             let left = layout.gap.x + 1;
             let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
                 layout.log.x - 1
             } else {
                 area.right()
             };
-            self.render_details_status(Rect::new(left, rule.y, right - left, 1), buf);
+            if layout.header.height >= 2 {
+                self.render_details_title(
+                    Rect::new(left, layout.header.y + 1, right - left, 1),
+                    buf,
+                    now,
+                );
+            }
+            self.render_details_status(Rect::new(left, details_rule.y, right - left, 1), buf);
         }
         let mut separators = vec![];
         if layout.gap.width > 1 {
@@ -542,8 +527,8 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// Centers the selected task's title on the rule row
-    /// `rule`, a space apart from the rule on each side.
+    /// Centers the selected task's title on the rule row `rule`, whose end cells are its
+    /// corners, a space apart from the rule on each side, with the elapsed time at its right end.
     fn render_details_title(
         &self,
         rule: Rect,
@@ -553,21 +538,19 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
+        self::rule(rule, buf);
         // The title stays centered on the whole rule, so the time's width is kept clear on both sides.
         let mut reserved = 0;
         if let Some(at) = session.started_at {
             let elapsed = format_session_duration((now - at).num_seconds());
-            let label = Line::from(vec![" ".into(), elapsed.dim()]);
-            let width = label.width() as u16;
-            // Keep a title cell, its spaces and the surrounding rule cells.
-            if rule.width >= 2 * width + 5 {
-                label.render(Rect::new(rule.right() - width, rule.y, width, 1), buf);
-                reserved = 2 * usize::from(width);
+            // Keep a title cell, its spaces and the rule cells and corners around it.
+            if usize::from(rule.width) >= 2 * (elapsed.width() + 2) + 7 {
+                let (_, area) = render_rule_ends(rule, 0, None, Some(elapsed.dim()), buf);
+                reserved = area.map_or(0, |area| 2 * usize::from(area.width + 2));
             }
         }
-        // One rule cell and a space on each side.
-        let width = usize::from(rule.width).saturating_sub(4 + reserved);
+        // The corner, one rule cell and a space on each side.
+        let width = usize::from(rule.width).saturating_sub(6 + reserved);
         let title_style = self.title_style(&session.id).bold();
         let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))
@@ -595,8 +578,14 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        let dashes = Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(2), 1);
-        line("─".repeat(usize::from(dashes.width)).dim(), dashes, buf);
+        // The left corner is a joint, or the separator that keeps going down beside the prompt.
+        self::rule(
+            Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(1), 1),
+            buf,
+        );
+        if buf[(rule.x, rule.y)].symbol() == "│" {
+            buf[(rule.x, rule.y)].set_symbol("├");
+        }
         let (status, _) = Self::status(session);
         let width = usize::from(rule.width).saturating_sub(4);
         let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
@@ -611,7 +600,8 @@ impl View {
         );
         Clear.render(status_area, buf);
         line(status, status_area, buf);
-        // The project folder's name and its pull request flank the status.
+        // The pull request on the left and the project folder's name on the right flank the
+        // status.
         let folder = session.cwd.file_name().map_or_else(
             || session.cwd.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
@@ -620,11 +610,11 @@ impl View {
             .pr
             .as_ref()
             .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)));
-        let (folder_area, pr_area) = render_rule_ends(
+        let (pr_area, folder_area) = render_rule_ends(
             rule,
             status_width,
-            Some(Span::styled(folder, style::time_style())),
             pr,
+            Some(Span::styled(folder, style::time_style())),
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();
@@ -1389,8 +1379,14 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
     }
 }
 
-/// Draws `left` one rule cell after the rule's first corner cell and `right` one rule cell before
-/// its last, each between spaces, keeping clear the `center` columns in the rule's middle. Returns where each text landed.
+/// Draws a dim rule across `area`'s first row.
+fn rule(area: Rect, buf: &mut Buffer) {
+    line("─".repeat(usize::from(area.width)).dim(), area, buf);
+}
+
+/// Draws `left` a space after the rule's first corner cell and `right` a space before its last,
+/// each between spaces, keeping clear the `center` columns in the rule's middle. Returns where
+/// each text landed.
 fn render_rule_ends(
     rule: Rect,
     center: u16,
@@ -1398,9 +1394,9 @@ fn render_rule_ends(
     right: Option<Span<'static>>,
     buf: &mut Buffer,
 ) -> (Option<Rect>, Option<Rect>) {
-    // Each side keeps its corner cell, a rule cell, a space on both sides of its text and a rule
-    // cell before the center.
-    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(5);
+    // Each side keeps its corner cell, a space on both sides of its text and a rule cell before
+    // the center.
+    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(4);
     let mut place = |text: Option<Span<'static>>, from_left: bool| {
         let style = text.as_ref()?.style;
         let text = truncate_line_with_ellipsis_if_overflow(Line::from(text?), side);
@@ -1409,9 +1405,9 @@ fn render_rule_ends(
             return None;
         }
         let x = if from_left {
-            rule.x + 3
+            rule.x + 2
         } else {
-            rule.right() - 3 - width
+            rule.right() - 2 - width
         };
         let area = Rect::new(x, rule.y, width, 1);
         Clear.render(Rect::new(x - 1, rule.y, width + 2, 1), buf);

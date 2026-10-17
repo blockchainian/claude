@@ -1,6 +1,5 @@
- Agent command center  Group: Project  g
   Active 1                                                                              Inactive 0
- ─────────────────────────────────────────────────┬─────────────── Task log example ───────────────
+──────────────────────────────────────────────────┬─────────────── Task log example ────────────────
                    /tmp/project                   │                     Prompt
  ● Task log example        Working            now │ Task log example
                                                   │
@@ -15,9 +14,9 @@
                                                   │
                                                   │
                                                   │
- ─────────────────────────────────────────────────┴─ project ───────── Working ────────────────────
+──────────────────────────────────────────────────┴─────────────────── Working ─────────── project ─
  Task log example · Running in a terminal; open it to type
- ─ Unknown ────────────────────────────────────────────────────────────────────────────────────────
+─ Unknown ──────────────────────────────────────────────────────────────────────────────────────────
                                         run tests                                               35s
  A long response whose whitespace collapses and whose body must be truncated before the …  11:59:20
                                   run a background job *                                         5s
@@ -31,7 +30,8 @@
 
 
 
- ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
                                              run tests                                          35s
 
  ────────────────────────────────────────────── Bash ────────────────────────────────────────── 12s
@@ -45,4 +45,4 @@
                                                  ↓
                                                 •··
 
- ? help  esc back  ↑/↓ move  enter open  n new
+ ? help  esc back  ↑/↓ move  enter open  n new  g group by project

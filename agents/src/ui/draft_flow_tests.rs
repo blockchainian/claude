@@ -353,7 +353,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
         };
         let log = view.viewport.borrow().log;
         assert_eq!(text(model.x, model.y, model.width), model_name);
-        assert_eq!(model.x, log.x + if width >= 150 { 1 } else { 2 });
+        assert_eq!(model.x, log.x + u16::from(width < 150));
         assert_eq!(
             model.y,
             if width >= 150 {
@@ -363,7 +363,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
             }
         );
         assert_eq!(effort.y, model.y);
-        assert_eq!(effort.right(), log.right() - 2);
+        assert_eq!(effort.right(), log.right() - 1);
         assert!(model.right() < effort.x);
         assert!(
             buffer[(effort.x, model.y)]
@@ -465,10 +465,10 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                 width - rule_left,
                 1,
             );
-            let available = (rule.width / 2).saturating_sub(5);
+            let available = (rule.width / 2).saturating_sub(4);
             let show_effort = effort.is_some() && available > 0;
             let name_width = available.min("claude-opus-5-5".len() as u16);
-            let start = rule.x + 3;
+            let start = rule.x + 2;
             let expected_name = if name_width == 0 {
                 String::new()
             } else if name_width < "claude-opus-5-5".len() as u16 {
@@ -487,7 +487,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
                 } else if show_effort
-                    && (area.right() - 2 - effort_width..area.right() - 2).contains(&x)
+                    && (rule.right() - 2 - effort_width..rule.right() - 2).contains(&x)
                 {
                     Some(Field::Effort)
                 } else {

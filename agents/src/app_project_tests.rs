@@ -50,7 +50,7 @@ fn project_heading_returns_when_reselecting_first_inactive_task_after_paging() {
             app.draw(&mut terminal).unwrap();
             assert_eq!(app.view.selected_id().unwrap().id, "thread-0");
             let buffer = terminal.backend().buffer();
-            let rows: Vec<_> = (3..height)
+            let rows: Vec<_> = (2..height)
                 .map(|y| {
                     (0..54)
                         .map(|x| buffer[(x, y)].symbol())
@@ -134,7 +134,7 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
         let mut terminal = Terminal::new(TestBackend::new(120, 60)).unwrap();
         app.draw(&mut terminal).unwrap();
         let buffer = terminal.backend().buffer();
-        let task_rows: Vec<String> = (3..buffer.area.height)
+        let task_rows: Vec<String> = (2..buffer.area.height)
             .map(|y| {
                 (0..buffer.area.width / 2 - 1)
                     .map(|x| buffer[(x, y)].symbol())

@@ -1,6 +1,5 @@
- Agent command center  Group: Project  g
   Active 0                                                          Inactive 1
- ───────────────────────────────────────┬──────────────────────────────────────
+────────────────────────────────────────┬───────────────────────────────────────
               /tmp/project              │
  ○ Recent task              Inactive    │
                                         │
@@ -8,5 +7,6 @@
                                         │
                                         │
                                         │
+                                        │
  No task · Select a task to type
- ? help  esc back  ↑/↓ move  enter open  n new
+ ? help  esc back  ↑/↓ move  enter open  n new  g group by project

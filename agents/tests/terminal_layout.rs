@@ -113,12 +113,54 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     tmux.wait_for(|capture| {
         capture
             .lines()
-            .nth(1)
+            .next()
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     tmux.wait_for(|capture| capture.contains("Stop hook") && capture.contains("Update"));
     (directory, tmux, transcript)
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_dashboard_tabs_and_grouping_hint() {
+    let (_directory, tmux, _transcript) = start_probe("header-footer");
+    for width in [200, 120] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "45",
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == 45 && capture.contains("g group by project")
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = capture.lines().collect();
+        assert!(rows[0].contains("Active 0"), "{capture}");
+        assert!(rows[0].contains("Inactive 1"), "{capture}");
+        assert!(rows[1].contains("──"), "{capture}");
+        assert!(!capture.contains("Agent command center"), "{capture}");
+        assert!(rows[44].contains("g group by project"), "{capture}");
+        let path = std::env::temp_dir().join(format!("agents-dashboard-{width}x45.txt"));
+        std::fs::write(&path, &capture).unwrap();
+        println!(
+            "{{\"dashboard_header_footer\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            path.display()
+        );
+        for grouping in ["status", "model", "project"] {
+            tmux.run(&["send-keys", "-t", "probe", "g"]);
+            tmux.wait_for(|capture| {
+                capture
+                    .lines()
+                    .last()
+                    .is_some_and(|footer| footer.contains(&format!("g group by {grouping}")))
+            });
+        }
+    }
 }
 
 #[test]
@@ -139,7 +181,7 @@ fn terminal_task_cursor_keeps_cell_colors() {
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
         let parser = captured_screen(&capture, width, 50);
         let screen = parser.screen();
-        let tabs = screen.rows(0, width).nth(1).unwrap();
+        let tabs = screen.rows(0, width).next().unwrap();
         assert_eq!(
             tabs.split_whitespace().collect::<Vec<_>>(),
             ["Active", "0", "Inactive", "1"]
@@ -150,14 +192,14 @@ fn terminal_task_cursor_keeps_cell_colors() {
             usize::from(width) - 12
         );
         for column in [2, width - 12] {
-            let tab = screen.cell(1, column).unwrap();
+            let tab = screen.cell(0, column).unwrap();
             assert!(tab.bold(), "{capture}");
             assert!(!tab.dim(), "{capture}");
             assert_ne!(tab.fgcolor(), vt100::Color::Default, "{capture}");
         }
-        assert_eq!(screen.cell(1, 2).unwrap().bgcolor(), vt100::Color::Default);
+        assert_eq!(screen.cell(0, 2).unwrap().bgcolor(), vt100::Color::Default);
         assert_ne!(
-            screen.cell(1, width - 12).unwrap().bgcolor(),
+            screen.cell(0, width - 12).unwrap().bgcolor(),
             vt100::Color::Default
         );
         let (x, y) = (0..50)
@@ -193,11 +235,11 @@ fn terminal_task_cursor_keeps_cell_colors() {
 
 fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     let lines: Vec<_> = capture.lines().collect();
-    let separators: Vec<_> = lines[3]
+    let separators: Vec<_> = lines[2]
         .match_indices('│')
-        .map(|(index, _)| lines[3][..index].width())
+        .map(|(index, _)| lines[2][..index].width())
         .collect();
-    let top_end = 3 + lines[3..]
+    let top_end = 2 + lines[2..]
         .iter()
         .take_while(|line| line.matches('│').count() == separators.len())
         .count();
@@ -244,14 +286,14 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     assert_eq!(cell.fgcolor(), vt100::Color::Default);
 
     let top: String = (details_start..details_end)
-        .map(|x| parser.screen().cell(2, x as u16).unwrap().contents())
+        .map(|x| parser.screen().cell(1, x as u16).unwrap().contents())
         .collect();
     let elapsed = top.rsplit('─').next().unwrap();
     assert!(elapsed.starts_with(' '), "{capture}");
     assert!(!elapsed.trim().is_empty(), "{capture}");
     let elapsed_start = details_end - elapsed.width();
-    for x in elapsed_start + 1..details_end {
-        let cell = parser.screen().cell(2, x as u16).unwrap();
+    for x in elapsed_start + 1..details_end - 1 {
+        let cell = parser.screen().cell(1, x as u16).unwrap();
         assert!(cell.dim(), "{colored}");
         assert!(!cell.bold(), "{colored}");
     }
@@ -260,7 +302,7 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     let start = (details_end - details_start - title.width()) / 2;
     assert_eq!(top.find(title), Some(start * "─".len()), "{capture}");
     for x in details_start + start + 1..details_start + start + title.width() - 1 {
-        let cell = parser.screen().cell(2, x as u16).unwrap();
+        let cell = parser.screen().cell(1, x as u16).unwrap();
         if !cell.contents().is_empty() {
             assert!(cell.bold(), "{colored}");
             assert!(!cell.dim(), "{colored}");
@@ -339,10 +381,10 @@ fn terminal_layout_tracks_width() {
             "fixture not selected: {capture}"
         );
         assert!(
-            !lines[2].contains("Inactive"),
+            !lines[1].contains("Inactive"),
             "status must stay on the bottom rule: {capture}"
         );
-        let top = lines[3];
+        let top = lines[2];
         assert_eq!(
             top.matches('│').count(),
             if width >= 150 { 2 } else { 1 },
@@ -352,7 +394,7 @@ fn terminal_layout_tracks_width() {
             .match_indices('│')
             .map(|(index, _)| top[..index].width())
             .collect();
-        let top_end = 3 + lines[3..]
+        let top_end = 2 + lines[2..]
             .iter()
             .take_while(|line| line.matches('│').count() == separators.len())
             .count();
@@ -365,7 +407,7 @@ fn terminal_layout_tracks_width() {
                 .find(|&row| lines[row].matches('─').count() > width as usize / 2)
                 .expect("separate list/detail border")
         };
-        let top_height = top_end - 3;
+        let top_height = top_end - 2;
         let bottom_height = lines.len() - log_rule - 2;
         if width >= 150 {
             assert!(
@@ -374,7 +416,7 @@ fn terminal_layout_tracks_width() {
             );
         } else {
             let list_height = log_rule - prompt - 2;
-            let content = height as usize - 8;
+            let content = height as usize - 7;
             let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
             assert_eq!(
                 [top_height, list_height, bottom_height],
@@ -401,7 +443,7 @@ fn terminal_layout_tracks_width() {
         if width >= 150 {
             let column_width = (width as usize - 8) / 4;
             assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
-            for line in &lines[3..top_end] {
+            for line in &lines[2..top_end] {
                 let log = line.split('│').next_back().unwrap();
                 if !log.trim().is_empty() {
                     assert_eq!(log.len() - log.trim_start().len(), 1, "log left: {line}");
@@ -424,7 +466,7 @@ fn terminal_layout_tracks_width() {
                 details.contains(" Inactive "),
                 "status missing from middle rule: {capture}"
             );
-            for line in &lines[3..top_end] {
+            for line in &lines[2..top_end] {
                 let log = line.split('│').next_back().unwrap();
                 assert!(!log.contains("────"), "extra log rule: {capture}");
                 assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
@@ -437,7 +479,7 @@ fn terminal_layout_tracks_width() {
                 "detail does not span the terminal: {capture}"
             );
             assert!(
-                lines[3..top_end].iter().any(|line| {
+                lines[2..top_end].iter().any(|line| {
                     line.split('│')
                         .next_back()
                         .is_some_and(|log| log.contains("Stop hook"))
@@ -532,7 +574,7 @@ fn terminal_compaction_summary_keeps_row_and_labels_detail() {
         .iter()
         .rposition(|line| line.matches('─').count() > 100)
         .expect("log detail rule");
-    let list = rows[3..rule].join("\n");
+    let list = rows[2..rule].join("\n");
     let detail = rows[rule + 1..rows.len() - 1].join("\n");
     assert!(
         list.contains("This session is being continued"),
@@ -571,8 +613,8 @@ fn terminal_log_selection_tracks_wheel_click_and_tail() {
             .rposition(|row| row.contains('›'))
             .expect("prompt");
         let (column, row) = if width >= 150 {
-            let separator = rows[3].rfind('│').expect("log column separator");
-            (rows[3][..separator].width() + 2, 3)
+            let separator = rows[2].rfind('│').expect("log column separator");
+            (rows[2][..separator].width() + 2, 2)
         } else {
             (1, prompt + 2)
         };
@@ -930,9 +972,9 @@ fn terminal_details_section_positions() {
             let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             println!("{width} columns, PR {has_pr}:\n{capture}");
             let lines: Vec<_> = capture.lines().collect();
-            let separators: Vec<_> = lines[3]
+            let separators: Vec<_> = lines[2]
                 .match_indices('│')
-                .map(|(byte, _)| lines[3][..byte].width())
+                .map(|(byte, _)| lines[2][..byte].width())
                 .collect();
             let left = separators[0] + 2;
             let right = if width >= 150 {
@@ -941,12 +983,12 @@ fn terminal_details_section_positions() {
                 width as usize - 1
             };
             let panel_width = right - left;
-            let bottom = 3 + lines[3..]
+            let bottom = 2 + lines[2..]
                 .iter()
                 .take_while(|line| line.matches('│').count() == separators.len())
                 .count();
             let parser = captured_screen(&capture, width, 70);
-            let panel: Vec<String> = (3..bottom)
+            let panel: Vec<String> = (2..bottom)
                 .map(|y| {
                     (left..right)
                         .map(|x| parser.screen().cell(y as u16, x as u16).unwrap().contents())

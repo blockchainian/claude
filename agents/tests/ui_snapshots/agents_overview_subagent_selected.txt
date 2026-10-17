@@ -1,6 +1,5 @@
- Agent command center  Group: Project  g
   Active 3                                                                                                  Inactive 0
- ───────────────────────────────────────────────────────────┬─────────────────────── Check files ──────────────────────
+────────────────────────────────────────────────────────────┬────────────────────── Check files ────────────────────────
                         /tmp/project                        │                          Prompt
  ○ Parent task                       Ready           2m ago │ Check files
  ├─ ○ Review results                 Ready              now │
@@ -25,6 +24,7 @@
                                                             │
                                                             │
                                                             │
-                                                            │─ child-project ──────── Working ─────────────────────────
+                                                            │
+                                                            ├──────────────────────── Working ────────── child-project ─
  Check files · Subagent cannot take input
- ? help  esc back  ↑/↓ move  n new
+ ? help  esc back  ↑/↓ move  n new  g group by project
