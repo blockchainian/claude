@@ -186,7 +186,7 @@ impl View {
         }
         let label = format!(" ↓ {} New ", viewport.log_unseen);
         let jump = log_content_centered(area, label.width() as u16);
-        Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
+        Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);
         viewport.log_jump = jump;
     }
 

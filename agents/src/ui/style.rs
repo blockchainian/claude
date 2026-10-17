@@ -147,7 +147,7 @@ pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
     }
 }
 
-/// The border labels used to jump through the log and separate input from output.
+/// The arrows that separate a tool call's input from its output.
 pub(super) fn log_jump_style() -> Style {
     Style::default().bold().not_dim()
 }
