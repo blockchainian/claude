@@ -744,7 +744,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: tasks, background, activity, message, prompt,
+        // Sections top to bottom: prompt, message, activity, background, tasks,
         // needs attention. The title
         // sits on the rule above the panel.
         let content_top = area.y;
@@ -759,156 +759,6 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
-
-        let tasks = [
-            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
-            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
-        ]
-        .into_iter()
-        .flat_map(|(status, indicator)| {
-            session
-                .tasks
-                .iter()
-                .filter(move |task| task.status == status)
-                .map(move |task| (task, indicator))
-        })
-        .collect::<Vec<_>>();
-        let tasks_text = tasks
-            .iter()
-            .map(|(task, status)| {
-                format!(
-                    "{} {}",
-                    Self::status_indicator(*status).content,
-                    task.subject
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !tasks.is_empty() {
-            separate_section(&mut items);
-            let in_progress = tasks
-                .iter()
-                .filter(|(_, status)| *status == SessionStatus::Working)
-                .count();
-            items.push(
-                centered_header(
-                    "Tasks".dim().into(),
-                    format!("{in_progress}/{}", tasks.len()).dim().into(),
-                    width,
-                )
-                .into(),
-            );
-            let start = items.len();
-            for (task, status) in tasks {
-                items.push(
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(vec![
-                            Self::status_indicator(status),
-                            Span::raw(format!(" {}", task.subject)),
-                        ]),
-                        width,
-                    )
-                    .into(),
-                );
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key("Tasks", &tasks_text));
-            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
-            body_links.push(Vec::new());
-            item_links.resize(items.len(), Vec::new());
-        }
-
-        // The agent appends an exit marker to the output file when the
-        // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
-            .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
-            .filter(|(_, lines)| {
-                !lines
-                    .last()
-                    .is_some_and(|last| last.starts_with("[exited with code"))
-            })
-            .collect::<Vec<_>>();
-        let mut background = items.len()..items.len();
-        let subagents = self.subagents_for(session).collect::<Vec<_>>();
-        if !boxes.is_empty() || !subagents.is_empty() {
-            separate_section(&mut items);
-            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
-            let start = items.len();
-            items.extend(
-                boxes
-                    .into_iter()
-                    .map(|(task, output)| Item::Background { task, output }),
-            );
-            items.extend(subagents.into_iter().map(Item::Subagent));
-            // Tasks showing output come first; each group keeps its order.
-            items[start..].sort_by_key(|item| item.height() == 1);
-            background = start..items.len();
-        }
-
-        let activity = session.activity.as_ref();
-        if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
-            let mut label = wrapped
-                .first()
-                .map_or(String::new(), |line| line.to_string());
-            if wrapped.len() > 1 {
-                label.push('…');
-            }
-            separate_section(&mut items);
-            let start = items.len() + 1;
-            items.extend([
-                centered_header(
-                    "Last activity".dim().into(),
-                    Span::styled(
-                        format_relative_time(now, Some(activity.at)),
-                        style::time_style(),
-                    )
-                    .into(),
-                    width,
-                )
-                .into(),
-                truncate_line_with_ellipsis_if_overflow(
-                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
-                    width,
-                )
-                .into(),
-            ]);
-            bodies.push(start..items.len());
-            keys.push(body_key("Last activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        if let Some(message) = session.last_message.as_ref() {
-            let mut header = Line::default();
-            if let Some(at) = session.last_message_at {
-                header =
-                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
-            }
-            separate_section(&mut items);
-            items.push(centered_header("Update".dim().into(), header, width).into());
-            let start = items.len();
-            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
-            items.extend(
-                wrap_details(message, &session.cwd, width, true)
-                    .into_iter()
-                    .map(|mut line| {
-                        for span in &mut line.spans {
-                            span.style = body_style.patch(span.style);
-                        }
-                        line
-                    })
-                    .map(Item::from),
-            );
-            bodies.push(start..items.len());
-            keys.push(body_key("Update", message));
-            copies.push(Some((message.as_str(), "Copied update")));
-            body_links.push(super::links::text_links(message, &session.cwd, &[]));
-        }
 
         let prompt_header = if let Some(start) = session.prompt_at {
             let end = if session.status == SessionStatus::Working {
@@ -970,6 +820,156 @@ impl View {
         }
 
         item_links.resize(items.len(), Vec::new());
+
+        if let Some(message) = session.last_message.as_ref() {
+            let mut header = Line::default();
+            if let Some(at) = session.last_message_at {
+                header =
+                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
+            }
+            separate_section(&mut items);
+            items.push(centered_header("Update".dim().into(), header, width).into());
+            let start = items.len();
+            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
+            items.extend(
+                wrap_details(message, &session.cwd, width, true)
+                    .into_iter()
+                    .map(|mut line| {
+                        for span in &mut line.spans {
+                            span.style = body_style.patch(span.style);
+                        }
+                        line
+                    })
+                    .map(Item::from),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
+            body_links.push(super::links::text_links(message, &session.cwd, &[]));
+        }
+
+        let activity = session.activity.as_ref();
+        if let Some(activity) = activity {
+            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
+            let mut label = wrapped
+                .first()
+                .map_or(String::new(), |line| line.to_string());
+            if wrapped.len() > 1 {
+                label.push('…');
+            }
+            separate_section(&mut items);
+            let start = items.len() + 1;
+            items.extend([
+                centered_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
+                    width,
+                )
+                .into(),
+                truncate_line_with_ellipsis_if_overflow(
+                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
+                    width,
+                )
+                .into(),
+            ]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        // The agent appends an exit marker to the output file when the
+        // command ends, which lands before the completion notification does.
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 1)))
+            .filter(|(_, lines)| {
+                !lines
+                    .last()
+                    .is_some_and(|last| last.starts_with("[exited with code"))
+            })
+            .collect::<Vec<_>>();
+        let mut background = items.len()..items.len();
+        let subagents = self.subagents_for(session).collect::<Vec<_>>();
+        if !boxes.is_empty() || !subagents.is_empty() {
+            separate_section(&mut items);
+            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
+            let start = items.len();
+            items.extend(
+                boxes
+                    .into_iter()
+                    .map(|(task, output)| Item::Background { task, output }),
+            );
+            items.extend(subagents.into_iter().map(Item::Subagent));
+            // Tasks showing output come first; each group keeps its order.
+            items[start..].sort_by_key(|item| item.height() == 1);
+            background = start..items.len();
+        }
+
+        let tasks = [
+            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
+            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
+        ]
+        .into_iter()
+        .flat_map(|(status, indicator)| {
+            session
+                .tasks
+                .iter()
+                .filter(move |task| task.status == status)
+                .map(move |task| (task, indicator))
+        })
+        .collect::<Vec<_>>();
+        let tasks_text = tasks
+            .iter()
+            .map(|(task, status)| {
+                format!(
+                    "{} {}",
+                    Self::status_indicator(*status).content,
+                    task.subject
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(
+                centered_header(
+                    "Tasks".dim().into(),
+                    format!("{in_progress}/{}", tasks.len()).dim().into(),
+                    width,
+                )
+                .into(),
+            );
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
+                );
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
+        }
 
         let needs = session
             .background_job

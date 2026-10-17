@@ -65,7 +65,13 @@ mod details_budget {
             .iter()
             .position(|line| line.trim() == "Prompt")
             .unwrap();
-        assert_eq!(rows[..prompt].iter().filter(|line| *line == "…").count(), 1);
+        assert_eq!(
+            rows[prompt + 4..]
+                .iter()
+                .filter(|line| *line == "…")
+                .count(),
+            1
+        );
         assert_eq!(
             &rows[prompt + 1..prompt + 4],
             ["Prompt text", "…", "Queued work"]
@@ -136,12 +142,12 @@ mod details_budget {
             .iter()
             .position(|line| line.trim() == "Prompt")
             .unwrap();
-        let needs = rest
+        let update = rest
             .iter()
-            .position(|line| line.trim() == "Needs attention")
+            .position(|line| line.trim() == "Update")
             .unwrap();
         assert!(
-            rest[prompt + 1..needs]
+            rest[prompt + 1..update]
                 .iter()
                 .rev()
                 .find(|line| !line.is_empty())
@@ -240,11 +246,11 @@ mod details_curtain {
     }
 
     #[test]
-    fn fully_open_message_hands_off_to_prompt() {
+    fn fully_open_prompt_hands_off_to_message() {
         let mut view = fixture();
         let before = panel(&view);
         let pointer = (0..19)
-            .find(|&y| text(&before, y).starts_with("Reply row 1"))
+            .find(|&y| text(&before, y).starts_with("Prompt row 1"))
             .unwrap();
         let hidden = view.viewport.borrow().details_scroll.hidden[0];
         assert!(hidden > 0);
@@ -253,11 +259,11 @@ mod details_curtain {
             panel(&view);
         }
         let opened = panel(&view);
-        let prompt = (0..19)
-            .find(|&y| text(&opened, y).trim() == "Prompt")
+        let update = (0..19)
+            .find(|&y| text(&opened, y).trim() == "Update")
             .unwrap();
-        assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
-        assert_eq!(text(&opened, prompt - 2), "Reply row 7");
+        assert!((1..update).all(|y| !text(&opened, y).ends_with('…')));
+        assert_eq!(text(&opened, update - 2), "Prompt row 12");
         view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
         assert_eq!(
@@ -265,21 +271,21 @@ mod details_curtain {
             vec![hidden, 1, 0]
         );
         assert_eq!(text(&after, 18), text(&opened, 18));
-        let prompt_pointer = (0..19)
-            .find(|&y| text(&after, y).starts_with("Prompt row"))
+        let message_pointer = (0..19)
+            .find(|&y| text(&after, y).starts_with("Reply row"))
             .unwrap();
-        let prompt_hidden = view.viewport.borrow().details_scroll.hidden[1];
-        for _ in 1..prompt_hidden {
-            view.scroll_content_row(true, false, prompt_pointer);
+        let message_hidden = view.viewport.borrow().details_scroll.hidden[1];
+        for _ in 1..message_hidden {
+            view.scroll_content_row(true, false, message_pointer);
             panel(&view);
         }
         let fully_open = panel(&view);
-        assert!((1..19).any(|y| text(&fully_open, y) == "Prompt row 12"));
+        assert!((1..19).any(|y| text(&fully_open, y) == "Reply row 7"));
         assert_eq!(
             view.viewport.borrow().details_scroll.reveal,
-            vec![hidden, prompt_hidden, 0]
+            vec![hidden, message_hidden, 0]
         );
-        view.scroll_content_row(true, false, prompt_pointer);
+        view.scroll_content_row(true, false, message_pointer);
         assert_eq!(panel(&view), fully_open);
     }
 
@@ -381,14 +387,14 @@ mod details_curtain {
             view.scroll_content_row(true, false, pointer);
             panel(&view);
         }
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 4, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![4, 0, 0]);
         view.rows[view.selected].prompt = (1..=8)
             .map(|i| format!("Prompt row {i}"))
             .collect::<Vec<_>>()
             .join("  \n");
         panel(&view);
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 2, 0]);
-        assert_eq!(view.viewport.borrow().details_scroll.hidden[1], 2);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![2, 0, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.hidden[0], 2);
         view.rows[view.selected].last_message = None;
         panel(&view);
         assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0]);

@@ -738,8 +738,8 @@ fn details_body_changed_while_away_opens_folded() {
         details_panel(&view);
     }
     let scrolled = details_reveal(&view);
-    let prompt = 1;
-    assert!(scrolled[prompt] > 0 && scrolled[0] > 0, "{scrolled:?}");
+    let prompt = 0;
+    assert!(scrolled[prompt] > 0 && scrolled[1] > 0, "{scrolled:?}");
     let index = view.selected;
     key(&mut view, KeyCode::Down);
     details_panel(&view);
@@ -1850,7 +1850,7 @@ fn details_include_attention_and_clip_messages() {
             .lines()
             .position(|line| !line.contains("Group:") && line.contains(label))
     };
-    assert!(position("Update") < position("Prompt"));
+    assert!(position("Prompt") < position("Update"));
     assert!(position("Prompt") < position("Needs attention"));
     let viewport = view.viewport.borrow();
     let folder = viewport
@@ -2524,7 +2524,7 @@ fn details_activity_and_message_are_independent() {
     let rendered = render(&view);
     assert!(rendered.contains("             Last activity        7s ago"));
     assert!(rendered.contains("                 Update           1h ago"));
-    assert!(rendered.find("Run checks").unwrap() < rendered.find("Update").unwrap());
+    assert!(rendered.find("Update").unwrap() < rendered.find("Run checks").unwrap());
     assert!(rendered.contains("Checking the project"));
     assert_eq!(
         rendered,
@@ -2623,9 +2623,9 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         if height == 16 {
             assert_eq!(viewport.details_scroll.fallback_max, None);
             assert_eq!(viewport.details_copy.len(), 3);
-            assert_eq!(viewport.details_scroll.hidden[0], 0);
+            assert!(viewport.details_scroll.hidden[0] > 0);
             assert!(viewport.details_scroll.hidden[1] > 0);
-            assert!(viewport.details_scroll.hidden[2] > 0);
+            assert_eq!(viewport.details_scroll.hidden[2], 0);
         } else {
             assert!(viewport.details_scroll.fallback_max.unwrap() > 0);
         }
@@ -3222,7 +3222,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_tasks_background_activity_update_prompt() {
+fn details_sections_run_prompt_update_activity_background_tasks() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         kind: crate::log::Kind::Tool,
@@ -3242,11 +3242,11 @@ fn details_sections_run_tasks_background_activity_update_prompt() {
     }];
     let rendered = queued_details(row, 40);
     let positions = [
-        "Tasks",
-        "Background\n",
-        "Last activity",
-        "Update",
         "Prompt\n",
+        "Update",
+        "Last activity",
+        "Background\n",
+        "Tasks",
     ]
     .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
@@ -3272,7 +3272,7 @@ fn details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_details(row.clone(), 22);
-    assert!(rendered.find("Background\n").unwrap() < rendered.find("Prompt\n").unwrap());
+    assert!(rendered.find("Prompt\n").unwrap() < rendered.find("Background\n").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
@@ -3289,7 +3289,7 @@ fn details_background_boxes_tail_and_clip_output() {
             .map(str::trim_start)
             .collect::<Vec<_>>()
             .join("\n")
-            .starts_with("Background\n…\n\nUpdate\nChecking the project\n"),
+            .starts_with("Prompt\nBackground task\n\nUpdate\nChecking the project\n\nBackground\n…"),
         "{clipped}"
     );
     assert!(clipped.contains("Update"));
@@ -3509,19 +3509,19 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 8)].fg, crate::theme::inline_code_color());
+    assert_eq!(buffer[(4, 1)].fg, crate::theme::inline_code_color());
     assert!(
-        buffer[(14, 8)]
+        buffer[(14, 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, 9)]
+        buffer[(2, 2)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 3)].fg, Color::Yellow);
-    assert_eq!(buffer[(0, 5)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, 7)].fg, Color::Yellow);
+    assert_eq!(buffer[(0, 9)].fg, Color::Cyan);
 }
 
 #[test]
