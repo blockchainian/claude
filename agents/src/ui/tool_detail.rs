@@ -55,6 +55,10 @@ enum Body {
     Json(serde_json::Value),
     Diff,
     Markdown,
+    /// A message or free-text input, with a shared reading column.
+    Prose(bool),
+    ProseJson(serde_json::Value),
+    InputFields(Vec<std::ops::Range<usize>>),
     /// Prose wrapped at the panel width.
     Text,
 }
@@ -137,9 +141,33 @@ impl Part {
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
 
+    pub fn prose(source: String, markdown: bool) -> Self {
+        let mut part = Self::text(source, markdown);
+        part.body = match part.body {
+            Body::Json(value) => Body::ProseJson(value),
+            _ => Body::Prose(markdown),
+        };
+        part
+    }
+
+    /// Body semantics determine the reading column, independently of the caller.
+    pub fn column(&self, width: usize, wide: bool) -> Option<(usize, usize)> {
+        if wide
+            && matches!(
+                self.body,
+                Body::Prose(_) | Body::ProseJson(_) | Body::InputFields(_)
+            )
+        {
+            let reading = (width / 2).max(1);
+            Some((reading, width.saturating_sub(reading) / 2))
+        } else {
+            None
+        }
+    }
+
     /// Whether the selection maps the drawn lines back to the source as Markdown.
     pub fn markdown(&self) -> bool {
-        matches!(self.body, Body::Markdown)
+        matches!(self.body, Body::Markdown | Body::Prose(true))
     }
 
     pub fn running(&self) -> bool {
@@ -218,7 +246,7 @@ impl Part {
                 running_frame(now),
                 Style::new().dim(),
             ))],
-            Body::Fields(keys) => {
+            Body::Fields(keys) | Body::InputFields(keys) => {
                 let key_style = Style::default().fg(highlight::json_key_foreground());
                 let mut offset = 0;
                 let lines = self.source.split_inclusive('\n').map(|raw| {
@@ -249,10 +277,12 @@ impl Part {
             Body::RawJson => split_wide(highlight::plain_lines(source), width),
             Body::Code(lang) => split_wide(highlight::code_lines(source, lang), width),
             Body::Shell(commands) => shell_lines(&self.source, commands, width),
-            Body::Json(value) => split_wide(json_lines(value), width),
+            Body::Json(value) | Body::ProseJson(value) => split_wide(json_lines(value), width),
             Body::Diff => split_wide(highlight::diff_lines(source), width),
-            Body::Markdown => super::markdown::render_with_options(source, options),
-            Body::Text => textwrap::wrap(source, options)
+            Body::Markdown | Body::Prose(true) => {
+                super::markdown::render_with_options(source, options)
+            }
+            Body::Text | Body::Prose(false) => textwrap::wrap(source, options)
                 .into_iter()
                 .map(|line| Line::from(line.into_owned()))
                 .collect(),
@@ -384,7 +414,9 @@ fn shell_maps(
                 span.style
                     .add_modifier
                     .contains(ratatui::style::Modifier::DIM)
-                    && SHELL_BRACKET.iter().any(|glyph| span.content.ends_with(glyph))
+                    && SHELL_BRACKET
+                        .iter()
+                        .any(|glyph| span.content.ends_with(glyph))
             }) {
                 line.spans.pop();
             }
@@ -537,7 +569,10 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
         }
         if event.calls.len() > 1 {
             let time = call.duration.map(super::formatting::format_log_duration);
-            parts.push(Part::new(call.title.clone(), Body::TitleRule(time)));
+            parts.push(Part::new(
+                input_title(call).unwrap_or_else(|| call.title.clone()),
+                Body::TitleRule(time),
+            ));
         }
         if let Some(agent) = &call.agent {
             parts.push(Part::text(agent.label.clone(), false));
@@ -588,6 +623,40 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
     parts
 }
 
+fn free_text(key: &str) -> bool {
+    matches!(key, "prompt" | "message" | "question")
+}
+
+fn header_field(key: &str, value: &str) -> Option<String> {
+    if value.trim().is_empty() || value.contains(['\n', '\r']) {
+        return None;
+    }
+    if matches!(key, "name" | "title") && value.width() <= 80 {
+        return Some(value.to_owned());
+    }
+    key.strip_suffix("Id")
+        .filter(|stem| !stem.is_empty())
+        .map(|stem| format!("{stem} {value}"))
+}
+
+/// Input metadata belongs to the header; outputs never take part in these roles.
+pub(super) fn input_title(call: &crate::log::ToolCall) -> Option<String> {
+    let labels: Vec<_> = call
+        .input
+        .iter()
+        .filter_map(|section| {
+            if let Section::Fields(fields) = section {
+                Some(fields)
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .filter_map(|(key, value)| header_field(key, value))
+        .collect();
+    (!labels.is_empty()).then(|| labels.join(" · "))
+}
+
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
         Section::Fields(fields) => {
@@ -604,8 +673,28 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
                             parts,
                             &Section::Fields(vec![(key.clone(), value.clone())]),
                             label_style,
-                            text_output,
+                            false,
                         );
+                    }
+                }
+                return;
+            }
+            if !text_output {
+                let ordinary: Vec<_> = fields
+                    .iter()
+                    .filter(|(key, value)| !free_text(key) && header_field(key, value).is_none())
+                    .cloned()
+                    .collect();
+                if !ordinary.is_empty() {
+                    push_section(parts, &Section::Fields(ordinary), label_style, true);
+                    let part = parts.last_mut().expect("fields part exists");
+                    if let Body::Fields(keys) = &part.body {
+                        part.body = Body::InputFields(keys.clone());
+                    }
+                }
+                for (key, value) in fields {
+                    if free_text(key) {
+                        parts.push(Part::prose(value.clone(), true));
                     }
                 }
                 return;
@@ -632,7 +721,14 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
         Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
-        Section::Markdown { label, text } => (label, Part::text(cells(text), true)),
+        Section::Markdown { label, text } => (
+            label,
+            if text_output {
+                Part::text(cells(text), true)
+            } else {
+                Part::prose(cells(text), true)
+            },
+        ),
         Section::Text { label, text } => {
             if label == "stderr" {
                 parts.push(Part::new(label.clone(), Body::Label(label_style)));
@@ -640,7 +736,11 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             if text_output {
                 parts.extend(Part::text_parts(cells(text), false));
             } else {
-                parts.push(Part::text(cells(text), false));
+                parts.push(if free_text(label) || label == "questions" {
+                    Part::prose(cells(text), false)
+                } else {
+                    Part::text(cells(text), false)
+                });
             }
             return;
         }

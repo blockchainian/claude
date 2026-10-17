@@ -9289,3 +9289,6 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
     );
     assert_eq!(view.selected, 19);
 }
+
+#[path = "reading_interaction_tests.rs"]
+mod reading_interaction_tests;

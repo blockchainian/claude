@@ -30,6 +30,7 @@ impl View {
         &self,
         event: &Event,
         width: u16,
+        wide: bool,
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> DetailLayout {
@@ -39,6 +40,7 @@ impl View {
             let mut layout = detail_parts_layout(
                 event,
                 width,
+                wide,
                 cwd,
                 now,
                 vec![super::tool_detail::Part::raw_json(source)],
@@ -64,7 +66,7 @@ impl View {
             }
             layout
         } else {
-            detail_layout(event, width, cwd, now)
+            detail_parts_layout(event, width, wide, cwd, now, open_parts(event))
         }
     }
 
@@ -194,6 +196,10 @@ impl View {
     ) {
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
+        let input_title = match event.calls.as_slice() {
+            [call] => super::tool_detail::input_title(call),
+            _ => None,
+        };
         let mut header = Vec::new();
         if let Some(sender) = &event.sender {
             header.push(Span::styled(format!("({sender}) "), label_style));
@@ -206,7 +212,9 @@ impl View {
                 header.push(" ".into());
             }
             let title = if event.calls.len() == 1 {
-                event.calls[0].title.clone()
+                input_title
+                    .clone()
+                    .unwrap_or_else(|| event.calls[0].title.clone())
             } else {
                 event.body.clone()
             };
@@ -231,16 +239,26 @@ impl View {
                 .as_ref()
                 .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16),
         );
-        let header_area = Rect::new(
+        let mut header_area = Rect::new(
             header_row.x + margin,
             header_row.y,
             header_row.width.saturating_sub(margin * 2),
             1,
         );
+        if input_title.is_some() {
+            header_area = content_area;
+        }
         if !header_area.is_empty() {
-            truncate_line_with_ellipsis_if_overflow(Line::from(header), header_area.width.into())
-                .centered()
-                .render(header_area, buf);
+            let title = truncate_line_with_ellipsis_if_overflow(
+                Line::from(header),
+                header_area.width.into(),
+            );
+            let title = if input_title.is_some() {
+                title
+            } else {
+                title.centered()
+            };
+            title.render(header_area, buf);
         }
         Line::from(Span::styled(time.to_owned(), time_style))
             .right_aligned()
@@ -271,17 +289,20 @@ impl View {
             }
         }
         let height = usize::from(body_area.height);
+        let wide = buf.area.width >= super::render::WIDE_LAYOUT_COLUMNS;
         let mut viewport = self.viewport.borrow_mut();
+        viewport.log_detail_wide = wide;
         let mut layout = match viewport.log_detail_layout.take() {
             Some(layout)
                 if layout.width == area.width
+                    && layout.wide == wide
                     && layout.height == height
                     && layout.theme_generation == super::highlight::theme_generation() =>
             {
                 layout
             }
             _ => {
-                let mut layout = self.selected_detail_layout(event, area.width, cwd, now);
+                let mut layout = self.selected_detail_layout(event, area.width, wide, cwd, now);
                 layout.height = height;
                 layout
             }
@@ -368,7 +389,13 @@ impl View {
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = self.selected_detail_layout(event, width, cwd, DateTime::UNIX_EPOCH);
+        let layout = self.selected_detail_layout(
+            event,
+            width,
+            viewport.log_detail_wide,
+            cwd,
+            DateTime::UNIX_EPOCH,
+        );
         let found = layout
             .lines
             .iter()
@@ -829,6 +856,7 @@ struct RawHighlight {
 pub(super) struct DetailLayout {
     raw: Option<RawHighlight>,
     width: u16,
+    wide: bool,
     height: usize,
     theme_generation: u64,
     lines: Vec<Line<'static>>,
@@ -866,18 +894,27 @@ impl DetailLayout {
     }
 }
 
+#[cfg(test)]
 fn detail_layout(
     event: &Event,
     width: u16,
     cwd: &std::path::Path,
     now: DateTime<Utc>,
 ) -> DetailLayout {
-    detail_parts_layout(event, width, cwd, now, open_parts(event))
+    detail_parts_layout(
+        event,
+        width,
+        width >= super::render::WIDE_LAYOUT_COLUMNS,
+        cwd,
+        now,
+        open_parts(event),
+    )
 }
 
 fn detail_parts_layout(
     event: &Event,
     width: u16,
+    wide: bool,
     cwd: &Path,
     now: DateTime<Utc>,
     parts: Vec<super::tool_detail::Part>,
@@ -887,7 +924,10 @@ fn detail_parts_layout(
     let rendered: Vec<_> = parts
         .into_iter()
         .map(|part| {
-            let lines = part.lines(usize::from(width), body_style, now);
+            let body_width = part
+                .column(usize::from(width), wide)
+                .map_or(usize::from(width), |(width, _)| width);
+            let lines = part.lines(body_width, body_style, now);
             (part, lines)
         })
         .collect();
@@ -907,7 +947,10 @@ fn detail_parts_layout(
                 || lines.iter().map(Line::width).max().unwrap_or(0),
                 |group| group_widths[group],
             );
-            let padding = usize::from(width).saturating_sub(block_width) / 2;
+            let padding = part.column(usize::from(width), wide).map_or_else(
+                || usize::from(width).saturating_sub(block_width) / 2,
+                |(_, left)| left,
+            );
             if padding > 0 {
                 // Every row keeps its position within the section, including its source cell map.
                 for (line, cells) in lines.iter_mut().zip(&mut maps) {
@@ -942,6 +985,7 @@ fn detail_parts_layout(
     let mut layout = DetailLayout {
         raw: None,
         width,
+        wide,
         height: 0,
         theme_generation,
         lines: Vec::new(),
@@ -997,7 +1041,12 @@ fn open_parts(event: &Event) -> Vec<super::tool_detail::Part> {
     } else if event.kind == Kind::Tool {
         Vec::new()
     } else if is_prose(&event.kind) {
-        vec![super::tool_detail::Part::text(event.body.clone(), true)]
+        vec![super::tool_detail::Part::prose(event.body.clone(), true)]
+    } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
+        vec![super::tool_detail::Part::prose(
+            event.body.clone(),
+            super::markdown::has_markers(&event.body),
+        )]
     } else {
         super::tool_detail::Part::text_parts(event.body.clone(), false)
     }
@@ -1715,3 +1764,7 @@ pub(super) mod log_markdown {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "log_reading_tests.rs"]
+mod reading_tests;
