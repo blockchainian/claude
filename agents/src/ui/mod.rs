@@ -475,7 +475,7 @@ impl View {
             return if draft.name.is_some() {
                 "New task prompt"
             } else {
-                "New task name"
+                "New task"
             }
             .into();
         }

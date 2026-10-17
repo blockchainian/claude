@@ -16,7 +16,7 @@ fn terminal_image_path_and_clipboard_are_atomic() {
     let source = directory.path().join("a picture.png");
     std::fs::write(&source, &bytes).unwrap();
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task name ❯"));
+    tmux.wait_for(|capture| capture.contains("New task ❯"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "probe"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| capture.contains("New task prompt ❯"));

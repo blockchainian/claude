@@ -519,9 +519,9 @@ fn details_browser_opens_folders_on_click_and_applies_a_repository_on_double_cli
 fn new_task_takes_its_name_then_its_prompt() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
-    assert_eq!(view.input_label(), "New task name");
+    assert_eq!(view.input_label(), "New task");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(view.input_label(), "New task name");
+    assert_eq!(view.input_label(), "New task");
     view.handle_paste("改 Claude Code 的颜色");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(
