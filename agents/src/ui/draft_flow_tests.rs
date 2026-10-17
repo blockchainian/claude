@@ -35,6 +35,7 @@ fn fixture() -> (tempfile::TempDir, View) {
         ProviderId::Claude,
         provider.capabilities(),
     )]));
+    crate::providers::claude::write_fixture_cache(&directory.path().join("config"));
     view.set_input_choices(HashMap::from([(
         ProviderId::Claude,
         provider.input_choices(),
@@ -190,7 +191,7 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
         .unwrap()
         .values
         .iter()
-        .position(|value| value == "haiku")
+        .position(|value| value == "claude-haiku-5-5")
         .unwrap();
     let (rect, _) = view
         .viewport
@@ -203,7 +204,7 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
     assert_eq!(click(&mut view, rect.x + 2, rect.y), None);
     assert_eq!(
         view.selected_draft().unwrap().setup.model.as_deref(),
-        Some("haiku")
+        Some("claude-haiku-5-5")
     );
 }
 
@@ -289,11 +290,14 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
         view.rows[view.selected].effort = effort.map(str::to_owned);
         // Providers without effort choices show only the model.
         if effort.is_none() {
-            view.input_choices
+            for model in &mut view
+                .input_choices
                 .get_mut(&ProviderId::Claude)
                 .unwrap()
-                .efforts
-                .clear();
+                .models
+            {
+                model.efforts.clear();
+            }
         }
         for width in [20, 40, 60, 80, 120, 149, 150, 200] {
             let frame = Rect::new(0, 0, width, 60);

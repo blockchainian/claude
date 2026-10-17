@@ -24,7 +24,7 @@ pub(super) struct BranchEditor {
 
 impl View {
     pub(super) fn open_field(&mut self, field: Field) {
-        let (provider, target) = if let Some(draft) = self.selected_draft() {
+        let (provider, target, model) = if let Some(draft) = self.selected_draft() {
             if draft.working || draft.job.is_some() {
                 return;
             }
@@ -41,7 +41,11 @@ impl View {
                 self.input_box.focused = false;
                 return;
             }
-            (draft.setup.provider, ControlTarget::Draft(draft.id))
+            (
+                draft.setup.provider,
+                ControlTarget::Draft(draft.id),
+                draft.setup.model.clone(),
+            )
         } else if let Some(session) = self.selected_row() {
             if field == Field::Branch
                 || !session.is_live_background()
@@ -52,6 +56,7 @@ impl View {
             (
                 session.id.provider,
                 ControlTarget::Session(session.id.clone()),
+                session.model.clone(),
             )
         } else {
             return;
@@ -60,8 +65,15 @@ impl View {
             return;
         };
         let values = match field {
-            Field::Model => choices.models.clone(),
-            Field::Effort => choices.efforts.clone(),
+            Field::Model => choices
+                .models
+                .iter()
+                .map(|model| model.id.clone())
+                .collect(),
+            Field::Effort => model
+                .and_then(|model| choices.model(&model))
+                .map(|model| model.efforts.clone())
+                .unwrap_or_default(),
             Field::Branch => return,
         };
         if values.is_empty() {
@@ -179,18 +191,18 @@ mod tests {
     use super::*;
     fn draft_view() -> View {
         let directory = tempfile::tempdir().unwrap();
+        crate::providers::claude::write_fixture_cache(directory.path());
         let mut view = View::default();
         view.set_input_choices(HashMap::from([(
             ProviderId::Claude,
-            crate::providers::InputChoices {
-                models: vec!["sonnet".into(), "haiku".into()],
-                efforts: vec!["low".into(), "high".into()],
-            },
+            crate::providers::Provider::input_choices(
+                &crate::providers::claude::ClaudeProvider::new(directory.path().into()),
+            ),
         )]));
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
             cwd: directory.path().into(),
-            model: None,
+            model: Some("claude-opus-5-5".into()),
             effort: None,
             branch: "main".into(),
         });
@@ -230,7 +242,10 @@ mod tests {
             .is_none()
         );
         assert!(view.picker.is_none());
-        assert_eq!(view.drafts[0].setup.model.as_deref(), Some("sonnet"));
+        assert_eq!(
+            view.drafts[0].setup.model.as_deref(),
+            Some("claude-opus-5-5")
+        );
     }
 
     #[test]

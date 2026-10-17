@@ -5,6 +5,7 @@ mod tool;
 use crate::log;
 use crate::model::{Action, Session};
 use std::{
+    collections::HashMap,
     fmt, io,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -84,10 +85,29 @@ pub enum SessionInput {
     SetEffort(String),
 }
 
+/// A selectable model and the efforts it accepts, as its provider's own model cache lists them.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelChoice {
+    pub id: String,
+    pub efforts: Vec<String>,
+    pub default_effort: Option<String>,
+}
+
+/// The models a provider's cache offers; empty when the provider has no cache to read.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputChoices {
-    pub models: Vec<String>,
-    pub efforts: Vec<String>,
+    pub models: Vec<ModelChoice>,
+    /// Short names, such as `opus`, mapped to the model id they stand for.
+    pub aliases: HashMap<String, String>,
+}
+
+impl InputChoices {
+    /// The model `name` names, by id or alias, ignoring a context-size suffix such as `[1m]`.
+    pub fn model(&self, name: &str) -> Option<&ModelChoice> {
+        let name = name.split('[').next().unwrap_or(name);
+        let id = self.aliases.get(name).map_or(name, String::as_str);
+        self.models.iter().find(|model| model.id == id)
+    }
 }
 
 pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;

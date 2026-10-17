@@ -245,11 +245,12 @@ fn creation_parses_verbatim_background_output_and_reports_invalid_results() {
 }
 
 #[test]
-fn claude_input_choices_are_the_supported_model_and_effort_names() {
+fn claude_input_choices_come_only_from_the_model_cache() {
     let directory = tempfile::tempdir().unwrap();
-    let choices = ClaudeProvider::new(directory.path().into()).input_choices();
-    assert_eq!(choices.models, ["fable", "opus", "sonnet", "haiku"]);
-    assert_eq!(choices.efforts, ["low", "medium", "high", "xhigh", "max"]);
+    let provider = ClaudeProvider::new(directory.path().into());
+    assert!(provider.input_choices().models.is_empty());
+    super::write_fixture_cache(directory.path());
+    assert_eq!(provider.input_choices().models[0].id, "claude-opus-5-5");
 }
 
 #[test]
@@ -260,4 +261,20 @@ fn creation_parses_idle_background_output() {
         stderr: Vec::new(),
     };
     assert_eq!(created_job(&output).unwrap(), "6f03db53");
+}
+
+#[test]
+fn task_defaults_fall_back_to_the_cached_models_own_effort() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = ClaudeProvider::new(directory.path().into());
+    std::fs::write(
+        directory.path().join("settings.json"),
+        r#"{"model":"claude-fable-5-1"}"#,
+    )
+    .unwrap();
+    let defaults = || provider.task_defaults(directory.path()).unwrap().unwrap();
+    assert_eq!(defaults().effort, None);
+    super::write_fixture_cache(directory.path());
+    assert_eq!(defaults().model.as_deref(), Some("claude-fable-5-1"));
+    assert_eq!(defaults().effort.as_deref(), Some("high"));
 }

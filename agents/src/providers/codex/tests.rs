@@ -965,3 +965,32 @@ fn model_catalog_labels_refresh_only_when_modified() {
     std::fs::remove_file(path).unwrap();
     assert_eq!(label(&mut provider).as_deref(), Some("gpt-6-astra"));
 }
+
+#[test]
+fn input_choices_list_cached_models_by_priority_with_their_efforts() {
+    let (dir, provider) = fixture();
+    assert_eq!(
+        provider.input_choices(),
+        crate::providers::InputChoices::default()
+    );
+    std::fs::write(
+        dir.path().join("models_cache.json"),
+        include_str!("../../../tests/fixtures/codex-models-cache.json"),
+    )
+    .unwrap();
+    let choices = provider.input_choices();
+    assert_eq!(
+        choices
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol"]
+    );
+    let model = choices.model("gpt-6.1-sol").unwrap();
+    assert_eq!(
+        model.efforts,
+        ["low", "medium", "high", "xhigh", "max", "ultra"]
+    );
+    assert_eq!(model.default_effort.as_deref(), Some("low"));
+}

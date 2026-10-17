@@ -212,6 +212,8 @@ impl CodexProvider {
 struct ModelCatalog {
     modified: Option<SystemTime>,
     labels: HashMap<String, String>,
+    /// The models Codex lists in its picker, by priority.
+    choices: crate::providers::InputChoices,
 }
 
 impl ModelCatalog {
@@ -221,6 +223,7 @@ impl ModelCatalog {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.modified = None;
                 self.labels.clear();
+                self.choices = crate::providers::InputChoices::default();
                 return Ok(());
             }
             Err(error) => return Err(error),
@@ -236,8 +239,39 @@ impl ModelCatalog {
         struct Model {
             slug: String,
             display_name: String,
+            visibility: Option<String>,
+            #[serde(default)]
+            priority: i64,
+            #[serde(default)]
+            supported_reasoning_levels: Vec<Level>,
+            default_reasoning_level: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Level {
+            effort: String,
         }
         let catalog: Catalog = serde_json::from_reader(io::BufReader::new(File::open(path)?))?;
+        let mut listed: Vec<_> = catalog
+            .models
+            .iter()
+            .filter(|model| model.visibility.as_deref() == Some("list"))
+            .collect();
+        listed.sort_by_key(|model| model.priority);
+        self.choices = crate::providers::InputChoices {
+            models: listed
+                .into_iter()
+                .map(|model| crate::providers::ModelChoice {
+                    id: model.slug.clone(),
+                    efforts: model
+                        .supported_reasoning_levels
+                        .iter()
+                        .map(|level| level.effort.clone())
+                        .collect(),
+                    default_effort: model.default_reasoning_level.clone(),
+                })
+                .collect(),
+            aliases: HashMap::new(),
+        };
         self.labels = catalog
             .models
             .into_iter()
@@ -465,6 +499,19 @@ impl Provider for CodexProvider {
     fn id(&self) -> ProviderId {
         ProviderId::Codex
     }
+    fn input_choices(&self) -> crate::providers::InputChoices {
+        let Ok(mut models) = self.models.lock() else {
+            return crate::providers::InputChoices::default();
+        };
+        if models
+            .refresh(&self.home.join("models_cache.json"))
+            .is_err()
+        {
+            return crate::providers::InputChoices::default();
+        }
+        models.choices.clone()
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume: true,

@@ -7,6 +7,9 @@ mod background;
 #[cfg(test)]
 mod create_tests;
 mod defaults;
+mod models;
+#[cfg(test)]
+pub use models::write_fixture_cache;
 mod images;
 pub(crate) mod log;
 mod peer;
@@ -715,20 +718,23 @@ impl Provider for ClaudeProvider {
     }
 
     fn input_choices(&self) -> crate::providers::InputChoices {
-        crate::providers::InputChoices {
-            models: ["fable", "opus", "sonnet", "haiku"]
-                .map(str::to_owned)
-                .into(),
-            efforts: ["low", "medium", "high", "xhigh", "max"]
-                .map(str::to_owned)
-                .into(),
-        }
+        models::input_choices(&self.config_dir, models::installed_version().as_deref())
     }
 
     fn task_defaults(&self, cwd: &Path) -> Option<io::Result<crate::tasks::TaskDefaults>> {
-        Some(defaults::resolve(&self.config_dir, cwd, |name| {
-            std::env::var(name).ok()
-        }))
+        Some(
+            defaults::resolve(&self.config_dir, cwd, |name| std::env::var(name).ok()).map(
+                |mut defaults| {
+                    // With no configured effort, Claude uses the model's own default.
+                    if defaults.effort.is_none() {
+                        defaults.effort = defaults.model.as_deref().and_then(|model| {
+                            self.input_choices().model(model)?.default_effort.clone()
+                        });
+                    }
+                    defaults
+                },
+            ),
+        )
     }
 
     fn created_job(&self, output: &std::process::Output) -> io::Result<String> {

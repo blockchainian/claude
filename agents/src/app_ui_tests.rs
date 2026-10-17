@@ -5,6 +5,7 @@ use ratatui::backend::TestBackend;
 fn fixture() -> (tempfile::TempDir, App) {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("projects/probe");
+    crate::providers::claude::write_fixture_cache(directory.path());
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
         project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
@@ -453,10 +454,10 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
     click(&mut app, x, y);
     click(&mut app, x, y);
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "haiku");
+    let (x, y) = position(&buffer, "claude-haiku-5-5");
     click(&mut app, x, y);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("╴haiku "), "{rendered}");
+    assert!(rendered.contains("╴claude-haiku-5-5 "), "{rendered}");
     let buffer = draw(&mut app, 180);
     let (_, (x, y)) = row_ends(&buffer, "Default");
     click(&mut app, x, y);
@@ -468,7 +469,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
         KeyModifiers::CONTROL,
     )));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("╴haiku "), "{rendered}");
+    assert!(rendered.contains("╴claude-haiku-5-5 "), "{rendered}");
     assert!(!rendered.contains("❯ high"), "{rendered}");
 }
 

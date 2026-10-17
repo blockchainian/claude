@@ -35,6 +35,7 @@ unicode-segmentation = "1"
 unicode-width = "0.2"
 url = "2"
 vt100 = "0.16"
+sha2 = "0.10"
 
 # macOS's default `unpacked` keeps one .o per codegen unit in target/debug/deps for
 # every incremental build, and Gatekeeper lists that directory on each exec of a test
