@@ -18,7 +18,7 @@ fn assert_reading_column(layout: &DetailLayout, segment: usize, wide: bool) {
         .filter(|(id, cells)| *id == segment && !cells.is_empty())
         .collect();
     assert!(!rows.is_empty());
-    let width = if wide { layout.width / 2 } else { layout.width };
+    let width = layout.content_width;
     let left = if wide { (layout.width - width) / 2 } else { 0 };
     for (_, cells) in rows {
         assert!(cells.first().unwrap().0.start >= left);
@@ -31,7 +31,7 @@ fn assert_reading_column(layout: &DetailLayout, segment: usize, wide: bool) {
 }
 
 #[test]
-fn prose_body_kinds_use_reading_column_only_in_wide_mode() {
+fn prose_body_kinds_use_the_log_column_width() {
     let mut event = events(include_str!("../../tests/fixtures/transcript.jsonl")).remove(0);
     event.calls.clear();
     event.body = "A readable sentence with enough words to span the full panel width. ".repeat(8);
@@ -130,7 +130,7 @@ fn generic_input_fields_keep_summaries_and_prose_without_changing_outputs() {
 }
 
 #[test]
-fn question_and_agent_inputs_are_prose_but_tool_outputs_keep_full_width() {
+fn question_agent_inputs_and_tool_outputs_use_the_log_column_width() {
     for fixture in [
         include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
@@ -181,15 +181,7 @@ fn question_and_agent_inputs_are_prose_but_tool_outputs_keep_full_width() {
             .iter()
             .position(|s| s.text.starts_with("tool output"))
             .unwrap();
-        assert!(
-            drawn
-                .rows
-                .iter()
-                .filter(|(id, _)| *id == output)
-                .any(|(_, cells)| cells
-                    .last()
-                    .is_some_and(|(range, _)| range.end > width * 3 / 4))
-        );
+        assert_reading_column(&drawn, output, width == 200);
     }
 }
 
@@ -283,8 +275,8 @@ fn command_and_all_output_body_formats_keep_their_width() {
         Section::Fields(vec![("prompt".into(), text.clone())]),
     ]);
     for part in open_parts(&event) {
-        assert_eq!(part.wrap_width(200, true), None);
-        assert_eq!(part.wrap_width(120, false), None);
+        assert_eq!(part.wrap_width(200, true), Some(200));
+        assert_eq!(part.wrap_width(120, false), Some(120));
     }
 }
 
@@ -301,7 +293,7 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
         expected.iter().map(|p| &p.source).collect::<Vec<_>>()
     );
     for part in actual {
-        assert_eq!(part.wrap_width(200, true), Some(100));
+        assert_eq!(part.wrap_width(200, true), Some(200));
     }
 }
 
@@ -406,7 +398,11 @@ fn assert_centered_blocks(event: &Event, width: u16) {
             .min()
             .unwrap();
         assert!(
-            left.abs_diff(right) <= 1,
+            if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
+                left.abs_diff(right) <= 1
+            } else {
+                left == 0
+            },
             "{} {:?} group {:?}: margins {left}/{right} at width {width}: {nonempty:#?}",
             event.body,
             event.kind,

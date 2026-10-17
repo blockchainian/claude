@@ -41,6 +41,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - Selecting the newest event follows arriving events. Older selections stay on their event and show the border's Latest/New jump; clicking it selects newest and follows again.
 - Switching tasks resets the log selection to newest and resumes following.
 - Double click, text selection and list/detail search remain independent of following.
+- Detail titles and body blocks use the log list message-column width; center them in wide layouts and left-align them in narrow layouts.
 
 ## Development
 

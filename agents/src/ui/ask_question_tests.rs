@@ -132,15 +132,9 @@ fn ask_question_outputs_without_marker_are_unchanged() {
 
 #[test]
 fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
-    for (fixture, expected) in [
-        (
-            REJECTED,
-            include_str!("../../tests/ui_snapshots/task_log_questions_rejected.txt"),
-        ),
-        (
-            ANSWERED,
-            include_str!("../../tests/ui_snapshots/task_log_questions_answered.txt"),
-        ),
+    for (fixture, name) in [
+        (REJECTED, "task_log_questions_rejected.txt"),
+        (ANSWERED, "task_log_questions_answered.txt"),
     ] {
         let event = question_event(fixture);
         let (mut view, now) = log_fixture();
@@ -163,7 +157,16 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
             .collect::<Vec<_>>()
             .join("\n")
             + "\n";
-        assert_eq!(screen.trim_end(), expected.trim_end());
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/ui_snapshots")
+            .join(name);
+        if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+            std::fs::write(&path, &screen).unwrap();
+        }
+        assert_eq!(
+            screen.trim_end(),
+            std::fs::read_to_string(path).unwrap().trim_end()
+        );
 
         let parts = tool_detail::parts(&event);
         let viewport = view.viewport.borrow();
@@ -181,7 +184,8 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
                 .collect();
             let left = cells.iter().map(|columns| columns.start).min().unwrap();
             let right = cells.iter().map(|columns| columns.end).max().unwrap();
-            assert_eq!(left, (region.area.width - (right - left)) / 2);
+            assert_eq!(left, 0);
+            assert!(right <= view.center_layout(area).log.width.saturating_sub(10));
         }
         assert_eq!(region.sources[0].text.as_ref(), parts[0].source);
         drop(viewport);

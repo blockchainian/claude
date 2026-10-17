@@ -30,6 +30,7 @@ impl View {
         &self,
         event: &Event,
         width: u16,
+        content_width: u16,
         wide: bool,
         cwd: &Path,
         now: DateTime<Utc>,
@@ -40,6 +41,7 @@ impl View {
             let mut layout = detail_parts_layout(
                 event,
                 width,
+                content_width,
                 wide,
                 cwd,
                 now,
@@ -50,7 +52,7 @@ impl View {
                 // Centering was already applied to plain rows by detail_parts_layout.
                 let content_width = super::tool_detail::split_wide(
                     super::highlight::plain_lines(&drawn),
-                    usize::from(width),
+                    usize::from(content_width),
                 )
                 .iter()
                 .map(Line::width)
@@ -66,7 +68,15 @@ impl View {
             }
             layout
         } else {
-            detail_parts_layout(event, width, wide, cwd, now, open_parts(event))
+            detail_parts_layout(
+                event,
+                width,
+                content_width,
+                wide,
+                cwd,
+                now,
+                open_parts(event),
+            )
         }
     }
 
@@ -207,6 +217,11 @@ impl View {
         cwd: &std::path::Path,
         now: DateTime<Utc>,
     ) {
+        let wide = buf.area.width >= super::render::WIDE_LAYOUT_COLUMNS;
+        let content_width = log_row_areas(self.center_layout(buf.area).log)
+            .0
+            .width
+            .min(area.width);
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown());
         let mut header = Vec::new();
@@ -240,16 +255,26 @@ impl View {
         };
         let header_row = super::render::row(area, LOG_TOP, 1);
         let (content_area, time_area) = log_row_areas(header_row);
-        // The centered title keeps the metadata and time clear on both sides.
-        let margin = (header_row.width - content_area.width).max(
-            header_label
-                .as_ref()
-                .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16),
-        );
+        let label_width = header_label
+            .as_ref()
+            .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16);
+        let margin = (header_row.width - content_area.width).max(label_width);
+        let title_width = content_width.min(if wide {
+            header_row.width.saturating_sub(2 * margin)
+        } else {
+            content_area
+                .width
+                .saturating_sub(label_width + u16::from(header_label.is_some()) * 2)
+        });
         let header_area = Rect::new(
-            header_row.x + margin,
+            header_row.x
+                + if wide {
+                    (header_row.width - title_width) / 2
+                } else {
+                    0
+                },
             header_row.y,
-            header_row.width.saturating_sub(margin * 2),
+            title_width,
             1,
         );
         if !header_area.is_empty() {
@@ -257,14 +282,23 @@ impl View {
                 Line::from(header),
                 header_area.width.into(),
             );
-            title.centered().render(header_area, buf);
+            if wide { title.centered() } else { title }.render(header_area, buf);
         }
         Line::from(Span::styled(time.to_owned(), time_style))
             .right_aligned()
             .render(time_area, buf);
-        // Metadata occupies the slot opposite the time.
+        // Metadata stays clear of the title and time.
         if let Some(header_label) = header_label {
-            let id_area = Rect::new(header_row.x, header_row.y, margin, 1);
+            let id_area = Rect::new(
+                if wide {
+                    header_row.x
+                } else {
+                    time_area.x.saturating_sub(label_width + 2)
+                },
+                header_row.y,
+                if wide { margin } else { label_width },
+                1,
+            );
             truncate_line_with_ellipsis_if_overflow(Line::from(header_label), id_area.width.into())
                 .render(id_area, buf);
         }
@@ -288,12 +322,12 @@ impl View {
             }
         }
         let height = usize::from(body_area.height);
-        let wide = buf.area.width >= super::render::WIDE_LAYOUT_COLUMNS;
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_detail_wide = wide;
         let mut layout = match viewport.log_detail_layout.take() {
             Some(layout)
                 if layout.width == area.width
+                    && layout.content_width == content_width
                     && layout.wide == wide
                     && layout.height == height
                     && layout.theme_generation == super::highlight::theme_generation() =>
@@ -301,7 +335,8 @@ impl View {
                 layout
             }
             _ => {
-                let mut layout = self.selected_detail_layout(event, area.width, wide, cwd, now);
+                let mut layout =
+                    self.selected_detail_layout(event, area.width, content_width, wide, cwd, now);
                 layout.height = height;
                 layout
             }
@@ -391,6 +426,7 @@ impl View {
         let layout = self.selected_detail_layout(
             event,
             width,
+            log_row_areas(viewport.log).0.width.min(width),
             viewport.log_detail_wide,
             cwd,
             DateTime::UNIX_EPOCH,
@@ -870,6 +906,7 @@ struct RawHighlight {
 pub(super) struct DetailLayout {
     raw: Option<RawHighlight>,
     width: u16,
+    content_width: u16,
     wide: bool,
     height: usize,
     theme_generation: u64,
@@ -892,7 +929,7 @@ impl DetailLayout {
             return;
         }
         raw.highlighter.advance(&raw.source, |line| {
-            let rows = super::tool_detail::split_wide(vec![line], usize::from(self.width));
+            let rows = super::tool_detail::split_wide(vec![line], usize::from(self.content_width));
             for mut line in rows {
                 for span in &mut line.spans {
                     span.style = raw.style.patch(span.style);
@@ -918,6 +955,7 @@ fn detail_layout(
     detail_parts_layout(
         event,
         width,
+        log_row_areas(Rect::new(0, 0, width, 1)).0.width,
         width >= super::render::WIDE_LAYOUT_COLUMNS,
         cwd,
         now,
@@ -928,6 +966,7 @@ fn detail_layout(
 fn detail_parts_layout(
     event: &Event,
     width: u16,
+    content_width: u16,
     wide: bool,
     cwd: &Path,
     now: DateTime<Utc>,
@@ -939,9 +978,10 @@ fn detail_parts_layout(
         .into_iter()
         .map(|part| {
             let body_width = part
-                .wrap_width(usize::from(width), wide)
-                .unwrap_or(usize::from(width));
-            let lines = part.lines(body_width, body_style, now);
+                .wrap_width(usize::from(content_width), wide)
+                .unwrap_or(usize::from(content_width));
+            let mut lines = part.lines(body_width, body_style, now);
+            part.align_title(&mut lines, wide);
             (part, lines)
         })
         .collect();
@@ -961,7 +1001,11 @@ fn detail_parts_layout(
                 || lines.iter().map(Line::width).max().unwrap_or(0),
                 |group| group_widths[group],
             );
-            let padding = usize::from(width).saturating_sub(block_width) / 2;
+            let padding = if wide {
+                usize::from(width).saturating_sub(block_width) / 2
+            } else {
+                0
+            };
             if padding > 0 {
                 // Every row keeps its position within the section, including its source cell map.
                 for (line, cells) in lines.iter_mut().zip(&mut maps) {
@@ -996,6 +1040,7 @@ fn detail_parts_layout(
     let mut layout = DetailLayout {
         raw: None,
         width,
+        content_width,
         wide,
         height: 0,
         theme_generation,

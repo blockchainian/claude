@@ -241,12 +241,13 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
         .find(|event| event.body == view.rows[0].prompt)
         .unwrap();
     let source = super::log::open_text(&event);
+    view.rows[0].transcript = Some(path);
     view.log_session = Some(view.rows[0].id.clone());
     view.select_fixture_event(Some(event));
     let area = Rect::new(2, 1, 30, 10);
     view.viewport.borrow_mut().log_detail = area;
     let render = |view: &View| {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 20));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 40));
         view.render_log_detail(area, &mut buf, Utc::now());
         buf
     };

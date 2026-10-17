@@ -5339,7 +5339,7 @@ mod log_search {
             }
             assert!(!view.log_search.active());
             assert_eq!(view.visible_log_event(), Some(&selected));
-            let area = Rect::new(0, 0, 100, 12);
+            let area = Rect::new(0, 0, 100, 40);
             let mut buf = Buffer::empty(area);
             view.render_log_detail(area, &mut buf, now);
             assert!(text(&buf).contains("I will check the files"));
@@ -6750,14 +6750,13 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
             let row = &rows[0];
             let start = row.cells.first().unwrap().0.start;
             let end = row.cells.last().unwrap().0.end;
-            let (left, right) = (start - 1, body.width - end - 1);
-            assert!(right.abs_diff(left) <= 2, "{left} {right}");
+            assert_eq!(start, 2);
             if start > 1 {
                 assert_eq!(buf[(body.x + start - 2, row.y)].symbol(), "─");
             }
             if end < body.width - 1 {
                 // The Bash call ran 12s; its time ends the rule in the header's time column.
-                let last = if title == "Read" { " " } else { "s" };
+                let last = " ";
                 assert_eq!(buf[(body.right() - 1, row.y)].symbol(), last);
             }
             if title != "Read" {
@@ -6774,7 +6773,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                     .modifier
                     .contains(ratatui::style::Modifier::DIM)
             );
-            let arrow_x = body.x + (body.width - 1) / 2;
+            let arrow_x = body.x;
             let arrow = (body.y..body.bottom())
                 .find(|y| buf[(arrow_x, *y)].symbol() == "↓")
                 .expect("arrow centered on panel");
@@ -6836,7 +6835,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             .cloned()
             .collect();
         assert_eq!(rows.len(), 4);
-        let offset = (region.area.width - ("cat /workspace/a".len() as u16 + 2)) / 2;
+        let offset = 0;
         assert!(
             rows.iter()
                 .all(|row| row.cells.first().unwrap().0.start == offset)
@@ -6922,7 +6921,7 @@ fn running_tool_redraws_cached_detail_only_while_visible() {
         let text = screen.lines().nth(usize::from(row.y)).unwrap();
         assert_eq!(
             text.find(frame),
-            Some(usize::from(region.area.x) + usize::from(region.area.width.saturating_sub(3)) / 2)
+            Some(usize::from(region.area.x))
         );
         drop(viewport);
         assert_eq!(
@@ -7076,7 +7075,7 @@ fn task_log_selected_event_header_centers_kind_and_keeps_time_right() {
         let list = log_screen(&view, 100, 25, now);
         let row = list.lines().find(|line| line.contains(body)).unwrap();
         let time = row.chars().skip(91).take(8).collect::<String>();
-        let header = format!("{:<91}{time}", format!("{}Assistant", " ".repeat(45)));
+        let header = format!("{:<91}{time}", " Assistant");
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
         assert!(
@@ -7101,8 +7100,15 @@ fn task_log_click_opens_row_with_shortened_path() {
     assert!(!list.contains(path), "{list}");
     click_log_text(&mut view, &list, "run tests", MouseButton::Left);
     let open = log_screen(&view, 100, 25, now);
-    // The open event wraps the full path at the panel edge instead of shortening it.
-    assert!(open.contains(&path[..96]), "{open}");
+    // The open event wraps the full path within the message-column width.
+    assert!(
+        open.contains("/private/workspace/a-very-long-directory-name"),
+        "{open}"
+    );
+    assert!(open.contains("report.md"), "{open}");
+    assert!(
+        view.viewport.borrow().log_text.sources.iter().any(|source| source.text.contains(path))
+    );
 }
 
 fn click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
@@ -7720,7 +7726,7 @@ fn open_tool_layout_titles_and_rules() {
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "↓");
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(x, area.x + (area.width - 1) / 2);
+    assert_eq!(x, area.x);
     assert_eq!(buf[(x, y)].fg, Color::Reset);
     assert!(
         buf[(x, y)]
@@ -7845,8 +7851,6 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         assert!(
             header
                 .replace(' ', "")
-                .strip_prefix(if name == "Agent" { "Plan" } else { "" })
-                .unwrap()
                 .starts_with(&call.title.replace(' ', ""))
         );
         for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
@@ -8715,11 +8719,12 @@ fn task_notification_detail_shows_task_id_and_output_content() {
         view.log = vec![event.clone(), event.clone()];
         view.select_fixture_event(Some(event.clone()));
         let area = Rect::new(0, 0, 160, 15);
-        let mut buffer = Buffer::empty(area);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
         view.render_log_detail(area, &mut buffer, now);
         let lines: Vec<_> = buffer
             .content
             .chunks(160)
+            .take(usize::from(area.height))
             .map(|row| {
                 let mut text = String::new();
                 let mut column = 0;

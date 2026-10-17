@@ -1633,7 +1633,14 @@ fn terminal_log_border_double_clicks() {
     double_click(2);
     tmux.wait_for(|capture| capture.contains("↓ Latest"));
     let oldest = capture("oldest");
-    assert!(oldest.contains("Codex Manager 在一个 turn"), "{oldest}");
+    assert!(
+        oldest
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("Codex Manager 在一个 turn"),
+        "{oldest}"
+    );
     double_click(bottom + 1);
     tmux.wait_for(|capture| !capture.contains("↓ Latest") && capture.contains("对，必须"));
     let latest = capture("latest");
@@ -1840,7 +1847,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
         })
         .expect("recorded user message");
     // Keep recorded upstream bodies, field names and command line breaks intact.
-    for (kind, records, needle, prose) in [
+    for (kind, records, needle, _prose) in [
         ("assistant", String::new(), "对，必须", true),
         (
             "send",
@@ -1942,73 +1949,39 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             } else {
                 line[..line.find(needle).unwrap()].width()
             };
-            let expected_left = if prose {
-                let body: Vec<_> = rows
-                    .iter()
-                    .skip(rule + 3)
-                    .take_while(|line| line.trim() != "↓" && !line.starts_with(" ? help"))
-                    .map(|line| line.trim_end().trim_end_matches('│').trim_end())
-                    .filter(|line| !line.trim().is_empty())
-                    .collect();
-                let start = body
-                    .iter()
-                    .map(|line| line.width() - line.trim_start().width())
-                    .min()
-                    .expect("input body");
-                let end = body.iter().map(|line| line.width()).max().unwrap();
-                1 + (usize::from(width) - 2 - (end - start)) / 2
+            let group_start = rows
+                .iter()
+                .enumerate()
+                .skip(rule + 3)
+                .take(row.saturating_sub(rule + 3))
+                .filter(|(_, line)| line.trim() == "↓")
+                .map(|(index, _)| index + 1)
+                .next_back()
+                .unwrap_or(rule + 3);
+            let group: Vec<_> = rows
+                .iter()
+                .skip(group_start)
+                .take_while(|line| line.trim() != "↓" && !line.starts_with(" ? help"))
+                .map(|line| line.trim_end().trim_end_matches('│').trim_end())
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            let group_left = group
+                .iter()
+                .map(|line| line.width() - line.trim_start().width())
+                .min()
+                .expect("detail body group");
+            let group_right = group.iter().map(|line| line.width()).max().unwrap();
+            let cap = terminal_detail_width::message_width(&capture, usize::from(width));
+            assert!(
+                group_right - group_left <= cap,
+                "{kind} exceeds actual message column {cap}: {capture}"
+            );
+            let expected_left = if width >= 150 {
+                1 + (usize::from(width) - 2 - (group_right - group_left)) / 2
             } else {
                 1
             };
-            if kind == "command" {
-                assert!(
-                    left < usize::from(width / 4),
-                    "command acquired a reading margin: {capture}"
-                );
-                assert!(
-                    rows.iter()
-                        .skip(row)
-                        .any(|line| line.trim().width() > usize::from(width / 2)),
-                    "command wrapped at prose width: {capture}"
-                );
-            } else if kind == "agent-prompt" && width < 150 {
-                // Its existing group centers at the widest full-width wrapped row.
-                assert!(left <= 3, "agent prompt unexpectedly narrowed: {capture}");
-                assert!(
-                    rows.iter().skip(row).any(|line| line.trim().width() > 100),
-                    "agent prompt did not use the full narrow column: {capture}"
-                );
-            } else if kind != "output" {
-                assert_eq!(left, expected_left, "{kind} at {width}: {capture}");
-            } else {
-                let recorded: serde_json::Value = serde_json::from_str(calls[3]).unwrap();
-                let content = recorded["toolUseResult"]["file"]["content"]
-                    .as_str()
-                    .unwrap();
-                let widest = content.lines().map(UnicodeWidthStr::width).max().unwrap();
-                let padding = (usize::from(width) - 2 - widest) / 2;
-                assert_eq!(
-                    left,
-                    1 + padding + "set -g ".width(),
-                    "output layout changed: {capture}"
-                );
-                assert!(
-                    capture.contains(content.lines().max_by_key(|line| line.width()).unwrap()),
-                    "output wrapped at prose width: {capture}"
-                );
-            }
-            if prose && width >= 150 {
-                for line in rows
-                    .iter()
-                    .skip(row)
-                    .take_while(|line| !line.trim().is_empty())
-                {
-                    assert!(
-                        line.trim_end().trim_end_matches('│').trim_end().width() <= 149,
-                        "prose exceeds reading column: {capture}"
-                    );
-                }
-            }
+            assert_eq!(group_left, expected_left, "{kind} at {width}: {capture}");
             if kind == "send" {
                 assert!(
                     rows[rule + 1]
@@ -2126,30 +2099,84 @@ fn terminal_manager_detach_title() {
     .unwrap();
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.wait_for(|capture| capture.contains("thread 01a1489e"));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    // The centered header is separate from the list row and input body.
-    let title = capture
-        .lines()
-        .find(|line| line.trim_start().starts_with("codex-manager detach"))
-        .expect("centered tool title");
-    let left = title.len() - title.trim_start().len();
-    assert!(
-        left.abs_diff((200 - "codex-manager detach".len()) / 2) <= 1,
-        "{capture}"
-    );
-    let input = capture
-        .lines()
-        .find(|line| line.contains("thread 01a1489e"))
-        .expect("thread input block");
-    assert!(input.len() - input.trim_start().len() > 50, "{capture}");
-    assert!(
-        capture.contains("\"archived\": true") && capture.contains("\"detached\": true"),
-        "{capture}"
-    );
-    let path = std::env::temp_dir().join("agents-manager-detach-title.txt");
-    std::fs::write(&path, &capture).unwrap();
-    println!(
-        "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
-        path.display()
-    );
+    for width in [200_u16, 120, 150, 149] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == 50
+                && capture.lines().nth(1).is_some_and(|line| {
+                    line.matches('┬').count() == if width >= 150 { 2 } else { 1 }
+                })
+                && capture.lines().any(|line| {
+                    line.width() == usize::from(width)
+                        && line.matches('─').count() > usize::from(width / 2)
+                })
+                && capture.contains("thread 01a1489e")
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = capture.lines().collect();
+        let rule = rows
+            .iter()
+            .rposition(|line| line.matches('─').count() > usize::from(width / 2))
+            .unwrap();
+        let title = rows[rule + 1];
+        assert!(
+            title.trim_start().starts_with("codex-manager detach"),
+            "{capture}"
+        );
+        let title_left = title.width() - title.trim_start().width();
+        let input = rows
+            .iter()
+            .skip(rule + 2)
+            .find(|line| line.contains("thread 01a1489e"))
+            .expect("thread input block");
+        let input_left = input.width() - input.trim_start().width();
+        if width >= 150 {
+            assert!(
+                title_left.abs_diff((usize::from(width) - "codex-manager detach".width()) / 2) <= 1,
+                "{capture}"
+            );
+            assert!(
+                input_left.abs_diff(usize::from(width) - input.trim_end().width()) <= 1,
+                "{capture}"
+            );
+        } else {
+            assert_eq!(title_left, 1, "{capture}");
+            assert_eq!(input_left, 1, "{capture}");
+        }
+        assert!(
+            capture.contains("\"archived\": true") && capture.contains("\"detached\": true"),
+            "{capture}"
+        );
+        let arrow = rows
+            .iter()
+            .skip(rule + 2)
+            .find(|line| line.trim() == "↓")
+            .unwrap();
+        let arrow_left = arrow.width() - arrow.trim_start().width();
+        if width >= 150 {
+            assert!(
+                arrow_left.abs_diff((usize::from(width) - 1) / 2) <= 1,
+                "{capture}"
+            );
+        } else {
+            assert_eq!(arrow_left, 1, "{capture}");
+        }
+        let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
+        std::fs::write(&path, &capture).unwrap();
+        println!(
+            "{{\"verdict\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
 }
+
+#[path = "support/terminal_detail_width.rs"]
+mod terminal_detail_width;

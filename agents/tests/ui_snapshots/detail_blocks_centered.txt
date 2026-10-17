@@ -1,11 +1,11 @@
 subagent interacted (/root) — 120 columns
-                                 agent_path: /root
-                                 agent_thread_id: 01a10da3-df29-7380-abe4-8c64f7ed5f8d
-                                 id: call_6pn4aC9AEdpX2uAtX7PAxvQe
-                                 kind: interacted
-                                 type: SubAgentActivity
-                                                           ↓
-                                                          •··
+agent_path: /root
+agent_thread_id: 01a10da3-df29-7380-abe4-8c64f7ed5f8d
+id: call_6pn4aC9AEdpX2uAtX7PAxvQe
+kind: interacted
+type: SubAgentActivity
+↓
+•··
 subagent interacted (/root) — 200 columns
                                                                          agent_path: /root
                                                                          agent_thread_id: 01a10da3-df29-7380-abe4-8c64f7ed5f8d
@@ -15,12 +15,12 @@ subagent interacted (/root) — 200 columns
                                                                                                    ↓
                                                                                                   •··
 spawn_agent (claude_calls) [scrubbed] — 120 columns
-                                                task_name: claude_calls
-                                                [scrubbed]
-                                                           ↓
-                                          {
-                                            "task_name": "/root/claude_calls"
-                                          }
+task_name: claude_calls
+[scrubbed]
+↓
+{
+  "task_name": "/root/claude_calls"
+}
 spawn_agent (claude_calls) [scrubbed] — 200 columns
                                                                                         task_name: claude_calls
                                                                                         [scrubbed]
@@ -29,10 +29,10 @@ spawn_agent (claude_calls) [scrubbed] — 200 columns
                                                                                     "task_name": "/root/claude_calls"
                                                                                   }
 spawn_agent (codex_calls) [scrubbed] — 120 columns
-                                                 task_name: codex_calls
-                                                 [scrubbed]
-                                                           ↓
-                                                          •··
+task_name: codex_calls
+[scrubbed]
+↓
+•··
 spawn_agent (codex_calls) [scrubbed] — 200 columns
                                                                                          task_name: codex_calls
                                                                                          [scrubbed]
@@ -40,17 +40,16 @@ spawn_agent (codex_calls) [scrubbed] — 200 columns
                                                                                                   •··
 WebFetch render.com/docs/postgresql-instance-types — 120 columns
 url: https://render.com/docs/postgresql-instance-types
-Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and price. Include
-any sentence about how the connection limit is computed.
-                                                           ↓
+Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and
+price. Include any sentence about how the connection limit is computed.
+↓
 The server returned HTTP 404 Not Found.
 
-The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. gh for GitHub,
-or an MCP-provided fetch tool) instead of WebFetch.
+The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. gh
+for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
 WebFetch render.com/docs/postgresql-instance-types — 200 columns
-                                                     url: https://render.com/docs/postgresql-instance-types
-                                                     Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection
-                                                     limit) and price. Include any sentence about how the connection limit is computed.
+           url: https://render.com/docs/postgresql-instance-types
+           Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and price. Include any sentence about how the connection limit is computed.
                                                                                                    ↓
               The server returned HTTP 404 Not Found.
 

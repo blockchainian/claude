@@ -162,17 +162,23 @@ impl Part {
         self
     }
 
-    /// Body semantics limit wrapping; the layout centers each block by its rendered width.
-    pub fn wrap_width(&self, width: usize, wide: bool) -> Option<usize> {
-        if wide
-            && matches!(
-                self.body,
-                Body::Prose(_) | Body::ProseJson(_) | Body::InputFields(_)
-            )
-        {
-            Some((width / 2).max(1))
-        } else {
-            None
+    /// Every body uses the log list's message-column width supplied by the layout.
+    pub fn wrap_width(&self, width: usize, _wide: bool) -> Option<usize> {
+        Some(width)
+    }
+
+    /// Narrow merged calls start at the same left edge as their input and output.
+    pub fn align_title(&self, lines: &mut [Line<'_>], wide: bool) {
+        if wide || !matches!(self.body, Body::TitleRule(..)) {
+            return;
+        }
+        for line in lines {
+            if line.spans.len() >= 4 && line.spans[0].width() >= 2 {
+                let shift = line.spans[0].width() - 2;
+                line.spans[0].content = "─ ".into();
+                let last = line.spans.last_mut().expect("title rule suffix exists");
+                last.content = format!("{}{}", "─".repeat(shift), last.content).into();
+            }
         }
     }
 

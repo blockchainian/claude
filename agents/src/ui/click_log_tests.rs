@@ -67,7 +67,7 @@ fn detail_buffer(view: &View, width: u16, now: chrono::DateTime<Utc>) -> Buffer 
 
 #[test]
 fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
-    for width in [80, 81, 120] {
+    for width in [80, 81, 160] {
         let (view, now, input, output) = multiline_tool_view();
         let buf = detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
@@ -84,8 +84,11 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
                 .filter(|row| row.segment == source.id)
                 .collect();
             let block_width = text.lines().map(UnicodeWidthStr::width).max().unwrap() as u16;
-            let offset = (region.area.width - block_width) / 2;
-            assert!(offset > 0);
+            let offset = if buf.area.width >= 150 {
+                (region.area.width - block_width) / 2
+            } else {
+                0
+            };
             for (row, line) in rows.iter().zip(text.lines()) {
                 let drawn: String = (0..block_width)
                     .map(|x| buf[(region.area.x + offset + x, row.y)].symbol())
@@ -100,7 +103,16 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
             assert_eq!(rows.len(), 2);
         }
         assert_eq!(
-            buf[(region.area.x + (width - 1) / 2, region.area.y + 2)].symbol(),
+            buf[(
+                region.area.x
+                    + if buf.area.width >= 150 {
+                        (width - 1) / 2
+                    } else {
+                        0
+                    },
+                region.area.y + 2
+            )]
+                .symbol(),
             "↓"
         );
     }
@@ -108,7 +120,7 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
 
 #[test]
 fn detail_centers_all_output_fragments_with_one_offset() {
-    for width in [80, 81, 120] {
+    for width in [80, 81, 160] {
         let (mut view, now, _, _) = multiline_tool_view();
         let mut event = view.visible_log_event().cloned().unwrap();
         let json = include_str!("../../tests/fixtures/transcript.jsonl")
@@ -127,16 +139,28 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             .unwrap();
         let output_parts = &parts[output_start..];
         assert!(output_parts.len() >= 4);
+        let content_width = view
+            .center_layout(Rect::new(0, 0, width + 4, 42))
+            .log
+            .width
+            .saturating_sub(10);
         let widest = output_parts
             .iter()
             .flat_map(|part| {
-                part.lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH)
+                part.lines(
+                    content_width.into(),
+                    Style::default(),
+                    chrono::DateTime::UNIX_EPOCH,
+                )
             })
             .map(|line| line.width())
             .max()
             .unwrap() as u16;
-        let offset = (width - widest) / 2;
-        assert!(offset > 0);
+        let offset = if width + 4 >= 150 {
+            (width - widest) / 2
+        } else {
+            0
+        };
         view.select_fixture_event(Some(event));
         let buf = detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
@@ -150,7 +174,11 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             output_parts
                 .iter()
                 .map(|part| part
-                    .lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH)
+                    .lines(
+                        content_width.into(),
+                        Style::default(),
+                        chrono::DateTime::UNIX_EPOCH
+                    )
                     .len())
                 .sum::<usize>(),
         );
@@ -162,8 +190,11 @@ fn detail_centers_all_output_fragments_with_one_offset() {
                 .filter(|other| other.segment == row.segment)
                 .collect();
             let index = rows.iter().position(|other| other.y == row.y).unwrap();
-            let line = part.lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH)
-                [index]
+            let line = part.lines(
+                content_width.into(),
+                Style::default(),
+                chrono::DateTime::UNIX_EPOCH,
+            )[index]
                 .to_string();
             let mut column = region.area.x + offset;
             for grapheme in
@@ -208,9 +239,21 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .join("\n"),
             include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
         );
-        let lines = part.lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH);
-        let offset = (width as usize - lines.iter().map(Line::width).max().unwrap()) / 2;
-        assert!(offset > 0);
+        let content_width = view
+            .center_layout(Rect::new(0, 0, width + 4, 42))
+            .log
+            .width
+            .saturating_sub(10);
+        let lines = part.lines(
+            content_width.into(),
+            Style::default(),
+            chrono::DateTime::UNIX_EPOCH,
+        );
+        let offset = if width + 4 >= 150 {
+            (width as usize - lines.iter().map(Line::width).max().unwrap()) / 2
+        } else {
+            0
+        };
         let copy = super::super::log::open_text(&event);
         assert!(copy.ends_with(&part.source));
         view.select_fixture_event(Some(event));
@@ -281,7 +324,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     view.rows[view.selected].cwd = directory.path().into();
     view.select_fixture_event(Some(event));
     view.log_detail_search.query.set_text("decks.txt");
-    let mut buf = detail_buffer(&view, 120, now);
+    let mut buf = detail_buffer(&view, 200, now);
     let (rect, target) = view
         .viewport
         .borrow()
@@ -316,7 +359,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
         rect.x + 12,
         rect.y,
     ));
-    let buf = detail_buffer(&view, 120, now);
+    let buf = detail_buffer(&view, 200, now);
     assert!(
         buf[(rect.x + 8, rect.y)]
             .modifier
@@ -565,17 +608,26 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
     view.select_fixture_event(Some(event));
     view.log_detail_raw = true;
     for width in [23, 80, 120] {
+        let content_width = view
+            .center_layout(Rect::new(0, 0, width + 4, 42))
+            .log
+            .width
+            .saturating_sub(10);
         let mut expected = super::tool_detail::split_wide(
             super::highlight::code_lines(&source, "json"),
-            width as usize,
+            content_width as usize,
         );
         let plain = super::tool_detail::Part::raw_json(source.clone());
         assert_eq!(
             plain.maps(&expected),
-            plain.maps(&plain.lines(width as usize, body_style, now))
+            plain.maps(&plain.lines(content_width as usize, body_style, now))
         );
         let widest = expected.iter().map(Line::width).max().unwrap();
-        let padding = (width as usize).saturating_sub(widest) / 2;
+        let padding = if width + 4 >= 150 {
+            (width as usize).saturating_sub(widest) / 2
+        } else {
+            0
+        };
         for line in &mut expected {
             for span in &mut line.spans {
                 span.style = body_style.patch(span.style);
@@ -622,10 +674,10 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
     assert_eq!(event.calls[0].title, "codex-manager detach");
     let (mut view, now) = log_fixture();
     view.select_fixture_event(Some(event));
-    let buf = detail_buffer(&view, 120, now);
+    let buf = detail_buffer(&view, 160, now);
     let rows: Vec<String> = buf
         .content
-        .chunks(124)
+        .chunks(164)
         .map(|row| row.iter().map(|cell| cell.symbol()).collect())
         .collect();
     let title = rows
@@ -633,7 +685,7 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
         .find(|row| row.contains("codex-manager detach"))
         .expect("detail must retain the log-list tool title");
     let left = title.find("codex-manager detach").unwrap();
-    assert!(left.abs_diff((124 - "codex-manager detach".len()) / 2) <= 1);
+    assert!(left.abs_diff((164 - "codex-manager detach".len()) / 2) <= 1);
     let input = rows
         .iter()
         .find(|row| row.contains("thread 01a1489e"))

@@ -88,7 +88,7 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
 }
 
 #[test]
-fn generic_tool_title_stays_centered_above_input_summary() {
+fn generic_tool_title_follows_detail_alignment_above_input_summary() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
     let event = crate::providers::claude::log::tail(&path, usize::MAX)
         .unwrap()
@@ -114,7 +114,58 @@ fn generic_tool_title_stays_centered_above_input_summary() {
         assert!(header.trim_start().starts_with(&title), "{header}");
         assert_eq!(
             header[..header.find(&title).unwrap()].width(),
-            usize::from(detail.x) + (usize::from(detail.width) - title.width()) / 2
+            usize::from(detail.x)
+                + if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
+                    (usize::from(detail.width) - title.width()) / 2
+                } else {
+                    0
+                }
         );
+    }
+}
+
+#[test]
+fn detail_blocks_use_the_log_list_message_column_width() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let event = crate::providers::claude::log::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
+        .unwrap();
+    for width in [200, 150, 149, 120] {
+        let (mut view, now) = log_fixture();
+        view.select_fixture_event(Some(event.clone()));
+        let area = Rect::new(0, 0, width, 50);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let viewport = view.viewport.borrow();
+        let limit = viewport
+            .log
+            .width
+            .saturating_sub(super::super::log::CLOCK_WIDTH as u16 + 2);
+        let wide = width >= super::super::render::WIDE_LAYOUT_COLUMNS;
+        let left = viewport.log_detail.x
+            + if wide {
+                (viewport.log_detail.width - limit) / 2
+            } else {
+                0
+            };
+        for row in &viewport.log_text.rows {
+            for (cells, _) in &row.cells {
+                assert!(
+                    row.x + cells.start >= left && row.x + cells.end <= left + limit,
+                    "detail must fit log-list message width {limit} at screen width {width}"
+                );
+            }
+        }
+        let first = viewport
+            .log_text
+            .rows
+            .iter()
+            .find(|row| !row.cells.is_empty())
+            .unwrap();
+        if !wide {
+            assert_eq!(first.x + first.cells[0].0.start, viewport.log_detail.x);
+        }
     }
 }
