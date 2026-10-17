@@ -593,10 +593,7 @@ impl App {
     }
 
     fn refresh(&mut self) {
-        let Snapshot {
-            sessions,
-            has_more,
-        } = self.hub.refresh();
+        let Snapshot { sessions, has_more } = self.hub.refresh();
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);

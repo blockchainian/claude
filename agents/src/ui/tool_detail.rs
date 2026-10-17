@@ -315,7 +315,12 @@ fn shell_lines(
         if !chained {
             continue;
         }
-        let column = lines[run.clone()].iter().map(Line::width).max().unwrap_or(0) + 1;
+        let column = lines[run.clone()]
+            .iter()
+            .map(Line::width)
+            .max()
+            .unwrap_or(0)
+            + 1;
         if width > 0 && column >= width {
             continue;
         }

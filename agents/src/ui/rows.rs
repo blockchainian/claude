@@ -181,11 +181,7 @@ impl View {
                     if selected {
                         state.marker = Some((rect.x, rect.y));
                     }
-                    line(
-                        Line::from(format!("  {label}")).style(style),
-                        rect,
-                        buf,
-                    );
+                    line(Line::from(format!("  {label}")).style(style), rect, buf);
                     continue;
                 }
             };
