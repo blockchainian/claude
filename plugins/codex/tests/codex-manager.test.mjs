@@ -427,6 +427,7 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
     assert.equal(response.code, 0, response.stderr);
     const { result } = JSON.parse(response.stdout);
     assert.equal(typeof result.instructions, "string");
+    assert.match(result.instructions, /start and review.*description.*thread name/);
     assert.match(result.instructions, /start.*await.*run_in_background/);
     assert.match(result.instructions, /no activity for a minute.*stuck.*pointed hint.*never steer.*faked tests/);
     assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask or approval.*checked and accepted.*no further message/);
@@ -449,9 +450,18 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     const tools = await mcp.request("tools/list", {});
     assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "attach", "send", "reply", "interrupt", "list", "detach", "review"]);
 
-    const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", name: "fix-bug" });
+    for (const name of ["start", "review"]) {
+      const schema = tools.result.tools.find((tool) => tool.name === name).inputSchema;
+      assert.equal(schema.properties.description.type, "string");
+      assert.match(schema.properties.description.description, /Codex thread name/);
+      assert.equal(Object.hasOwn(schema.properties, "name"), false);
+      assert.equal(schema.required.includes("description"), false);
+    }
+
+    const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", description: "fix-bug" });
     assert.equal(started.isError, false, started.text);
     assert.equal(started.json.threadId, "thread-A");
+    assert.equal(started.json.name, "fix-bug");
     assert.equal(started.json.turnId, "turn-1");
     assert.equal(started.json.await, `node ${JSON.stringify(manager)} await --thread thread-A`);
 
@@ -1065,9 +1075,10 @@ test("review starts a read-only thread, runs codex's review mode on a base sha, 
   const mcp = new McpChild(home.home, daemon.socketPath);
   const out = path.join(home.home, "specs", "review", "review.md");
   try {
-    const review = await mcp.call("review", { cwd: "plugins", base: "abc1234", plan: "specs/plan.md", out, name: "review-feature" });
+    const review = await mcp.call("review", { cwd: "plugins", base: "abc1234", plan: "specs/plan.md", out, description: "review-feature" });
     assert.equal(review.isError, false, review.text);
     assert.equal(review.json.threadId, "thread-A");
+    assert.equal(review.json.name, "review-feature");
     assert.equal(review.json.turnId, "turn-review");
     assert.equal(review.json.out, out);
     assert.equal(review.json.await, `node ${JSON.stringify(manager)} await --thread thread-A`);
@@ -1078,6 +1089,7 @@ test("review starts a read-only thread, runs codex's review mode on a base sha, 
     assert.equal(start.cwd, path.resolve("plugins"));
     assert.equal(start.sandbox, "read-only");
     assert.equal(start.dynamicTools, undefined);
+    assert.deepEqual(script.messages[3].params, { threadId: "thread-A", name: "review-feature" });
     const started = script.messages[4].params;
     assert.equal(started.threadId, "thread-A");
     assert.equal(started.delivery, "inline");
