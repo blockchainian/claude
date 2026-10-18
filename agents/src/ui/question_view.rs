@@ -121,14 +121,6 @@ impl QuestionView {
         question.other || question.options.is_empty()
     }
 
-    /// The row after a multi-select question's options that moves on to the next tab.
-    fn submit_row(&self) -> Option<usize> {
-        let question = self.questions().get(self.page)?;
-        question
-            .multi
-            .then(|| question.options.len() + usize::from(Self::other_row(question)))
-    }
-
     fn editing(&self) -> bool {
         self.questions().get(self.page).is_some_and(|question| {
             Self::other_row(question) && self.pages[self.page].focus == question.options.len()
@@ -142,7 +134,6 @@ impl QuestionView {
         self.questions().get(self.page).map_or(0, |question| {
             question.options.len()
                 + usize::from(Self::other_row(question))
-                + usize::from(question.multi)
         })
     }
 
@@ -234,11 +225,9 @@ impl QuestionView {
                     if self.pages[self.page].other.is_empty() {
                         return None;
                     }
-                    if let Some(row) = self.submit_row() {
-                        self.pages[self.page].focus = row;
-                        return None;
+                    if !self.questions()[self.page].multi {
+                        self.pages[self.page].selected.clear();
                     }
-                    self.pages[self.page].selected.clear();
                     return self.advance();
                 }
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
@@ -302,8 +291,6 @@ impl QuestionView {
         }
         if other && index == option_count {
             self.pages[self.page].focus = index;
-        } else if self.submit_row() == Some(index) {
-            return self.advance();
         }
         None
     }
@@ -418,8 +405,10 @@ impl QuestionView {
             }
             let answer = Self::answer(question, page);
             let values: Vec<String> = answer.answers.into_iter().chain(answer.other).collect();
-            lines.extend(wrap(&format!("● {}", question.text), " "));
-            lines.extend(wrap(&format!("→ {}", values.join(", ")), "   "));
+            lines.extend(wrap(
+                &format!("● {} → {}", question.header, values.join(", ")),
+                " ",
+            ));
         }
         lines.push(Line::default());
         lines.push(Line::from("Ready to submit your answers?"));
@@ -527,11 +516,6 @@ impl QuestionView {
                 )
             };
             lines.push(Self::row_line(page.focus == row, row + 1, vec![text]));
-            rows.push(Some(row));
-        }
-        if let Some(row) = self.submit_row() {
-            let marker = if page.focus == row { "›" } else { " " };
-            lines.push(Line::from(format!("{marker}    Submit")));
             rows.push(Some(row));
         }
         rows
@@ -706,14 +690,17 @@ mod tests {
     }
 
     #[test]
-    fn ask_view_multi_enter_toggles_and_submit_row_moves_on() {
+    fn ask_view_multi_enter_toggles_and_right_moves_on() {
         let mut view = QuestionView::new(fixture("Multi"));
         assert!(press(&mut view, KeyCode::Enter).is_none());
         assert!(screen(&view, 60, 14).contains("› 1. [x] Red"));
         assert!(press(&mut view, KeyCode::Enter).is_none());
-        assert!(press(&mut view, KeyCode::Up).is_none());
-        assert!(screen(&view, 60, 14).contains("›    Submit"));
-        assert!(press(&mut view, KeyCode::Enter).is_none());
+        assert!(
+            !screen(&view, 60, 14)
+                .lines()
+                .any(|line| line.trim() == "Submit")
+        );
+        assert!(press(&mut view, KeyCode::Right).is_none());
         assert!(screen(&view, 60, 14).contains("You have not answered all questions"));
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(
@@ -729,7 +716,8 @@ mod tests {
         press(&mut view, KeyCode::Down);
         assert!(press(&mut view, KeyCode::Enter).is_none());
         let review = screen(&view, 60, 14);
-        assert!(review.contains("● Probe second page?"), "{review}");
+        assert!(review.contains("● First → Green"), "{review}");
+        assert!(review.contains("● Second → Green"), "{review}");
         assert!(!review.contains("not answered"), "{review}");
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(answer.answers.len(), 2);
