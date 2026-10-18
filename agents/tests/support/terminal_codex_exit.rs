@@ -62,19 +62,20 @@ fn terminal_codex_exit_sections() {
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert_eq!(capture.matches("Exec Command").count(), 3, "{capture}");
-    assert!(capture.matches("false").count() == 1, "{capture}");
+    assert_eq!(capture.matches("Exec Command").count(), 1, "{capture}");
+    assert!(capture.contains("false (exit 1)"), "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
         .iter()
-        .position(|row| row.contains("exit 1"))
+        .position(|row| row.trim_start().starts_with("Exec Command"))
         .expect(&capture);
     assert!(rows[status].contains("Exec Command"), "{capture}");
     assert!(rows[status + 2].contains("false"), "{capture}");
     assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
     assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
-    assert_eq!(capture.matches("exit 1").count(), 1, "{capture}");
+    assert!(rows[status].contains("Exec Command · exit 1"), "{capture}");
+    assert!(rows[status].contains("false"), "{capture}");
     println!(
         "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
         path.display()
@@ -85,27 +86,30 @@ fn terminal_codex_exit_sections() {
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_shell_titles() {
     let mut captures = Vec::new();
-    for (name, fixture, command) in [
+    for (name, fixture, command, summary) in [
         (
             "shell-titles",
             include_str!("../fixtures/codex-inner/shell.jsonl"),
             "sleep 60",
+            "sleep",
         ),
         (
             "chain-titles",
             include_str!("../fixtures/codex-inner/git-chain.jsonl"),
             "git status --short",
+            "git {status, diff}, sed",
         ),
     ] {
         let (_directory, tmux) = start_codex_probe(name, fixture);
         let capture = tmux
             .capture_when(|capture| capture.contains("Exec Command") && capture.contains(command));
-        assert_eq!(capture.matches("Exec Command").count(), 3, "{capture}");
+        assert_eq!(capture.matches("Exec Command").count(), 1, "{capture}");
         let title = capture
             .lines()
             .find(|line| line.trim_start().starts_with("Exec Command"))
             .unwrap();
         assert_eq!(title.matches("Exec Command").count(), 1, "{capture}");
+        assert!(title.contains(summary), "{capture}");
         assert!(
             !title.contains(command),
             "arguments only belong in the body: {capture}"

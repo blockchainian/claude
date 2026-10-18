@@ -46,7 +46,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .collect();
     assert_eq!(entries.len(), 2);
     let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
-    assert_eq!(bodies, ["Exec Command", "Exec Command"]);
+    assert_eq!(bodies, ["cat, git {log, status}, shasum", "gh pr"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
         assert_record_timing(entry, record);
@@ -59,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "Exec Command");
+    assert_eq!(entries[0].body, "type (exit 1)");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -102,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "Exec Command");
+    assert_eq!(entries[0].body, "sleep");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }
@@ -707,10 +707,10 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "Exec Command");
+    assert_eq!(event.body, "sleep");
     assert_eq!(call.name, "exec_command");
-    assert_eq!(call.title, "Exec Command");
-    assert_eq!(call.detail_title, "");
+    assert_eq!(call.title, "sleep");
+    assert_eq!(call.detail_title, "sleep");
     assert_eq!(call.detail_left, "Exec Command");
     assert_eq!(
         call.input,
@@ -736,9 +736,9 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "Exec Command");
+    assert_eq!(event.body, "git {status, diff}, sed");
     assert_eq!(call.title, event.body);
-    assert_eq!(call.detail_title, "");
+    assert_eq!(call.detail_title, "git {status, diff}, sed");
     assert_eq!(call.detail_left, "Exec Command");
     assert!(event.paths.is_empty());
     assert_eq!(call.name, "exec_command");
@@ -849,7 +849,7 @@ fn child_real_command_and_extension_have_complete_details() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
     let rows = tail(&path, 100).unwrap();
-    let command = rows.iter().find(|row| row.body == "Exec Command").unwrap();
+    let command = rows.iter().find(|row| row.body == "sleep").unwrap();
     assert!(
         matches!(&command.calls[0].input[0], crate::log::Section::Shell { text, .. } if text == "sleep 60")
     );

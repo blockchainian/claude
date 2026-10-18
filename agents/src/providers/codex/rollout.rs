@@ -57,43 +57,123 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
 #[derive(Clone, Copy)]
 enum Output {
     QuestionRejection,
+    Empty,
+    Hidden,
+    Wait,
 }
 
 const OUTPUTS: &[(&str, Output)] = &[
     ("AskUserQuestion", Output::QuestionRejection),
     ("request_user_input", Output::QuestionRejection),
+    ("spawn_agent", Output::Hidden),
+    ("send_message", Output::Empty),
+    ("followup_task", Output::Empty),
+    ("wait_agent", Output::Wait),
 ];
 
+#[derive(Clone, Copy)]
+enum AgentTitle {
+    Target,
+    Route,
+}
+
+#[derive(Clone, Copy)]
+struct AgentRoute {
+    assignment: bool,
+    title: AgentTitle,
+}
+
+const AGENT_ROUTES: &[(&str, AgentRoute)] = &[
+    (
+        "spawn_agent",
+        AgentRoute {
+            assignment: true,
+            title: AgentTitle::Target,
+        },
+    ),
+    (
+        "send_message",
+        AgentRoute {
+            assignment: false,
+            title: AgentTitle::Route,
+        },
+    ),
+    (
+        "followup_task",
+        AgentRoute {
+            assignment: true,
+            title: AgentTitle::Route,
+        },
+    ),
+];
+
+#[derive(Clone, Copy)]
+enum ListTitle {
+    Subject,
+}
+
+const LIST_TITLES: &[(&str, ListTitle)] = &[
+    ("exec_command", ListTitle::Subject),
+    ("shell", ListTitle::Subject),
+    ("CommandExecution", ListTitle::Subject),
+];
+
+fn rule<T: Copy>(name: &str, rules: &[(&str, T)]) -> Option<T> {
+    let name = name.rsplit(['.', ' ']).next().unwrap_or(name);
+    rules
+        .iter()
+        .find_map(|(tool, mode)| (*tool == name).then_some(*mode))
+}
+
+fn list_title(
+    raw_name: &str,
+    display_name: &str,
+    subject: Option<&str>,
+    input: &Value,
+    exit_code: Option<i64>,
+) -> String {
+    match rule(raw_name, LIST_TITLES) {
+        Some(ListTitle::Subject) => {
+            let title = input["description"]
+                .as_str()
+                .filter(|text| !text.trim().is_empty())
+                .or(subject.filter(|text| !text.is_empty()))
+                .unwrap_or(display_name);
+            match exit_code {
+                Some(code) => format!("{title} (exit {code})"),
+                None => title.to_owned(),
+            }
+        }
+        None => crate::providers::tool::list_title(display_name, subject, input),
+    }
+}
+
 fn response_output(name: &str, text: &str) -> Vec<Section> {
-    let mode = OUTPUTS.iter().find_map(|(tool, mode)| {
-        (*tool == name.rsplit('.').next().unwrap_or(name)).then_some(*mode)
-    });
-    let parsed = serde_json::from_str::<Value>(text).ok();
-    if matches!(
-        name.rsplit('.').next(),
-        Some("spawn_agent" | "send_message" | "followup_task")
-    ) {
-        return Vec::new();
-    }
-    if name.rsplit('.').next() == Some("wait_agent")
-        && let Some(value) = parsed
-    {
-        return vec![text_section(
-            "output",
-            if value["timed_out"] == true {
-                "(timed out)"
-            } else {
-                value["message"].as_str().unwrap_or(text)
-            },
-        )];
-    }
+    output_sections(text, rule(name, OUTPUTS))
+}
+
+fn output_sections(text: &str, mode: Option<Output>) -> Vec<Section> {
     let text = match mode {
+        Some(Output::Hidden | Output::Empty) => return Vec::new(),
+        Some(Output::Wait) => match serde_json::from_str::<Value>(text) {
+            Ok(value) if value["timed_out"] == true => "(timed out)".to_owned(),
+            Ok(value) => value["message"].as_str().unwrap_or(text).to_owned(),
+            Err(_) => text.to_owned(),
+        },
         Some(Output::QuestionRejection) => {
             crate::providers::tool::rejected_questions(text).unwrap_or_else(|| text.to_owned())
         }
         None => text.to_owned(),
     };
     vec![text_section("output", &text)]
+}
+
+fn apply_output_rule(name: &str, call: &mut ToolCall) {
+    match rule(name, OUTPUTS) {
+        Some(Output::Hidden) => call.hide_output = true,
+        Some(Output::Empty) => call.output = Some(Vec::new()),
+        _ => {}
+    }
 }
 
 const CHUNK: u64 = 64 * 1024;
@@ -549,19 +629,15 @@ fn tool_body(payload: &Value) -> Option<String> {
     let raw_name = response_tool_name(payload);
     let (name, subject, _) =
         crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
-    if matches!(
-        raw_name.rsplit('.').next(),
-        Some("exec_command" | "shell" | "CommandExecution")
-    ) {
-        return Some(crate::providers::tool::title_name(&name));
-    }
-    if let Some((_, _, title)) = agent_route(payload, &arguments) {
+    if let Some((_, _, title)) = agent_route(&raw_name, subject.as_deref(), "/root") {
         return Some(title);
     }
-    Some(crate::providers::tool::list_title(
+    Some(list_title(
+        &raw_name,
         &crate::providers::tool::title_name(&name),
         subject.as_deref(),
         &arguments,
+        None,
     ))
 }
 
@@ -598,27 +674,32 @@ fn agent_name(path: &str) -> &str {
         .unwrap_or(path)
 }
 
-fn agent_route(payload: &Value, arguments: &Value) -> Option<(String, String, String)> {
-    let name = payload["name"].as_str()?.rsplit('.').next()?;
-    let target = match name {
-        "spawn_agent" => arguments["task_name"].as_str()?,
-        "send_message" | "followup_task" => arguments["target"].as_str()?,
-        _ => return None,
-    };
-    let route = format!("root → {}", agent_name(target));
-    let title = if matches!(name, "spawn_agent" | "followup_task") {
+fn agent_route(
+    name: &str,
+    subject: Option<&str>,
+    sender: &str,
+) -> Option<(String, String, String)> {
+    let rule = rule(name, AGENT_ROUTES)?;
+    let target = subject?;
+    let route = format!("{} → {}", agent_name(sender), agent_name(target));
+    let title = if rule.assignment {
         format!("{route} · new task")
     } else {
         route.clone()
     };
-    Some((target.to_owned(), route, title))
+    let detail = match rule.title {
+        AgentTitle::Target => agent_name(target).to_owned(),
+        AgentTitle::Route => route,
+    };
+    Some((target.to_owned(), detail, title))
 }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let raw = payload["arguments"].as_str().unwrap_or("");
     let arguments = tool_arguments(payload);
+    let raw_name = response_tool_name(payload);
     let (name, subject, mut input) = crate::providers::tool::presentation(
-        &response_tool_name(payload),
+        &raw_name,
         arguments.as_ref().unwrap_or(&Value::Null),
         &TOOL_RULES,
     );
@@ -636,10 +717,12 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         detail_title: subject.clone().unwrap_or_default(),
         show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: crate::providers::tool::list_title(
+        title: list_title(
+            &raw_name,
             &display_name,
             subject.as_deref(),
             arguments.as_ref().unwrap_or(&Value::Null),
+            None,
         ),
         name,
         started_at: None,
@@ -647,47 +730,17 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         agent_thread_id: None,
         agent_path: None,
         input,
-        output: output.map(|text| response_output(&response_tool_name(payload), text)),
+        output: output.map(|text| response_output(&raw_name, text)),
         exit_code: None,
         is_error: false,
         duration: None,
     };
-    if let Some((target, route, title)) =
-        agent_route(payload, arguments.as_ref().unwrap_or(&Value::Null))
-    {
-        call.agent_path = Some(target.clone());
-        call.detail_title = if payload["name"]
-            .as_str()
-            .and_then(|name| name.rsplit('.').next())
-            == Some("spawn_agent")
-        {
-            agent_name(&target).to_owned()
-        } else {
-            route
-        };
+    if let Some((target, detail, title)) = agent_route(&raw_name, subject.as_deref(), "/root") {
+        call.agent_path = Some(target);
+        call.detail_title = detail;
         call.title = title;
     }
-    if matches!(
-        payload["name"]
-            .as_str()
-            .and_then(|name| name.rsplit('.').next()),
-        Some("send_message" | "followup_task")
-    ) {
-        call.output = Some(Vec::new());
-    }
-    call.hide_output = payload["name"]
-        .as_str()
-        .and_then(|name| name.rsplit('.').next())
-        == Some("spawn_agent");
-    if matches!(
-        payload["name"]
-            .as_str()
-            .and_then(|name| name.rsplit('.').next()),
-        Some("exec_command" | "shell" | "CommandExecution")
-    ) {
-        call.title = display_name;
-        call.detail_title.clear();
-    }
+    apply_output_rule(&raw_name, &mut call);
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -763,8 +816,9 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         }
         _ => (item_type.to_owned(), item.clone(), None),
     };
+    let raw_name = name;
     let (name, subject, input) =
-        crate::providers::tool::presentation(&name, &arguments, &TOOL_RULES);
+        crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
     let display_name = crate::providers::tool::title_name(&name);
     let exit_code = item["exit_code"]
         .as_i64()
@@ -774,7 +828,13 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         detail_title: subject.clone().unwrap_or_default(),
         show_details: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
-        title: crate::providers::tool::list_title(&display_name, subject.as_deref(), &arguments),
+        title: list_title(
+            &raw_name,
+            &display_name,
+            subject.as_deref(),
+            &arguments,
+            exit_code,
+        ),
         name,
         started_at: None,
         hide_output: false,
@@ -787,14 +847,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         is_error: item["status"] == "failed" || item["result"]["isError"] == true,
         duration: None,
     };
-    call.hide_output = call.name.rsplit('.').next() == Some("spawn_agent");
-    if matches!(
-        call.name.rsplit('.').next(),
-        Some("exec_command" | "shell" | "CommandExecution")
-    ) {
-        call.title = display_name;
-        call.detail_title.clear();
-    }
+    apply_output_rule(&raw_name, &mut call);
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -1154,7 +1207,8 @@ impl Reader {
             && (payload["type"] == "agent_message"
                 || payload["name"]
                     .as_str()
-                    .is_some_and(|name| name.rsplit('.').next() == Some("send_message")))
+                    .and_then(|name| rule(name, AGENT_ROUTES))
+                    .is_some_and(|rule| !rule.assignment))
             && let Some((previous_offset, previous)) = self.entries.last()
             && previous.calls.first().is_some_and(message_call)
         {
@@ -1403,7 +1457,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
 }
 
 fn message_call(call: &ToolCall) -> bool {
-    call.name == "MESSAGE" || call.detail_left.ends_with("Send Message")
+    call.name == "MESSAGE" || rule(&call.name, AGENT_ROUTES).is_some_and(|rule| !rule.assignment)
 }
 
 fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
@@ -1510,25 +1564,14 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     .and_then(|id| results.remove(id));
                 let mut call =
                     response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
-                if let Some((target, _, _)) =
-                    agent_route(payload, &tool_arguments(payload).unwrap_or(Value::Null))
-                {
-                    let route = format!("{} → {}", agent_name(sender), agent_name(&target));
-                    let tool = payload["name"]
-                        .as_str()
-                        .unwrap()
-                        .rsplit('.')
-                        .next()
-                        .unwrap();
-                    body = if matches!(tool, "spawn_agent" | "followup_task") {
-                        format!("{route} · new task")
-                    } else {
-                        route.clone()
-                    };
+                if let Some((_, detail, title)) = agent_route(
+                    &response_tool_name(payload),
+                    call.agent_path.as_deref(),
+                    sender,
+                ) {
+                    body = title;
                     call.title = body.clone();
-                    if tool != "spawn_agent" {
-                        call.detail_title = route;
-                    }
+                    call.detail_title = detail;
                 }
                 call.started_at = call.agent_path.as_ref().map(|_| at);
                 let mut completed_at = ended.as_ref().map(|(at, _, _)| *at);
@@ -1763,6 +1806,139 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 #[cfg(test)]
 mod tests {
     #[test]
+    fn real_command_list_preserves_summary_and_failure_status() {
+        let record: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-command-summary.jsonl"
+        ))
+        .unwrap();
+        let call = completed_call(
+            &record["payload"]["item"],
+            Some(
+                record["payload"]["item"]["command"][2]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            ),
+        );
+        assert_eq!(call.title, "sed, cat");
+        assert_eq!(call.detail_left, "Exec Command");
+        assert_eq!(call.detail_title, "sed, cat");
+        let mut failed = record["payload"]["item"].clone();
+        failed["exit_code"] = 2.into();
+        assert_eq!(
+            completed_call(&failed, Some("yarn tsc".into())).title,
+            "yarn tsc (exit 2)"
+        );
+        let mut empty = record["payload"]["item"].clone();
+        empty["exit_code"] = 0.into();
+        assert_eq!(
+            completed_call(&empty, Some("$command".into())).title,
+            "Exec Command"
+        );
+    }
+
+    #[test]
+    fn command_rules_keep_descriptions_and_detail_subjects() {
+        let record = tool_records()
+            .into_iter()
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        let command = record["payload"]["item"]["command"][2].as_str().unwrap();
+        let parent = include_str!("../../../tests/fixtures/codex-interaction/parent.jsonl");
+        let mut payload = parent
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| record["payload"]["type"] == "function_call")
+            .unwrap()["payload"]
+            .clone();
+        payload["arguments"] =
+            serde_json::json!({"command": command, "description": "A command description"})
+                .to_string()
+                .into();
+        for name in [
+            "exec_command",
+            "shell",
+            "CommandExecution",
+            "functions.exec_command",
+        ] {
+            payload["name"] = name.into();
+            let call = response_tool_call(&payload, Some(""));
+            assert_eq!(
+                tool_body(&payload).as_deref(),
+                Some("A command description")
+            );
+            assert_eq!(call.title, "A command description");
+            assert!(!call.detail_title.is_empty());
+            assert!(matches!(&call.input[0], Section::Shell { text, .. } if text == command));
+        }
+    }
+
+    #[test]
+    fn output_rules_declare_agent_result_behavior() {
+        for name in ["spawn_agent", "send_message", "followup_task", "wait_agent"] {
+            assert!(
+                OUTPUTS.iter().any(|(tool, _)| *tool == name),
+                "missing output rule: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn command_rules_declare_summaries() {
+        for name in ["exec_command", "shell", "CommandExecution"] {
+            assert!(
+                TOOL_RULES
+                    .subjects
+                    .iter()
+                    .any(|(tool, subject)| *tool == name
+                        && matches!(subject, Subject::Shell { description: false })),
+                "missing command subject: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn output_rules_handle_aliases_from_real_wait_payload() {
+        let record = include_str!("../../../tests/fixtures/codex-interaction/parent.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| {
+                record["payload"]["type"] == "function_call_output"
+                    && record["payload"]["output"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("Wait completed."))
+            })
+            .unwrap();
+        let raw = record["payload"]["output"].as_str().unwrap();
+        let aliases = [
+            ("review_progress", Output::Wait),
+            ("notify", Output::Empty),
+            ("dispatch", Output::Hidden),
+        ];
+        for (name, expected) in [
+            (
+                "collaboration.review_progress",
+                vec![text_section("output", "Wait completed.")],
+            ),
+            ("collaboration.notify", Vec::new()),
+            ("collaboration.dispatch", Vec::new()),
+        ] {
+            let mode = rule(name, &aliases);
+            assert_eq!(output_sections(raw, mode), expected, "{name}");
+        }
+        let mut timed_out: Value = serde_json::from_str(raw).unwrap();
+        timed_out["timed_out"] = true.into();
+        assert_eq!(
+            output_sections(&timed_out.to_string(), Some(Output::Wait)),
+            vec![text_section("output", "(timed out)")]
+        );
+        assert_eq!(
+            output_sections(raw, None),
+            vec![text_section("output", raw)]
+        );
+    }
+
+    #[test]
     fn agent_message_outputs_are_empty_without_result_records() {
         for fixture in [
             include_str!("../../../tests/fixtures/codex-collaboration/send_message.jsonl"),
@@ -1834,8 +2010,8 @@ mod tests {
             });
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
-            assert_eq!(call.title, crate::providers::tool::title_name(name));
-            assert_eq!(call.detail_title, "");
+            assert_eq!(call.title, "cat, sed");
+            assert_eq!(call.detail_title, "cat, sed");
             assert_eq!(call.detail_left, crate::providers::tool::title_name(name));
             let (_, _, input) = crate::providers::tool::presentation(
                 name,
@@ -1859,7 +2035,7 @@ mod tests {
                 "type": "function_call", "name": "exec_command", "call_id": "shell",
                 "arguments": serde_json::json!({field: command}).to_string(),
             });
-            assert_eq!(tool_body(&payload).as_deref(), Some("Exec Command"));
+            assert_eq!(tool_body(&payload).as_deref(), Some("cat, sed"));
             let file = tempfile::NamedTempFile::new().unwrap();
             writeln!(
                 file.as_file(),
@@ -1871,7 +2047,7 @@ mod tests {
             .unwrap();
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, "Exec Command");
+            assert_eq!(events[0].body, "cat, sed");
             assert_eq!(events[0].calls[0].detail_left, "Exec Command");
         }
     }
@@ -1884,9 +2060,9 @@ mod tests {
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
-        assert_eq!(event.calls[0].detail_title, "");
+        assert_eq!(event.calls[0].detail_title, "cat, sed");
         assert_eq!(event.calls[0].detail_left, "Exec Command");
-        assert_eq!(event.body, "Exec Command");
+        assert_eq!(event.body, "cat, sed");
         let file = records
             .iter()
             .find(|r| r["payload"]["item"]["type"] == "FileChange")
@@ -2113,7 +2289,7 @@ mod tests {
             .unwrap();
         let call = &completed_tool(record).unwrap().unwrap().calls[0];
         assert_eq!(call.id, record["payload"]["item"]["id"].as_str().unwrap());
-        assert_eq!(call.title, "Exec Command");
+        assert_eq!(call.title, "cat, sed");
     }
 
     #[test]
@@ -2855,7 +3031,7 @@ mod tests {
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"exec_command","arguments":"{{\"cmd\":\"cargo check\"}}","call_id":"test"}}}}"#).unwrap();
         let result = summary(file.path()).unwrap();
         assert!(!result.turn_ended);
-        assert_eq!(result.activity.unwrap().label, "Exec Command");
+        assert_eq!(result.activity.unwrap().label, "cargo check");
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:02Z","type":"event_msg","payload":{{"type":"turn_aborted","reason":"interrupted"}}}}"#).unwrap();
         assert!(summary(file.path()).unwrap().turn_ended);
     }

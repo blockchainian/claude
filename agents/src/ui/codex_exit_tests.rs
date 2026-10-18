@@ -40,7 +40,7 @@ fn codex_nonzero_exit_title_keeps_status_out_of_body() {
         detail.sections[0].title.left.as_deref(),
         Some("Exec Command · exit 1")
     );
-    assert_eq!(detail.sections[0].title.title, "");
+    assert_eq!(detail.sections[0].title.title, "false");
     assert!(
         detail.sections[0]
             .groups
@@ -73,10 +73,9 @@ fn codex_zero_exit_parts_keep_input_arrow_output() {
 }
 
 #[test]
-fn codex_exit_list_uses_tool_display_name() {
-    for code in [0, 1] {
-        assert_eq!(codex_exit_event(code).body, "Exec Command");
-    }
+fn codex_exit_list_keeps_summary_and_nonzero_status() {
+    assert_eq!(codex_exit_event(0).body, "false");
+    assert_eq!(codex_exit_event(1).body, "false (exit 1)");
 }
 
 #[test]

@@ -972,9 +972,9 @@ fn tool_list_rows_group_members_and_preserve_relative_paths() {
 #[test]
 fn tool_list_rows_keep_shell_display_names_and_grouped_subjects() {
     let event = codex_events("codex-inner/git-chain.jsonl").remove(0);
-    assert_eq!(event.body, "Exec Command");
+    assert_eq!(event.body, "git {status, diff}, sed");
     assert_eq!(event.calls[0].detail_left, "Exec Command");
-    assert_eq!(event.calls[0].detail_title, "");
+    assert_eq!(event.calls[0].detail_title, "git {status, diff}, sed");
     let mut record = list_row_records().remove(0);
     let block = &mut record["message"]["content"][0];
     block["name"] = "Bash".into();
@@ -1030,12 +1030,12 @@ fn tool_list_rows_choose_descriptions_by_data() {
 fn tool_list_rows_keep_codex_native_file_paths() {
     let entries = codex_events("tool-list/codex.jsonl");
     assert_eq!(entries.len(), 3);
-    for event in entries {
-        let call = &event.calls[0];
-        assert_eq!(
-            event.body,
-            format!("{} {}", call.detail_left, call.detail_title).trim()
-        );
+    for (event, expected) in entries.into_iter().zip([
+        "sed",
+        "Apply Patch /workspace/agents/src/log.rs · /workspace/agents/src/providers/codex/rollout.rs",
+        "Apply Patch /private/tmp/agents-http-settings/report.md",
+    ]) {
+        assert_eq!(event.body, expected);
         for range in &event.paths {
             assert!(event.body[range.clone()].starts_with('/'));
         }
