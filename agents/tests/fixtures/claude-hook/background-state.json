@@ -1,0 +1,60 @@
+{
+  "state": "working",
+  "detail": "starting\u2026",
+  "tempo": "blocked",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 0,
+  "template": "bg",
+  "respawnFlags": [
+    "--effort",
+    "low",
+    "--tools",
+    "AskUserQuestion",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--setting-sources",
+    "",
+    "--settings",
+    "{\"hooks\": {\"PreToolUse\": [{\"matcher\": \"AskUserQuestion\", \"hooks\": [{\"type\": \"http\", \"url\": \"http://127.0.0.1:56363/ask-user-question\", \"timeout\": 3600}]}]}}",
+    "--model",
+    "haiku"
+  ],
+  "providerEnv": {
+    "CLAUDE_CONFIG_DIR": "/tmp/agents-hook-fixture/config"
+  },
+  "intent": "Use AskUserQuestion exactly once. Ask question \"Hook color?\", header \"Color\", multiSelect false, options Red with description Red choice and Blue with description Blue choice. Wait for my answer. This is an explicit interactive question test.",
+  "sessionId": "8a9983a7-ffed-4baa-8b5a-4f1c9d56bb05",
+  "resumeSessionId": "8a9983a7-ffed-4baa-8b5a-4f1c9d56bb05",
+  "daemonShort": "8a9983a7",
+  "cwd": "/tmp/agents-hook-fixture/cwd",
+  "createdAt": "2026-10-18T19:51:03.002Z",
+  "updatedAt": "2026-10-18T19:51:06.241Z",
+  "firstTerminalAt": null,
+  "backend": "daemon",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "needs": "answer: Hook color? (Red \u00b7 Blue)",
+  "block": {
+    "questions": [
+      {
+        "question": "Hook color?",
+        "options": [
+          {
+            "label": "Red",
+            "description": "Red choice"
+          },
+          {
+            "label": "Blue",
+            "description": "Blue choice"
+          }
+        ]
+      }
+    ]
+  }
+}

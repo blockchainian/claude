@@ -14,14 +14,24 @@ pub(super) struct Questions {
 
 impl Questions {
     fn sync(&mut self, rows: &[Session]) {
+        let answerable = |ask: &crate::ask::Ask| {
+            ask.session.provider != ProviderId::Claude
+                || matches!(
+                    ask.kind,
+                    crate::ask::AskKind::Questions { blocking: true, .. }
+                )
+        };
+        let background = |row: &Session| {
+            row.is_live_background()
+                || (row.id.provider == ProviderId::Claude && row.background_job.is_some())
+        };
         let pending = |id: &SessionKey| {
             rows.iter()
                 .find(|row| {
-                    &row.id == id
-                        && row.is_live_background()
-                        && row.status == SessionStatus::NeedsInput
+                    &row.id == id && background(row) && row.status == SessionStatus::NeedsInput
                 })
                 .and_then(|row| row.ask.as_ref())
+                .filter(|ask| answerable(ask))
         };
         self.views
             .retain(|id, view| pending(id).is_some_and(|ask| ask == view.ask()));
@@ -29,8 +39,9 @@ impl Questions {
         self.sending.retain(|id| pending(id).is_some());
         for row in rows {
             if row.status == SessionStatus::NeedsInput
-                && row.is_live_background()
+                && background(row)
                 && let Some(ask) = &row.ask
+                && answerable(ask)
                 && !self.views.contains_key(&row.id)
             {
                 self.views
@@ -250,7 +261,7 @@ mod tests {
         });
         row.transcript = Some("probe.jsonl".into());
         let record: serde_json::Value =
-            include_str!("../../tests/fixtures/claude-attach/ask/transcript.jsonl")
+            include_str!("../../tests/fixtures/claude-questions/transcript.jsonl")
                 .lines()
                 .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
                 .find(|record| {
@@ -307,6 +318,37 @@ mod tests {
     }
 
     #[test]
+    fn hook_questions_are_answerable_before_process_metadata_arrives() {
+        let mut view = fixture();
+        let mut row = view.rows[0].clone();
+        row.process = None;
+        view.set_sessions(vec![row], false);
+        assert!(view.active_question().is_some());
+        assert!(matches!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            Some(Action::AnswerQuestions { .. })
+        ));
+    }
+
+    #[test]
+    fn transcript_questions_stay_read_only_after_refresh() {
+        let mut view = fixture();
+        assert!(view.active_question().is_some());
+        let mut rows = view.rows.clone();
+        let crate::ask::AskKind::Questions { blocking, .. } =
+            &mut rows[0].ask.as_mut().unwrap().kind;
+        *blocking = false;
+        view.set_sessions(rows, false);
+
+        assert!(view.active_question().is_none());
+        assert!(!screen(&view, 100, 40).contains("Enter to confirm"));
+        assert!(!matches!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            Some(Action::AnswerQuestions { .. })
+        ));
+    }
+
+    #[test]
     fn ask_flow_escape_stays_closed_after_refresh() {
         let mut view = fixture();
         assert!(
@@ -320,14 +362,6 @@ mod tests {
     #[test]
     fn ask_flow_failure_keeps_draft_and_shows_notice() {
         let mut view = fixture();
-        let mut capture = vt100::Parser::new(50, 200, 0);
-        capture.process(include_bytes!(
-            "../../tests/fixtures/claude-attach/ask/unicode/refused.raw"
-        ));
-        assert!(capture.screen().contents().contains("Review your answers"));
-        let reason =
-            include_str!("../../tests/fixtures/claude-attach/ask/unicode/refused.reason.txt")
-                .trim();
         let ask = view.selected_row().unwrap().ask.clone().unwrap();
         let input = crate::providers::SessionInput::Answer {
             ask: ask.clone(),
@@ -339,15 +373,22 @@ mod tests {
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
                 .is_none()
         );
-        view.input_complete(&ask.session, &input, Err(std::io::Error::other(reason)));
+        view.input_complete(
+            &ask.session,
+            &input,
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "Claude question hook disconnected",
+            )),
+        );
         view.expire_messages(Instant::now() + Duration::from_secs(2));
-        assert!(screen(&view, 100, 40).contains("Claude attach timed out"));
+        assert!(screen(&view, 100, 40).contains("Claude question hook disconnected"));
         assert!(matches!(
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
             Some(Action::AnswerQuestions { .. })
         ));
         view.input_sending(&ask.session, &input);
-        assert!(!screen(&view, 100, 40).contains("Claude attach timed out"));
+        assert!(!screen(&view, 100, 40).contains("Claude question hook disconnected"));
     }
 
     #[test]
@@ -471,7 +512,10 @@ mod tests {
             prompts.push(view.viewport.borrow().prompt);
             view.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
         }
-        assert!(prompts.windows(2).all(|pair| pair[0] == pair[1]), "{prompts:?}");
+        assert!(
+            prompts.windows(2).all(|pair| pair[0] == pair[1]),
+            "{prompts:?}"
+        );
     }
 
     #[test]

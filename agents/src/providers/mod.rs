@@ -146,6 +146,10 @@ pub enum TerminalInput<'a> {
 }
 
 pub trait Provider {
+    /// Prepares provider integrations when the dashboard starts.
+    fn setup(&mut self) -> io::Result<()> {
+        Ok(())
+    }
     /// Starts this session in the dashboard's terminal, or explains why it cannot open.
     fn terminal_command(&self, _session: &Session) -> Result<TerminalCommand, &'static str> {
         Err("Terminal is not supported")
@@ -194,13 +198,14 @@ pub trait Provider {
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
     let provider = claude::ClaudeProvider::from_config()?;
     let preferences_dir = provider.preferences_dir();
-    Ok((
-        crate::sessions::Hub::new(vec![
-            Box::new(provider),
-            Box::new(codex::CodexProvider::from_config()?),
-        ]),
-        preferences_dir,
-    ))
+    let mut providers: Vec<Box<dyn Provider>> = vec![
+        Box::new(provider),
+        Box::new(codex::CodexProvider::from_config()?),
+    ];
+    for provider in &mut providers {
+        provider.setup()?;
+    }
+    Ok((crate::sessions::Hub::new(providers), preferences_dir))
 }
 
 /// Opens a reader whose decoded records and event state survive refreshes.

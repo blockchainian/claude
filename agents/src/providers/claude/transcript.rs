@@ -92,7 +92,7 @@ fn pending_ask(id: &str, input: &Value, timestamp: &Value) -> io::Result<Pending
                     secret: false,
                 })
                 .collect(),
-            blocking: true,
+            blocking: false,
         },
         since,
     })

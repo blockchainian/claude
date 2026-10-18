@@ -352,14 +352,6 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
-        if let SessionInput::Answer {
-            ask,
-            answer,
-            transcript,
-        } = &input
-        {
-            return self.answer_questions(ask, answer, transcript);
-        }
         self.wait_at("initial-ready", ready)?;
         match input {
             SessionInput::Prompt(text) => {
@@ -390,7 +382,10 @@ impl Terminal {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
-            SessionInput::Answer { .. } => unreachable!("Answers use the question transport"),
+            SessionInput::Answer { .. } => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Answers require the HTTP hook",
+            )),
             SessionInput::Interrupt => self.write(b"\x1b"),
             SessionInput::SetModel(model) => {
                 self.submit(&format!("/model {model}"))?;
@@ -506,9 +501,7 @@ mod tests {
 
     #[test]
     fn captured_question_redraw_waits_for_synchronized_output_end() {
-        let raw = include_bytes!(
-            "../../../tests/fixtures/claude-attach/ask/other-submit/two-initial.raw"
-        );
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/synchronized-question.raw");
         let end = raw
             .windows(8)
             .position(|bytes| bytes == b"\x1b[?2026l")
@@ -654,7 +647,3 @@ mod input_tests;
 #[cfg(test)]
 #[path = "attach_image_tests.rs"]
 mod image_tests;
-
-#[path = "ask_transport.rs"]
-mod ask_transport;
-pub(super) use ask_transport::pending;

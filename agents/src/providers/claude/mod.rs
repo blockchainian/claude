@@ -12,10 +12,10 @@ mod defaults;
 mod models;
 #[cfg(test)]
 pub use models::write_fixture_cache;
+mod ask_hook;
 mod images;
 pub(crate) mod log;
 mod peer;
-mod pending_asks;
 pub(super) mod registry;
 mod settings;
 mod subagents;
@@ -43,6 +43,7 @@ pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
 const DETACH: &[u8] = b"\x1a";
 
 const PAGE_SIZE: usize = 10;
+const ASK_HOOK_PORT: u16 = 47831;
 
 /// Persists the custom title in Claude Code's transcript and sidecar formats.
 pub fn rename(transcript: &Path, id: &str, name: &str) -> io::Result<()> {
@@ -293,7 +294,7 @@ pub struct ClaudeProvider {
     summaries: HashMap<PathBuf, CachedSummary>,
     starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
     background: background::Tasks,
-    pending_asks: pending_asks::PendingAsks,
+    ask_hook: Option<std::sync::Arc<ask_hook::HookServer>>,
 }
 
 fn created_job(output: &std::process::Output) -> io::Result<String> {
@@ -359,7 +360,7 @@ impl ClaudeProvider {
             summaries: HashMap::new(),
             starts: HashMap::new(),
             background: background::Tasks::default(),
-            pending_asks: pending_asks::PendingAsks::default(),
+            ask_hook: None,
         }
     }
 
@@ -492,7 +493,20 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
-        self.pending_asks.refresh(&self.config_dir, &mut sessions);
+        if let Some(hook) = &self.ask_hook {
+            for ask in hook.pending() {
+                if let Some(session) = sessions
+                    .iter_mut()
+                    .find(|session| session.id == ask.session)
+                    && session.background_job.is_some()
+                {
+                    let crate::ask::AskKind::Questions { questions, .. } = &ask.kind;
+                    session.pending_questions = questions.iter().map(|q| q.text.clone()).collect();
+                    session.status = SessionStatus::NeedsInput;
+                    session.ask = Some(ask);
+                }
+            }
+        }
         Snapshot { sessions, has_more }
     }
 
@@ -679,8 +693,30 @@ impl ClaudeProvider {
 }
 
 impl Provider for ClaudeProvider {
+    fn setup(&mut self) -> io::Result<()> {
+        settings::ensure_ask_hook(&self.config_dir.join("settings.json"), ASK_HOOK_PORT)?;
+        match ask_hook::HookServer::bind(ASK_HOOK_PORT, self.config_dir.clone()) {
+            Ok(server) => self.ask_hook = Some(std::sync::Arc::new(server)),
+            // Without a listener, Claude owns question input and the dashboard only displays it.
+            Err(_) => self.ask_hook = None,
+        }
+        Ok(())
+    }
+
     fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
-        let command = if session.is_live_background() {
+        let hook_pending = self
+            .ask_hook
+            .as_ref()
+            .is_some_and(|hook| hook.pending().iter().any(|ask| ask.session == session.id));
+        let command = if hook_pending {
+            let job = session
+                .background_job
+                .as_ref()
+                .ok_or("Terminal is not supported")?;
+            let mut command = Command::new("claude");
+            command.args(["attach", &job.id]).current_dir(&session.cwd);
+            command
+        } else if session.is_live_background() {
             self.launch(&Action::Resume(session.id.clone()), Some(session))
                 .ok_or("Terminal is not supported")?
         } else if session.process.is_some() {
@@ -701,6 +737,10 @@ impl Provider for ClaudeProvider {
                 .current_dir(&session.cwd);
             command
         };
+        if let Some(hook) = &self.ask_hook {
+            hook.release(&session.id.id)
+                .map_err(|_| "Cannot release question hook")?;
+        }
         Ok(TerminalCommand {
             command,
             detach: Some(DETACH),
@@ -815,6 +855,13 @@ impl Provider for ClaudeProvider {
     }
 
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
+        if let SessionInput::Answer { ask, answer, .. } = input {
+            let hook = self.ask_hook.clone();
+            return Some(Box::new(move || {
+                hook.ok_or_else(|| io::Error::other("Claude question hook is unavailable"))?
+                    .answer(&ask, &answer)
+            }));
+        }
         if !session.can_resume() {
             return None;
         }
@@ -1131,7 +1178,7 @@ mod tests {
                 questions,
                 blocking,
             } = &ask.kind;
-            assert!(*blocking);
+            assert!(!*blocking);
             assert_eq!(questions.len(), 2);
             for (question, raw) in questions
                 .iter()
@@ -1174,7 +1221,7 @@ mod tests {
         let mut provider = ClaudeProvider::new(dir.path().into());
         fs::write(
             &path,
-            include_str!("../../../tests/fixtures/claude-attach/ask/multi-pending.jsonl"),
+            include_str!("../../../tests/fixtures/claude-questions/multi-pending.jsonl"),
         )
         .unwrap();
         let sessions = provider.refresh(1).sessions;
@@ -1201,10 +1248,30 @@ mod tests {
         );
         fs::write(
             &path,
-            include_str!("../../../tests/fixtures/claude-attach/ask/transcript.jsonl"),
+            include_str!("../../../tests/fixtures/claude-questions/transcript.jsonl"),
         )
         .unwrap();
         assert!(provider.refresh(1).sessions[0].ask.is_none());
+    }
+
+    #[test]
+    fn setup_leaves_questions_read_only_when_listener_is_unavailable() {
+        use std::net::TcpListener;
+        let _occupied = match TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, ASK_HOOK_PORT)) {
+            Ok(listener) => Some(listener),
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => None,
+            Err(error) => panic!("cannot reserve question port: {error}"),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        provider.setup().unwrap();
+        assert!(provider.ask_hook.is_none());
+        let settings: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("settings.json")).unwrap()).unwrap();
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"],
+            3600
+        );
     }
 
     pub(super) fn transcript(dir: &Path, id: &str, age: u64) -> PathBuf {

@@ -602,7 +602,7 @@ mod tests {
     use serde_json::Value;
 
     fn fixture(header: &str) -> Ask {
-        let records = include_str!("../../tests/fixtures/claude-attach/ask/transcript.jsonl");
+        let records = include_str!("../../tests/fixtures/claude-questions/transcript.jsonl");
         for line in records.lines() {
             let record: Value = serde_json::from_str(line).unwrap();
             let Some(content) = record["message"]["content"].as_array() else {
