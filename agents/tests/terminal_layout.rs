@@ -126,6 +126,39 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_background_log_has_no_marker_and_keeps_its_time() {
+    let records = include_str!("fixtures/background/two-awaits.jsonl");
+    let contents = |count| {
+        format!(
+            "{}{}\n",
+            include_str!("fixtures/transcript.jsonl"),
+            records.lines().take(count).collect::<Vec<_>>().join("\n")
+        )
+    };
+    let (_directory, tmux, transcript) =
+        start_probe_with_transcript("background-log-marker", &contents(3));
+    for (count, time) in [(3, "3m 13s"), (4, "3m 15s")] {
+        if count == 4 {
+            std::fs::write(&transcript, contents(count)).unwrap();
+        }
+        let capture = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .any(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
+        });
+        let row = capture
+            .lines()
+            .find(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
+            .unwrap();
+        assert!(!row.contains(" *"), "{row}");
+    }
+    println!(
+        "{{\"verdict\":\"pass\",\"background_marker\":false,\"pending_time\":\"3m 13s\",\"completed_time\":\"3m 15s\"}}"
+    );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_queued_details_wrap_bold_and_separate_messages() {
     let mut enqueue: serde_json::Value = include_str!("fixtures/claude-main-model-history.jsonl")
         .lines()

@@ -481,7 +481,6 @@ struct Entry {
     offset: u64,
     event: Event,
     missing: bool,
-    background: bool,
     last_result: Option<usize>,
     labels: Vec<(String, Option<String>)>,
 }
@@ -1033,7 +1032,7 @@ impl Log {
             offset: self.offset,
             event: Event {
                 completed_time: false,
-                background: body.ends_with(" *"),
+                background: false,
                 source: None,
                 source_records: self.source_records(),
                 sender: None,
@@ -1049,7 +1048,6 @@ impl Log {
                 calls: Vec::new(),
             },
             missing: false,
-            background: false,
             last_result: None,
             labels: Vec::new(),
         });
@@ -1108,7 +1106,6 @@ impl Log {
                     calls: Vec::new(),
                 },
                 missing: false,
-                background: false,
                 last_result: None,
                 labels: Vec::new(),
             }
@@ -1152,11 +1149,7 @@ impl Log {
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
         entry.event.calls.insert(0, detail);
-        entry.background |= input["run_in_background"] == true;
-        if entry.background {
-            entry.event.body.push_str(" *");
-        }
-        entry.event.background = entry.event.body.ends_with(" *");
+        entry.event.background |= input["run_in_background"] == true;
         entry.event.started_at = at;
         if let Some(result) = result {
             if result.denial.is_some() {
@@ -2906,6 +2899,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn trailing_asterisk_does_not_mark_a_foreground_tool_as_background() {
+        let mut record: serde_json::Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/background/two-awaits.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let input = &mut record["message"]["content"][0]["input"];
+        input["run_in_background"] = false.into();
+        input["description"] = "literal *".into();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file.as_file(), "{record}").unwrap();
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events[0].body, "literal *");
+        assert!(!events[0].background);
+    }
+
+    #[test]
     fn groups_interleaved_parallel_calls_and_tracks_predecessors() {
         let file = fixture();
         let events = tail(file.path(), 8).unwrap();
@@ -2935,7 +2947,8 @@ pub(crate) mod tests {
         assert_eq!(events[2].body, "Read, Grep");
         assert_eq!(events[2].started_at, at(30));
         assert_eq!(events[2].ended_at, Some(at(35)));
-        assert_eq!(events[3].body, "build *");
+        assert_eq!(events[3].body, "build");
+        assert!(events[3].background);
         assert_eq!(events[3].started_at, at(36));
         assert_eq!(events[3].ended_at, Some(at(38)));
         assert_eq!(events[4].body, "next task");

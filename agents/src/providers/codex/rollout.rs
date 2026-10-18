@@ -1814,7 +1814,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             Event {
                 completed_time: kind == Kind::Tool
                     && !calls.iter().any(|call| call.agent_path.is_some()),
-                background: body.ends_with(" *"),
+                background: false,
                 source: Some(source(record, offset)),
                 source_records,
                 sender: None,
@@ -2074,6 +2074,25 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn trailing_asterisk_does_not_mark_a_message_as_background() {
+        let mut record = include_str!("../../../tests/fixtures/codex-rollout.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| {
+                record["type"] == "response_item"
+                    && record["payload"]["type"] == "message"
+                    && record["payload"]["role"] == "assistant"
+            })
+            .unwrap();
+        record["payload"]["content"][0]["text"] = "literal *".into();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file.as_file(), "{record}").unwrap();
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events[0].body, "literal *");
+        assert!(!events[0].background);
     }
 
     #[test]

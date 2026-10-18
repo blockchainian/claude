@@ -39,7 +39,7 @@
                                             Read src/main.rs， Read src/app.rs                                       15s
                                                       failed check                                                  15s
                                                  Also inspect the tests                                        11:59:00
-                                                 run a background job *                                              5s
+                                                  run a background job                                               5s
  A long response whose whitespace collapses and whose body must be truncated before the right aligned timest…  11:59:20
                                                         run tests                                                    5s
  # Result {"answer":[1,2]} <plist version="1.0"><dict><key>settings</key><array> <dict><key>settings</key><d…       35s

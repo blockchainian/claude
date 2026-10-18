@@ -3926,7 +3926,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Tool, "Read src/main.rs，Read src/app.rs", 100, Some(90)),
         (Kind::Error, "failed check", 80, Some(70)),
         (Kind::QueuedUser, "Also inspect the tests", 60, None),
-        (Kind::Tool, "run a background job *", 50, None),
+        (Kind::Tool, "run a background job", 50, None),
         (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
@@ -4756,6 +4756,39 @@ fn task_log_tall_running_snapshot() {
 }
 
 #[test]
+fn task_log_background_record_has_no_marker_and_keeps_its_time() {
+    let records = include_str!("../../tests/fixtures/background/two-awaits.jsonl");
+    let file = tempfile::NamedTempFile::new().unwrap();
+    for (lines, expected_time) in [(3, "3m 13s"), (4, "3m 15s")] {
+        std::fs::write(
+            file.path(),
+            format!(
+                "{}\n",
+                records.lines().take(lines).collect::<Vec<_>>().join("\n")
+            ),
+        )
+        .unwrap();
+        let events = crate::providers::claude::log::tail(file.path(), 100).unwrap();
+        let event = events.last().unwrap();
+        assert_eq!(event.body, "等用量图颜色线程");
+        assert!(event.background);
+        assert_eq!(event.ended_at.is_some(), lines == 4);
+        let now = event.started_at + Duration::minutes(2);
+        let (mut view, _) = log_fixture();
+        view.set_log(events);
+        for now in [now, now + Duration::minutes(1)] {
+            let rendered = log_screen(&view, 100, 25, now);
+            let row = rendered
+                .lines()
+                .find(|row| row.replace(' ', "").contains("等用量图颜色线程"))
+                .unwrap_or_else(|| panic!("{rendered}"));
+            assert!(!row.contains(" *"), "{row}");
+            assert!(row.ends_with(expected_time), "{row}");
+        }
+    }
+}
+
+#[test]
 fn task_log_tall_finished_snapshot() {
     let (mut view, now) = log_fixture();
     view.log.last_mut().unwrap().ended_at = Some(now - Duration::seconds(5));
@@ -4859,7 +4892,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .any(|line| line.ends_with("25s"))
     );
-    view.log.last_mut().unwrap().body.push_str(" *");
+    view.log.last_mut().unwrap().background = true;
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
