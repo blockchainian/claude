@@ -1018,13 +1018,65 @@ impl Log {
                 .find(|line| !line.is_empty())
                 .unwrap_or("")
         });
-        // The output file's content, or its path once the file is gone.
-        let output = field("output-file").map(|path| match std::fs::read_to_string(path) {
-            Ok(text) => Section::Text {
+        let output = field("output-file").map(|path| {
+            let text = match std::fs::read_to_string(path) {
+                Ok(text) => text,
+                Err(error) => {
+                    return Section::Placeholder(if error.kind() == io::ErrorKind::NotFound {
+                        "File no longer exists".to_owned()
+                    } else {
+                        error.to_string()
+                    });
+                }
+            };
+            let records = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(serde_json::from_str::<serde_json::Value>)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+                .filter(|records| {
+                    records.iter().all(|record| record["type"].is_string())
+                        && records.iter().any(|record| {
+                            matches!(record["type"].as_str(), Some("assistant" | "user"))
+                                && record["message"]["role"] == record["type"]
+                                && record["message"]["content"].is_array()
+                        })
+                });
+            let Some(records) = records else {
+                return Section::Text {
+                    label: String::new(),
+                    text,
+                };
+            };
+            let handback = records
+                .iter()
+                .filter(|record| record["type"] == "assistant")
+                .filter_map(|record| record["message"]["content"].as_array())
+                .flatten()
+                .rfind(|block| block["type"] == "tool_use" && block["name"] == "SubagentHandback")
+                .and_then(|block| block["input"]["message"].as_str())
+                .map(str::to_owned);
+            let message = handback.or_else(|| {
+                let last = records.last()?;
+                if last["type"] != "assistant" {
+                    return None;
+                }
+                last["message"]["content"]
+                    .as_array()?
+                    .iter()
+                    .map(|block| {
+                        (block["type"] == "text")
+                            .then(|| block["text"].as_str())
+                            .flatten()
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|parts| parts.join("\n"))
+            });
+            Section::Markdown {
                 label: String::new(),
-                text,
-            },
-            Err(_) => Section::Fields(vec![("output-file".to_owned(), path.to_owned())]),
+                text: message.unwrap_or_default(),
+            }
         });
         self.push(Kind::Tool, summary.to_owned(), at);
         let event = &mut self.entries.last_mut().unwrap().event;
@@ -1452,6 +1504,8 @@ pub(crate) mod tests {
             serde_json::to_string_pretty(&rows[0]).unwrap()
         );
     }
+
+    include!("notification_tests.rs");
 
     #[test]
     fn task_notification_delivery_keeps_only_enqueue_rows() {

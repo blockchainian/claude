@@ -1328,7 +1328,7 @@ fn terminal_update_click_selects_source_row() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_task_notification_shows_summary_id_and_missing_output_path() {
+fn terminal_task_notification_shows_summary_id_and_missing_file() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("task-notification");
     let record = include_str!("fixtures/claude-task-notifications.jsonl")
@@ -1358,14 +1358,28 @@ fn terminal_task_notification_shows_summary_id_and_missing_output_path() {
         rows[rule + 1].trim_start().starts_with("Task b9wi31ww0 "),
         "{capture}"
     );
+    assert!(detail.contains("File no longer exists"), "{capture}");
+    assert!(!detail.contains("output-file:"), "{capture}");
+    let raw = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&raw, 200, 50);
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("File no longer exists"))
+        .unwrap();
+    let column = line[..line.find("File no longer exists").unwrap()].width();
     assert!(
-        detail.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output"),
-        "{capture}"
+        parser
+            .screen()
+            .cell(row as u16, column as u16)
+            .unwrap()
+            .dim(),
+        "{raw}"
     );
     assert!(!detail.contains("task-id:"), "{capture}");
     assert!(!detail.contains("status: completed"), "{capture}");
     assert!(!detail.contains("tool-use-id"), "{capture}");
-    println!("{{\"task_notification\":\"pass\",\"summary_once\":true,\"output_path\":true}}");
+    println!("{{\"task_notification\":\"pass\",\"summary_once\":true,\"missing_file\":true}}");
 }
 
 #[test]
@@ -2590,3 +2604,6 @@ fn terminal_notification_json_preserves_lines_wide_and_narrow() {
     }
     println!("{{\"notification_preformatted\":\"pass\"}}");
 }
+
+#[path = "support/terminal_notification.rs"]
+mod terminal_notification;

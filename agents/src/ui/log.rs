@@ -1268,25 +1268,14 @@ pub(super) mod log_markdown {
     }
 
     #[test]
-    fn task_notifications_keep_a_linked_path_once_the_output_is_gone() {
+    fn task_notifications_show_a_placeholder_once_the_output_is_gone() {
         let dir = tempfile::tempdir().unwrap();
-        let output = dir.path().join("b9wi31ww0.output");
         for event in notification_events(dir.path(), None) {
             let body = open_text(&event);
-            assert!(
-                body.contains(&format!("output-file: {}", output.display())),
-                "{body}"
-            );
-            std::fs::write(&output, "done").unwrap();
+            assert!(body.contains("File no longer exists"), "{body}");
+            assert!(!body.contains("output-file:"), "{body}");
             let layout = detail_layout(&event, 120, dir.path(), DateTime::UNIX_EPOCH);
-            assert!(
-                layout
-                    .links
-                    .iter()
-                    .flatten()
-                    .any(|link| link.target == output)
-            );
-            std::fs::remove_file(&output).unwrap();
+            assert!(layout.links.iter().flatten().next().is_none());
         }
     }
 
