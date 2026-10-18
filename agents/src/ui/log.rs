@@ -1105,7 +1105,12 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         let shortened = super::line_truncation::abbreviate_paths_in_text(&body, &paths, body_width);
         let mut spans = Vec::new();
         for line in super::markdown::render(&shortened, usize::MAX) {
-            if line.spans.iter().all(|span| span.content.trim().is_empty()) {
+            // Blank separators and drawn rules carry no text for a single row.
+            let text = line.to_string();
+            if text
+                .chars()
+                .all(|ch| ch.is_whitespace() || matches!(ch, '─' | '┼'))
+            {
                 continue;
             }
             if !spans.is_empty() {
@@ -1716,6 +1721,12 @@ pub(super) mod log_markdown {
                 assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }
+    }
+
+    #[test]
+    fn prose_rows_flatten_tables_without_their_header_rule() {
+        let buffer = body_buffer(Kind::Assistant, "| a | b |\n|---|---|\n| c | d |", 40);
+        assert_eq!(body_text(&buffer).trim_start(), "a │ b c │ d");
     }
 
     /// A row merging an Edit and a Read call, fitted to `width`.

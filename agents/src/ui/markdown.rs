@@ -46,21 +46,17 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                     Tag::Table(_) => {
                         writer.separate();
                         writer.kind = Kind::Preformatted;
+                        writer.table = Some(Vec::new());
                     }
                     Tag::TableHead => {
-                        writer.flush();
-                        writer.table_cells = 0;
                         writer.styles.push(style.bold());
+                        writer.table.get_or_insert_default().push(Vec::new());
                     }
-                    Tag::TableRow => {
-                        writer.flush();
-                        writer.table_cells = 0;
-                    }
+                    Tag::TableRow => writer.table.get_or_insert_default().push(Vec::new()),
                     Tag::TableCell => {
-                        if writer.table_cells > 0 {
-                            writer.push(" | ", style);
+                        if let Some(row) = writer.table.as_mut().and_then(|rows| rows.last_mut()) {
+                            row.push(Line::default());
                         }
-                        writer.table_cells += 1;
                     }
                     Tag::Paragraph if writer.indent == 0 => writer.separate(),
                     Tag::Heading { level, .. } => {
@@ -113,12 +109,11 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
             }
             Event::End(tag) => match tag {
                 TagEnd::TableHead => {
-                    writer.flush();
                     writer.styles.pop();
                 }
-                TagEnd::TableRow => writer.flush(),
                 TagEnd::Table => {
-                    writer.flush();
+                    let rows = writer.table.take().unwrap_or_default();
+                    writer.table_lines(rows);
                     writer.kind = Kind::Prose;
                 }
                 TagEnd::Paragraph => writer.flush(),
@@ -179,7 +174,8 @@ struct Writer {
     indent: usize,
     code: bool,
     kind: Kind,
-    table_cells: usize,
+    /// Cells of the table being parsed, row by row; the first row is the header.
+    table: Option<Vec<Vec<Line<'static>>>>,
 }
 
 impl Writer {
@@ -192,10 +188,62 @@ impl Writer {
             .chars()
             .map(|ch| if ch.is_control() { ' ' } else { ch })
             .collect::<String>();
+        if let Some(cell) = self
+            .table
+            .as_mut()
+            .and_then(|rows| rows.last_mut())
+            .and_then(|row| row.last_mut())
+        {
+            cell.spans.push(Span::styled(text, style));
+            return;
+        }
         if self.current.spans.is_empty() && self.indent > 0 {
             self.current.spans.push(Span::raw(" ".repeat(self.indent)));
         }
         self.current.spans.push(Span::styled(text, style));
+    }
+
+    /// Align each column to its widest cell, divide columns with rules and underline the header.
+    fn table_lines(&mut self, rows: Vec<Vec<Line<'static>>>) {
+        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let widths: Vec<usize> = (0..columns)
+            .map(|column| {
+                rows.iter()
+                    .filter_map(|row| row.get(column))
+                    .map(Line::width)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        let style = self.style();
+        for (index, row) in rows.into_iter().enumerate() {
+            let mut cells = row.into_iter();
+            for (column, width) in widths.iter().enumerate() {
+                if column > 0 {
+                    self.current.spans.push(Span::styled(" │ ", style));
+                }
+                let cell = cells.next().unwrap_or_default();
+                let padding = width - cell.width();
+                self.current.spans.extend(cell.spans);
+                if column + 1 < columns && padding > 0 {
+                    self.current.spans.push(Span::raw(" ".repeat(padding)));
+                }
+            }
+            self.flush_code();
+            if index == 0 {
+                let rule = widths
+                    .iter()
+                    .enumerate()
+                    .map(|(column, width)| {
+                        let gaps = usize::from(column > 0) + usize::from(column + 1 < columns);
+                        "─".repeat(width + gaps)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("┼");
+                self.current.spans.push(Span::styled(rule, style));
+                self.flush_code();
+            }
+        }
     }
 
     fn flush(&mut self) {
@@ -241,7 +289,10 @@ mod tests {
     fn tables_render_cells_and_preserve_selection_sources() {
         let source = "| Name | Value |\n| --- | --- |\n| alpha | **two** |";
         let lines = render(source, 40);
-        assert_eq!(plain(&lines), ["Name | Value", "alpha | two"]);
+        assert_eq!(
+            plain(&lines),
+            ["Name  │ Value", "──────┼──────", "alpha │ two"]
+        );
         assert!(
             lines[0].spans[0]
                 .style
@@ -252,7 +303,8 @@ mod tests {
         let name = source.find("Name").unwrap();
         let two = source.find("two").unwrap();
         assert_eq!(maps[0][0].1, name..name + 1);
-        assert_eq!(maps[1].last().unwrap().1, two + 2..two + 3);
+        assert!(maps[1].is_empty());
+        assert_eq!(maps[2].last().unwrap().1, two + 2..two + 3);
     }
 
     #[test]

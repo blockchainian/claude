@@ -137,7 +137,7 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
             Event::Start(Tag::TableHead | Tag::TableRow) => table_cells = 0,
             Event::Start(Tag::TableCell) => {
                 if table_cells > 0 {
-                    tokens.extend(" | ".graphemes(true).map(|text| Token {
+                    tokens.extend(" │ ".graphemes(true).map(|text| Token {
                         text: text.to_owned(),
                         source: None,
                     }));
