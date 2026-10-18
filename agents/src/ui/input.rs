@@ -406,6 +406,9 @@ impl View {
             self.text_selection.borrow_mut().take();
             return None;
         }
+        if let Some(action) = self.question_mouse(mouse) {
+            return action;
+        }
         let prompt = self.viewport.borrow().prompt;
         if self.input_disabled().is_none()
             && (self.input_box.mouse_selecting()

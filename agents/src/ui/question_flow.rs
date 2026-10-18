@@ -1,13 +1,15 @@
 //! Keeps pending question drafts with their session.
 
 use super::*;
-use question_view::{Outcome, QuestionView};
+use question_view::{Outcome, QuestionView, Target};
 
 #[derive(Default)]
 pub(super) struct Questions {
     views: HashMap<SessionKey, QuestionView>,
     closed: HashMap<SessionKey, crate::ask::Ask>,
     pub(super) sending: HashSet<SessionKey>,
+    /// The last clicked option, as session, question and row, for double-click detection.
+    last_click: Option<(SessionKey, usize, usize, Instant)>,
 }
 
 impl Questions {
@@ -94,17 +96,67 @@ impl View {
             return Some(None);
         }
         let view = self.questions.views.get_mut(&id).expect("visible question");
-        Some(match view.key(key) {
-            Some(Outcome::Dismiss) => {
-                self.questions.closed.insert(id, view.ask().clone());
+        let outcome = view.key(key);
+        Some(self.question_outcome(id, outcome))
+    }
+
+    fn question_outcome(&mut self, id: SessionKey, outcome: Option<Outcome>) -> Option<Action> {
+        let ask = self.questions.views[&id].ask().clone();
+        match outcome? {
+            Outcome::Dismiss => {
+                self.questions.closed.insert(id, ask);
                 None
             }
-            Some(Outcome::Submit(answer)) => Some(Action::AnswerQuestions {
-                ask: view.ask().clone(),
-                answer,
-            }),
-            None => None,
-        })
+            Outcome::Submit(answer) => Some(Action::AnswerQuestions { ask, answer }),
+        }
+    }
+
+    /// Wheel steps options, or questions over the tab row; a click focuses an option or
+    /// shows a question, and a double click answers with the option.
+    pub(super) fn question_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
+        let prompt = self.viewport.borrow().prompt;
+        if !prompt.contains((mouse.column, mouse.row).into()) {
+            return None;
+        }
+        let id = self.selected_id()?.clone();
+        self.questions.visible(&id)?;
+        if self.questions.sending.contains(&id) {
+            return Some(None);
+        }
+        self.mouse_press = None;
+        self.text_selection.borrow_mut().take();
+        let area = prompt.inner(Margin::new(super::render::HORIZONTAL_PADDING, 0));
+        let interval = self.double_click_interval;
+        let view = self.questions.views.get_mut(&id).expect("visible question");
+        let target = view.target(area, mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => view.scroll(
+                mouse.kind == MouseEventKind::ScrollDown,
+                matches!(target, Some(Target::Tabs(_))),
+            ),
+            MouseEventKind::Up(MouseButton::Left) => match target {
+                Some(Target::Tabs(Some(page))) => view.show_page(page),
+                Some(Target::Option(row)) => {
+                    let now = Instant::now();
+                    let page = view.page();
+                    let double = self.questions.last_click.take().is_some_and(
+                        |(session, last_page, last_row, at)| {
+                            (session, last_page, last_row) == (id.clone(), page, row)
+                                && now.duration_since(at) < interval
+                        },
+                    );
+                    if double {
+                        let outcome = view.choose(row);
+                        return Some(self.question_outcome(id, outcome));
+                    }
+                    view.focus(row);
+                    self.questions.last_click = Some((id, page, row, now));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        Some(None)
     }
 
     pub(super) fn question_paste(&mut self, text: &str) -> bool {
@@ -322,6 +374,71 @@ mod tests {
         assert_eq!(screen(&view, 100, 40), before);
         view.input_complete(&ask.session, &input, Ok(()));
         assert!(view.active_question().is_none());
+    }
+
+    fn click(view: &mut View, column: u16, row: u16) -> Option<Action> {
+        let mouse = |kind| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left)));
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left)))
+    }
+
+    fn row_of(screen: &str, text: &str) -> u16 {
+        screen
+            .lines()
+            .position(|line| line.contains(text))
+            .unwrap_or_else(|| panic!("{text} missing: {screen}")) as u16
+    }
+
+    #[test]
+    fn ask_flow_click_focuses_and_double_click_answers() {
+        let mut view = fixture();
+        let before = screen(&view, 100, 40);
+        let green = row_of(&before, "2. Green");
+        assert_eq!(click(&mut view, 10, green), None);
+        assert!(screen(&view, 100, 40).contains("› 2. Green"));
+        let Some(Action::AnswerQuestions { answer, .. }) = click(&mut view, 10, green) else {
+            panic!("double click did not answer")
+        };
+        assert_eq!(answer.answers["Probe single choice?"].answers, ["Green"]);
+
+        let mut view = fixture();
+        let other = row_of(&screen(&view, 100, 40), "Type something.");
+        assert_eq!(click(&mut view, 10, other), None);
+        view.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        let Some(Action::AnswerQuestions { answer, .. }) =
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        else {
+            panic!("typed answer missing")
+        };
+        assert_eq!(
+            answer.answers["Probe single choice?"].other.as_deref(),
+            Some("x")
+        );
+    }
+
+    #[test]
+    fn ask_flow_wheel_steps_options_without_wrapping() {
+        let mut view = fixture();
+        let row = row_of(&screen(&view, 100, 40), "1. Red");
+        let wheel = |view: &mut View, kind| {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: 10,
+                row,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        wheel(&mut view, MouseEventKind::ScrollUp);
+        assert!(screen(&view, 100, 40).contains("› 1. Red"));
+        for _ in 0..6 {
+            wheel(&mut view, MouseEventKind::ScrollDown);
+        }
+        assert!(screen(&view, 100, 40).contains("› 4. Type something."));
     }
 
     #[test]

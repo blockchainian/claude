@@ -16,6 +16,14 @@ pub(super) enum Outcome {
     Dismiss,
 }
 
+/// What a mouse position points at: the question tab row, or an option row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Target {
+    /// The tab row, with the question whose tab is under the pointer.
+    Tabs(Option<usize>),
+    Option(usize),
+}
+
 #[derive(Default)]
 struct Page {
     focus: usize,
@@ -206,19 +214,7 @@ impl QuestionView {
             }
             KeyCode::BackTab => self.pages[self.page].focus = 0,
             KeyCode::Char(digit @ '1'..='9') => {
-                let index = digit as usize - '1' as usize;
-                if index < option_count {
-                    if multi {
-                        self.toggle(index);
-                    } else {
-                        self.pages[self.page].focus = index;
-                        self.pages[self.page].selected = vec![index];
-                        self.pages[self.page].other.clear();
-                        return self.finish_page();
-                    }
-                } else if other && index == option_count {
-                    self.pages[self.page].focus = index;
-                }
+                return self.choose(digit as usize - '1' as usize);
             }
             KeyCode::Char(' ') if multi && focus < option_count => self.toggle(focus),
             KeyCode::Char(' ') if !multi && focus < option_count => {
@@ -241,6 +237,82 @@ impl QuestionView {
         None
     }
 
+    /// Answers with an option the way its digit key does; the free-text row only takes focus.
+    pub(super) fn choose(&mut self, index: usize) -> Option<Outcome> {
+        let question = self.questions().get(self.page)?;
+        let (multi, option_count, other) =
+            (question.multi, question.options.len(), question.other);
+        if index < option_count {
+            if multi {
+                self.toggle(index);
+            } else {
+                self.pages[self.page].focus = index;
+                self.pages[self.page].selected = vec![index];
+                self.pages[self.page].other.clear();
+                return self.finish_page();
+            }
+        } else if (other || option_count == 0) && index == option_count {
+            self.pages[self.page].focus = index;
+        }
+        None
+    }
+
+    /// Moves the focus to a row without answering.
+    pub(super) fn focus(&mut self, index: usize) {
+        if index < self.rows() {
+            self.pages[self.page].focus = index;
+        }
+    }
+
+    pub(super) fn show_page(&mut self, page: usize) {
+        if page < self.pages.len() {
+            self.page = page;
+        }
+    }
+
+    pub(super) fn page(&self) -> usize {
+        self.page
+    }
+
+    /// Steps the focused row, or the shown question over the tab row, stopping at either end.
+    pub(super) fn scroll(&mut self, forward: bool, tabs: bool) {
+        let step = |value: usize, len: usize| {
+            if forward {
+                (value + 1).min(len.saturating_sub(1))
+            } else {
+                value.saturating_sub(1)
+            }
+        };
+        if tabs {
+            self.page = step(self.page, self.pages.len());
+        } else if !self.pages.is_empty() {
+            self.pages[self.page].focus = step(self.pages[self.page].focus, self.rows());
+        }
+    }
+
+    pub(super) fn target(&self, area: Rect, column: u16, row: u16) -> Option<Target> {
+        if !area.contains((column, row).into()) {
+            return None;
+        }
+        let (_, rows, offset) = self.visible(area);
+        let y = usize::from(row - area.y);
+        if offset == 0 && y == 0 && !self.pages.is_empty() {
+            let mut x = area.x;
+            for (index, question) in self.questions().iter().enumerate() {
+                if index > 0 {
+                    x += "·".width() as u16;
+                }
+                let width = (question.header.width() + 2) as u16;
+                if (x..x.saturating_add(width)).contains(&column) {
+                    return Some(Target::Tabs(Some(index)));
+                }
+                x = x.saturating_add(width);
+            }
+            return Some(Target::Tabs(None));
+        }
+        rows.get(y).copied().flatten().map(Target::Option)
+    }
+
     pub(super) fn paste(&mut self, text: &str) {
         if self.editing() {
             self.pages[self.page]
@@ -249,9 +321,10 @@ impl QuestionView {
         }
     }
 
-    fn lines(&self, width: u16) -> (Vec<Line<'static>>, usize) {
+    /// The view's lines, the focused line, and the option each body line belongs to.
+    fn lines(&self, width: u16) -> (Vec<Line<'static>>, usize, Vec<Option<usize>>) {
         let Some(question) = self.questions().get(self.page) else {
-            return (vec![Line::from("No pending questions")], 0);
+            return (vec![Line::from("No pending questions")], 0, vec![None]);
         };
         let page = &self.pages[self.page];
         let mut tabs = Vec::new();
@@ -272,6 +345,7 @@ impl QuestionView {
         }
         lines.push(Line::default());
         let mut focus_row = lines.len();
+        let mut rows = vec![None; lines.len()];
         for (index, option) in question.options.iter().enumerate() {
             let focused = page.focus == index;
             if focused {
@@ -308,6 +382,7 @@ impl QuestionView {
                     lines.push(Line::styled(format!("     {text}"), Style::default().dim()));
                 }
             }
+            rows.resize(lines.len(), Some(index));
         }
         if question.other || question.options.is_empty() {
             let focused = page.focus == question.options.len();
@@ -331,37 +406,47 @@ impl QuestionView {
                 Span::raw(format!("{marker} {}. ", question.options.len() + 1)),
                 text,
             ]));
+            rows.push(Some(question.options.len()));
         }
         lines.push(Line::default());
+        rows.push(None);
         lines.extend(self.footer(width));
-        (lines, focus_row)
+        (lines, focus_row, rows)
     }
 
     pub(super) fn height(&self, width: u16) -> u16 {
         self.lines(width).0.len().min(usize::from(u16::MAX)) as u16
     }
 
+    /// The lines that fit `area`, scrolled to keep the focus and footer visible, with each
+    /// visible body line's option and the number of body lines scrolled off the top.
+    fn visible(&self, area: Rect) -> (Vec<Line<'static>>, Vec<Option<usize>>, usize) {
+        let (mut lines, focus, rows) = self.lines(area.width);
+        let height = usize::from(area.height);
+        if lines.len() <= height {
+            return (lines, rows, 0);
+        }
+        let footer = lines.split_off(lines.len() - self.footer(area.width).len());
+        let body_height = self.body_height(area);
+        let offset = (focus + 1).saturating_sub(body_height);
+        let rows = rows.into_iter().skip(offset).take(body_height).collect();
+        lines = lines.into_iter().skip(offset).take(body_height).collect();
+        lines.extend(footer.into_iter().take(height - body_height));
+        (lines, rows, offset)
+    }
+
     pub(super) fn render(&self, area: Rect, buf: &mut Buffer) {
         if area.is_empty() {
             return;
         }
-        let (mut lines, focus) = self.lines(area.width);
-        let height = usize::from(area.height);
-        if lines.len() > height {
-            let footer = lines.split_off(lines.len() - self.footer(area.width).len());
-            let body_height = self.body_height(area);
-            let offset = (focus + 1).saturating_sub(body_height);
-            lines = lines.into_iter().skip(offset).take(body_height).collect();
-            lines.extend(footer.into_iter().take(height - body_height));
-        }
-        Paragraph::new(lines).render(area, buf);
+        Paragraph::new(self.visible(area).0).render(area, buf);
     }
 
     pub(super) fn cursor(&self, area: Rect) -> Option<(u16, u16)> {
         if !self.editing() || area.is_empty() {
             return None;
         }
-        let (_, focus) = self.lines(area.width);
+        let (_, focus, _) = self.lines(area.width);
         let visible = self.body_height(area);
         if visible == 0 {
             return None;
@@ -572,6 +657,27 @@ mod tests {
         assert_eq!(buf[(5, other)].symbol(), "T");
         assert!(buf[(5, other)].modifier.contains(Modifier::DIM));
         assert!((0..60).all(|x| buf[(x, other)].bg == Color::Reset));
+    }
+
+    #[test]
+    fn ask_view_tab_row_targets_questions_and_wheel_stops_at_ends() {
+        let mut view = QuestionView::new(fixture("First"));
+        let area = Rect::new(2, 5, 60, 13);
+        assert_eq!(view.target(area, 4, 5), Some(Target::Tabs(Some(0))));
+        assert_eq!(view.target(area, 12, 5), Some(Target::Tabs(Some(1))));
+        assert_eq!(view.target(area, 40, 5), Some(Target::Tabs(None)));
+        let green = (5..18)
+            .find(|&y| screen(&view, 60, 13).lines().nth(usize::from(y - 5)) == Some("  2. Green"))
+            .unwrap();
+        assert_eq!(view.target(area, 3, green), Some(Target::Option(1)));
+        assert_eq!(view.target(area, 3, green + 1), Some(Target::Option(1)));
+        view.show_page(1);
+        assert!(screen(&view, 60, 13).contains("Probe second page?"));
+        view.scroll(true, true);
+        assert_eq!(view.page(), 1);
+        view.scroll(false, true);
+        view.scroll(false, true);
+        assert_eq!(view.page(), 0);
     }
 
     #[test]

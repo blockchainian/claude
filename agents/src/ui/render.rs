@@ -47,7 +47,7 @@ pub(super) fn render_input_row(
     buf.set_style(area, Style { fg: None, ..style });
 }
 
-const HORIZONTAL_PADDING: u16 = 1;
+pub(super) const HORIZONTAL_PADDING: u16 = 1;
 const PANEL_GAP: u16 = 2 * HORIZONTAL_PADDING + 1;
 
 /// Fills a list row through both padding cells, stopping before column separators.
