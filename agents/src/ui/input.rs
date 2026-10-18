@@ -168,6 +168,10 @@ impl View {
             previous_end: None,
             images: Vec::new(),
             calls: vec![crate::log::ToolCall {
+                started_at: None,
+                hide_output: false,
+                agent_thread_id: None,
+                agent_path: None,
                 detail_left: "background".into(),
                 detail_title: task.description.clone(),
                 show_details: false,
@@ -1272,6 +1276,10 @@ impl View {
                 }
                 _ => {}
             }
+            return None;
+        }
+        if plain && key.code == KeyCode::Enter && self.mouse_focus == Panel::LogList {
+            self.jump_log_agent();
             return None;
         }
         let navigation = super::navigation::list_navigation(key);

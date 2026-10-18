@@ -21,7 +21,7 @@ fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
 }
 
 #[test]
-fn codex_agent_messages_show_payload_without_changing_list_titles() {
+fn codex_agent_messages_show_routes_and_payload() {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
     let provider =
@@ -45,11 +45,11 @@ fn codex_agent_messages_show_payload_without_changing_list_titles() {
     );
     let message = serde_json::to_string(&message).unwrap() + "\n";
     for (record, title, body) in [
-        (plaintext, "FINAL_ANSWER from /root/demo_sub", "演示完成"),
-        (encrypted, "NEW_TASK from /root", "Content is encrypted."),
+        (plaintext, "demo_sub → root · 演示完成", "演示完成"),
+        (encrypted, "root → demo_sub · new task", "(encrypted)"),
         (
             message.as_str(),
-            "MESSAGE from /root/demo_sub",
+            "demo_sub → root",
             "**完成** [report](https://example.com/report)\n\nPayload:\n保留正文",
         ),
     ] {
@@ -520,9 +520,9 @@ fn assert_centered_blocks(event: &Event, width: u16) {
 
 #[test]
 fn subagent_activity_blocks_are_centered() {
-    let events = codex_events("codex-inner/subagent.jsonl");
+    let events = codex_events("codex-collaboration/spawn_agent.jsonl");
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].calls[0].name, "SubAgentActivity");
+    assert_eq!(events[0].calls[0].name, "spawn_agent");
     for width in [200, 151, 120, 41] {
         assert_centered_blocks(&events[0], width);
     }
@@ -914,7 +914,7 @@ fn tool_list_rows_keep_names_subjects_and_detail_titles() {
         let call = &event.calls[0];
         assert_eq!(
             event.body,
-            format!("{} {}", call.detail_left, call.detail_title)
+            format!("{} {}", call.detail_left, call.detail_title).trim()
         );
         assert_eq!(
             super::body_line(&event, 200, Path::new("/workspace")).to_string(),
@@ -972,9 +972,9 @@ fn tool_list_rows_group_members_and_preserve_relative_paths() {
 #[test]
 fn tool_list_rows_keep_shell_display_names_and_grouped_subjects() {
     let event = codex_events("codex-inner/git-chain.jsonl").remove(0);
-    assert_eq!(event.body, "Shell git {status, diff}, sed");
-    assert_eq!(event.calls[0].detail_left, "Shell");
-    assert_eq!(event.calls[0].detail_title, "git {status, diff}, sed");
+    assert_eq!(event.body, "Exec Command");
+    assert_eq!(event.calls[0].detail_left, "Exec Command");
+    assert_eq!(event.calls[0].detail_title, "");
     let mut record = list_row_records().remove(0);
     let block = &mut record["message"]["content"][0];
     block["name"] = "Bash".into();
@@ -1034,7 +1034,7 @@ fn tool_list_rows_keep_codex_native_file_paths() {
         let call = &event.calls[0];
         assert_eq!(
             event.body,
-            format!("{} {}", call.detail_left, call.detail_title)
+            format!("{} {}", call.detail_left, call.detail_title).trim()
         );
         for range in &event.paths {
             assert!(event.body[range.clone()].starts_with('/'));
@@ -1058,4 +1058,65 @@ fn tool_list_rows_group_home_paths_through_existing_shortening() {
         super::body_line(&event, 200, Path::new(&home)).to_string(),
         "Edit {src/a.rs, src/b.rs}"
     );
+}
+
+#[test]
+fn codex_collaboration_message_sections_snapshot() {
+    let mut snapshot = String::new();
+    for fixture in [
+        "codex-agent-messages/new-task.jsonl",
+        "codex-agent-messages/final-answer.jsonl",
+        "codex-agent-messages/sequence.jsonl",
+        "codex-collaboration/spawn_agent.jsonl",
+        "codex-collaboration/send_message.jsonl",
+        "codex-collaboration/followup_task.jsonl",
+    ] {
+        for event in codex_events(fixture) {
+            let panel = Rect::new(0, 0, 120, 35);
+            let mut buffer = Buffer::empty(panel);
+            let view = View::new(Grouping::Project, false);
+            view.render_event_detail(
+                &event,
+                "09:54:58",
+                panel,
+                &mut buffer,
+                Path::new("/workspace"),
+                DateTime::UNIX_EPOCH,
+            );
+            snapshot.push_str(&format!("{fixture}\n"));
+            let rows: Vec<_> = buffer
+                .content
+                .chunks(120)
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                        .trim_end()
+                        .to_owned()
+                })
+                .collect();
+            snapshot.push_str(rows.join("\n").trim_end());
+            snapshot.push_str("\n\n");
+            let columns = detail_columns(panel, panel);
+            let viewport = view.viewport.borrow();
+            let layout = viewport.log_detail_layout.as_ref().unwrap();
+            for (row, time) in &layout.times {
+                let y = LOG_TOP + *row as u16;
+                let start = columns.time.right() - time.width() as u16;
+                assert_eq!(
+                    (start..columns.time.right())
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>(),
+                    time.content.as_ref()
+                );
+            }
+        }
+    }
+    let snapshot = format!("{}\n", snapshot.trim_end());
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots/codex_collaboration_messages.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }

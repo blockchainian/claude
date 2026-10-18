@@ -74,6 +74,32 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     }
 }
 
+/// Display protocol identifiers without maintaining a per-tool name table.
+pub(crate) fn title_name(name: &str) -> String {
+    name.split(['_', '.', ' '])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| {
+                    first.to_uppercase().collect::<String>()
+                        + &if word
+                            .chars()
+                            .filter(|ch| ch.is_alphabetic())
+                            .all(|ch| ch.is_uppercase())
+                        {
+                            chars.as_str().to_lowercase()
+                        } else {
+                            chars.as_str().to_owned()
+                        }
+                })
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Subject {
     Field(&'static str),
@@ -275,22 +301,23 @@ pub(crate) fn presentation(
         Some((method, format)) => {
             let (body, mut sections) = match method {
                 Input::Shell => (shell_command(input).unwrap_or("").to_owned(), Vec::new()),
-                Input::Field(field) => {
-                    (text(&remaining, field).unwrap_or("").to_owned(), Vec::new())
-                }
-                Input::QuestionList => (String::new(), question_sections(input)),
-                Input::Arguments => (input["args"].as_str().unwrap_or("").to_owned(), Vec::new()),
-                Input::AgentMessage => (
-                    text(input, "message").unwrap_or("").to_owned(),
-                    text(input, "task_name")
-                        .map(|name| {
-                            vec![Section::Text {
-                                label: String::new(),
-                                text: format!("task_name: {name}"),
-                            }]
+                Input::Field(field) => (
+                    remaining
+                        .get(field)
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| value.to_string())
                         })
                         .unwrap_or_default(),
+                    Vec::new(),
                 ),
+                Input::QuestionList => (String::new(), question_sections(input)),
+                Input::Arguments => (input["args"].as_str().unwrap_or("").to_owned(), Vec::new()),
+                Input::AgentMessage => {
+                    (text(input, "message").unwrap_or("").to_owned(), Vec::new())
+                }
                 Input::FetchPrompt => (
                     text(input, "prompt").unwrap_or("").to_owned(),
                     text(input, "url")
@@ -396,7 +423,10 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
             answers.insert(question.to_owned(), answer.to_owned());
         }
     }
-    Some(format!("Chat about this\n\n{}", answer_list(questions, &answers)))
+    Some(format!(
+        "Chat about this\n\n{}",
+        answer_list(questions, &answers)
+    ))
 }
 
 pub(crate) fn rejected_questions(text: &str) -> Option<String> {

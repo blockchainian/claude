@@ -38,9 +38,9 @@ fn codex_nonzero_exit_title_keeps_status_out_of_body() {
     assert_eq!(detail.sections[0].groups.len(), 3);
     assert_eq!(
         detail.sections[0].title.left.as_deref(),
-        Some("Shell · exit 1")
+        Some("Exec Command · exit 1")
     );
-    assert_eq!(detail.sections[0].title.title, "false");
+    assert_eq!(detail.sections[0].title.title, "");
     assert!(
         detail.sections[0]
             .groups
@@ -73,9 +73,9 @@ fn codex_zero_exit_parts_keep_input_arrow_output() {
 }
 
 #[test]
-fn codex_exit_list_uses_command_subject() {
+fn codex_exit_list_uses_tool_display_name() {
     for code in [0, 1] {
-        assert_eq!(codex_exit_event(code).body, "Shell false");
+        assert_eq!(codex_exit_event(code).body, "Exec Command");
     }
 }
 
@@ -91,8 +91,6 @@ fn codex_exit_detail_snapshot() {
     let rendered = log_screen(&view, 100, 40, now);
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/codex_exit_detail.txt");
-    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
-        std::fs::write(&path, &rendered).unwrap();
-    }
+    update_log_snapshot_body(&path, &rendered);
     assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
 }

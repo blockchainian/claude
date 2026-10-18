@@ -67,20 +67,20 @@ fn terminal_codex_agent_message_bodies() {
     });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     let plaintext_capture = tmux.capture_when(|capture| {
-        capture.contains("FINAL_ANSWER from /root/demo_sub") && capture.contains("演示完成")
+        capture.contains("demo_sub → root · 演示完成") && capture.contains("演示完成")
     });
     assert!(
-        plaintext_capture.contains("NEW_TASK from /root"),
+        plaintext_capture.contains("root → demo_sub · new task"),
         "{plaintext_capture}"
     );
     let (row, line) = plaintext_capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("NEW_TASK from /root"))
+        .find(|(_, line)| line.contains("root → demo_sub · new task"))
         .unwrap();
-    let column = line[..line.find("NEW_TASK from /root").unwrap()].width();
+    let column = line[..line.find("root → demo_sub · new task").unwrap()].width();
     tmux.mouse(0, column, row, true);
-    let encrypted_capture = tmux.capture_when(|capture| capture.contains("Content is encrypted."));
+    let encrypted_capture = tmux.capture_when(|capture| capture.contains("(encrypted)"));
     let record: serde_json::Value = serde_json::from_str(encrypted).unwrap();
     let ciphertext = record["payload"]["content"][1]["encrypted_content"]
         .as_str()
@@ -91,9 +91,7 @@ fn terminal_codex_agent_message_bodies() {
     );
     let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
     for (fixture, subject) in collaboration {
-        let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
-        let tool = record["payload"]["name"].as_str().unwrap();
-        let label = format!("{tool} {subject}");
+        let label = format!("root → {subject}");
         let (row, line) = encrypted_capture
             .lines()
             .enumerate()
@@ -105,13 +103,13 @@ fn terminal_codex_agent_message_bodies() {
             capture.lines().any(|line| {
                 line.contains(subject)
                     && line.contains(if subject == "demo_sub" {
-                        "spawn_agent"
+                        "Spawn Agent"
                     } else if subject == "ux_probe" {
-                        "followup_task"
+                        "Followup Task"
                     } else {
-                        "send_message"
+                        "Send Message"
                     })
-            }) && capture.contains("Content is encrypted.")
+            }) && capture.contains("(encrypted)")
         });
         let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
         let arguments: serde_json::Value =
@@ -126,6 +124,139 @@ fn terminal_codex_agent_message_bodies() {
         serde_json::json!({"verdict":"pass","events":5,"binary":binary,"capture":capture});
     std::fs::write(
         std::env::temp_dir().join("agents-message-probe.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_codex_collaboration_navigation() {
+    let directory = tempfile::tempdir().unwrap();
+    let codex = directory.path().join("codex");
+    let claude = directory.path().join("claude");
+    std::fs::create_dir(&codex).unwrap();
+    std::fs::create_dir(&claude).unwrap();
+    let parent_records = include_str!("../fixtures/codex-interaction/parent.jsonl");
+    let child_records = include_str!("../fixtures/codex-interaction/child.jsonl");
+    let metadata = |records: &str| -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(records.lines().next().unwrap()).unwrap()["payload"].clone()
+    };
+    let parent = metadata(parent_records);
+    let child = metadata(child_records);
+    let parent_path = codex.join("parent.jsonl");
+    let child_path = codex.join("child.jsonl");
+    std::fs::write(&parent_path, parent_records).unwrap();
+    std::fs::write(&child_path, child_records).unwrap();
+    std::fs::write(
+        codex.join("models_cache.json"),
+        include_str!("../fixtures/codex-models-cache.json"),
+    )
+    .unwrap();
+    let db = rusqlite::Connection::open(codex.join("state_5.sqlite")).unwrap();
+    db.execute_batch(include_str!("../fixtures/codex-state.sql"))
+        .unwrap();
+    db.execute(
+        "DELETE FROM threads WHERE id NOT IN ('thread-0', 'thread-1')",
+        [],
+    )
+    .unwrap();
+    for (original, meta, path, name) in [
+        ("thread-0", &parent, &parent_path, "Collaboration parent"),
+        ("thread-1", &child, &child_path, "Child probe"),
+    ] {
+        db.execute("UPDATE threads SET id=?1, rollout_path=?2, source=?3, cwd=?4, name=?5, archived=0 WHERE id=?6", rusqlite::params![
+            meta["id"].as_str().unwrap(), path.to_str().unwrap(),
+            if let Some(source) = meta["source"].as_str() { source.to_owned() } else { meta["source"].to_string() },
+            directory.path().to_str().unwrap(), name, original,
+        ]).unwrap();
+    }
+    db.execute("DELETE FROM thread_spawn_edges", []).unwrap();
+    db.execute(
+        "INSERT INTO thread_spawn_edges VALUES (?1, ?2, 'completed')",
+        rusqlite::params![
+            parent["id"].as_str().unwrap(),
+            child["id"].as_str().unwrap()
+        ],
+    )
+    .unwrap();
+    let binary =
+        std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
+    let binary = Path::new(&binary).canonicalize().unwrap();
+    let tmux = Tmux(format!("agents-collaboration-{}", std::process::id()));
+    tmux.run(&[
+        "-f",
+        "/dev/null",
+        "new-session",
+        "-d",
+        "-s",
+        "probe",
+        "-x",
+        "180",
+        "-y",
+        "48",
+        "-e",
+        &format!("CLAUDE_CONFIG_DIR={}", claude.display()),
+        "-e",
+        &format!("CODEX_HOME={}", codex.display()),
+        "-e",
+        &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
+        binary.to_str().unwrap(),
+    ]);
+    tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .next()
+            .is_some_and(|tabs| tabs.contains("Inactive 2"))
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    let capture = tmux.capture_when(|capture| capture.contains("Collaboration parent"));
+    let find = |capture: &str, needle: &str| -> (usize, usize) {
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(needle))
+            .unwrap();
+        (line[..line.find(needle).unwrap()].width(), row)
+    };
+    let (column, row) = find(&capture, "Collaboration parent");
+    tmux.mouse(0, column, row, true);
+    let capture = tmux.capture_when(|capture| capture.contains("demo_sub → root · 演示完成"));
+    let (column, row) = find(&capture, "root → demo_sub · new task");
+    tmux.mouse(0, column, row, true);
+    let spawn = tmux.capture_when(|capture| {
+        capture.contains("Spawn Agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")
+    });
+    let log_surface = spawn
+        .lines()
+        .map(|line| line.chars().skip(90).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!log_surface.contains("SubAgentActivity"), "{spawn}");
+    assert!(!log_surface.contains("CollabAgentToolCall"), "{spawn}");
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    let jumped = tmux.capture_when(|capture| {
+        capture.contains("root → demo_sub · new task")
+            && !capture.contains("demo_sub → root · 演示完成")
+    });
+    let (column, row) = find(&jumped, "root → demo_sub · new task");
+    tmux.mouse(0, column, row, true);
+    let jumped = tmux.capture_when(|capture| capture.contains("New Task"));
+    assert!(jumped.contains("root → demo_sub"), "{jumped}");
+    let (column, row) = find(&jumped, "Collaboration parent");
+    tmux.mouse(0, column, row, true);
+    let capture = tmux.capture_when(|capture| capture.contains("Wait Agent"));
+    let (column, row) = find(&capture, "Wait Agent");
+    tmux.mouse(0, column, row, true);
+    let waited = tmux
+        .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));
+    assert!(waited.contains("GPT-6.1-Sol"), "{waited}");
+    let output = std::env::temp_dir().join("agents-collaboration-tmux.txt");
+    std::fs::write(&output, format!("{spawn}\n\n{jumped}\n\n{waited}")).unwrap();
+    let verdict = serde_json::json!({"verdict":"pass", "binary":binary, "capture":output, "checks":["spawn metadata", "model label", "child selection", "wait result"]});
+    std::fs::write(
+        std::env::temp_dir().join("agents-collaboration-probe.json"),
         serde_json::to_vec_pretty(&verdict).unwrap(),
     )
     .unwrap();

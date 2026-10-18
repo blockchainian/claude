@@ -534,7 +534,9 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     let sections = if super::log::shows_calls(event) {
         let mut sections = parts(event);
         if let ([_], Some(section)) = (event.calls.as_slice(), sections.first_mut()) {
-            section.title.time = Some(time);
+            if event.calls[0].started_at.is_none() {
+                section.title.time = Some(time);
+            }
             section.title.meta_style = meta_style;
         }
         sections
@@ -601,7 +603,14 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                     left,
                     title,
                     title_style: label_style,
-                    time: call.duration.map(super::formatting::format_log_duration),
+                    time: call
+                        .started_at
+                        .map(|at| {
+                            at.with_timezone(&chrono::Local)
+                                .format("%H:%M:%S")
+                                .to_string()
+                        })
+                        .or_else(|| call.duration.map(super::formatting::format_log_duration)),
                     meta_style: Style::new().dim(),
                 },
                 groups: Vec::new(),
@@ -634,6 +643,14 @@ fn parts(event: &Event) -> Vec<DetailSection> {
             let mut groups = Vec::new();
             if !input.is_empty() {
                 groups.push(Group { parts: input });
+            }
+            if call.hide_output {
+                sections
+                    .last_mut()
+                    .expect("call has a section")
+                    .groups
+                    .extend(groups);
+                return sections;
             }
             groups.push(Group {
                 parts: vec![Part::new("", Body::Arrow)],
@@ -840,6 +857,65 @@ mod tests {
             .collect()
     }
 
+    fn codex_fixture_events(fixture: &str) -> Vec<Event> {
+        use crate::providers::Provider;
+        let directory = tempfile::tempdir().unwrap();
+        let provider = crate::providers::codex::CodexProvider::new(
+            directory.path().into(),
+            directory.path().join("manager"),
+        );
+        let database = rusqlite::Connection::open(directory.path().join("state_5.sqlite")).unwrap();
+        database
+            .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let mut provider = provider;
+        let mut session = provider.refresh(1).sessions.remove(0);
+        session.transcript = Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fixture));
+        provider.log(&session, usize::MAX, false).unwrap()
+    }
+
+    #[test]
+    fn codex_agent_message_has_a_named_title_and_no_output_arrow() {
+        let events = codex_fixture_events("tests/fixtures/codex-agent-messages/new-task.jsonl");
+        let event = events.first().unwrap();
+        let detail = detail(event, "09:55:00".into(), Style::new().dim());
+        assert_eq!(detail.sections.len(), 1);
+        let section = &detail.sections[0];
+        assert_eq!(section.title.left.as_deref(), Some("New Task"));
+        assert_eq!(section.title.title, "root → demo_sub");
+        assert_eq!(section.title.time.as_deref(), Some("09:55:00"));
+        let parts: Vec<_> = section
+            .groups
+            .iter()
+            .flat_map(|group| &group.parts)
+            .collect();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].source, "(encrypted)");
+        assert!(!matches!(parts[0].body, Body::Arrow));
+    }
+
+    #[test]
+    fn merged_codex_messages_have_individual_clock_titles() {
+        let events = codex_fixture_events("tests/fixtures/codex-agent-messages/sequence.jsonl");
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        let detail = detail(event, "merged time".into(), Style::new().dim());
+        assert_eq!(detail.sections.len(), 4);
+        let expected_times = ["21:22:10", "21:22:35", "21:22:53", "21:22:53"];
+        for (section, expected) in detail.sections.iter().zip(expected_times) {
+            assert_eq!(section.title.left.as_deref(), Some("Message"));
+            assert_eq!(section.title.title, "tests_audit → root");
+            assert_eq!(section.title.time.as_deref(), Some(expected));
+            let body: Vec<_> = section
+                .groups
+                .iter()
+                .flat_map(|group| &group.parts)
+                .collect();
+            assert_eq!(body.len(), 1);
+            assert_eq!(body[0].source, "(encrypted)");
+        }
+    }
+
     #[test]
     fn section_titles_cover_single_tools_and_messages() {
         let parsed = crate::providers::claude::log::tail(
@@ -877,6 +953,10 @@ mod tests {
     #[test]
     fn tool_descriptions_are_centered_in_single_and_merged_title_rows() {
         let call = ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Bash".into(),
             detail_title: "Check the workspace".into(),
             show_details: false,
@@ -904,6 +984,10 @@ mod tests {
     #[test]
     fn call_titles_keep_type_and_labels_out_of_the_body() {
         let mut call = ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "general-purpose".into(),
             detail_title: "Inspect source".into(),
             show_details: false,
@@ -1046,6 +1130,10 @@ mod tests {
     #[test]
     fn running_part_has_no_copy_source_or_selectable_cells() {
         let parts = flattened_parts(&event(vec![ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Bash".into(),
             detail_title: "Bash".into(),
             show_details: false,
@@ -1544,6 +1632,10 @@ mod tests {
     fn merged_calls_keep_separate_sections_and_groups() {
         let sections = parts(&event(vec![
             ToolCall {
+                started_at: None,
+                hide_output: false,
+                agent_thread_id: None,
+                agent_path: None,
                 detail_left: "Bash".into(),
                 detail_title: "Bash".into(),
                 show_details: false,
@@ -1563,6 +1655,10 @@ mod tests {
                 duration: None,
             },
             ToolCall {
+                started_at: None,
+                hide_output: false,
+                agent_thread_id: None,
+                agent_path: None,
                 detail_left: "Read".into(),
                 detail_title: "Read".into(),
                 show_details: false,
@@ -1624,6 +1720,10 @@ mod tests {
         for count in [1, 2] {
             let calls = vec![
                 ToolCall {
+                    started_at: None,
+                    hide_output: false,
+                    agent_thread_id: None,
+                    agent_path: None,
                     detail_left: "Bash".into(),
                     detail_title: "Run checks".into(),
                     show_details: false,
@@ -1655,6 +1755,10 @@ mod tests {
     #[test]
     fn wide_code_and_diff_keep_logical_lines() {
         let parts = flattened_parts(&event(vec![ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Edit".into(),
             detail_title: "Edit".into(),
             show_details: false,
@@ -1755,6 +1859,10 @@ mod tests {
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
         let parts = flattened_parts(&event(vec![ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Bash".into(),
             detail_title: "Bash".into(),
             show_details: false,

@@ -100,6 +100,12 @@ pub(crate) trait Reader: Send {
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
+    /// Per-message clock for collaboration sections.
+    pub started_at: Option<DateTime<Utc>>,
+    /// Calls such as agent creation and messages have no result block.
+    pub hide_output: bool,
+    pub agent_thread_id: Option<String>,
+    pub agent_path: Option<String>,
     /// Left metadata and centered title, chosen by the provider.
     pub detail_left: String,
     pub detail_title: String,

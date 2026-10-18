@@ -4717,16 +4717,16 @@ fn codex_inner_task_log_snapshot() {
     }
     view.set_log(view.log.clone());
     view.select_log_event(None);
-    assert_eq!(
-        log_screen(&view, 160, 25, now),
-        include_str!("../../tests/ui_snapshots/codex_inner_log.txt")
-    );
+    let rendered = log_screen(&view, 160, 25, now);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/codex_inner_log.txt");
+    update_log_snapshot_body(&path, &rendered);
+    assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
     view.prepare_log_search();
     view.log_search.query.set_text("ImageView");
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(4));
-    for query in ["type", "exec_command"] {
+    for query in ["Exec Command", "exec_command"] {
         view.log_search.query.set_text(query);
         view.rematch_log();
         assert_eq!(view.matching_log_count(), 1, "{query}");
@@ -6846,6 +6846,10 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Bash".into(),
             detail_title: "Bash".into(),
             show_details: false,
@@ -6865,6 +6869,10 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Read".into(),
             detail_title: "Read".into(),
             show_details: false,
@@ -9579,5 +9587,17 @@ fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
             let rendered = screen(&view, 120, 40);
             assert!(rendered.contains("Inactive"));
         }
+    }
+}
+
+#[path = "log_agent_tests.rs"]
+mod log_agent_tests;
+
+fn update_log_snapshot_body(path: &Path, rendered: &str) {
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        let previous = std::fs::read_to_string(path).unwrap();
+        let footer = previous.lines().last().unwrap();
+        let (body, _) = rendered.rsplit_once(" ? help").unwrap();
+        std::fs::write(path, format!("{body}{footer}\n")).unwrap();
     }
 }

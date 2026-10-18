@@ -163,8 +163,13 @@ fn terminal_codex_tool_list_shell_group() {
             .lines()
             .any(|row| row.width() == WIDTH && row.matches('─').count() > WIDTH / 2)
     });
-    let capture = select_tool(&tmux, "Shell git {status, diff}, sed");
-    assert_title(&capture, "Shell", "git {status, diff}, sed");
+    let capture = select_tool(&tmux, "Exec Command");
+    let title = capture
+        .lines()
+        .skip(log_divider(&capture).unwrap() + 1)
+        .find(|row| row.trim_start().starts_with("Exec Command"))
+        .unwrap();
+    assert_eq!(title.find("Exec Command"), Some(1), "{capture}");
     assert!(capture.contains("git status --short"), "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     write_verdict("codex", &[capture]);

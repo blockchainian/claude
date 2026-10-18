@@ -116,7 +116,7 @@ fn request_user_input_pending_answered_and_offline() {
             if state == "pending" {
                 assert_eq!(
                     session.latest_activity().unwrap().label,
-                    "request_user_input Color"
+                    "Request User Input Color"
                 );
             }
             session.process = None;
@@ -939,7 +939,7 @@ fn file_change_without_start_preserves_session_list() {
         .unwrap();
     assert_eq!(
         session.activity.as_ref().unwrap().label,
-        "apply_patch /workspace/project/design.md"
+        "Apply Patch /workspace/project/design.md"
     );
 }
 
@@ -1055,4 +1055,15 @@ fn input_choices_list_cached_models_by_priority_with_their_efforts() {
         ["low", "medium", "high", "xhigh", "max", "ultra"]
     );
     assert_eq!(model.default_effort.as_deref(), Some("low"));
+}
+
+#[test]
+fn collaboration_and_session_models_share_cached_display_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("models_cache.json");
+    std::fs::write(&path, include_str!("../../../tests/fixtures/codex-models-cache.json")).unwrap();
+    let mut catalog = ModelCatalog::default();
+    catalog.refresh(&path).unwrap();
+    assert_eq!(catalog.display_name("gpt-6.1-sol"), "GPT-6.1-Sol");
+    assert_eq!(catalog.display_name("unknown-model"), "unknown-model");
 }

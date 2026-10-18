@@ -21,6 +21,7 @@ mod line_edit;
 mod line_truncation;
 mod links;
 mod log;
+mod log_agent;
 mod log_search;
 mod markdown;
 mod navigation;

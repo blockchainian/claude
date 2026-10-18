@@ -251,78 +251,66 @@ Agent                                                                           
                                                                                                     ↓
                                                                                                    •··
 spawn_agent call_tKZ0LQYkzNUlq6ZsRz9pnc2T — 120 columns
-spawn_agent                                             real_scan
+Spawn Agent                                             real_scan
 
-                                                  task_name: real_scan
-                                                  Review files.
-                                                            ↓
-                                                           •··
+                                                      Review files.
 spawn_agent call_tKZ0LQYkzNUlq6ZsRz9pnc2T — 200 columns
-spawn_agent                                                                                     real_scan
+Spawn Agent                                                                                     real_scan
 
-                                                                                          task_name: real_scan
-                                                                                          Review files.
-                                                                                                    ↓
-                                                                                                   •··
+                                                                                              Review files.
 send_message call_f449799618f74814b21e98c2d8107ef5 — 120 columns
-send_message                                              /root
+Send Message                                           root → root
 
                                                       Review files.
                                                             ↓
-                                                           •··
+                                                       (no output)
 send_message call_f449799618f74814b21e98c2d8107ef5 — 200 columns
-send_message                                                                                      /root
+Send Message                                                                                   root → root
 
                                                                                               Review files.
                                                                                                     ↓
-                                                                                                   •··
+                                                                                               (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 120 columns
-followup_task                                           ux_probe
+Followup Task                                        root → ux_probe
 
                                                       Review files.
                                                             ↓
-                                                           •··
+                                                       (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 200 columns
-followup_task                                                                                   ux_probe
+Followup Task                                                                                root → ux_probe
 
                                                                                               Review files.
                                                                                                     ↓
-                                                                                                   •··
+                                                                                               (no output)
 spawn_agent call_1809a0d0a2ad4ca7bc5e5d116754151f — 120 columns
-spawn_agent                                             demo_sub
+Spawn Agent                                             demo_sub
 
-                                                  task_name: demo_sub
-                                                  Content is encrypted.
-                                                            ↓
-                                                           •··
+                                                       (encrypted)
 spawn_agent call_1809a0d0a2ad4ca7bc5e5d116754151f — 200 columns
-spawn_agent                                                                                     demo_sub
+Spawn Agent                                                                                     demo_sub
 
-                                                                                          task_name: demo_sub
-                                                                                          Content is encrypted.
-                                                                                                    ↓
-                                                                                                   •··
+                                                                                               (encrypted)
 send_message call_79ce27eb65c447ee9080c286a12cb69c — 120 columns
-send_message                                          rename_gating
+Send Message                                      root → rename_gating
 
-                                                  Content is encrypted.
+                                                       (encrypted)
                                                             ↓
-                                                           •··
+                                                       (no output)
 send_message call_79ce27eb65c447ee9080c286a12cb69c — 200 columns
-send_message                                                                                  rename_gating
+Send Message                                                                              root → rename_gating
 
-                                                                                          Content is encrypted.
+                                                                                               (encrypted)
                                                                                                     ↓
-                                                                                                   •··
+                                                                                               (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 120 columns
-followup_task                                           ux_probe
+Followup Task                                        root → ux_probe
 
-                                                  Content is encrypted.
+                                                       (encrypted)
                                                             ↓
-                                                           •··
+                                                       (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 200 columns
-followup_task                                                                                   ux_probe
+Followup Task                                                                                root → ux_probe
 
-                                                                                          Content is encrypted.
+                                                                                               (encrypted)
                                                                                                     ↓
-                                                                                                   •··
+                                                                                               (no output)

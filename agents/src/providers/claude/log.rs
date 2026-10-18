@@ -693,6 +693,10 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     });
     let title = subject.clone().unwrap_or_else(|| display_name.clone());
     let mut call = ToolCall {
+        started_at: None,
+        hide_output: false,
+        agent_thread_id: None,
+        agent_path: None,
         detail_left: if subject.is_some() {
             display_name.clone()
         } else {
@@ -1003,6 +1007,10 @@ impl Log {
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
+                started_at: None,
+                hide_output: false,
+                agent_thread_id: None,
+                agent_path: None,
                 detail_left: format!("Task {}", field("task-id").unwrap_or("")),
                 detail_title: summary.to_owned(),
                 show_details: false,

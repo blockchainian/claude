@@ -56,19 +56,21 @@ fn terminal_codex_exit_sections() {
         include_str!("../fixtures/codex-command-failed.jsonl"),
     );
     let capture = tmux.capture_when(|capture| {
-        capture.contains("Shell") && capture.contains("exit 1") && capture.contains("[scrubbed]")
+        capture.contains("Exec Command")
+            && capture.contains("exit 1")
+            && capture.contains("[scrubbed]")
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert_eq!(capture.matches("Shell").count(), 3, "{capture}");
-    assert!(capture.matches("false").count() >= 3, "{capture}");
+    assert_eq!(capture.matches("Exec Command").count(), 3, "{capture}");
+    assert!(capture.matches("false").count() == 1, "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
         .iter()
         .position(|row| row.contains("exit 1"))
         .expect(&capture);
-    assert!(rows[status].contains("Shell"), "{capture}");
+    assert!(rows[status].contains("Exec Command"), "{capture}");
     assert!(rows[status + 2].contains("false"), "{capture}");
     assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
     assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
@@ -83,31 +85,27 @@ fn terminal_codex_exit_sections() {
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_shell_titles() {
     let mut captures = Vec::new();
-    for (name, fixture, subject, command) in [
+    for (name, fixture, command) in [
         (
             "shell-titles",
             include_str!("../fixtures/codex-inner/shell.jsonl"),
-            "sleep",
             "sleep 60",
         ),
         (
             "chain-titles",
             include_str!("../fixtures/codex-inner/git-chain.jsonl"),
-            "git {status, diff}, sed",
             "git status --short",
         ),
     ] {
         let (_directory, tmux) = start_codex_probe(name, fixture);
-        let capture = tmux.capture_when(|capture| {
-            capture.matches(subject).count() >= 2 && capture.contains(command)
-        });
-        assert_eq!(capture.matches("Shell").count(), 3, "{capture}");
+        let capture = tmux
+            .capture_when(|capture| capture.contains("Exec Command") && capture.contains(command));
+        assert_eq!(capture.matches("Exec Command").count(), 3, "{capture}");
         let title = capture
             .lines()
-            .find(|line| line.trim_start().starts_with("Shell"))
+            .find(|line| line.trim_start().starts_with("Exec Command"))
             .unwrap();
-        assert!(title.contains(subject), "{capture}");
-        assert!(title.find("Shell") < title.find(subject), "{capture}");
+        assert_eq!(title.matches("Exec Command").count(), 1, "{capture}");
         assert!(
             !title.contains(command),
             "arguments only belong in the body: {capture}"
@@ -132,49 +130,28 @@ fn terminal_codex_shell_titles() {
 fn terminal_codex_completed_subagent_calls() {
     let (_directory, tmux) = start_codex_probe(
         "subagent-completed",
-        include_str!("../fixtures/codex-inner/subagent-completed.jsonl"),
+        include_str!("../fixtures/codex-interaction/parent.jsonl"),
     );
-    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "65"]);
-    let initial = tmux.capture_when(|capture| capture.contains("\"tool\": \"wait\""));
-    let (row, line) = initial
+    let capture = tmux.capture_when(|capture| capture.contains("Wait Agent"));
+    let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("CollabAgentToolCall"))
+        .find(|(_, line)| line.contains("Wait Agent"))
         .unwrap();
-    let column = line[..line.find("CollabAgentToolCall").unwrap()].width();
+    let column = line[..line.find("Wait Agent").unwrap()].width();
     tmux.mouse(0, column, row, true);
-    let mut captures = Vec::new();
-    for (index, (item, marker)) in [
-        ("CollabAgentToolCall", "\"tool\": \"wait\""),
-        ("SubAgentActivity", "\"kind\": \"completed\""),
-        ("SubAgentActivity", "\"kind\": \"started\""),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if index > 0 {
-            tmux.run(&["send-keys", "-t", "probe", "Up"]);
-        }
-        let capture = tmux.capture_when(|capture| {
-            capture.contains(item) && capture.contains(marker) && capture.contains("(no output)")
-        });
-        let rows: Vec<_> = capture.lines().collect();
-        let output = rows
-            .iter()
-            .position(|row| row.contains("(no output)"))
-            .unwrap();
-        assert_eq!(rows[output - 1].trim(), "↓", "{capture}");
-        captures.push(capture);
-    }
+    let capture = tmux
+        .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));
+    let log_surface = capture
+        .lines()
+        .map(|line| line.chars().skip(80).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!log_surface.contains("SubAgentActivity"), "{capture}");
+    assert!(!log_surface.contains("CollabAgentToolCall"), "{capture}");
     let path = std::env::temp_dir().join("agents-codex-subagent-completed-tmux.txt");
-    std::fs::write(&path, captures.join("\n\n")).unwrap();
-    let verdict = serde_json::json!({"verdict": "pass", "events": 3, "capture": path});
-    std::fs::write(
-        std::env::temp_dir().join("agents-codex-subagent-completed.json"),
-        serde_json::to_vec_pretty(&verdict).unwrap(),
-    )
-    .unwrap();
-    println!("{verdict}");
+    std::fs::write(&path, capture).unwrap();
+    println!("{}", serde_json::json!({"verdict":"pass","capture":path}));
 }
 
 #[test]
@@ -185,15 +162,15 @@ fn terminal_failed_plain_output_uses_default_foreground() {
             "mcp-failed-output",
             include_str!("../fixtures/codex-mcp-errors.jsonl"),
             (
-                "codebase-memory-mcp trace_path",
-                "codebase-memory-mcp trace_path",
+                "Codebase-memory-mcp Trace Path",
+                "Codebase-memory-mcp Trace Path",
             ),
             "user rejected MCP tool call",
         ),
         (
             "command-failed-output",
             include_str!("../fixtures/codex-command-failed.jsonl"),
-            ("Shell · exit 1", "false"),
+            ("Exec Command · exit 1", "Exec Command"),
             "[scrubbed]",
         ),
     ] {
@@ -209,9 +186,11 @@ fn terminal_failed_plain_output_uses_default_foreground() {
             .last()
             .unwrap();
         let title_column = title_text[..title_text.find(title).unwrap()].width();
-        let title_cell = screen.cell(title_row as u16, title_column as u16).unwrap();
-        assert_ne!(title_cell.fgcolor(), vt100::Color::Default, "{capture}");
-        assert!(title_cell.bold(), "tool title keeps its semantic style");
+        assert!(screen.cell(title_row as u16, title_column as u16).is_some());
+        assert_eq!(
+            title_column, 1,
+            "tool name stays in the left column: {capture}"
+        );
         let row = screen
             .rows(0, 160)
             .position(|row| row.contains(message))

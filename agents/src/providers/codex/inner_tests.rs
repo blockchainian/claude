@@ -46,7 +46,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .collect();
     assert_eq!(entries.len(), 2);
     let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
-    assert_eq!(bodies, ["Shell cat, git {log, status}, shasum", "Shell gh pr"]);
+    assert_eq!(bodies, ["Exec Command", "Exec Command"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
         assert_record_timing(entry, record);
@@ -59,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "Shell type");
+    assert_eq!(entries[0].body, "Exec Command");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -77,7 +77,7 @@ fn file_change_uses_record_paths() {
         .next()
         .unwrap()
         .clone();
-    assert_eq!(entries[0].body, format!("apply_patch {path}"));
+    assert_eq!(entries[0].body, format!("Apply Patch {path}"));
     assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], record);
@@ -87,7 +87,7 @@ fn file_change_uses_record_paths() {
 fn mcp_call_uses_record_server_tool_and_duration() {
     let entries = events("mcp");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "claude ask_claude");
+    assert_eq!(entries[0].body, "Claude Ask Claude");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("mcp")[0]);
 }
@@ -102,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "Shell sleep");
+    assert_eq!(entries[0].body, "Exec Command");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }
@@ -136,44 +136,17 @@ fn image_view_retains_image_path_for_rendering() {
 
 #[test]
 fn subagent_activity_is_rendered() {
-    let entries = events("subagent");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "SubAgentActivity");
-    assert_eq!(entries[0].kind, Kind::Tool);
+    assert!(events("subagent").is_empty());
 }
 
 #[test]
 fn collaboration_tool_activity_is_rendered() {
-    let entries = events("collaboration");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "CollabAgentToolCall");
-    assert_eq!(entries[0].kind, Kind::Tool);
+    assert!(events("collaboration").is_empty());
 }
 
 #[test]
 fn completed_subagent_items_have_finished_calls_without_pairing_item_ids() {
-    let entries = events("subagent-completed");
-    let records = records("subagent-completed");
-    assert_eq!(entries.len(), 3);
-    assert_ne!(
-        records[0]["payload"]["item"]["id"],
-        records[1]["payload"]["item"]["id"]
-    );
-    assert_eq!(
-        records[0]["payload"]["item"]["agent_thread_id"],
-        records[1]["payload"]["item"]["agent_thread_id"]
-    );
-    for (entry, record) in entries.iter().zip(&records) {
-        assert_record_timing(entry, record);
-        assert_eq!(entry.calls.len(), 1);
-    }
-    assert_eq!(
-        entries
-            .iter()
-            .map(|entry| &entry.calls[0].output)
-            .collect::<Vec<_>>(),
-        vec![&Some(Vec::new()); 3]
-    );
+    assert!(events("subagent-completed").is_empty());
 }
 
 #[test]
@@ -210,12 +183,7 @@ fn completed_collaboration_calls_finish_for_every_tool_and_status() {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), format!("{record}\n")).unwrap();
             let entries = tail(file.path(), 100).unwrap();
-            assert_eq!(
-                entries[0].calls[0].output,
-                Some(Vec::new()),
-                "{tool}: {status}"
-            );
-            assert_eq!(entries[0].calls[0].is_error, status == "failed");
+            assert!(entries.is_empty(), "{tool}: {status}");
         }
     }
 }
@@ -261,7 +229,7 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 fn file_change_without_start_log_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "apply_patch /workspace/project/design.md");
+    assert_eq!(entries[0].body, "Apply Patch /workspace/project/design.md");
     let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
     assert_eq!(entries[0].started_at, completion);
     assert_eq!(entries[0].ended_at, Some(completion));
@@ -274,7 +242,7 @@ fn file_change_without_start_summary_succeeds() {
         .unwrap()
         .activity
         .unwrap();
-    assert_eq!(activity.label, "apply_patch /workspace/project/design.md");
+    assert_eq!(activity.label, "Apply Patch /workspace/project/design.md");
     assert_eq!(
         activity.at,
         DateTime::from_timestamp_millis(1781329074517).unwrap()
@@ -739,11 +707,11 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "Shell sleep");
+    assert_eq!(event.body, "Exec Command");
     assert_eq!(call.name, "exec_command");
-    assert_eq!(call.title, "Shell sleep");
-    assert_eq!(call.detail_title, "sleep");
-    assert_eq!(call.detail_left, "Shell");
+    assert_eq!(call.title, "Exec Command");
+    assert_eq!(call.detail_title, "");
+    assert_eq!(call.detail_left, "Exec Command");
     assert_eq!(
         call.input,
         vec![crate::log::Section::Shell {
@@ -768,10 +736,10 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "Shell git {status, diff}, sed");
+    assert_eq!(event.body, "Exec Command");
     assert_eq!(call.title, event.body);
-    assert_eq!(call.detail_title, "git {status, diff}, sed");
-    assert_eq!(call.detail_left, "Shell");
+    assert_eq!(call.detail_title, "");
+    assert_eq!(call.detail_left, "Exec Command");
     assert!(event.paths.is_empty());
     assert_eq!(call.name, "exec_command");
     assert!(
@@ -786,4 +754,105 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
             .label,
         event.body
     );
+}
+
+#[test]
+fn interaction_functions_win_over_completed_items() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/parent.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].body, "root → demo_sub · new task");
+    assert_eq!(rows[0].calls[0].detail_left, "Spawn Agent");
+    assert_eq!(
+        rows[0].calls[0].input,
+        vec![crate::log::Section::Markdown {
+            label: "message".into(),
+            text: "(encrypted)".into()
+        }]
+    );
+    assert_eq!(rows[1].body, "Wait Agent");
+    assert_eq!(
+        rows[1].calls[0].input,
+        vec![crate::log::Section::Prose {
+            text: "70000".into(),
+            markdown: false
+        }]
+    );
+    assert_eq!(
+        rows[1].calls[0].output,
+        Some(vec![crate::log::Section::Text {
+            label: "output".into(),
+            text: "Wait completed.".into()
+        }])
+    );
+    assert_eq!(rows[2].body, "demo_sub → root · 演示完成");
+}
+
+#[test]
+fn interaction_messages_keep_route_and_merge_adjacent_sender() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    assert_eq!(rows[0].body, "root → demo_sub · new task");
+    assert_eq!(rows[0].calls[0].detail_left, "New Task");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/codex-interaction/messages.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    assert!(
+        rows.iter()
+            .any(|row| row.body.contains("messages") && row.calls.len() > 1)
+    );
+    assert!(rows.iter().all(|row| !row.body.contains("encrypted")));
+}
+
+#[test]
+fn interaction_message_group_survives_small_tail_page() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/codex-interaction/messages.jsonl");
+    let all = tail(&path, 100).unwrap();
+    for count in 1..all.len() {
+        assert_eq!(tail(&path, count).unwrap(), all[all.len() - count..]);
+    }
+}
+
+#[test]
+fn protocol_titles_preserve_mixed_case_words() {
+    assert_eq!(crate::providers::tool::title_name("ImageView"), "ImageView");
+    assert_eq!(
+        crate::providers::tool::title_name("FINAL_ANSWER"),
+        "Final Answer"
+    );
+}
+
+#[test]
+fn child_function_message_uses_session_sender() {
+    let child = include_str!("../../../tests/fixtures/codex-interaction/child.jsonl");
+    let message = include_str!("../../../tests/fixtures/codex-collaboration/send_message.jsonl");
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        file.path(),
+        format!("{}\n{}", child.lines().next().unwrap(), message),
+    )
+    .unwrap();
+    let rows = tail(file.path(), 100).unwrap();
+    assert_eq!(rows[0].body, "demo_sub → rename_gating");
+    let mut reader = super::rollout::Reader::new(file.path().to_owned(), false);
+    assert_eq!(
+        reader.refresh(100).unwrap().events[0].body,
+        "demo_sub → rename_gating"
+    );
+}
+
+#[test]
+fn child_real_command_and_extension_have_complete_details() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    let command = rows.iter().find(|row| row.body == "Exec Command").unwrap();
+    assert!(
+        matches!(&command.calls[0].input[0], crate::log::Section::Shell { text, .. } if text == "sleep 60")
+    );
+    assert_eq!(command.duration.unwrap().num_seconds(), 59);
+    assert!(rows.iter().any(|row| row.body == "Extension"));
 }

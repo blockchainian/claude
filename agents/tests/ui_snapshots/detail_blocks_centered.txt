@@ -1,59 +1,19 @@
-SubAgentActivity — 120 columns
-                                                    SubAgentActivity
+root → claude_calls · new task — 120 columns
+Spawn Agent                                           claude_calls
 
-                              {
-                                "agent_path": "/root",
-                                "agent_thread_id": "01a10da3-df29-7380-abe4-8c64f7ed5f8d",
-                                "id": "call_6pn4aC9AEdpX2uAtX7PAxvQe",
-                                "kind": "interacted",
-                                "type": "SubAgentActivity"
-                              }
-                                                            ↓
-                                                       (no output)
-SubAgentActivity — 200 columns
-                                                                                            SubAgentActivity
+                                                       [scrubbed]
+root → claude_calls · new task — 200 columns
+Spawn Agent                                                                                   claude_calls
 
-                                                                      {
-                                                                        "agent_path": "/root",
-                                                                        "agent_thread_id": "01a10da3-df29-7380-abe4-8c64f7ed5f8d",
-                                                                        "id": "call_6pn4aC9AEdpX2uAtX7PAxvQe",
-                                                                        "kind": "interacted",
-                                                                        "type": "SubAgentActivity"
-                                                                      }
-                                                                                                    ↓
-                                                                                               (no output)
-spawn_agent claude_calls — 120 columns
-spawn_agent                                           claude_calls
+                                                                                               [scrubbed]
+root → codex_calls · new task — 120 columns
+Spawn Agent                                            codex_calls
 
-                                                 task_name: claude_calls
-                                                 [scrubbed]
-                                                            ↓
-                                           {
-                                             "task_name": "/root/claude_calls"
-                                           }
-spawn_agent claude_calls — 200 columns
-spawn_agent                                                                                   claude_calls
+                                                       [scrubbed]
+root → codex_calls · new task — 200 columns
+Spawn Agent                                                                                    codex_calls
 
-                                                                                         task_name: claude_calls
-                                                                                         [scrubbed]
-                                                                                                    ↓
-                                                                                   {
-                                                                                     "task_name": "/root/claude_calls"
-                                                                                   }
-spawn_agent codex_calls — 120 columns
-spawn_agent                                            codex_calls
-
-                                                 task_name: codex_calls
-                                                 [scrubbed]
-                                                            ↓
-                                                           •··
-spawn_agent codex_calls — 200 columns
-spawn_agent                                                                                    codex_calls
-
-                                                                                         task_name: codex_calls
-                                                                                         [scrubbed]
-                                                                                                    ↓
-                                                                                                   •··
+                                                                                               [scrubbed]
 WebFetch https://render.com/docs/postgresql-instance-types — 120 columns
 WebFetch                            https://render.com/docs/postgresql-instance-types
 

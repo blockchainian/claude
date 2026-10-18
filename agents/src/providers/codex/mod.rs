@@ -225,6 +225,13 @@ struct ModelCatalog {
 }
 
 impl ModelCatalog {
+    fn display_name(&self, slug: &str) -> String {
+        self.labels
+            .get(slug)
+            .cloned()
+            .unwrap_or_else(|| slug.to_owned())
+    }
+
     fn refresh(&mut self, path: &Path) -> io::Result<()> {
         let modified = match std::fs::metadata(path) {
             Ok(metadata) => metadata.modified()?,
@@ -289,6 +296,30 @@ impl ModelCatalog {
         self.modified = Some(modified);
         Ok(())
     }
+}
+
+/// Uses the same cached catalog names as the session model label.
+pub(super) fn model_display_name(slug: &str) -> io::Result<String> {
+    static CATALOG: std::sync::OnceLock<Mutex<(PathBuf, ModelCatalog)>> =
+        std::sync::OnceLock::new();
+    let home = match std::env::var_os("CODEX_HOME").filter(|value| !value.is_empty()) {
+        Some(home) => PathBuf::from(home),
+        None => PathBuf::from(
+            std::env::var_os("HOME")
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unset"))?,
+        )
+        .join(".codex"),
+    };
+    let path = home.join("models_cache.json");
+    let mut cached = CATALOG
+        .get_or_init(|| Mutex::new((PathBuf::new(), ModelCatalog::default())))
+        .lock()
+        .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?;
+    if cached.0 != path {
+        *cached = (path.clone(), ModelCatalog::default());
+    }
+    cached.1.refresh(&path)?;
+    Ok(cached.1.display_name(slug))
 }
 
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {

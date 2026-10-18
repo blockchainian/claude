@@ -210,7 +210,7 @@ impl View {
                 layout
             }
         };
-        if (!shows_calls(event) || event.calls.len() == 1)
+        if (!shows_calls(event) || (event.calls.len() == 1 && event.calls[0].started_at.is_none()))
             && let Some((_, span)) = layout.times.first_mut()
         {
             span.content = time.to_owned().into();

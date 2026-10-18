@@ -1,0 +1,51 @@
+codex-agent-messages/new-task.jsonl
+
+New Task                                             root → demo_sub                                            09:55:00
+
+                                                       (encrypted)
+
+codex-agent-messages/final-answer.jsonl
+
+Final Answer                                         demo_sub → root                                            09:56:06
+
+                                                        演 示 完 成
+
+codex-agent-messages/sequence.jsonl
+
+Message                                            tests_audit → root                                           21:22:10
+
+                                                       (encrypted)
+
+Message                                            tests_audit → root                                           21:22:35
+
+                                                       (encrypted)
+
+Message                                            tests_audit → root                                           21:22:53
+
+                                                       (encrypted)
+
+Message                                            tests_audit → root                                           21:22:53
+
+                                                       (encrypted)
+
+codex-collaboration/spawn_agent.jsonl
+
+Spawn Agent                                             demo_sub                                                09:54:58
+
+                                                       (encrypted)
+
+codex-collaboration/send_message.jsonl
+
+Send Message                                      root → rename_gating                                          18:30:39
+
+                                                       (encrypted)
+                                                            ↓
+                                                       (no output)
+
+codex-collaboration/followup_task.jsonl
+
+Followup Task                                        root → ux_probe                                            10:55:06
+
+                                                       (encrypted)
+                                                            ↓
+                                                       (no output)

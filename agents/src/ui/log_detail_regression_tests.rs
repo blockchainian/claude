@@ -40,6 +40,10 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Bash".into(),
             detail_title: "Bash".into(),
             show_details: false,
@@ -59,6 +63,10 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
+            started_at: None,
+            hide_output: false,
+            agent_thread_id: None,
+            agent_path: None,
             detail_left: "Read".into(),
             detail_title: "Read".into(),
             show_details: false,

@@ -43,6 +43,7 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("Agent", Input::Field("prompt"), Format::Markdown),
         ("Task", Input::Field("prompt"), Format::Markdown),
         ("spawn_agent", Input::AgentMessage, Format::Markdown),
+        ("wait_agent", Input::Field("timeout_ms"), Format::Text),
         ("SendMessage", Input::Field("message"), Format::Markdown),
         ("send_message", Input::Field("message"), Format::Markdown),
         ("followup_task", Input::Field("message"), Format::Markdown),
@@ -67,6 +68,25 @@ fn response_output(name: &str, text: &str) -> Vec<Section> {
     let mode = OUTPUTS.iter().find_map(|(tool, mode)| {
         (*tool == name.rsplit('.').next().unwrap_or(name)).then_some(*mode)
     });
+    let parsed = serde_json::from_str::<Value>(text).ok();
+    if matches!(
+        name.rsplit('.').next(),
+        Some("spawn_agent" | "send_message" | "followup_task")
+    ) {
+        return Vec::new();
+    }
+    if name.rsplit('.').next() == Some("wait_agent")
+        && let Some(value) = parsed
+    {
+        return vec![text_section(
+            "output",
+            if value["timed_out"] == true {
+                "(timed out)"
+            } else {
+                value["message"].as_str().unwrap_or(text)
+            },
+        )];
+    }
     let text = match mode {
         Some(Output::QuestionRejection) => {
             crate::providers::tool::rejected_questions(text).unwrap_or_else(|| text.to_owned())
@@ -529,14 +549,23 @@ fn tool_body(payload: &Value) -> Option<String> {
     let raw_name = response_tool_name(payload);
     let (name, subject, _) =
         crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
+    if matches!(
+        raw_name.rsplit('.').next(),
+        Some("exec_command" | "shell" | "CommandExecution")
+    ) {
+        return Some(crate::providers::tool::title_name(&name));
+    }
+    if let Some((_, _, title)) = agent_route(payload, &arguments) {
+        return Some(title);
+    }
     Some(crate::providers::tool::list_title(
-        shell_display_name(&name),
+        &crate::providers::tool::title_name(&name),
         subject.as_deref(),
         &arguments,
     ))
 }
 
-const ENCRYPTED_CONTENT: &str = "Content is encrypted.";
+const ENCRYPTED_CONTENT: &str = "(encrypted)";
 
 fn is_fernet_token(text: &str) -> bool {
     let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(text) else {
@@ -563,11 +592,26 @@ fn text_section(label: &str, text: &str) -> Section {
     }
 }
 
-fn shell_display_name(name: &str) -> &str {
-    match name {
-        "exec_command" | "shell" | "CommandExecution" => "Shell",
-        _ => name,
-    }
+fn agent_name(path: &str) -> &str {
+    path.rsplit('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or(path)
+}
+
+fn agent_route(payload: &Value, arguments: &Value) -> Option<(String, String, String)> {
+    let name = payload["name"].as_str()?.rsplit('.').next()?;
+    let target = match name {
+        "spawn_agent" => arguments["task_name"].as_str()?,
+        "send_message" | "followup_task" => arguments["target"].as_str()?,
+        _ => return None,
+    };
+    let route = format!("root → {}", agent_name(target));
+    let title = if matches!(name, "spawn_agent" | "followup_task") {
+        format!("{route} · new task")
+    } else {
+        route.clone()
+    };
+    Some((target.to_owned(), route, title))
 }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
@@ -586,27 +630,64 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     } else if arguments.is_none() {
         input = vec![text_section("input", raw)];
     }
-    let display_name = shell_display_name(&name);
+    let display_name = crate::providers::tool::title_name(&name);
     let mut call = ToolCall {
-        detail_left: subject
-            .as_ref()
-            .map(|_| display_name.to_owned())
-            .unwrap_or_default(),
-        detail_title: subject.clone().unwrap_or_else(|| display_name.to_owned()),
+        detail_left: display_name.to_owned(),
+        detail_title: subject.clone().unwrap_or_default(),
         show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
         title: crate::providers::tool::list_title(
-            display_name,
+            &display_name,
             subject.as_deref(),
             arguments.as_ref().unwrap_or(&Value::Null),
         ),
         name,
+        started_at: None,
+        hide_output: false,
+        agent_thread_id: None,
+        agent_path: None,
         input,
         output: output.map(|text| response_output(&response_tool_name(payload), text)),
         exit_code: None,
         is_error: false,
         duration: None,
     };
+    if let Some((target, route, title)) =
+        agent_route(payload, arguments.as_ref().unwrap_or(&Value::Null))
+    {
+        call.agent_path = Some(target.clone());
+        call.detail_title = if payload["name"]
+            .as_str()
+            .and_then(|name| name.rsplit('.').next())
+            == Some("spawn_agent")
+        {
+            agent_name(&target).to_owned()
+        } else {
+            route
+        };
+        call.title = title;
+    }
+    if matches!(
+        payload["name"]
+            .as_str()
+            .and_then(|name| name.rsplit('.').next()),
+        Some("send_message" | "followup_task")
+    ) {
+        call.output = Some(Vec::new());
+    }
+    call.hide_output = payload["name"]
+        .as_str()
+        .and_then(|name| name.rsplit('.').next())
+        == Some("spawn_agent");
+    if matches!(
+        payload["name"]
+            .as_str()
+            .and_then(|name| name.rsplit('.').next()),
+        Some("exec_command" | "shell" | "CommandExecution")
+    ) {
+        call.title = display_name;
+        call.detail_title.clear();
+    }
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -684,21 +765,21 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     };
     let (name, subject, input) =
         crate::providers::tool::presentation(&name, &arguments, &TOOL_RULES);
-    let display_name = shell_display_name(&name);
+    let display_name = crate::providers::tool::title_name(&name);
     let exit_code = item["exit_code"]
         .as_i64()
         .filter(|code| item_type == "CommandExecution" && *code != 0);
     let mut call = ToolCall {
-        detail_left: if subject.is_some() || exit_code.is_some() {
-            display_name.to_owned()
-        } else {
-            String::new()
-        },
-        detail_title: subject.clone().unwrap_or_else(|| display_name.to_owned()),
+        detail_left: display_name.to_owned(),
+        detail_title: subject.clone().unwrap_or_default(),
         show_details: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
-        title: crate::providers::tool::list_title(display_name, subject.as_deref(), &arguments),
+        title: crate::providers::tool::list_title(&display_name, subject.as_deref(), &arguments),
         name,
+        started_at: None,
+        hide_output: false,
+        agent_thread_id: None,
+        agent_path: None,
         input,
         // Completed items can have no result body; an empty output still marks completion.
         output: Some(output.unwrap_or_default()),
@@ -706,6 +787,14 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         is_error: item["status"] == "failed" || item["result"]["isError"] == true,
         duration: None,
     };
+    call.hide_output = call.name.rsplit('.').next() == Some("spawn_agent");
+    if matches!(
+        call.name.rsplit('.').next(),
+        Some("exec_command" | "shell" | "CommandExecution")
+    ) {
+        call.title = display_name;
+        call.detail_title.clear();
+    }
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -1061,6 +1150,16 @@ impl Reader {
     fn dependency(&mut self, record: &Value, offset: u64) -> u64 {
         let payload = &record["payload"];
         let mut affected = offset;
+        if record["type"] == "response_item"
+            && (payload["type"] == "agent_message"
+                || payload["name"]
+                    .as_str()
+                    .is_some_and(|name| name.rsplit('.').next() == Some("send_message")))
+            && let Some((previous_offset, previous)) = self.entries.last()
+            && previous.calls.first().is_some_and(message_call)
+        {
+            affected = affected.min(*previous_offset);
+        }
         for id in [
             payload["id"].as_str(),
             payload["call_id"].as_str(),
@@ -1188,7 +1287,7 @@ impl Reader {
         }
         let parsed_before_older = parsed_bytes;
         while self.oldest > 0
-            && (self.entries.len() < requested || missing_assistant_context(&self.records))
+            && (self.entries.len() <= requested || missing_assistant_context(&self.records))
         {
             let end = self.oldest;
             let target = end.saturating_sub(CHUNK);
@@ -1303,13 +1402,34 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
         .collect())
 }
 
+fn message_call(call: &ToolCall) -> bool {
+    call.name == "MESSAGE" || call.detail_left.ends_with("Send Message")
+}
+
 fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
+    let mut metadata = String::new();
+    io::BufReader::new(File::open(path)?).read_line(&mut metadata)?;
+    let metadata = serde_json::from_str::<Value>(&metadata).ok();
+    let sender = metadata
+        .as_ref()
+        .filter(|record| record["type"] == "session_meta")
+        .and_then(|record| record["payload"]["agent_path"].as_str())
+        .unwrap_or("/root");
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
     let mut completed_prompt = None;
     let mut completed_messages = HashMap::new();
+    let mut collaboration = HashMap::new();
     for (offset, record) in records {
+        let item = &record["payload"]["item"];
+        if matches!(
+            item["type"].as_str(),
+            Some("SubAgentActivity" | "CollabAgentToolCall")
+        ) && let Some(id) = item["id"].as_str()
+        {
+            collaboration.insert(id.to_owned(), (*offset, record));
+        }
         if completed_assistant(record) {
             let id = required_text(&record["payload"]["item"], "id")?;
             completed_messages.insert(id, (*offset, record));
@@ -1341,6 +1461,13 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             })
             .unwrap_or(record);
         let payload = &record["payload"];
+        if matches!(
+            payload["item"]["type"].as_str(),
+            Some("SubAgentActivity" | "CollabAgentToolCall")
+        ) {
+            completed_tool(record)?;
+            return Ok(true);
+        }
         if let Some(mut event) = completed_tool(record)? {
             event.source = Some(source(record, offset));
             event.source_records = source_records;
@@ -1348,7 +1475,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 return Ok(true);
             }
             entries.push((offset, event));
-            return Ok(entries.len() <= count);
+            return Ok(true);
         }
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
             (Some("response_item"), Some("function_call_output" | "custom_tool_call_output")) => {
@@ -1370,7 +1497,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 return Ok(true);
             }
             (Some("response_item"), Some("function_call" | "custom_tool_call")) => {
-                let Some(body) = tool_body(payload) else {
+                let Some(mut body) = tool_body(payload) else {
                     return Ok(true);
                 };
                 if let Some(id) = payload["call_id"].as_str()
@@ -1381,19 +1508,65 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 let ended = payload["call_id"]
                     .as_str()
                     .and_then(|id| results.remove(id));
-                calls.push(response_tool_call(
-                    payload,
-                    ended.as_ref().map(|(_, text, _)| text.as_str()),
-                ));
+                let mut call =
+                    response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
+                if let Some((target, _, _)) =
+                    agent_route(payload, &tool_arguments(payload).unwrap_or(Value::Null))
+                {
+                    let route = format!("{} → {}", agent_name(sender), agent_name(&target));
+                    let tool = payload["name"]
+                        .as_str()
+                        .unwrap()
+                        .rsplit('.')
+                        .next()
+                        .unwrap();
+                    body = if matches!(tool, "spawn_agent" | "followup_task") {
+                        format!("{route} · new task")
+                    } else {
+                        route.clone()
+                    };
+                    call.title = body.clone();
+                    if tool != "spawn_agent" {
+                        call.detail_title = route;
+                    }
+                }
+                call.started_at = call.agent_path.as_ref().map(|_| at);
+                let mut completed_at = ended.as_ref().map(|(at, _, _)| *at);
+                if let Some((offset, record)) = payload["call_id"]
+                    .as_str()
+                    .and_then(|id| collaboration.get(id))
+                {
+                    source_records.push(reference(*offset));
+                    let completion = &record["payload"];
+                    let item = &completion["item"];
+                    if item["type"] == "SubAgentActivity" && item["kind"] == "started" {
+                        call.agent_thread_id = item["agent_thread_id"].as_str().map(str::to_owned);
+                        call.agent_path = item["agent_path"].as_str().map(str::to_owned);
+                        if let Some(model) = item["model"].as_str() {
+                            call.detail_title
+                                .push_str(&format!(" · {}", super::model_display_name(model)?));
+                        }
+                        if let Some(effort) = item["reasoning_effort"].as_str() {
+                            call.detail_title.push_str(&format!(" · {effort}"));
+                        }
+                    } else if item["type"] == "CollabAgentToolCall" {
+                        let start = item_time(completion, "started_at_ms")?;
+                        let end = item_time(completion, "completed_at_ms")?;
+                        call.duration = Some(end - start);
+                        completed_at = Some(end);
+                    }
+                }
                 if let Some((_, _, offset)) = &ended {
                     source_records.insert(0, reference(*offset));
                 }
+                calls.push(call);
                 (
                     tool_kind(payload["name"].as_str().unwrap()),
                     body,
-                    ended.map(|(at, _, _)| at),
+                    completed_at,
                 )
             }
+
             (Some("response_item"), Some("agent_message")) => {
                 let header = content_text(&payload["content"]).ok_or_else(|| {
                     io::Error::new(
@@ -1432,9 +1605,39 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                             )
                         })
                 };
-                let body = format!("{} from {}", field("Message Type: ")?, field("Sender: ")?);
-                (Kind::Assistant, body, None)
+                let message_type = field("Message Type: ")?;
+                let sender = required_text(payload, "author")?;
+                let recipient = required_text(payload, "recipient")?;
+                let route = format!("{} → {}", agent_name(sender), agent_name(recipient));
+                let text = detail_body.take().unwrap();
+                let body = match message_type {
+                    "NEW_TASK" => format!("{route} · new task"),
+                    "FINAL_ANSWER" => format!("{route} · {text}"),
+                    _ => route.clone(),
+                };
+                calls.push(ToolCall {
+                    detail_left: crate::providers::tool::title_name(message_type),
+                    detail_title: route,
+                    show_details: true,
+                    id: required_text(payload, "id")?.to_owned(),
+                    title: body.clone(),
+                    name: message_type.to_owned(),
+                    started_at: Some(at),
+                    hide_output: true,
+                    agent_thread_id: None,
+                    agent_path: Some(if sender == "/root" { recipient } else { sender }.to_owned()),
+                    input: vec![Section::Markdown {
+                        label: String::new(),
+                        text,
+                    }],
+                    output: None,
+                    exit_code: None,
+                    is_error: false,
+                    duration: None,
+                });
+                (Kind::Agent, body, None)
             }
+
             (Some("response_item"), Some("message")) => {
                 let kind = match payload["role"].as_str() {
                     Some("user") if !is_context_message(payload) => Kind::User,
@@ -1489,7 +1692,8 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         entries.push((
             offset,
             Event {
-                completed_time: kind == Kind::Tool,
+                completed_time: kind == Kind::Tool
+                    && !calls.iter().any(|call| call.agent_path.is_some()),
                 background: body.ends_with(" *"),
                 source: Some(source(record, offset)),
                 source_records,
@@ -1500,13 +1704,16 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 paths: Vec::new(),
                 started_at: at,
                 ended_at,
-                duration: ended_at.map(|end| end - at),
+                duration: calls
+                    .first()
+                    .and_then(|call| call.duration)
+                    .or_else(|| ended_at.map(|end| end - at)),
                 previous_end: None,
                 images,
                 calls,
             },
         ));
-        Ok(entries.len() <= count)
+        Ok(true)
     };
     for (offset, record) in records.iter().rev() {
         if !visit(record, *offset)? {
@@ -1514,6 +1721,35 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         }
     }
     entries.reverse();
+    let mut merged: Vec<(u64, Event)> = Vec::new();
+    for (offset, entry) in entries {
+        if entry.calls.first().is_some_and(message_call)
+            && let Some((_, previous)) = merged.last_mut()
+            && previous.calls.first().is_some_and(|call| {
+                message_call(call)
+                    && call
+                        .detail_title
+                        .split_once(" → ")
+                        .map(|(sender, _)| sender)
+                        == entry.calls[0]
+                            .detail_title
+                            .split_once(" → ")
+                            .map(|(sender, _)| sender)
+            })
+        {
+            previous.calls.extend(entry.calls);
+            previous.source_records.extend(entry.source_records);
+            previous.started_at = entry.started_at;
+            previous.body = format!(
+                "{} · {} messages",
+                previous.calls[0].detail_title,
+                previous.calls.len()
+            );
+            continue;
+        }
+        merged.push((offset, entry));
+    }
+    let mut entries = merged;
     let mut previous_end = None;
     for (_, entry) in &mut entries {
         entry.source_records.sort_by_key(|record| record.offset);
@@ -1526,6 +1762,18 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_message_outputs_are_empty_without_result_records() {
+        for fixture in [
+            include_str!("../../../tests/fixtures/codex-collaboration/send_message.jsonl"),
+            include_str!("../../../tests/fixtures/codex-collaboration/followup_task.jsonl"),
+        ] {
+            let record: Value = serde_json::from_str(fixture).unwrap();
+            let call = response_tool_call(&record["payload"], None);
+            assert_eq!(call.output, Some(Vec::new()));
+        }
+    }
+
     #[test]
     fn raw_source_records_preserve_real_call_and_result_order() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -1586,9 +1834,9 @@ mod tests {
             });
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
-            assert_eq!(call.title, "Shell cat, sed");
-            assert_eq!(call.detail_title, "cat, sed");
-            assert_eq!(call.detail_left, "Shell");
+            assert_eq!(call.title, crate::providers::tool::title_name(name));
+            assert_eq!(call.detail_title, "");
+            assert_eq!(call.detail_left, crate::providers::tool::title_name(name));
             let (_, _, input) = crate::providers::tool::presentation(
                 name,
                 &tool_arguments(&payload).unwrap(),
@@ -1611,7 +1859,7 @@ mod tests {
                 "type": "function_call", "name": "exec_command", "call_id": "shell",
                 "arguments": serde_json::json!({field: command}).to_string(),
             });
-            assert_eq!(tool_body(&payload).as_deref(), Some("Shell cat, sed"));
+            assert_eq!(tool_body(&payload).as_deref(), Some("Exec Command"));
             let file = tempfile::NamedTempFile::new().unwrap();
             writeln!(
                 file.as_file(),
@@ -1623,8 +1871,8 @@ mod tests {
             .unwrap();
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, "Shell cat, sed");
-            assert_eq!(events[0].calls[0].detail_left, "Shell");
+            assert_eq!(events[0].body, "Exec Command");
+            assert_eq!(events[0].calls[0].detail_left, "Exec Command");
         }
     }
 
@@ -1636,9 +1884,9 @@ mod tests {
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
-        assert_eq!(event.calls[0].detail_title, "cat, sed");
-        assert_eq!(event.calls[0].detail_left, "Shell");
-        assert_eq!(event.body, format!("Shell {}", event.calls[0].detail_title));
+        assert_eq!(event.calls[0].detail_title, "");
+        assert_eq!(event.calls[0].detail_left, "Exec Command");
+        assert_eq!(event.body, "Exec Command");
         let file = records
             .iter()
             .find(|r| r["payload"]["item"]["type"] == "FileChange")
@@ -1858,14 +2106,14 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "spawn_agent claude_calls");
+        assert_eq!(call.title, "root → claude_calls · new task");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let call = &completed_tool(record).unwrap().unwrap().calls[0];
         assert_eq!(call.id, record["payload"]["item"]["id"].as_str().unwrap());
-        assert_eq!(call.title, "Shell cat, sed");
+        assert_eq!(call.title, "Exec Command");
     }
 
     #[test]
@@ -2162,9 +2410,9 @@ mod tests {
             .find(|record| record["payload"]["name"] == "request_user_input")
             .unwrap();
         let call = response_tool_call(&record["payload"], None);
-        assert_eq!(call.detail_left, "request_user_input");
+        assert_eq!(call.detail_left, "Request User Input");
         assert_eq!(call.detail_title, "Color");
-        assert_eq!(call.title, "request_user_input Color");
+        assert_eq!(call.title, "Request User Input Color");
         assert!(call.show_details);
         assert_eq!(
             call.input,
@@ -2241,25 +2489,29 @@ mod tests {
                 payload["name"] = name.into();
                 let call = response_tool_call(&payload, Some("Plaintext result"));
                 let expected = format!(
-                    "{} {subject}",
-                    crate::providers::tool::display_tool_name(payload["name"].as_str().unwrap())
+                    "root → {subject}{}",
+                    if tool == "send_message" {
+                        ""
+                    } else {
+                        " · new task"
+                    }
                 );
                 assert_eq!(tool_body(&payload).unwrap(), expected);
                 assert_eq!(call.title, expected);
-                assert_eq!(call.detail_title, subject);
-                let mut input = Vec::new();
-                if tool == "spawn_agent" {
-                    input.push(text_section("", &format!("task_name: {subject}")));
-                }
-                input.push(Section::Markdown {
-                    label: "message".into(),
-                    text: "Content is encrypted.".into(),
-                });
-                assert_eq!(call.input, input);
                 assert_eq!(
-                    call.output,
-                    Some(vec![text_section("output", "Plaintext result")])
+                    call.detail_title,
+                    if tool == "spawn_agent" {
+                        subject.to_owned()
+                    } else {
+                        format!("root → {}", agent_name(subject))
+                    }
                 );
+                let input = vec![Section::Markdown {
+                    label: "message".into(),
+                    text: "(encrypted)".into(),
+                }];
+                assert_eq!(call.input, input);
+                assert_eq!(call.output, Some(Vec::new()));
                 let file = tempfile::NamedTempFile::new().unwrap();
                 let mut row = record.clone();
                 row["payload"] = payload.clone();
@@ -2291,20 +2543,22 @@ mod tests {
                 let call = response_tool_call(&payload, None);
                 assert_eq!(
                     call.detail_left,
-                    crate::providers::tool::display_tool_name(&name)
+                    crate::providers::tool::title_name(&crate::providers::tool::display_tool_name(
+                        &name
+                    ))
                 );
-                assert_eq!(call.detail_title, subject);
-                let mut expected = Vec::new();
-                if tool == "spawn_agent" {
-                    expected.push(Section::Text {
-                        label: String::new(),
-                        text: format!("task_name: {subject}"),
-                    });
-                }
-                expected.push(Section::Markdown {
+                assert_eq!(
+                    call.detail_title,
+                    if tool == "spawn_agent" {
+                        subject.to_owned()
+                    } else {
+                        format!("root → {}", agent_name(subject))
+                    }
+                );
+                let expected = vec![Section::Markdown {
                     label: "message".into(),
                     text: "Review files.".into(),
-                });
+                }];
                 assert_eq!(call.input, expected);
             }
         }
@@ -2326,7 +2580,7 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(question.kind, Kind::Assistant);
-            assert_eq!(question.body, "request_user_input Color");
+            assert_eq!(question.body, "Request User Input Color");
             assert!(question.ended_at.is_none());
             let summary = summary(&path).unwrap();
             assert_eq!(
@@ -2353,7 +2607,7 @@ mod tests {
                 }]
             );
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, "request_user_input Color");
+            assert_eq!(activity.label, "Request User Input Color");
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -2434,7 +2688,7 @@ mod tests {
         call["payload"]["name"] = "functions.request_user_input".into();
         assert_eq!(
             tool_body(&call["payload"]).unwrap(),
-            "functions request_user_input Color · Color"
+            "Functions Request User Input Color · Color"
         );
         records.push(call);
         assert_eq!(
@@ -2451,9 +2705,9 @@ mod tests {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
-                "spawn_agent real_scan",
-                "send_message /root",
-                "followup_task ux_probe",
+                "root → real_scan · new task",
+                "root → root",
+                "root → ux_probe · new task",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -2489,9 +2743,9 @@ mod tests {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
             let expected = if name == "collaboration.send_message" {
-                "collaboration send_message reviewer".to_owned()
+                "root → reviewer".to_owned()
             } else {
-                crate::providers::tool::display_tool_name(name)
+                crate::providers::tool::title_name(&crate::providers::tool::display_tool_name(name))
             };
             assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
             assert_eq!(
@@ -2601,8 +2855,37 @@ mod tests {
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"exec_command","arguments":"{{\"cmd\":\"cargo check\"}}","call_id":"test"}}}}"#).unwrap();
         let result = summary(file.path()).unwrap();
         assert!(!result.turn_ended);
-        assert_eq!(result.activity.unwrap().label, "Shell cargo check");
+        assert_eq!(result.activity.unwrap().label, "Exec Command");
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:02Z","type":"event_msg","payload":{{"type":"turn_aborted","reason":"interrupted"}}}}"#).unwrap();
         assert!(summary(file.path()).unwrap().turn_ended);
+    }
+}
+
+#[cfg(test)]
+mod timeout_test {
+    use super::*;
+
+    #[test]
+    fn real_wait_result_timeout_only_shows_annotation() {
+        let record = include_str!("../../../tests/fixtures/codex-interaction/parent.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| {
+                record["payload"]["type"] == "function_call_output"
+                    && record["payload"]["output"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("Wait completed."))
+            })
+            .unwrap();
+        let mut output: serde_json::Value =
+            serde_json::from_str(record["payload"]["output"].as_str().unwrap()).unwrap();
+        output["timed_out"] = true.into();
+        assert_eq!(
+            response_output("wait_agent", &output.to_string()),
+            vec![crate::log::Section::Text {
+                label: "output".into(),
+                text: "(timed out)".into()
+            }]
+        );
     }
 }
