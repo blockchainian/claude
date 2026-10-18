@@ -5,12 +5,12 @@
  Navigate            Tasks
  ↑      Up           n          New
  ↓      Down         o          Terminal
- enter  Open         f          Fork
- pgup   Page up      r          Rename
- pgdn   Page down    x          Stop
- ⌃c     Quit         a          Archive
- esc    Back         h          Hide
-                     backspace  Delete
+ enter  Terminal     f          Fork
+ →/⌃l   Terminal     r          Rename
+ pgup   Page up      x          Stop
+ pgdn   Page down    a          Archive
+ ⌃c     Quit         h          Hide
+ esc    Previous     backspace  Delete
                      p          Pin/unpin
 
  View                Log

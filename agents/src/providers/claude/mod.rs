@@ -927,7 +927,7 @@ impl Provider for ClaudeProvider {
             Action::New => {
                 command.current_dir(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
             }
-            Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
+            Action::Resume(_) | Action::Fork(_) => {
                 let session = session?;
                 if session.parent.is_some() || !session.cwd.is_dir() {
                     return None;

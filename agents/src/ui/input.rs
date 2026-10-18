@@ -190,6 +190,7 @@ impl View {
     }
 
     fn set_filter(&mut self, idx: usize) {
+        self.remember_previous_task();
         self.leave_draft();
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
@@ -910,12 +911,6 @@ impl View {
             self.focus_input();
             return None;
         }
-        if self
-            .selected_row()
-            .is_some_and(|session| !session.can_resume())
-        {
-            return Some(Action::Unsupported("Resume"));
-        }
         if self.selected == usize::MAX
             && self.has_more
             && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive]
@@ -927,14 +922,16 @@ impl View {
             return Some(Action::ShowMore);
         }
         let id = self.selected_id()?.to_owned();
+        if !self.selected_capabilities().resume
+            || !self.selected_row().is_some_and(Session::can_resume)
+        {
+            return Some(Action::Unsupported("Terminal"));
+        }
         if self.searching {
             self.search.clear();
             self.searching = false;
         }
-        if !self.selected_capabilities().resume {
-            return Some(Action::Unsupported("Resume"));
-        }
-        Some(Action::Open(id))
+        Some(Action::OpenTerminal(id))
     }
     /// Stops the selected task, keeping a running turn's prompt to return to the input.
     fn stop_from_input(&mut self) -> Option<Action> {
@@ -1094,12 +1091,14 @@ impl View {
                 || (key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('l')))
         {
+            if key.code == KeyCode::Char('l') {
+                return self.activate();
+            }
             return self
                 .selected_row()
                 .filter(|session| !session.can_resume())
                 .map(|_| {
                     Action::Unsupported(match key.code {
-                        KeyCode::Char('l') => "Resume",
                         KeyCode::Char('f') => "Fork",
                         KeyCode::Char('r') => "Rename",
                         KeyCode::Char('x') => "Stop",
@@ -1317,7 +1316,7 @@ impl View {
                 self.select(selected);
             }
             KeyCode::Enter | KeyCode::Right => return self.activate(),
-            KeyCode::Esc => return Some(Action::Back),
+            KeyCode::Esc if self.mouse_focus == Panel::TaskList => self.select_previous_task(),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();
                 self.viewport.borrow_mut().scroll = 0;
@@ -1375,18 +1374,7 @@ impl View {
                     });
                 }
             }
-            KeyCode::Char('o') => {
-                let id = self.selected_id()?.clone();
-                return Some(
-                    if self.selected_capabilities().resume
-                        && self.selected_row().is_some_and(Session::can_resume)
-                    {
-                        Action::OpenTerminal(id)
-                    } else {
-                        Action::Unsupported("Terminal")
-                    },
-                );
-            }
+            KeyCode::Char('o') => return self.activate(),
             KeyCode::Char('f') => {
                 let id = self.selected_id()?.clone();
                 return Some(if self.selected_capabilities().fork {

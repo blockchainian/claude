@@ -1,3 +1,6 @@
+#[path = "task_navigation_tests.rs"]
+mod task_navigation_tests;
+
 #[path = "codex_memory_tests.rs"]
 mod codex_memory_tests;
 
@@ -1211,8 +1214,8 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
         include_str!("../../tests/ui_snapshots/live_center_help_two_columns.txt")
     );
     // Both widths fit the task tabs and shortcut columns.
-    let narrow = screen(&view, 56, 24);
-    let wide = screen(&view, 60, 24);
+    let narrow = screen(&view, 60, 24);
+    let wide = screen(&view, 64, 24);
     assert_eq!(
         narrow.lines().skip(3).collect::<Vec<_>>(),
         wide.lines().skip(3).collect::<Vec<_>>()
@@ -1811,7 +1814,7 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     assert_eq!(view.search.text(), "task");
     key(&mut view, KeyCode::Esc);
     assert!(!view.searching);
-    assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Back));
+    assert_eq!(key(&mut view, KeyCode::Esc), None);
 }
 #[test]
 fn actions_and_hide_move_to_next_visible_row() {
@@ -1826,7 +1829,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     );
     assert_eq!(
         key(&mut view, KeyCode::Right),
-        Some(Action::Open(session_key("42")))
+        Some(Action::OpenTerminal(session_key("42")))
     );
     assert_eq!(
         key(&mut view, KeyCode::Char('x')),
@@ -5782,9 +5785,9 @@ mod log_search {
             view.center_footer_hints().to_string(),
             super::super::hints::hint_line(&[
                 ("?", "help"),
-                ("esc", "back"),
+                ("esc", "Previous"),
                 ("↑/↓", "move"),
-                ("enter", "open"),
+                ("enter", "Terminal"),
                 ("n", "new"),
             ])
             .to_string()
@@ -6474,7 +6477,7 @@ mod subagent_actions {
         control_l,
         KeyCode::Char('l'),
         KeyModifiers::CONTROL,
-        "Resume"
+        "Terminal"
     );
     unsupported_key!(rename, KeyCode::Char('r'), KeyModifiers::NONE, "Rename");
     unsupported_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE, "Fork");
@@ -6487,8 +6490,8 @@ mod subagent_actions {
     #[test]
     fn resume_emits_unsupported_notice() {
         for (code, name) in [
-            (KeyCode::Enter, "Resume"),
-            (KeyCode::Right, "Resume"),
+            (KeyCode::Enter, "Terminal"),
+            (KeyCode::Right, "Terminal"),
             (KeyCode::Char('o'), "Terminal"),
         ] {
             let mut view = fixture();
@@ -6528,7 +6531,7 @@ mod subagent_actions {
             view.searching = true;
             view.search.set_text("Parent task");
             let before = subagent_rows::screen(&view, 120, 30);
-            assert_eq!(view.handle_key(event), Some(Action::Unsupported("Resume")));
+            assert_eq!(view.handle_key(event), Some(Action::Unsupported("Terminal")));
             assert!(view.searching);
             assert_eq!(view.search.text(), "Parent task");
             assert_eq!(subagent_rows::screen(&view, 120, 30), before);
@@ -6540,7 +6543,7 @@ mod subagent_actions {
         let view = fixture();
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "? help  esc back  ↑/↓ move  n new"
+            "? help  esc Previous  ↑/↓ move  n new"
         );
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),
@@ -6557,8 +6560,8 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
         Capabilities::default(),
     )]));
     for (code, name) in [
-        (KeyCode::Enter, "Resume"),
-        (KeyCode::Right, "Resume"),
+        (KeyCode::Enter, "Terminal"),
+        (KeyCode::Right, "Terminal"),
         (KeyCode::Char('o'), "Terminal"),
         (KeyCode::Char('f'), "Fork"),
         (KeyCode::Char('r'), "Rename"),
@@ -6594,7 +6597,7 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     key(&mut view, KeyCode::Esc);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
-        Some(Action::Unsupported("Resume"))
+        Some(Action::Unsupported("Terminal"))
     );
 }
 

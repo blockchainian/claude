@@ -5,12 +5,12 @@
  Navigate            Tasks                   View                Log
  ↑      Up           n          New          tab/⇧tab  Filter    /                       Search
  ↓      Down         o          Terminal     /         Search    2× click top border     Earliest
- enter  Open         f          Fork         g         Group     2× click bottom border  Latest
- pgup   Page up      r          Rename
- pgdn   Page down    x          Stop
- ⌃c     Quit         a          Archive
- esc    Back         h          Hide
-                     backspace  Delete
+ enter  Terminal     f          Fork         g         Group     2× click bottom border  Latest
+ →/⌃l   Terminal     r          Rename
+ pgup   Page up      x          Stop
+ pgdn   Page down    a          Archive
+ ⌃c     Quit         h          Hide
+ esc    Previous     backspace  Delete
                      p          Pin/unpin
 
 

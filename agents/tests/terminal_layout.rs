@@ -1,3 +1,6 @@
+#[path = "support/terminal_task_navigation.rs"]
+mod terminal_task_navigation;
+
 #[path = "support/terminal_memory_citation.rs"]
 mod terminal_memory_citation;
 

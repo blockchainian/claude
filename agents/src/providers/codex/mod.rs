@@ -585,7 +585,7 @@ impl Provider for CodexProvider {
         }
         let mut command = Command::new("codex");
         match action {
-            Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
+            Action::Resume(_) | Action::Fork(_) => {
                 let session = session?;
                 if !session.cwd.is_dir() {
                     return None;

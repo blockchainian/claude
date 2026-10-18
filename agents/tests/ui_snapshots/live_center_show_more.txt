@@ -9,4 +9,4 @@
                                         │
                                         │
  No task ❮ Select a task to type
- ? help  esc back  ↑/↓ move  enter open  n new
+ ? help  esc Previous  ↑/↓ move  enter Terminal  n new

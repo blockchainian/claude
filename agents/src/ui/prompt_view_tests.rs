@@ -12,7 +12,7 @@ fn task_double_click_keeps_task_focus_and_enter_opens() {
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(!view.input_box.focused);
     assert!(view.mouse_focus == Panel::TaskList);
-    assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Open(id)));
+    assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::OpenTerminal(id)));
 }
 
 #[test]

@@ -30,18 +30,18 @@ impl View {
         {
             hint_line(&[
                 ("?", "help"),
-                ("esc", "back"),
+                ("esc", "Previous"),
                 ("↑/↓", "move"),
                 ("n", "new"),
             ])
         } else if self.searching {
-            hint_line(&[("esc", "back"), ("enter", "open")])
+            hint_line(&[("esc", "back"), ("enter", "Terminal")])
         } else {
             hint_line(&[
                 ("?", "help"),
-                ("esc", "back"),
+                ("esc", "Previous"),
                 ("↑/↓", "move"),
-                ("enter", "open"),
+                ("enter", "Terminal"),
                 ("n", "new"),
             ])
         }
@@ -63,11 +63,12 @@ impl View {
                 &[
                     ("↑", "Up"),
                     ("↓", "Down"),
-                    ("enter", "Open"),
+                    ("enter", "Terminal"),
+                    ("→/⌃l", "Terminal"),
                     ("pgup", "Page up"),
                     ("pgdn", "Page down"),
                     ("⌃c", "Quit"),
-                    ("esc", "Back"),
+                    ("esc", "Previous"),
                 ],
             ),
             group(

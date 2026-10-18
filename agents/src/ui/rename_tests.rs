@@ -75,7 +75,7 @@ fn manager_child_session_keys_operate() {
     let id = view.selected_id().unwrap().clone();
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
-        Some(Action::Open(id.clone()))
+        Some(Action::OpenTerminal(id.clone()))
     );
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE)),
@@ -90,7 +90,7 @@ fn manager_child_session_keys_operate() {
 #[test]
 fn codex_spawn_child_session_keys_emit_unsupported() {
     for (code, modifiers, label) in [
-        (KeyCode::Char('l'), KeyModifiers::CONTROL, "Resume"),
+        (KeyCode::Char('l'), KeyModifiers::CONTROL, "Terminal"),
         (KeyCode::Char('f'), KeyModifiers::NONE, "Fork"),
         (KeyCode::Char('r'), KeyModifiers::NONE, "Rename"),
         (KeyCode::Char('x'), KeyModifiers::NONE, "Stop"),
@@ -133,7 +133,9 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
         let session = view.selected_row().unwrap().clone();
         let expected = match code {
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => Action::Open(session.id),
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                Action::OpenTerminal(session.id)
+            }
             KeyCode::Char('o') => Action::OpenTerminal(session.id),
             KeyCode::Char('f') => Action::Fork(session.id),
             KeyCode::Char('n') => Action::NewDraft { cwd: session.cwd },
@@ -187,7 +189,7 @@ fn manager_thread_hides_itself_and_pins_its_parent_group() {
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("enter open")
+            .contains("enter Terminal")
     );
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),

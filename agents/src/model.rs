@@ -190,8 +190,6 @@ pub type DraftId = u64;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
     Batch(Vec<Action>),
-    /// Enter: jump to a live session's terminal, or resume an inactive one.
-    Open(SessionKey),
     SendPrompt {
         id: SessionKey,
         text: String,
@@ -230,10 +228,10 @@ pub enum Action {
         id: SessionKey,
         effort: String,
     },
-    /// Esc on the top level: resume the last launched session in this terminal.
+    /// Build a provider resume command.
     Resume(SessionKey),
-    /// `o` or a right click on the log detail: run the session's program in the log detail
-    /// panel.
+    /// Enter, Right, Ctrl-L, `o` or a right click on the log detail: run the session's
+    /// program in the log detail panel.
     OpenTerminal(SessionKey),
     /// A right click on the session terminal: detach it and show the log detail again.
     CloseTerminal,
@@ -269,8 +267,6 @@ pub enum Action {
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.
     ShowMore,
-    /// Esc on the top level: return to the last launched session, or quit.
-    Back,
     /// Ctrl-c.
     Quit,
     /// Double click on an open log event or a details body: copy its text to the

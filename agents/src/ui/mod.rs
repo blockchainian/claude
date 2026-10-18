@@ -234,6 +234,7 @@ pub struct View {
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
     selected: usize,
+    selection_history: Vec<(SessionKey, usize)>,
     grouping: Grouping,
     use_colors: bool,
     pinned: Vec<SessionKey>,
@@ -367,6 +368,7 @@ impl View {
             rows: Vec::new(),
             project_groups: Vec::new(),
             selected: usize::MAX,
+            selection_history: Vec::new(),
             grouping,
             use_colors,
             pinned: Vec::new(),
@@ -933,8 +935,43 @@ impl View {
 
     /// Selects the row the user chose.
     fn select(&mut self, selected: usize) {
+        if self.selected_draft.is_some() || self.selected != selected {
+            self.remember_previous_task();
+        }
         self.set_selected(selected);
         self.remember_selection();
+    }
+
+    fn remember_previous_task(&mut self) {
+        if let Some(id) = self.selected_id().cloned() {
+            let entry = (id, self.status_filter);
+            if self.selection_history.last() != Some(&entry) {
+                self.selection_history.push(entry);
+            }
+        }
+    }
+
+    fn select_previous_task(&mut self) {
+        let current = self.selected_id().cloned();
+        let filter = self.status_filter;
+        while let Some((id, tab)) = self.selection_history.pop() {
+            if current.as_ref() == Some(&id) {
+                continue;
+            }
+            let Some(index) = self.rows.iter().position(|row| row.id == id) else {
+                continue;
+            };
+            for candidate in [tab, 1 - tab] {
+                self.status_filter = candidate;
+                if self.selectable_indices().contains(&index) {
+                    self.set_selected(index);
+                    self.remember_selection();
+                    self.viewport.get_mut().scroll = 0;
+                    return;
+                }
+            }
+        }
+        self.status_filter = filter;
     }
 
     /// Remembers the selected task in its visible tab, including children of a different status.

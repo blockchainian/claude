@@ -196,11 +196,6 @@ fn launches_top_level_threads_in_their_cwd() {
             vec!["resume", session.id.id.as_str()],
         ),
         (
-            Action::Open(session.id.clone()),
-            vec!["resume", session.id.id.as_str()],
-        ),
-        (Action::Back, vec!["resume", session.id.id.as_str()]),
-        (
             Action::Fork(session.id.clone()),
             vec!["fork", session.id.id.as_str()],
         ),
@@ -231,8 +226,6 @@ fn launch_rejects_children_missing_sessions_and_missing_cwd() {
         for action in [
             Action::Resume(session.id.clone()),
             Action::Fork(session.id.clone()),
-            Action::Open(session.id.clone()),
-            Action::Back,
         ] {
             assert!(provider.launch(&action, Some(&session)).is_none());
         }
@@ -267,7 +260,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
     )]));
     view.set_sessions(vec![session.clone()], false);
     for (code, expected) in [
-        (KeyCode::Enter, Action::Open(session.id.clone())),
+        (KeyCode::Enter, Action::OpenTerminal(session.id.clone())),
         (KeyCode::Char('o'), Action::OpenTerminal(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
         (
@@ -309,7 +302,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
-    for (code, name) in [(KeyCode::Enter, "Resume"), (KeyCode::Char('o'), "Terminal")] {
+    for (code, name) in [(KeyCode::Enter, "Terminal"), (KeyCode::Char('o'), "Terminal")] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(Action::Unsupported(name))
@@ -654,8 +647,8 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     );
     assert!(lines[parent_row + 1].contains("Managed worker"));
     for (code, expected) in [
-        (KeyCode::Enter, Action::Open(key("thread-12".into()))),
-        (KeyCode::Right, Action::Open(key("thread-12".into()))),
+        (KeyCode::Enter, Action::OpenTerminal(key("thread-12".into()))),
+        (KeyCode::Right, Action::OpenTerminal(key("thread-12".into()))),
         (
             KeyCode::Char('o'),
             Action::OpenTerminal(key("thread-12".into())),
@@ -681,11 +674,17 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     assert_eq!(view.handle_mouse(release), None);
     assert_eq!(view.handle_mouse(click), None);
     assert_eq!(view.handle_mouse(release), None);
-    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        None
+    );
+    assert_eq!(view.selected_id(), Some(&parent_key));
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        Some(Action::Open(key("thread-12".into())))
+        Some(Action::OpenTerminal(parent_key.clone()))
     );
+    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     for (code, expected) in [
         (KeyCode::Char('f'), Action::Fork(key("thread-12".into()))),
         (KeyCode::Char('x'), Action::Stop(key("thread-12".into()))),
@@ -729,19 +728,15 @@ fn manager_children_launch_like_ordinary_threads() {
         .find(|session| session.id.id == "thread-12")
         .unwrap();
     session.cwd = dir.path().into();
-    for action in [
-        Action::Open(session.id.clone()),
-        Action::Resume(session.id.clone()),
-        Action::Back,
-    ] {
-        let command = provider.launch(&action, Some(&session)).unwrap();
-        assert_eq!(command.get_program(), "codex");
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["resume", "thread-12"]
-        );
-        assert_eq!(command.get_current_dir(), Some(dir.path()));
-    }
+    let command = provider
+        .launch(&Action::Resume(session.id.clone()), Some(&session))
+        .unwrap();
+    assert_eq!(command.get_program(), "codex");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["resume", "thread-12"]
+    );
+    assert_eq!(command.get_current_dir(), Some(dir.path()));
     let command = provider
         .launch(&Action::Fork(session.id.clone()), Some(&session))
         .unwrap();
@@ -781,7 +776,7 @@ fn spawn_children_cannot_resume_in_the_view() {
     )]));
     view.set_sessions(vec![parent, child], false);
     assert_eq!(view.selected_id(), Some(&id));
-    for (code, name) in [(KeyCode::Enter, "Resume"), (KeyCode::Char('o'), "Terminal")] {
+    for (code, name) in [(KeyCode::Enter, "Terminal"), (KeyCode::Char('o'), "Terminal")] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(Action::Unsupported(name))

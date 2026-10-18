@@ -13,4 +13,4 @@
  ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ │
  Search ❯ find                              ├───────────────── Ready ───────── project╶─
  Task to find ❯
- esc back  enter open
+ esc back  enter Terminal

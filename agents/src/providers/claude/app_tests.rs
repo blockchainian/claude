@@ -45,19 +45,6 @@ pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     quit
 }
 
-fn assert_resume(app: &App) {
-    let command = app.launch.as_ref().expect("session should resume");
-    assert_eq!(command.get_program(), "claude");
-    assert_eq!(
-        command.get_args().collect::<Vec<_>>(),
-        ["--resume", app.sessions[0].id.id.as_str()]
-    );
-    assert_eq!(
-        command.get_current_dir(),
-        Some(app.sessions[0].cwd.as_path())
-    );
-}
-
 #[test]
 fn terminal_theme_events_update_background_and_accents() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
@@ -806,18 +793,22 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
     let mut before = ratatui::buffer::Buffer::empty(area);
     app.view.render_at(area, &mut before, child.updated_at);
     let action = make_action(&child.id);
-    let resume = matches!(action, Action::Open(_) | Action::Resume(_));
+    let operation = match action {
+        Action::Resume(_) => Some("Resume"),
+        Action::OpenTerminal(_) => Some("Terminal"),
+        _ => None,
+    };
     assert!(!app.handle_action(Some(action)));
     let mut after = ratatui::buffer::Buffer::empty(area);
     app.view.render_at(area, &mut after, child.updated_at);
-    if resume {
+    if let Some(operation) = operation {
         assert!(
             after
                 .content
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect::<String>()
-                .contains("Resume is not supported")
+                .contains(&format!("{operation} is not supported"))
         );
         app.view.set_notice(None);
         after = ratatui::buffer::Buffer::empty(area);
@@ -829,7 +820,6 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
     assert_eq!(app.view.log, log);
     assert_eq!(app.view.selected_id(), Some(&selected));
     assert!(app.launch.is_none());
-    assert!(app.last_session.is_none());
     assert_eq!(std::fs::read(path).unwrap(), transcript);
     assert!(!path.with_extension("").exists());
     assert_eq!(std::fs::read(meta).unwrap(), metadata);
@@ -837,8 +827,8 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
 }
 
 #[test]
-fn subagent_open_shows_unsupported_notice() {
-    assert_subagent_action_blocked(|id| Action::Open(id.clone()));
+fn subagent_terminal_shows_unsupported_notice() {
+    assert_subagent_action_blocked(|id| Action::OpenTerminal(id.clone()));
 }
 
 #[test]
@@ -880,7 +870,6 @@ fn subagent_launch_is_ignored_before_directory_validation() {
     child.cwd = child.cwd.join("missing");
     assert!(!app.launch_session(Action::Resume(child.id.clone()), child.clone()));
     assert!(app.launch.is_none());
-    assert!(app.last_session.is_none());
     let area = ratatui::layout::Rect::new(0, 0, 120, 30);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render_at(area, &mut buffer, child.updated_at);
@@ -895,80 +884,42 @@ fn subagent_launch_is_ignored_before_directory_validation() {
 }
 
 #[test]
-fn escape_without_launched_session_opens_new_session() {
+fn escape_without_selection_history_stays_in_dashboard() {
     let (_dir, mut app) = fixture();
-    assert!(key(&mut app, KeyCode::Esc));
-    let command = app.launch.as_ref().expect("new session should launch");
-    assert_eq!(command.get_program(), "claude");
-    assert_eq!(command.get_args().len(), 0);
-    assert_eq!(
-        command.get_current_dir(),
-        Some(std::env::current_dir().unwrap().as_path())
-    );
-    assert!(app.last_session.is_none());
+    assert!(!key(&mut app, KeyCode::Esc));
+    assert!(app.launch.is_none());
 }
 
 #[test]
-fn escape_resumes_last_opened_session() {
-    let (_dir, mut app) = fixture();
-    assert!(key(&mut app, KeyCode::Enter));
-    app.launch.take().unwrap();
-    // True leaves the dashboard for either quit or launch; the command distinguishes them.
-    assert!(key(&mut app, KeyCode::Esc));
-    assert_resume(&app);
-}
-
-#[test]
-fn escape_after_session_removed_opens_new_session() {
-    let (_dir, mut app) = fixture();
-    assert!(key(&mut app, KeyCode::Enter));
-    app.launch.take().unwrap();
-    let last_session = app.last_session.clone();
-    app.sessions.clear();
-    app.view.set_sessions(Vec::new(), false);
-    assert!(key(&mut app, KeyCode::Esc));
-    let command = app.launch.as_ref().expect("new session should launch");
-    assert_eq!(command.get_program(), "claude");
-    assert_eq!(command.get_args().len(), 0);
-    assert_eq!(
-        command.get_current_dir(),
-        Some(std::env::current_dir().unwrap().as_path())
-    );
-    assert_eq!(app.last_session, last_session);
-}
-
-#[test]
-fn escape_remembers_fork_but_not_new() {
+fn escape_after_fork_stays_in_dashboard() {
     let (_dir, mut app) = fixture();
     assert!(key(&mut app, KeyCode::Char('f')));
     app.launch.take().unwrap();
-    assert!(app.handle_action(Some(Action::New)));
-    app.launch.take().unwrap();
-    assert!(key(&mut app, KeyCode::Esc));
-    assert_resume(&app);
+    assert!(!key(&mut app, KeyCode::Esc));
+    assert!(app.launch.is_none());
+}
 
+#[test]
+fn escape_after_session_removed_stays_in_dashboard() {
     let (_dir, mut app) = fixture();
-    assert!(app.handle_action(Some(Action::New)));
-    app.launch.take().unwrap();
-    assert!(key(&mut app, KeyCode::Esc));
-    assert!(app.launch.is_some());
-    assert!(app.last_session.is_none());
+    app.sessions.clear();
+    app.view.set_sessions(Vec::new(), false);
+    assert!(!key(&mut app, KeyCode::Esc));
+    assert!(app.launch.is_none());
 }
 
 #[test]
 fn escape_with_missing_directory_stays_in_dashboard() {
     let (dir, mut app) = fixture();
-    assert!(key(&mut app, KeyCode::Enter));
-    app.launch.take().unwrap();
     app.sessions[0].cwd = dir.path().join("missing");
     assert!(!key(&mut app, KeyCode::Esc));
     assert!(app.launch.is_none());
 }
 
 #[test]
-fn control_c_after_open_quits() {
+fn control_c_after_fork_quits() {
     let (_dir, mut app) = fixture();
-    assert!(key(&mut app, KeyCode::Enter));
+    assert!(key(&mut app, KeyCode::Char('f')));
     app.launch.take().unwrap();
     assert!(app.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Char('c'),
@@ -1001,31 +952,27 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
         child.cwd = dir.path().into();
         app.hub = Hub::new(vec![Box::new(provider)]);
         app.sessions.push(child.clone());
-        for action in [
-            Action::Open(child.id.clone()),
-            Action::Resume(child.id.clone()),
-        ] {
-            assert_eq!(app.handle_action(Some(action)), manager);
-            if manager {
-                let command = app.launch.take().unwrap();
-                assert_eq!(command.get_program(), "codex");
-                assert_eq!(
-                    command.get_args().collect::<Vec<_>>(),
-                    ["resume", "thread-13"]
-                );
-            } else {
-                assert!(app.launch.is_none());
-                let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
-                app.view.render(buffer.area, &mut buffer);
-                assert!(
-                    buffer
-                        .content
-                        .iter()
-                        .map(|cell| cell.symbol())
-                        .collect::<String>()
-                        .contains("Resume is not supported")
-                );
-            }
+        let action = Action::Resume(child.id.clone());
+        assert_eq!(app.handle_action(Some(action)), manager);
+        if manager {
+            let command = app.launch.take().unwrap();
+            assert_eq!(command.get_program(), "codex");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                ["resume", "thread-13"]
+            );
+        } else {
+            assert!(app.launch.is_none());
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+            app.view.render(buffer.area, &mut buffer);
+            assert!(
+                buffer
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .contains("Resume is not supported")
+            );
         }
         if !manager {
             for action in [
@@ -1048,7 +995,7 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
         };
         claude_child.parent = Some(app.sessions[0].id.clone());
         app.sessions.push(claude_child.clone());
-        assert!(!app.handle_action(Some(Action::Open(claude_child.id))));
+        assert!(!app.handle_action(Some(Action::Resume(claude_child.id))));
         assert!(app.launch.is_none());
     }
 }

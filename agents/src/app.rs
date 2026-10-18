@@ -133,7 +133,6 @@ pub struct App {
     terminal_task: Option<SessionKey>,
     /// Clients being reaped before the same session can open another terminal.
     closing_terminals: std::collections::HashMap<SessionKey, session_terminal::TerminalClose>,
-    last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
     task_log: Option<(SessionKey, PathBuf, Box<dyn crate::log::Reader>)>,
@@ -196,7 +195,6 @@ impl App {
             terminal: None,
             terminal_task: None,
             closing_terminals: std::collections::HashMap::new(),
-            last_session: None,
             log_stamp: None,
             full_log_stamp: None,
             task_log: None,
@@ -1017,8 +1015,7 @@ impl App {
             return false;
         };
         let target = match &action {
-            Action::Open(id)
-            | Action::Resume(id)
+            Action::Resume(id)
             | Action::OpenTerminal(id)
             | Action::Fork(id)
             | Action::Rename { id, .. }
@@ -1031,7 +1028,7 @@ impl App {
         if let Some(session) = target.and_then(|id| self.session(id))
             && !session.can_resume()
         {
-            if matches!(action, Action::Open(_) | Action::Resume(_)) {
+            if matches!(action, Action::Resume(_)) {
                 return self.handle_action(Some(Action::Unsupported("Resume")));
             }
             if matches!(action, Action::OpenTerminal(_)) {
@@ -1097,20 +1094,12 @@ impl App {
                 Ok(image) => self.view.attach_image(image),
                 Err(error) => self.view.set_notice(Some(error.to_string())),
             },
-            Action::Back => {
-                let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
-                else {
-                    return self.launch_new();
-                };
-                let id = session.id.clone();
-                return self.launch_session(Action::Resume(id), session);
-            }
             Action::ShowMore => {
                 self.hub.show_more();
                 self.view.set_loading(true);
                 self.refresh();
             }
-            Action::Open(id) | Action::Resume(id) => {
+            Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
                     return self.launch_session(Action::Resume(id), session);
                 }
@@ -1254,7 +1243,6 @@ impl App {
             .provider(session.id.provider)
             .launch(&action, Some(&session));
         if self.launch.is_some() {
-            self.last_session = Some(session.id);
             return true;
         }
         false

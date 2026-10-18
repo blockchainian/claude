@@ -118,12 +118,12 @@ fn enter_prompt_reaches_background_provider_and_displays_identity_failure() {
     let pending = screen(&mut app);
     assert!(!pending.contains(" · sending"));
     assert!(!pending.contains("registry race prompt"), "{pending}");
-    assert!(!app.handle_action(Some(Action::Open(id.clone()))));
+    assert!(!app.handle_action(Some(Action::Resume(id.clone()))));
     assert!(app.launch.is_none());
     assert!(!screen(&mut app).contains("Input is still being sent"));
     complete_input(&mut app, "Claude background session identity changed");
     assert!(screen(&mut app).contains("registry race prompt"));
-    assert!(app.handle_action(Some(Action::Open(id))));
+    assert!(app.handle_action(Some(Action::Resume(id))));
     assert!(app.launch.is_some());
 }
 
