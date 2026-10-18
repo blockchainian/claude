@@ -13,5 +13,5 @@ AskUserQuestion                                                    子 命 令  
                                    1. 不 显 示  (Recommended): cd 只 是 换 目 录 ， 几 乎 每 条 都 有 ， 显 示 出 来 是 噪 音 。
                                    2. 显 示  cd: 只 显 示  cd 这 个 名 字 ， 不 带 参 数 。
                                                                       ↓
-Your questions have been answered: "怎 么 判 断 命 令 后 面 那 个 词 是 子 命 令 ？ 比 如  `rg -n 'background' src` 里 的  background 是 搜 索 词 、 `cat …
-cat, rg, sed, git {status,branch}, cargo {test,clippy}, "cd 要 不 要 显 示 ？ "="显 示  cd". You can now continue with these answers in m…
+                                                       ● 子 命 令  → 白 名 单  (Recommended)
+                                                       ● cd → 显 示  cd

@@ -614,11 +614,19 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             }
             crate::providers::tool::mcp_content(&content)
         };
-        if let Some(Output::Questions) = mode
-            && result.error
-            && let Some(output) = crate::providers::tool::rejected_questions(&result.content)
-        {
-            return vec![text_section("output", &output)];
+        if let Some(Output::Questions) = mode {
+            let listed = if result.error {
+                crate::providers::tool::rejected_answers(&input["questions"], &result.content)
+            } else {
+                serde_json::from_value(value["answers"].clone())
+                    .ok()
+                    .map(|answers| {
+                        crate::providers::tool::answer_list(&value["questions"], &answers)
+                    })
+            };
+            if let Some(output) = listed {
+                return vec![text_section("output", &output)];
+            }
         }
         if result.error {
             return generic();

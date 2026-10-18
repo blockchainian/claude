@@ -114,43 +114,64 @@ fn ask_question_input_is_a_copyable_numbered_list() {
     }
 }
 
+fn with_result(fixture: &str, content: &str) -> crate::log::Event {
+    let mut records: Vec<serde_json::Value> = fixture
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    records[1]["message"]["content"][0]["content"] = content.into();
+    question_event(
+        &records
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
 #[test]
-fn ask_question_rejection_moves_questions_before_explanation() {
-    let event = question_event(REJECTED);
-    let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
-    let original = record["message"]["content"][0]["content"].as_str().unwrap();
-    let (explanation, questions) = original.split_once("Questions asked:").unwrap();
-    assert_eq!(
-        output(&event),
-        format!(
-            "Questions asked:{}\n\n{}",
-            questions.trim_end(),
-            explanation.trim_end()
-        )
-    );
+fn ask_question_answers_list_headers_like_the_submit_tab() {
+    let event = question_event(ANSWERED);
+    let record: serde_json::Value = serde_json::from_str(ANSWERED.lines().nth(1).unwrap()).unwrap();
+    let result = &record["toolUseResult"];
+    let expected = result["questions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|question| {
+            format!(
+                "● {} → {}",
+                question["header"].as_str().unwrap(),
+                result["answers"][question["question"].as_str().unwrap()]
+                    .as_str()
+                    .unwrap()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(output(&event), expected);
     assert!(log::open_text(&event).contains(output(&event)));
 }
 
 #[test]
-fn ask_question_outputs_without_marker_are_unchanged() {
-    let answered = question_event(ANSWERED);
-    let record: serde_json::Value = serde_json::from_str(ANSWERED.lines().nth(1).unwrap()).unwrap();
+fn ask_question_rejections_list_what_was_answered() {
     assert_eq!(
-        output(&answered),
-        record["message"]["content"][0]["content"].as_str().unwrap()
+        output(&question_event(REJECTED)),
+        "Chat about this\n\n⚠ You have not answered all questions"
     );
-    let mut records: Vec<serde_json::Value> = REJECTED
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    records[1]["message"]["content"][0]["content"] = "The tool use was rejected.".into();
-    let fixture = records
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
+    let original = record["message"]["content"][0]["content"].as_str().unwrap();
+    let answered = original.replace("(No answer provided)", "Answer: 直接隐藏");
     assert_eq!(
-        output(&question_event(&fixture)),
+        output(&with_result(REJECTED, &answered)),
+        "Chat about this\n\n● 压缩摘要 → 直接隐藏"
+    );
+    let rejected = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+    assert_eq!(output(&with_result(REJECTED, rejected)), "Rejected");
+    let noted = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nask me later";
+    assert_eq!(output(&with_result(REJECTED, noted)), "Rejected\n\nask me later");
+    assert_eq!(
+        output(&with_result(REJECTED, "The tool use was rejected.")),
         "The tool use was rejected."
     );
 }

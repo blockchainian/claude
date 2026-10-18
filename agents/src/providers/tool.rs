@@ -1,5 +1,6 @@
 use crate::log::{Section, ToolCall};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 pub(crate) fn json_input(value: &Value) -> Vec<Section> {
     if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
@@ -347,6 +348,59 @@ pub(crate) fn question_texts(input: &Value) -> Vec<String> {
         .filter_map(|question| question["question"].as_str())
         .map(str::to_owned)
         .collect()
+}
+
+/// Lists an ask's answers the way the question view's Submit tab does: a warning while
+/// questions are unanswered, then one `● header → answer` line per answered question.
+pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>) -> String {
+    let questions = questions.as_array().map(Vec::as_slice).unwrap_or_default();
+    let mut blocks = Vec::new();
+    if questions
+        .iter()
+        .any(|question| !answers.contains_key(question["question"].as_str().unwrap_or("")))
+    {
+        blocks.push("⚠ You have not answered all questions".to_owned());
+    }
+    let lines: Vec<String> = questions
+        .iter()
+        .filter_map(|question| {
+            let answer = answers.get(question["question"].as_str()?)?;
+            let header = text(question, "header").or_else(|| text(question, "question"))?;
+            Some(format!("● {header} → {answer}"))
+        })
+        .collect();
+    if !lines.is_empty() {
+        blocks.push(lines.join("\n"));
+    }
+    blocks.join("\n\n")
+}
+
+/// Shows a rejected ask as `Rejected` with the user's note, or as `Chat about this` with
+/// the answers its "Questions asked:" list reports; other errors keep their text.
+pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> {
+    let text = text.strip_prefix("Error: ").unwrap_or(text);
+    let reason = text.strip_prefix("The user doesn't want to proceed with this tool use.")?;
+    let Some((_, said)) = reason.split_once("the user said:\n") else {
+        return Some("Rejected".to_owned());
+    };
+    if !said.starts_with("The user wants to clarify these questions.") {
+        return Some(format!("Rejected\n\n{}", said.trim()));
+    }
+    let mut answers = BTreeMap::new();
+    let (_, asked) = said.split_once("Questions asked:")?;
+    let mut lines = asked.lines().map(str::trim).peekable();
+    while let Some(line) = lines.next() {
+        let Some(question) = line
+            .strip_prefix("- \"")
+            .and_then(|line| line.strip_suffix('"'))
+        else {
+            continue;
+        };
+        if let Some(answer) = lines.peek().and_then(|line| line.strip_prefix("Answer: ")) {
+            answers.insert(question.to_owned(), answer.to_owned());
+        }
+    }
+    Some(format!("Chat about this\n\n{}", answer_list(questions, &answers)))
 }
 
 pub(crate) fn rejected_questions(text: &str) -> Option<String> {
