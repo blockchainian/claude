@@ -2261,7 +2261,10 @@ fn archive_dialog_shows_codex_copy_and_one_accepts_at_once() {
         .map(str::trim)
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(dialog.contains("then archives them. Their history can be restored from the"));
+    assert!(dialog.contains(
+        "This stops any running work in this task and its child agents, then archives them."
+    ));
+    assert!(!dialog.contains("resume picker"));
     assert!(rendered.contains("1. Archive task and child agents"));
     assert!(view.confirm_dialog.as_ref().unwrap().confirm);
     assert!(rendered.find("1. Archive").unwrap() < rendered.find("2. Cancel").unwrap());
@@ -2298,11 +2301,16 @@ fn archive_dialog_shows_claude_copy_and_one_accepts_at_once() {
         .map(str::trim)
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(dialog.contains("This stops the session, then archives it on claude.ai. Its history can be restored from the resume picker."));
-    assert!(rendered.contains("1. Archive session"));
-    assert!(!rendered.contains("Archive task and child agents"));
+    assert!(dialog.contains(
+        "This stops any running work in this task and its child agents, then archives them."
+    ));
+    assert!(!dialog.contains("resume picker"));
+    assert!(rendered.contains("1. Archive task and child agents"));
     assert!(view.confirm_dialog.as_ref().unwrap().confirm);
-    assert!(rendered.find("1. Archive session").unwrap() < rendered.find("2. Cancel").unwrap());
+    assert!(
+        rendered.find("1. Archive task and child agents").unwrap()
+            < rendered.find("2. Cancel").unwrap()
+    );
     assert_eq!(
         key(&mut view, KeyCode::Char('1')),
         Some(Action::Archive(session_key("42")))

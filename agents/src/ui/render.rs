@@ -492,14 +492,9 @@ impl View {
         let width = area.width.min(80);
         let content_width = usize::from(width.saturating_sub(4).max(1));
         let (title, description, label) = match dialog.removal {
-            Removal::Archive if dialog.id.provider == ProviderId::Claude => (
-                format!("Archive “{}”?", dialog.title),
-                "This stops the session, then archives it on claude.ai. Its history can be restored from the resume picker.",
-                "Archive session",
-            ),
             Removal::Archive => (
                 format!("Archive “{}”?", dialog.title),
-                "This stops any running work in this task and its child agents, then archives them. Their history can be restored from the resume picker.",
+                "This stops any running work in this task and its child agents, then archives them.",
                 "Archive task and child agents",
             ),
             Removal::Delete => (
