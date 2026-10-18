@@ -72,7 +72,7 @@ fn terminal_disabled_prompt_keeps_mirrored_marker_and_dim_reason() {
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     tmux.wait_for(|capture| capture.contains("Example thread 1 ❯"));
     tmux.run(&["send-keys", "-t", "probe", "Down"]);
-    let expected = "升级命令中心 ❮ Subagent cannot take input";
+    let expected = "升级命令中心 ❮ Not supported";
     tmux.wait_for(|capture| capture.contains(expected));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&capture, 160, 45);

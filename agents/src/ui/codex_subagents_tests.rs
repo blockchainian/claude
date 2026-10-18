@@ -123,3 +123,40 @@ fn nested_rows_render_increasing_indent() {
 
 #[path = "codex_subagent_details_tests.rs"]
 mod details;
+
+#[test]
+fn nested_rows_align_status_and_time_columns() {
+    let mut root = session("root", "Root task", SessionStatus::Working, 120);
+    let mut child = session("child", "Child task", SessionStatus::Ready, 120);
+    let mut grandchild = session("grandchild", "Deep task", SessionStatus::Ready, 120);
+    child.parent = Some(root.id.clone());
+    grandchild.parent = Some(child.id.clone());
+    let reference = Utc::now();
+    root.updated_at = reference - Duration::minutes(2);
+    child.updated_at = root.updated_at;
+    grandchild.updated_at = root.updated_at;
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![root, child, grandchild], false);
+    for width in [46, 48, 50, 80] {
+        let area = Rect::new(3, 2, width, 8);
+        let mut buf = Buffer::empty(area);
+        view.render_center_rows(area, &mut buf, reference);
+        let rows: Vec<_> = (area.y..area.bottom())
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect();
+        let root = rows.iter().find(|row| row.contains("Root task")).unwrap();
+        let deep = rows.iter().find(|row| row.contains("Deep task")).unwrap();
+        assert_eq!(
+            root.find("Working").map(|offset| root[..offset].width()),
+            deep.find("Ready").map(|offset| deep[..offset].width()),
+            "width={width}:\n{root}\n{deep}"
+        );
+        for row in [root, deep] {
+            assert!(row.ends_with("2m ago"), "width={width}: {row}");
+        }
+    }
+}

@@ -398,7 +398,7 @@ mod tests {
         assert!(screen.contains("Task ❮ Running in a terminal"), "{screen}");
         assert!(!screen.contains("denied"));
         let area = Rect::new(0, 0, 100, 1);
-        for reason in ["Running in a terminal", "Subagent cannot take input"] {
+        for reason in ["Running in a terminal", "Not supported"] {
             let mut buffer = Buffer::empty(area);
             editor.render(area, &mut buffer, "升级命令中心", Some(reason));
             use unicode_segmentation::UnicodeSegmentation;

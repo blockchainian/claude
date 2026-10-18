@@ -12,8 +12,7 @@ fn columns(area: Rect, indent: u16) -> (Rect, Rect, Rect) {
     const UPDATED_WIDTH: u16 = 9;
     const GAP: u16 = 2;
 
-    let gutter = area.width.min(indent.saturating_add(2));
-    let available = area.width - gutter;
+    let available = area.width.saturating_sub(2);
     let status_metadata = GAP + STATUS_WIDTH;
     let all_metadata = status_metadata + GAP + UPDATED_WIDTH;
     let (metadata, status_width, updated_width) = if available >= MIN_TITLE_WIDTH + all_metadata {
@@ -23,7 +22,9 @@ fn columns(area: Rect, indent: u16) -> (Rect, Rect, Rect) {
     } else {
         (0, 0, 0)
     };
-    let title = Rect::new(area.x + gutter, area.y, available - metadata, area.height);
+    let title_space = area.width - metadata;
+    let gutter = title_space.min(indent.saturating_add(2));
+    let title = Rect::new(area.x + gutter, area.y, title_space - gutter, area.height);
     let updated = Rect::new(
         area.right() - updated_width,
         area.y,
@@ -31,7 +32,7 @@ fn columns(area: Rect, indent: u16) -> (Rect, Rect, Rect) {
         area.height,
     );
     let status = Rect::new(
-        title.right() + metadata.min(GAP),
+        area.right() - metadata + metadata.min(GAP),
         area.y,
         status_width,
         area.height,
