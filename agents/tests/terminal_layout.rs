@@ -1795,14 +1795,14 @@ fn terminal_details_section_positions() {
                 }),
                 "{model}"
             );
-            assert!(model.ends_with(" medium╶─"), "{model}");
+            assert!(model.contains("claude-opus-5-5 · medium"), "{model}");
             assert!(!model.contains("Model"));
-            assert!(!model.contains('·'));
+            assert!(model.contains('·'));
             let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
             let colored = captured_screen(&colored, width, 70);
             for (start, length) in [
                 (model_left + 2, "claude-opus-5-5".len()),
-                (model_right - 2 - "medium".len(), "medium".len()),
+                (model_left + 2 + "claude-opus-5-5 · ".width(), "medium".len()),
             ] {
                 for x in start..start + length {
                     let cell = colored.screen().cell(model_y as u16, x as u16).unwrap();
@@ -1822,7 +1822,7 @@ mod terminal_codex_exit;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_log_new_jump_uses_list_bottom_border() {
+fn terminal_log_metadata_aligns_new_with_clock() {
     for width in [80, 200] {
         let (_directory, tmux, transcript) = start_probe("log-latest-border");
         tmux.run(&[
@@ -1886,33 +1886,30 @@ fn terminal_log_new_jump_uses_list_bottom_border() {
         let older = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = older.lines().collect();
         assert!(
-            rows[bottom].contains("↓ 1 New"),
-            "New missing from bottom border: {older}"
+            rows[model].contains("↓ 1 New"),
+            "New missing from model border: {older}"
         );
-        assert!(!rows[top].contains("New"), "New on top border: {older}");
+        assert!(rows[model].contains(" · medium"), "{older}");
         assert!(
             (rows[model].contains("claude-opus-5-5") || rows[model].contains("Opus 5.5"))
                 && rows[model].contains("medium"),
             "{older}"
         );
-        let byte = rows[bottom].find("↓ 1 New").unwrap();
-        let jump = rows[bottom][..byte].width();
-        let panel_width = width - column - 1;
-        let button_width = " ↓ 1 New ".width();
-        let expected = (column + panel_width / 2 - button_width / 2)
-            .min(column + panel_width - 10 - button_width);
-        assert_eq!(jump - 1, expected);
+        let byte = rows[model].find("↓ 1 New").unwrap();
+        let jump = rows[model][..byte].width();
+        assert_eq!(jump + "↓ 1 New".width(), width - 1);
+        println!("{older}");
         if width < 150 {
             tmux.mouse(65, 2, bottom + 3, false);
             let scrolled = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             assert_ne!(scrolled, older);
             assert!(!scrolled.contains("↑ Top"), "{scrolled}");
             assert!(
-                scrolled.lines().nth(bottom).unwrap().contains("↓ 1 New"),
+                scrolled.lines().nth(model).unwrap().contains("↓ 1 New"),
                 "{scrolled}"
             );
         }
-        tmux.mouse(0, jump, bottom, true);
+        tmux.mouse(0, jump, model, true);
         tmux.wait_for(|capture| {
             !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
         });
@@ -1933,14 +1930,14 @@ fn terminal_log_new_jump_uses_list_bottom_border() {
         });
         tmux.mouse(64, column, top + 1, false);
         tmux.wait_for(|capture| capture.contains("decision"));
-        double_click(jump, bottom);
+        double_click(jump, model);
         tmux.wait_for(|capture| {
             !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
         });
         let path = std::env::temp_dir().join(format!("agents-latest-border-{width}x50.txt"));
         std::fs::write(&path, older).unwrap();
         println!(
-            "{{\"new_bottom_border\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            "{{\"new_clock_alignment\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
             path.display()
         );
     }

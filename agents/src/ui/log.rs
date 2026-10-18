@@ -145,7 +145,7 @@ impl View {
         self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
-    /// Draws the button that jumps back to the newest row, centered over the rows' content, while
+    /// Draws the button that jumps back to the newest row at the time column’s right edge while
     /// an older event is selected and new events have arrived.
     pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
@@ -158,7 +158,10 @@ impl View {
             return;
         }
         let label = format!(" ↓ {} New ", viewport.log_unseen);
-        let jump = log_content_centered(area, label.width() as u16);
+        let width = (label.width() as u16).min(area.width.saturating_sub(2));
+        let right = viewport.log.right().saturating_add(1).min(area.right());
+        let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
+        Clear.render(jump, buf);
         Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);
         viewport.log_jump = jump;
     }
@@ -696,6 +699,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
 }
 
 /// Centers a one-row label of `width` on the panel midline, clear of the clock column's gap.
+#[cfg(test)]
 pub(super) fn log_content_centered(area: Rect, width: u16) -> Rect {
     let (content, _) = log_row_areas(area);
     let x = super::centering::centered_x(area, content, width);

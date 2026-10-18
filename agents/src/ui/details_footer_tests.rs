@@ -104,7 +104,7 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
             assert_eq!(model.y, y);
             assert_eq!(effort.y, y);
             assert_eq!(model.x, layout.log.x + u16::from(width < 150));
-            assert_eq!(effort.right(), layout.log.right() - 1);
+            assert_eq!(effort.x, model.right() + 3);
             let text = |rect: Rect| {
                 (rect.x..rect.right())
                     .map(|x| buf[(x, rect.y)].symbol())
@@ -117,6 +117,62 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
             assert_eq!(buf[(model.x, y)].style(), reference.style());
             assert_eq!(buf[(effort.x, y)].style(), reference.style());
             assert!(model.right() < effort.x);
+        }
+    }
+}
+
+#[test]
+fn model_effort_border_groups_optional_values_and_right_aligns_new() {
+    for width in [80, 149, 150, 220] {
+        for (model, effort, expected) in [
+            (Some("Opus"), Some("high"), "Opus · high"),
+            (Some("Opus"), None, "Opus"),
+            (None, Some("high"), "high"),
+            (None, None, ""),
+        ] {
+            for unseen in [0, 3] {
+                let mut view = fixture();
+                let selected = &mut view.rows[view.selected];
+                selected.model = model.map(str::to_owned);
+                selected.model_label = model.map(str::to_owned);
+                selected.effort = effort.map(str::to_owned);
+                view.log = super::log_fixture().0.log;
+                view.select_log_event(Some(0));
+                view.viewport.borrow_mut().log_unseen = unseen;
+                let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
+                view.render(buf.area, &mut buf);
+                let viewport = view.viewport.borrow();
+                let model_y = if width >= 150 {
+                    viewport.log.bottom()
+                } else {
+                    viewport.log.y - 1
+                };
+                let line: String = (viewport.log.x + u16::from(width < 150)..buf.area.right())
+                    .map(|x| buf[(x, model_y)].symbol())
+                    .collect();
+                if !expected.is_empty() {
+                    assert!(line.starts_with(expected), "{line}");
+                }
+                assert_eq!(
+                    line.contains('·'),
+                    model.is_some() && effort.is_some(),
+                    "{line}"
+                );
+                if unseen == 0 {
+                    assert!(viewport.log_jump.is_empty());
+                } else {
+                    let jump = viewport.log_jump;
+                    assert_eq!(jump.y, model_y);
+                    assert_eq!(
+                        jump.right() - 1,
+                        super::super::log::log_row_areas(viewport.log).1.right()
+                    );
+                    let text: String = (jump.x..jump.right())
+                        .map(|x| buf[(x, jump.y)].symbol())
+                        .collect();
+                    assert_eq!(text, " ↓ 3 New ");
+                }
+            }
         }
     }
 }

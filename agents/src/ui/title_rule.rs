@@ -4,8 +4,10 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+pub(super) const SEPARATOR: &str = " · ";
+
 pub(super) fn title_rule(title: &str, width: usize, elapsed: Option<&str>) -> Line<'static> {
-    let elapsed_width = elapsed.map_or(0, |text| text.width() + " · ".width());
+    let elapsed_width = elapsed.map_or(0, |text| text.width() + SEPARATOR.width());
     let mut title = super::line_truncation::truncate_line_with_ellipsis_if_overflow(
         Line::from(Span::styled(title.to_owned(), Style::new().not_dim())),
         width.saturating_sub(4).saturating_sub(elapsed_width),
@@ -14,7 +16,9 @@ pub(super) fn title_rule(title: &str, width: usize, elapsed: Option<&str>) -> Li
         span.style = Style::new().not_dim();
     }
     if let Some(elapsed) = elapsed {
-        title.spans.extend([" · ".dim(), elapsed.to_owned().dim()]);
+        title
+            .spans
+            .extend([SEPARATOR.dim(), elapsed.to_owned().dim()]);
     }
     title.spans.insert(0, "─ ".dim());
     title.spans.push(" ".not_dim());

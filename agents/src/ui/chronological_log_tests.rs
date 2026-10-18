@@ -284,7 +284,7 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
 }
 
 #[test]
-fn chronological_new_bottom_border_preserves_center_and_model_targets() {
+fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
     use unicode_width::UnicodeWidthStr;
     for width in [60, 80, 100, 149, 150, 200] {
         for unseen in [3, 100_000_000] {
@@ -303,11 +303,9 @@ fn chronological_new_bottom_border_preserves_center_and_model_targets() {
             let top = viewport.log_borders[0];
             let bottom = viewport.log_borders[1];
             let label = format!(" ↓ {unseen} New ");
-            assert_eq!(
-                jump,
-                super::log::log_content_centered(bottom, label.width() as u16),
-                "width {width}"
-            );
+            assert_eq!(jump.right() - 1, viewport.log.right(), "width {width}");
+            assert_eq!(jump.width, label.width() as u16);
+            assert_eq!(jump.y, if width >= 150 { bottom.y } else { top.y });
             let drawn: String = (jump.x..jump.right())
                 .map(|x| buf[(x, jump.y)].symbol())
                 .collect();
@@ -324,8 +322,8 @@ fn chronological_new_bottom_border_preserves_center_and_model_targets() {
                     "{field:?} overlaps New at width {width}"
                 );
             }
-            assert!(!top.intersects(jump));
-            let border_click = (top.right() - 1, top.y);
+            assert_eq!(top.intersects(jump), width < 150);
+            let border_click = (top.x, top.y);
             drop(viewport);
             // The plain top border selects oldest; the labeled button still selects latest.
             for _ in 0..2 {

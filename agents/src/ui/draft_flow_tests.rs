@@ -254,7 +254,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
             }
         );
         assert_eq!(effort.y, model.y);
-        assert_eq!(effort.right(), log.right() - 1);
+        assert_eq!(effort.x, model.right() + 3);
         assert!(model.right() < effort.x);
         assert!(
             buffer[(effort.x, model.y)]
@@ -336,7 +336,12 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                 width - rule_left,
                 1,
             );
-            let available = (rule.width / 2).saturating_sub(4);
+            let total = rule.width.saturating_sub(4);
+            let available = if effort.is_some() {
+                total.saturating_sub(6.min(total / 2) + 3)
+            } else {
+                total
+            };
             let show_effort = effort.is_some() && available > 0;
             // The catalog's name for `claude-opus-5-5`.
             let name = "Opus 5.5";
@@ -355,13 +360,12 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             assert_eq!(drawn, expected_name, "width={width}");
             let targets = view.viewport.borrow().field_targets.clone();
             let y = rule.y;
-            let effort_width = available.min(6);
+            let effort_start = start + name_width + 3;
+            let effort_width = rule.right().saturating_sub(2 + effort_start).min(6);
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
-                } else if show_effort
-                    && (rule.right() - 2 - effort_width..rule.right() - 2).contains(&x)
-                {
+                } else if show_effort && (effort_start..effort_start + effort_width).contains(&x) {
                     Some(Field::Effort)
                 } else {
                     None

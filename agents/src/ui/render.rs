@@ -431,8 +431,6 @@ impl View {
                 rule(border, buf);
                 border.y
             };
-            let log_rule = self.viewport.borrow().log_borders[1];
-            self.render_log_jump(log_rule, buf);
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
             let left = if area.width >= WIDE_LAYOUT_COLUMNS {
@@ -440,6 +438,10 @@ impl View {
             } else {
                 area.x
             };
+            self.render_log_jump(
+                Rect::new(left, model_y, area.right().saturating_sub(left), 1),
+                buf,
+            );
             self.render_log_model(
                 Rect::new(left, model_y, area.right().saturating_sub(left), 1),
                 buf,
@@ -692,14 +694,10 @@ impl View {
         }
     }
 
-    /// Writes the selected session's model on the left of the log's border and its effort on
-    /// the right; both open their pickers when clicked.
+    /// Groups the model and effort on the left; each value opens its own picker.
     fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
         let (model, effort) = match (self.selected_row(), self.selected_draft()) {
-            (Some(session), _) => (
-                self.session_model_text(session),
-                session.effort.clone(),
-            ),
+            (Some(session), _) => (self.session_model_text(session), session.effort.clone()),
             // A new task shows its defaults too, so both stay clickable.
             (None, Some(draft)) => (
                 Some(draft.setup.model.as_deref().map_or_else(
@@ -717,26 +715,61 @@ impl View {
             ),
             (None, None) => return,
         };
-        // The jump centers without the clock column; both end labels must stay outside it.
+        let separator = super::title_rule::SEPARATOR;
         let jump = self.viewport.borrow().log_jump;
-        let center = if jump.intersects(rule) {
-            rule.width
-                .saturating_sub(jump.x.saturating_sub(rule.x).saturating_mul(2))
+        let right = if jump.intersects(rule) {
+            jump.x.saturating_sub(1)
         } else {
-            0
+            rule.right().saturating_sub(2)
         };
-        let (model_area, effort_area) = render_rule_ends(
-            rule,
-            center,
-            model.map(|model| Span::styled(model, style::time_style())),
-            effort.map(|effort| Span::styled(effort, style::time_style())),
-            buf,
-        );
-        let mut viewport = self.viewport.borrow_mut();
-        for (area, field) in [(model_area, Field::Model), (effort_area, Field::Effort)] {
-            if let Some(area) = area {
-                viewport.field_targets.push((area, field));
+        let mut x = rule.x + 2;
+        let values: Vec<_> = [(model, Field::Model), (effort, Field::Effort)]
+            .into_iter()
+            .filter_map(|(value, field)| {
+                value
+                    .filter(|value| !value.is_empty())
+                    .map(|value| (value, field))
+            })
+            .collect();
+        for (index, (value, field)) in values.iter().enumerate() {
+            let gap = if index == 0 {
+                0
+            } else {
+                separator.width() as u16
+            };
+            let mut available = right.saturating_sub(x).saturating_sub(gap);
+            if index == 0 && values.len() == 2 {
+                let reserve = (values[1].0.width() as u16).min(available / 2);
+                available = available.saturating_sub(reserve + separator.width() as u16);
             }
+            if available == 0 {
+                break;
+            }
+            if gap > 0 {
+                Line::from(separator)
+                    .style(style::time_style())
+                    .render(Rect::new(x, rule.y, gap, 1), buf);
+                x += gap;
+            } else {
+                buf[(x - 1, rule.y)]
+                    .set_symbol("╴")
+                    .set_style(style::time_style());
+            }
+            let text = truncate_line_with_ellipsis_if_overflow(
+                Line::from(value.clone()),
+                usize::from(available),
+            );
+            let width = text.width() as u16;
+            let area = Rect::new(x, rule.y, width, 1);
+            text.style(style::time_style()).render(area, buf);
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .push((area, *field));
+            x += width;
+            buf[(x, rule.y)]
+                .set_symbol(" ")
+                .set_style(style::time_style());
         }
     }
     pub(super) fn render_details(

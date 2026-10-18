@@ -506,8 +506,8 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     assert_eq!(
         (jump.0, jump.1),
         (
-            super::centering::centered_x(rect, super::log::log_row_areas(rect).0, label) + 1,
-            rect.bottom()
+            rect.right() + 2 - label,
+            rect.y - 1
         )
     );
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
@@ -2629,7 +2629,13 @@ fn log_model_and_effort_use_dim_style_and_picker_targets() {
                                 area.x
                             }) + 2
                         } else {
-                            area.right() - 2 - rect.width
+                            targets
+                                .iter()
+                                .find(|(_, value)| *value == Field::Model)
+                                .unwrap()
+                                .0
+                                .right()
+                                + 3
                         }
                     );
                     for (offset, symbol) in text.chars().enumerate() {
@@ -8481,7 +8487,7 @@ fn mixed_open_outputs_keep_literal_markup_and_copy_pretty_json() {
 }
 
 #[test]
-fn log_new_button_keeps_centering_and_target() {
+fn log_new_button_keeps_right_alignment_and_target() {
     for width in [60, 100, 149, 150, 200] {
         for unseen in [1, 3] {
             let (mut view, now) = log_fixture();
@@ -8497,18 +8503,15 @@ fn log_new_button_keeps_centering_and_target() {
             let layout = view.center_layout(Rect::new(0, 0, width, 40));
             let viewport = view.viewport.borrow();
             let latest = viewport.log_jump;
-            let border_y = layout.log.bottom();
-            assert_eq!(
-                latest.x,
-                super::centering::centered_x(
-                    layout.log,
-                    super::log::log_row_areas(layout.log).0,
-                    latest.width,
-                )
-            );
+            let border_y = if width >= 150 {
+                layout.log.bottom()
+            } else {
+                layout.log.y - 1
+            };
+            assert_eq!(latest.right() - 1, layout.log.right());
             assert_eq!(latest.y, border_y);
             let label = format!(" ↓ {unseen} New ");
-            assert_eq!(rendered_cell(&screen, &label), (latest.x, latest.y));
+            assert_eq!(rendered_cell(&screen, label.trim_end()), (latest.x, latest.y));
             let row = screen.lines().nth(usize::from(border_y)).unwrap();
             assert_eq!(row.chars().next(), Some('─'));
             drop(viewport);
@@ -9039,7 +9042,7 @@ fn border_labels_use_half_lines_beside_screen_edge_corners() {
             .unwrap()
             .0;
         let row: String = (0..width).map(|x| buf[(x, model.y)].symbol()).collect();
-        assert!(row.ends_with(" medium╶─"), "{row}");
+        assert!(row.contains("opus · medium "), "{row}");
         for x in [model.x - 1, width - 2] {
             assert!(
                 buf[(x, model.y)]
