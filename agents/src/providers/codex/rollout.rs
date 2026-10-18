@@ -18,7 +18,9 @@ fn tool_kind(name: &str) -> Kind {
 
 const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
     subjects: &[
-        ("exec_command", Subject::Field("path")),
+        ("exec_command", Subject::Shell { description: false }),
+        ("shell", Subject::Shell { description: false }),
+        ("CommandExecution", Subject::Shell { description: false }),
         ("apply_patch", Subject::Field("paths")),
         ("AskUserQuestion", Subject::QuestionHeaders),
         ("request_user_input", Subject::QuestionHeaders),
@@ -32,7 +34,9 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("Skill", Subject::Field("skill")),
     ],
     inputs: &[
-        ("exec_command", Input::Field("command"), Format::Text),
+        ("exec_command", Input::Shell, Format::Text),
+        ("shell", Input::Shell, Format::Text),
+        ("CommandExecution", Input::Shell, Format::Text),
         ("apply_patch", Input::Field(""), Format::Text),
         ("AskUserQuestion", Input::QuestionList, Format::Text),
         ("request_user_input", Input::QuestionList, Format::Text),
@@ -536,7 +540,7 @@ fn tool_body(payload: &Value) -> Option<String> {
     // Wrapper calls are represented by their completed inner items.
     if matches!(
         name.rsplit('.').next(),
-        Some("exec" | "exec_command" | "shell" | "apply_patch" | "view_image")
+        Some("exec" | "apply_patch" | "view_image")
     ) {
         return None;
     }
@@ -633,23 +637,13 @@ fn result_section(text: &str) -> Section {
 fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
     let (name, arguments, output) = match item_type {
-        "CommandExecution" => {
-            let paths = item["parsed_cmd"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|parsed| parsed["type"] == "read")
-                .filter_map(|parsed| parsed["path"].as_str())
-                .collect::<Vec<_>>()
-                .join(" · ");
-            (
-                "exec_command".to_owned(),
-                serde_json::json!({"path": paths, "command": command.unwrap()}),
-                item["aggregated_output"]
-                    .as_str()
-                    .map(|text| vec![text_section("output", text)]),
-            )
-        }
+        "CommandExecution" => (
+            "exec_command".to_owned(),
+            serde_json::json!({"command": command.unwrap()}),
+            item["aggregated_output"]
+                .as_str()
+                .map(|text| vec![text_section("output", text)]),
+        ),
         "FileChange" => {
             let changes = item["changes"].as_object().unwrap();
             let output = changes
@@ -707,14 +701,8 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         }
         _ => (item_type.to_owned(), item.clone(), None),
     };
-    let (name, subject, mut input) =
+    let (name, subject, input) =
         crate::providers::tool::presentation(&name, &arguments, &TOOL_RULES);
-    if item_type == "CommandExecution" {
-        input = vec![Section::Shell {
-            text: arguments["command"].as_str().unwrap().to_owned(),
-            prefix: 0,
-        }];
-    }
     let display_name = shell_display_name(&name);
     let exit_code = item["exit_code"]
         .as_i64()
@@ -852,19 +840,18 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     };
     let call = completed_call(item, command_text);
     let body = call.title.clone();
-    let paths =
-        if matches!(item_type, "CommandExecution" | "FileChange") && !call.detail_left.is_empty() {
-            let mut offset = 0;
-            body.split(" · ")
-                .map(|path| {
-                    let range = offset..offset + path.len();
-                    offset += path.len() + " · ".len();
-                    range
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+    let paths = if item_type == "FileChange" && !call.detail_left.is_empty() {
+        let mut offset = 0;
+        body.split(" · ")
+            .map(|path| {
+                let range = offset..offset + path.len();
+                offset += path.len() + " · ".len();
+                range
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(Some(Event {
         completed_time: true,
         background: false,
@@ -1539,22 +1526,27 @@ mod tests {
     }
 
     #[test]
-    fn shell_response_titles_keep_tool_names_and_sections() {
+    fn shell_response_titles_use_command_subject_and_shell_detail() {
         let record = tool_records()
             .into_iter()
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let command = record["payload"]["item"]["command"][2].as_str().unwrap();
-        for name in ["exec_command", "shell", "CommandExecution"] {
+        for (name, field) in [
+            ("exec_command", "cmd"),
+            ("exec_command", "command"),
+            ("shell", "command"),
+            ("CommandExecution", "command"),
+        ] {
             let payload = serde_json::json!({
                 "type": "function_call", "name": name, "call_id": "shell",
-                "arguments": serde_json::json!({"command": command}).to_string(),
+                "arguments": serde_json::json!({field: command}).to_string(),
             });
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
-            assert_eq!(call.title, "Shell");
-            assert_eq!(call.detail_title, "Shell");
-            assert!(call.detail_left.is_empty());
+            assert_eq!(call.title, "cat, sed");
+            assert_eq!(call.detail_title, "cat, sed");
+            assert_eq!(call.detail_left, "Shell");
             let (_, _, input) = crate::providers::tool::presentation(
                 name,
                 &tool_arguments(&payload).unwrap(),
@@ -1566,6 +1558,35 @@ mod tests {
     }
 
     #[test]
+    fn shell_function_calls_supply_command_subjects() {
+        let record = tool_records()
+            .into_iter()
+            .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        let command = record["payload"]["item"]["command"][2].as_str().unwrap();
+        for field in ["cmd", "command"] {
+            let payload = serde_json::json!({
+                "type": "function_call", "name": "exec_command", "call_id": "shell",
+                "arguments": serde_json::json!({field: command}).to_string(),
+            });
+            assert_eq!(tool_body(&payload).as_deref(), Some("cat, sed"));
+            let file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(
+                file.as_file(),
+                "{}",
+                serde_json::json!({
+                    "type": "response_item", "timestamp": record["timestamp"], "payload": payload,
+                })
+            )
+            .unwrap();
+            let events = tail(file.path(), 100).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].body, "cat, sed");
+            assert_eq!(events[0].calls[0].detail_left, "Shell");
+        }
+    }
+
+    #[test]
     fn read_subject_and_file_change_use_captured_records() {
         let records = tool_records();
         let read = records
@@ -1573,10 +1594,7 @@ mod tests {
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
-        assert_eq!(
-            event.calls[0].detail_title,
-            "AGENTS.md · agents/AGENTS.md · agents/src/providers/codex/rollout.rs · agents/src/log.rs"
-        );
+        assert_eq!(event.calls[0].detail_title, "cat, sed");
         assert_eq!(event.calls[0].detail_left, "Shell");
         assert_eq!(event.body, event.calls[0].detail_title);
         let file = records
@@ -1805,10 +1823,7 @@ mod tests {
             .unwrap();
         let call = &completed_tool(record).unwrap().unwrap().calls[0];
         assert_eq!(call.id, record["payload"]["item"]["id"].as_str().unwrap());
-        assert_eq!(
-            call.title,
-            "AGENTS.md · agents/AGENTS.md · agents/src/providers/codex/rollout.rs · agents/src/log.rs"
-        );
+        assert_eq!(call.title, "cat, sed");
     }
 
     #[test]
@@ -2542,7 +2557,7 @@ mod tests {
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"exec_command","arguments":"{{\"cmd\":\"cargo check\"}}","call_id":"test"}}}}"#).unwrap();
         let result = summary(file.path()).unwrap();
         assert!(!result.turn_ended);
-        assert!(result.activity.is_none());
+        assert_eq!(result.activity.unwrap().label, "cargo check");
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:02Z","type":"event_msg","payload":{{"type":"turn_aborted","reason":"interrupted"}}}}"#).unwrap();
         assert!(summary(file.path()).unwrap().turn_ended);
     }

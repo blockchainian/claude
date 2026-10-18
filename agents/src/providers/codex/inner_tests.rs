@@ -46,7 +46,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .collect();
     assert_eq!(entries.len(), 2);
     let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
-    assert_eq!(bodies, ["Shell", "Shell"]);
+    assert_eq!(bodies, ["cat, git {log, status}, shasum", "gh pr"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
         assert_record_timing(entry, record);
@@ -59,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "Shell");
+    assert_eq!(entries[0].body, "type");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -102,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "Shell");
+    assert_eq!(entries[0].body, "sleep");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }
@@ -739,11 +739,11 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "Shell");
+    assert_eq!(event.body, "sleep");
     assert_eq!(call.name, "exec_command");
-    assert_eq!(call.title, "Shell");
-    assert_eq!(call.detail_title, "Shell");
-    assert!(call.detail_left.is_empty());
+    assert_eq!(call.title, "sleep");
+    assert_eq!(call.detail_title, "sleep");
+    assert_eq!(call.detail_left, "Shell");
     assert_eq!(
         call.input,
         vec![crate::log::Section::Shell {
@@ -760,4 +760,30 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     );
     assert_eq!(call.exit_code, None);
     assert_record_timing(event, &records("shell")[1]);
+}
+
+#[test]
+fn chained_shell_subject_groups_subcommands_without_arguments() {
+    let entries = events("git-chain");
+    assert_eq!(entries.len(), 1);
+    let event = &entries[0];
+    let call = &event.calls[0];
+    assert_eq!(event.body, "git {status, diff}, sed");
+    assert_eq!(call.title, event.body);
+    assert_eq!(call.detail_title, event.body);
+    assert_eq!(call.detail_left, "Shell");
+    assert!(event.paths.is_empty());
+    assert_eq!(call.name, "exec_command");
+    assert!(
+        matches!(&call.input[0], crate::log::Section::Shell { text, .. } if text.contains("git status --short && git diff --name-only"))
+    );
+    assert_record_timing(event, &records("git-chain")[1]);
+    assert_eq!(
+        summary(&fixture("git-chain"))
+            .unwrap()
+            .activity
+            .unwrap()
+            .label,
+        event.body
+    );
 }

@@ -40,7 +40,7 @@ fn codex_nonzero_exit_title_keeps_status_out_of_body() {
         detail.sections[0].title.left.as_deref(),
         Some("Shell · exit 1")
     );
-    assert_eq!(detail.sections[0].title.title, "Shell");
+    assert_eq!(detail.sections[0].title.title, "false");
     assert!(
         detail.sections[0]
             .groups
@@ -73,9 +73,9 @@ fn codex_zero_exit_parts_keep_input_arrow_output() {
 }
 
 #[test]
-fn codex_exit_list_uses_tool_name_without_subject() {
+fn codex_exit_list_uses_command_subject() {
     for code in [0, 1] {
-        assert_eq!(codex_exit_event(code).body, "Shell");
+        assert_eq!(codex_exit_event(code).body, "false");
     }
 }
 

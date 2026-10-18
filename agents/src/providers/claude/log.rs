@@ -22,7 +22,7 @@ const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
         ("Read", Subject::Field("file_path")),
         ("Write", Subject::Field("file_path")),
         ("Edit", Subject::Field("file_path")),
-        ("Bash", Subject::Field("description")),
+        ("Bash", Subject::Shell { description: true }),
         ("ToolSearch", Subject::Field("query")),
         ("AskUserQuestion", Subject::QuestionHeaders),
         ("request_user_input", Subject::QuestionHeaders),
@@ -38,7 +38,7 @@ const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
         ("Read", Input::Field(""), Format::Text),
         ("Write", Input::Field("content"), Format::Text),
         ("Edit", Input::Field(""), Format::Text),
-        ("Bash", Input::Field("command"), Format::Text),
+        ("Bash", Input::Shell, Format::Text),
         ("ToolSearch", Input::Field(""), Format::Text),
         ("AskUserQuestion", Input::QuestionList, Format::Text),
         ("request_user_input", Input::QuestionList, Format::Text),
@@ -2023,14 +2023,14 @@ pub(crate) mod tests {
     #[test]
     fn real_tool_details_match_log_and_latest_activity() {
         let expected = [
-            "Bash",
+            "mkdir, cd, ls, wc, head",
             "找那个会话",
             "To (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
             "To (team-lead) Report: /tmp/research",
             "SubagentHandback",
             "WebFetch code.claude.com/docs/en/hooks",
-            "Bash",
-            "Bash",
+            "cd, ls, sed, wc",
+            "cd, cat, wc, sed",
         ];
         for (line, expected) in include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
             .lines()
@@ -2145,7 +2145,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bash_blank_description_uses_tool_name_in_both_surfaces() {
+    fn bash_blank_description_uses_command_subject_in_both_surfaces() {
         let mut record: Value = serde_json::from_str(
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
                 .lines()
@@ -2157,13 +2157,13 @@ pub(crate) mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
         let events = tail_session(file.path(), 8, true).unwrap();
-        assert_eq!(events[0].body, "Bash");
+        assert_eq!(events[0].body, "cd, ls, sed, wc");
         let summary = super::super::transcript::read_subagent(
             file.path(),
             file.as_file().metadata().unwrap().len(),
         )
         .unwrap();
-        assert_eq!(summary.activity.unwrap().label, "Bash");
+        assert_eq!(summary.activity.unwrap().label, "cd, ls, sed, wc");
     }
 
     #[test]
@@ -2255,7 +2255,7 @@ pub(crate) mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash");
+        assert_eq!(events[0].body, "echo");
         assert!(
             matches!(&events[0].calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text.contains("Create Unsafe Agents"))
         );
@@ -2285,7 +2285,7 @@ pub(crate) mod tests {
         records.push(reply);
         let events = events_from(records);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash");
+        assert_eq!(events[0].body, "echo");
         assert_eq!(events[0].ended_at, Some(end));
         assert_eq!(events[1].previous_end, Some(end));
     }
@@ -2304,7 +2304,7 @@ pub(crate) mod tests {
             records[1]["permissionDecision"]["reasonType"] = reason.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Error);
-            assert_eq!(events[0].body, "Bash");
+            assert_eq!(events[0].body, "echo");
         }
     }
 
@@ -2317,7 +2317,7 @@ pub(crate) mod tests {
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert_eq!(events[0].body, "Bash");
+            assert_eq!(events[0].body, "echo");
         }
     }
 
@@ -2339,7 +2339,7 @@ pub(crate) mod tests {
             let events = events_from(records);
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert!(events[0].body.contains("Bash"));
+            assert!(events[0].body.contains("echo"));
             assert!(events[0].body.contains("Read"));
         }
     }

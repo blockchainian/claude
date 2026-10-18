@@ -60,7 +60,8 @@ fn terminal_codex_exit_sections() {
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert!(capture.matches("Shell").count() >= 2, "{capture}");
+    assert_eq!(capture.matches("Shell").count(), 1, "{capture}");
+    assert!(capture.matches("false").count() >= 3, "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
@@ -81,18 +82,40 @@ fn terminal_codex_exit_sections() {
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_shell_titles() {
-    let (_directory, tmux) = start_codex_probe(
-        "shell-titles",
-        include_str!("../fixtures/codex-inner/shell.jsonl"),
-    );
-    let capture = tmux.capture_when(|capture| {
-        capture.matches("Shell").count() >= 2 && capture.contains("sleep 60")
-    });
-    assert!(!capture.contains("exec_command"), "{capture}");
-    assert!(!capture.contains("CommandExecution"), "{capture}");
+    let mut captures = Vec::new();
+    for (name, fixture, subject, command) in [
+        (
+            "shell-titles",
+            include_str!("../fixtures/codex-inner/shell.jsonl"),
+            "sleep",
+            "sleep 60",
+        ),
+        (
+            "chain-titles",
+            include_str!("../fixtures/codex-inner/git-chain.jsonl"),
+            "git {status, diff}, sed",
+            "git status --short",
+        ),
+    ] {
+        let (_directory, tmux) = start_codex_probe(name, fixture);
+        let capture = tmux.capture_when(|capture| {
+            capture.matches(subject).count() >= 2 && capture.contains(command)
+        });
+        assert_eq!(capture.matches("Shell").count(), 1, "{capture}");
+        let title = capture.lines().find(|line| line.contains("Shell")).unwrap();
+        assert!(title.contains(subject), "{capture}");
+        assert!(title.find("Shell") < title.find(subject), "{capture}");
+        assert!(
+            !title.contains(command),
+            "arguments only belong in the body: {capture}"
+        );
+        assert!(!capture.contains("exec_command"), "{capture}");
+        assert!(!capture.contains("CommandExecution"), "{capture}");
+        captures.push(capture);
+    }
     let path = std::env::temp_dir().join("agents-codex-shell-tmux.txt");
-    std::fs::write(&path, &capture).unwrap();
-    let verdict = serde_json::json!({"verdict": "pass", "capture": path});
+    std::fs::write(&path, captures.join("\n\n")).unwrap();
+    let verdict = serde_json::json!({"verdict": "pass", "scenarios": 2, "capture": path});
     std::fs::write(
         std::env::temp_dir().join("agents-codex-shell.json"),
         serde_json::to_vec_pretty(&verdict).unwrap(),

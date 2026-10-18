@@ -1,3 +1,5 @@
+mod shell_summary;
+
 use crate::log::{Section, ToolCall};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -75,6 +77,7 @@ pub(crate) fn display_tool_name(name: &str) -> String {
 pub(crate) enum Subject {
     Field(&'static str),
     QuestionHeaders,
+    Shell { description: bool },
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +87,7 @@ pub(crate) enum Input {
     Arguments,
     FetchPrompt,
     AgentMessage,
+    Shell,
 }
 
 #[derive(Clone, Copy)]
@@ -243,6 +247,10 @@ pub(crate) fn summary(name: &str, input: &Value, rules: &Rules, activity: bool) 
     })
 }
 
+fn shell_command(input: &Value) -> Option<&str> {
+    text(input, "command").or_else(|| text(input, "cmd"))
+}
+
 pub(crate) fn presentation(
     name: &str,
     input: &Value,
@@ -260,6 +268,14 @@ pub(crate) fn presentation(
                     .as_str()
                     .filter(|text| !text.trim().is_empty())
                     .map(str::to_owned)
+            }),
+        Some(Subject::Shell { description }) => description
+            .then(|| text(input, "description"))
+            .flatten()
+            .map(str::to_owned)
+            .or_else(|| {
+                let summary = shell_summary::summarize_shell_commands(shell_command(input)?);
+                (!summary.is_empty()).then_some(summary)
             }),
         Some(Subject::QuestionHeaders) => Some(
             input["questions"]
@@ -283,6 +299,7 @@ pub(crate) fn presentation(
         Some((Input::Field(""), _)) => Vec::new(),
         Some((method, format)) => {
             let (body, mut sections) = match method {
+                Input::Shell => (shell_command(input).unwrap_or("").to_owned(), Vec::new()),
                 Input::Field(field) => {
                     (text(&remaining, field).unwrap_or("").to_owned(), Vec::new())
                 }
@@ -313,6 +330,10 @@ pub(crate) fn presentation(
             };
             if !body.trim().is_empty() {
                 let section = match format {
+                    _ if matches!(method, Input::Shell) => Section::Shell {
+                        text: body,
+                        prefix: 0,
+                    },
                     Format::Text if matches!(method, Input::Arguments) => Section::Text {
                         label: "args".into(),
                         text: body,

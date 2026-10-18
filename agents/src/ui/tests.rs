@@ -4720,7 +4720,7 @@ fn codex_inner_task_log_snapshot() {
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(4));
-    for query in ["Shell", "exec_command"] {
+    for query in ["type", "exec_command"] {
         view.log_search.query.set_text(query);
         view.rematch_log();
         assert_eq!(view.matching_log_count(), 1, "{query}");

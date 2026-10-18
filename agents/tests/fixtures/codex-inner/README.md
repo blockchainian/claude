@@ -22,3 +22,5 @@ Extracted from real local Codex rollouts. Source paths below are relative to the
 - `../codex-command-failed.jsonl`: command completion from the same source as `command.jsonl`, line 14. Command, output, path and identifiers anonymized; non-zero exit and timing retained.
 
 - `shell.jsonl`: `2026/10/18/rollout-2026-10-18T09-54-58-01a14ff0-1c14-74c0-8f40-4d7f85ae6ecc.jsonl`, lines 17 and 27. Retains the `exec` wrapper and `sleep 60` command completion; local cwd and wrapper metadata omitted.
+
+- `git-chain.jsonl`: `2026/10/17/rollout-2026-10-17T15-01-09-01a14be2-1370-7d62-a0ba-e135a25424e6.jsonl`, lines 53, 56 and 57. Retains the exec wrapper, completed command, and wrapper output; covers repeated git subcommands and a pipeline. Local worktree paths are replaced with `/workspace`; command text is unchanged.

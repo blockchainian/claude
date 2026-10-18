@@ -1,6 +1,6 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────── Task log example ───────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │                                     Shell
+              /tmp/project              │                 Prompt                 │                                     type
  ● Task log example         Working     │ Task log example                       │               ~/Documents/case-studies/khaby-lame/drafts/06.md          17ms
                                         │                                        │                               claude ask_claude                          28s
                                         │                                        │                                   Extension                               1s
