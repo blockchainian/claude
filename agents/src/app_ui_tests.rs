@@ -1259,6 +1259,49 @@ fn terminal_restore_fixture() -> (tempfile::TempDir, App, SessionKey) {
     (directory, app, id)
 }
 
+#[test]
+fn terminal_repaint_never_shows_the_hardware_cursor_over_painted_cells() {
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::{TerminalOptions, Viewport};
+
+    let (_directory, mut app, _id) = terminal_restore_fixture();
+    app.terminal
+        .as_ref()
+        .unwrap()
+        .screen
+        .lock()
+        .unwrap()
+        .process(b"\x1b[4;6H");
+    let area = ratatui::layout::Rect::new(0, 0, 100, 45);
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let mut terminal = Terminal::with_options(
+        CrosstermBackend::new(output.reopen().unwrap()),
+        TerminalOptions {
+            viewport: Viewport::Fixed(area),
+        },
+    )
+    .unwrap();
+    let now = chrono::Utc::now();
+    app.draw_at(&mut terminal, now).unwrap();
+    let mut hardware = vt100::Parser::new(area.height, area.width, 0);
+    let first = std::fs::read(output.path()).unwrap();
+    hardware.process(&first);
+    assert!(!hardware.screen().hide_cursor());
+    let cursor = hardware.screen().cursor_position();
+
+    app.view.set_notice(Some("repaint".into()));
+    app.draw_at(&mut terminal, now).unwrap();
+    let repainted = std::fs::read(output.path()).unwrap();
+    for byte in &repainted[first.len()..] {
+        hardware.process(&[*byte]);
+        if !hardware.screen().hide_cursor() {
+            assert_eq!(hardware.screen().cursor_position(), cursor);
+        }
+    }
+    assert!(!hardware.screen().hide_cursor());
+    assert_eq!(hardware.screen().cursor_position(), cursor);
+}
+
 fn terminal_restore_round_trip(app: &mut App, id: &SessionKey) {
     let mut other = app.sessions[0].clone();
     other.id.id = "another-task".into();

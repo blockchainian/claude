@@ -1,5 +1,5 @@
 use super::*;
-use crate::session_terminal::{Replies, Screen};
+use crate::session_terminal::{Screen, TerminalScreen};
 
 fn right_click(view: &mut View, column: u16, row: u16) -> Option<Action> {
     assert!(
@@ -13,9 +13,8 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
     let (mut view, now) = log_fixture();
     log_screen(&view, 100, 45, now);
     let (rows, cols) = view.terminal_size().unwrap();
-    let screen: Screen = std::sync::Arc::new(std::sync::Mutex::new(
-        vt100::Parser::new_with_callbacks(rows, cols, 0, Replies::default()),
-    ));
+    let screen: Screen =
+        std::sync::Arc::new(std::sync::Mutex::new(TerminalScreen::new(rows, cols)));
     screen.lock().unwrap().process(text);
     view.show_terminal(session_key("log"), screen.clone());
     log_screen(&view, 100, 45, now);
@@ -53,6 +52,42 @@ fn the_terminal_draws_the_program_screen_below_the_panel_rule() {
 }
 
 #[test]
+fn synchronized_output_keeps_the_displayed_screen_and_cursor_until_the_frame_ends() {
+    let (view, now, screen) = open_terminal(b"\x1b[12;3H\x1b[?25h");
+    let area = Rect::new(0, 0, 100, 45);
+    let before = log_screen(&view, 100, 45, now);
+    let cursor = view.cursor_pos(area);
+    assert!(cursor.is_some());
+
+    // One timer update captured from Codex's PTY, split at every byte boundary.
+    let frame = b"\x1b[?2026h\x1b[?25l\x1b[14;31H\x1b[1m2\x1b[0m\x1b[12;3H\x1b[?25h\x1b[?2026l";
+    for byte in &frame[..frame.len() - 1] {
+        screen.lock().unwrap().process(&[*byte]);
+        assert_eq!(view.cursor_pos(area), cursor);
+        assert_eq!(log_screen(&view, 100, 45, now), before);
+    }
+    screen.lock().unwrap().process(&frame[frame.len() - 1..]);
+    assert_eq!(view.cursor_pos(area), cursor);
+    assert_ne!(log_screen(&view, 100, 45, now), before);
+    assert!(screen.lock().unwrap().screen().contents().contains('2'));
+}
+
+#[test]
+fn a_synchronized_redraw_retains_the_last_published_frame_before_its_clear_prefix() {
+    let (view, now, screen) = open_terminal(b"\x1b[12;3H\x1b[?25h");
+    let area = Rect::new(0, 0, 100, 45);
+    let before = log_screen(&view, 100, 45, now);
+    let cursor = view.cursor_pos(area);
+    // Codex's full-history redraw clears immediately before beginning its update.
+    screen
+        .lock()
+        .unwrap()
+        .process(b"\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H\x1b[?2026h\x1b[1;1H\x1b[J");
+    assert_eq!(view.cursor_pos(area), cursor);
+    assert_eq!(log_screen(&view, 100, 45, now), before);
+}
+
+#[test]
 fn the_focused_terminal_takes_every_key() {
     let (mut view, _now, _screen) = open_terminal(b"");
     for (code, modifiers, bytes) in [
@@ -72,7 +107,10 @@ fn the_focused_terminal_takes_every_key() {
 fn clicking_another_panel_takes_keys_away_until_the_terminal_is_clicked() {
     let (mut view, _now, _screen) = open_terminal(b"\x1b[?1000h\x1b[?1006h");
     let list = view.viewport.borrow().list;
-    click_mouse(&mut view, mouse(MouseEventKind::Down(MouseButton::Left), list.x + 1, list.y));
+    click_mouse(
+        &mut view,
+        mouse(MouseEventKind::Down(MouseButton::Left), list.x + 1, list.y),
+    );
     assert_ne!(
         view.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
         Some(Action::TerminalInput(b"q".to_vec()))
@@ -98,7 +136,11 @@ fn clicks_reach_a_program_that_asked_for_mouse_reports() {
     // SGR reports for presses and releases.
     let (mut view, _now, _screen) = open_terminal(b"\x1b[?1000h\x1b[?1006h");
     let terminal = view.viewport.borrow().terminal;
-    let press = mouse(MouseEventKind::Down(MouseButton::Left), terminal.x + 4, terminal.y + 2);
+    let press = mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        terminal.x + 4,
+        terminal.y + 2,
+    );
     assert_eq!(
         view.handle_mouse(press),
         Some(Action::TerminalInput(b"\x1b[<0;5;3M".to_vec()))
@@ -107,12 +149,18 @@ fn clicks_reach_a_program_that_asked_for_mouse_reports() {
 
 #[test]
 fn the_wheel_does_nothing_over_a_program_without_mouse_reports() {
-    let lines: Vec<u8> = (0..80).flat_map(|n| format!("line {n}\r\n").into_bytes()).collect();
+    let lines: Vec<u8> = (0..80)
+        .flat_map(|n| format!("line {n}\r\n").into_bytes())
+        .collect();
     let (mut view, now, _screen) = open_terminal(&lines);
     let terminal = view.viewport.borrow().terminal;
     let before = log_screen(&view, 100, 45, now);
     assert_eq!(
-        view.handle_mouse(mouse(MouseEventKind::ScrollUp, terminal.x + 1, terminal.y + 1)),
+        view.handle_mouse(mouse(
+            MouseEventKind::ScrollUp,
+            terminal.x + 1,
+            terminal.y + 1
+        )),
         None
     );
     assert_eq!(log_screen(&view, 100, 45, now), before);

@@ -3,17 +3,53 @@
 use crate::providers::SessionKey;
 use crate::pty::Pty;
 use std::io::{self, Write};
+use std::os::fd::AsRawFd;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// The shortest interval between two redraw requests while output streams in.
+/// Output arriving within this interval is published together as one terminal frame.
 const FRAME: Duration = Duration::from_millis(16);
 const DETACH_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub type Screen = Arc<Mutex<vt100::Parser<Replies>>>;
+pub type Screen = Arc<Mutex<TerminalScreen>>;
+
+/// Parses the live output while keeping a synchronized update off the displayed screen.
+pub struct TerminalScreen {
+    parser: vt100::Parser<Replies>,
+    displayed: vt100::Screen,
+}
+
+impl TerminalScreen {
+    pub fn new(rows: u16, cols: u16) -> Self {
+        let parser = vt100::Parser::new_with_callbacks(rows, cols, 0, Replies::default());
+        let displayed = parser.screen().clone();
+        Self { parser, displayed }
+    }
+
+    pub fn process(&mut self, output: &[u8]) -> Vec<u8> {
+        self.parser.process(output);
+        if let Some(completed) = self.parser.callbacks_mut().completed.take() {
+            self.displayed = completed;
+        }
+        if !self.parser.callbacks().synchronized {
+            self.displayed = self.parser.screen().clone();
+        }
+        std::mem::take(&mut self.parser.callbacks_mut().pending)
+    }
+
+    /// The last published screen and cursor, held until a synchronized update completes.
+    pub fn screen(&self) -> &vt100::Screen {
+        &self.displayed
+    }
+
+    fn set_size(&mut self, rows: u16, cols: u16) {
+        self.parser.screen_mut().set_size(rows, cols);
+        self.displayed.set_size(rows, cols);
+    }
+}
 
 pub struct SessionTerminal {
     pub id: SessionKey,
@@ -39,12 +75,7 @@ impl SessionTerminal {
     ) -> io::Result<Self> {
         let (rows, cols) = (rows.max(1), cols.max(1));
         let pty = Pty::spawn(command, rows, cols)?;
-        let screen: Screen = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(
-            rows,
-            cols,
-            0,
-            Replies::default(),
-        )));
+        let screen: Screen = Arc::new(Mutex::new(TerminalScreen::new(rows, cols)));
         let dirty = Arc::new(AtomicBool::new(false));
         let closed = Arc::new(AtomicBool::new(false));
         let mut reader = pty.reader()?;
@@ -54,28 +85,24 @@ impl SessionTerminal {
         thread::Builder::new()
             .name("agents-terminal".into())
             .spawn(move || {
-                let mut last_wake = Instant::now() - FRAME;
                 loop {
                     let mut output = Vec::new();
-                    if !crate::pty::read_available(&mut reader, &mut output).unwrap_or(false) {
-                        thread_closed.store(true, Ordering::Relaxed);
-                        wake();
-                        return;
-                    }
+                    let open = read_frame(&mut reader, &mut output).unwrap_or(false);
                     let replies = {
                         let mut parser = thread_screen.lock().expect("terminal screen lock");
-                        parser.process(&output);
-                        std::mem::take(&mut parser.callbacks_mut().pending)
+                        parser.process(&output)
                     };
                     if !replies.is_empty() {
                         let _ = writer.write_all(&replies);
                     }
                     if !thread_dirty.swap(true, Ordering::Relaxed) {
                         wake();
-                        last_wake = Instant::now();
                     }
-                    // Output arriving within a frame is parsed together before the next redraw.
-                    thread::sleep(FRAME.saturating_sub(last_wake.elapsed()));
+                    if !open {
+                        thread_closed.store(true, Ordering::Relaxed);
+                        wake();
+                        return;
+                    }
                 }
             })?;
         Ok(Self {
@@ -130,7 +157,6 @@ impl SessionTerminal {
         self.screen
             .lock()
             .expect("terminal screen lock")
-            .screen_mut()
             .set_size(rows, cols);
         self.pty.resize(rows, cols)
     }
@@ -141,10 +167,44 @@ impl SessionTerminal {
     }
 }
 
-/// Answers the terminal queries programs send at startup, which vt100 leaves unhandled.
+/// Blocks for the first output, then drains arrivals through that frame's fixed boundary.
+fn read_frame(reader: &mut std::fs::File, output: &mut Vec<u8>) -> io::Result<bool> {
+    let mut open = crate::pty::read_available(reader, output)?;
+    let deadline = Instant::now() + FRAME;
+    let mut descriptor = libc::pollfd {
+        fd: reader.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    while open {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        // Round up so a sub-millisecond remainder cannot publish before the boundary.
+        let timeout = remaining.as_nanos().div_ceil(1_000_000) as i32;
+        let ready = unsafe { libc::poll(&mut descriptor, 1, timeout) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if ready == 0 {
+            break;
+        }
+        open = crate::pty::read_available(reader, output)?;
+    }
+    Ok(open)
+}
+
+/// Handles synchronized updates and terminal queries, which vt100 leaves unhandled.
 #[derive(Default)]
-pub struct Replies {
+struct Replies {
     pending: Vec<u8>,
+    synchronized: bool,
+    completed: Option<vt100::Screen>,
 }
 
 impl vt100::Callbacks for Replies {
@@ -152,10 +212,24 @@ impl vt100::Callbacks for Replies {
         &mut self,
         screen: &mut vt100::Screen,
         first: Option<u8>,
-        _second: Option<u8>,
+        second: Option<u8>,
         params: &[&[u16]],
         command: char,
     ) {
+        if first == Some(b'?') && second.is_none() && params.contains(&&[2026][..]) {
+            match command {
+                'h' => {
+                    // DECSET is idempotent, including repeated begins in one update.
+                    self.synchronized = true;
+                }
+                'l' if self.synchronized => {
+                    self.synchronized = false;
+                    // Retain this frame if another update begins in the same PTY read.
+                    self.completed = Some(screen.clone());
+                }
+                _ => {}
+            }
+        }
         match (first, command, params) {
             // Cursor position report.
             (None, 'n', [[6]]) => {
@@ -197,6 +271,82 @@ mod tests {
         }
     }
 
+    #[test]
+    fn synchronized_updates_answer_queries_from_the_live_cursor() {
+        let mut screen = TerminalScreen::new(20, 80);
+        screen.process(b"\x1b[12;3H");
+        let replies = screen.process(b"\x1b[?2026h\x1b[?25l\x1b[14;31H2\x1b[6n");
+        assert_eq!(replies, b"\x1b[14;32R");
+        assert_eq!(screen.screen().cursor_position(), (11, 2));
+        assert!(!screen.screen().hide_cursor());
+
+        // A repeated begin is a mode set, not another nested transaction.
+        screen.process(b"\x1b[?2026h\x1b[?2026l");
+        assert_eq!(screen.screen().cursor_position(), (13, 31));
+        assert!(screen.screen().hide_cursor());
+    }
+
+    #[test]
+    fn a_second_synchronized_update_retains_the_frame_completed_in_the_same_read() {
+        let mut screen = TerminalScreen::new(20, 80);
+        screen.process(b"\x1b[?2026hfirst\x1b[?2026l\x1b[?2026h\rsecond");
+        assert_eq!(screen.screen().contents(), "first");
+        assert_eq!(screen.screen().cursor_position(), (0, 5));
+        screen.process(b"\x1b[?2026l");
+        assert_eq!(screen.screen().contents(), "second");
+        assert_eq!(screen.screen().cursor_position(), (0, 6));
+    }
+
+    #[test]
+    fn resizing_a_synchronized_update_resizes_both_screens() {
+        let mut screen = TerminalScreen::new(20, 80);
+        screen.process(b"\x1b[?2026h\x1b[14;31H2");
+        screen.set_size(25, 100);
+        assert_eq!(screen.screen().size(), (25, 100));
+        screen.process(b"\x1b[?2026l");
+        assert_eq!(screen.screen().size(), (25, 100));
+        assert_eq!(screen.screen().cell(13, 30).unwrap().contents(), "2");
+    }
+
+    #[test]
+    fn the_first_wake_batches_a_clear_and_the_redraw_arriving_within_a_frame() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "stty -echo; printf 'READY\\033[12;3H'; read start; \
+             printf '\\033[r\\033[0m\\033[H\\033[2J\\033[3J\\033[H'; \
+             sleep 0.001; \
+             printf '\\033[?2026h\\033[1;1HDRAWN\\033[12;3H\\033[?25h\\033[?2026l'; \
+             read done",
+        ]);
+        let (sender, wakes) = mpsc::channel();
+        let mut terminal = SessionTerminal::spawn(key(), command, None, (14, 101), move || {
+            let _ = sender.send(());
+        })
+        .unwrap();
+        wakes.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            terminal
+                .screen
+                .lock()
+                .unwrap()
+                .screen()
+                .contents()
+                .contains("READY")
+        );
+        terminal.drawn();
+        // Let the reader finish its initial frame and block for the next burst.
+        thread::sleep(FRAME * 2);
+        terminal.write(b"\n").unwrap();
+        wakes.recv_timeout(Duration::from_secs(5)).unwrap();
+        {
+            let screen = terminal.screen.lock().unwrap();
+            assert_eq!(screen.screen().cursor_position(), (11, 2));
+            assert!(screen.screen().contents().contains("DRAWN"));
+        }
+        terminal.close().unwrap();
+    }
+
     fn wait_for(terminal: &SessionTerminal, wakes: &mpsc::Receiver<()>, text: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -204,7 +354,10 @@ mod tests {
             if contents.contains(text) {
                 return contents;
             }
-            assert!(Instant::now() < deadline, "never showed {text:?}:\n{contents}");
+            assert!(
+                Instant::now() < deadline,
+                "never showed {text:?}:\n{contents}"
+            );
             let _ = wakes.recv_timeout(Duration::from_millis(100));
             terminal.drawn();
         }
@@ -243,7 +396,15 @@ mod tests {
             assert!(Instant::now() < deadline);
             let _ = wakes.recv_timeout(Duration::from_millis(100));
         }
-        assert!(terminal.screen.lock().unwrap().screen().contents().contains("bye"));
+        assert!(
+            terminal
+                .screen
+                .lock()
+                .unwrap()
+                .screen()
+                .contents()
+                .contains("bye")
+        );
     }
 
     #[test]

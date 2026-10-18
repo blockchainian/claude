@@ -305,6 +305,9 @@ impl App {
         terminal: &mut Terminal<B>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), B::Error> {
+        // Keep the drawing cursor hidden until the frame's input cursor is in place.
+        terminal.hide_cursor()?;
+        let mut cursor = None;
         terminal.draw(|frame| {
             let area = frame.area();
             self.refresh_log(self.view.log_event_count(area));
@@ -312,17 +315,16 @@ impl App {
             self.refresh_activity(area.width, now);
             self.view.render_at(area, frame.buffer_mut(), now);
             self.view.underline_links(frame.buffer_mut());
-            if let Some((x, y)) = self.view.cursor_pos(area) {
-                frame.set_cursor_position((x, y));
-            }
+            cursor = self.view.cursor_pos(area);
         })?;
         self.terminal_drawn();
-        // The hidden cursor otherwise rests wherever the last repainted cell was, and a
-        // terminal's cursor-line guide follows it there; park it on the selected row's marker.
-        if self.view.cursor_pos(terminal.get_frame().area()).is_none()
-            && let Some((x, y)) = self.view.marker_pos()
-        {
-            terminal.set_cursor_position((x, y))?;
+        if let Some(position) = cursor {
+            terminal.set_cursor_position(position)?;
+            terminal.show_cursor()?;
+        } else if let Some(position) = self.view.marker_pos() {
+            // The hidden cursor otherwise rests wherever the last repainted cell was, and a
+            // terminal's cursor-line guide follows it there; park it on the selected row's marker.
+            terminal.set_cursor_position(position)?;
         }
         Ok(())
     }
