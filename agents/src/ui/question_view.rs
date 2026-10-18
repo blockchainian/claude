@@ -47,6 +47,8 @@ pub(super) struct QuestionView {
     /// The shown tab: a question, or the Submit tab after the last question.
     page: usize,
     pages: Vec<Page>,
+    /// The focused Submit tab row; it starts on Submit.
+    review_focus: usize,
     error: Option<String>,
 }
 
@@ -58,6 +60,7 @@ impl QuestionView {
             ask,
             page: 0,
             pages,
+            review_focus: 0,
             error: None,
         }
     }
@@ -86,13 +89,8 @@ impl QuestionView {
         } else {
             ""
         };
-        let act = if self.reviewing() {
-            ""
-        } else {
-            "↑/↓ move · Enter to confirm · "
-        };
         lines.push(Line::styled(
-            format!("{switch}{act}Esc to close"),
+            format!("{switch}↑/↓ move · Enter to confirm · Esc to close"),
             Style::default().dim(),
         ));
         lines
@@ -178,6 +176,7 @@ impl QuestionView {
     fn advance(&mut self) -> Option<Outcome> {
         if self.page + 1 < self.tabs() {
             self.page += 1;
+            self.review_focus = 0;
             None
         } else {
             Some(self.submit())
@@ -240,12 +239,15 @@ impl QuestionView {
             return None;
         }
         if self.reviewing() {
-            // The Submit tab acts on its digits alone.
             match key.code {
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                    self.review_focus = 1 - self.review_focus;
+                }
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
                 KeyCode::Char(digit @ '1'..='9') => {
                     return self.choose(digit as usize - '1' as usize);
                 }
+                KeyCode::Char(' ') | KeyCode::Enter => return self.choose(self.review_focus),
                 _ => {}
             }
             return None;
@@ -307,7 +309,9 @@ impl QuestionView {
 
     /// Moves the focus to a row without answering.
     pub(super) fn focus(&mut self, index: usize) {
-        if !self.reviewing() && index < self.rows() {
+        if self.reviewing() {
+            self.review_focus = index.min(REVIEW_ROWS.len() - 1);
+        } else if index < self.rows() {
             self.set_focus(index);
         }
     }
@@ -333,7 +337,9 @@ impl QuestionView {
         };
         if tabs {
             self.page = step(self.page, self.tabs());
-        } else if !self.pages.is_empty() && !self.reviewing() {
+        } else if self.reviewing() {
+            self.review_focus = step(self.review_focus, REVIEW_ROWS.len());
+        } else if !self.pages.is_empty() {
             self.set_focus(step(self.pages[self.page].focus, self.rows()));
         }
     }
@@ -418,7 +424,7 @@ impl QuestionView {
         for (index, label) in REVIEW_ROWS.into_iter().enumerate() {
             rows.push(Some(index));
             lines.push(Self::row_line(
-                false,
+                self.review_focus == index,
                 index + 1,
                 vec![Span::raw(label)],
             ));
@@ -449,7 +455,11 @@ impl QuestionView {
         } else {
             self.question_lines(width, &mut lines)
         };
-        let focus = (!self.reviewing()).then(|| self.pages[self.page].focus);
+        let focus = Some(if self.reviewing() {
+            self.review_focus
+        } else {
+            self.pages[self.page].focus
+        });
         let focus_row = rows
             .iter()
             .position(|&row| row.is_some() && row == focus)
@@ -845,8 +855,8 @@ mod tests {
         assert!(review.contains("● First → Green"), "{review}");
         assert!(review.contains("You have not answered all questions"), "{review}");
         assert!(!review.contains("Review your answers"), "{review}");
-        assert!(press(&mut view, KeyCode::Enter).is_none());
-        let answer = submitted(press(&mut view, KeyCode::Char('1')));
+        assert!(review.contains("› 1. Submit"), "{review}");
+        let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(answer.answers["Probe first page?"].answers, ["Green"]);
         assert!(answer.answers["Probe second page?"].answers.is_empty());
     }
