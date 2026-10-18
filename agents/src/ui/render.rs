@@ -1124,33 +1124,16 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.details_scroll;
             state.content_top = content_top;
-            // Back on a task, a body whose text changed while the user was away opens folded,
-            // and the plain offset starts over.
-            if let Some(left) = state.left_keys.take()
-                && left != keys
-            {
-                state.reveal = keys
-                    .iter()
-                    .map(|key| {
-                        left.iter()
-                            .position(|old| old == key)
-                            .and_then(|index| state.reveal.get(index).copied())
-                            .unwrap_or(0)
-                    })
-                    .collect();
-                state.offset = 0;
-            }
-            state.keys = keys;
-            if state.reveal.len() != bodies.len() {
-                state.reveal = vec![0; bodies.len()];
-            }
+            state.prepare(keys);
             if let Some(budget) = &budget {
-                state.fallback_max = None;
-                state.offset = 0;
-                state.hidden = budget.bodies.iter().map(|&(_, hidden)| hidden).collect();
-                for (reveal, hidden) in state.reveal.iter_mut().zip(&state.hidden) {
-                    *reveal = (*reveal).min(*hidden);
-                }
+                state.budget(
+                    &bodies.iter().map(|body| body.len()).collect::<Vec<_>>(),
+                    &budget
+                        .bodies
+                        .iter()
+                        .map(|&(rows, _)| rows)
+                        .collect::<Vec<_>>(),
+                );
                 let mut keep = vec![true; items.len()];
                 if let Some(cut) = &budget.background_cut {
                     items[cut.start] = "…".dim().into();

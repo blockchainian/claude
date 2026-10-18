@@ -13,6 +13,7 @@ mod centering;
 mod chronological_log_tests;
 mod content;
 mod detail_model;
+mod details_scroll;
 mod highlight;
 mod hints;
 mod hyperlink;
@@ -22,6 +23,9 @@ mod line_truncation;
 mod links;
 mod log;
 mod log_agent;
+#[cfg(test)]
+#[path = "log_scroll_tests.rs"]
+mod log_scroll_tests;
 mod log_search;
 mod markdown;
 mod navigation;
@@ -137,6 +141,9 @@ struct Viewport {
     /// Lines of the selected event scrolled off the top.
     log_detail_scroll: usize,
     log_detail_max: usize,
+    log_detail_state: DetailsScroll,
+    log_detail_key: Option<u64>,
+    log_detail_saved: HashMap<u64, DetailsScroll>,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,
     log_text: text_selection::TextRegion,

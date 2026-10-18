@@ -43,7 +43,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 - The log list selects one event, oldest first, newest at the bottom; the detail shows that event.
 - Selected rows use the task cursor style across the column, including both padding cells.
-- A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. The detail wheel scrolls only its content.
+- A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. In the detail panel, wheel and navigation keys scroll and unfold sections before moving the log selection at a directional boundary; returning to an unchanged event restores its scroll state.
 - Selecting the newest event follows arriving events. Older selections stay on their event and show the border's New button only when new events arrive; clicking it selects newest and follows again.
 - Switching tasks or sending a prompt resets the log selection to newest and resumes following.
 - Double click, text selection and list/detail search remain independent of following.

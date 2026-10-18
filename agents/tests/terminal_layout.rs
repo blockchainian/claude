@@ -2697,3 +2697,6 @@ mod terminal_notification;
 
 #[path = "support/terminal_paths.rs"]
 mod paths;
+
+#[path = "support/terminal_log_scroll.rs"]
+mod terminal_log_scroll;

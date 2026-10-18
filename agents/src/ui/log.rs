@@ -232,12 +232,78 @@ impl View {
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
+        let record = event
+            .source_records
+            .first()
+            .map(|record| (&record.path, record.offset));
+        let key = detail_key(&(
+            self.selected_id(),
+            &event.source,
+            record,
+            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
+        ));
+        let switched = viewport.log_detail_key != Some(key);
+        if switched {
+            let mut left = std::mem::take(&mut viewport.log_detail_state);
+            left.left_keys = Some(std::mem::take(&mut left.keys));
+            if let Some(previous) = viewport.log_detail_key.replace(key) {
+                viewport.log_detail_saved.insert(previous, left);
+            }
+            viewport.log_detail_state = viewport.log_detail_saved.remove(&key).unwrap_or_default();
+        }
+        let requested_scroll = viewport.log_detail_scroll;
+        let state = &mut viewport.log_detail_state;
+        state.content_top = body_area.y;
+        state.prepare(layout.body_keys.clone());
+        let position = state.position();
+        // Search and drag selection address the full source layout with a plain offset.
+        let external_scroll = (!switched || requested_scroll > 0) && requested_scroll != position;
+        let wants = layout
+            .bodies
+            .iter()
+            .map(|body| body.len())
+            .collect::<Vec<_>>();
+        let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
+        let mut kept: Vec<usize> = (0..layout.lines.len()).collect();
+        let mut cuts = Vec::new();
+        let scroll = if height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
+            && !self.log_detail_search.active()
+            && !external_scroll
+            && state.offset == 0
+        {
+            let allocations = super::render::allocate(&wants, height - static_rows);
+            state.budget(&wants, &allocations);
+            state.bodies.clear();
+            let mut removed = 0;
+            for (index, body) in layout.bodies.iter().enumerate() {
+                let rows = allocations[index] + state.reveal[index];
+                let start = body.start - removed;
+                state.bodies.push(start..start + rows);
+                kept.retain(|row| !((body.start + rows)..body.end).contains(row));
+                if rows > 0 && state.reveal[index] < state.hidden[index] {
+                    cuts.push(body.start + rows - 1);
+                }
+                removed += body.len() - rows;
+            }
+            state.reveal.iter().sum()
+        } else {
+            state.hidden.clear();
+            state.bodies.clear();
+            let max = layout.lines.len().saturating_sub(height);
+            state.fallback_max = Some(max);
+            state.offset = if switched && !external_scroll {
+                state.offset
+            } else {
+                requested_scroll
+            }
+            .min(max);
+            state.offset
+        };
         viewport.log_detail_max = layout.lines.len().saturating_sub(height);
-        viewport.log_detail_scroll = viewport.log_detail_scroll.min(viewport.log_detail_max);
-        let scroll = viewport.log_detail_scroll;
+        viewport.log_detail_scroll = scroll;
         if overflow && height > 0 {
             let thumb = (height * height)
-                .div_ceil(layout.lines.len())
+                .div_ceil(height + viewport.log_detail_max)
                 .max(1)
                 .min(height);
             let top = scroll * (height - thumb) / viewport.log_detail_max.max(1);
@@ -251,17 +317,27 @@ impl View {
                 );
             }
         }
-        let rows: Vec<_> = layout
-            .rows
+        let visible_rows = kept
             .iter()
             .skip(scroll)
             .take(height)
+            .copied()
+            .collect::<Vec<_>>();
+        let rows: Vec<_> = visible_rows
+            .iter()
             .enumerate()
-            .map(|(row, (segment, cells))| text_selection::DrawnRow {
-                segment: *segment,
-                x: body_area.x,
-                y: body_area.y + row as u16,
-                cells: cells.clone(),
+            .map(|(row, &source)| {
+                let (segment, cells) = &layout.rows[source];
+                let mut cells = cells.clone();
+                if cuts.contains(&source) {
+                    cells.retain(|(cells, _)| cells.end < body_area.width);
+                }
+                text_selection::DrawnRow {
+                    segment: *segment,
+                    x: body_area.x,
+                    y: body_area.y + row as u16,
+                    cells,
+                }
             })
             .collect();
         viewport.log_links = rows
@@ -276,10 +352,22 @@ impl View {
             sources: layout.sources.clone(),
             rows,
         };
-        let mut visible = layout.lines
-            [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
-            .to_vec();
+        let mut visible = visible_rows
+            .iter()
+            .map(|&source| {
+                let mut line = layout.lines[source].clone();
+                if cuts.contains(&source) {
+                    line = super::line_truncation::truncate_line_to_width(
+                        line,
+                        usize::from(body_area.width.saturating_sub(1)),
+                    );
+                    line.spans.push("…".dim());
+                }
+                line
+            })
+            .collect::<Vec<_>>();
         let times = layout.times.clone();
+        layout.visible = visible_rows.clone();
         viewport.log_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
@@ -287,7 +375,7 @@ impl View {
         }
         Paragraph::new(visible).render(body_area, buf);
         for (row, time) in times {
-            if let Some(row) = row.checked_sub(scroll).filter(|&row| row < height) {
+            if let Some(row) = visible_rows.iter().position(|&source| source == row) {
                 let time_area = Rect::new(
                     columns.time.x,
                     body_area.y + row as u16,
@@ -575,12 +663,10 @@ impl View {
         }
         let viewport = self.viewport.borrow();
         let layout = viewport.log_detail_layout.as_ref()?;
-        let visible = viewport.log_detail_scroll
-            ..viewport.log_detail_scroll + usize::from(viewport.log_text.area.height);
         layout
             .running
             .iter()
-            .any(|row| visible.contains(row))
+            .any(|row| layout.visible.contains(row))
             .then(|| super::tool_detail::running_redraw_in(now))
     }
 
@@ -807,6 +893,8 @@ pub(super) struct DetailLayout {
     lines: Vec<Line<'static>>,
     /// Animated output rows, updated without repeating syntax highlighting.
     running: Vec<usize>,
+    /// Source rows drawn by the last render, after folding and window clipping.
+    visible: Vec<usize>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
     sources: Vec<text_selection::Source>,
@@ -814,6 +902,8 @@ pub(super) struct DetailLayout {
     links: Vec<Vec<super::links::Link>>,
     /// Section title times, drawn separately in the time column.
     times: Vec<(usize, Span<'static>)>,
+    bodies: Vec<std::ops::Range<usize>>,
+    body_keys: Vec<u64>,
 }
 
 #[cfg(test)]
@@ -883,10 +973,13 @@ fn detail_parts_layout(
         theme_generation: super::highlight::theme_generation(),
         lines: Vec::new(),
         running: Vec::new(),
+        visible: Vec::new(),
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
         times: Vec::new(),
+        bodies: Vec::new(),
+        body_keys: Vec::new(),
     };
     for (section_index, section) in sections.into_iter().enumerate() {
         if section_index > 0 {
@@ -920,6 +1013,8 @@ fn detail_parts_layout(
         }
         layout.lines.push(Line::default());
         layout.rows.push((layout.sources.len() - 1, Vec::new()));
+        let body_start = layout.lines.len();
+        let source_start = layout.sources.len();
         for group in section.groups {
             let rendered: Vec<_> = group
                 .parts
@@ -1002,8 +1097,23 @@ fn detail_parts_layout(
                 layout.links.push(links);
             }
         }
+        let body = body_start..layout.lines.len();
+        layout.body_keys.push(detail_key(
+            &layout.sources[source_start..]
+                .iter()
+                .map(|source| &source.text)
+                .collect::<Vec<_>>(),
+        ));
+        layout.bodies.push(body);
     }
     layout
+}
+
+fn detail_key(value: &impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::hash::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Whether an event draws its tool calls when open, which makes its row open on click even

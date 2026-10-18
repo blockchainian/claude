@@ -820,7 +820,9 @@ impl View {
                         super::navigation::step(selector.selected, selector.len(), 1, code);
                 } else if over_log || over_details {
                     for _ in 0..WHEEL_ROWS {
-                        self.scroll_content_row(forward, over_log, mouse.row);
+                        if !self.scroll_content_row(forward, over_log, mouse.row) {
+                            break;
+                        }
                     }
                 }
             }
@@ -844,56 +846,27 @@ impl View {
     }
 
     /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
-    pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) {
-        let viewport = self.viewport.borrow();
+    pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) -> bool {
+        let mut viewport = self.viewport.borrow_mut();
         let over_log_detail = (viewport.log_detail.y..viewport.log_detail.bottom()).contains(&row);
-        drop(viewport);
         if over_log && over_log_detail {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.log_detail_scroll = if forward {
-                viewport.log_detail_scroll.saturating_add(1)
+            if viewport.log_detail_state.scroll_window(forward, row) {
+                viewport.log_detail_scroll = viewport.log_detail_state.position();
+                true
             } else {
-                viewport.log_detail_scroll.saturating_sub(1)
-            };
+                drop(viewport);
+                self.move_log_selection(forward);
+                false
+            }
         } else if over_log {
-            let mut viewport = self.viewport.borrow_mut();
             viewport.log_scroll = if forward {
                 viewport.log_scroll.saturating_add(1)
             } else {
                 viewport.log_scroll.saturating_sub(1)
             };
+            true
         } else {
-            let mut viewport = self.viewport.borrow_mut();
-            let state = &mut viewport.details_scroll;
-            if let Some(max) = state.fallback_max {
-                state.offset = if forward {
-                    state.offset.saturating_add(1).min(max)
-                } else {
-                    state.offset.saturating_sub(1).min(max)
-                };
-            } else {
-                let d = usize::from(row.saturating_sub(state.content_top))
-                    + state.reveal.iter().sum::<usize>();
-                if let Some(target) =
-                    curtain_target(&state.bodies, &state.reveal, &state.hidden, d, forward)
-                {
-                    if forward {
-                        state.reveal[target] += 1;
-                        state.bodies[target].end += 1;
-                        for body in &mut state.bodies[target + 1..] {
-                            body.start += 1;
-                            body.end += 1;
-                        }
-                    } else {
-                        state.reveal[target] -= 1;
-                        state.bodies[target].end -= 1;
-                        for body in &mut state.bodies[target + 1..] {
-                            body.start -= 1;
-                            body.end -= 1;
-                        }
-                    }
-                }
-            }
+            viewport.details_scroll.scroll(forward, row)
         }
     }
 
@@ -1285,6 +1258,34 @@ impl View {
         let navigation = super::navigation::list_navigation(key);
         if let Some(code) = navigation
             && !self.searching
+            && self.mouse_focus == Panel::LogDetail
+        {
+            match code {
+                KeyCode::Home | KeyCode::End => self.navigate_log(code),
+                _ => {
+                    let viewport = self.viewport.borrow();
+                    let row = viewport.log_detail.y + super::log::LOG_TOP;
+                    let steps = if matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
+                        viewport.log_text.area.height.max(1)
+                    } else {
+                        1
+                    };
+                    drop(viewport);
+                    for _ in 0..steps {
+                        if !self.scroll_content_row(
+                            matches!(code, KeyCode::Down | KeyCode::PageDown),
+                            true,
+                            row,
+                        ) {
+                            break;
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+        if let Some(code) = navigation
+            && !self.searching
             && self.log_list_focused
         {
             self.navigate_log(code);
@@ -1418,45 +1419,8 @@ impl View {
     }
 }
 
-/// Choose the body to open or close at a document row.
-pub(super) fn curtain_target(
-    bodies: &[std::ops::Range<usize>],
-    reveal: &[usize],
-    hidden: &[usize],
-    d: usize,
-    forward: bool,
-) -> Option<usize> {
-    let eligible = |i: usize| {
-        if forward {
-            reveal[i] < hidden[i]
-        } else {
-            reveal[i] > 0
-        }
-    };
-    bodies
-        .iter()
-        .enumerate()
-        .find(|(i, body)| body.contains(&d) && eligible(*i))
-        .map(|(i, _)| i)
-        .or_else(|| {
-            bodies
-                .iter()
-                .enumerate()
-                .find(|(i, body)| body.start > d && eligible(*i))
-                .map(|(i, _)| i)
-        })
-        .or_else(|| {
-            if forward {
-                None
-            } else {
-                bodies
-                    .iter()
-                    .enumerate()
-                    .rfind(|(i, body)| body.end <= d && eligible(*i))
-                    .map(|(i, _)| i)
-            }
-        })
-}
+#[cfg(test)]
+pub(super) use super::details_scroll::curtain_target;
 
 #[cfg(test)]
 #[path = "input_tests.rs"]

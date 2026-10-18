@@ -7283,7 +7283,15 @@ fn task_log_selected_tool_layout_is_cached_until_selection_or_width_changes() {
     assert_eq!(log_screen(&view, 100, 28, now), open);
     let narrow = log_screen(&view, 60, 28, now);
     assert_ne!(narrow, open);
-    assert!(narrow.contains("running 3 tests"));
+    assert!(narrow.contains('…'));
+    assert!(
+        view.viewport
+            .borrow()
+            .log_text
+            .sources
+            .iter()
+            .any(|source| source.text.contains("running 3 tests"))
+    );
     view.select_fixture_event(Some(view.log[6].clone()));
     assert!(view.viewport.borrow().log_detail_layout.is_none());
     assert_eq!(view.visible_log_event(), view.log.get(6));
@@ -7311,7 +7319,7 @@ fn task_log_selected_tool_gains_its_output_when_the_log_refreshes() {
 #[test]
 fn task_log_selected_tool_copies_a_dragged_section() {
     let (mut view, now) = open_tool_fixture();
-    let open = log_screen(&view, 100, 28, now);
+    let open = log_screen(&view, 100, 48, now);
     let (x1, y1) = rendered_cell(&open, "cargo test");
     let (x2, y2) = rendered_cell(&open, "running 3 tests");
     assert!(
@@ -7319,7 +7327,7 @@ fn task_log_selected_tool_copies_a_dragged_section() {
             .is_none()
     );
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2 + 7, y2));
-    log_screen(&view, 100, 28, now);
+    log_screen(&view, 100, 48, now);
     let action = view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2 + 7, y2));
     assert_eq!(
         action,
