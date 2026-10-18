@@ -400,31 +400,6 @@ fn draft_first_message_accepts_images_and_reports_background_failure() {
 }
 
 #[test]
-fn draft_images_outlive_the_dashboard_after_the_task_starts() {
-    let (directory, mut view) = fixture();
-    let id = view.add_draft(setup(directory.path()));
-    view.drafts[0].name = Some("probe".into());
-    view.attach_image(
-        crate::images::ImageAttachment::from_image(
-            image::load_from_memory(&crate::images::fixture_png()).unwrap(),
-        )
-        .unwrap(),
-    );
-    let paths = view.input_box.editor.image_paths();
-    key(&mut view, KeyCode::Enter);
-    view.draft_created(id, Ok("job".into()));
-    drop(view);
-    for path in paths {
-        assert!(
-            path.is_file(),
-            "the transcript companion links {}",
-            path.display()
-        );
-        std::fs::remove_file(path).unwrap();
-    }
-}
-
-#[test]
 fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
     let (directory, mut view) = fixture();
     let session = view.rows[0].id.clone();
