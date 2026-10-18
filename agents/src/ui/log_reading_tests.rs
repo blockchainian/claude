@@ -581,8 +581,12 @@ fn notification_preformatted_blocks_preserve_logical_lines() {
             .iter()
             .find(|source| source.text.contains("lastMessage"))
             .unwrap();
-        for expected in message.lines().filter(|line| !line.is_empty()) {
-            assert!(continuation.text.contains(expected));
+        for expected in super::super::markdown::render(message, usize::MAX)
+            .iter()
+            .map(ToString::to_string)
+            .filter(|line| !line.is_empty())
+        {
+            assert!(continuation.text.contains(&expected));
         }
         let rows: Vec<_> = drawn
             .rows

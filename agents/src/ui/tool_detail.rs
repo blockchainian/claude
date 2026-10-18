@@ -427,6 +427,26 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
             self.push("\"", quote);
         }
 
+        /// Render a multi-line Markdown value between its quotes, indented like its continuations.
+        fn markdown(&mut self, text: &str, indent: usize) {
+            self.push("\"", JsonToken::StringQuote);
+            let base = self.styles[JsonToken::String as usize];
+            for (index, line) in super::markdown::render(text, usize::MAX)
+                .into_iter()
+                .enumerate()
+            {
+                if index > 0 {
+                    self.newline(indent);
+                }
+                let spans = &mut self.lines.last_mut().expect("JSON line exists").spans;
+                spans.extend(line.spans.into_iter().map(|mut span| {
+                    span.style = base.patch(span.style);
+                    span
+                }));
+            }
+            self.push("\"", JsonToken::StringQuote);
+        }
+
         fn value(&mut self, value: &serde_json::Value, indent: usize) {
             use serde_json::Value;
             match value {
@@ -459,6 +479,11 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
                         self.newline(indent);
                     }
                     self.push("]", JsonToken::Punctuation);
+                }
+                Value::String(text)
+                    if text.contains('\n') && super::markdown::has_markers(text) =>
+                {
+                    self.markdown(text, indent)
                 }
                 Value::String(text) => self.string(text, JsonToken::String, true, indent),
                 Value::Number(number) => self.push(number.to_string(), JsonToken::Number),
@@ -1000,9 +1025,11 @@ mod tests {
         assert_eq!(text[first + 1], " ".repeat(column));
         assert_eq!(
             text[first + 2],
-            format!("{}三个区块单击定位、双击复制已实现。", " ".repeat(column))
+            format!(
+                "{}三个区块单击定位、双击复制已实现。\",",
+                " ".repeat(column)
+            )
         );
-        assert_eq!(text[first + 3], format!("{}\",", " ".repeat(column)));
         assert_eq!(part.source, text.join("\n"));
         let key = lines[first]
             .spans
@@ -1018,7 +1045,13 @@ mod tests {
             .unwrap()
             .style;
         assert_eq!(
-            lines[first + 2].spans.last().unwrap().style.fg,
+            lines[first + 2]
+                .spans
+                .iter()
+                .find(|span| span.content.contains("三个区块"))
+                .unwrap()
+                .style
+                .fg,
             string_style.fg
         );
         for width in [20, 80, 200] {
@@ -1695,5 +1728,38 @@ mod tests {
             super::super::style::log_styles(&Kind::Error).0
         );
         assert_eq!(parts[2].source, "\tboom");
+    }
+
+    #[test]
+    fn json_renders_multiline_markdown_strings_and_keeps_other_strings_literal() {
+        let value = serde_json::json!({
+            "prompt": "# Plan\n\n- **ship** it",
+            "log": "line one\nline two",
+            "title": "**inline**",
+        });
+        let lines = json_lines(&value);
+        let rows: Vec<_> = lines.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            rows,
+            [
+                "{",
+                "  \"log\": \"line one",
+                "  line two\",",
+                "  \"prompt\": \"Plan",
+                "  • ship it\",",
+                "  \"title\": \"**inline**\"",
+                "}",
+            ]
+        );
+        let bold = lines[4]
+            .spans
+            .iter()
+            .find(|span| span.content == "ship")
+            .unwrap();
+        assert!(
+            bold.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
     }
 }
