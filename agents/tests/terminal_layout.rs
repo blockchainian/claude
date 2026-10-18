@@ -106,6 +106,67 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     result
 }
 
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_queued_details_wrap_bold_and_separate_messages() {
+    let mut enqueue: serde_json::Value = include_str!("fixtures/claude-main-model-history.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|record| record["type"] == "queue-operation" && record["operation"] == "enqueue")
+        .unwrap();
+    let mut records = include_str!("fixtures/transcript.jsonl").to_owned();
+    for text in [
+        "Queued first message with enough words to wrap across the details panel and keep its queue_tail_one",
+        "Queued second message with enough words to wrap across the details panel and keep its queue_tail_two",
+    ] {
+        enqueue["content"] = text.into();
+        records.push('\n');
+        records.push_str(&enqueue.to_string());
+    }
+    records.push('\n');
+    let (_directory, tmux, _transcript) = start_probe_with_transcript("queued-details", &records);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "112", "-y", "90"]);
+    let capture = tmux.capture_when(|capture| {
+        capture.contains("queue_tail_one") && capture.contains("queue_tail_two")
+    });
+    println!("{capture}");
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&colored, 112, 90);
+    let screen = parser.screen();
+    let lines: Vec<_> = capture.lines().collect();
+    let mut previous_tail = None;
+    for (first, tail) in [
+        ("Queued first", "queue_tail_one"),
+        ("Queued second", "queue_tail_two"),
+    ] {
+        let y = lines.iter().position(|line| line.contains(first)).unwrap();
+        let x = lines[y][..lines[y].find(first).unwrap()].width();
+        let end = lines.iter().position(|line| line.contains(tail)).unwrap();
+        assert!(end > y, "queued message must wrap: {capture}");
+        if let Some(previous) = previous_tail {
+            assert_eq!(y, previous + 2, "messages need one blank row: {capture}");
+        }
+        for row in y..=end {
+            assert!(
+                screen.cell(row as u16, x as u16).unwrap().bold(),
+                "{colored}"
+            );
+        }
+        for column in x..x + first.len() {
+            assert_eq!(
+                screen
+                    .cell((y - 1) as u16, column as u16)
+                    .unwrap()
+                    .contents()
+                    .trim(),
+                ""
+            );
+        }
+        previous_tail = Some(end);
+    }
+    println!("{{\"queued_details\":\"pass\",\"wrap\":true,\"bold\":true,\"blank_rows\":true}}");
+}
+
 fn start_probe_with_transcript(
     name: &str,
     contents: &str,

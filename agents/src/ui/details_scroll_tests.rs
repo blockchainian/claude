@@ -77,13 +77,13 @@ mod details_budget {
                 .count(),
             1
         );
-        assert_eq!(&rows[prompt + 1..], ["Prompt text…", "Queued work"]);
+        assert_eq!(&rows[prompt + 1..], ["Prompt text…", "", "Queued work"]);
         let attention = rows
             .iter()
-            .position(|line| line.trim() == "Needs attention")
+            .position(|line| line.trim() == "Needs attention…")
             .unwrap();
         assert!(background < attention && attention < prompt);
-        assert_eq!(rows[attention + 1], "Open task to review.…");
+        assert_eq!(rows[attention + 1], "");
     }
 
     #[test]

@@ -1037,25 +1037,17 @@ impl View {
             item_links.resize(items.len(), Vec::new());
         }
         for queued in &session.queued {
-            let first = wrap_details(queued, &session.cwd, width, true)
-                .into_iter()
-                .next()
-                .unwrap_or_default();
-            let visible = if first.width() > width {
-                width - 1
-            } else {
-                width
-            } as u16;
-            let mut cells =
-                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
-                    .pop()
-                    .unwrap_or_default();
-            cells.retain(|(columns, _)| columns.end <= visible);
-            item_links.push(super::links::row_links(
-                &cells,
-                &super::links::text_links(queued, &session.cwd, &[]),
-            ));
-            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+            separate_section(&mut items);
+            let start = items.len();
+            items.extend(
+                wrap_details(queued, &session.cwd, width, true)
+                    .into_iter()
+                    .map(|line| Item::from(line.bold())),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Prompt", queued));
+            copies.push(Some((queued.as_str(), "Copied prompt")));
+            body_links.push(super::links::text_links(queued, &session.cwd, &[]));
         }
 
         item_links.resize(items.len(), Vec::new());

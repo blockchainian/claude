@@ -3484,13 +3484,108 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
 }
 
 #[test]
-fn details_prompt_truncates_long_queued_entry() {
+fn details_prompt_wraps_long_queued_entry() {
     let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
     row.prompt = "Current prompt ".repeat(12);
     row.queued = vec!["Queued prompt that extends beyond the panel width".into()];
     assert_eq!(
         queued_details(row, 15),
-        include_str!("../../tests/ui_snapshots/details_queued_truncated.txt")
+        include_str!("../../tests/ui_snapshots/details_queued_wrapped.txt")
+    );
+}
+
+#[test]
+fn details_queued_messages_render_all_paragraphs_and_bold_cells() {
+    let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
+    row.prompt = "Current prompt".into();
+    row.queued = vec![
+        "First queued line  \nSecond queued line\n\nAnother paragraph with words that wrap across the panel width".into(),
+        "Next queued message".into(),
+    ];
+    let mut view = test_view(Grouping::Project, true);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 20);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    let rows = buf
+        .content
+        .chunks(40)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        &rows[1..11],
+        &[
+            "Current prompt",
+            "",
+            "First queued line",
+            "Second queued line",
+            "",
+            "Another paragraph with words that wrap",
+            "across the panel width",
+            "",
+            "Next queued message",
+            "",
+        ]
+    );
+    for y in [3, 4, 6, 7, 9] {
+        for x in 0..rows[y].len() {
+            assert!(
+                buf[(x as u16, y as u16)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
+        }
+    }
+    assert!(
+        !buf[(0, 1)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+}
+
+#[test]
+fn details_queued_messages_keep_links_selection_and_copy() {
+    let mut view = fixture();
+    let queued = "Queued first line\n\nRead [report](https://example.com/report) and finish";
+    let selected = &mut view.rows[view.selected];
+    selected.prompt = "Current prompt".into();
+    selected.queued = vec![queued.into(), "Second queued message".into()];
+    let rendered = screen(&view, 120, 50);
+    assert_eq!(
+        click_text(&mut view, &rendered, "report"),
+        Some(Action::OpenPath("https://example.com/report".into()))
+    );
+    assert_eq!(
+        double_click_text(&mut view, &rendered, "Queued first"),
+        Some(Action::Copy {
+            text: queued.into(),
+            label: "Copied prompt".into(),
+        })
+    );
+    view.last_copy_click = None;
+    let (x, y) = rendered_cell(&rendered, "Queued first");
+    let (end_x, end_y) = rendered_cell(&rendered, "finish");
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end_x, end_y));
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end_x, end_y)),
+        Some(Action::Copy {
+            text: queued[..queued.find("finish").unwrap()].into(),
+            label: "Copied prompt".into(),
+        })
+    );
+    assert_eq!(
+        double_click_text(&mut view, &rendered, "Second queued"),
+        Some(Action::Copy {
+            text: "Second queued message".into(),
+            label: "Copied prompt".into(),
+        })
     );
 }
 
@@ -3832,7 +3927,7 @@ fn details_markdown_snapshot() {
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, prompt_y + 2)]
+        buffer[(2, prompt_y + 3)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
