@@ -148,7 +148,7 @@ impl Session {
 
     pub fn input_disabled_reason(&self) -> Option<&'static str> {
         if !self.can_resume() {
-            Some("Not supported")
+            Some("")
         } else if self.id.provider == ProviderId::Claude
             && self
                 .process

@@ -116,10 +116,15 @@ impl PromptBox {
         }
         if let Some(reason) = disabled {
             let reason = reason.lines().next().unwrap_or("");
+            let mut heading = format!("{label} {DISABLED_PROMPT_MARKER}");
+            if !reason.is_empty() {
+                heading.push(' ');
+                heading.push_str(reason);
+            }
             buf.set_stringn(
                 area.x,
                 area.y,
-                format!("{label} {DISABLED_PROMPT_MARKER} {reason}"),
+                heading,
                 usize::from(area.width),
                 Style::default().dim(),
             );
@@ -409,11 +414,16 @@ mod tests {
         assert!(screen.contains("Task ❮ Running in a terminal"), "{screen}");
         assert!(!screen.contains("denied"));
         let area = Rect::new(0, 0, 100, 1);
-        for reason in ["Running in a terminal", "Not supported"] {
+        for (reason, expected) in [
+            (
+                "Running in a terminal",
+                "升级命令中心 ❮ Running in a terminal",
+            ),
+            ("", "升级命令中心 ❮"),
+        ] {
             let mut buffer = Buffer::empty(area);
             editor.render(area, &mut buffer, "升级命令中心", Some(reason));
             use unicode_segmentation::UnicodeSegmentation;
-            let expected = format!("升级命令中心 ❮ {reason}");
             let mut column = 0;
             for grapheme in expected.graphemes(true) {
                 let cell = &buffer[(column as u16, 0)];
@@ -422,6 +432,10 @@ mod tests {
                 column += grapheme.width();
             }
             assert_eq!(column, expected.width());
+            assert_eq!(
+                buffer[(column as u16, 0)].modifier,
+                ratatui::style::Modifier::empty()
+            );
         }
     }
 

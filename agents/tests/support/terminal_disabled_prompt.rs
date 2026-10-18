@@ -72,7 +72,7 @@ fn terminal_disabled_prompt_keeps_mirrored_marker_and_dim_reason() {
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     tmux.wait_for(|capture| capture.contains("Example thread 1 ❯"));
     tmux.run(&["send-keys", "-t", "probe", "Down"]);
-    let expected = "升级命令中心 ❮ Not supported";
+    let expected = "升级命令中心 ❮";
     tmux.wait_for(|capture| capture.contains(expected));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&capture, 160, 45);
@@ -84,6 +84,7 @@ fn terminal_disabled_prompt_keeps_mirrored_marker_and_dim_reason() {
         .find_map(|(row, line)| line.contains(expected).then(|| (row, line.to_owned())))
         .unwrap();
     let column = line[..line.find(expected).unwrap()].width();
+    assert_eq!(line.trim(), expected);
     let marker = column + "升级命令中心 ".width();
     assert_eq!(
         screen.cell(row as u16, marker as u16).unwrap().contents(),
