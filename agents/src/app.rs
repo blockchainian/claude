@@ -59,6 +59,10 @@ enum Input {
         id: SessionKey,
         result: io::Result<()>,
     },
+    Archived {
+        id: SessionKey,
+        result: io::Result<()>,
+    },
     /// The session terminal's screen changed or its program closed the terminal.
     TerminalOutput,
     /// A terminal client has detached or been killed and reaped.
@@ -460,6 +464,7 @@ impl App {
                     }
                 }
                 Input::Deleted { id, result } => self.deleted(&id, result),
+                Input::Archived { id, result } => self.archived(&id, result),
                 Input::TerminalOutput => {}
                 Input::TerminalClosed { id, result } => self.terminal_closed(&id, result),
             }
@@ -925,20 +930,58 @@ impl App {
             Ok(job) => job,
             Err(error) => return self.deleted(&id, Err(error)),
         };
-        let sender = self.sender.clone();
-        let worker_id = id.clone();
-        if let Err(error) = thread::Builder::new()
-            .name("agents-delete".into())
-            .spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
-                    .unwrap_or_else(|_| Err(io::Error::other("Delete job panicked")));
-                let _ = sender.send(Input::Deleted {
-                    id: worker_id,
-                    result,
-                });
-            })
-        {
+        if let Err(error) = self.run_session_job(
+            id.clone(),
+            job,
+            "agents-delete",
+            "Delete job panicked",
+            |id, result| Input::Deleted { id, result },
+        ) {
             self.deleted(&id, Err(error));
+        }
+    }
+
+    fn archive(&mut self, session: Session) {
+        let id = session.id.clone();
+        self.view.hide(&id);
+        let job = match self.hub.provider(id.provider).archive(&session) {
+            Ok(job) => job,
+            Err(error) => return self.archived(&id, Err(error)),
+        };
+        if let Err(error) = self.run_session_job(
+            id.clone(),
+            job,
+            "agents-archive",
+            "Archive job panicked",
+            |id, result| Input::Archived { id, result },
+        ) {
+            self.archived(&id, Err(error));
+        }
+    }
+
+    fn run_session_job(
+        &self,
+        id: SessionKey,
+        job: Job,
+        name: &str,
+        panic_message: &'static str,
+        complete: fn(SessionKey, io::Result<()>) -> Input,
+    ) -> io::Result<()> {
+        let sender = self.sender.clone();
+        thread::Builder::new().name(name.into()).spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| Err(io::Error::other(panic_message)));
+            let _ = sender.send(complete(id, result));
+        })?;
+        Ok(())
+    }
+
+    fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
+        self.view.unhide(id);
+        self.refresh();
+        if let Err(error) = result {
+            self.view
+                .set_notice(Some(format!("Failed to archive: {error}")));
         }
     }
 
@@ -1101,12 +1144,7 @@ impl App {
             }
             Action::Archive(id) => {
                 if let Some(session) = self.session(&id) {
-                    match self.hub.provider(id.provider).archive(&session) {
-                        Ok(()) => self.refresh(),
-                        Err(error) => self
-                            .view
-                            .set_notice(Some(format!("Failed to archive: {error}"))),
-                    }
+                    self.archive(session);
                 }
             }
             Action::Stop(id) => {

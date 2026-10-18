@@ -1179,6 +1179,12 @@ fn manager_thread_mutations_reach_app_provider_paths() {
             _ => unreachable!(),
         };
         assert!(!app.handle_action(Some(action)));
+        if operation == "archive" {
+            let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(matches!(&event, Input::Archived { result: Err(_), .. }));
+            let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+            app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+        }
         let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
         app.view.render(buffer.area, &mut buffer);
         let rendered = buffer

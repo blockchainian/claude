@@ -916,7 +916,7 @@ fn manager_thread_operations_use_the_provider_paths() {
     // No daemon is present in this captured fixture; reaching it reports a connection error.
     for result in [
         provider.rename(&session, "probe"),
-        provider.archive(&session),
+        provider.archive(&session).unwrap()(),
         provider.send(&session, SessionInput::Interrupt).unwrap()(),
     ] {
         assert_ne!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);

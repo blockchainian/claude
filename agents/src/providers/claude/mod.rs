@@ -910,28 +910,34 @@ impl Provider for ClaudeProvider {
         let session = session.clone();
         Ok(Box::new(move || delete_session(&config_dir, &session)))
     }
-    fn archive(&self, session: &Session) -> io::Result<()> {
-        let ended = || {
-            io::Error::other("session has already ended; Claude Code archived it when it stopped")
-        };
-        let entry = match session_entry(&self.config_dir, session) {
-            Ok(Some(entry)) => entry,
-            Ok(None) => return Err(ended()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(ended()),
-            Err(error) => return Err(error),
-        };
-        let pid = entry.pid.expect("validated process id");
-        if !process_exists(pid)? {
-            return Err(ended());
-        }
-        let bridge_id = entry
-            .bridge_session_id
-            .as_deref()
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| io::Error::other("session has no Remote Control link"))?;
-        let mut client = api::Client::connect(&self.config_dir)?;
-        stop_session(session, &entry)?;
-        api::session::archive(&mut client, bridge_id)
+    fn archive(&self, session: &Session) -> io::Result<Job> {
+        let config_dir = self.config_dir.clone();
+        let session = session.clone();
+        Ok(Box::new(move || {
+            let ended = || {
+                io::Error::other(
+                    "session has already ended; Claude Code archived it when it stopped",
+                )
+            };
+            let entry = match session_entry(&config_dir, &session) {
+                Ok(Some(entry)) => entry,
+                Ok(None) => return Err(ended()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(ended()),
+                Err(error) => return Err(error),
+            };
+            let pid = entry.pid.expect("validated process id");
+            if !process_exists(pid)? {
+                return Err(ended());
+            }
+            let bridge_id = entry
+                .bridge_session_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| io::Error::other("session has no Remote Control link"))?;
+            let mut client = api::Client::connect(&config_dir)?;
+            stop_session(&session, &entry)?;
+            api::session::archive(&mut client, bridge_id)
+        }))
     }
 }
 
@@ -1264,7 +1270,9 @@ mod tests {
         let mut provider = ClaudeProvider::new(dir.path().into());
         let session = provider.refresh(1).sessions.remove(0);
         assert_eq!(
-            provider.archive(&session).unwrap_err().to_string(),
+            provider.archive(&session).unwrap()()
+                .unwrap_err()
+                .to_string(),
             "session has already ended; Claude Code archived it when it stopped"
         );
         assert!(path.exists());
@@ -1286,7 +1294,9 @@ mod tests {
         let session = provider.refresh(1).sessions.remove(0);
         assert!(session.process.is_some());
         assert_eq!(
-            provider.archive(&session).unwrap_err().to_string(),
+            provider.archive(&session).unwrap()()
+                .unwrap_err()
+                .to_string(),
             "session has no Remote Control link"
         );
         assert!(process_exists(std::process::id()).unwrap());

@@ -179,7 +179,7 @@ fn stop_and_archive_thread(manager: bool) {
     provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     drop(owner);
 
-    provider.archive(&session).unwrap();
+    provider.archive(&session).unwrap()().unwrap();
     let archived: bool = Connection::open_with_flags(
         provider.home.join("state_5.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -255,7 +255,7 @@ fn delete_real_codex_sessions() {
         let rollout = session.transcript.clone().unwrap();
         assert!(rollout.exists());
         if archived {
-            provider.archive(&session).unwrap();
+            provider.archive(&session).unwrap()().unwrap();
             let path: String = Connection::open_with_flags(
                 provider.home.join("state_5.sqlite"),
                 OpenFlags::SQLITE_OPEN_READ_ONLY,

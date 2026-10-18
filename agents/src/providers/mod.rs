@@ -172,7 +172,8 @@ pub trait Provider {
     fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
     /// Returns the job that permanently deletes the session, to run off the UI thread.
     fn delete(&self, session: &Session) -> io::Result<Job>;
-    fn archive(&self, session: &Session) -> io::Result<()>;
+    /// Returns the archive job to run off the UI thread.
+    fn archive(&self, session: &Session) -> io::Result<Job>;
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {

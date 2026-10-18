@@ -658,15 +658,20 @@ impl Provider for CodexProvider {
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::set_name(&mut client, &session.id.id, name)
     }
-    fn archive(&self, session: &Session) -> io::Result<()> {
+    fn archive(&self, session: &Session) -> io::Result<Job> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        if session.archived {
-            return Ok(());
-        }
-        let mut client = app_server::Client::connect(&self.home)?;
-        app_server::thread::archive(&mut client, &session.id.id)
+        let home = self.home.clone();
+        let id = session.id.id.clone();
+        let archived = session.archived;
+        Ok(Box::new(move || {
+            if archived {
+                return Ok(());
+            }
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::thread::archive(&mut client, &id)
+        }))
     }
     fn delete(&self, session: &Session) -> io::Result<Job> {
         if !session.can_resume() {

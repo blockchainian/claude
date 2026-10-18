@@ -9360,3 +9360,38 @@ mod reading_interaction_tests;
 
 #[path = "terminal_panel_tests.rs"]
 mod terminal_panel_tests;
+
+#[test]
+fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for position in 0..3 {
+            let mut view = fixture();
+            let mut rows = view.rows.iter().take(3).cloned().collect::<Vec<_>>();
+            for row in &mut rows {
+                row.id.provider = provider;
+                row.status = SessionStatus::Ready;
+                row.parent = None;
+            }
+            view.set_sessions(rows, false);
+            let visible = view.selectable_indices();
+            let target = view.rows[visible[position]].id.clone();
+            view.select(visible[position]);
+            view.hide(&target);
+            let next = view.selected_id().cloned();
+            assert!(next.is_some());
+            let mut rows = view.rows.clone();
+            rows.iter_mut().find(|row| row.id == target).unwrap().status = SessionStatus::Inactive;
+            // Filesystem refreshes can arrive before the worker completion.
+            view.set_sessions(rows.clone(), false);
+            assert_eq!(view.selected_id(), next.as_ref());
+            view.unhide(&target);
+            view.set_sessions(rows, false);
+            assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+            assert_eq!(view.selected_id(), next.as_ref());
+            key(&mut view, KeyCode::Tab);
+            assert_eq!(view.selected_id(), Some(&target));
+            let rendered = screen(&view, 120, 40);
+            assert!(rendered.contains("Inactive"));
+        }
+    }
+}

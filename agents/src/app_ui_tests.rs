@@ -1330,3 +1330,90 @@ fn terminal_stays_closed_when_the_task_is_selected_again() {
         "returning must show the log detail without reopening the terminal"
     );
 }
+
+fn archive_codex_fixture() -> (tempfile::TempDir, App) {
+    let directory = tempfile::tempdir().unwrap();
+    rusqlite::Connection::open(directory.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let provider = crate::providers::codex::CodexProvider::new(
+        directory.path().into(),
+        directory.path().join("manager"),
+    );
+    let mut app = App::new(Hub::new(vec![Box::new(provider)]), directory.path().into());
+    app.refresh();
+    (directory, app)
+}
+
+#[test]
+fn archive_errors_arrive_through_workers_for_both_providers() {
+    for (directory, mut app) in [fixture(), archive_codex_fixture()] {
+        let target = app
+            .sessions
+            .iter()
+            .find(|s| s.can_resume())
+            .unwrap()
+            .clone();
+        app.sessions = vec![target.clone()];
+        app.view.set_sessions(app.sessions.clone(), false);
+        key(&mut app, KeyCode::Tab);
+        draw(&mut app, 120);
+        assert!(!app.handle_action(Some(Action::Archive(target.id.clone()))));
+        let event = app
+            .receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("archive must report the provider error through a worker");
+        let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+        app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+        let rendered = lines(&draw(&mut app, 160)).join("\n");
+        assert!(rendered.contains("Failed to archive:"), "{rendered}");
+        key(&mut app, KeyCode::Home);
+        assert!(
+            app.view.selected_id().is_some(),
+            "failed archive must unhide the task"
+        );
+        drop(directory);
+    }
+}
+
+#[test]
+fn archive_success_keeps_active_tab_and_releases_hidden_task() {
+    let (_directory, mut app) = archive_codex_fixture();
+    let mut target = app
+        .sessions
+        .iter()
+        .find(|s| s.can_resume())
+        .unwrap()
+        .clone();
+    // Archiving an already archived Codex thread is a real provider no-op.
+    target.archived = true;
+    target.status = crate::model::SessionStatus::Ready;
+    app.sessions = vec![target.clone()];
+    app.view.set_sessions(app.sessions.clone(), false);
+    draw(&mut app, 120);
+    assert_eq!(app.view.selected_id(), Some(&target.id));
+    key(&mut app, KeyCode::Char('a'));
+    assert!(lines(&draw(&mut app, 120)).join("\n").contains("Archive"));
+    key(&mut app, KeyCode::Char('2'));
+    assert!(
+        app.view.selected_id().is_none(),
+        "archive must move selection before refreshing"
+    );
+    let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    draw(&mut app, 120);
+    assert!(
+        app.view.selected_id().is_none(),
+        "must stay on empty Active tab"
+    );
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Home);
+    let mut found = false;
+    for _ in 0..app.sessions.len() {
+        found |= app.view.selected_id() == Some(&target.id);
+        key(&mut app, KeyCode::Down);
+    }
+    assert!(found, "archived task must remain available on Inactive");
+}
