@@ -1004,6 +1004,7 @@ impl View {
                                 images,
                             },
                         };
+                        self.input_box.editor.preserve_images();
                         self.submit_draft(id);
                         Some(action)
                     } else {
