@@ -125,7 +125,7 @@ pub struct App {
     launch: Option<Command>,
     /// The session program running in the log detail panel.
     terminal: Option<crate::session_terminal::SessionTerminal>,
-    /// The task whose terminal should reopen when selected again.
+    /// The task whose terminal opens once that task's previous client has closed.
     terminal_task: Option<SessionKey>,
     /// Clients being reaped before the same session can open another terminal.
     closing_terminals: std::collections::HashMap<SessionKey, session_terminal::TerminalClose>,

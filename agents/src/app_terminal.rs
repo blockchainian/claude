@@ -138,26 +138,20 @@ impl App {
         }
     }
 
-    /// Reopens the remembered task's terminal, closes unselected or exited programs,
-    /// and fits the selected terminal to the panel.
+    /// Opens a terminal that waited for its task's previous client while that task is
+    /// still selected, closes unselected or exited programs, and fits the selected
+    /// terminal to the panel.
     pub(super) fn sync_terminal(&mut self) {
         let Some(terminal) = &mut self.terminal else {
-            if let Some(id) = &self.terminal_task
-                && self.view.selected_id() == Some(id)
+            if let Some(id) = self.terminal_task.take()
+                && self.view.selected_id() == Some(&id)
             {
-                let id = self.terminal_task.take().expect("remembered terminal task");
                 self.open_terminal(id);
             }
             return;
         };
-        if terminal.closed() {
+        if terminal.closed() || self.view.selected_id() != Some(&terminal.id) {
             self.close_terminal();
-            return;
-        }
-        if self.view.selected_id() != Some(&terminal.id) {
-            let id = terminal.id.clone();
-            self.close_terminal();
-            self.terminal_task = Some(id);
             return;
         }
         if let Some((rows, cols)) = self.view.terminal_size()
