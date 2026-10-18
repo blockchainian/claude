@@ -15,6 +15,33 @@ pub(super) fn text_paths(text: &str, cwd: &Path) -> Vec<Range<usize>> {
     paths
 }
 
+/// A path inside `cwd`, relative to that directory. Component boundaries matter;
+/// parent components stay absolute so a lexical prefix cannot hide an escape.
+pub(super) fn relative_path(path: &str, cwd: &Path) -> Option<String> {
+    let expanded;
+    let absolute = if let Some(rest) = path.strip_prefix("~/") {
+        expanded = std::path::PathBuf::from(std::env::var_os("HOME")?).join(rest);
+        expanded.as_path()
+    } else {
+        Path::new(path)
+    };
+    if !absolute.is_absolute() || !cwd.is_absolute() {
+        return None;
+    }
+    let relative = absolute.strip_prefix(cwd).ok()?;
+    if relative
+        .components()
+        .any(|part| part == std::path::Component::ParentDir)
+    {
+        return None;
+    }
+    Some(if relative.as_os_str().is_empty() {
+        ".".into()
+    } else {
+        relative.to_str()?.to_owned()
+    })
+}
+
 /// CJK punctuation that ends a word without an intervening space.
 const CJK_BREAKS: [char; 7] = ['，', '。', '、', '；', '：', '！', '？'];
 

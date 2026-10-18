@@ -1565,7 +1565,7 @@ fn wrap_details(
     markdown: bool,
 ) -> Vec<Line<'static>> {
     let paths = super::paths::text_paths(text, cwd);
-    let text = super::line_truncation::abbreviate_paths_for_wrap(text, &paths, width);
+    let text = super::line_truncation::abbreviate_paths_for_wrap(text, &paths, width, cwd);
     if markdown {
         super::markdown::render_with_options(
             &text,
@@ -1590,7 +1590,7 @@ mod wrapped_path_tests {
         for markdown in [false, true] {
             let lines = wrap_details(
                 "some prose before /tmp/fits.md and after",
-                std::path::Path::new("/"),
+                std::path::Path::new("/project"),
                 20,
                 markdown,
             );
@@ -1602,7 +1602,7 @@ mod wrapped_path_tests {
         }
         let lines = wrap_details(
             "**/private/workspace/reports/report.md**",
-            std::path::Path::new("/"),
+            std::path::Path::new("/project"),
             20,
             true,
         );
@@ -1676,7 +1676,7 @@ mod wrapped_path_tests {
 
     #[test]
     fn wrapped_details_abbreviate_screenshot_path_at_narrow_width() {
-        let lines = wrap_details(MESSAGE, std::path::Path::new("/"), 40, true);
+        let lines = wrap_details(MESSAGE, std::path::Path::new("/project"), 40, true);
         let plain: Vec<_> = lines.iter().map(ToString::to_string).collect();
         assert_eq!(
             plain,

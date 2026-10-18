@@ -759,10 +759,11 @@ fn render_event(
         } else {
             super::links::path_links(&fitted.source, &fitted.paths, cwd)
         };
-        let mut maps = super::text_selection_layout::map_lines(
+        let mut maps = super::text_selection_layout::map_lines_in(
             &fitted.source,
             std::slice::from_ref(&body),
             is_prose(&event.kind),
+            Some(cwd),
         );
         let mut cells = maps.pop().unwrap_or_default();
         cells.retain(|(columns, _)| columns.end <= visible);
@@ -896,7 +897,7 @@ fn detail_parts_layout(
             let title = section.title;
             let id = layout.sources.len();
             let source = title.source();
-            let (line, cells) = title.line(columns);
+            let (line, cells) = title.line_in(columns, cwd);
             if let Some(time) = title.time {
                 layout
                     .times
@@ -920,10 +921,11 @@ fn detail_parts_layout(
                 .parts
                 .into_iter()
                 .map(|part| {
-                    let lines = part.lines(
+                    let lines = part.lines_in(
                         usize::from(columns.reading_width.min(columns.text.width)),
                         body_style,
                         now,
+                        cwd,
                     );
                     (part, lines)
                 })
@@ -940,7 +942,7 @@ fn detail_parts_layout(
             let padding = usize::from(group_x - columns.text.x);
             for (part, lines) in rendered {
                 let id = layout.sources.len();
-                let mut maps = part.maps(&lines);
+                let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
                 if part.running() && width > 0 {
                     layout.running.push(first);
@@ -1102,7 +1104,8 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
             .collect::<Vec<_>>()
             .join("\n");
         let paths = super::paths::text_paths(&body, cwd);
-        let shortened = super::line_truncation::abbreviate_paths_in_text(&body, &paths, body_width);
+        let shortened =
+            super::line_truncation::abbreviate_paths_in_text(&body, &paths, body_width, cwd);
         let mut spans = Vec::new();
         for line in super::markdown::render(&shortened, usize::MAX) {
             // Blank separators and drawn rules carry no text for a single row.
@@ -1128,7 +1131,7 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         }
     } else {
         let (text, paths) = display_paths(event, cwd);
-        let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
+        let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width, cwd);
         FittedBody {
             line: Line::from(Span::styled(shortened, body_style)),
             source: text,
@@ -1400,7 +1403,7 @@ pub(super) mod log_markdown {
             area,
             &mut buffer,
             None,
-            std::path::Path::new("/"),
+            std::path::Path::new("/project"),
         );
         buffer
     }
@@ -1747,7 +1750,7 @@ pub(super) mod log_markdown {
             std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
         }
         let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
-        let fitted = fitted_body_line(&events[0], width, std::path::Path::new("/"));
+        let fitted = fitted_body_line(&events[0], width, std::path::Path::new("/project"));
         fitted
             .line
             .spans
@@ -2185,3 +2188,7 @@ mod panel_detail_tests {
 #[cfg(test)]
 #[path = "log_detail_regression_tests.rs"]
 mod detail_regression_tests;
+
+#[cfg(test)]
+#[path = "log_path_tests.rs"]
+mod path_tests;

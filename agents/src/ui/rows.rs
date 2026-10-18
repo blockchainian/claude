@@ -64,7 +64,11 @@ impl View {
             }
         };
         if self.grouping == Grouping::Project && !self.is_pinned(index) {
-            super::line_truncation::abbreviate_path(&group, usize::from(width).min(/*other*/ 64))
+            super::line_truncation::abbreviate_path(
+                &group,
+                usize::from(width).min(/*other*/ 64),
+                None,
+            )
         } else {
             group
         }

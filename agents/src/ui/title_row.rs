@@ -2,17 +2,32 @@
 
 use super::detail_model::{DetailColumns, TitleRow};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
-use super::text_selection_layout::{CellMap, map_lines};
+use super::text_selection_layout::{CellMap, map_lines_in};
 use ratatui::text::{Line, Span};
 
 impl TitleRow {
     /// Draw the text area; cell columns are relative to its left edge.
     /// The caller draws `time` separately in `columns.time` with `meta_style`.
+    #[cfg(test)]
     pub fn line(&self, columns: DetailColumns) -> (Line<'static>, Vec<CellMap>) {
+        self.line_in(columns, std::path::Path::new("/nonexistent"))
+    }
+
+    pub fn line_in(
+        &self,
+        columns: DetailColumns,
+        cwd: &std::path::Path,
+    ) -> (Line<'static>, Vec<CellMap>) {
         let width = usize::from(columns.text.width);
         let source = self.source();
-        let drawn = Line::from(Span::styled(source.replace('\t', "    "), self.title_style));
-        let mut maps = map_lines(&source, std::slice::from_ref(&drawn), false).remove(0);
+        let paths = super::paths::text_paths(&source, cwd);
+        let display = super::line_truncation::abbreviate_paths(&source, &paths, width, cwd);
+        let drawn = Line::from(Span::styled(
+            display.replace('\t', "    "),
+            self.title_style,
+        ));
+        let mut maps =
+            map_lines_in(&source, std::slice::from_ref(&drawn), false, Some(cwd)).remove(0);
         let mut title = super::log::truncate_detail_line(drawn, &mut maps, width);
         for span in &mut title.spans {
             span.style = self.title_style;

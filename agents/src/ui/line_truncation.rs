@@ -103,8 +103,15 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
     }
 }
 
-pub(super) fn abbreviate_path(path: &str, max_width: usize) -> String {
-    let path = abbreviate_directories(path, max_width);
+pub(super) fn abbreviate_path(
+    path: &str,
+    max_width: usize,
+    cwd: Option<&std::path::Path>,
+) -> String {
+    let path = cwd
+        .and_then(|cwd| super::paths::relative_path(path, cwd))
+        .unwrap_or_else(|| path.to_owned());
+    let path = abbreviate_directories(&path, max_width);
     if display_width(&path) <= max_width {
         return path;
     }
@@ -182,8 +189,9 @@ pub(super) fn abbreviate_paths_in_text(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
+    cwd: &std::path::Path,
 ) -> String {
-    fit_paths(text, ranges, max_width, false)
+    fit_paths(text, ranges, max_width, false, cwd)
 }
 
 /// Shrinks the paths at `ranges` in `text`, left to right, until the text
@@ -193,8 +201,9 @@ pub(super) fn abbreviate_paths(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
+    cwd: &std::path::Path,
 ) -> String {
-    fit_paths(text, ranges, max_width, ranges.len() == 1)
+    fit_paths(text, ranges, max_width, ranges.len() == 1, cwd)
 }
 
 fn fit_paths(
@@ -202,14 +211,26 @@ fn fit_paths(
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
     cut_names: bool,
+    cwd: &std::path::Path,
 ) -> String {
-    let mut overflow = display_width(text).saturating_sub(max_width);
     let mut paths: Vec<String> = ranges
         .iter()
-        .map(|range| text[range.clone()].to_owned())
+        .map(|range| {
+            super::paths::relative_path(&text[range.clone()], cwd)
+                .unwrap_or_else(|| text[range.clone()].to_owned())
+        })
         .collect();
+    let paths_width: usize = ranges
+        .iter()
+        .map(|range| display_width(&text[range.clone()]))
+        .sum();
+    let text_width = display_width(text).saturating_sub(paths_width)
+        + paths.iter().map(|path| display_width(path)).sum::<usize>();
+    let mut overflow = text_width.saturating_sub(max_width);
     let passes: &[fn(&str, usize) -> String] = if cut_names {
-        &[abbreviate_directories, abbreviate_path]
+        &[abbreviate_directories, |path, width| {
+            abbreviate_path(path, width, None)
+        }]
     } else {
         &[abbreviate_directories]
     };
@@ -240,16 +261,18 @@ pub(super) fn abbreviate_paths_for_wrap(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     width: usize,
+    cwd: &std::path::Path,
 ) -> String {
     let mut fitted = String::new();
     let mut end = 0;
     for range in ranges {
         fitted.push_str(&text[end..range.start]);
-        let path = &text[range.clone()];
+        let relative = super::paths::relative_path(&text[range.clone()], cwd);
+        let path = relative.as_deref().unwrap_or(&text[range.clone()]);
         if display_width(path) <= width {
             fitted.push_str(path);
         } else {
-            fitted.push_str(&abbreviate_path(path, width));
+            fitted.push_str(&abbreviate_path(path, width, None));
         }
         end = range.end;
     }
@@ -296,17 +319,65 @@ fn prose_words(text: &str) -> Box<dyn Iterator<Item = textwrap::core::Word<'_>> 
 mod tests {
     use super::*;
 
+    fn abbreviate_path(path: &str, width: usize) -> String {
+        super::abbreviate_path(path, width, None)
+    }
+
     /// A directory with no files, so only absolute and home paths are found.
     const EMPTY: &str = "/nonexistent";
 
     fn abbreviate_paths_for_wrap(text: &str, width: usize) -> String {
         let ranges = crate::ui::paths::text_paths(text, std::path::Path::new(EMPTY));
-        super::abbreviate_paths_for_wrap(text, &ranges, width)
+        super::abbreviate_paths_for_wrap(text, &ranges, width, std::path::Path::new(EMPTY))
     }
 
     fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
         let ranges = crate::ui::paths::text_paths(text, std::path::Path::new(EMPTY));
-        super::abbreviate_paths_in_text(text, &ranges, max_width)
+        super::abbreviate_paths_in_text(text, &ranges, max_width, std::path::Path::new(EMPTY))
+    }
+
+    #[test]
+    fn cwd_abbreviation_precedes_width_fitting_and_keeps_component_boundaries() {
+        let cwd = std::path::Path::new("/a/b");
+        for (path, expected) in [
+            ("/a/b/src/lib.rs:272-274", "src/lib.rs:272-274"),
+            ("/a/b", "."),
+            ("/a/b/", "."),
+            ("/a/bc/src/lib.rs", "/a/bc/src/lib.rs"),
+            ("/a/b/../outside.rs", "/a/b/../outside.rs"),
+            ("src/lib.rs", "src/lib.rs"),
+        ] {
+            assert_eq!(super::abbreviate_path(path, 100, Some(cwd)), expected);
+        }
+        let text = "See `/a/b/src/lib.rs`:272-274 and /a/bc/other.rs";
+        let ranges = crate::ui::paths::text_paths(text, cwd);
+        let expected = "See `src/lib.rs`:272-274 and /a/bc/other.rs";
+        assert_eq!(
+            super::abbreviate_paths_in_text(text, &ranges, 100, cwd),
+            expected
+        );
+        assert_eq!(super::abbreviate_paths(text, &ranges, 100, cwd), expected);
+        assert_eq!(
+            super::abbreviate_paths_for_wrap(text, &ranges, 100, cwd),
+            expected
+        );
+        let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+        assert_eq!(
+            super::abbreviate_path("~/project/src/lib.rs", 100, Some(&home.join("project"))),
+            "src/lib.rs"
+        );
+        assert_eq!(
+            super::abbreviate_path(
+                &home.join("other/file.rs").to_string_lossy(),
+                100,
+                Some(&home.join("project"))
+            ),
+            "~/other/file.rs"
+        );
+        assert_eq!(
+            super::abbreviate_path("/a/b/long_directory/file.rs", 11, Some(cwd)),
+            "l…/file.rs"
+        );
     }
 
     #[test]

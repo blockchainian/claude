@@ -8,7 +8,7 @@ fn events(fixture: &str) -> Vec<Event> {
 }
 
 fn layout(event: &Event, width: u16) -> DetailLayout {
-    detail_layout(event, width, Path::new("/"), DateTime::UNIX_EPOCH)
+    detail_layout(event, width, Path::new("/workspace"), DateTime::UNIX_EPOCH)
 }
 
 fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
@@ -464,10 +464,11 @@ fn assert_centered_blocks(event: &Event, width: u16) {
                 .parts
                 .iter()
                 .flat_map(|part| {
-                    part.lines(
+                    part.lines_in(
                         usize::from(drawn.columns.reading_width.min(drawn.columns.text.width)),
                         Style::default(),
                         DateTime::UNIX_EPOCH,
+                        Path::new("/workspace"),
                     )
                 })
                 .map(|line| line.width())
@@ -736,7 +737,7 @@ fn recorded_preformatted_block(code: bool) {
         for width in [200, 90] {
             let drawn = layout(&event, width);
             let expected = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
-                Line::from(command_line.to_owned()),
+                Line::from(command_line.replace("/workspace/", "")),
                 drawn.columns.text.width.into(),
             )
             .to_string();

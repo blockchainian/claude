@@ -171,31 +171,59 @@ impl Part {
     }
 
     /// Generated rules and title padding have no source bytes to select.
+    #[cfg(test)]
     pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
+        self.maps_in(lines, std::path::Path::new("/nonexistent"))
+    }
+
+    pub fn maps_in(
+        &self,
+        lines: &[Line<'_>],
+        cwd: &std::path::Path,
+    ) -> Vec<Vec<super::text_selection_layout::CellMap>> {
         if self.running() {
             return vec![Vec::new(); lines.len()];
         }
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
-        super::text_selection_layout::map_lines(&self.source, lines, self.markdown())
+        super::text_selection_layout::map_lines_in(
+            &self.source,
+            lines,
+            self.markdown(),
+            (!matches!(self.body, Body::Json(_))).then_some(cwd),
+        )
     }
 
     /// Lay out prose at `width`, preserving logical lines in preformatted blocks.
+    #[cfg(test)]
     pub fn lines(
         &self,
         width: usize,
         body_style: Style,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Vec<Line<'static>> {
-        let drawn = self.source.replace('\t', "    ");
+        self.lines_in(width, body_style, now, std::path::Path::new("/nonexistent"))
+    }
+
+    pub fn lines_in(
+        &self,
+        width: usize,
+        body_style: Style,
+        now: chrono::DateTime<chrono::Utc>,
+        cwd: &std::path::Path,
+    ) -> Vec<Line<'static>> {
+        let paths = super::paths::text_paths(&self.source, cwd);
+        let display =
+            super::line_truncation::abbreviate_paths_in_text(&self.source, &paths, usize::MAX, cwd);
+        let drawn = display.replace('\t', "    ");
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let kind = self.body.content_kind();
         let blocks = match &self.body {
             Body::Markdown | Body::Prose(true) => super::markdown::blocks(source),
             _ => vec![Block {
-                lines: self.render_lines(width, now),
+                lines: self.render_lines(source, width, now),
                 indent: 0,
                 kind,
             }],
@@ -218,9 +246,12 @@ impl Part {
             .collect()
     }
 
-    fn render_lines(&self, width: usize, now: chrono::DateTime<chrono::Utc>) -> Vec<Line<'static>> {
-        let drawn = self.source.replace('\t', "    ");
-        let source = drawn.as_str();
+    fn render_lines(
+        &self,
+        source: &str,
+        width: usize,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<Line<'static>> {
         match &self.body {
             Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
             Body::Arrow => {

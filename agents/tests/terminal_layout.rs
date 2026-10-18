@@ -2649,3 +2649,6 @@ fn terminal_notification_json_preserves_lines_wide_and_narrow() {
 
 #[path = "support/terminal_notification.rs"]
 mod terminal_notification;
+
+#[path = "support/terminal_paths.rs"]
+mod paths;

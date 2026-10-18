@@ -14,7 +14,63 @@ struct Token {
 
 /// Maps rendered graphemes to the original bytes, excluding generated list padding.
 pub(super) fn map_lines(source: &str, lines: &[Line<'_>], markdown: bool) -> Vec<Vec<CellMap>> {
-    let tokens = source_tokens(source, markdown);
+    map_lines_in(source, lines, markdown, None)
+}
+
+/// Maps cwd-relative labels back to the absolute source bytes used by links and copies.
+pub(super) fn map_lines_in(
+    source: &str,
+    lines: &[Line<'_>],
+    markdown: bool,
+    cwd: Option<&std::path::Path>,
+) -> Vec<Vec<CellMap>> {
+    let mut tokens = source_tokens(source, markdown);
+    if let Some(cwd) = cwd {
+        for range in super::paths::text_paths(source, cwd) {
+            if let Some(relative) = super::paths::relative_path(&source[range.clone()], cwd) {
+                let path = &source[range.clone()];
+                let suffix: usize = path
+                    .chars()
+                    .rev()
+                    .zip(relative.chars().rev())
+                    .take_while(|(left, right)| left == right)
+                    .map(|(ch, _)| ch.len_utf8())
+                    .sum();
+                let end = range.end - suffix;
+                let prefix = &relative[..relative.len() - suffix];
+                let start = tokens.iter().position(|token| {
+                    token
+                        .source
+                        .as_ref()
+                        .is_some_and(|bytes| bytes.start == range.start)
+                });
+                tokens.retain(|token| {
+                    !token
+                        .source
+                        .as_ref()
+                        .is_some_and(|bytes| bytes.start >= range.start && bytes.end <= end)
+                });
+                if prefix.is_empty() {
+                    if let Some(token) = tokens.iter_mut().find(|token| {
+                        token
+                            .source
+                            .as_ref()
+                            .is_some_and(|bytes| bytes.start == end)
+                    }) {
+                        token.source.as_mut().unwrap().start = range.start;
+                    }
+                } else if let Some(start) = start {
+                    tokens.splice(
+                        start..start,
+                        prefix.graphemes(true).map(|text| Token {
+                            text: text.to_owned(),
+                            source: Some(range.start..end),
+                        }),
+                    );
+                }
+            }
+        }
+    }
     let mut cursor = 0;
     lines
         .iter()
@@ -248,6 +304,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn home_paths_under_a_parent_cwd_keep_links_on_the_expanded_label() {
+        let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+        let source = "~/project/file.rs";
+        let target = home.join("project/file.rs");
+        let display = target.strip_prefix("/").unwrap().to_str().unwrap();
+        let maps = map_lines_in(
+            source,
+            &[Line::raw(display)],
+            false,
+            Some(std::path::Path::new("/")),
+        );
+        assert_eq!(maps[0].len(), display.chars().count());
+        let links = [super::super::links::Link {
+            range: 0..source.len(),
+            target: target.clone(),
+        }];
+        assert_eq!(
+            super::super::links::row_links(&maps[0], &links),
+            [(0..display.width() as u16, target)]
+        );
+        assert_eq!(maps[0].first().unwrap().1.start, 0);
+        assert_eq!(maps[0].last().unwrap().1.end, source.len());
+    }
+
+    #[test]
+    fn relative_path_cells_retain_absolute_link_and_copy_bytes() {
+        let cwd = std::path::Path::new("/a/b");
+        for (source, display) in [
+            (
+                "See /a/b/src/lib.rs:272-274 done",
+                "See src/lib.rs:272-274 done",
+            ),
+            ("/a/b", "."),
+            ("/a/b/", "."),
+            (
+                "/a/b/src/lib.rs and /a/bc/other.rs",
+                "src/lib.rs and /a/bc/other.rs",
+            ),
+        ] {
+            let lines = [Line::raw(display)];
+            let maps = map_lines_in(source, &lines, false, Some(cwd));
+            assert_eq!(maps[0].len(), display.chars().count(), "{source}");
+            assert_eq!(
+                maps[0]
+                    .iter()
+                    .map(|(_, bytes)| &source[bytes.clone()])
+                    .collect::<String>(),
+                source
+            );
+        }
+    }
+
+    #[test]
     fn shortened_filename_preserves_following_cjk_punctuation() {
         let source = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
         for markdown in [false, true] {
@@ -255,6 +364,7 @@ mod tests {
                 source,
                 &crate::ui::paths::text_paths(source, std::path::Path::new("/")),
                 25,
+                std::path::Path::new("/nonexistent"),
             );
             let lines = if markdown {
                 super::super::markdown::render_with_options(
@@ -308,6 +418,7 @@ mod tests {
             &source,
             &crate::ui::paths::text_paths(&source, std::path::Path::new("/")),
             15,
+            std::path::Path::new("/nonexistent"),
         );
         let lines: Vec<_> = textwrap::wrap(
             &shortened,
@@ -399,6 +510,7 @@ mod tests {
             source,
             &crate::ui::paths::text_paths(source, std::path::Path::new("/")),
             20,
+            std::path::Path::new("/nonexistent"),
         );
         let lines = super::super::markdown::render(&shortened, 20);
         let maps = map_lines(source, &lines, true);
