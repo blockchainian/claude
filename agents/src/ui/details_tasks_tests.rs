@@ -39,10 +39,10 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     let view = tasks_view();
     let (buf, rows) = render(&view, 40, 40);
     let find = |s: &str| rows.iter().position(|line| line.contains(s)).unwrap();
-    assert!(find("Tasks") < find("Prompt"));
-    assert!(find("Tasks") < find("Update"));
-    assert!(find("Prompt") < find("Update"));
-    assert!(find("Tasks") < find("Needs attention"));
+    assert!(find("Prompt") < find("Tasks"));
+    assert!(find("Update") < find("Tasks"));
+    assert!(find("Update") < find("Prompt"));
+    assert!(find("Needs attention") < find("Tasks"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
     assert!(rows[find("Tasks")].ends_with("2/4"));
@@ -158,11 +158,11 @@ fn tasks_long_list_uses_details_scroll_and_keeps_other_sections() {
     );
     assert!(after.iter().any(|row| row.contains("Task row 2")));
     assert!(before.iter().any(|row| row.trim() == "Prompt"));
-    assert_eq!(view.viewport.borrow().details_scroll.reveal[3], 0);
-    assert_eq!(view.viewport.borrow().details_scroll.reveal[0], 1);
-    for label in ["Needs attention", "Waiting for your response."] {
+    assert_eq!(view.viewport.borrow().details_scroll.reveal[0], 0);
+    assert_eq!(view.viewport.borrow().details_scroll.reveal[3], 1);
+    for label in ["Update", "Prompt"] {
         let position = |rows: &[String]| rows.iter().position(|row| row.trim() == label).unwrap();
-        assert_eq!(position(&before), position(&after));
+        assert_eq!(position(&before), position(&after) + 1);
     }
     view.scroll_content_row(false, false, y.saturating_sub(1));
     assert_eq!(render(&view, 40, 24).1, before);

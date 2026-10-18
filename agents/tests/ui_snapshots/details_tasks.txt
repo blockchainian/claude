@@ -1,16 +1,16 @@
-                 Tasks               1/2
-● Working first
-○ Pending first
-
-                 Prompt
-Session title
+            Needs attention
+Open task to review.
+Waiting for your response.
 
                  Update
 Task update
 
-            Needs attention
-Open task to review.
-Waiting for your response.
+                 Prompt
+Session title
+
+                 Tasks               1/2
+● Working first
+○ Pending first
 
 
 

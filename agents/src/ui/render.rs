@@ -795,8 +795,8 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: tasks, background, prompt and queued messages, update,
-        // activity, needs attention. The title sits on the rule above the panel.
+        // Sections top to bottom: needs attention, background, activity, update,
+        // prompt and queued messages, tasks. The title sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
@@ -809,6 +809,221 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
+
+        let needs = session
+            .background_job
+            .as_ref()
+            .and_then(|job| job.needs.as_deref());
+        if session.status == SessionStatus::NeedsInput || needs.is_some() {
+            separate_section(&mut items);
+            let start = items.len();
+            items.push(
+                centered_header(
+                    Span::styled("Needs attention", style::attention_title_style()).into(),
+                    Line::default(),
+                    width,
+                )
+                .into(),
+            );
+            if let Some(needs) = needs {
+                items.extend(
+                    textwrap::wrap(needs, width.max(1))
+                        .into_iter()
+                        .map(|text| Line::from(text.into_owned()).into()),
+                );
+            } else if session.pending_questions.is_empty() {
+                items.extend([
+                    "Open task to review.".dim().into(),
+                    "Waiting for your response.".into(),
+                ]);
+            } else {
+                items.extend(session.pending_questions.iter().map(|question| {
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(Span::styled(
+                            question.clone(),
+                            style::log_styles(&crate::log::Kind::Assistant).1,
+                        )),
+                        width,
+                    )
+                    .into()
+                }));
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key(
+                "Needs attention",
+                &(needs, &session.pending_questions),
+            ));
+            copies.push(None);
+            body_links.push(Vec::new());
+        }
+        item_links.resize(items.len(), Vec::new());
+
+        // The agent appends an exit marker to the output file when the
+        // command ends, which lands before the completion notification does.
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 1)))
+            .filter(|(_, lines)| {
+                !lines
+                    .last()
+                    .is_some_and(|last| last.starts_with("[exited with code"))
+            })
+            .collect::<Vec<_>>();
+        let mut background = items.len()..items.len();
+        let subagents = self.subagents_for(session).collect::<Vec<_>>();
+        if !boxes.is_empty() || !subagents.is_empty() {
+            separate_section(&mut items);
+            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
+            let start = items.len();
+            items.extend(
+                boxes
+                    .into_iter()
+                    .map(|(task, output)| Item::Background { task, output }),
+            );
+            items.extend(subagents.into_iter().map(Item::Subagent));
+            // Mix tasks and descendants: two-line entries first, then oldest starts,
+            // unknown starts last, with identity/path breaking ties regardless of depth or kind.
+            items[start..].sort_by_key(|item| {
+                let (started_at, identity, provider) = match item {
+                    Item::Background { task, .. } => {
+                        (Some(task.started_at), task.output.as_os_str(), None)
+                    }
+                    Item::Subagent(child) => (
+                        child.started_at,
+                        std::ffi::OsStr::new(&child.id.id),
+                        Some(child.id.provider),
+                    ),
+                    Item::Text(_) => unreachable!("Background contains only tasks and descendants"),
+                };
+                (
+                    item.height() == 1,
+                    started_at.is_none(),
+                    started_at,
+                    identity,
+                    provider,
+                )
+            });
+            background = start..items.len();
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        let activity = session.activity.as_ref();
+        if let Some(activity) = activity {
+            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
+            let mut label = wrapped
+                .first()
+                .map_or(String::new(), |line| line.to_string());
+            if wrapped.len() > 1 {
+                label.push('…');
+            }
+            separate_section(&mut items);
+            let start = items.len() + 1;
+            items.extend([
+                centered_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
+                    width,
+                )
+                .into(),
+                truncate_line_with_ellipsis_if_overflow(
+                    style::exit_code_line(
+                        label,
+                        activity.exit_code,
+                        style::log_styles(&activity.kind).1,
+                    ),
+                    width,
+                )
+                .into(),
+            ]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        if let Some(message) = session.last_message.as_ref() {
+            let mut header = Line::default();
+            if let Some(at) = session.last_message_at {
+                header =
+                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
+            }
+            separate_section(&mut items);
+            items.push(centered_header("Update".dim().into(), header, width).into());
+            let start = items.len();
+            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
+            items.extend(
+                wrap_details(message, &session.cwd, width, true)
+                    .into_iter()
+                    .map(|mut line| {
+                        for span in &mut line.spans {
+                            span.style = body_style.patch(span.style);
+                        }
+                        line
+                    })
+                    .map(Item::from),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
+            body_links.push(super::links::text_links(message, &session.cwd, &[]));
+        }
+
+        if !session.prompt.trim().is_empty()
+            || session
+                .parent
+                .as_ref()
+                .is_none_or(|parent| parent.provider != ProviderId::Codex)
+        {
+            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
+            } else {
+                centered_header("Prompt".dim().into(), Line::default(), width)
+            };
+            separate_section(&mut items);
+            items.push(prompt_header.into());
+            let prompt_text = match session.prompt.trim() {
+                "" => "No prompt available.",
+                prompt => prompt,
+            };
+            let prompt_start = items.len();
+            let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
+            items.extend(prompt_body.into_iter().map(Item::from));
+            bodies.push(prompt_start..items.len());
+            keys.push(body_key("Prompt", &session.prompt));
+            copies.push(
+                Some((session.prompt.as_str(), "Copied prompt"))
+                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
+            );
+            body_links.push(super::links::text_links(
+                &session.prompt,
+                &session.cwd,
+                &session.prompt_images,
+            ));
+            item_links.resize(items.len(), Vec::new());
+        }
+        for queued in &session.queued {
+            separate_section(&mut items);
+            let start = items.len();
+            items.extend(
+                wrap_details(queued, &session.cwd, width, true)
+                    .into_iter()
+                    .map(|line| Item::from(line.bold())),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Prompt", queued));
+            copies.push(Some((queued.as_str(), "Copied prompt")));
+            body_links.push(super::links::text_links(queued, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
 
         let tasks = [
             (crate::model::TaskStatus::InProgress, SessionStatus::Working),
@@ -867,221 +1082,6 @@ impl View {
             body_links.push(Vec::new());
             item_links.resize(items.len(), Vec::new());
         }
-
-        // The agent appends an exit marker to the output file when the
-        // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
-            .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
-            .filter(|(_, lines)| {
-                !lines
-                    .last()
-                    .is_some_and(|last| last.starts_with("[exited with code"))
-            })
-            .collect::<Vec<_>>();
-        let mut background = items.len()..items.len();
-        let subagents = self.subagents_for(session).collect::<Vec<_>>();
-        if !boxes.is_empty() || !subagents.is_empty() {
-            separate_section(&mut items);
-            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
-            let start = items.len();
-            items.extend(
-                boxes
-                    .into_iter()
-                    .map(|(task, output)| Item::Background { task, output }),
-            );
-            items.extend(subagents.into_iter().map(Item::Subagent));
-            // Mix tasks and descendants: two-line entries first, then oldest starts,
-            // unknown starts last, with identity/path breaking ties regardless of depth or kind.
-            items[start..].sort_by_key(|item| {
-                let (started_at, identity, provider) = match item {
-                    Item::Background { task, .. } => {
-                        (Some(task.started_at), task.output.as_os_str(), None)
-                    }
-                    Item::Subagent(child) => (
-                        child.started_at,
-                        std::ffi::OsStr::new(&child.id.id),
-                        Some(child.id.provider),
-                    ),
-                    Item::Text(_) => unreachable!("Background contains only tasks and descendants"),
-                };
-                (
-                    item.height() == 1,
-                    started_at.is_none(),
-                    started_at,
-                    identity,
-                    provider,
-                )
-            });
-            background = start..items.len();
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        if !session.prompt.trim().is_empty()
-            || session
-                .parent
-                .as_ref()
-                .is_none_or(|parent| parent.provider != ProviderId::Codex)
-        {
-            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
-                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
-            } else {
-                centered_header("Prompt".dim().into(), Line::default(), width)
-            };
-            separate_section(&mut items);
-            items.push(prompt_header.into());
-            let prompt_text = match session.prompt.trim() {
-                "" => "No prompt available.",
-                prompt => prompt,
-            };
-            let prompt_start = items.len();
-            let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
-            items.extend(prompt_body.into_iter().map(Item::from));
-            bodies.push(prompt_start..items.len());
-            keys.push(body_key("Prompt", &session.prompt));
-            copies.push(
-                Some((session.prompt.as_str(), "Copied prompt"))
-                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
-            );
-            body_links.push(super::links::text_links(
-                &session.prompt,
-                &session.cwd,
-                &session.prompt_images,
-            ));
-            item_links.resize(items.len(), Vec::new());
-        }
-        for queued in &session.queued {
-            separate_section(&mut items);
-            let start = items.len();
-            items.extend(
-                wrap_details(queued, &session.cwd, width, true)
-                    .into_iter()
-                    .map(|line| Item::from(line.bold())),
-            );
-            bodies.push(start..items.len());
-            keys.push(body_key("Prompt", queued));
-            copies.push(Some((queued.as_str(), "Copied prompt")));
-            body_links.push(super::links::text_links(queued, &session.cwd, &[]));
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        if let Some(message) = session.last_message.as_ref() {
-            let mut header = Line::default();
-            if let Some(at) = session.last_message_at {
-                header =
-                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
-            }
-            separate_section(&mut items);
-            items.push(centered_header("Update".dim().into(), header, width).into());
-            let start = items.len();
-            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
-            items.extend(
-                wrap_details(message, &session.cwd, width, true)
-                    .into_iter()
-                    .map(|mut line| {
-                        for span in &mut line.spans {
-                            span.style = body_style.patch(span.style);
-                        }
-                        line
-                    })
-                    .map(Item::from),
-            );
-            bodies.push(start..items.len());
-            keys.push(body_key("Update", message));
-            copies.push(Some((message.as_str(), "Copied update")));
-            body_links.push(super::links::text_links(message, &session.cwd, &[]));
-        }
-
-        let activity = session.activity.as_ref();
-        if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
-            let mut label = wrapped
-                .first()
-                .map_or(String::new(), |line| line.to_string());
-            if wrapped.len() > 1 {
-                label.push('…');
-            }
-            separate_section(&mut items);
-            let start = items.len() + 1;
-            items.extend([
-                centered_header(
-                    "Last activity".dim().into(),
-                    Span::styled(
-                        format_relative_time(now, Some(activity.at)),
-                        style::time_style(),
-                    )
-                    .into(),
-                    width,
-                )
-                .into(),
-                truncate_line_with_ellipsis_if_overflow(
-                    style::exit_code_line(
-                        label,
-                        activity.exit_code,
-                        style::log_styles(&activity.kind).1,
-                    ),
-                    width,
-                )
-                .into(),
-            ]);
-            bodies.push(start..items.len());
-            keys.push(body_key("Last activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        let needs = session
-            .background_job
-            .as_ref()
-            .and_then(|job| job.needs.as_deref());
-        if session.status == SessionStatus::NeedsInput || needs.is_some() {
-            separate_section(&mut items);
-            let start = items.len();
-            items.push(
-                centered_header(
-                    Span::styled("Needs attention", style::attention_title_style()).into(),
-                    Line::default(),
-                    width,
-                )
-                .into(),
-            );
-            if let Some(needs) = needs {
-                items.extend(
-                    textwrap::wrap(needs, width.max(1))
-                        .into_iter()
-                        .map(|text| Line::from(text.into_owned()).into()),
-                );
-            } else if session.pending_questions.is_empty() {
-                items.extend([
-                    "Open task to review.".dim().into(),
-                    "Waiting for your response.".into(),
-                ]);
-            } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            question.clone(),
-                            style::log_styles(&crate::log::Kind::Assistant).1,
-                        )),
-                        width,
-                    )
-                    .into()
-                }));
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key(
-                "Needs attention",
-                &(needs, &session.pending_questions),
-            ));
-            copies.push(None);
-            body_links.push(Vec::new());
-        }
-        item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();
