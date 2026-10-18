@@ -749,6 +749,7 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
         source: None,
         source_records: Vec::new(),
         sender: None,
+        detail_body: None,
         kind: crate::log::Kind::Assistant,
         body: "done".into(),
         paths: Vec::new(),

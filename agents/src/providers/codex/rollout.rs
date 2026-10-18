@@ -828,6 +828,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         source: None,
         source_records: Vec::new(),
         sender: None,
+        detail_body: None,
         kind: Kind::Tool,
         body,
         paths,
@@ -1262,6 +1263,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         let payload = &record["payload"];
         let mut images = Vec::new();
         let mut calls = Vec::new();
+        let mut detail_body = None;
         let reference = |offset| crate::log::SourceRecord {
             path: path.to_path_buf(),
             offset,
@@ -1327,6 +1329,25 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                         "Missing Codex agent message header",
                     )
                 })?;
+                let (header, body) = header.split_once("\nPayload:\n").ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Missing Codex agent message payload",
+                    )
+                })?;
+                detail_body = Some(
+                    if body.trim().is_empty()
+                        && payload["content"].as_array().is_some_and(|blocks| {
+                            blocks
+                                .iter()
+                                .any(|block| block["type"] == "encrypted_content")
+                        })
+                    {
+                        "Content is encrypted.".to_owned()
+                    } else {
+                        body.to_owned()
+                    },
+                );
                 let field = |prefix: &str| {
                     header
                         .lines()
@@ -1403,6 +1424,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 sender: None,
                 kind,
                 body,
+                detail_body,
                 paths: Vec::new(),
                 started_at: at,
                 ended_at,

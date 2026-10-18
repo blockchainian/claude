@@ -512,7 +512,10 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
             event.kind,
             Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
         ) {
-            vec![Part::prose(event.body.clone(), true)]
+            vec![Part::prose(
+                event.detail_body.as_ref().unwrap_or(&event.body).clone(),
+                true,
+            )]
         } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
             Part::prose_parts(event.body.clone(), false)
         } else if event.kind == Kind::Tool {
@@ -777,6 +780,7 @@ mod tests {
             background: false,
             source_records: Vec::new(),
             sender: None,
+            detail_body: None,
             kind: Kind::Tool,
             body: String::new(),
             paths: Vec::new(),

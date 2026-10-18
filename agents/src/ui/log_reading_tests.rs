@@ -20,6 +20,80 @@ fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
         .collect()
 }
 
+#[test]
+fn codex_agent_messages_show_payload_without_changing_list_titles() {
+    use crate::providers::Provider;
+    let dir = tempfile::tempdir().unwrap();
+    let provider =
+        crate::providers::codex::CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let project = dir.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut claude = crate::providers::claude::ClaudeProvider::new(dir.path().into());
+    let mut session = claude.refresh(1).sessions.remove(0);
+    let path = dir.path().join("messages.jsonl");
+    session.transcript = Some(path.clone());
+    let plaintext = include_str!("../../tests/fixtures/codex-agent-messages/final-answer.jsonl");
+    let encrypted = include_str!("../../tests/fixtures/codex-agent-messages/new-task.jsonl");
+    let mut message: serde_json::Value = serde_json::from_str(plaintext).unwrap();
+    message["payload"]["content"][0]["text"] = serde_json::json!(
+        "Message Type: MESSAGE\nTask name: /root\nSender: /root/demo_sub\nPayload:\n**完成** [report](https://example.com/report)\n\nPayload:\n保留正文"
+    );
+    let message = serde_json::to_string(&message).unwrap() + "\n";
+    for (record, title, body) in [
+        (plaintext, "FINAL_ANSWER from /root/demo_sub", "演示完成"),
+        (encrypted, "NEW_TASK from /root", "Content is encrypted."),
+        (
+            message.as_str(),
+            "MESSAGE from /root/demo_sub",
+            "**完成** [report](https://example.com/report)\n\nPayload:\n保留正文",
+        ),
+    ] {
+        std::fs::write(&path, record).unwrap();
+        let event = provider.log(&session, 10, false).unwrap().remove(0);
+        assert_eq!(event.body, title);
+        assert_eq!(super::body_line(&event, 100, dir.path()).to_string(), title);
+        let parts = body_parts(&event);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].source, body);
+        assert!(parts[0].markdown());
+        assert_eq!(super::open_text(&event), body);
+        assert!(
+            layout(&event, 120)
+                .sources
+                .iter()
+                .any(|source| source.text.as_ref() == body)
+        );
+        if record == message {
+            let drawn = layout(&event, 120);
+            assert!(
+                drawn
+                    .lines
+                    .iter()
+                    .any(|line| line.to_string().contains("完成 report"))
+            );
+            assert!(drawn.lines.iter().flat_map(|line| &line.spans).any(|span| {
+                span.content == "完成"
+                    && span
+                        .style
+                        .add_modifier
+                        .contains(ratatui::style::Modifier::BOLD)
+            }));
+            assert!(
+                drawn
+                    .links
+                    .iter()
+                    .flatten()
+                    .any(|link| link.target == Path::new("https://example.com/report"))
+            );
+        }
+    }
+}
+
 fn assert_reading_column(layout: &DetailLayout, segment: usize) {
     let rows: Vec<_> = layout
         .rows

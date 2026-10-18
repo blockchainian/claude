@@ -33,6 +33,8 @@ pub struct Event {
     pub kind: Kind,
     pub sender: Option<String>,
     pub body: String,
+    /// Message content when the list row uses a summary instead of the body.
+    pub detail_body: Option<String>,
     /// Byte ranges of the file paths inside `body`, in order.
     pub paths: Vec<std::ops::Range<usize>>,
     pub started_at: DateTime<Utc>,

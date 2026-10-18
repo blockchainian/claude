@@ -159,6 +159,7 @@ impl View {
             background: false,
             source_records: Vec::new(),
             sender: None,
+            detail_body: None,
             body: task.description.clone(),
             paths: Vec::new(),
             started_at: task.started_at,
