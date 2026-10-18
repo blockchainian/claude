@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use unicode_width::UnicodeWidthStr;
 
 pub(super) enum Outcome {
@@ -38,7 +39,7 @@ impl Page {
 }
 
 /// Rows on the Submit tab, which follows the questions when Claude Code shows one.
-const REVIEW_ROWS: [&str; 2] = ["Submit answers", "Cancel"];
+const REVIEW_ROWS: [&str; 2] = ["Submit", "Cancel"];
 
 #[derive(Clone)]
 pub(super) struct QuestionView {
@@ -146,11 +147,18 @@ impl QuestionView {
         }
     }
 
+    /// Moves the focus; on a single-select question the focused option is its answer.
     fn set_focus(&mut self, row: usize) {
         if self.reviewing() {
             self.review_focus = row;
-        } else {
-            self.pages[self.page].focus = row;
+            return;
+        }
+        let question = &self.questions()[self.page];
+        let (multi, option_count) = (question.multi, question.options.len());
+        let page = &mut self.pages[self.page];
+        page.focus = row;
+        if !multi {
+            page.selected = if row < option_count { vec![row] } else { Vec::new() };
         }
     }
 
@@ -380,20 +388,11 @@ impl QuestionView {
         Line::from(spans)
     }
 
+    /// The Submit tab: a warning while questions are unanswered, one line per answer, then
+    /// its rows. The warning and answers keep one line per question, so the tab's height
+    /// never changes as questions are answered.
     fn review_lines(&self, width: u16, lines: &mut Vec<Line<'static>>) -> Vec<Option<usize>> {
-        let wrap = |text: &str, indent: &str| {
-            textwrap::wrap(
-                text,
-                textwrap::Options::new(usize::from(width.max(1)))
-                    .initial_indent(indent)
-                    .subsequent_indent(indent),
-            )
-            .into_iter()
-            .map(|line| Line::from(line.into_owned()))
-            .collect::<Vec<_>>()
-        };
-        lines.push(Line::styled("Review your answers", Style::default().bold()));
-        lines.push(Line::default());
+        let start = lines.len();
         if self.pages.iter().any(|page| !page.answered()) {
             lines.push(Line::styled(
                 "⚠ You have not answered all questions",
@@ -406,13 +405,12 @@ impl QuestionView {
             }
             let answer = Self::answer(question, page);
             let values: Vec<String> = answer.answers.into_iter().chain(answer.other).collect();
-            lines.extend(wrap(
-                &format!("● {} → {}", question.header, values.join(", ")),
-                " ",
+            lines.push(truncate_line_with_ellipsis_if_overflow(
+                Line::from(format!("● {} → {}", question.header, values.join(", "))),
+                usize::from(width),
             ));
         }
-        lines.push(Line::default());
-        lines.push(Line::from("Ready to submit your answers?"));
+        lines.resize(start + self.pages.len() + 1, Line::default());
         lines.push(Line::default());
         let mut rows = vec![None; lines.len()];
         for (index, label) in REVIEW_ROWS.into_iter().enumerate() {
@@ -835,9 +833,27 @@ mod tests {
     }
 
     #[test]
+    fn ask_view_focused_single_option_is_its_answer() {
+        let mut view = QuestionView::new(fixture("First"));
+        press(&mut view, KeyCode::Down);
+        press(&mut view, KeyCode::Right);
+        press(&mut view, KeyCode::Right);
+        let review = screen(&view, 60, 14);
+        assert!(review.contains("● First → Green"), "{review}");
+        assert!(review.contains("You have not answered all questions"), "{review}");
+        assert!(!review.contains("Review your answers"), "{review}");
+        let answer = submitted(press(&mut view, KeyCode::Enter));
+        assert_eq!(answer.answers["Probe first page?"].answers, ["Green"]);
+        assert!(answer.answers["Probe second page?"].answers.is_empty());
+    }
+
+    #[test]
     fn ask_view_height_stays_fixed_across_tabs() {
         let mut view = QuestionView::new(fixture("First"));
         let height = view.height(60);
+        press(&mut view, KeyCode::Char('2'));
+        press(&mut view, KeyCode::Char('3'));
+        assert_eq!(view.height(60), height);
         for page in [2, 1, 0] {
             view.show_page(page);
             assert_eq!(view.height(60), height, "tab {page}");

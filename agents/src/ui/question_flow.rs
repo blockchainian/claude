@@ -442,6 +442,39 @@ mod tests {
     }
 
     #[test]
+    fn ask_flow_prompt_keeps_its_rows_across_tabs() {
+        let mut view = fixture();
+        let row = view.rows[0].clone();
+        let mut ask = row.ask.clone().unwrap();
+        let crate::ask::AskKind::Questions { questions, .. } = &mut ask.kind;
+        let mut second = questions[0].clone();
+        second.id = "Second?".into();
+        second.header = "Second".into();
+        second.multi = true;
+        second.options.push(crate::ask::QuestionOption {
+            label: "Extra".into(),
+            description: "Extra choice".into(),
+            preview: None,
+        });
+        let mut third = questions[0].clone();
+        third.id = "Third?".into();
+        third.header = "Third".into();
+        third.options.truncate(2);
+        questions.extend([second, third]);
+        let mut row = row;
+        row.ask = Some(ask);
+        view.set_sessions(vec![row], false);
+        let mut prompts = Vec::new();
+        for expected in ["Probe single choice?", "Extra", "Third", "2. Cancel"] {
+            let text = screen(&view, 160, 50);
+            assert!(text.contains(expected), "{expected}: {text}");
+            prompts.push(view.viewport.borrow().prompt);
+            view.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        }
+        assert!(prompts.windows(2).all(|pair| pair[0] == pair[1]), "{prompts:?}");
+    }
+
+    #[test]
     fn ask_flow_uses_question_footer_instead_of_open_hint() {
         let view = fixture();
         let text = view.center_footer_hints().to_string();
