@@ -91,12 +91,15 @@ fn terminal_codex_agent_message_bodies() {
     );
     let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
     for (fixture, subject) in collaboration {
+        let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let tool = record["payload"]["name"].as_str().unwrap();
+        let label = format!("{tool} {subject}");
         let (row, line) = encrypted_capture
             .lines()
             .enumerate()
-            .find(|(_, line)| line.contains(&format!("({subject})")))
+            .find(|(_, line)| line.contains(&label))
             .unwrap();
-        let column = line[..line.find(&format!("({subject})")).unwrap()].width();
+        let column = line[..line.find(&label).unwrap()].width();
         tmux.mouse(0, column, row, true);
         let capture = tmux.capture_when(|capture| {
             capture.lines().any(|line| {

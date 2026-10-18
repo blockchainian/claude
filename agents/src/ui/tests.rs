@@ -9318,7 +9318,7 @@ fn claude_agent_display_from_real_records() {
     for (id, label, metadata) in [
         (
             "toolu_015h3Ngbytx63sMddkJwjDX7",
-            "attach-probe · 实测 attach 发提示词",
+            "实测 attach 发提示词",
             "general-purpose",
         ),
         (

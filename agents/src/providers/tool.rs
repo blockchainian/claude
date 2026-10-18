@@ -1,3 +1,4 @@
+pub(crate) mod groups;
 mod shell_summary;
 
 use crate::log::{Section, ToolCall};
@@ -99,25 +100,17 @@ pub(crate) enum Format {
 #[derive(Clone, Copy)]
 pub(crate) enum Summary {
     Questions,
-    Agent,
-    Task,
     Recipient,
     WebFetch,
-    Skill,
     AgentActivity,
     TaskActivity,
     Description,
-    Participant {
-        field: &'static str,
-        label: Option<&'static str>,
-    },
 }
 
 pub(crate) struct Rules {
     pub subjects: &'static [(&'static str, Subject)],
     pub inputs: &'static [(&'static str, Input, Format)],
     pub expanded: &'static [(&'static str, bool)],
-    pub summaries: &'static [(&'static str, Summary)],
     pub activities: &'static [(&'static str, Summary)],
 }
 
@@ -141,7 +134,6 @@ const MCP_RULES: Rules = Rules {
         ),
     ],
     expanded: &[],
-    summaries: &[],
     activities: &[],
 };
 
@@ -160,15 +152,8 @@ pub(crate) fn expanded(name: &str, rules: &Rules) -> bool {
     find(name, rules.expanded).unwrap_or(true)
 }
 
-pub(crate) fn summary(name: &str, input: &Value, rules: &Rules, activity: bool) -> Option<String> {
-    let mode = find(
-        name,
-        if activity {
-            rules.activities
-        } else {
-            rules.summaries
-        },
-    )?;
+pub(crate) fn summary(name: &str, input: &Value, rules: &Rules) -> Option<String> {
+    let mode = find(name, rules.activities)?;
     let description = || text(input, "description").unwrap_or(name).to_owned();
     let participant = |field, message| crate::log::participant_text(text(input, field), message);
     let first_detail = || {
@@ -179,18 +164,6 @@ pub(crate) fn summary(name: &str, input: &Value, rules: &Rules, activity: bool) 
     };
     Some(match mode {
         Summary::Questions => question_texts(input).join(" · "),
-        Summary::Agent => {
-            let detail = [text(input, "name"), text(input, "description")]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
-            if detail.is_empty() {
-                name.to_owned()
-            } else {
-                detail
-            }
-        }
         Summary::AgentActivity => match text(input, "name") {
             Some(_) => [text(input, "name"), text(input, "description")]
                 .into_iter()
@@ -199,9 +172,6 @@ pub(crate) fn summary(name: &str, input: &Value, rules: &Rules, activity: bool) 
                 .join(" · "),
             None => description(),
         },
-        Summary::Task => format!("{name} {}", participant("name", first_detail()))
-            .trim_end()
-            .to_owned(),
         Summary::TaskActivity => match text(input, "name") {
             Some(_) => format!("{name} {}", participant("name", first_detail()))
                 .trim_end()
@@ -223,28 +193,33 @@ pub(crate) fn summary(name: &str, input: &Value, rules: &Rules, activity: bool) 
                 .trim_end()
                 .to_owned()
         }
-        Summary::Skill => [
-            text(input, "skill").unwrap_or(name),
-            text(input, "args").unwrap_or(""),
-        ]
-        .join(" ")
-        .trim_end()
-        .to_owned(),
         Summary::Description => description(),
-        Summary::Participant { field, label } => {
-            let detail = participant(field, input["message"].as_str().unwrap_or(""));
-            let label = label.unwrap_or(name);
-            if detail.trim().is_empty() {
-                label.to_owned()
-            } else {
-                let detail: String = detail
-                    .chars()
-                    .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-                    .collect();
-                format!("{label} {detail}")
-            }
-        }
     })
+}
+
+/// A human description stands alone; otherwise the display name heads its subject.
+pub(crate) fn list_label(
+    name: &str,
+    subject: Option<&str>,
+    input: &Value,
+) -> (String, Option<String>) {
+    match input["description"]
+        .as_str()
+        .filter(|text| !text.trim().is_empty())
+    {
+        Some(description) => (description.to_owned(), None),
+        None => (
+            name.to_owned(),
+            subject.filter(|text| !text.is_empty()).map(str::to_owned),
+        ),
+    }
+}
+
+pub(crate) fn list_title(name: &str, subject: Option<&str>, input: &Value) -> String {
+    let (head, member) = list_label(name, subject, input);
+    let mut groups = groups::Groups::default();
+    groups.add(&head, member.as_deref());
+    groups.finish().unwrap()
 }
 
 fn shell_command(input: &Value) -> Option<&str> {
@@ -538,7 +513,6 @@ mod tests {
             subjects: &[],
             inputs: &[],
             expanded: &[],
-            summaries: &[],
             activities: &[],
         };
         for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {

@@ -75,7 +75,7 @@ fn codex_zero_exit_parts_keep_input_arrow_output() {
 #[test]
 fn codex_exit_list_uses_command_subject() {
     for code in [0, 1] {
-        assert_eq!(codex_exit_event(code).body, "false");
+        assert_eq!(codex_exit_event(code).body, "Shell false");
     }
 }
 

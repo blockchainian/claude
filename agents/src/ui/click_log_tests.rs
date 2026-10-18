@@ -585,7 +585,10 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         .unwrap()
         .remove(0);
     let thread_id = "01a1489e-5020-7f40-90e8-c9413012630b";
-    assert_eq!(event.calls[0].title, thread_id);
+    assert_eq!(
+        event.calls[0].title,
+        format!("codex-manager detach {thread_id}")
+    );
     assert!(event.calls[0].input.is_empty());
     let (mut view, now) = log_fixture();
     view.select_fixture_event(Some(event));

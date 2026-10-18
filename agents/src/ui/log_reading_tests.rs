@@ -896,3 +896,166 @@ fn restored_tool_details_snapshot() {
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }
+
+fn list_row_records() -> Vec<serde_json::Value> {
+    include_str!("../../tests/fixtures/tool-list/claude.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+fn list_row_fixture(records: &[serde_json::Value]) -> String {
+    records.iter().map(|record| format!("{record}\n")).collect()
+}
+
+#[test]
+fn tool_list_rows_keep_names_subjects_and_detail_titles() {
+    for event in events(&list_row_fixture(&list_row_records()[..3])) {
+        let call = &event.calls[0];
+        assert_eq!(
+            event.body,
+            format!("{} {}", call.detail_left, call.detail_title)
+        );
+        assert_eq!(
+            super::body_line(&event, 200, Path::new("/workspace")).to_string(),
+            format!(
+                "{} {}",
+                call.detail_left,
+                call.detail_title.trim_start_matches("/workspace/")
+            )
+        );
+        let title = layout(&event, 200).lines[0].to_string();
+        assert!(title.starts_with(&call.detail_left));
+        assert!(title.contains(call.detail_title.trim_start_matches("/workspace/")));
+    }
+}
+
+#[test]
+fn tool_list_rows_group_members_and_preserve_relative_paths() {
+    let mut records = list_row_records();
+    let edits = &mut records[3..];
+    for (record, path) in edits
+        .iter_mut()
+        .zip(["/workspace/src/a.rs", "/workspace/src/b.rs"])
+    {
+        record["message"]["content"][0]["input"]["file_path"] = path.into();
+    }
+    let merged = events(&list_row_fixture(edits)).remove(0);
+    assert_eq!(
+        merged.body,
+        "Edit {/workspace/src/a.rs, /workspace/src/b.rs}"
+    );
+    assert_eq!(
+        super::body_line(&merged, 200, Path::new("/workspace")).to_string(),
+        "Edit {src/a.rs, src/b.rs}"
+    );
+    assert_eq!(
+        merged
+            .paths
+            .iter()
+            .map(|range| &merged.body[range.clone()])
+            .collect::<Vec<_>>(),
+        ["/workspace/src/a.rs", "/workspace/src/b.rs"]
+    );
+    let batch = edits[0]["message"]["id"].clone();
+    let mut read = records[0].clone();
+    read["message"]["id"] = batch;
+    read["message"]["content"][0]["input"]["file_path"] = "/workspace/src/c.rs".into();
+    records.push(read);
+    let mixed = events(&list_row_fixture(&records[3..])).remove(0);
+    assert_eq!(
+        super::body_line(&mixed, 200, Path::new("/workspace")).to_string(),
+        "Edit {src/a.rs, src/b.rs}, Read src/c.rs"
+    );
+}
+
+#[test]
+fn tool_list_rows_keep_shell_display_names_and_grouped_subjects() {
+    let event = codex_events("codex-inner/git-chain.jsonl").remove(0);
+    assert_eq!(event.body, "Shell git {status, diff}, sed");
+    assert_eq!(event.calls[0].detail_left, "Shell");
+    assert_eq!(event.calls[0].detail_title, "git {status, diff}, sed");
+    let mut record = list_row_records().remove(0);
+    let block = &mut record["message"]["content"][0];
+    block["name"] = "Bash".into();
+    block["input"] = serde_json::json!({"command":"git status --short && git diff --name-only; sed -n '1,3p' file"});
+    let event = events(&list_row_fixture(&[record.clone()])).remove(0);
+    assert_eq!(event.body, "Bash git {status, diff}, sed");
+    record["message"]["content"][0]["input"]["description"] = "Inspect changes".into();
+    assert_eq!(
+        events(&list_row_fixture(&[record.clone()]))[0].body,
+        "Inspect changes"
+    );
+    record["message"]["content"][0]["name"] = "Read".into();
+    assert_eq!(
+        events(&list_row_fixture(&[record.clone()]))[0].body,
+        "Inspect changes"
+    );
+    record["message"]["content"][0]["input"] = serde_json::json!({});
+    assert_eq!(events(&list_row_fixture(&[record]))[0].body, "Read");
+}
+
+#[test]
+fn tool_list_rows_choose_descriptions_by_data() {
+    let records: Vec<serde_json::Value> =
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    for event in events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl")) {
+        for call in event.calls {
+            let input = records
+                .iter()
+                .flat_map(|record| record["message"]["content"].as_array().unwrap())
+                .find(|block| block["id"] == call.id)
+                .unwrap()["input"]
+                .clone();
+            let expected = input["description"]
+                .as_str()
+                .filter(|text| !text.trim().is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    if call.detail_left.is_empty() {
+                        call.detail_title.clone()
+                    } else {
+                        format!("{} {}", call.detail_left, call.detail_title)
+                    }
+                });
+            assert_eq!(call.title, expected, "{}", call.name);
+        }
+    }
+}
+
+#[test]
+fn tool_list_rows_keep_codex_native_file_paths() {
+    let entries = codex_events("tool-list/codex.jsonl");
+    assert_eq!(entries.len(), 3);
+    for event in entries {
+        let call = &event.calls[0];
+        assert_eq!(
+            event.body,
+            format!("{} {}", call.detail_left, call.detail_title)
+        );
+        for range in &event.paths {
+            assert!(event.body[range.clone()].starts_with('/'));
+        }
+    }
+}
+
+#[test]
+fn tool_list_rows_group_home_paths_through_existing_shortening() {
+    let home = std::env::var("HOME").unwrap();
+    let mut records = list_row_records();
+    for (record, path) in records[3..].iter_mut().zip(["src/a.rs", "src/b.rs"]) {
+        record["message"]["content"][0]["input"]["file_path"] = format!("{home}/{path}").into();
+    }
+    let event = events(&list_row_fixture(&records[3..])).remove(0);
+    assert_eq!(
+        super::body_line(&event, 200, Path::new("/workspace")).to_string(),
+        "Edit {~/src/a.rs, ~/src/b.rs}"
+    );
+    assert_eq!(
+        super::body_line(&event, 200, Path::new(&home)).to_string(),
+        "Edit {src/a.rs, src/b.rs}"
+    );
+}

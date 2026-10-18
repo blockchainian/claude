@@ -1,3 +1,5 @@
+use super::groups::Groups;
+
 /// Commands observed in rollouts whose first positional argument selects an action.
 const SUBCOMMANDS: &[&str] = &[
     "git",
@@ -23,51 +25,15 @@ const SUBCOMMANDS: &[&str] = &[
     "security",
 ];
 
-#[derive(Default)]
-pub(crate) struct Commands(Vec<(String, Vec<String>)>);
-impl Commands {
-    pub(crate) fn add(&mut self, name: &str, sub: Option<&str>) {
-        let index = self
-            .0
-            .iter()
-            .position(|(n, _)| n == name)
-            .unwrap_or_else(|| {
-                self.0.push((name.into(), vec![]));
-                self.0.len() - 1
-            });
-        if let Some(sub) = sub
-            && !self.0[index].1.iter().any(|s| s == sub)
-        {
-            self.0[index].1.push(sub.into());
-        }
-    }
-    pub(crate) fn finish(self) -> Option<String> {
-        if self.0.is_empty() {
-            return None;
-        }
-        Some(
-            self.0
-                .into_iter()
-                .map(|(name, subs)| match subs.len() {
-                    0 => name,
-                    1 => format!("{name} {}", subs[0]),
-                    _ => format!("{name} {{{}}}", subs.join(", ")),
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-        )
-    }
-}
-
 /// Return command names in first-appearance order; an empty result means unsupported shell syntax.
 pub(crate) fn summarize_shell_commands(cmd: &str) -> String {
-    let mut commands = Commands::default();
+    let mut commands = Groups::default();
     collect(cmd, &mut commands)
         .and_then(|()| commands.finish())
         .unwrap_or_default()
 }
 
-pub(crate) fn collect(cmd: &str, commands: &mut Commands) -> Option<()> {
+pub(crate) fn collect(cmd: &str, commands: &mut Groups) -> Option<()> {
     shell(cmd, commands, 0)
 }
 
@@ -182,7 +148,7 @@ fn option_value(command: &str, option: &str) -> bool {
     }
 }
 
-fn simple(words: &[String], out: &mut Commands, depth: usize) -> Option<()> {
+fn simple(words: &[String], out: &mut Groups, depth: usize) -> Option<()> {
     if words
         .first()
         .is_some_and(|w| matches!(w.as_str(), "for" | "select" | "case" | "function"))
@@ -297,7 +263,7 @@ fn simple(words: &[String], out: &mut Commands, depth: usize) -> Option<()> {
 }
 
 // Scan shell words, preserving quoted scripts and separating only shell operators.
-fn shell(input: &str, out: &mut Commands, depth: usize) -> Option<()> {
+fn shell(input: &str, out: &mut Groups, depth: usize) -> Option<()> {
     if depth > 64 {
         return None;
     }

@@ -114,7 +114,10 @@ fn request_user_input_pending_answered_and_offline() {
                 }
             );
             if state == "pending" {
-                assert_eq!(session.latest_activity().unwrap().label, "Pick a color?");
+                assert_eq!(
+                    session.latest_activity().unwrap().label,
+                    "request_user_input Color"
+                );
             }
             session.process = None;
             apply_rollout(&mut session, rollout::summary(&path).unwrap());
@@ -898,7 +901,7 @@ fn file_change_without_start_preserves_session_list() {
         .unwrap();
     assert_eq!(
         session.activity.as_ref().unwrap().label,
-        "/workspace/project/design.md"
+        "apply_patch /workspace/project/design.md"
     );
 }
 

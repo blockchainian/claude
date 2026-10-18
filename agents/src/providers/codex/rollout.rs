@@ -1,6 +1,6 @@
 use crate::log::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
-use crate::providers::tool::{Format, Input, Subject, Summary as ToolSummary};
+use crate::providers::tool::{Format, Input, Subject};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -50,31 +50,6 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("Skill", Input::Arguments, Format::Text),
     ],
     expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
-    summaries: &[
-        ("AskUserQuestion", ToolSummary::Questions),
-        ("request_user_input", ToolSummary::Questions),
-        (
-            "spawn_agent",
-            ToolSummary::Participant {
-                field: "task_name",
-                label: None,
-            },
-        ),
-        (
-            "send_message",
-            ToolSummary::Participant {
-                field: "target",
-                label: Some("To"),
-            },
-        ),
-        (
-            "followup_task",
-            ToolSummary::Participant {
-                field: "target",
-                label: Some("To"),
-            },
-        ),
-    ],
     activities: &[],
 };
 
@@ -548,8 +523,11 @@ fn tool_body(payload: &Value) -> Option<String> {
     let raw_name = response_tool_name(payload);
     let (name, subject, _) =
         crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
-    crate::providers::tool::summary(&raw_name, &arguments, &TOOL_RULES, false)
-        .or_else(|| Some(subject.unwrap_or_else(|| shell_display_name(&name).to_owned())))
+    Some(crate::providers::tool::list_title(
+        shell_display_name(&name),
+        subject.as_deref(),
+        &arguments,
+    ))
 }
 
 const ENCRYPTED_CONTENT: &str = "Content is encrypted.";
@@ -611,14 +589,11 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         detail_title: subject.clone().unwrap_or_else(|| display_name.to_owned()),
         show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: crate::providers::tool::summary(
-            &response_tool_name(payload),
+        title: crate::providers::tool::list_title(
+            display_name,
+            subject.as_deref(),
             arguments.as_ref().unwrap_or(&Value::Null),
-            &TOOL_RULES,
-            false,
-        )
-        .or(subject)
-        .unwrap_or_else(|| display_name.to_owned()),
+        ),
         name,
         input,
         output: output.map(|text| response_output(&response_tool_name(payload), text)),
@@ -716,7 +691,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         detail_title: subject.clone().unwrap_or_else(|| display_name.to_owned()),
         show_details: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
-        title: subject.unwrap_or_else(|| display_name.to_owned()),
+        title: crate::providers::tool::list_title(display_name, subject.as_deref(), &arguments),
         name,
         input,
         // Completed items can have no result body; an empty output still marks completion.
@@ -841,8 +816,9 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     let call = completed_call(item, command_text);
     let body = call.title.clone();
     let paths = if item_type == "FileChange" && !call.detail_left.is_empty() {
-        let mut offset = 0;
-        body.split(" · ")
+        let mut offset = call.detail_left.len() + 1;
+        call.detail_title
+            .split(" · ")
             .map(|path| {
                 let range = offset..offset + path.len();
                 offset += path.len() + " · ".len();
@@ -1544,7 +1520,7 @@ mod tests {
             });
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
-            assert_eq!(call.title, "cat, sed");
+            assert_eq!(call.title, "Shell cat, sed");
             assert_eq!(call.detail_title, "cat, sed");
             assert_eq!(call.detail_left, "Shell");
             let (_, _, input) = crate::providers::tool::presentation(
@@ -1569,7 +1545,7 @@ mod tests {
                 "type": "function_call", "name": "exec_command", "call_id": "shell",
                 "arguments": serde_json::json!({field: command}).to_string(),
             });
-            assert_eq!(tool_body(&payload).as_deref(), Some("cat, sed"));
+            assert_eq!(tool_body(&payload).as_deref(), Some("Shell cat, sed"));
             let file = tempfile::NamedTempFile::new().unwrap();
             writeln!(
                 file.as_file(),
@@ -1581,7 +1557,7 @@ mod tests {
             .unwrap();
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, "cat, sed");
+            assert_eq!(events[0].body, "Shell cat, sed");
             assert_eq!(events[0].calls[0].detail_left, "Shell");
         }
     }
@@ -1596,7 +1572,7 @@ mod tests {
         let event = completed_tool(read).unwrap().unwrap();
         assert_eq!(event.calls[0].detail_title, "cat, sed");
         assert_eq!(event.calls[0].detail_left, "Shell");
-        assert_eq!(event.body, event.calls[0].detail_title);
+        assert_eq!(event.body, format!("Shell {}", event.calls[0].detail_title));
         let file = records
             .iter()
             .find(|r| r["payload"]["item"]["type"] == "FileChange")
@@ -1816,14 +1792,14 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "spawn_agent (claude_calls) [scrubbed]");
+        assert_eq!(call.title, "spawn_agent claude_calls");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let call = &completed_tool(record).unwrap().unwrap().calls[0];
         assert_eq!(call.id, record["payload"]["item"]["id"].as_str().unwrap());
-        assert_eq!(call.title, "cat, sed");
+        assert_eq!(call.title, "Shell cat, sed");
     }
 
     #[test]
@@ -2122,7 +2098,7 @@ mod tests {
         let call = response_tool_call(&record["payload"], None);
         assert_eq!(call.detail_left, "request_user_input");
         assert_eq!(call.detail_title, "Color");
-        assert_eq!(call.title, "Pick a color?");
+        assert_eq!(call.title, "request_user_input Color");
         assert!(call.show_details);
         assert_eq!(
             call.input,
@@ -2178,21 +2154,18 @@ mod tests {
 
     #[test]
     fn real_collaboration_messages_hide_fernet_tokens() {
-        for (fixture, subject, prefix) in [
+        for (fixture, subject) in [
             (
                 include_str!("../../../tests/fixtures/codex-collaboration/spawn_agent.jsonl"),
                 "demo_sub",
-                "spawn_agent",
             ),
             (
                 include_str!("../../../tests/fixtures/codex-collaboration/send_message.jsonl"),
                 "rename_gating",
-                "To",
             ),
             (
                 include_str!("../../../tests/fixtures/codex-collaboration/followup_task.jsonl"),
                 "ux_probe",
-                "To",
             ),
         ] {
             let record: Value = serde_json::from_str(fixture).unwrap();
@@ -2201,12 +2174,10 @@ mod tests {
             for name in [tool.clone(), format!("collaboration.{tool}")] {
                 payload["name"] = name.into();
                 let call = response_tool_call(&payload, Some("Plaintext result"));
-                let prefix = if tool == "spawn_agent" {
-                    payload["name"].as_str().unwrap()
-                } else {
-                    prefix
-                };
-                let expected = format!("{prefix} ({subject}) Content is encrypted.");
+                let expected = format!(
+                    "{} {subject}",
+                    crate::providers::tool::display_tool_name(payload["name"].as_str().unwrap())
+                );
                 assert_eq!(tool_body(&payload).unwrap(), expected);
                 assert_eq!(call.title, expected);
                 assert_eq!(call.detail_title, subject);
@@ -2274,17 +2245,22 @@ mod tests {
     }
 
     #[test]
-    fn request_user_input_log_and_activity_show_question_texts() {
+    fn request_user_input_log_and_activity_show_name_and_headers() {
         for mode in ["default", "plan"] {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(format!("tests/fixtures/codex-input/{mode}-pending.jsonl"));
             let events = tail(&path, 100).unwrap();
             let question = events
                 .iter()
-                .find(|event| event.body == "Pick a color?")
+                .find(|event| {
+                    event
+                        .calls
+                        .iter()
+                        .any(|call| call.name == "request_user_input")
+                })
                 .unwrap();
             assert_eq!(question.kind, Kind::Assistant);
-            assert_eq!(question.body, "Pick a color?");
+            assert_eq!(question.body, "request_user_input Color");
             assert!(question.ended_at.is_none());
             let summary = summary(&path).unwrap();
             assert_eq!(
@@ -2311,7 +2287,7 @@ mod tests {
                 }]
             );
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, "Pick a color?");
+            assert_eq!(activity.label, "request_user_input Color");
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -2392,7 +2368,7 @@ mod tests {
         call["payload"]["name"] = "functions.request_user_input".into();
         assert_eq!(
             tool_body(&call["payload"]).unwrap(),
-            "Pick a color? · Pick a size?"
+            "functions request_user_input Color · Color"
         );
         records.push(call);
         assert_eq!(
@@ -2409,9 +2385,9 @@ mod tests {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
-                "spawn_agent (real_scan) Review files.",
-                "To (/root) Review files.",
-                "To (ux_probe) Review files.",
+                "spawn_agent real_scan",
+                "send_message /root",
+                "followup_task ux_probe",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -2447,7 +2423,7 @@ mod tests {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
             let expected = if name == "collaboration.send_message" {
-                "To (reviewer)".to_owned()
+                "collaboration send_message reviewer".to_owned()
             } else {
                 crate::providers::tool::display_tool_name(name)
             };
@@ -2557,7 +2533,7 @@ mod tests {
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"exec_command","arguments":"{{\"cmd\":\"cargo check\"}}","call_id":"test"}}}}"#).unwrap();
         let result = summary(file.path()).unwrap();
         assert!(!result.turn_ended);
-        assert_eq!(result.activity.unwrap().label, "cargo check");
+        assert_eq!(result.activity.unwrap().label, "Shell cargo check");
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:02Z","type":"event_msg","payload":{{"type":"turn_aborted","reason":"interrupted"}}}}"#).unwrap();
         assert!(summary(file.path()).unwrap().turn_ended);
     }

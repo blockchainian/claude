@@ -51,15 +51,6 @@ const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
         ("Skill", Input::Arguments, Format::Text),
     ],
     expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
-    summaries: &[
-        ("AskUserQuestion", Summary::Questions),
-        ("request_user_input", Summary::Questions),
-        ("Agent", Summary::Agent),
-        ("Task", Summary::Task),
-        ("SendMessage", Summary::Recipient),
-        ("WebFetch", Summary::WebFetch),
-        ("Skill", Summary::Skill),
-    ],
     activities: &[
         ("AskUserQuestion", Summary::Questions),
         ("request_user_input", Summary::Questions),
@@ -108,7 +99,7 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     if tool_hidden(name) {
         return None;
     }
-    if let Some(summary) = crate::providers::tool::summary(name, &block["input"], &RULES, true) {
+    if let Some(summary) = crate::providers::tool::summary(name, &block["input"], &RULES) {
         return Some(summary);
     }
     let (name, subject, _) = crate::providers::tool::presentation(name, &block["input"], &RULES);
@@ -492,6 +483,7 @@ struct Entry {
     missing: bool,
     background: bool,
     last_result: Option<usize>,
+    labels: Vec<(String, Option<String>)>,
 }
 struct ResultAt {
     source_records: Vec<crate::log::SourceRecord>,
@@ -702,14 +694,14 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     let title = subject.clone().unwrap_or_else(|| display_name.clone());
     let mut call = ToolCall {
         detail_left: if subject.is_some() {
-            display_name
+            display_name.clone()
         } else {
             String::new()
         },
         detail_title: title.clone(),
         show_details: crate::providers::tool::expanded(name, &RULES),
         id: String::new(),
-        title: crate::providers::tool::summary(name, input, &RULES, false).unwrap_or(title),
+        title: crate::providers::tool::list_title(&display_name, subject.as_deref(), input),
         name: name.to_owned(),
         input: sections,
         output,
@@ -1051,6 +1043,7 @@ impl Log {
             missing: false,
             background: false,
             last_result: None,
+            labels: Vec::new(),
         });
     }
 
@@ -1064,12 +1057,19 @@ impl Log {
         let input = &block["input"];
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
         let detail_call = tool_call(name, input, result);
-        let call = detail_call.title.clone();
+        let subject =
+            (!detail_call.detail_left.is_empty()).then_some(detail_call.detail_title.as_str());
+        let display_name = if subject.is_some() {
+            detail_call.detail_left.as_str()
+        } else {
+            detail_call.detail_title.as_str()
+        };
+        let label = crate::providers::tool::list_label(display_name, subject, input);
         let path = RULES.subjects.iter().find_map(|(tool, field)| {
             (*tool == name
                 && *field == Subject::Field("file_path")
                 && !detail_call.detail_left.is_empty())
-            .then_some(call.as_str())
+            .then_some(detail_call.detail_title.clone())
         });
         let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
@@ -1102,6 +1102,7 @@ impl Log {
                 missing: false,
                 background: false,
                 last_result: None,
+                labels: Vec::new(),
             }
         };
         entry.offset = self.offset;
@@ -1117,23 +1118,28 @@ impl Log {
             .source_records
             .sort_by_key(|record| record.offset);
         entry.event.source_records.dedup();
-        let body = entry
+        let mut path_subjects: Vec<_> = entry
             .event
-            .body
-            .strip_suffix(" *")
-            .filter(|_| entry.background)
-            .unwrap_or(&entry.event.body);
-        let path = path.map(|path| call.len() - path.len()..call.len());
-        let (body, call) = if body.is_empty() {
-            (body, call)
-        } else {
-            (body, format!("{call}，"))
-        };
-        for range in &mut entry.event.paths {
-            *range = range.start + call.len()..range.end + call.len();
+            .paths
+            .iter()
+            .map(|range| entry.event.body[range.clone()].to_owned())
+            .collect();
+        path_subjects.extend(path);
+        entry.labels.insert(0, label);
+        let mut groups = crate::providers::tool::groups::Groups::default();
+        for (head, member) in &entry.labels {
+            groups.add(head, member.as_deref());
         }
-        entry.event.paths.splice(0..0, path);
-        entry.event.body = format!("{call}{body}");
+        let (body, members) = groups.finish_with_ranges().unwrap();
+        entry.event.paths = members
+            .into_iter()
+            .filter(|range| {
+                path_subjects
+                    .iter()
+                    .any(|path| path == &body[range.clone()])
+            })
+            .collect();
+        entry.event.body = body;
         let mut detail = detail_call;
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
@@ -1625,7 +1631,7 @@ pub(crate) mod tests {
                 .map(|record| &record["message"]["content"][0])
                 .find(|block| block["id"] == call.id)
                 .unwrap();
-            assert_eq!(tool_activity(block).unwrap(), call.title);
+            assert_eq!(tool_activity(block).unwrap(), call.detail_title);
         }
     }
 
@@ -1711,10 +1717,7 @@ pub(crate) mod tests {
         let events = events_from(records.clone());
         let call = &events[0].calls[0];
         let input = &records[0]["message"]["content"][0]["input"];
-        assert_eq!(
-            events[0].body,
-            "computer-use:capture-window Visual Studio Code"
-        );
+        assert_eq!(events[0].body, "Skill computer-use:capture-window");
         assert_eq!(call.detail_title, input["skill"].as_str().unwrap());
         assert_eq!(call.detail_left, "Skill");
         assert_eq!(
@@ -1884,6 +1887,7 @@ pub(crate) mod tests {
                 file["startLine"].as_u64().unwrap() + file["numLines"].as_u64().unwrap() - 1
             )
         );
+        assert_eq!(read.title, format!("Read {}", read.detail_title));
         assert!(read.input.is_empty());
         let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
         assert!(edit.input.is_empty());
@@ -1992,7 +1996,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn questions_use_question_texts_in_log_and_activity() {
+    fn questions_use_headers_in_log_and_question_texts_in_activity() {
         for fixture in [
             include_str!("../../../tests/fixtures/claude-questions-pending.jsonl"),
             include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
@@ -2010,7 +2014,19 @@ pub(crate) mod tests {
             write!(file, "{fixture}").unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, expected);
+            assert_eq!(
+                events[0].body,
+                format!(
+                    "AskUserQuestion {}",
+                    record["message"]["content"][0]["input"]["questions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|question| question["header"].as_str().unwrap())
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                )
+            );
             assert_eq!(events[0].kind, Kind::Assistant);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
@@ -2040,7 +2056,24 @@ pub(crate) mod tests {
             writeln!(file, "{line}").unwrap();
             let events = tail_session(file.path(), 8, true).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, expected);
+            let record: Value = serde_json::from_str(line).unwrap();
+            let block = &record["message"]["content"][0];
+            let rows = [
+                "Bash mkdir, cd, ls, wc, head",
+                "找那个会话",
+                "SendMessage hide-idle-teammates",
+                "SendMessage team-lead",
+                "SubagentHandback",
+                "WebFetch https://code.claude.com/docs/en/hooks",
+                "Bash cd, ls, sed, wc",
+                "Bash cd, cat, wc, sed",
+            ];
+            let index = include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+                .lines()
+                .position(|candidate| candidate == line)
+                .unwrap();
+            assert_eq!(events[0].body, rows[index]);
+            assert_eq!(events[0].calls[0].name, block["name"].as_str().unwrap());
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
             assert_eq!(summary.activity.unwrap().label, expected);
@@ -2064,9 +2097,14 @@ pub(crate) mod tests {
             std::fs::write(file.path(), line).unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
+            let row_expected = if expected == "reviewer · Review files" {
+                "Review files"
+            } else {
+                expected
+            };
             assert_eq!(
                 participant_text(events[0].sender.as_deref(), &events[0].body),
-                expected
+                row_expected
             );
             let record: Value = serde_json::from_str(line).unwrap();
             if record["type"] == "assistant" {
@@ -2092,7 +2130,10 @@ pub(crate) mod tests {
             block["input"]["name"] = "reviewer".into();
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
-            assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+            let row_expected = record["message"]["content"][0]["input"]["description"]
+                .as_str()
+                .unwrap_or(tool_name);
+            assert_eq!(tail(file.path(), 1).unwrap()[0].body, row_expected);
             let summary = super::super::transcript::read_subagent(
                 file.path(),
                 file.as_file().metadata().unwrap().len(),
@@ -2133,7 +2174,12 @@ pub(crate) mod tests {
                     json!({if name == "SendMessage" { "to" } else { "name" }: participant});
                 let file = tempfile::NamedTempFile::new().unwrap();
                 std::fs::write(file.path(), record.to_string()).unwrap();
-                assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+                let row_expected = if name == "SendMessage" && !participant.trim().is_empty() {
+                    format!("SendMessage {participant}")
+                } else {
+                    name.to_owned()
+                };
+                assert_eq!(tail(file.path(), 1).unwrap()[0].body, row_expected);
                 let summary = super::super::transcript::read_subagent(
                     file.path(),
                     file.as_file().metadata().unwrap().len(),
@@ -2145,7 +2191,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bash_blank_description_uses_command_subject_in_both_surfaces() {
+    fn bash_blank_description_keeps_name_in_log_and_subject_in_activity() {
         let mut record: Value = serde_json::from_str(
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
                 .lines()
@@ -2157,7 +2203,7 @@ pub(crate) mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
         let events = tail_session(file.path(), 8, true).unwrap();
-        assert_eq!(events[0].body, "cd, ls, sed, wc");
+        assert_eq!(events[0].body, "Bash cd, ls, sed, wc");
         let summary = super::super::transcript::read_subagent(
             file.path(),
             file.as_file().metadata().unwrap().len(),
@@ -2255,7 +2301,7 @@ pub(crate) mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "echo");
+        assert_eq!(events[0].body, "Bash echo");
         assert!(
             matches!(&events[0].calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text.contains("Create Unsafe Agents"))
         );
@@ -2285,7 +2331,7 @@ pub(crate) mod tests {
         records.push(reply);
         let events = events_from(records);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "echo");
+        assert_eq!(events[0].body, "Bash echo");
         assert_eq!(events[0].ended_at, Some(end));
         assert_eq!(events[1].previous_end, Some(end));
     }
@@ -2304,7 +2350,7 @@ pub(crate) mod tests {
             records[1]["permissionDecision"]["reasonType"] = reason.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Error);
-            assert_eq!(events[0].body, "echo");
+            assert_eq!(events[0].body, "Bash echo");
         }
     }
 
@@ -2317,7 +2363,7 @@ pub(crate) mod tests {
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert_eq!(events[0].body, "echo");
+            assert_eq!(events[0].body, "Bash echo");
         }
     }
 
@@ -2764,7 +2810,10 @@ pub(crate) mod tests {
                 name,
                 json!({"file_path":"~/Users/project/src/main.rs"}),
             )]);
-            assert_eq!(events[0].body, "~/Users/project/src/main.rs");
+            assert_eq!(
+                events[0].body,
+                format!("{name} ~/Users/project/src/main.rs")
+            );
             assert_eq!(
                 &events[0].body[events[0].paths[0].clone()],
                 "~/Users/project/src/main.rs"
@@ -2782,8 +2831,16 @@ pub(crate) mod tests {
             ),
             ("Bash", json!({}), "Bash"),
             ("Bash", json!({"description":" \n "}), "Bash"),
-            ("Read", json!({"description":"inspect files"}), "Read"),
-            ("bash", json!({"description":"inspect files"}), "bash"),
+            (
+                "Read",
+                json!({"description":"inspect files"}),
+                "inspect files",
+            ),
+            (
+                "bash",
+                json!({"description":"inspect files"}),
+                "inspect files",
+            ),
         ] {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             writeln!(file, "{}", tool(1, "call", "a", name, input)).unwrap();
@@ -2817,7 +2874,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "inspect files，Bash，Read");
+        assert_eq!(events[0].body, "inspect files, Bash, read config");
     }
 
     #[test]
@@ -2837,7 +2894,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "codex-manager detach，TaskStop");
+        assert_eq!(events[0].body, "codex-manager detach, TaskStop");
     }
 
     #[test]
@@ -2867,7 +2924,7 @@ pub(crate) mod tests {
             events[1].started_at,
             "2026-10-06T16:39:29.554Z".parse::<DateTime<Utc>>().unwrap()
         );
-        assert_eq!(events[2].body, "Read，Grep");
+        assert_eq!(events[2].body, "Read, Grep");
         assert_eq!(events[2].started_at, at(30));
         assert_eq!(events[2].ended_at, Some(at(35)));
         assert_eq!(events[3].body, "build *");
@@ -2910,9 +2967,9 @@ pub(crate) mod tests {
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Error);
-        assert_eq!(events[0].body, "Read，b");
+        assert_eq!(events[0].body, "Read b");
         assert_eq!(events[0].paths.len(), 1);
-        assert_eq!(events[0].paths[0], "Read，".len().."Read，b".len());
+        assert_eq!(events[0].paths[0], "Read ".len().."Read b".len());
         assert_eq!(events[0].ended_at, None);
         assert_eq!(events[0].started_at, at(1));
     }
@@ -2945,7 +3002,7 @@ pub(crate) mod tests {
         assert_eq!(events[0].started_at, at(2));
         assert_eq!(events[0].previous_end, Some(at(1)));
         assert_eq!(events[0].ended_at, Some(at(5)));
-        assert_eq!(events[0].body, "Read，Read");
+        assert_eq!(events[0].body, "Read");
     }
     #[test]
     fn stops_in_the_tail_of_a_large_file() {

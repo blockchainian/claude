@@ -15,6 +15,9 @@ mod terminal_mcp;
 #[path = "support/terminal_headings.rs"]
 mod terminal_headings;
 
+#[path = "support/terminal_tool_list.rs"]
+mod terminal_tool_list;
+
 #[path = "support/terminal_scripts.rs"]
 mod terminal_scripts;
 

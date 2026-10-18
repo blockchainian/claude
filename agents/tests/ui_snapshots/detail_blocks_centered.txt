@@ -22,7 +22,7 @@ SubAgentActivity — 200 columns
                                                                       }
                                                                                                     ↓
                                                                                                (no output)
-spawn_agent (claude_calls) [scrubbed] — 120 columns
+spawn_agent claude_calls — 120 columns
 spawn_agent                                           claude_calls
 
                                                  task_name: claude_calls
@@ -31,7 +31,7 @@ spawn_agent                                           claude_calls
                                            {
                                              "task_name": "/root/claude_calls"
                                            }
-spawn_agent (claude_calls) [scrubbed] — 200 columns
+spawn_agent claude_calls — 200 columns
 spawn_agent                                                                                   claude_calls
 
                                                                                          task_name: claude_calls
@@ -40,21 +40,21 @@ spawn_agent                                                                     
                                                                                    {
                                                                                      "task_name": "/root/claude_calls"
                                                                                    }
-spawn_agent (codex_calls) [scrubbed] — 120 columns
+spawn_agent codex_calls — 120 columns
 spawn_agent                                            codex_calls
 
                                                  task_name: codex_calls
                                                  [scrubbed]
                                                             ↓
                                                            •··
-spawn_agent (codex_calls) [scrubbed] — 200 columns
+spawn_agent codex_calls — 200 columns
 spawn_agent                                                                                    codex_calls
 
                                                                                          task_name: codex_calls
                                                                                          [scrubbed]
                                                                                                     ↓
                                                                                                    •··
-WebFetch render.com/docs/postgresql-instance-types — 120 columns
+WebFetch https://render.com/docs/postgresql-instance-types — 120 columns
 WebFetch                            https://render.com/docs/postgresql-instance-types
 
      url: https://render.com/docs/postgresql-instance-types
@@ -65,7 +65,7 @@ WebFetch                            https://render.com/docs/postgresql-instance-
 
   The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. gh
   for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
-WebFetch render.com/docs/postgresql-instance-types — 200 columns
+WebFetch https://render.com/docs/postgresql-instance-types — 200 columns
 WebFetch                                                                    https://render.com/docs/postgresql-instance-types
 
                                                           url: https://render.com/docs/postgresql-instance-types

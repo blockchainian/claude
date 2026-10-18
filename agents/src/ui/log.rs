@@ -1763,7 +1763,7 @@ pub(super) mod log_markdown {
     fn merged_tool_row_abbreviates_every_path() {
         assert_eq!(
             merged_tool_row(70),
-            "/o…/w…/a…/s…/ui/tests.rs，/o…/work/agents/src/providers/codex/tests.rs"
+            "Edit /o…/w…/a…/s…/ui/tests.rs, Read /o…/w…/a…/s…/p…/codex/tests.rs"
         );
     }
 
@@ -1771,7 +1771,7 @@ pub(super) mod log_markdown {
     fn merged_tool_row_keeps_every_file_name_whole() {
         assert_eq!(
             merged_tool_row(40),
-            "/o…/w…/a…/s…/ui/tests.rs，/o…/w…/a…/s…/p…/c…/tests.rs"
+            "Edit /o…/w…/a…/s…/ui/tests.rs, Read /o…/w…/a…/s…/p…/c…/tests.rs"
         );
     }
 

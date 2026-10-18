@@ -46,7 +46,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .collect();
     assert_eq!(entries.len(), 2);
     let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
-    assert_eq!(bodies, ["cat, git {log, status}, shasum", "gh pr"]);
+    assert_eq!(bodies, ["Shell cat, git {log, status}, shasum", "Shell gh pr"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
         assert_record_timing(entry, record);
@@ -59,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "type");
+    assert_eq!(entries[0].body, "Shell type");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -77,7 +77,7 @@ fn file_change_uses_record_paths() {
         .next()
         .unwrap()
         .clone();
-    assert_eq!(entries[0].body, path);
+    assert_eq!(entries[0].body, format!("apply_patch {path}"));
     assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], record);
@@ -102,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "sleep");
+    assert_eq!(entries[0].body, "Shell sleep");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }
@@ -261,7 +261,7 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 fn file_change_without_start_log_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "/workspace/project/design.md");
+    assert_eq!(entries[0].body, "apply_patch /workspace/project/design.md");
     let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
     assert_eq!(entries[0].started_at, completion);
     assert_eq!(entries[0].ended_at, Some(completion));
@@ -274,7 +274,7 @@ fn file_change_without_start_summary_succeeds() {
         .unwrap()
         .activity
         .unwrap();
-    assert_eq!(activity.label, "/workspace/project/design.md");
+    assert_eq!(activity.label, "apply_patch /workspace/project/design.md");
     assert_eq!(
         activity.at,
         DateTime::from_timestamp_millis(1781329074517).unwrap()
@@ -739,9 +739,9 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "sleep");
+    assert_eq!(event.body, "Shell sleep");
     assert_eq!(call.name, "exec_command");
-    assert_eq!(call.title, "sleep");
+    assert_eq!(call.title, "Shell sleep");
     assert_eq!(call.detail_title, "sleep");
     assert_eq!(call.detail_left, "Shell");
     assert_eq!(
@@ -768,9 +768,9 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
     assert_eq!(entries.len(), 1);
     let event = &entries[0];
     let call = &event.calls[0];
-    assert_eq!(event.body, "git {status, diff}, sed");
+    assert_eq!(event.body, "Shell git {status, diff}, sed");
     assert_eq!(call.title, event.body);
-    assert_eq!(call.detail_title, event.body);
+    assert_eq!(call.detail_title, "git {status, diff}, sed");
     assert_eq!(call.detail_left, "Shell");
     assert!(event.paths.is_empty());
     assert_eq!(call.name, "exec_command");

@@ -32,18 +32,21 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|question| question["question"].as_str().unwrap())
+            .map(|question| question["header"].as_str().unwrap())
             .collect::<Vec<_>>()
             .join(" · ");
-        assert_eq!(event.calls[0].title, questions);
-        assert_eq!(event.body, questions);
+        assert_eq!(event.calls[0].title, format!("AskUserQuestion {questions}"));
+        assert_eq!(event.body, format!("AskUserQuestion {questions}"));
         assert!(log::shows_calls(&event));
         let (mut view, now) = log_fixture();
         view.set_log(vec![event.clone()]);
         view.select_fixture_event(Some(event.clone()));
         let screen = log_screen(&view, 180, 60, now);
         let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
-        assert!(!compact.contains("AskUserQuestion·"), "{screen}");
+        assert!(
+            compact.contains(&format!("AskUserQuestion{}", questions.replace(' ', ""))),
+            "{screen}"
+        );
         let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
         assert_eq!(
             detail.sections[0].title.left.as_deref(),

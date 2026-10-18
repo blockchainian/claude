@@ -1,6 +1,6 @@
 use super::*;
 
-fn start_codex_probe(name: &str, fixture: &str) -> (tempfile::TempDir, Tmux) {
+pub(super) fn start_codex_probe(name: &str, fixture: &str) -> (tempfile::TempDir, Tmux) {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
     let claude = directory.path().join("claude");
@@ -60,7 +60,7 @@ fn terminal_codex_exit_sections() {
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert_eq!(capture.matches("Shell").count(), 1, "{capture}");
+    assert_eq!(capture.matches("Shell").count(), 3, "{capture}");
     assert!(capture.matches("false").count() >= 3, "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
@@ -101,8 +101,11 @@ fn terminal_codex_shell_titles() {
         let capture = tmux.capture_when(|capture| {
             capture.matches(subject).count() >= 2 && capture.contains(command)
         });
-        assert_eq!(capture.matches("Shell").count(), 1, "{capture}");
-        let title = capture.lines().find(|line| line.contains("Shell")).unwrap();
+        assert_eq!(capture.matches("Shell").count(), 3, "{capture}");
+        let title = capture
+            .lines()
+            .find(|line| line.trim_start().starts_with("Shell"))
+            .unwrap();
         assert!(title.contains(subject), "{capture}");
         assert!(title.find("Shell") < title.find(subject), "{capture}");
         assert!(
