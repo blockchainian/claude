@@ -987,7 +987,7 @@ pub(super) mod tests {
             };
             let first = read(file.path(), file.as_file().metadata().unwrap().len(), None).unwrap();
             let session = super::super::session("test".into(), first.clone(), None, Utc::now());
-            assert_eq!(session.model_label(), Some(label));
+            assert_eq!(session.model_label.as_deref(), Some(label));
             writeln!(file, "{messages}").unwrap();
             let appended = read(
                 file.path(),
@@ -996,7 +996,7 @@ pub(super) mod tests {
             )
             .unwrap();
             let session = super::super::session("test".into(), appended, None, Utc::now());
-            assert_eq!(session.model_label(), Some(label));
+            assert_eq!(session.model_label.as_deref(), Some(label));
         }
     }
 
@@ -1019,7 +1019,7 @@ pub(super) mod tests {
             )
             .unwrap();
             let session = super::super::session("test".into(), summary.clone(), None, Utc::now());
-            assert_eq!(session.model_label(), Some(label));
+            assert_eq!(session.model_label.as_deref(), Some(label));
             previous = Some(summary);
         }
         let summary = previous.unwrap();

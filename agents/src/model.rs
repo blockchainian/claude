@@ -182,13 +182,6 @@ impl Session {
             .filter(|model| !model.is_empty())
             .unwrap_or("Unknown")
     }
-
-    /// The model's human-readable name when known, else its id, if the session reports one.
-    pub fn model_label(&self) -> Option<&str> {
-        self.model_label
-            .as_deref()
-            .or_else(|| self.model.as_deref().filter(|model| !model.is_empty()))
-    }
 }
 
 pub type DraftId = u64;

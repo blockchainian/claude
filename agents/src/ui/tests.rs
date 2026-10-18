@@ -4149,6 +4149,7 @@ fn list_row_highlights_include_column_padding() {
                                 view.rows[0].id.clone(),
                             ),
                             values: vec!["claude-sonnet-5-5".into(), "claude-haiku-5-5".into()],
+                            labels: vec!["claude-sonnet-5-5".into(), "claude-haiku-5-5".into()],
                         },
                         0,
                     ));

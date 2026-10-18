@@ -1046,14 +1046,14 @@ mod tests {
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
         for (transcript, label) in [
-            (fixture.clone(), "Opus 5.5"),
+            (fixture.clone(), Some("Opus 5.5")),
             (
                 fixture.replacen(
                     "\"modelId\":\"claude-opus-5-5\"",
                     "\"modelId\":\"claude-fable-5-1\"",
                     1,
                 ),
-                "claude-opus-5-5",
+                None,
             ),
         ] {
             let path = dir.path().join("model-identity.jsonl");
@@ -1061,7 +1061,7 @@ mod tests {
             let len = std::fs::metadata(&path).unwrap().len();
             let summary = transcript::read(&path, len).unwrap();
             let session = session("model-identity".into(), summary, Some(path), Utc::now());
-            assert_eq!(session.model_label(), Some(label));
+            assert_eq!(session.model_label.as_deref(), label);
         }
     }
 

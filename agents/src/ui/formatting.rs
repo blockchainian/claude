@@ -2,6 +2,29 @@ use super::*;
 use chrono::{DateTime, Utc};
 use std::io::{Read, Seek, SeekFrom};
 
+impl View {
+    /// A session's model as the screen names it: the name its provider recorded, else the
+    /// provider's name for its id; `None` when the session reports no model.
+    pub(super) fn session_model_text(&self, session: &Session) -> Option<String> {
+        match (session.model_label.as_deref(), session.model.as_deref()) {
+            (Some(label), _) => Some(label.to_owned()),
+            (None, Some(model)) if !model.is_empty() => {
+                Some(self.model_text(session.id.provider, model))
+            }
+            _ => None,
+        }
+    }
+
+    /// A model id or alias as the screen names it: its provider's name for it, else itself.
+    pub(super) fn model_text(&self, provider: ProviderId, model: &str) -> String {
+        self.input_choices
+            .get(&provider)
+            .and_then(|choices| choices.label(model))
+            .unwrap_or(model)
+            .to_owned()
+    }
+}
+
 pub(super) fn tail_lines(path: &Path, count: usize) -> Vec<String> {
     if count == 0 {
         return Vec::new();
