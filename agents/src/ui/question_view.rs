@@ -24,7 +24,7 @@ pub(super) enum Target {
     Option(usize),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Page {
     focus: usize,
     selected: Vec<usize>,
@@ -40,6 +40,7 @@ impl Page {
 /// Rows on the Submit tab, which follows the questions when Claude Code shows one.
 const REVIEW_ROWS: [&str; 2] = ["Submit answers", "Cancel"];
 
+#[derive(Clone)]
 pub(super) struct QuestionView {
     ask: Ask,
     /// The shown tab: a question, or the Submit tab after the last question.
@@ -521,8 +522,17 @@ impl QuestionView {
         rows
     }
 
+    /// The tallest tab's height, so switching tabs never moves the panels around the view.
     pub(super) fn height(&self, width: u16) -> u16 {
-        self.lines(width).0.len().min(usize::from(u16::MAX)) as u16
+        let mut tab = self.clone();
+        (0..self.tabs().max(1))
+            .map(|page| {
+                tab.page = page;
+                tab.lines(width).0.len()
+            })
+            .max()
+            .unwrap_or(0)
+            .min(usize::from(u16::MAX)) as u16
     }
 
     /// The lines that fit `area`, scrolled to keep the focus and footer visible, with each
@@ -531,6 +541,12 @@ impl QuestionView {
         let (mut lines, focus, rows) = self.lines(area.width);
         let height = usize::from(area.height);
         if lines.len() <= height {
+            // Blank rows above the footer keep it on the area's last line on a shorter tab.
+            let footer = lines.len() - self.footer(area.width).len();
+            lines.splice(
+                footer..footer,
+                std::iter::repeat_n(Line::default(), height - lines.len()),
+            );
             return (lines, rows, 0);
         }
         let footer = lines.split_off(lines.len() - self.footer(area.width).len());
@@ -816,6 +832,22 @@ mod tests {
         view.scroll(false, true);
         view.scroll(false, true);
         assert_eq!(view.page(), 0);
+    }
+
+    #[test]
+    fn ask_view_height_stays_fixed_across_tabs() {
+        let mut view = QuestionView::new(fixture("First"));
+        let height = view.height(60);
+        for page in [2, 1, 0] {
+            view.show_page(page);
+            assert_eq!(view.height(60), height, "tab {page}");
+        }
+        view.show_page(2);
+        let review = screen(&view, 60, height);
+        assert!(
+            review.lines().last().unwrap().ends_with("Esc to close"),
+            "{review}"
+        );
     }
 
     #[test]
