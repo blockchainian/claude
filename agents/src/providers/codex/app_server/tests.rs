@@ -190,14 +190,31 @@ fn stop_and_archive_thread(manager: bool) {
     })
     .unwrap();
     assert!(archived);
+    let mut stored = provider
+        .snapshot(1)
+        .unwrap()
+        .sessions
+        .into_iter()
+        .find(|candidate| candidate.id == session.id)
+        .unwrap();
+    assert!(stored.archived);
+    stored.parent = session.parent.clone();
+    // Opening the archived thread in a terminal unarchives it first.
     assert!(
         provider
-            .snapshot(1)
-            .unwrap()
-            .sessions
-            .iter()
-            .any(|candidate| candidate.id == session.id && candidate.archived)
+            .launch(&Action::Resume(session.id.clone()), Some(&stored))
+            .is_some()
     );
+    let archived: bool = Connection::open_with_flags(
+        provider.home.join("state_5.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+    .query_row("SELECT archived FROM threads WHERE id=?1", [&id], |row| {
+        row.get(0)
+    })
+    .unwrap();
+    assert!(!archived);
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
     provider.delete(&session).and_then(|delete| delete()).unwrap();
     cleanup.2 = false;

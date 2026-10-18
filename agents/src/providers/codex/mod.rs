@@ -575,6 +575,13 @@ impl Provider for CodexProvider {
                 } else {
                     "resume"
                 };
+                // `codex resume` asks before unarchiving; unarchive here so it opens directly.
+                // On failure it still asks, so the error needs no handling.
+                if session.archived && subcommand == "resume" {
+                    let _ = app_server::Client::connect(&self.home).and_then(|mut client| {
+                        app_server::thread::unarchive(&mut client, &session.id.id)
+                    });
+                }
                 command
                     .args([subcommand, &session.id.id])
                     .current_dir(&session.cwd);
