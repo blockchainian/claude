@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn hook_questions_are_answerable_before_process_metadata_arrives() {
+    fn ask_user_question_is_answerable_before_process_metadata_arrives() {
         let mut view = fixture();
         let mut row = view.rows[0].clone();
         row.process = None;
@@ -378,17 +378,17 @@ mod tests {
             &input,
             Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
-                "Claude question hook disconnected",
+                "Claude AskUserQuestion disconnected",
             )),
         );
         view.expire_messages(Instant::now() + Duration::from_secs(2));
-        assert!(screen(&view, 100, 40).contains("Claude question hook disconnected"));
+        assert!(screen(&view, 100, 40).contains("Claude AskUserQuestion disconnected"));
         assert!(matches!(
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
             Some(Action::AnswerQuestions { .. })
         ));
         view.input_sending(&ask.session, &input);
-        assert!(!screen(&view, 100, 40).contains("Claude question hook disconnected"));
+        assert!(!screen(&view, 100, 40).contains("Claude AskUserQuestion disconnected"));
     }
 
     #[test]

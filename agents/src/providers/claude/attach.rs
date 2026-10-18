@@ -384,7 +384,7 @@ impl Terminal {
             }
             SessionInput::Answer { .. } => Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "Answers require the HTTP hook",
+                "Answers require AskUserQuestion",
             )),
             SessionInput::Interrupt => self.write(b"\x1b"),
             SessionInput::SetModel(model) => {

@@ -1,4 +1,4 @@
-//! Holds background Claude question hooks until the dashboard answers or attaches.
+//! Handles background Claude AskUserQuestion requests until the dashboard answers or attaches.
 use crate::ask::{Answer, Ask, AskKind, Question};
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -20,14 +20,14 @@ struct Pending {
     questions: Value,
     stream: TcpStream,
 }
-pub(super) struct HookServer {
+pub(super) struct AskUserQuestion {
     entries: Arc<Mutex<HashMap<String, Pending>>>,
     stopping: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
     #[cfg(test)]
     port: u16,
 }
-impl HookServer {
+impl AskUserQuestion {
     pub(super) fn bind(port: u16, config: PathBuf) -> io::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))?;
         #[cfg(test)]
@@ -38,7 +38,7 @@ impl HookServer {
         let pending = Arc::clone(&entries);
         let stop = Arc::clone(&stopping);
         let worker = thread::Builder::new()
-            .name("agents-question-hook".into())
+            .name("agents-ask_user_question".into())
             .spawn(move || {
                 while !stop.load(Ordering::Acquire) {
                     match listener.accept() {
@@ -47,21 +47,21 @@ impl HookServer {
                             let config = config.clone();
                             let stop = Arc::clone(&stop);
                             if let Err(error) = thread::Builder::new()
-                                .name("agents-question-request".into())
+                                .name("agents-ask_user_question-request".into())
                                 .spawn(move || {
                                     if let Err(error) = receive(stream, &config, &entries, &stop) {
-                                        eprintln!("agents: Claude question hook: {error}");
+                                        eprintln!("agents: Claude AskUserQuestion: {error}");
                                     }
                                 })
                             {
-                                eprintln!("agents: Claude question reader: {error}");
+                                eprintln!("agents: Claude AskUserQuestion reader: {error}");
                             }
                         }
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(20));
                         }
                         Err(error) => {
-                            eprintln!("agents: Claude question listener: {error}");
+                            eprintln!("agents: Claude AskUserQuestion listener: {error}");
                             break;
                         }
                     }
@@ -76,7 +76,7 @@ impl HookServer {
         })
     }
     pub(super) fn pending(&self) -> Vec<Ask> {
-        let mut entries = self.entries.lock().expect("question hooks lock");
+        let mut entries = self.entries.lock().expect("AskUserQuestion requests lock");
         entries.retain(|_, entry| {
             let mut byte = [0];
             match entry.stream.peek(&mut byte) {
@@ -89,17 +89,17 @@ impl HookServer {
     }
     pub(super) fn answer(&self, ask: &Ask, answer: &Answer) -> io::Result<()> {
         let answers = encode_answers(ask, answer)?;
-        let mut entries = self.entries.lock().expect("question hooks lock");
+        let mut entries = self.entries.lock().expect("AskUserQuestion requests lock");
         let entry = entries
             .get(&ask.id)
             .filter(|entry| entry.ask == *ask)
-            .ok_or_else(|| io::Error::other("Claude question is no longer pending"))?;
+            .ok_or_else(|| io::Error::other("Claude AskUserQuestion is no longer pending"))?;
         let body = json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"questions":entry.questions,"answers":answers}}});
-        let mut entry = entries.remove(&ask.id).expect("pending question");
+        let mut entry = entries.remove(&ask.id).expect("pending AskUserQuestion");
         respond(&mut entry.stream, Some(&body))
     }
     pub(super) fn release(&self, session: &str) -> io::Result<()> {
-        let mut entries = self.entries.lock().expect("question hooks lock");
+        let mut entries = self.entries.lock().expect("AskUserQuestion requests lock");
         let ids: Vec<_> = entries
             .iter()
             .filter(|(_, entry)| entry.ask.session.id == session)
@@ -113,13 +113,18 @@ impl HookServer {
         Ok(())
     }
 }
-impl Drop for HookServer {
+impl Drop for AskUserQuestion {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-        for (_, entry) in self.entries.lock().expect("question hooks lock").drain() {
+        for (_, entry) in self
+            .entries
+            .lock()
+            .expect("AskUserQuestion requests lock")
+            .drain()
+        {
             let _ = entry.stream.shutdown(Shutdown::Both);
         }
     }
@@ -133,7 +138,7 @@ fn receive(
     let (ask, questions) = match read_request(&mut stream).and_then(|value| parse_request(&value)) {
         Ok(request) => request,
         Err(error) => {
-            eprintln!("agents: invalid Claude question hook: {error}");
+            eprintln!("agents: invalid Claude AskUserQuestion: {error}");
             return stream.write_all(
                 b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             );
@@ -144,7 +149,7 @@ fn receive(
     }
     stream.set_read_timeout(None)?;
     stream.set_nonblocking(true)?;
-    let mut entries = entries.lock().expect("question hooks lock");
+    let mut entries = entries.lock().expect("AskUserQuestion requests lock");
     if !stopping.load(Ordering::Acquire) {
         entries.insert(
             ask.id.clone(),
@@ -161,7 +166,7 @@ fn receive(
 fn invalid() -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
-        "Invalid Claude question or answer",
+        "Invalid Claude AskUserQuestion or answer",
     )
 }
 fn parse_request(value: &Value) -> io::Result<(Ask, Value)> {
@@ -311,8 +316,8 @@ fn respond(stream: &mut TcpStream, body: Option<&Value>) -> io::Result<()> {
     stream.shutdown(Shutdown::Both)
 }
 #[cfg(test)]
-#[path = "ask_hook_live_tests.rs"]
+#[path = "ask_user_question_live_tests.rs"]
 mod live_tests;
 #[cfg(test)]
-#[path = "ask_hook_tests.rs"]
+#[path = "ask_user_question_tests.rs"]
 mod tests;

@@ -12,7 +12,7 @@ mod defaults;
 mod models;
 #[cfg(test)]
 pub use models::write_fixture_cache;
-mod ask_hook;
+mod ask_user_question;
 mod images;
 pub(crate) mod log;
 mod peer;
@@ -43,7 +43,7 @@ pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
 const DETACH: &[u8] = b"\x1a";
 
 const PAGE_SIZE: usize = 10;
-const ASK_HOOK_PORT: u16 = 47831;
+const ASK_USER_QUESTION_PORT: u16 = 47831;
 
 /// Persists the custom title in Claude Code's transcript and sidecar formats.
 pub fn rename(transcript: &Path, id: &str, name: &str) -> io::Result<()> {
@@ -294,7 +294,7 @@ pub struct ClaudeProvider {
     summaries: HashMap<PathBuf, CachedSummary>,
     starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
     background: background::Tasks,
-    ask_hook: Option<std::sync::Arc<ask_hook::HookServer>>,
+    ask_user_question: Option<std::sync::Arc<ask_user_question::AskUserQuestion>>,
 }
 
 fn created_job(output: &std::process::Output) -> io::Result<String> {
@@ -360,7 +360,7 @@ impl ClaudeProvider {
             summaries: HashMap::new(),
             starts: HashMap::new(),
             background: background::Tasks::default(),
-            ask_hook: None,
+            ask_user_question: None,
         }
     }
 
@@ -493,8 +493,8 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
-        if let Some(hook) = &self.ask_hook {
-            for ask in hook.pending() {
+        if let Some(ask_user_question) = &self.ask_user_question {
+            for ask in ask_user_question.pending() {
                 if let Some(session) = sessions
                     .iter_mut()
                     .find(|session| session.id == ask.session)
@@ -694,21 +694,32 @@ impl ClaudeProvider {
 
 impl Provider for ClaudeProvider {
     fn setup(&mut self) -> io::Result<()> {
-        settings::ensure_ask_hook(&self.config_dir.join("settings.json"), ASK_HOOK_PORT)?;
-        match ask_hook::HookServer::bind(ASK_HOOK_PORT, self.config_dir.clone()) {
-            Ok(server) => self.ask_hook = Some(std::sync::Arc::new(server)),
+        settings::ensure_ask_user_question(
+            &self.config_dir.join("settings.json"),
+            ASK_USER_QUESTION_PORT,
+        )?;
+        match ask_user_question::AskUserQuestion::bind(
+            ASK_USER_QUESTION_PORT,
+            self.config_dir.clone(),
+        ) {
+            Ok(server) => self.ask_user_question = Some(std::sync::Arc::new(server)),
             // Without a listener, Claude owns question input and the dashboard only displays it.
-            Err(_) => self.ask_hook = None,
+            Err(_) => self.ask_user_question = None,
         }
         Ok(())
     }
 
     fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
-        let hook_pending = self
-            .ask_hook
-            .as_ref()
-            .is_some_and(|hook| hook.pending().iter().any(|ask| ask.session == session.id));
-        let command = if hook_pending {
+        let ask_user_question_pending =
+            self.ask_user_question
+                .as_ref()
+                .is_some_and(|ask_user_question| {
+                    ask_user_question
+                        .pending()
+                        .iter()
+                        .any(|ask| ask.session == session.id)
+                });
+        let command = if ask_user_question_pending {
             let job = session
                 .background_job
                 .as_ref()
@@ -737,9 +748,10 @@ impl Provider for ClaudeProvider {
                 .current_dir(&session.cwd);
             command
         };
-        if let Some(hook) = &self.ask_hook {
-            hook.release(&session.id.id)
-                .map_err(|_| "Cannot release question hook")?;
+        if let Some(ask_user_question) = &self.ask_user_question {
+            ask_user_question
+                .release(&session.id.id)
+                .map_err(|_| "Cannot release AskUserQuestion")?;
         }
         Ok(TerminalCommand {
             command,
@@ -856,9 +868,10 @@ impl Provider for ClaudeProvider {
 
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
         if let SessionInput::Answer { ask, answer, .. } = input {
-            let hook = self.ask_hook.clone();
+            let ask_user_question = self.ask_user_question.clone();
             return Some(Box::new(move || {
-                hook.ok_or_else(|| io::Error::other("Claude question hook is unavailable"))?
+                ask_user_question
+                    .ok_or_else(|| io::Error::other("Claude AskUserQuestion is unavailable"))?
                     .answer(&ask, &answer)
             }));
         }
@@ -1257,15 +1270,16 @@ mod tests {
     #[test]
     fn setup_leaves_questions_read_only_when_listener_is_unavailable() {
         use std::net::TcpListener;
-        let _occupied = match TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, ASK_HOOK_PORT)) {
-            Ok(listener) => Some(listener),
-            Err(error) if error.kind() == io::ErrorKind::AddrInUse => None,
-            Err(error) => panic!("cannot reserve question port: {error}"),
-        };
+        let _occupied =
+            match TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, ASK_USER_QUESTION_PORT)) {
+                Ok(listener) => Some(listener),
+                Err(error) if error.kind() == io::ErrorKind::AddrInUse => None,
+                Err(error) => panic!("cannot reserve question port: {error}"),
+            };
         let dir = tempfile::tempdir().unwrap();
         let mut provider = ClaudeProvider::new(dir.path().into());
         provider.setup().unwrap();
-        assert!(provider.ask_hook.is_none());
+        assert!(provider.ask_user_question.is_none());
         let settings: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.path().join("settings.json")).unwrap()).unwrap();
         assert_eq!(

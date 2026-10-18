@@ -86,8 +86,8 @@ fn write(
     Ok(())
 }
 
-/// Registers the HTTP hook without rewriting settings that already contain it.
-pub(super) fn ensure_ask_hook(path: &Path, port: u16) -> io::Result<()> {
+/// Registers AskUserQuestion without rewriting settings that already contain it.
+pub(super) fn ensure_ask_user_question(path: &Path, port: u16) -> io::Result<()> {
     let settings = read(path)?;
     let permissions = settings
         .as_ref()
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn ask_hook_adds_http_hook_and_preserves_settings_and_permissions() {
+    fn ask_user_question_adds_http_configuration_and_preserves_settings_and_permissions() {
         let (directory, path) = fixture();
         let mut before = read(&path);
         before["permissions"] = json!({"allow": ["Read"]});
@@ -378,7 +378,7 @@ mod tests {
         write(&path, &before);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
 
-        ensure_ask_hook(&path, 31337).unwrap();
+        ensure_ask_user_question(&path, 31337).unwrap();
 
         let after = read(&path);
         for key in ["model", "effortLevel", "permissions"] {
@@ -400,19 +400,19 @@ mod tests {
     }
 
     #[test]
-    fn ask_hook_keeps_existing_equivalent_hook_byte_for_byte() {
+    fn ask_user_question_keeps_existing_equivalent_configuration_byte_for_byte() {
         let (_directory, path) = fixture();
         let existing = r#"{ "model":"haiku", "hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"true"},{"type":"http","url":"http://127.0.0.1:31337/ask-user-question","timeout":3600,"headers":{"X-Test":"retained"}}]}]}}"#;
         fs::write(&path, existing).unwrap();
-        ensure_ask_hook(&path, 31337).unwrap();
+        ensure_ask_user_question(&path, 31337).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), existing);
     }
 
     #[test]
-    fn ask_hook_creates_missing_directory_and_file() {
+    fn ask_user_question_creates_missing_directory_and_file() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config/settings.json");
-        ensure_ask_hook(&path, 31337).unwrap();
+        ensure_ask_user_question(&path, 31337).unwrap();
         let settings = read(&path);
         assert_eq!(
             settings["hooks"]["PreToolUse"][0]["matcher"],
@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn ask_hook_rejects_malformed_structure_without_changing_file() {
+    fn ask_user_question_rejects_malformed_structure_without_changing_file() {
         let (_directory, path) = fixture();
         for invalid in [
             "{broken",
@@ -438,7 +438,7 @@ mod tests {
         ] {
             fs::write(&path, invalid).unwrap();
             assert_eq!(
-                ensure_ask_hook(&path, 31337).unwrap_err().kind(),
+                ensure_ask_user_question(&path, 31337).unwrap_err().kind(),
                 io::ErrorKind::InvalidData
             );
             assert_eq!(fs::read_to_string(&path).unwrap(), invalid);

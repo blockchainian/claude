@@ -4,7 +4,7 @@ use crate::ask::QuestionAnswer;
 fn ask() -> Ask {
     parse_request(
         &serde_json::from_str(include_str!(
-            "../../../tests/fixtures/claude-hook/post.json"
+            "../../../tests/fixtures/claude-ask-user-question/post.json"
         ))
         .unwrap(),
     )
@@ -88,7 +88,7 @@ fn answer_encoding_rejects_invalid_values() {
 #[test]
 fn recorded_request_preserves_questions_and_session() {
     let value: Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/claude-hook/post.json"
+        "../../../tests/fixtures/claude-ask-user-question/post.json"
     ))
     .unwrap();
     let (ask, questions) = parse_request(&value).unwrap();
@@ -98,7 +98,7 @@ fn recorded_request_preserves_questions_and_session() {
     assert!(!ask.id.is_empty());
 }
 
-fn post(server: &HookServer, body: &Value) -> TcpStream {
+fn post(server: &AskUserQuestion, body: &Value) -> TcpStream {
     let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
@@ -113,7 +113,7 @@ fn post(server: &HookServer, body: &Value) -> TcpStream {
     stream.write_all(&body).unwrap();
     stream
 }
-fn await_pending(server: &HookServer) -> Ask {
+fn await_pending(server: &AskUserQuestion) -> Ask {
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(ask) = server.pending().into_iter().next() {
@@ -121,22 +121,22 @@ fn await_pending(server: &HookServer) -> Ask {
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "hook did not become pending"
+            "AskUserQuestion did not become pending"
         );
         thread::sleep(Duration::from_millis(10));
     }
 }
 fn fixture() -> Value {
     serde_json::from_str(include_str!(
-        "../../../tests/fixtures/claude-hook/post.json"
+        "../../../tests/fixtures/claude-ask-user-question/post.json"
     ))
     .unwrap()
 }
 #[test]
 fn socket_unknown_returns_empty_background_answers_release_disconnect_and_drop() {
     let config = tempfile::tempdir().unwrap();
-    let server = HookServer::bind(0, config.path().to_owned()).unwrap();
-    assert!(HookServer::bind(server.port, config.path().to_owned()).is_err());
+    let server = AskUserQuestion::bind(0, config.path().to_owned()).unwrap();
+    assert!(AskUserQuestion::bind(server.port, config.path().to_owned()).is_err());
     let body = fixture();
     let mut stream = post(&server, &body);
     let mut response = String::new();
@@ -148,7 +148,7 @@ fn socket_unknown_returns_empty_background_answers_release_disconnect_and_drop()
     std::fs::create_dir_all(&job).unwrap();
     std::fs::write(
         job.join("state.json"),
-        include_str!("../../../tests/fixtures/claude-hook/background-state.json"),
+        include_str!("../../../tests/fixtures/claude-ask-user-question/background-state.json"),
     )
     .unwrap();
     let mut stream = post(&server, &body);
@@ -199,7 +199,7 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     std::fs::create_dir_all(&job).unwrap();
     std::fs::write(
         job.join("state.json"),
-        include_str!("../../../tests/fixtures/claude-hook/background-state.json"),
+        include_str!("../../../tests/fixtures/claude-ask-user-question/background-state.json"),
     )
     .unwrap();
     let mut registry = super::super::registry::tests::fixture(config.path());
@@ -214,9 +214,9 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     )
     .unwrap();
     super::super::tests::transcript(config.path(), id, 0);
-    let server = Arc::new(HookServer::bind(0, config.path().to_owned()).unwrap());
+    let server = Arc::new(AskUserQuestion::bind(0, config.path().to_owned()).unwrap());
     let mut provider = super::super::ClaudeProvider::new(config.path().to_owned());
-    provider.ask_hook = Some(Arc::clone(&server));
+    provider.ask_user_question = Some(Arc::clone(&server));
     let stream = post(&server, &body);
     let ask = await_pending(&server);
     let session = provider
@@ -263,7 +263,7 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
 #[test]
 fn http_reader_waits_for_a_body_that_arrives_after_the_headers() {
     let config = tempfile::tempdir().unwrap();
-    let server = HookServer::bind(0, config.path().to_owned()).unwrap();
+    let server = AskUserQuestion::bind(0, config.path().to_owned()).unwrap();
     let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
@@ -339,7 +339,7 @@ fn answers_encode_single_free_text_and_partial_question_sets() {
 #[test]
 fn http_reader_rejects_wrong_routes_and_invalid_json() {
     let config = tempfile::tempdir().unwrap();
-    let server = HookServer::bind(0, config.path().to_owned()).unwrap();
+    let server = AskUserQuestion::bind(0, config.path().to_owned()).unwrap();
     for request in [
         "GET /ask-user-question HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
         "POST /other HTTP/1.1\r\nContent-Length: 0\r\n\r\n",

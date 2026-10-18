@@ -122,35 +122,38 @@ fn until<T>(message: &str, mut condition: impl FnMut() -> Option<T>) -> T {
 
 #[test]
 #[ignore = "starts billable Claude sessions; requires CLAUDE_CODE_OAUTH_TOKEN"]
-fn real_http_hook_dashboard_answer_and_empty_response() {
+fn real_ask_user_question_dashboard_answer_and_empty_response() {
     let mut live = Live::new();
-    let server = Arc::new(HookServer::bind(0, live.config.clone()).unwrap());
+    let server = Arc::new(AskUserQuestion::bind(0, live.config.clone()).unwrap());
     let job = live.start(server.port);
-    let ask = until("real HTTP hook never arrived", || {
+    let ask = until("real AskUserQuestion request never arrived", || {
         server.pending().into_iter().next()
     });
     assert_eq!(live.state(&job)["tempo"], "active");
     assert!(live.state(&job)["block"].is_null());
     let mut provider = ClaudeProvider::new(live.config.clone());
-    provider.ask_hook = Some(Arc::clone(&server));
+    provider.ask_user_question = Some(Arc::clone(&server));
     let mut app = dashboard::app(Box::new(provider), live.root.path().to_owned());
     let session = dashboard::session(&app, &ask.session.id);
     assert_eq!(session.status, crate::model::SessionStatus::NeedsInput);
     assert!(session.background_job.is_some());
     assert!(
         session.transcript.is_some(),
-        "hook session has no transcript"
+        "AskUserQuestion session has no transcript"
     );
     dashboard::answer_questions(&mut app, session, vec![vec!["Blue".into()]]);
-    until("real transcript never recorded hook answers", || {
-        live.events(&ask.session.id)
-            .iter()
-            .any(|event| event["toolUseResult"]["answers"] == json!({"Hook color?":"Blue"}))
-            .then_some(())
-    });
+    until(
+        "real transcript never recorded AskUserQuestion answers",
+        || {
+            live.events(&ask.session.id)
+                .iter()
+                .any(|event| event["toolUseResult"]["answers"] == json!({"Hook color?":"Blue"}))
+                .then_some(())
+        },
+    );
     assert!(server.pending().is_empty());
     let job = live.start(server.port);
-    let ask = until("second real HTTP hook never arrived", || {
+    let ask = until("second real AskUserQuestion request never arrived", || {
         server.pending().into_iter().next()
     });
     server.release(&ask.session.id).unwrap();
