@@ -120,6 +120,8 @@ pub struct App {
     launch: Option<Command>,
     /// The session program running in the log detail panel.
     terminal: Option<crate::session_terminal::SessionTerminal>,
+    /// The task whose terminal should reopen when selected again.
+    terminal_task: Option<SessionKey>,
     last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
@@ -181,6 +183,7 @@ impl App {
             sessions: Vec::new(),
             launch: None,
             terminal: None,
+            terminal_task: None,
             last_session: None,
             log_stamp: None,
             full_log_stamp: None,

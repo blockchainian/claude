@@ -1229,3 +1229,112 @@ fn incremental_refresh_parses_only_appended_fixture_bytes() {
     draw_size(&mut app, 200, 45);
     assert_eq!(app.log_parsed_bytes - before, payload.len() as u64);
 }
+
+// A real PTY program isolates selection and shutdown from provider availability.
+fn terminal_restore_fixture() -> (tempfile::TempDir, App, SessionKey) {
+    let (directory, mut app) = fixture();
+    app.sessions[0].status = crate::model::SessionStatus::Working;
+    app.view.set_sessions(app.sessions.clone(), false);
+    key(&mut app, KeyCode::Home);
+    let id = app.view.selected_id().unwrap().clone();
+    // Reopening must reach open_terminal's directory validation, without launching
+    // a provider client against the user's sessions during a unit test.
+    app.sessions[0].cwd = directory.path().join("removed-project");
+    draw(&mut app, 200);
+    let mut command = Command::new("/bin/sh");
+    command.args(["-c", "read line"]);
+    let sender = app.sender.clone();
+    let terminal = crate::session_terminal::SessionTerminal::spawn(
+        id.clone(),
+        command,
+        None,
+        app.view.terminal_size().unwrap(),
+        move || {
+            let _ = sender.send(Input::TerminalOutput);
+        },
+    )
+    .unwrap();
+    app.view.show_terminal(id.clone(), terminal.screen.clone());
+    app.terminal = Some(terminal);
+    (directory, app, id)
+}
+
+fn terminal_restore_round_trip(app: &mut App, id: &SessionKey) {
+    let mut other = app.sessions[0].clone();
+    other.id.id = "another-task".into();
+    app.view.set_sessions(vec![other], false);
+    key(app, KeyCode::Home);
+    assert_ne!(app.view.selected_id(), Some(id));
+    app.sync_terminal();
+    assert!(app.terminal.is_none(), "switching away must close the PTY");
+    app.view.set_sessions(app.sessions.clone(), false);
+    key(app, KeyCode::Home);
+    assert_eq!(app.view.selected_id(), Some(id));
+    draw(app, 200);
+    app.sync_terminal();
+}
+
+#[test]
+fn terminal_restore_reopens_when_the_task_is_selected_again() {
+    let (_directory, mut app, id) = terminal_restore_fixture();
+    terminal_restore_round_trip(&mut app, &id);
+    assert!(
+        lines(&draw(&mut app, 200))
+            .join("\n")
+            .contains("Directory no longer exists:"),
+        "returning must retry open_terminal for the remembered task"
+    );
+    app.view.set_notice(None);
+    app.sync_terminal();
+    assert!(
+        !lines(&draw(&mut app, 200))
+            .join("\n")
+            .contains("Directory no longer exists:"),
+        "a failed reopen must not retry every frame"
+    );
+}
+
+#[test]
+fn terminal_restore_forgets_after_right_click() {
+    let (_directory, mut app, id) = terminal_restore_fixture();
+    draw(&mut app, 200);
+    let (x, y) = (100, 30);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Right),
+        MouseEventKind::Up(MouseButton::Right),
+    ] {
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+    assert!(app.terminal.is_none());
+    terminal_restore_round_trip(&mut app, &id);
+    assert!(
+        !lines(&draw(&mut app, 200))
+            .join("\n")
+            .contains("Directory no longer exists:")
+    );
+}
+
+#[test]
+fn terminal_restore_forgets_when_the_program_exits() {
+    let (_directory, mut app, id) = terminal_restore_fixture();
+    app.write_terminal(b"exit\n");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !app.terminal.as_ref().unwrap().closed() {
+        app.receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+    }
+    app.sync_terminal();
+    assert!(app.terminal.is_none());
+    terminal_restore_round_trip(&mut app, &id);
+    assert!(
+        !lines(&draw(&mut app, 200))
+            .join("\n")
+            .contains("Directory no longer exists:")
+    );
+}

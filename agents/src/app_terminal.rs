@@ -89,6 +89,7 @@ impl App {
 
     /// Detaches or ends the open terminal and shows the log detail again.
     pub(super) fn close_terminal(&mut self) {
+        self.terminal_task = None;
         let Some(terminal) = self.terminal.take() else {
             return;
         };
@@ -117,14 +118,26 @@ impl App {
         }
     }
 
-    /// Closes the terminal when its program exited or its session is no longer selected,
-    /// and fits it to the panel otherwise.
+    /// Reopens the remembered task's terminal, closes unselected or exited programs,
+    /// and fits the selected terminal to the panel.
     pub(super) fn sync_terminal(&mut self) {
         let Some(terminal) = &mut self.terminal else {
+            if self.terminal_task.is_some()
+                && self.view.selected_id() == self.terminal_task.as_ref()
+            {
+                let id = self.terminal_task.take().expect("remembered terminal task");
+                self.open_terminal(id);
+            }
             return;
         };
-        if terminal.closed() || self.view.selected_id() != Some(&terminal.id) {
+        if terminal.closed() {
             self.close_terminal();
+            return;
+        }
+        if self.view.selected_id() != Some(&terminal.id) {
+            let id = terminal.id.clone();
+            self.close_terminal();
+            self.terminal_task = Some(id);
             return;
         }
         if let Some((rows, cols)) = self.view.terminal_size()
