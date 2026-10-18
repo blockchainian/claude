@@ -45,4 +45,5 @@ sha2 = "0.10"
 split-debuginfo = "off"
 
 [patch.crates-io]
+nucleo-matcher = { path = "vendor/nucleo-matcher" }
 crossterm = { git = "https://github.com/blockchainian/crossterm", rev = "03622784292936a1950cfae866c02f584c21b848" }

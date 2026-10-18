@@ -7,6 +7,9 @@ mod terminal_task_navigation;
 #[path = "support/terminal_memory_citation.rs"]
 mod terminal_memory_citation;
 
+#[path = "support/terminal_log_search.rs"]
+mod terminal_log_search;
+
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;

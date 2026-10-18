@@ -28,6 +28,42 @@ fn draw_detail(view: &View) {
 }
 
 #[test]
+fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
+    let (_dir, mut view) = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let provider = crate::providers::codex::CodexProvider::new(
+        dir.path().to_owned(),
+        dir.path().join("manager"),
+    );
+    let mut session = view.selected_row().unwrap().clone();
+    session.transcript = Some(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex-inner/command.jsonl"),
+    );
+    let event = provider
+        .log(&session, usize::MAX, false)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.calls.iter().any(|call| call.name == "exec_command"))
+        .unwrap();
+    for body in ["type", "检查日志", "type · 1", "❮ type"] {
+        let mut event = event.clone();
+        event.body = body.into();
+        event.paths.clear();
+        view.set_log(vec![event.clone()]);
+        view.prepare_log_search();
+        assert_eq!(
+            view.log_search.bodies[0].to_string(),
+            format!("Tool {body} exec_command")
+        );
+        view.log_search.query.set_text("exec_command");
+        view.rematch_log();
+        assert_eq!(view.matching_log_count(), 1, "{body}");
+        assert_eq!(view.visible_log_event(), Some(&event), "{body}");
+    }
+}
+
+#[test]
 fn list_search_keeps_layout_when_the_selected_event_survives() {
     let (_dir, mut view) = fixture();
     view.mouse_focus = Panel::LogList;
