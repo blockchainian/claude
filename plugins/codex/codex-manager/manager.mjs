@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
 import { runClaude } from "./claude.mjs";
-import { SessionStore, askTimeoutSeconds, writeSupervisor } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "./inbox.mjs";
 import { parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -19,6 +19,7 @@ const adversarialStancePath = path.join(path.dirname(scriptPath), "adversarial-r
 const usage = `usage:
   manager.mjs mcp                                   serve Claude's codex tools over stdio
   manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
+  manager.mjs detach --thread <id>                   release a thread from its owning session
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
   manager.mjs owner                                 PostToolUse hook: record the thread's starting agent
   manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
@@ -216,14 +217,14 @@ class Manager {
     return Boolean(this.client);
   }
 
-  async connect() {
+  async connect({ adopt = true } = {}) {
     if (this.client) return this.client;
     if (this.connecting) return this.connecting;
-    this.connecting = this.connectInner().finally(() => { this.connecting = undefined; });
+    this.connecting = this.connectInner({ adopt }).finally(() => { this.connecting = undefined; });
     return this.connecting;
   }
 
-  async connectInner() {
+  async connectInner({ adopt }) {
     const client = new WebSocketClient(this.socketPath);
     client.onNotification = (message) => this.onNotification(message);
     client.onServerRequest = (message) => this.onServerRequest(client, message);
@@ -240,7 +241,7 @@ class Manager {
     client.send({ method: "initialized", params: {} });
     this.client = client;
     this.reconnectAttempt = 0;
-    await this.adopt(client);
+    if (adopt) await this.adopt(client);
     return client;
   }
 
@@ -675,10 +676,37 @@ async function runMcp() {
 
 // --- entry -------------------------------------------------------------------
 
+async function runDetach(options) {
+  let manager;
+  try {
+    if (!options.thread) throw new Error("--thread is required");
+    const supervisor = readSupervisor(options.thread);
+    if (!supervisor?.sessionId) throw new Error(`unknown thread: ${options.thread}`);
+    const store = new SessionStore(supervisor.sessionId);
+    const plugin = JSON.parse(await readFile(pluginManifestPath, "utf8"));
+    manager = new Manager(store, daemonSocketPath(process.env.CODEX_DAEMON_SOCKET), plugin.version);
+    manager.thread(options.thread);
+    // This caller releases one thread without taking over the session's other threads or supervisor pid.
+    const client = await manager.connect({ adopt: false });
+    client.onServerRequest = () => {};
+    const latest = await manager.subscribe(client, options.thread);
+    manager.updateThread(options.thread, { turnId: latest?.id, lastStatus: latest?.status ?? "idle" });
+    const result = await manager.detach({ threadId: options.thread });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return 0;
+  } catch (error) {
+    process.stderr.write(`${error.message.replace(/[\r\n]+/g, " ")}\n`);
+    return error.exitCode || 2;
+  } finally {
+    manager?.client?.close();
+  }
+}
+
 export async function main(argv) {
   const { command, options } = parseArgs(argv);
   if (command === "mcp") return runMcp();
   if (command === "await") return runAwait(options);
+  if (command === "detach") return runDetach(options);
   if (command === "pending") return runPending();
   if (command === "owner") return runOwner();
   if (command === "claude") return runClaude(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);

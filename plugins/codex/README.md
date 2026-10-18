@@ -105,6 +105,8 @@ same turn; a thread the session started is then archived and takes no further
 `send`. Before ending a multi-thread run, `list(state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"])`
 and detach every finished thread.
 
+`node <plugin>/codex-manager/manager.mjs detach --thread <id>` releases a thread through its owning session, even after that session exits.
+
 Every `start`/`send`/`review` result carries an await command. Run it with
 `run_in_background`:
 
