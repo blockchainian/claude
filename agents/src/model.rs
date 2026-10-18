@@ -127,6 +127,7 @@ pub struct Session {
     pub archived: bool,
 }
 
+#[cfg(test)]
 pub use crate::providers::claude::FOREGROUND_SESSION;
 
 impl Session {
@@ -155,7 +156,7 @@ impl Session {
                 .as_ref()
                 .is_some_and(|process| process.label.as_deref() != Some("bg"))
         {
-            Some(FOREGROUND_SESSION)
+            Some("/bg")
         } else {
             None
         }

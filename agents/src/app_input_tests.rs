@@ -170,7 +170,13 @@ fn terminal_registry_session_refuses_provider_input() {
     let (_directory, mut app, _path, _registry) = registry_app("interactive");
     let id = app.view.selected_id().unwrap().clone();
     assert!(app.session(&id).unwrap().background_job.is_none());
-    assert!(screen(&mut app).contains("Running in a terminal"));
+    assert_eq!(
+        app.session(&id).unwrap().input_disabled_reason(),
+        Some("/bg")
+    );
+    let rendered = screen(&mut app);
+    assert!(rendered.contains("❮ /bg"));
+    assert!(!rendered.contains("Running in a terminal"));
     app.handle_action(Some(Action::SendPrompt {
         id,
         text: "must not reach terminal".into(),

@@ -410,17 +410,12 @@ mod tests {
                 "{screen}"
             );
         }
-        let screen = rendered(&editor, 100, Some("Running in a terminal"));
-        assert!(screen.contains("Task ❮ Running in a terminal"), "{screen}");
+        let screen = rendered(&editor, 100, Some("/bg"));
+        assert!(screen.contains("Task ❮ /bg"), "{screen}");
         assert!(!screen.contains("denied"));
         let area = Rect::new(0, 0, 100, 1);
-        for (reason, expected) in [
-            (
-                "Running in a terminal",
-                "升级命令中心 ❮ Running in a terminal",
-            ),
-            ("", "升级命令中心 ❮"),
-        ] {
+        for (reason, expected) in [("/bg", "升级命令中心 ❮ /bg"), ("", "升级命令中心 ❮")]
+        {
             let mut buffer = Buffer::empty(area);
             editor.render(area, &mut buffer, "升级命令中心", Some(reason));
             use unicode_segmentation::UnicodeSegmentation;

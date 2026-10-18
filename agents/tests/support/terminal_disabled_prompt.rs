@@ -105,3 +105,39 @@ fn terminal_disabled_prompt_keeps_mirrored_marker_and_dim_reason() {
         path.display()
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_foreground_prompt_shows_only_bg() {
+    let (directory, tmux, _transcript) = start_probe("foreground-prompt");
+    let config = directory.path().join("claude");
+    let mut registry: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/registry.json")).unwrap();
+    let pid = std::process::id();
+    let start = Command::new("ps")
+        .env("TZ", "UTC")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .unwrap();
+    assert!(start.status.success());
+    registry["sessionId"] = "4165651d-b9e3-458d-8612-f8114e312363".into();
+    registry["pid"] = pid.into();
+    registry["procStart"] = String::from_utf8(start.stdout).unwrap().trim().into();
+    registry["cwd"] = directory.path().to_str().unwrap().into();
+    registry["kind"] = "interactive".into();
+    std::fs::create_dir_all(config.join("sessions")).unwrap();
+    std::fs::write(
+        config.join(format!("sessions/{pid}.json")),
+        serde_json::to_vec(&registry).unwrap(),
+    )
+    .unwrap();
+    let capture = tmux.capture_when(|capture| capture.contains("❮ /bg"));
+    assert!(!capture.contains("Running in a terminal"), "{capture}");
+    let verdict = std::env::temp_dir().join("agents-foreground-prompt-verdict.json");
+    std::fs::write(
+        &verdict,
+        "{\"verdict\":\"pass\",\"foreground_prompt\":\"/bg\"}\n",
+    )
+    .unwrap();
+    println!("{}", verdict.display());
+}

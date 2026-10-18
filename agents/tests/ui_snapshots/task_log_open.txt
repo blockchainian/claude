@@ -14,7 +14,7 @@
                                                   │
                                                   │
 ──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
- Task log example ❮ Running in a terminal · /bg
+ Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                        Please inspect the task                             11:58:00
                                        I will check the files                                   10s
