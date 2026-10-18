@@ -795,7 +795,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: needs attention, background, activity, update,
+        // Sections top to bottom: needs attention, activity, background, update,
         // prompt and queued messages, tasks. The title sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
@@ -858,6 +858,46 @@ impl View {
         }
         item_links.resize(items.len(), Vec::new());
 
+        let activity = session.activity.as_ref();
+        if let Some(activity) = activity {
+            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
+            let mut label = wrapped
+                .first()
+                .map_or(String::new(), |line| line.to_string());
+            if wrapped.len() > 1 {
+                label.push('…');
+            }
+            separate_section(&mut items);
+            let start = items.len() + 1;
+            items.extend([
+                centered_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
+                    width,
+                )
+                .into(),
+                truncate_line_with_ellipsis_if_overflow(
+                    style::exit_code_line(
+                        label,
+                        activity.exit_code,
+                        style::log_styles(&activity.kind).1,
+                    ),
+                    width,
+                )
+                .into(),
+            ]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
         let boxes = session
@@ -905,46 +945,6 @@ impl View {
                 )
             });
             background = start..items.len();
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        let activity = session.activity.as_ref();
-        if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
-            let mut label = wrapped
-                .first()
-                .map_or(String::new(), |line| line.to_string());
-            if wrapped.len() > 1 {
-                label.push('…');
-            }
-            separate_section(&mut items);
-            let start = items.len() + 1;
-            items.extend([
-                centered_header(
-                    "Last activity".dim().into(),
-                    Span::styled(
-                        format_relative_time(now, Some(activity.at)),
-                        style::time_style(),
-                    )
-                    .into(),
-                    width,
-                )
-                .into(),
-                truncate_line_with_ellipsis_if_overflow(
-                    style::exit_code_line(
-                        label,
-                        activity.exit_code,
-                        style::log_styles(&activity.kind).1,
-                    ),
-                    width,
-                )
-                .into(),
-            ]);
-            bodies.push(start..items.len());
-            keys.push(body_key("Last activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
 
         item_links.resize(items.len(), Vec::new());

@@ -3558,7 +3558,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_background_activity_update_prompt_tasks() {
+fn details_sections_run_activity_background_update_prompt_tasks() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         exit_code: None,
@@ -3579,8 +3579,8 @@ fn details_sections_run_background_activity_update_prompt_tasks() {
     }];
     let rendered = queued_details(row, 40);
     let positions = [
-        "Background\n",
         "Last activity",
+        "Background\n",
         "Update",
         "Prompt\n",
         "Tasks",

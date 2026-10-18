@@ -32,7 +32,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Details panel
 
-- Sections run Needs attention, Background, Last activity, Update, Prompt and its queued prompts, then Tasks.
+- Sections run Needs attention, Last activity, Background, Update, Prompt and its queued prompts, then Tasks.
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
 - The activity section is `Last activity`.
 
