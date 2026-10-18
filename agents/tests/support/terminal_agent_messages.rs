@@ -11,7 +11,22 @@ fn terminal_codex_agent_message_bodies() {
     let transcript = codex.join("messages.jsonl");
     let encrypted = include_str!("../fixtures/codex-agent-messages/new-task.jsonl");
     let plaintext = include_str!("../fixtures/codex-agent-messages/final-answer.jsonl");
-    std::fs::write(&transcript, format!("{encrypted}{plaintext}")).unwrap();
+    let collaboration = [
+        (
+            include_str!("../fixtures/codex-collaboration/spawn_agent.jsonl"),
+            "demo_sub",
+        ),
+        (
+            include_str!("../fixtures/codex-collaboration/send_message.jsonl"),
+            "rename_gating",
+        ),
+        (
+            include_str!("../fixtures/codex-collaboration/followup_task.jsonl"),
+            "ux_probe",
+        ),
+    ];
+    let calls: String = collaboration.iter().map(|(fixture, _)| *fixture).collect();
+    std::fs::write(&transcript, format!("{calls}{encrypted}{plaintext}")).unwrap();
     let db = rusqlite::Connection::open(codex.join("state_5.sqlite")).unwrap();
     db.execute_batch(include_str!("../fixtures/codex-state.sql"))
         .unwrap();
@@ -74,14 +89,38 @@ fn terminal_codex_agent_message_bodies() {
         !encrypted_capture.contains(&ciphertext[..32]),
         "{encrypted_capture}"
     );
+    let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
+    for (fixture, subject) in collaboration {
+        let (row, line) = encrypted_capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(&format!("({subject})")))
+            .unwrap();
+        let column = line[..line.find(&format!("({subject})")).unwrap()].width();
+        tmux.mouse(0, column, row, true);
+        let capture = tmux.capture_when(|capture| {
+            capture.lines().any(|line| {
+                line.contains(subject)
+                    && line.contains(if subject == "demo_sub" {
+                        "spawn_agent"
+                    } else if subject == "ux_probe" {
+                        "followup_task"
+                    } else {
+                        "send_message"
+                    })
+            }) && capture.contains("Content is encrypted.")
+        });
+        let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let arguments: serde_json::Value =
+            serde_json::from_str(record["payload"]["arguments"].as_str().unwrap()).unwrap();
+        let token = arguments["message"].as_str().unwrap();
+        assert!(!capture.contains(&token[..32]), "{capture}");
+        captures.push_str(&format!("\n\n{capture}"));
+    }
     let capture = std::env::temp_dir().join("agents-message-tmux.txt");
-    std::fs::write(
-        &capture,
-        format!("{plaintext_capture}\n\n{encrypted_capture}"),
-    )
-    .unwrap();
+    std::fs::write(&capture, captures).unwrap();
     let verdict =
-        serde_json::json!({"verdict":"pass","events":2,"binary":binary,"capture":capture});
+        serde_json::json!({"verdict":"pass","events":5,"binary":binary,"capture":capture});
     std::fs::write(
         std::env::temp_dir().join("agents-message-probe.json"),
         serde_json::to_vec_pretty(&verdict).unwrap(),

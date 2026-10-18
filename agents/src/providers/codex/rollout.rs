@@ -1,6 +1,7 @@
 use crate::log::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::tool::{Format, Input, Subject, Summary as ToolSummary};
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -26,6 +27,7 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("spawn_agent", Subject::Field("task_name")),
         ("SendMessage", Subject::Field("to")),
         ("send_message", Subject::Field("target")),
+        ("followup_task", Subject::Field("target")),
         ("WebFetch", Subject::Field("url")),
         ("Skill", Subject::Field("skill")),
     ],
@@ -39,6 +41,7 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("spawn_agent", Input::AgentMessage, Format::Markdown),
         ("SendMessage", Input::Field("message"), Format::Markdown),
         ("send_message", Input::Field("message"), Format::Markdown),
+        ("followup_task", Input::Field("message"), Format::Markdown),
         ("WebFetch", Input::Field("prompt"), Format::Text),
         ("Skill", Input::Arguments, Format::Text),
     ],
@@ -55,6 +58,13 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ),
         (
             "send_message",
+            ToolSummary::Participant {
+                field: "target",
+                label: Some("To"),
+            },
+        ),
+        (
+            "followup_task",
             ToolSummary::Participant {
                 field: "target",
                 label: Some("To"),
@@ -538,8 +548,24 @@ fn tool_body(payload: &Value) -> Option<String> {
         .or_else(|| Some(subject.unwrap_or_else(|| shell_display_name(&name).to_owned())))
 }
 
+const ENCRYPTED_CONTENT: &str = "Content is encrypted.";
+
+fn is_fernet_token(text: &str) -> bool {
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(text) else {
+        return false;
+    };
+    // Version, timestamp, IV, at least one AES block, and SHA-256 HMAC.
+    bytes.first() == Some(&0x80) && bytes.len() >= 73 && (bytes.len() - 57).is_multiple_of(16)
+}
+
 fn tool_arguments(payload: &Value) -> Option<Value> {
-    serde_json::from_str(payload["arguments"].as_str()?).ok()
+    let mut arguments: Value = serde_json::from_str(payload["arguments"].as_str()?).ok()?;
+    if let Some(message) = arguments.get_mut("message")
+        && message.as_str().is_some_and(is_fernet_token)
+    {
+        *message = ENCRYPTED_CONTENT.into();
+    }
+    Some(arguments)
 }
 
 fn text_section(label: &str, text: &str) -> Section {
@@ -558,7 +584,7 @@ fn shell_display_name(name: &str) -> &str {
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let raw = payload["arguments"].as_str().unwrap_or("");
-    let arguments = serde_json::from_str::<Value>(raw);
+    let arguments = tool_arguments(payload);
     let (name, subject, mut input) = crate::providers::tool::presentation(
         &response_tool_name(payload),
         arguments.as_ref().unwrap_or(&Value::Null),
@@ -569,7 +595,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
             "input",
             payload["input"].as_str().unwrap_or(""),
         )];
-    } else if arguments.is_err() {
+    } else if arguments.is_none() {
         input = vec![text_section("input", raw)];
     }
     let display_name = shell_display_name(&name);
@@ -1360,7 +1386,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                                 .any(|block| block["type"] == "encrypted_content")
                         })
                     {
-                        "Content is encrypted.".to_owned()
+                        ENCRYPTED_CONTENT.to_owned()
                     } else {
                         body.to_owned()
                     },
@@ -2096,12 +2122,115 @@ mod tests {
     }
 
     #[test]
+    fn message_redaction_requires_fernet_structure_and_preserves_other_fields() {
+        let record: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-collaboration/spawn_agent.jsonl"
+        ))
+        .unwrap();
+        let mut payload = record["payload"].clone();
+        let original: Value = serde_json::from_str(payload["arguments"].as_str().unwrap()).unwrap();
+        let token = original["message"].as_str().unwrap();
+        let bytes = base64::engine::general_purpose::URL_SAFE
+            .decode(token)
+            .unwrap();
+        let mut wrong_version = bytes.clone();
+        wrong_version[0] = 0x81;
+        for message in [
+            "Review files.".to_owned(),
+            "gAAAAA is a token prefix.".to_owned(),
+            format!("{token} trailing prose"),
+            format!("Review {token}"),
+            base64::engine::general_purpose::URL_SAFE.encode(&bytes[..57]),
+            base64::engine::general_purpose::URL_SAFE.encode(&bytes[..bytes.len() - 1]),
+            base64::engine::general_purpose::URL_SAFE.encode(wrong_version),
+        ] {
+            let arguments = serde_json::json!({"message": message, "target": "reviewer"});
+            payload["arguments"] = arguments.to_string().into();
+            assert_eq!(tool_arguments(&payload).unwrap(), arguments);
+        }
+        // Redaction depends on the field value, not a tool name or namespace.
+        payload["name"] = "other_message_tool".into();
+        payload["arguments"] = serde_json::json!({
+            "message": token, "target": token, "task_name": "demo_sub"
+        })
+        .to_string()
+        .into();
+        let arguments = tool_arguments(&payload).unwrap();
+        assert_eq!(arguments["message"], ENCRYPTED_CONTENT);
+        assert_eq!(arguments["target"], token);
+        assert_eq!(arguments["task_name"], "demo_sub");
+    }
+
+    #[test]
+    fn real_collaboration_messages_hide_fernet_tokens() {
+        for (fixture, subject, prefix) in [
+            (
+                include_str!("../../../tests/fixtures/codex-collaboration/spawn_agent.jsonl"),
+                "demo_sub",
+                "spawn_agent",
+            ),
+            (
+                include_str!("../../../tests/fixtures/codex-collaboration/send_message.jsonl"),
+                "rename_gating",
+                "To",
+            ),
+            (
+                include_str!("../../../tests/fixtures/codex-collaboration/followup_task.jsonl"),
+                "ux_probe",
+                "To",
+            ),
+        ] {
+            let record: Value = serde_json::from_str(fixture).unwrap();
+            let mut payload = record["payload"].clone();
+            let tool = payload["name"].as_str().unwrap().to_owned();
+            for name in [tool.clone(), format!("collaboration.{tool}")] {
+                payload["name"] = name.into();
+                let call = response_tool_call(&payload, Some("Plaintext result"));
+                let prefix = if tool == "spawn_agent" {
+                    payload["name"].as_str().unwrap()
+                } else {
+                    prefix
+                };
+                let expected = format!("{prefix} ({subject}) Content is encrypted.");
+                assert_eq!(tool_body(&payload).unwrap(), expected);
+                assert_eq!(call.title, expected);
+                assert_eq!(call.detail_title, subject);
+                let mut input = Vec::new();
+                if tool == "spawn_agent" {
+                    input.push(text_section("", &format!("task_name: {subject}")));
+                }
+                input.push(Section::Markdown {
+                    label: "message".into(),
+                    text: "Content is encrypted.".into(),
+                });
+                assert_eq!(call.input, input);
+                assert_eq!(
+                    call.output,
+                    Some(vec![text_section("output", "Plaintext result")])
+                );
+                let file = tempfile::NamedTempFile::new().unwrap();
+                let mut row = record.clone();
+                row["payload"] = payload.clone();
+                std::fs::write(file.path(), row.to_string()).unwrap();
+                assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+                assert_eq!(
+                    summary(file.path()).unwrap().activity.unwrap().label,
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
     fn real_agent_details_use_markdown_messages() {
         for (line, (tool, subject)) in
             include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
                 .lines()
-                .take(2)
-                .zip([("spawn_agent", "real_scan"), ("send_message", "/root")])
+                .zip([
+                    ("spawn_agent", "real_scan"),
+                    ("send_message", "/root"),
+                    ("followup_task", "ux_probe"),
+                ])
         {
             let record: Value = serde_json::from_str(line).unwrap();
             for name in [tool.to_owned(), format!("collaboration.{tool}")] {
@@ -2267,7 +2396,7 @@ mod tests {
             .zip([
                 "spawn_agent (real_scan) Review files.",
                 "To (/root) Review files.",
-                "followup_task",
+                "To (ux_probe) Review files.",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();

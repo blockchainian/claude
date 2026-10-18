@@ -858,6 +858,9 @@ fn restored_tool_details_snapshot() {
         entries.extend(events(fixture));
     }
     entries.extend(codex_events("codex-agent-names.jsonl"));
+    for tool in ["spawn_agent", "send_message", "followup_task"] {
+        entries.extend(codex_events(&format!("codex-collaboration/{tool}.jsonl")));
+    }
     let mut snapshot = String::new();
     for event in entries {
         for call in &event.calls {
@@ -870,6 +873,7 @@ fn restored_tool_details_snapshot() {
                     | "Skill"
                     | "spawn_agent"
                     | "send_message"
+                    | "followup_task"
             ) {
                 continue;
             }
