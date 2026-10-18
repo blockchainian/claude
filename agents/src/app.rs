@@ -456,6 +456,7 @@ impl App {
                     self.pending_inputs.remove(&id);
                     if matches!(input, SessionInput::Interrupt) {
                         self.refresh();
+                        self.view.stop_complete(&id, result.is_ok());
                         if let Err(error) = result {
                             self.input_error(&input, error.to_string());
                         }

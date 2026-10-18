@@ -939,6 +939,26 @@ impl View {
         }
         Some(Action::Open(id))
     }
+    /// Stops the selected task, keeping a running turn's prompt to return to the input.
+    fn stop_from_input(&mut self) -> Option<Action> {
+        if !self.can_stop_selected() {
+            return None;
+        }
+        let session = self.selected_row()?;
+        let id = session.id.clone();
+        self.stopping_prompt = (session.status == SessionStatus::Working
+            && self.log_session.as_ref() == Some(&id))
+        .then(|| {
+            self.log
+                .iter()
+                .rev()
+                .find(|event| event.kind == crate::log::Kind::User)
+                .map(|event| (id.clone(), event.body.clone()))
+        })
+        .flatten();
+        Some(Action::Stop(id))
+    }
+
     fn can_stop_selected(&self) -> bool {
         self.selected_capabilities().stop
             || self.selected_row().is_some_and(Session::is_live_background)
@@ -1018,11 +1038,7 @@ impl View {
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
                 Some(prompt_box::PromptAction::PasteImage) => Some(Action::PasteImage),
-                Some(prompt_box::PromptAction::Stop) => self
-                    .selected_id()
-                    .filter(|_| self.can_stop_selected())
-                    .cloned()
-                    .map(Action::Stop),
+                Some(prompt_box::PromptAction::Stop) => self.stop_from_input(),
                 Some(prompt_box::PromptAction::Submit(text)) => {
                     let images = self.input_box.editor.image_paths();
                     if !images.is_empty() && self.selected_draft.is_none() {

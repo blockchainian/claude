@@ -2,23 +2,26 @@ use super::*;
 use crate::providers::Provider;
 
 fn fixture() -> (tempfile::TempDir, View, Vec<crate::log::Event>) {
+    let (dir, view, events) =
+        transcript_view(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+    let events: Vec<_> = events.iter().cycle().take(24).cloned().collect();
+    assert!(events.len() > 10);
+    (dir, view, events)
+}
+
+/// Shows one Claude transcript as the selected inactive task, with its log events.
+fn transcript_view(transcript: &str) -> (tempfile::TempDir, View, Vec<crate::log::Event>) {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
     let path = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
-    std::fs::write(
-        &path,
-        include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
-    )
-    .unwrap();
+    std::fs::write(&path, transcript).unwrap();
     let mut provider = crate::providers::claude::ClaudeProvider::new(dir.path().to_owned());
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(provider.refresh(1).sessions, false);
     view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     view.log_session = view.selected_id().cloned();
     let events = crate::providers::claude::log::tail_session(&path, usize::MAX, true).unwrap();
-    let events: Vec<_> = events.iter().cycle().take(24).cloned().collect();
-    assert!(events.len() > 10);
     (dir, view, events)
 }
 
@@ -62,6 +65,43 @@ fn sending_a_prompt_returns_the_log_to_live_tail() {
     draw(&view);
     assert_eq!(view.viewport.borrow().log_rows, vec![6, 7, 8, 9]);
     assert_eq!(view.viewport.borrow().log_unseen, 0);
+}
+
+#[test]
+fn escape_stopping_a_running_turn_returns_its_prompt_to_the_input() {
+    for (status, restored) in [(SessionStatus::Working, true), (SessionStatus::Ready, false)] {
+        let (_dir, mut view, events) =
+            transcript_view(include_str!("../../tests/fixtures/claude-start.jsonl"));
+        view.set_log(events.clone());
+        let id = view.selected_id().unwrap().clone();
+        view.set_capabilities(HashMap::from([(
+            ProviderId::Claude,
+            crate::providers::Capabilities {
+                stop: true,
+                ..Default::default()
+            },
+        )]));
+        view.rows[view.selected].status = status;
+        // The fixture shows the Inactive tab; a live task belongs on Active.
+        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(view.selected_id(), Some(&id));
+        view.focus_input();
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(Action::Stop(id.clone()))
+        );
+        assert!(view.input_box.editor.is_empty());
+        view.stop_complete(&id, true);
+        let prompt = events
+            .iter()
+            .rev()
+            .find(|event| event.kind == crate::log::Kind::User)
+            .unwrap()
+            .body
+            .clone();
+        let expected = if restored { prompt.as_str() } else { "" };
+        assert_eq!(view.input_box.editor.text(), expected, "{status:?}");
+    }
 }
 
 #[test]

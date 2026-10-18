@@ -275,6 +275,8 @@ pub struct View {
     search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<SessionKey>,
+    /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
+    stopping_prompt: Option<(SessionKey, String)>,
     rename: line_edit::LineEdit,
     confirm_dialog: Option<ConfirmDialog>,
     help: bool,
@@ -406,6 +408,7 @@ impl View {
             search: line_edit::LineEdit::default(),
             searching: false,
             rename_target: None,
+            stopping_prompt: None,
             rename: line_edit::LineEdit::default(),
             confirm_dialog: None,
             help: false,
@@ -592,6 +595,20 @@ impl View {
         };
         if let Some(error) = error {
             self.set_notice(Some(error));
+        }
+    }
+
+    /// Returns the stopped turn's prompt to an empty input, as Claude Code does after Esc.
+    pub(crate) fn stop_complete(&mut self, id: &SessionKey, stopped: bool) {
+        let Some((target, prompt)) = self.stopping_prompt.take() else {
+            return;
+        };
+        if !stopped || &target != id {
+            return;
+        }
+        let input = self.task_input(id);
+        if input.editor.is_empty() {
+            input.editor.set_text(&prompt);
         }
     }
 
