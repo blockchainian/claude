@@ -871,7 +871,7 @@ fn detail_parts_layout(
     sections: Vec<Section>,
 ) -> DetailLayout {
     let width = usize::from(columns.text.width);
-    let body_style = super::style::log_styles(&event.kind).1;
+    let body_style = Style::default();
     let mut layout = DetailLayout {
         columns,
         height: 0,

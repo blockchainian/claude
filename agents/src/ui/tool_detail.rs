@@ -30,7 +30,6 @@ fn record_json_scan(bytes: usize) {
 pub(super) struct Part {
     pub source: String,
     body: Body,
-    style: Style,
 }
 
 enum Body {
@@ -75,7 +74,6 @@ impl Part {
         Part {
             source: source.into(),
             body,
-            style: Style::default(),
         }
     }
 
@@ -213,7 +211,7 @@ impl Part {
             .into_iter()
             .map(|mut line| {
                 for span in &mut line.spans {
-                    span.style = body_style.patch(self.style).patch(span.style);
+                    span.style = body_style.patch(span.style);
                 }
                 line
             })
@@ -622,13 +620,6 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                     }
                 }
                 None => output_parts.push(Part::new("", Body::Running)),
-            }
-            if call.is_error {
-                for part in &mut output_parts {
-                    if matches!(part.body, Body::Text) {
-                        part.style = super::style::log_styles(&Kind::Error).1;
-                    }
-                }
             }
             groups.push(Group {
                 parts: output_parts,
@@ -1664,7 +1655,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_plain_outputs_use_error_body_style() {
+    fn plain_outputs_keep_default_body_style_even_on_failure() {
         use crate::providers::Provider;
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("projects/project");
@@ -1706,11 +1697,7 @@ mod tests {
                             if !matches!(part.body, Body::Text) {
                                 continue;
                             }
-                            let style = if failed {
-                                super::super::style::log_styles(&Kind::Error).1
-                            } else {
-                                Style::default()
-                            };
+                            let style = Style::default();
                             for width in [20, 160] {
                                 for line in part.lines(width, Style::default(), event.started_at) {
                                     for span in line.spans {

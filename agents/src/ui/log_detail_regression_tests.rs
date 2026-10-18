@@ -1,6 +1,7 @@
 use super::*;
 use crate::providers::Provider;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::style::Modifier;
 
 fn open_tool_fixture() -> (View, DateTime<Utc>) {
     let dir = tempfile::tempdir().unwrap();
@@ -74,6 +75,162 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: None,
         },
     ]
+}
+
+fn text_cell<'a>(buffer: &'a Buffer, text: &str) -> &'a ratatui::buffer::Cell {
+    for y in buffer.area.y..buffer.area.bottom() {
+        let row: String = (buffer.area.x..buffer.area.right())
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        if let Some(byte) = row.find(text) {
+            return &buffer[(buffer.area.x + row[..byte].chars().count() as u16, y)];
+        }
+    }
+    panic!("missing rendered text: {text}");
+}
+
+#[test]
+fn detail_body_uses_default_foreground_and_preserves_title_and_markdown_styles() {
+    let (view, now) = open_tool_fixture();
+    let mut event = view.visible_log_event().unwrap().clone();
+    event.calls.clear();
+    event.body =
+        "plain **bold** [link](https://example.com)\n\n# Heading\n\n```rust\nlet value = 42;\n```"
+            .into();
+    let mut snapshot = String::new();
+    for kind in [
+        Kind::Assistant,
+        Kind::Agent,
+        Kind::Error,
+        Kind::Denied,
+        Kind::QueuedSystem,
+    ] {
+        event.kind = kind;
+        let area = Rect::new(0, 0, 120, 30);
+        let mut buffer = Buffer::empty(area);
+        let view = View::new(Grouping::Project, false);
+        view.render_event_detail(&event, "12:34:56", area, &mut buffer, Path::new("/"), now);
+        let title = text_cell(&buffer, kind_label(&event.kind));
+        assert_eq!(
+            title.fg,
+            super::super::style::log_styles(&event.kind).0.fg.unwrap()
+        );
+        assert_eq!(
+            text_cell(&buffer, "plain").fg,
+            Color::Reset,
+            "{:?}",
+            event.kind
+        );
+        if matches!(event.kind, Kind::Assistant | Kind::Agent) {
+            assert!(text_cell(&buffer, "bold").modifier.contains(Modifier::BOLD));
+            assert_eq!(text_cell(&buffer, "bold").fg, Color::Reset);
+            assert!(
+                text_cell(&buffer, "Heading")
+                    .modifier
+                    .contains(Modifier::BOLD)
+            );
+            assert_eq!(text_cell(&buffer, "Heading").fg, Color::Reset);
+            assert_eq!(text_cell(&buffer, "link").fg, Color::Reset);
+            assert_eq!(text_cell(&buffer, "let value").fg, Color::Cyan);
+            assert!(
+                view.viewport
+                    .borrow()
+                    .log_links
+                    .iter()
+                    .any(|(_, target)| target.to_string_lossy().contains("example.com"))
+            );
+        }
+        let mut list = Buffer::empty(Rect::new(0, 0, 120, 1));
+        render_event(
+            &event,
+            "12:34:56",
+            false,
+            list.area,
+            &mut list,
+            None,
+            Path::new("/"),
+        );
+        assert_eq!(
+            text_cell(&list, "plain").fg,
+            super::super::style::log_styles(&event.kind).1.fg.unwrap()
+        );
+        snapshot.push_str(&format!("{:?}\n", event.kind));
+        for text in [
+            kind_label(&event.kind),
+            "plain",
+            "bold",
+            "link",
+            "Heading",
+            "let value",
+        ] {
+            let cell = text_cell(&buffer, text);
+            snapshot.push_str(&format!("  {text}: {:?} {:?}\n", cell.fg, cell.modifier));
+        }
+        snapshot.push_str(&format!(
+            "  list plain: {:?}\n",
+            text_cell(&list, "plain").fg
+        ));
+    }
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/log_detail_colors.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}
+
+#[test]
+fn tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting() {
+    let (mut view, now) = open_tool_fixture();
+    let mut event = view.visible_log_event().unwrap().clone();
+    event.calls.truncate(1);
+    event.calls[0].detail_title = "Run checks".into();
+    event.calls[0].output = Some(vec![
+        crate::log::Section::Text {
+            label: String::new(),
+            text: "plain output".into(),
+        },
+        crate::log::Section::Code {
+            label: String::new(),
+            lang: "rust".into(),
+            text: "let value = 42;".into(),
+        },
+        crate::log::Section::Json {
+            label: String::new(),
+            text: "{\"answer\":42}".into(),
+        },
+    ]);
+    for failed in [false, true] {
+        event.calls[0].is_error = failed;
+        view.select_fixture_event(Some(event.clone()));
+        let area = Rect::new(0, 0, 200, 35);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, now);
+        let detail = view.viewport.borrow().log_detail;
+        let mut body = Buffer::empty(detail);
+        for y in detail.y..detail.bottom() {
+            for x in detail.x..detail.right() {
+                body[(x, y)] = buffer[(x, y)].clone();
+            }
+        }
+        assert_eq!(
+            text_cell(&body, "Run checks").fg,
+            super::super::style::log_styles(&Kind::Tool).0.fg.unwrap()
+        );
+        assert_eq!(text_cell(&body, "plain output").fg, Color::Reset);
+        for token in ["cargo", "let", "answer"] {
+            assert_ne!(text_cell(&body, token).fg, Color::Reset, "{token}");
+        }
+        let expected = super::super::highlight::code_lines("let value = 42;", "rust");
+        assert_eq!(
+            text_cell(&body, "let").fg,
+            expected[0].spans[0].style.fg.unwrap()
+        );
+        assert_eq!(
+            text_cell(&body, "answer").fg,
+            super::super::highlight::json_key_foreground()
+        );
+    }
 }
 
 #[test]
