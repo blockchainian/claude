@@ -92,7 +92,7 @@ fn details_section_order_preserves_clicks_and_copies() {
         );
         assert_eq!(
             super::super::log::open_text(view.visible_log_event().unwrap()),
-            "\nbackground output"
+            "background output"
         );
     }
 }

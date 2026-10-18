@@ -122,6 +122,23 @@ fn mcp_inputs_keep_only_declared_prompt_in_body() {
 }
 
 #[test]
+fn pending_tool_copy_preserves_prompt_without_display_only_suffix() {
+    let fixture = include_str!("../../tests/fixtures/reading-column-send.jsonl");
+    let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    let prompt = record["message"]["content"][0]["input"]["prompt"]
+        .as_str()
+        .unwrap();
+    let mut event = events(fixture).remove(0);
+    assert_eq!(open_text(&event), prompt);
+    let text = format!("\n{prompt}\n\n");
+    event.calls[0].input = vec![crate::log::Section::Prose {
+        text: text.clone(),
+        markdown: false,
+    }];
+    assert_eq!(open_text(&event), text);
+}
+
+#[test]
 fn question_agent_inputs_preserve_json_and_tool_output() {
     for fixture in [
         include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),

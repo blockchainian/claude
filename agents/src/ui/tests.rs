@@ -6955,7 +6955,7 @@ fn task_log_selected_tool_snapshot() {
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
         super::log::open_text(&view.log[7]),
-        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\nagents/src/log.rs:1-40\n\n"
+        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\nagents/src/log.rs:1-40"
     );
 }
 

@@ -2213,12 +2213,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 let copied = std::fs::read_to_string(&clipboard).unwrap();
                 let record: serde_json::Value = serde_json::from_str(records.trim()).unwrap();
                 let input = &record["message"]["content"][0]["input"];
-                for source_line in input["prompt"].as_str().unwrap().lines() {
-                    assert!(
-                        copied.contains(source_line),
-                        "source text lost during copy: {source_line}: {copied}"
-                    );
-                }
+                assert_eq!(copied, input["prompt"].as_str().unwrap());
                 assert!(
                     !copied.contains(input["threadId"].as_str().unwrap()),
                     "{copied}"
@@ -2359,7 +2354,17 @@ fn terminal_manager_detach_title() {
             .as_str()
             .unwrap();
         assert!(title.contains(subject), "{capture}");
+        assert_eq!(
+            title[..title.find(subject).unwrap()].width(),
+            terminal_detail_width::detail_center(usize::from(width), subject.width()),
+            "thread title stays on the panel midline: {capture}"
+        );
         assert_eq!(rows[rule + 3].trim(), "↓", "{capture}");
+        assert_eq!(
+            rows[rule + 3][..rows[rule + 3].find('↓').unwrap()].width(),
+            terminal_detail_width::detail_center(usize::from(width), 1),
+            "empty input arrow stays on the panel midline: {capture}"
+        );
         assert!(
             capture.contains("\"archived\": true") && capture.contains("\"detached\": true"),
             "{capture}"
@@ -2432,9 +2437,25 @@ fn terminal_start_tool_name_header() {
                 .trim()
                 .to_owned()
         };
-        let list_row = rows[..header]
+        let list_start = if width >= 150 {
+            2
+        } else {
+            rows[..header]
+                .iter()
+                .rposition(|line| line.contains("claude-opus-5-5") || line.contains("Opus 5.5"))
+                .expect("log list model border")
+                + 1
+        };
+        let list_row = rows[list_start..header]
             .iter()
-            .rfind(|line| line.contains("Claude 图片链接"))
+            .find(|line| {
+                if width >= 150 {
+                    line.rsplit_once('│')
+                        .is_some_and(|(_, list)| list.contains("Claude 图片链接"))
+                } else {
+                    line.contains("Claude 图片链接")
+                }
+            })
             .expect("selected tool list row");
         assert_eq!(
             clock(bar),

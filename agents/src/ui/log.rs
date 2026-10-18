@@ -1005,7 +1005,15 @@ pub(super) fn open_text(event: &Event) -> String {
             sources.extend(group.parts.into_iter().map(|part| part.source));
         }
     }
-    sources.join("\n")
+    // Display-only arrows and running indicators have no source bytes.
+    while sources.last().is_some_and(String::is_empty) {
+        sources.pop();
+    }
+    sources
+        .into_iter()
+        .skip_while(String::is_empty)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The footer confirmation after copying an open log event, such as "Copied user message".
