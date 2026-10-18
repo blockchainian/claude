@@ -9,9 +9,6 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
-/// Rows one wheel step scrolls the terminal's scrollback.
-const WHEEL_ROWS: usize = 3;
-
 impl View {
     /// Shows `screen` in the log detail panel and gives it keyboard focus.
     pub fn show_terminal(&mut self, id: SessionKey, screen: Screen) {
@@ -70,19 +67,15 @@ impl View {
         if !self.terminal_focused() {
             return None;
         }
-        let mut parser = self.shown_terminal()?.lock().expect("terminal screen lock");
-        parser.screen_mut().set_scrollback(0);
+        let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let bytes = key_bytes(key, parser.screen().application_cursor());
         Some((!bytes.is_empty()).then_some(Action::TerminalInput(bytes)))
     }
 
-    /// Handles mouse events over the terminal other than the right button, which always
-    /// switches back to the log detail; returns `None` for events elsewhere.
-    pub(super) fn terminal_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        previous_focus: Panel,
-    ) -> Option<Option<Action>> {
+    /// Forwards mouse events over the terminal to its program as far as the program asked
+    /// for them; the right button always switches back to the log detail. Returns `None`
+    /// for events elsewhere.
+    pub(super) fn terminal_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
         let area = self.viewport.borrow().terminal;
         let position = (mouse.column, mouse.row).into();
         if !area.contains(position)
@@ -98,33 +91,19 @@ impl View {
         }
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
             self.focus(Panel::Terminal);
-            // The click that focuses the terminal stays with the dashboard.
-            if previous_focus != Panel::Terminal {
-                return Some(None);
-            }
         }
-        let mut parser = self.shown_terminal()?.lock().expect("terminal screen lock");
+        let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();
-        if let Some(bytes) = mouse_bytes(
-            mouse,
-            mouse.column - area.x,
-            mouse.row - area.y,
-            screen.mouse_protocol_mode(),
-            screen.mouse_protocol_encoding(),
-        ) {
-            return Some(Some(Action::TerminalInput(bytes)));
-        }
-        let scrollback = screen.scrollback();
-        match mouse.kind {
-            MouseEventKind::ScrollUp => parser
-                .screen_mut()
-                .set_scrollback(scrollback + WHEEL_ROWS),
-            MouseEventKind::ScrollDown => parser
-                .screen_mut()
-                .set_scrollback(scrollback.saturating_sub(WHEEL_ROWS)),
-            _ => {}
-        }
-        Some(None)
+        Some(
+            mouse_bytes(
+                mouse,
+                mouse.column - area.x,
+                mouse.row - area.y,
+                screen.mouse_protocol_mode(),
+                screen.mouse_protocol_encoding(),
+            )
+            .map(Action::TerminalInput),
+        )
     }
 
     /// Draws the shown terminal below the panel's top rule; returns false when none is shown.
@@ -149,7 +128,7 @@ impl View {
         }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();
-        if screen.hide_cursor() || screen.scrollback() > 0 {
+        if screen.hide_cursor() {
             return None;
         }
         let area = self.viewport.borrow().terminal;

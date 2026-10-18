@@ -250,7 +250,7 @@ impl View {
         } else {
             None
         };
-        if let Some(action) = self.terminal_mouse(mouse, previous_focus) {
+        if let Some(action) = self.terminal_mouse(mouse) {
             return action;
         }
         let next = self.handle_mouse_event(mouse);

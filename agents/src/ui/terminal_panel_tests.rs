@@ -14,7 +14,7 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
     log_screen(&view, 100, 45, now);
     let (rows, cols) = view.terminal_size().unwrap();
     let screen: Screen = std::sync::Arc::new(std::sync::Mutex::new(
-        vt100::Parser::new_with_callbacks(rows, cols, 100, Replies::default()),
+        vt100::Parser::new_with_callbacks(rows, cols, 0, Replies::default()),
     ));
     screen.lock().unwrap().process(text);
     view.show_terminal(session_key("log"), screen.clone());
@@ -70,7 +70,7 @@ fn the_focused_terminal_takes_every_key() {
 
 #[test]
 fn clicking_another_panel_takes_keys_away_until_the_terminal_is_clicked() {
-    let (mut view, _now, _screen) = open_terminal(b"");
+    let (mut view, _now, _screen) = open_terminal(b"\x1b[?1000h\x1b[?1006h");
     let list = view.viewport.borrow().list;
     click_mouse(&mut view, mouse(MouseEventKind::Down(MouseButton::Left), list.x + 1, list.y));
     assert_ne!(
@@ -78,13 +78,14 @@ fn clicking_another_panel_takes_keys_away_until_the_terminal_is_clicked() {
         Some(Action::TerminalInput(b"q".to_vec()))
     );
     let terminal = view.viewport.borrow().terminal;
-    // The focusing click reaches no program.
+    // The focusing click reaches the program too.
     assert_eq!(
-        click_mouse(
-            &mut view,
-            mouse(MouseEventKind::Down(MouseButton::Left), terminal.x + 1, terminal.y + 1)
-        ),
-        None
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            terminal.x + 1,
+            terminal.y + 1
+        )),
+        Some(Action::TerminalInput(b"\x1b[<0;2;2M".to_vec()))
     );
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
@@ -105,17 +106,16 @@ fn clicks_reach_a_program_that_asked_for_mouse_reports() {
 }
 
 #[test]
-fn the_wheel_scrolls_the_scrollback_of_a_program_without_mouse_reports() {
+fn the_wheel_does_nothing_over_a_program_without_mouse_reports() {
     let lines: Vec<u8> = (0..80).flat_map(|n| format!("line {n}\r\n").into_bytes()).collect();
-    let (mut view, now, screen) = open_terminal(&lines);
+    let (mut view, now, _screen) = open_terminal(&lines);
     let terminal = view.viewport.borrow().terminal;
     let before = log_screen(&view, 100, 45, now);
-    view.handle_mouse(mouse(MouseEventKind::ScrollUp, terminal.x + 1, terminal.y + 1));
-    assert_eq!(screen.lock().unwrap().screen().scrollback(), 3);
-    assert_ne!(log_screen(&view, 100, 45, now), before);
-    // Typing returns to the live screen.
-    view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
-    assert_eq!(screen.lock().unwrap().screen().scrollback(), 0);
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, terminal.x + 1, terminal.y + 1)),
+        None
+    );
+    assert_eq!(log_screen(&view, 100, 45, now), before);
 }
 
 #[test]

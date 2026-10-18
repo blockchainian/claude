@@ -12,8 +12,6 @@ use std::time::{Duration, Instant};
 /// The shortest interval between two redraw requests while output streams in.
 const FRAME: Duration = Duration::from_millis(16);
 const DETACH_TIMEOUT: Duration = Duration::from_secs(3);
-/// Rows kept above the screen for the dashboard's own scrolling.
-const SCROLLBACK: usize = 10_000;
 
 pub type Screen = Arc<Mutex<vt100::Parser<Replies>>>;
 
@@ -44,7 +42,7 @@ impl SessionTerminal {
         let screen: Screen = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(
             rows,
             cols,
-            SCROLLBACK,
+            0,
             Replies::default(),
         )));
         let dirty = Arc::new(AtomicBool::new(false));
