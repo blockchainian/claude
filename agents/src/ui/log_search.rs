@@ -81,9 +81,15 @@ impl View {
             .iter()
             .map(|event| {
                 format!(
-                    "{} {}",
+                    "{} {} {}",
                     super::log::kind_label(&event.kind),
-                    super::log::body_line(event, usize::MAX, &cwd)
+                    super::log::body_line(event, usize::MAX, &cwd),
+                    event
+                        .calls
+                        .iter()
+                        .map(|call| call.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
                 )
                 .into()
             })

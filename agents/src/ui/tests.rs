@@ -4792,10 +4792,12 @@ fn codex_inner_task_log_snapshot() {
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(4));
-    view.log_search.query.set_text("exec_command");
-    view.rematch_log();
-    assert_eq!(view.matching_log_count(), 1);
-    assert!(view.log_matches(0));
+    for query in ["Shell", "exec_command"] {
+        view.log_search.query.set_text(query);
+        view.rematch_log();
+        assert_eq!(view.matching_log_count(), 1, "{query}");
+        assert!(view.log_matches(0));
+    }
 }
 
 #[test]

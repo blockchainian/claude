@@ -56,19 +56,18 @@ fn terminal_codex_exit_sections() {
         include_str!("../fixtures/codex-command-failed.jsonl"),
     );
     let capture = tmux.capture_when(|capture| {
-        capture.contains("exec_command")
-            && capture.contains("exit 1")
-            && capture.contains("[scrubbed]")
+        capture.contains("Shell") && capture.contains("exit 1") && capture.contains("[scrubbed]")
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert!(capture.contains("exec_command"), "{capture}");
+    assert!(capture.matches("Shell").count() >= 2, "{capture}");
+    assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
         .iter()
         .position(|row| row.contains("exit 1"))
         .expect(&capture);
-    assert!(rows[status].contains("exec_command"), "{capture}");
+    assert!(rows[status].contains("Shell"), "{capture}");
     assert!(rows[status + 2].contains("false"), "{capture}");
     assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
     assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
@@ -77,6 +76,29 @@ fn terminal_codex_exit_sections() {
         "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
         path.display()
     );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_codex_shell_titles() {
+    let (_directory, tmux) = start_codex_probe(
+        "shell-titles",
+        include_str!("../fixtures/codex-inner/shell.jsonl"),
+    );
+    let capture = tmux.capture_when(|capture| {
+        capture.matches("Shell").count() >= 2 && capture.contains("sleep 60")
+    });
+    assert!(!capture.contains("exec_command"), "{capture}");
+    assert!(!capture.contains("CommandExecution"), "{capture}");
+    let path = std::env::temp_dir().join("agents-codex-shell-tmux.txt");
+    std::fs::write(&path, &capture).unwrap();
+    let verdict = serde_json::json!({"verdict": "pass", "capture": path});
+    std::fs::write(
+        std::env::temp_dir().join("agents-codex-shell.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
 }
 
 #[test]

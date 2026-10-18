@@ -20,3 +20,5 @@ Extracted from real local Codex rollouts. Source paths below are relative to the
 - `image-generation.jsonl`: `2026/07/21/rollout-2026-07-21T19-13-52-019f8461-d57c-7870-920d-fcac3f017a77.jsonl`, line 162. Image result omitted, prompt scrubbed, optional saved path omitted.
 
 - `../codex-command-failed.jsonl`: command completion from the same source as `command.jsonl`, line 14. Command, output, path and identifiers anonymized; non-zero exit and timing retained.
+
+- `shell.jsonl`: `2026/10/18/rollout-2026-10-18T09-54-58-01a14ff0-1c14-74c0-8f40-4d7f85ae6ecc.jsonl`, lines 17 and 27. Retains the `exec` wrapper and `sleep 60` command completion; local cwd and wrapper metadata omitted.

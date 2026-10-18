@@ -46,7 +46,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .collect();
     assert_eq!(entries.len(), 2);
     let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
-    assert_eq!(bodies, ["exec_command", "exec_command"]);
+    assert_eq!(bodies, ["Shell", "Shell"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
         assert_record_timing(entry, record);
@@ -59,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "exec_command");
+    assert_eq!(entries[0].body, "Shell");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -102,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "exec_command");
+    assert_eq!(entries[0].body, "Shell");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }
@@ -731,4 +731,33 @@ fn wrapper_path_precedes_event_path_and_unavailable_path_falls_back() {
     records[1]["payload"]["turn_id"] = "different-turn".into();
     write_image_records(&path, &records);
     assert!(tail(&path, 100).unwrap()[0].images.is_empty());
+}
+
+#[test]
+fn shell_command_display_keeps_raw_name_command_output_and_timing() {
+    let entries = events("shell");
+    assert_eq!(entries.len(), 1);
+    let event = &entries[0];
+    let call = &event.calls[0];
+    assert_eq!(event.body, "Shell");
+    assert_eq!(call.name, "exec_command");
+    assert_eq!(call.title, "Shell");
+    assert_eq!(call.detail_title, "Shell");
+    assert!(call.detail_left.is_empty());
+    assert_eq!(
+        call.input,
+        vec![crate::log::Section::Shell {
+            text: "sleep 60".into(),
+            prefix: 0,
+        }]
+    );
+    assert_eq!(
+        call.output,
+        Some(vec![crate::log::Section::Text {
+            label: "output".into(),
+            text: String::new(),
+        }])
+    );
+    assert_eq!(call.exit_code, None);
+    assert_record_timing(event, &records("shell")[1]);
 }

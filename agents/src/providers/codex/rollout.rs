@@ -535,7 +535,7 @@ fn tool_body(payload: &Value) -> Option<String> {
     let (name, subject, _) =
         crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
     crate::providers::tool::summary(&raw_name, &arguments, &TOOL_RULES, false)
-        .or_else(|| Some(subject.unwrap_or(name)))
+        .or_else(|| Some(subject.unwrap_or_else(|| shell_display_name(&name).to_owned())))
 }
 
 fn tool_arguments(payload: &Value) -> Option<Value> {
@@ -546,6 +546,13 @@ fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
         text: text.to_owned(),
+    }
+}
+
+fn shell_display_name(name: &str) -> &str {
+    match name {
+        "exec_command" | "shell" | "CommandExecution" => "Shell",
+        _ => name,
     }
 }
 
@@ -565,9 +572,13 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     } else if arguments.is_err() {
         input = vec![text_section("input", raw)];
     }
+    let display_name = shell_display_name(&name);
     let mut call = ToolCall {
-        detail_left: subject.as_ref().map(|_| name.clone()).unwrap_or_default(),
-        detail_title: subject.clone().unwrap_or_else(|| name.clone()),
+        detail_left: subject
+            .as_ref()
+            .map(|_| display_name.to_owned())
+            .unwrap_or_default(),
+        detail_title: subject.clone().unwrap_or_else(|| display_name.to_owned()),
         show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
         title: crate::providers::tool::summary(
@@ -577,7 +588,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
             false,
         )
         .or(subject)
-        .unwrap_or_else(|| name.clone()),
+        .unwrap_or_else(|| display_name.to_owned()),
         name,
         input,
         output: output.map(|text| response_output(&response_tool_name(payload), text)),
@@ -678,19 +689,25 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             prefix: 0,
         }];
     }
+    let display_name = shell_display_name(&name);
+    let exit_code = item["exit_code"]
+        .as_i64()
+        .filter(|code| item_type == "CommandExecution" && *code != 0);
     let mut call = ToolCall {
-        detail_left: subject.as_ref().map(|_| name.clone()).unwrap_or_default(),
-        detail_title: subject.clone().unwrap_or_else(|| name.clone()),
+        detail_left: if subject.is_some() || exit_code.is_some() {
+            display_name.to_owned()
+        } else {
+            String::new()
+        },
+        detail_title: subject.clone().unwrap_or_else(|| display_name.to_owned()),
         show_details: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
-        title: subject.unwrap_or_else(|| name.clone()),
+        title: subject.unwrap_or_else(|| display_name.to_owned()),
         name,
         input,
         // Completed items can have no result body; an empty output still marks completion.
         output: Some(output.unwrap_or_default()),
-        exit_code: item["exit_code"]
-            .as_i64()
-            .filter(|code| item_type == "CommandExecution" && *code != 0),
+        exit_code,
         is_error: item["status"] == "failed" || item["result"]["isError"] == true,
         duration: None,
     };
@@ -1496,6 +1513,33 @@ mod tests {
     }
 
     #[test]
+    fn shell_response_titles_keep_tool_names_and_sections() {
+        let record = tool_records()
+            .into_iter()
+            .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        let command = record["payload"]["item"]["command"][2].as_str().unwrap();
+        for name in ["exec_command", "shell", "CommandExecution"] {
+            let payload = serde_json::json!({
+                "type": "function_call", "name": name, "call_id": "shell",
+                "arguments": serde_json::json!({"command": command}).to_string(),
+            });
+            let call = response_tool_call(&payload, Some("output"));
+            assert_eq!(call.name, name);
+            assert_eq!(call.title, "Shell");
+            assert_eq!(call.detail_title, "Shell");
+            assert!(call.detail_left.is_empty());
+            let (_, _, input) = crate::providers::tool::presentation(
+                name,
+                &tool_arguments(&payload).unwrap(),
+                &TOOL_RULES,
+            );
+            assert_eq!(call.input, input);
+            assert_eq!(call.output, Some(response_output(name, "output")));
+        }
+    }
+
+    #[test]
     fn read_subject_and_file_change_use_captured_records() {
         let records = tool_records();
         let read = records
@@ -1507,7 +1551,7 @@ mod tests {
             event.calls[0].detail_title,
             "AGENTS.md · agents/AGENTS.md · agents/src/providers/codex/rollout.rs · agents/src/log.rs"
         );
-        assert_eq!(event.calls[0].detail_left, "exec_command");
+        assert_eq!(event.calls[0].detail_left, "Shell");
         assert_eq!(event.body, event.calls[0].detail_title);
         let file = records
             .iter()
