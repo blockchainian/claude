@@ -21,7 +21,8 @@ mod transcript;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
-    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot,
+    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, TerminalCommand,
+    TerminalInput,
 };
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -32,6 +33,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 use transcript::Summary;
+
+/// Why a session running in another terminal takes no input here, and how to fix it.
+pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
+
+/// The attach client detaches on Ctrl-Z, leaving the background job running.
+const DETACH: &[u8] = b"\x1a";
 
 const PAGE_SIZE: usize = 10;
 
@@ -651,6 +658,46 @@ impl ClaudeProvider {
 }
 
 impl Provider for ClaudeProvider {
+    fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
+        let command = if session.is_live_background() {
+            self.launch(&Action::Resume(session.id.clone()), Some(session))
+                .ok_or("Terminal is not supported")?
+        } else if session.process.is_some() {
+            return Err(FOREGROUND_SESSION);
+        } else {
+            // A session with no live process wakes as a background job under the same
+            // id, whose job id is the session id's first eight characters.
+            let job = session.id.id.get(..8).ok_or("Terminal is not supported")?;
+            let mut command = Command::new("sh");
+            command
+                .args([
+                    "-c",
+                    r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
+                    "sh",
+                    &session.id.id,
+                    job,
+                ])
+                .current_dir(&session.cwd);
+            command
+        };
+        Ok(TerminalCommand {
+            command,
+            detach: Some(DETACH),
+        })
+    }
+
+    fn terminal_input<'a>(&self, input: &'a SessionInput) -> Option<TerminalInput<'a>> {
+        // The open attach client already owns this session's input.
+        Some(match input {
+            SessionInput::Prompt(text) => TerminalInput::Paste {
+                text,
+                submit: b"\r",
+            },
+            SessionInput::Interrupt => TerminalInput::Write(b"\x1b"),
+            _ => TerminalInput::Unsupported("Use the open terminal for this input"),
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::Claude
     }
@@ -772,7 +819,7 @@ impl Provider for ClaudeProvider {
                     .ok_or_else(|| io::Error::other("Claude background session has no job id"))?;
                 attach::send(&job_id, &session.cwd, &config.join("settings.json"), input)
             }
-            Some(_) => Err(io::Error::other(crate::model::FOREGROUND_SESSION)),
+            Some(_) => Err(io::Error::other(FOREGROUND_SESSION)),
             None => match input {
                 SessionInput::Prompt(text) => {
                     let output = resume_prompt(&session, &text).output()?;

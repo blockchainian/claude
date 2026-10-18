@@ -113,7 +113,32 @@ impl InputChoices {
 pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
 pub type CreateJob = Box<dyn FnOnce() -> io::Result<Output> + Send>;
 
+/// The program that shows a session and the bytes that detach its client on close.
+#[derive(Debug)]
+pub struct TerminalCommand {
+    pub command: Command,
+    pub detach: Option<&'static [u8]>,
+}
+
+/// How input is delivered while a session's terminal is open.
+pub enum TerminalInput<'a> {
+    Paste {
+        text: &'a str,
+        submit: &'static [u8],
+    },
+    Write(&'static [u8]),
+    Unsupported(&'static str),
+}
+
 pub trait Provider {
+    /// Starts this session in the dashboard's terminal, or explains why it cannot open.
+    fn terminal_command(&self, _session: &Session) -> Result<TerminalCommand, &'static str> {
+        Err("Terminal is not supported")
+    }
+    /// Routes input through the open terminal; `None` keeps the normal provider path.
+    fn terminal_input<'a>(&self, _input: &'a SessionInput) -> Option<TerminalInput<'a>> {
+        None
+    }
     fn id(&self) -> ProviderId;
     /// Whether a published terminal screen still shows startup progress.
     fn terminal_screen_is_loading(&self, _screen: &str) -> bool {

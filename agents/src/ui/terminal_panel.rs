@@ -237,7 +237,7 @@ pub(super) fn key_bytes(key: KeyEvent, application_cursor: bool) -> Vec<u8> {
             None => Vec::new(),
         },
         KeyCode::Char(c) => escaped(c.to_string().as_bytes()),
-        // Claude Code's terminal setup maps Shift+Enter to a newline as ESC CR.
+        // Shift+Enter sends a newline as ESC CR.
         KeyCode::Enter if shift => b"\x1b\r".to_vec(),
         KeyCode::Enter => escaped(b"\r"),
         KeyCode::Tab => escaped(b"\t"),

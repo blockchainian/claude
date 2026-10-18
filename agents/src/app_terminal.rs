@@ -1,13 +1,8 @@
 //! Opens, feeds and closes the session terminal shown in the log detail panel.
 
 use super::{App, Input};
-use crate::model::{Action, Session};
-use crate::providers::{ProviderId, SessionInput, SessionKey};
+use crate::providers::{SessionInput, SessionKey, TerminalCommand, TerminalInput};
 use crate::session_terminal::SessionTerminal;
-use std::process::Command;
-
-/// Claude's attach client detaches on Ctrl-Z, leaving the background job running.
-const CLAUDE_DETACH: &[u8] = b"\x1a";
 
 impl App {
     pub(super) fn open_terminal(&mut self, id: SessionKey) {
@@ -31,13 +26,14 @@ impl App {
             self.terminal_task = Some(id);
             return;
         }
-        let (command, detach) = match self.terminal_command(&session) {
-            Ok(command) => command,
-            Err(reason) => {
-                self.view.set_notice(Some(reason.into()));
-                return;
-            }
-        };
+        let TerminalCommand { command, detach } =
+            match self.hub.provider(id.provider).terminal_command(&session) {
+                Ok(command) => command,
+                Err(reason) => {
+                    self.view.set_notice(Some(reason.into()));
+                    return;
+                }
+            };
         let sender = self.sender.clone();
         match SessionTerminal::spawn(id.clone(), command, detach, size, move || {
             let _ = sender.send(Input::TerminalOutput);
@@ -49,45 +45,6 @@ impl App {
             Err(error) => self
                 .view
                 .set_notice(Some(format!("Failed to open the terminal: {error}"))),
-        }
-    }
-
-    /// The program that shows `session` in a terminal, and the bytes that detach it.
-    fn terminal_command(
-        &self,
-        session: &Session,
-    ) -> Result<(Command, Option<&'static [u8]>), &'static str> {
-        let resume = || {
-            self.hub
-                .provider(session.id.provider)
-                .launch(&Action::Resume(session.id.clone()), Some(session))
-                .ok_or("Terminal is not supported")
-        };
-        match session.id.provider {
-            // The app-server owns Codex turns, so closing the client leaves them running.
-            ProviderId::Codex => Ok((resume()?, None)),
-            ProviderId::Claude if session.is_live_background() => {
-                Ok((resume()?, Some(CLAUDE_DETACH)))
-            }
-            ProviderId::Claude if session.process.is_some() => {
-                Err(crate::model::FOREGROUND_SESSION)
-            }
-            ProviderId::Claude => {
-                // A session with no live process wakes as a background job under the same
-                // id, whose job id is the session id's first eight characters.
-                let job = session.id.id.get(..8).ok_or("Terminal is not supported")?;
-                let mut command = Command::new("sh");
-                command
-                    .args([
-                        "-c",
-                        r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
-                        "sh",
-                        &session.id.id,
-                        job,
-                    ])
-                    .current_dir(&session.cwd);
-                Ok((command, Some(CLAUDE_DETACH)))
-            }
         }
     }
 
@@ -177,25 +134,21 @@ impl App {
         }
     }
 
-    /// Types a Claude prompt or interrupt into the session's open terminal, whose attach
-    /// client already owns its input; returns false when the input takes the provider path.
+    /// Delivers input through the session's open terminal when its provider requests it.
     pub(super) fn send_to_terminal(&mut self, id: &SessionKey, input: &SessionInput) -> bool {
-        let Some(terminal) = self
-            .terminal
-            .as_mut()
-            .filter(|terminal| &terminal.id == id && id.provider == ProviderId::Claude)
-        else {
+        let Some(terminal) = self.terminal.as_mut().filter(|terminal| &terminal.id == id) else {
             return false;
         };
-        let result = match input {
-            SessionInput::Prompt(text) => {
+        let Some(delivery) = self.hub.provider(id.provider).terminal_input(input) else {
+            return false;
+        };
+        let result = match delivery {
+            TerminalInput::Paste { text, submit } => {
                 self.view.input_sending(id, input);
-                terminal.paste(text).and_then(|()| terminal.write(b"\r"))
+                terminal.paste(text).and_then(|()| terminal.write(submit))
             }
-            SessionInput::Interrupt => terminal.write(b"\x1b"),
-            _ => Err(std::io::Error::other(
-                "Use the open terminal for this input",
-            )),
+            TerminalInput::Write(bytes) => terminal.write(bytes),
+            TerminalInput::Unsupported(reason) => Err(std::io::Error::other(reason)),
         };
         match (input, result) {
             (SessionInput::Prompt(_), result) => self.view.input_complete(id, input, result),
@@ -222,6 +175,7 @@ mod tests {
     use super::*;
     use crate::sessions::Hub;
     use ratatui::{Terminal, backend::TestBackend};
+    use std::process::Command;
     use std::time::{Duration, Instant};
 
     fn fixture() -> (tempfile::TempDir, App, SessionKey) {
@@ -267,16 +221,11 @@ mod tests {
         command.args(["-c", r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED; while :; do read line; done"#, "sh"])
             .arg(pid_file);
         let sender = app.sender.clone();
-        let terminal = SessionTerminal::spawn(
-            id.clone(),
-            command,
-            Some(CLAUDE_DETACH),
-            (20, 80),
-            move || {
+        let terminal =
+            SessionTerminal::spawn(id.clone(), command, Some(b"\x1a"), (20, 80), move || {
                 let _ = sender.send(Input::TerminalOutput);
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while !terminal
             .screen
@@ -329,6 +278,183 @@ mod tests {
                 break;
             }
         }
+    }
+
+    fn assert_command(command: &Command, program: &str, args: &[&str], cwd: &std::path::Path) {
+        assert_eq!(command.get_program(), program);
+        assert_eq!(command.get_args().collect::<Vec<_>>(), args);
+        assert_eq!(command.get_current_dir(), Some(cwd));
+    }
+
+    #[test]
+    fn terminal_commands_preserve_resume_attach_and_detach_rules() {
+        use crate::model::{BackgroundJob, Process};
+        let (directory, app, id) = fixture();
+        let mut session = app.session(&id).unwrap();
+        session.process = None;
+        session.background_job = None;
+        let TerminalCommand { command, detach } = app
+            .hub
+            .provider(session.id.provider)
+            .terminal_command(&session)
+            .unwrap();
+        assert_command(
+            &command,
+            "sh",
+            &[
+                "-c",
+                r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
+                "sh",
+                &id.id,
+                &id.id[..8],
+            ],
+            &session.cwd,
+        );
+        assert_eq!(detach, Some(b"\x1a".as_slice()));
+        session.id.id = "short".into();
+        assert_eq!(
+            app.hub
+                .provider(session.id.provider)
+                .terminal_command(&session)
+                .unwrap_err(),
+            "Terminal is not supported"
+        );
+        session.id = id.clone();
+        session.process = Some(Process {
+            pid: 1,
+            label: None,
+            started_at: None,
+        });
+        assert_eq!(
+            app.hub
+                .provider(session.id.provider)
+                .terminal_command(&session)
+                .unwrap_err(),
+            crate::model::FOREGROUND_SESSION
+        );
+        session.process.as_mut().unwrap().label = Some("bg".into());
+        // A background process without its job is still rejected.
+        assert_eq!(
+            app.hub
+                .provider(session.id.provider)
+                .terminal_command(&session)
+                .unwrap_err(),
+            crate::model::FOREGROUND_SESSION
+        );
+        session.background_job = Some(BackgroundJob {
+            id: "job-id".into(),
+            needs: None,
+        });
+        let TerminalCommand { command, detach } = app
+            .hub
+            .provider(session.id.provider)
+            .terminal_command(&session)
+            .unwrap();
+        assert_command(&command, "claude", &["attach", "job-id"], &session.cwd);
+        assert_eq!(detach, Some(b"\x1a".as_slice()));
+        session.parent = Some(id.clone());
+        assert_eq!(
+            app.hub
+                .provider(session.id.provider)
+                .terminal_command(&session)
+                .unwrap_err(),
+            "Terminal is not supported"
+        );
+
+        let app = App::new(
+            Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
+                directory.path().into(),
+                directory.path().join("manager"),
+            ))]),
+            directory.path().into(),
+        );
+        session.id.provider = crate::providers::ProviderId::Codex;
+        session.parent = None;
+        let TerminalCommand { command, detach } = app
+            .hub
+            .provider(session.id.provider)
+            .terminal_command(&session)
+            .unwrap();
+        assert_command(&command, "codex", &["resume", &id.id], &session.cwd);
+        assert_eq!(detach, None);
+        session.parent = Some(session.id.clone());
+        assert_eq!(
+            app.hub
+                .provider(session.id.provider)
+                .terminal_command(&session)
+                .unwrap_err(),
+            "Terminal is not supported"
+        );
+    }
+
+    #[test]
+    fn open_terminal_routes_only_its_providers_input_and_preserves_bytes() {
+        let (directory, mut app, id) = fixture();
+        assert!(!app.send_to_terminal(&id, &SessionInput::Interrupt));
+        let output = directory.path().join("input");
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                r#"stty raw -echo; printf '\033[?2004hREADY'; cat > "$1""#,
+                "sh",
+            ])
+            .arg(&output);
+        let sender = app.sender.clone();
+        let terminal = SessionTerminal::spawn(id.clone(), command, None, (20, 80), move || {
+            let _ = sender.send(Input::TerminalOutput);
+        })
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !terminal
+            .screen
+            .lock()
+            .unwrap()
+            .screen()
+            .contents()
+            .contains("READY")
+        {
+            app.receiver
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap();
+        }
+        app.view.show_terminal(id.clone(), terminal.screen.clone());
+        app.terminal = Some(terminal);
+        let mut other = id.clone();
+        other.id.push('x');
+        assert!(!app.send_to_terminal(&other, &SessionInput::Interrupt));
+        assert!(app.send_to_terminal(&id, &SessionInput::Prompt("line 1\nline 2".into())));
+        assert!(app.send_to_terminal(&id, &SessionInput::Interrupt));
+        for input in [
+            SessionInput::SetModel("model".into()),
+            SessionInput::SetEffort("high".into()),
+            SessionInput::PromptWithImages {
+                text: "image".into(),
+                images: vec![],
+            },
+        ] {
+            assert!(app.send_to_terminal(&id, &input));
+            assert!(draw(&mut app).contains("Use the open terminal for this input"));
+        }
+        let expected = b"\x1b[200~line 1\nline 2\x1b[201~\r\x1b";
+        while std::fs::read(&output).unwrap_or_default().len() < expected.len() {
+            assert!(Instant::now() < deadline, "terminal never received input");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(std::fs::read(output).unwrap(), expected);
+        let codex_id = SessionKey {
+            provider: crate::providers::ProviderId::Codex,
+            id: id.id.clone(),
+        };
+        app.hub = Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
+            directory.path().into(),
+            directory.path().join("manager"),
+        ))]);
+        app.terminal.as_mut().unwrap().id = codex_id.clone();
+        assert!(!app.send_to_terminal(&codex_id, &SessionInput::Prompt("not sent".into())));
+        assert!(!app.send_to_terminal(&codex_id, &SessionInput::Interrupt));
+        app.close_terminal();
+        finish_close(&mut app);
     }
 
     #[test]
@@ -398,11 +524,10 @@ mod tests {
         let mut command = Command::new("sh");
         command.args(["-c", "printf finished"]);
         let sender = app.sender.clone();
-        let terminal =
-            SessionTerminal::spawn(id, command, Some(CLAUDE_DETACH), (5, 20), move || {
-                let _ = sender.send(Input::TerminalOutput);
-            })
-            .unwrap();
+        let terminal = SessionTerminal::spawn(id, command, Some(b"\x1a"), (5, 20), move || {
+            let _ = sender.send(Input::TerminalOutput);
+        })
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while !terminal.closed() {
             app.receiver

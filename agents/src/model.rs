@@ -127,8 +127,7 @@ pub struct Session {
     pub archived: bool,
 }
 
-/// Why a Claude session running in another terminal takes no input here, and how to fix it.
-pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
+pub use crate::providers::claude::FOREGROUND_SESSION;
 
 impl Session {
     /// Whether provider session operations apply; display nesting does not make a thread a subagent.

@@ -10,7 +10,9 @@ mod subagents_tests;
 #[cfg(test)]
 mod tests;
 
-use super::{Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot};
+use super::{
+    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, TerminalCommand,
+};
 #[cfg(test)]
 use crate::log;
 use crate::model::{Action, Process, Session, SessionStatus};
@@ -508,6 +510,17 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 }
 
 impl Provider for CodexProvider {
+    fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
+        let command = self
+            .launch(&Action::Resume(session.id.clone()), Some(session))
+            .ok_or("Terminal is not supported")?;
+        // The app-server owns turns, so closing the client leaves them running.
+        Ok(TerminalCommand {
+            command,
+            detach: None,
+        })
+    }
+
     fn terminal_screen_is_loading(&self, screen: &str) -> bool {
         screen.contains("Resuming session")
     }
