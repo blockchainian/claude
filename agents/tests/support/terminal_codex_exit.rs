@@ -176,16 +176,21 @@ fn terminal_codex_completed_subagent_calls() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_failed_plain_output_uses_error_color() {
-    for (name, fixture, message) in [
+fn terminal_failed_plain_output_uses_default_foreground() {
+    for (name, fixture, (title_marker, title), message) in [
         (
-            "mcp-error-color",
+            "mcp-failed-output",
             include_str!("../fixtures/codex-mcp-errors.jsonl"),
+            (
+                "codebase-memory-mcp trace_path",
+                "codebase-memory-mcp trace_path",
+            ),
             "user rejected MCP tool call",
         ),
         (
-            "command-error-color",
+            "command-failed-output",
             include_str!("../fixtures/codex-command-failed.jsonl"),
+            ("Shell · exit 1", "false"),
             "[scrubbed]",
         ),
     ] {
@@ -194,6 +199,16 @@ fn terminal_failed_plain_output_uses_error_color() {
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
         let parser = captured_screen(&capture, 160, 45);
         let screen = parser.screen();
+        let (title_row, title_text) = screen
+            .rows(0, 160)
+            .enumerate()
+            .filter(|(_, row)| row.contains(title_marker))
+            .last()
+            .unwrap();
+        let title_column = title_text[..title_text.find(title).unwrap()].width();
+        let title_cell = screen.cell(title_row as u16, title_column as u16).unwrap();
+        assert_ne!(title_cell.fgcolor(), vt100::Color::Default, "{capture}");
+        assert!(title_cell.bold(), "tool title keeps its semantic style");
         let row = screen
             .rows(0, 160)
             .position(|row| row.contains(message))
@@ -202,7 +217,7 @@ fn terminal_failed_plain_output_uses_error_color() {
         let column = text.find(message).unwrap();
         for offset in 0..message.len() {
             let cell = screen.cell(row as u16, (column + offset) as u16).unwrap();
-            assert_eq!(cell.fgcolor(), vt100::Color::Idx(1), "{name}: {capture}");
+            assert_eq!(cell.fgcolor(), vt100::Color::Default, "{name}: {capture}");
             assert!(!cell.bold(), "error body keeps ordinary weight");
         }
         let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
