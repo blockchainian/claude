@@ -209,7 +209,7 @@ pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<
         }
     }
     if questions.len() > 1 || questions.iter().any(|question| question.multi) {
-        key(app, KeyCode::Enter);
+        key(app, KeyCode::Char('1'));
     }
     assert!(
         app.pending_inputs.contains(&id),

@@ -47,7 +47,6 @@ pub(super) struct QuestionView {
     /// The shown tab: a question, or the Submit tab after the last question.
     page: usize,
     pages: Vec<Page>,
-    review_focus: usize,
     error: Option<String>,
 }
 
@@ -59,7 +58,6 @@ impl QuestionView {
             ask,
             page: 0,
             pages,
-            review_focus: 0,
             error: None,
         }
     }
@@ -88,8 +86,13 @@ impl QuestionView {
         } else {
             ""
         };
+        let act = if self.reviewing() {
+            ""
+        } else {
+            "↑/↓ move · Enter to confirm · "
+        };
         lines.push(Line::styled(
-            format!("{switch}↑/↓ move · Enter to confirm · Esc to close"),
+            format!("{switch}{act}Esc to close"),
             Style::default().dim(),
         ));
         lines
@@ -139,20 +142,8 @@ impl QuestionView {
         })
     }
 
-    fn focused(&self) -> usize {
-        if self.reviewing() {
-            self.review_focus
-        } else {
-            self.pages[self.page].focus
-        }
-    }
-
     /// Moves the focus; on a single-select question the focused option is its answer.
     fn set_focus(&mut self, row: usize) {
-        if self.reviewing() {
-            self.review_focus = row;
-            return;
-        }
         let question = &self.questions()[self.page];
         let (multi, option_count) = (question.multi, question.options.len());
         let page = &mut self.pages[self.page];
@@ -187,7 +178,6 @@ impl QuestionView {
     fn advance(&mut self) -> Option<Outcome> {
         if self.page + 1 < self.tabs() {
             self.page += 1;
-            self.review_focus = 0;
             None
         } else {
             Some(self.submit())
@@ -249,7 +239,18 @@ impl QuestionView {
         if modifiers != KeyModifiers::NONE {
             return None;
         }
-        let focus = self.focused();
+        if self.reviewing() {
+            // The Submit tab acts on its digits alone.
+            match key.code {
+                KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
+                KeyCode::Char(digit @ '1'..='9') => {
+                    return self.choose(digit as usize - '1' as usize);
+                }
+                _ => {}
+            }
+            return None;
+        }
+        let focus = self.pages[self.page].focus;
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.set_focus((focus + self.rows() - 1) % self.rows());
@@ -263,7 +264,7 @@ impl QuestionView {
                 return self.choose(digit as usize - '1' as usize);
             }
             KeyCode::Char(' ') | KeyCode::Enter => return self.choose(focus),
-            KeyCode::Backspace | KeyCode::Delete if !self.reviewing() => {
+            KeyCode::Backspace | KeyCode::Delete => {
                 self.pages[self.page].selected.clear();
             }
             _ => {}
@@ -306,7 +307,7 @@ impl QuestionView {
 
     /// Moves the focus to a row without answering.
     pub(super) fn focus(&mut self, index: usize) {
-        if index < self.rows() {
+        if !self.reviewing() && index < self.rows() {
             self.set_focus(index);
         }
     }
@@ -332,8 +333,8 @@ impl QuestionView {
         };
         if tabs {
             self.page = step(self.page, self.tabs());
-        } else if !self.pages.is_empty() {
-            self.set_focus(step(self.focused(), self.rows()));
+        } else if !self.pages.is_empty() && !self.reviewing() {
+            self.set_focus(step(self.pages[self.page].focus, self.rows()));
         }
     }
 
@@ -398,6 +399,7 @@ impl QuestionView {
                 "⚠ You have not answered all questions",
                 super::style::attention_title_style(),
             ));
+            lines.push(Line::default());
         }
         for (question, page) in self.questions().iter().zip(&self.pages) {
             if !page.answered() {
@@ -410,13 +412,13 @@ impl QuestionView {
                 usize::from(width),
             ));
         }
-        lines.resize(start + self.pages.len() + 1, Line::default());
+        lines.resize(start + self.pages.len() + 2, Line::default());
         lines.push(Line::default());
         let mut rows = vec![None; lines.len()];
         for (index, label) in REVIEW_ROWS.into_iter().enumerate() {
             rows.push(Some(index));
             lines.push(Self::row_line(
-                self.review_focus == index,
+                false,
                 index + 1,
                 vec![Span::raw(label)],
             ));
@@ -447,9 +449,10 @@ impl QuestionView {
         } else {
             self.question_lines(width, &mut lines)
         };
+        let focus = (!self.reviewing()).then(|| self.pages[self.page].focus);
         let focus_row = rows
             .iter()
-            .position(|&row| row == Some(self.focused()))
+            .position(|&row| row.is_some() && row == focus)
             .unwrap_or(0);
         lines.push(Line::default());
         rows.push(None);
@@ -696,7 +699,7 @@ mod tests {
         press(&mut view, KeyCode::Char('1'));
         press(&mut view, KeyCode::Char('1'));
         assert!(press(&mut view, KeyCode::Right).is_none());
-        let answer = submitted(press(&mut view, KeyCode::Enter));
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(
             answer.answers["Probe multiple choices?"].answers,
             ["Blue", "Red"]
@@ -716,7 +719,7 @@ mod tests {
         );
         assert!(press(&mut view, KeyCode::Right).is_none());
         assert!(screen(&view, 60, 14).contains("You have not answered all questions"));
-        let answer = submitted(press(&mut view, KeyCode::Enter));
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(
             answer.answers["Probe multiple choices?"],
             QuestionAnswer::default()
@@ -733,7 +736,7 @@ mod tests {
         assert!(review.contains("● First → Green"), "{review}");
         assert!(review.contains("● Second → Green"), "{review}");
         assert!(!review.contains("not answered"), "{review}");
-        let answer = submitted(press(&mut view, KeyCode::Enter));
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(answer.answers.len(), 2);
         assert_eq!(answer.answers["Probe first page?"].answers, ["Green"]);
         assert_eq!(answer.answers["Probe second page?"].answers, ["Green"]);
@@ -842,7 +845,8 @@ mod tests {
         assert!(review.contains("● First → Green"), "{review}");
         assert!(review.contains("You have not answered all questions"), "{review}");
         assert!(!review.contains("Review your answers"), "{review}");
-        let answer = submitted(press(&mut view, KeyCode::Enter));
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(answer.answers["Probe first page?"].answers, ["Green"]);
         assert!(answer.answers["Probe second page?"].answers.is_empty());
     }
@@ -882,7 +886,7 @@ mod tests {
         press(&mut view, KeyCode::Char(' '));
         press(&mut view, KeyCode::Char(' '));
         press(&mut view, KeyCode::Right);
-        let answer = submitted(press(&mut view, KeyCode::Enter));
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(answer.answers["Probe multiple choices?"].answers, ["Red"]);
     }
 
