@@ -40,7 +40,8 @@ pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
     let end = range.end;
     let path = &word[start..end];
     let shaped = if is_rooted(path) {
-        path[1..].contains('/')
+        // The first component after the root must be named, so `//` and `///` comments stay prose.
+        path[1..].contains('/') && !path.trim_start_matches('~')[1..].starts_with('/')
     } else {
         path.contains('/')
             && !path.contains("://")
@@ -199,5 +200,12 @@ mod tests {
         let cwd = Path::new("/");
         assert!(found("a:b/c http://x/y/z", cwd).is_empty());
         assert_eq!(word_path("tmp/x/y.md"), Some(0..10));
+    }
+
+    #[test]
+    fn comment_slashes_are_not_rooted_paths() {
+        let cwd = Path::new("/");
+        assert!(found("src/model.rs:85:    /// Display parent // note", cwd).is_empty());
+        assert!(found("//! Module docs ~//x", cwd).is_empty());
     }
 }
