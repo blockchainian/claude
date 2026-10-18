@@ -156,7 +156,9 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
             None
         );
         assert!(view.confirm_dialog.is_some());
-        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        if matches!(removal, Removal::Delete) {
+            view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
         let expected = match removal {
             Removal::Archive => Action::Archive(id),
             Removal::Delete => Action::Delete(id),

@@ -397,11 +397,44 @@ impl View {
             }
             return None;
         }
-        if self.confirm_dialog.is_some()
-            || self.help
-            || self.rename_target.is_some()
-            || self.searching
-        {
+        if self.confirm_dialog.is_some() {
+            self.pending_click = None;
+            self.text_selection.borrow_mut().take();
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.mouse_press = Some((MouseButton::Left, mouse.column, mouse.row, false));
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Some((_, _, _, dragged)) = self.mouse_press.as_mut() {
+                        *dragged = true;
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    let press = self.mouse_press.take();
+                    let viewport = self.viewport.borrow();
+                    let choice = viewport
+                        .confirm_options
+                        .iter()
+                        .find(|(rect, _)| {
+                            rect.contains((mouse.column, mouse.row).into())
+                                && press.is_some_and(|(button, x, y, dragged)| {
+                                    button == MouseButton::Left
+                                        && !dragged
+                                        && rect.contains((x, y).into())
+                                })
+                        })
+                        .map(|(_, confirm)| *confirm);
+                    drop(viewport);
+                    if let Some(confirm) = choice {
+                        let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
+                        return confirm.then(|| dialog.action());
+                    }
+                }
+                _ => self.mouse_press = None,
+            }
+            return None;
+        }
+        if self.help || self.rename_target.is_some() || self.searching {
             self.mouse_press = None;
             self.text_selection.borrow_mut().take();
             return None;
@@ -1070,20 +1103,23 @@ impl View {
                         dialog.confirm = !dialog.confirm;
                     }
                     // Each item's number accepts it at once.
-                    KeyCode::Char('1') => self.confirm_dialog = None,
-                    KeyCode::Char('2') => {
+                    KeyCode::Char(number @ ('1' | '2')) => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
-                        return Some(dialog.action());
+                        if dialog.removal.options()[usize::from(number == '2')] {
+                            return Some(dialog.action());
+                        }
                     }
-                    KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
-                    KeyCode::End | KeyCode::PageDown => dialog.confirm = true,
+                    KeyCode::Home | KeyCode::PageUp => dialog.confirm = dialog.removal.options()[0],
+                    KeyCode::End | KeyCode::PageDown => {
+                        dialog.confirm = dialog.removal.options()[1]
+                    }
                     _ => {}
                 }
             } else if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match key.code {
                     KeyCode::Char('p' | 'k' | 'n' | 'j') => dialog.confirm = !dialog.confirm,
-                    KeyCode::Char('b') => dialog.confirm = false,
-                    KeyCode::Char('f') => dialog.confirm = true,
+                    KeyCode::Char('b') => dialog.confirm = dialog.removal.options()[0],
+                    KeyCode::Char('f') => dialog.confirm = dialog.removal.options()[1],
                     _ => {}
                 }
             }
@@ -1304,12 +1340,11 @@ impl View {
                     if !self.selected_capabilities().archive {
                         return Some(Action::Unsupported("Archive"));
                     }
-                    self.confirm_dialog = Some(ConfirmDialog {
-                        removal: Removal::Archive,
-                        id: session.id.clone(),
-                        title: session.display_title().to_owned(),
-                        confirm: false,
-                    });
+                    self.confirm_dialog = Some(ConfirmDialog::new(
+                        Removal::Archive,
+                        session.id.clone(),
+                        session.display_title().to_owned(),
+                    ));
                 }
             }
             KeyCode::Backspace => {
@@ -1321,12 +1356,11 @@ impl View {
                     if !self.selected_capabilities().delete {
                         return Some(Action::Unsupported("Delete"));
                     }
-                    self.confirm_dialog = Some(ConfirmDialog {
-                        removal: Removal::Delete,
-                        id: session.id.clone(),
-                        title: session.display_title().to_owned(),
-                        confirm: false,
-                    });
+                    self.confirm_dialog = Some(ConfirmDialog::new(
+                        Removal::Delete,
+                        session.id.clone(),
+                        session.display_title().to_owned(),
+                    ));
                 }
             }
             KeyCode::Char('o') => {

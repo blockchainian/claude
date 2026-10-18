@@ -535,12 +535,15 @@ impl View {
             lines.push(Line::from(text.into_owned().dim()));
         }
         lines.push(Line::default());
-        for (confirm, label) in [(false, "Cancel"), (true, label)] {
+        let options_start = lines.len() as u16;
+        let options = dialog.removal.options();
+        for (index, confirm) in options.into_iter().enumerate() {
+            let label = if confirm { label } else { "Cancel" };
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
                 if selected { PROMPT_MARKER } else { " " },
-                if confirm { 2 } else { 1 }
+                index + 1
             );
             lines.push(Line::from(Span::styled(
                 text,
@@ -569,6 +572,14 @@ impl View {
         }
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
+        viewport.confirm_options = options
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, confirm)| {
+                let y = inner.y + options_start + index as u16;
+                (y < inner.bottom()).then_some((Rect::new(inner.x, y, inner.width, 1), confirm))
+            })
+            .collect();
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }

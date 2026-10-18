@@ -116,6 +116,7 @@ struct Viewport {
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
+    confirm_options: Vec<(Rect, bool)>,
     /// Index of the first visible event in the chronological shown log.
     log_scroll: usize,
     /// Events that arrived below the rows on screen since the log left its newest row.
@@ -184,6 +185,16 @@ enum Removal {
     Delete,
 }
 
+impl Removal {
+    /// Choices in display order; the first choice is selected when opened.
+    fn options(self) -> [bool; 2] {
+        match self {
+            Self::Archive => [true, false],
+            Self::Delete => [false, true],
+        }
+    }
+}
+
 /// Confirmation before archiving or deleting a task.
 struct ConfirmDialog {
     removal: Removal,
@@ -193,6 +204,15 @@ struct ConfirmDialog {
 }
 
 impl ConfirmDialog {
+    fn new(removal: Removal, id: SessionKey, title: String) -> Self {
+        Self {
+            removal,
+            id,
+            title,
+            confirm: removal.options()[0],
+        }
+    }
+
     fn action(&self) -> Action {
         match self.removal {
             Removal::Archive => Action::Archive(self.id.clone()),

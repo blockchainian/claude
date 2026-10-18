@@ -2270,7 +2270,10 @@ fn archive_dialog_shows_codex_copy_and_one_accepts_at_once() {
     assert!(rendered.contains("1. Archive task and child agents"));
     assert!(view.confirm_dialog.as_ref().unwrap().confirm);
     assert!(rendered.find("1. Archive").unwrap() < rendered.find("2. Cancel").unwrap());
-    assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Archive(id.clone())));
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Archive(id.clone()))
+    );
     key(&mut view, KeyCode::Char('a'));
     assert_eq!(
         key(&mut view, KeyCode::Char('1')),
@@ -2315,20 +2318,42 @@ fn archive_dialog_shows_claude_copy_and_one_accepts_at_once() {
 fn removal_dialog_mouse_follows_visible_options() {
     for archive in [true, false] {
         for option in 0..2 {
-            let mut view = lifecycle_fixture();
-            key(&mut view, if archive { KeyCode::Char('a') } else { KeyCode::Backspace });
+            let mut view = if archive {
+                lifecycle_fixture()
+            } else {
+                fixture()
+            };
+            key(
+                &mut view,
+                if archive {
+                    KeyCode::Char('a')
+                } else {
+                    KeyCode::Backspace
+                },
+            );
             let area = Rect::new(7, 3, 120, 48);
             let mut buf = Buffer::empty(area);
             view.render(area, &mut buf);
             let label = format!("{}.", option + 1);
             let (x, y) = (area.y..area.bottom())
                 .flat_map(|y| (area.x..area.right() - 1).map(move |x| (x, y)))
-                .find(|&(x, y)| format!("{}{}", buf[(x, y)].symbol(), buf[(x + 1, y)].symbol()) == label)
+                .find(|&(x, y)| {
+                    format!("{}{}", buf[(x, y)].symbol(), buf[(x + 1, y)].symbol()) == label
+                })
                 .unwrap();
-            let action = click_mouse(&mut view, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+            let action = click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+            );
             let expected = if (option == 0) == archive {
-                Some(if archive { Action::Archive(session_key("42")) } else { Action::Delete(session_key("42")) })
-            } else { None };
+                Some(if archive {
+                    Action::Archive(session_key("42"))
+                } else {
+                    Action::Delete(session_key("42"))
+                })
+            } else {
+                None
+            };
             assert_eq!(action, expected);
             assert!(view.confirm_dialog.is_none());
         }
@@ -2350,7 +2375,10 @@ fn archive_dialog_cancel_and_position_keys() {
         assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
         key(&mut view, KeyCode::Home);
         assert!(view.confirm_dialog.as_ref().unwrap().confirm);
-        assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Archive(session_key("42"))));
+        assert_eq!(
+            key(&mut view, KeyCode::Enter),
+            Some(Action::Archive(session_key("42")))
+        );
     }
 }
 
