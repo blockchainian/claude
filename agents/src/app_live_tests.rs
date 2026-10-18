@@ -152,6 +152,19 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
 }
 
 pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<String>>) {
+    answer(app, session, values, false);
+}
+
+/// Answers while the session's terminal is open in the log detail panel.
+pub(crate) fn answer_questions_in_terminal(
+    app: &mut App,
+    session: Session,
+    values: Vec<Vec<String>>,
+) {
+    answer(app, session, values, true);
+}
+
+fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>, open_terminal: bool) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let ask = session
         .ask
@@ -163,6 +176,40 @@ pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<
     app.view.set_sessions(vec![session], false);
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
     app.draw(&mut terminal).unwrap();
+    if open_terminal {
+        app.open_terminal(id.clone());
+        assert!(app.terminal.is_some(), "terminal did not open");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+            app.sync_terminal();
+            app.draw(&mut terminal).unwrap();
+        }
+        // Click the question view to take the keys back from the terminal.
+        let width = usize::from(terminal.backend().buffer().area.width);
+        let rows: Vec<String> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(width)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+            .collect();
+        let row = rows
+            .iter()
+            .position(|row| row.contains(&questions[0].text))
+            .expect("question row") as u16;
+        for kind in [
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        ] {
+            app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+                kind,
+                column: 4,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }));
+        }
+    }
     let screen: String = terminal
         .backend()
         .buffer()
@@ -215,15 +262,22 @@ pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<
         app.pending_inputs.contains(&id),
         "dashboard did not submit answer"
     );
-    let event = app
-        .receiver
-        .recv_timeout(Duration::from_secs(120))
-        .expect("live answer deadline");
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    // Terminal output and its close can arrive before the answer completes.
+    let event = loop {
+        let event = app
+            .receiver
+            .recv_timeout(Duration::from_secs(120))
+            .expect("live answer deadline");
+        if matches!(event, Input::Sent { .. }) {
+            break event;
+        }
+        app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    };
     let Input::Sent { result, .. } = &event else {
-        panic!("expected answer completion")
+        unreachable!()
     };
     assert!(result.is_ok(), "live dashboard answer failed: {result:?}");
-    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
     assert!(!app.pending_inputs.contains(&id));
 }
