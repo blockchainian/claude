@@ -1460,6 +1460,77 @@ fn message_call(call: &ToolCall) -> bool {
     call.name == "MESSAGE" || rule(&call.name, AGENT_ROUTES).is_some_and(|rule| !rule.assignment)
 }
 
+fn memory_notes(item: &Value) -> io::Result<Vec<crate::log::Note>> {
+    let Some(citation) = item.get("memory_citation").filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Entry {
+        path: PathBuf,
+        line_start: u64,
+        line_end: u64,
+        note: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Citation {
+        entries: Vec<Entry>,
+    }
+    let citation: Citation = serde_json::from_value(citation.clone())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if citation.entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let home = match std::env::var_os("CODEX_HOME").filter(|value| !value.is_empty()) {
+        Some(home) => PathBuf::from(home),
+        None => PathBuf::from(
+            std::env::var_os("HOME")
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unset"))?,
+        )
+        .join(".codex"),
+    };
+    citation
+        .entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            if entry.line_start == 0
+                || entry.line_end < entry.line_start
+                || entry.path.as_os_str().is_empty()
+                || entry
+                    .path
+                    .components()
+                    .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid Codex memory citation",
+                ));
+            }
+            let location = if entry.line_start == entry.line_end {
+                format!("{}:{}", entry.path.display(), entry.line_start)
+            } else {
+                format!(
+                    "{}:{}-{}",
+                    entry.path.display(),
+                    entry.line_start,
+                    entry.line_end
+                )
+            };
+            let prefix = if index == 0 { "Memory: " } else { "        " };
+            let end = prefix.len() + location.len();
+            Ok(crate::log::Note {
+                text: format!("{prefix}{location} · {}", entry.note),
+                links: vec![crate::log::FileLink {
+                    range: prefix.len()..end,
+                    path: home.join("memories").join(entry.path),
+                    line: entry.line_start,
+                }],
+            })
+        })
+        .collect()
+}
+
 fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
     let mut metadata = String::new();
     io::BufReader::new(File::open(path)?).read_line(&mut metadata)?;
@@ -1743,7 +1814,15 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 sender: None,
                 kind,
                 body,
-                detail_body,
+                detail_body: {
+                    let notes = memory_notes(&payload["item"])?;
+                    (detail_body.is_some() || !notes.is_empty()).then_some(
+                        crate::log::MessageDetail {
+                            text: detail_body,
+                            notes,
+                        },
+                    )
+                },
                 paths: Vec::new(),
                 started_at: at,
                 ended_at,

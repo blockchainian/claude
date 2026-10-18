@@ -8,6 +8,8 @@ fn terminal_codex_memory_citation_body() {
     let claude = directory.path().join("claude");
     std::fs::create_dir(&codex).unwrap();
     std::fs::create_dir(&claude).unwrap();
+    std::fs::create_dir(codex.join("memories")).unwrap();
+    std::fs::write(codex.join("memories/MEMORY.md"), "# Memory\n").unwrap();
     let transcript = codex.join("reply.jsonl");
     std::fs::write(
         &transcript,
@@ -64,12 +66,14 @@ fn terminal_codex_memory_citation_body() {
     let clean = !capture.contains("oai-mem-citation") && !capture.contains("citation_entries");
     // One copy belongs to Update, one to the log detail, and one to the log list.
     let copies = capture.matches("完成，未提交。").count();
+    let cited = capture.contains("Memory: MEMORY.md:136 · source conditions validation context");
     let complete = capture.contains("270→270")
         && capture.contains("docs/axiom/api-spec.md")
         && capture.contains("未改。");
     let verdict = serde_json::json!({
-        "verdict": if clean && complete && copies == 3 { "pass" } else { "fail" },
+        "verdict": if clean && complete && cited && copies == 3 { "pass" } else { "fail" },
         "clean": clean,
+        "cited": cited,
         "complete": complete,
         "body_copies": copies,
         "binary": binary,

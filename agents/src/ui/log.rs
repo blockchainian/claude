@@ -965,6 +965,14 @@ fn detail_parts_layout(
                     };
                     super::links::path_links(&part.source, &paths, cwd)
                 };
+                for link in &part.file_links {
+                    if let Some(target) = super::vscode::file_line_link(&link.path, link.line) {
+                        links.push(super::links::Link {
+                            range: link.range.clone(),
+                            target: target.into(),
+                        });
+                    }
+                }
                 if !shows_calls(event) {
                     part.remap_links(&event.body, &event.paths, cwd, &mut links);
                 }

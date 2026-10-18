@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 pub(super) struct Part {
     pub source: String,
     body: Body,
+    pub file_links: Vec<crate::log::FileLink>,
 }
 
 enum Body {
@@ -36,6 +37,7 @@ enum Body {
     Prose(bool),
     /// Literal output with its original logical lines.
     Text,
+    Note,
 }
 
 impl Body {
@@ -49,6 +51,7 @@ impl Body {
             | Self::Shell(_)
             | Self::Structured(_)
             | Self::Diff
+            | Self::Note
             | Self::Text => ContentKind::Preformatted,
         }
     }
@@ -59,6 +62,7 @@ impl Part {
         Part {
             source: source.into(),
             body,
+            file_links: Vec::new(),
         }
     }
 
@@ -281,6 +285,10 @@ impl Part {
             Body::Structured(document) => document.highlighted(),
             Body::Diff => highlight::diff_lines(source),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
+            Body::Note => source
+                .split('\n')
+                .map(|line| Line::styled(line.to_owned(), Style::new().dim()))
+                .collect(),
             Body::Text | Body::Prose(false) => source
                 .split('\n')
                 .map(|line| Line::from(line.to_owned()))
@@ -409,12 +417,17 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
         }
         sections
     } else {
-        let parts = if matches!(
+        let mut parts = if matches!(
             event.kind,
             Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
         ) {
             Part::prose_parts(
-                event.detail_body.as_ref().unwrap_or(&event.body).clone(),
+                event
+                    .detail_body
+                    .as_ref()
+                    .and_then(|detail| detail.text.as_ref())
+                    .unwrap_or(&event.body)
+                    .clone(),
                 true,
             )
         } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
@@ -424,6 +437,13 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
         } else {
             Part::text_parts(event.body.clone(), false)
         };
+        if let Some(detail) = &event.detail_body {
+            for note in &detail.notes {
+                let mut part = Part::new(note.text.clone(), Body::Note);
+                part.file_links = note.links.clone();
+                parts.push(part);
+            }
+        }
         vec![DetailSection {
             title: TitleRow {
                 left: event.sender.clone(),

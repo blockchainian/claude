@@ -33,8 +33,8 @@ pub struct Event {
     pub kind: Kind,
     pub sender: Option<String>,
     pub body: String,
-    /// Message content when the list row uses a summary instead of the body.
-    pub detail_body: Option<String>,
+    /// Optional detail text and annotations, separate from the list body.
+    pub detail_body: Option<MessageDetail>,
     /// Byte ranges of the file paths inside `body`, in order.
     pub paths: Vec<std::ops::Range<usize>>,
     pub started_at: DateTime<Utc>,
@@ -47,6 +47,26 @@ pub struct Event {
     pub images: Vec<Image>,
     /// The tool calls a Tool, Error or Denied row stands for, in the order they ran.
     pub calls: Vec<ToolCall>,
+}
+
+/// Additional message content shown only in the event detail.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageDetail {
+    pub text: Option<String>,
+    pub notes: Vec<Note>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    pub text: String,
+    pub links: Vec<FileLink>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileLink {
+    pub range: std::ops::Range<usize>,
+    pub path: std::path::PathBuf,
+    pub line: u64,
 }
 
 /// A transcript line retained by its file position, decoded only when requested.

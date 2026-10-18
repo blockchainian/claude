@@ -95,13 +95,61 @@ fn codex_memory_citation_log_list_and_detail_use_processed_body() {
     let mut buf = Buffer::empty(area);
     view.render_log(area, &mut buf, now);
     assert_clean_complete(&text(&buf));
+    assert!(!text(&buf).contains("Memory:"));
     let area = Rect::new(0, 0, 160, 65);
     let mut buf = Buffer::empty(area);
     view.render_log_detail(area, &mut buf, now);
     let rendered = text(&buf);
     assert_clean_complete(&rendered);
+    assert!(rendered.contains("Memory: MEMORY.md:136 · source conditions validation context"));
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/codex_memory_log_detail.txt")
+    );
+}
+
+#[test]
+fn codex_memory_note_link_opens_the_recorded_file_line() {
+    let (dir, mut view, now) = provider_view();
+    let memory = dir.path().join("memories/MEMORY.md");
+    std::fs::create_dir(memory.parent().unwrap()).unwrap();
+    std::fs::write(&memory, "# Memory\n").unwrap();
+    let mut events = view.log.clone();
+    events[0].detail_body.as_mut().unwrap().notes[0].links[0].path = memory.clone();
+    view.set_log(events);
+    let area = Rect::new(0, 0, 160, 65);
+    view.viewport.borrow_mut().log_detail = area;
+    let mut buf = Buffer::empty(area);
+    view.render_log_detail(area, &mut buf, now);
+    let target = PathBuf::from(super::super::vscode::file_line_link(&memory, 136).unwrap());
+    let (rect, _) = view
+        .viewport
+        .borrow()
+        .log_links
+        .iter()
+        .find(|(_, path)| *path == target)
+        .cloned()
+        .expect("memory file link");
+    assert_eq!(rect.width, "MEMORY.md:136".len() as u16);
+    assert!(
+        buf[(rect.x, rect.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            rect.x,
+            rect.y
+        ))
+        .is_none()
+    );
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), rect.x, rect.y))
+            .is_none()
+    );
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1)),
+        Some(Action::OpenPath(target))
     );
 }
