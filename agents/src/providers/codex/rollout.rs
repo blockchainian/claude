@@ -674,6 +674,20 @@ fn agent_name(path: &str) -> &str {
         .unwrap_or(path)
 }
 
+fn message_title(author: &str, recipient: &str, viewer: &str, content: &str) -> String {
+    if author == viewer {
+        format!("{content} → {}", agent_name(recipient))
+    } else if recipient == viewer {
+        format!("{} → {content}", agent_name(author))
+    } else {
+        format!(
+            "{} → {} · {content}",
+            agent_name(author),
+            agent_name(recipient)
+        )
+    }
+}
+
 fn agent_route(
     name: &str,
     subject: Option<&str>,
@@ -683,9 +697,13 @@ fn agent_route(
     let target = subject?;
     let route = format!("{} → {}", agent_name(sender), agent_name(target));
     let title = if rule.assignment {
-        format!("{route} · new task")
+        format!(
+            "{} · {}",
+            crate::providers::tool::title_name(name),
+            agent_name(target)
+        )
     } else {
-        route.clone()
+        message_title(sender, target, sender, "message")
     };
     let detail = match rule.title {
         AgentTitle::Target => agent_name(target).to_owned(),
@@ -1552,6 +1570,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
     let mut completed_prompt = None;
     let mut completed_messages = HashMap::new();
     let mut collaboration = HashMap::new();
+    let mut message_routes = HashMap::new();
     for (offset, record) in records {
         let item = &record["payload"]["item"];
         if matches!(
@@ -1650,6 +1669,11 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     call.title = body.clone();
                     call.detail_title = detail;
                 }
+                if message_call(&call)
+                    && let Some(target) = &call.agent_path
+                {
+                    message_routes.insert(call.id.clone(), (sender.to_owned(), target.clone()));
+                }
                 call.started_at = call.agent_path.as_ref().map(|_| at);
                 let mut completed_at = ended.as_ref().map(|(at, _, _)| *at);
                 if let Some((offset, record)) = payload["call_id"]
@@ -1726,15 +1750,20 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                         })
                 };
                 let message_type = field("Message Type: ")?;
-                let sender = required_text(payload, "author")?;
+                let author = required_text(payload, "author")?;
                 let recipient = required_text(payload, "recipient")?;
-                let route = format!("{} → {}", agent_name(sender), agent_name(recipient));
+                let route = format!("{} → {}", agent_name(author), agent_name(recipient));
                 let text = detail_body.take().unwrap();
-                let body = match message_type {
-                    "NEW_TASK" => format!("{route} · new task"),
-                    "FINAL_ANSWER" => format!("{route} · {text}"),
-                    _ => route.clone(),
+                let content = match message_type {
+                    "NEW_TASK" => "new task",
+                    "FINAL_ANSWER" if text != ENCRYPTED_CONTENT => &text,
+                    _ => "message",
                 };
+                let body = message_title(author, recipient, sender, content);
+                message_routes.insert(
+                    required_text(payload, "id")?.to_owned(),
+                    (author.to_owned(), recipient.to_owned()),
+                );
                 calls.push(ToolCall {
                     detail_left: crate::providers::tool::title_name(message_type),
                     detail_title: route,
@@ -1745,7 +1774,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     started_at: Some(at),
                     hide_output: true,
                     agent_thread_id: None,
-                    agent_path: Some(if sender == "/root" { recipient } else { sender }.to_owned()),
+                    agent_path: Some(if author == "/root" { recipient } else { author }.to_owned()),
                     input: vec![Section::Markdown {
                         label: String::new(),
                         text,
@@ -1855,23 +1884,20 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             && let Some((_, previous)) = merged.last_mut()
             && previous.calls.first().is_some_and(|call| {
                 message_call(call)
-                    && call
-                        .detail_title
-                        .split_once(" → ")
-                        .map(|(sender, _)| sender)
-                        == entry.calls[0]
-                            .detail_title
-                            .split_once(" → ")
-                            .map(|(sender, _)| sender)
+                    && message_routes
+                        .get(&call.id)
+                        .is_some_and(|route| Some(route) == message_routes.get(&entry.calls[0].id))
             })
         {
             previous.calls.extend(entry.calls);
             previous.source_records.extend(entry.source_records);
             previous.started_at = entry.started_at;
-            previous.body = format!(
-                "{} · {} messages",
-                previous.calls[0].detail_title,
-                previous.calls.len()
+            let (author, recipient) = &message_routes[&previous.calls[0].id];
+            previous.body = message_title(
+                author,
+                recipient,
+                sender,
+                &format!("{} messages", previous.calls.len()),
             );
             continue;
         }
@@ -1906,7 +1932,7 @@ mod tests {
             ),
         );
         assert_eq!(call.title, "sed, cat");
-        assert_eq!(call.detail_left, "Exec Command");
+        assert_eq!(call.detail_left, "Exec command");
         assert_eq!(call.detail_title, "sed, cat");
         let mut failed = record["payload"]["item"].clone();
         failed["exit_code"] = 2.into();
@@ -1918,7 +1944,7 @@ mod tests {
         empty["exit_code"] = 0.into();
         assert_eq!(
             completed_call(&empty, Some("$command".into())).title,
-            "Exec Command"
+            "Exec command"
         );
     }
 
@@ -2152,7 +2178,7 @@ mod tests {
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, "cat, sed");
-            assert_eq!(events[0].calls[0].detail_left, "Exec Command");
+            assert_eq!(events[0].calls[0].detail_left, "Exec command");
         }
     }
 
@@ -2165,7 +2191,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
         assert_eq!(event.calls[0].detail_title, "cat, sed");
-        assert_eq!(event.calls[0].detail_left, "Exec Command");
+        assert_eq!(event.calls[0].detail_left, "Exec command");
         assert_eq!(event.body, "cat, sed");
         let file = records
             .iter()
@@ -2386,7 +2412,7 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "root → claude_calls · new task");
+        assert_eq!(call.title, "Spawn agent · claude_calls");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2690,9 +2716,9 @@ mod tests {
             .find(|record| record["payload"]["name"] == "request_user_input")
             .unwrap();
         let call = response_tool_call(&record["payload"], None);
-        assert_eq!(call.detail_left, "Request User Input");
+        assert_eq!(call.detail_left, "Request user input");
         assert_eq!(call.detail_title, "Color");
-        assert_eq!(call.title, "Request User Input Color");
+        assert_eq!(call.title, "Request user input Color");
         assert!(call.show_details);
         assert_eq!(
             call.input,
@@ -2768,14 +2794,14 @@ mod tests {
             for name in [tool.clone(), format!("collaboration.{tool}")] {
                 payload["name"] = name.into();
                 let call = response_tool_call(&payload, Some("Plaintext result"));
-                let expected = format!(
-                    "root → {subject}{}",
-                    if tool == "send_message" {
-                        ""
-                    } else {
-                        " · new task"
-                    }
-                );
+                let expected = if tool == "send_message" {
+                    format!("message → {subject}")
+                } else {
+                    format!(
+                        "{} · {subject}",
+                        crate::providers::tool::title_name(payload["name"].as_str().unwrap())
+                    )
+                };
                 assert_eq!(tool_body(&payload).unwrap(), expected);
                 assert_eq!(call.title, expected);
                 assert_eq!(
@@ -2860,7 +2886,7 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(question.kind, Kind::Assistant);
-            assert_eq!(question.body, "Request User Input Color");
+            assert_eq!(question.body, "Request user input Color");
             assert!(question.ended_at.is_none());
             let summary = summary(&path).unwrap();
             assert_eq!(
@@ -2887,7 +2913,7 @@ mod tests {
                 }]
             );
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, "Request User Input Color");
+            assert_eq!(activity.label, "Request user input Color");
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -2968,7 +2994,7 @@ mod tests {
         call["payload"]["name"] = "functions.request_user_input".into();
         assert_eq!(
             tool_body(&call["payload"]).unwrap(),
-            "Functions Request User Input Color · Color"
+            "Functions request user input Color · Color"
         );
         records.push(call);
         assert_eq!(
@@ -2985,9 +3011,9 @@ mod tests {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
-                "root → real_scan · new task",
-                "root → root",
-                "root → ux_probe · new task",
+                "Spawn agent · real_scan",
+                "message → root",
+                "Followup task · ux_probe",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -3023,7 +3049,7 @@ mod tests {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
             let expected = if name == "collaboration.send_message" {
-                "root → reviewer".to_owned()
+                "message → reviewer".to_owned()
             } else {
                 crate::providers::tool::title_name(&crate::providers::tool::display_tool_name(name))
             };
@@ -3166,6 +3192,123 @@ mod timeout_test {
                 label: "output".into(),
                 text: "(timed out)".into()
             }]
+        );
+    }
+}
+
+#[cfg(test)]
+mod perspective_tests {
+    use super::*;
+
+    fn fixture(name: &str) -> Vec<Event> {
+        tail(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/fixtures/codex-perspective/{name}.jsonl")),
+            200,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn perspective_sentence_names_from_real_records() {
+        let records = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl");
+        for (name, expected) in [
+            ("spawn_agent", "Spawn agent"),
+            ("wait_agent", "Wait agent"),
+            ("followup_task", "Followup task"),
+        ] {
+            let record: Value = records
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|r| r["payload"]["name"] == name)
+                .unwrap();
+            assert_eq!(
+                response_tool_call(&record["payload"], None).detail_left,
+                expected
+            );
+        }
+        assert_eq!(
+            crate::providers::tool::title_name("FINAL_ANSWER"),
+            "Final answer"
+        );
+        assert_eq!(
+            crate::providers::tool::title_name("exec_command"),
+            "Exec command"
+        );
+    }
+
+    #[test]
+    fn perspective_assignments_use_function_names() {
+        let events = fixture("root");
+        for (name, title) in [
+            ("spawn_agent", "Spawn agent · alpha"),
+            ("followup_task", "Followup task · alpha"),
+        ] {
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e.calls.iter().any(|c| c.name == name) && e.body == title),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn perspective_root_messages() {
+        let events = fixture("root");
+        for title in ["alpha → message", "message → beta", "beta → beta 完成"] {
+            assert!(
+                events.iter().any(|e| e.body == title),
+                "{title}: {:?}",
+                events.iter().map(|e| &e.body).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn perspective_children_and_grandchild() {
+        let events = fixture("alpha");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.body == "root → new task")
+                .count(),
+            2
+        );
+        for title in ["alpha_kid → 孙子完成", "message → beta", "message → root"] {
+            assert!(events.iter().any(|e| e.body == title), "{title}");
+        }
+        assert!(fixture("beta").iter().any(|e| e.body == "alpha → message"));
+        assert!(
+            fixture("beta")
+                .iter()
+                .any(|e| e.body == "2 messages → root")
+        );
+        assert!(
+            fixture("alpha_kid")
+                .iter()
+                .any(|e| e.body == "alpha → new task")
+        );
+    }
+
+    #[test]
+    fn perspective_foreign_route_keeps_both_participants() {
+        let root = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl")
+            .lines()
+            .next()
+            .unwrap();
+        let message = include_str!("../../../tests/fixtures/codex-perspective/beta.jsonl")
+            .lines()
+            .find(|line| {
+                let r: Value = serde_json::from_str(line).unwrap();
+                r["payload"]["author"] == "/root/alpha" && r["payload"]["recipient"] == "/root/beta"
+            })
+            .unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), format!("{root}\n{message}\n")).unwrap();
+        assert_eq!(
+            tail(file.path(), 10).unwrap()[0].body,
+            "alpha → beta · message"
         );
     }
 }

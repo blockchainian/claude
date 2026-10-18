@@ -67,18 +67,18 @@ fn terminal_codex_agent_message_bodies() {
     });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     let plaintext_capture = tmux.capture_when(|capture| {
-        capture.contains("demo_sub → root · 演示完成") && capture.contains("演示完成")
+        capture.contains("demo_sub → 演示完成") && capture.contains("演示完成")
     });
     assert!(
-        plaintext_capture.contains("root → demo_sub · new task"),
+        plaintext_capture.contains("new task → demo_sub"),
         "{plaintext_capture}"
     );
     let (row, line) = plaintext_capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("root → demo_sub · new task"))
+        .find(|(_, line)| line.contains("new task → demo_sub"))
         .unwrap();
-    let column = line[..line.find("root → demo_sub · new task").unwrap()].width();
+    let column = line[..line.find("new task → demo_sub").unwrap()].width();
     tmux.mouse(0, column, row, true);
     let encrypted_capture = tmux.capture_when(|capture| capture.contains("(encrypted)"));
     let record: serde_json::Value = serde_json::from_str(encrypted).unwrap();
@@ -91,7 +91,11 @@ fn terminal_codex_agent_message_bodies() {
     );
     let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
     for (fixture, subject) in collaboration {
-        let label = format!("root → {subject}");
+        let label = match subject {
+            "demo_sub" => format!("Spawn agent · {subject}"),
+            "ux_probe" => format!("Followup task · {subject}"),
+            _ => format!("message → {subject}"),
+        };
         let (row, line) = encrypted_capture
             .lines()
             .enumerate()
@@ -103,11 +107,11 @@ fn terminal_codex_agent_message_bodies() {
             capture.lines().any(|line| {
                 line.contains(subject)
                     && line.contains(if subject == "demo_sub" {
-                        "Spawn Agent"
+                        "Spawn agent"
                     } else if subject == "ux_probe" {
-                        "Followup Task"
+                        "Followup task"
                     } else {
-                        "Send Message"
+                        "Send message"
                     })
             }) && capture.contains("(encrypted)")
         });
@@ -222,11 +226,11 @@ fn terminal_codex_collaboration_navigation() {
     };
     let (column, row) = find(&capture, "Collaboration parent");
     tmux.mouse(0, column, row, true);
-    let capture = tmux.capture_when(|capture| capture.contains("demo_sub → root · 演示完成"));
-    let (column, row) = find(&capture, "root → demo_sub · new task");
+    let capture = tmux.capture_when(|capture| capture.contains("demo_sub → 演示完成"));
+    let (column, row) = find(&capture, "Spawn agent · demo_sub");
     tmux.mouse(0, column, row, true);
     let spawn = tmux.capture_when(|capture| {
-        capture.contains("Spawn Agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")
+        capture.contains("Spawn agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")
     });
     let log_surface = spawn
         .lines()
@@ -237,17 +241,16 @@ fn terminal_codex_collaboration_navigation() {
     assert!(!log_surface.contains("CollabAgentToolCall"), "{spawn}");
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     let jumped = tmux.capture_when(|capture| {
-        capture.contains("root → demo_sub · new task")
-            && !capture.contains("demo_sub → root · 演示完成")
+        capture.contains("root → new task") && !capture.contains("demo_sub → 演示完成")
     });
-    let (column, row) = find(&jumped, "root → demo_sub · new task");
+    let (column, row) = find(&jumped, "root → new task");
     tmux.mouse(0, column, row, true);
-    let jumped = tmux.capture_when(|capture| capture.contains("New Task"));
+    let jumped = tmux.capture_when(|capture| capture.contains("New task"));
     assert!(jumped.contains("root → demo_sub"), "{jumped}");
     let (column, row) = find(&jumped, "Collaboration parent");
     tmux.mouse(0, column, row, true);
-    let capture = tmux.capture_when(|capture| capture.contains("Wait Agent"));
-    let (column, row) = find(&capture, "Wait Agent");
+    let capture = tmux.capture_when(|capture| capture.contains("Wait agent"));
+    let (column, row) = find(&capture, "Wait agent");
     tmux.mouse(0, column, row, true);
     let waited = tmux
         .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));

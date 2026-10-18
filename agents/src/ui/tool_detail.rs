@@ -731,7 +731,7 @@ mod tests {
         let detail = detail(event, "09:55:00".into(), Style::new().dim());
         assert_eq!(detail.sections.len(), 1);
         let section = &detail.sections[0];
-        assert_eq!(section.title.left.as_deref(), Some("New Task"));
+        assert_eq!(section.title.left.as_deref(), Some("New task"));
         assert_eq!(section.title.title, "root → demo_sub");
         assert_eq!(section.title.time.as_deref(), Some("09:55:00"));
         let parts: Vec<_> = section

@@ -169,14 +169,14 @@ fn terminal_codex_tool_list_shell_group() {
     let column = line[..line.find(label).unwrap()].width();
     tmux.mouse(0, column, row, true);
     let capture = tmux.capture_when(|capture| {
-        capture.contains("Exec Command") && capture.contains("git status --short")
+        capture.contains("Exec command") && capture.contains("git status --short")
     });
     let title = capture
         .lines()
         .skip(log_divider(&capture).unwrap() + 1)
-        .find(|row| row.trim_start().starts_with("Exec Command"))
+        .find(|row| row.trim_start().starts_with("Exec command"))
         .unwrap();
-    assert_eq!(title.find("Exec Command"), Some(1), "{capture}");
+    assert_eq!(title.find("Exec command"), Some(1), "{capture}");
     assert!(title.contains(label), "{capture}");
     assert!(capture.contains("git status --short"), "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");

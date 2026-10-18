@@ -56,30 +56,30 @@ fn terminal_codex_exit_sections() {
         include_str!("../fixtures/codex-command-failed.jsonl"),
     );
     let capture = tmux.capture_when(|capture| {
-        capture.contains("Exec Command")
+        capture.contains("Exec command")
             && capture.contains("· 1")
             && capture.contains("[scrubbed]")
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert_eq!(capture.matches("Exec Command").count(), 1, "{capture}");
+    assert_eq!(capture.matches("Exec command").count(), 1, "{capture}");
     assert!(capture.contains("false (1)"), "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
         .iter()
-        .position(|row| row.trim_start().starts_with("Exec Command"))
+        .position(|row| row.trim_start().starts_with("Exec command"))
         .expect(&capture);
-    assert!(rows[status].contains("Exec Command"), "{capture}");
+    assert!(rows[status].contains("Exec command"), "{capture}");
     assert!(rows[status + 2].contains("false"), "{capture}");
     assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
     assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
-    assert!(rows[status].contains("Exec Command · 1"), "{capture}");
+    assert!(rows[status].contains("Exec command · 1"), "{capture}");
     assert!(rows[status].contains("false"), "{capture}");
     let ansi = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&ansi, 160, 45);
     let screen = parser.screen();
-    for (marker, count) in [("Exec Command · 1", 1), ("false (1)", 2)] {
+    for (marker, count) in [("Exec command · 1", 1), ("false (1)", 2)] {
         let rows: Vec<_> = screen
             .rows(0, 160)
             .enumerate()
@@ -132,13 +132,13 @@ fn terminal_codex_shell_titles() {
     ] {
         let (_directory, tmux) = start_codex_probe(name, fixture);
         let capture = tmux
-            .capture_when(|capture| capture.contains("Exec Command") && capture.contains(command));
-        assert_eq!(capture.matches("Exec Command").count(), 1, "{capture}");
+            .capture_when(|capture| capture.contains("Exec command") && capture.contains(command));
+        assert_eq!(capture.matches("Exec command").count(), 1, "{capture}");
         let title = capture
             .lines()
-            .find(|line| line.trim_start().starts_with("Exec Command"))
+            .find(|line| line.trim_start().starts_with("Exec command"))
             .unwrap();
-        assert_eq!(title.matches("Exec Command").count(), 1, "{capture}");
+        assert_eq!(title.matches("Exec command").count(), 1, "{capture}");
         assert!(title.contains(summary), "{capture}");
         assert!(
             !title.contains(command),
@@ -166,13 +166,13 @@ fn terminal_codex_completed_subagent_calls() {
         "subagent-completed",
         include_str!("../fixtures/codex-interaction/parent.jsonl"),
     );
-    let capture = tmux.capture_when(|capture| capture.contains("Wait Agent"));
+    let capture = tmux.capture_when(|capture| capture.contains("Wait agent"));
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("Wait Agent"))
+        .find(|(_, line)| line.contains("Wait agent"))
         .unwrap();
-    let column = line[..line.find("Wait Agent").unwrap()].width();
+    let column = line[..line.find("Wait agent").unwrap()].width();
     tmux.mouse(0, column, row, true);
     let capture = tmux
         .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));
@@ -196,15 +196,15 @@ fn terminal_failed_plain_output_uses_default_foreground() {
             "mcp-failed-output",
             include_str!("../fixtures/codex-mcp-errors.jsonl"),
             (
-                "Codebase-memory-mcp Trace Path",
-                "Codebase-memory-mcp Trace Path",
+                "Codebase-memory-mcp trace path",
+                "Codebase-memory-mcp trace path",
             ),
             "user rejected MCP tool call",
         ),
         (
             "command-failed-output",
             include_str!("../fixtures/codex-command-failed.jsonl"),
-            ("Exec Command · 1", "Exec Command"),
+            ("Exec command · 1", "Exec command"),
             "[scrubbed]",
         ),
     ] {

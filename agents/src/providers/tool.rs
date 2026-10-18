@@ -76,28 +76,16 @@ pub(crate) fn display_tool_name(name: &str) -> String {
 
 /// Display protocol identifiers without maintaining a per-tool name table.
 pub(crate) fn title_name(name: &str) -> String {
-    name.split(['_', '.', ' '])
+    let text = name
+        .split(['_', '.', ' '])
         .filter(|word| !word.is_empty())
-        .map(|word| {
-            let mut chars = word.chars();
-            chars
-                .next()
-                .map(|first| {
-                    first.to_uppercase().collect::<String>()
-                        + &if word
-                            .chars()
-                            .filter(|ch| ch.is_alphabetic())
-                            .all(|ch| ch.is_uppercase())
-                        {
-                            chars.as_str().to_lowercase()
-                        } else {
-                            chars.as_str().to_owned()
-                        }
-                })
-                .unwrap_or_default()
-        })
         .collect::<Vec<_>>()
         .join(" ")
+        .to_lowercase();
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]

@@ -39,7 +39,7 @@ fn codex_nonzero_exit_title_keeps_status_out_of_body() {
     assert_eq!(detail.sections[0].groups.len(), 3);
     assert_eq!(
         detail.sections[0].title.left.as_deref(),
-        Some("Exec Command · 1")
+        Some("Exec command · 1")
     );
     assert_eq!(detail.sections[0].title.title, "false");
     assert!(

@@ -35,7 +35,7 @@ fn terminal_log_search_finds_trailing_tool_after_unicode() {
             .any(|line| line.contains('│') && line.contains("检查日志 (1)")),
         "Unicode event disappeared from search results: {capture}"
     );
-    assert!(capture.contains("Exec Command"), "{capture}");
+    assert!(capture.contains("Exec command"), "{capture}");
     let path = std::env::temp_dir().join("agents-unicode-search-tmux.txt");
     std::fs::write(&path, capture).unwrap();
     let verdict = serde_json::json!({"verdict": "pass", "capture": path});

@@ -819,7 +819,11 @@ impl View {
                     selector.selected =
                         super::navigation::step(selector.selected, selector.len(), 1, code);
                 } else if over_log || over_details {
-                    self.scroll_content_rows(forward, over_log, mouse.row, WHEEL_ROWS);
+                    for _ in 0..WHEEL_ROWS {
+                        if !self.scroll_content_row(forward, over_log, mouse.row) {
+                            break;
+                        }
+                    }
                 }
             }
             _ => {}
@@ -843,26 +847,10 @@ impl View {
 
     /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
     pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) -> bool {
-        self.scroll_content_rows(forward, over_log, row, 1)
-    }
-
-    fn scroll_content_rows(
-        &mut self,
-        forward: bool,
-        over_log: bool,
-        row: u16,
-        rows: usize,
-    ) -> bool {
-        let over_log_detail = {
-            let viewport = self.viewport.borrow();
-            (viewport.log_detail.y..viewport.log_detail.bottom()).contains(&row)
-        };
-        if over_log && over_log_detail {
-            self.prepare_log_detail_scroll();
-        }
         let mut viewport = self.viewport.borrow_mut();
+        let over_log_detail = (viewport.log_detail.y..viewport.log_detail.bottom()).contains(&row);
         if over_log && over_log_detail {
-            if viewport.log_detail_state.scroll_rows(forward, row, rows) {
+            if viewport.log_detail_state.scroll_window(forward, row) {
                 viewport.log_detail_scroll = viewport.log_detail_state.position();
                 true
             } else {
@@ -878,14 +866,7 @@ impl View {
             };
             true
         } else {
-            let mut consumed = false;
-            for _ in 0..rows {
-                if !viewport.details_scroll.scroll(forward, row) {
-                    break;
-                }
-                consumed = true;
-            }
-            consumed
+            viewport.details_scroll.scroll(forward, row)
         }
     }
 
@@ -1290,11 +1271,14 @@ impl View {
                         1
                     };
                     drop(viewport);
-                    let forward = matches!(code, KeyCode::Down | KeyCode::PageDown);
-                    if steps == 1 {
-                        self.scroll_content_row(forward, true, row);
-                    } else {
-                        self.scroll_content_rows(forward, true, row, usize::from(steps));
+                    for _ in 0..steps {
+                        if !self.scroll_content_row(
+                            matches!(code, KeyCode::Down | KeyCode::PageDown),
+                            true,
+                            row,
+                        ) {
+                            break;
+                        }
                     }
                 }
             }

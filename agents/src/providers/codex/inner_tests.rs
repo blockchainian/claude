@@ -78,7 +78,7 @@ fn file_change_uses_record_paths() {
         .next()
         .unwrap()
         .clone();
-    assert_eq!(entries[0].body, format!("Apply Patch {path}"));
+    assert_eq!(entries[0].body, format!("Apply patch {path}"));
     assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], record);
@@ -88,7 +88,7 @@ fn file_change_uses_record_paths() {
 fn mcp_call_uses_record_server_tool_and_duration() {
     let entries = events("mcp");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "Claude Ask Claude");
+    assert_eq!(entries[0].body, "Claude ask claude");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("mcp")[0]);
 }
@@ -122,7 +122,7 @@ fn image_view_retains_image_path_for_rendering() {
     let entries = events("image-view");
     assert_eq!(entries.len(), 1);
     let records = records("image-view");
-    assert_eq!(entries[0].body, "ImageView");
+    assert_eq!(entries[0].body, "Imageview");
     assert!(entries[0].paths.is_empty());
     let crate::log::Section::Structured { text, .. } = &entries[0].calls[0].input[0] else {
         panic!("image arguments require JSON");
@@ -230,7 +230,7 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 fn file_change_without_start_log_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "Apply Patch /workspace/project/design.md");
+    assert_eq!(entries[0].body, "Apply patch /workspace/project/design.md");
     let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
     assert_eq!(entries[0].started_at, completion);
     assert_eq!(entries[0].ended_at, Some(completion));
@@ -243,7 +243,7 @@ fn file_change_without_start_summary_succeeds() {
         .unwrap()
         .activity
         .unwrap();
-    assert_eq!(activity.label, "Apply Patch /workspace/project/design.md");
+    assert_eq!(activity.label, "Apply patch /workspace/project/design.md");
     assert_eq!(
         activity.at,
         DateTime::from_timestamp_millis(1781329074517).unwrap()
@@ -712,7 +712,7 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     assert_eq!(call.name, "exec_command");
     assert_eq!(call.title, "sleep");
     assert_eq!(call.detail_title, "sleep");
-    assert_eq!(call.detail_left, "Exec Command");
+    assert_eq!(call.detail_left, "Exec command");
     assert_eq!(
         call.input,
         vec![crate::log::Section::Shell {
@@ -740,7 +740,7 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
     assert_eq!(event.body, "git {status, diff}, sed");
     assert_eq!(call.title, event.body);
     assert_eq!(call.detail_title, "git {status, diff}, sed");
-    assert_eq!(call.detail_left, "Exec Command");
+    assert_eq!(call.detail_left, "Exec command");
     assert!(event.paths.is_empty());
     assert_eq!(call.name, "exec_command");
     assert!(
@@ -763,8 +763,8 @@ fn interaction_functions_win_over_completed_items() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/parent.jsonl");
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0].body, "root → demo_sub · new task");
-    assert_eq!(rows[0].calls[0].detail_left, "Spawn Agent");
+    assert_eq!(rows[0].body, "Spawn agent · demo_sub");
+    assert_eq!(rows[0].calls[0].detail_left, "Spawn agent");
     assert_eq!(
         rows[0].calls[0].input,
         vec![crate::log::Section::Markdown {
@@ -772,7 +772,7 @@ fn interaction_functions_win_over_completed_items() {
             text: "(encrypted)".into()
         }]
     );
-    assert_eq!(rows[1].body, "Wait Agent");
+    assert_eq!(rows[1].body, "Wait agent");
     assert_eq!(
         rows[1].calls[0].input,
         vec![crate::log::Section::Prose {
@@ -787,7 +787,7 @@ fn interaction_functions_win_over_completed_items() {
             text: "Wait completed.".into()
         }])
     );
-    assert_eq!(rows[2].body, "demo_sub → root · 演示完成");
+    assert_eq!(rows[2].body, "demo_sub → 演示完成");
 }
 
 #[test]
@@ -795,8 +795,8 @@ fn interaction_messages_keep_route_and_merge_adjacent_sender() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
     let rows = tail(&path, 100).unwrap();
-    assert_eq!(rows[0].body, "root → demo_sub · new task");
-    assert_eq!(rows[0].calls[0].detail_left, "New Task");
+    assert_eq!(rows[0].body, "root → new task");
+    assert_eq!(rows[0].calls[0].detail_left, "New task");
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/codex-interaction/messages.jsonl");
     let rows = tail(&path, 100).unwrap();
@@ -818,11 +818,11 @@ fn interaction_message_group_survives_small_tail_page() {
 }
 
 #[test]
-fn protocol_titles_preserve_mixed_case_words() {
-    assert_eq!(crate::providers::tool::title_name("ImageView"), "ImageView");
+fn protocol_titles_use_sentence_case() {
+    assert_eq!(crate::providers::tool::title_name("ImageView"), "Imageview");
     assert_eq!(
         crate::providers::tool::title_name("FINAL_ANSWER"),
-        "Final Answer"
+        "Final answer"
     );
 }
 
@@ -837,11 +837,11 @@ fn child_function_message_uses_session_sender() {
     )
     .unwrap();
     let rows = tail(file.path(), 100).unwrap();
-    assert_eq!(rows[0].body, "demo_sub → rename_gating");
+    assert_eq!(rows[0].body, "message → rename_gating");
     let mut reader = super::rollout::Reader::new(file.path().to_owned(), false);
     assert_eq!(
         reader.refresh(100).unwrap().events[0].body,
-        "demo_sub → rename_gating"
+        "message → rename_gating"
     );
 }
 

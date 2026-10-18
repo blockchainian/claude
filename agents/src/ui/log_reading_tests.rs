@@ -45,11 +45,11 @@ fn codex_agent_messages_show_routes_and_payload() {
     );
     let message = serde_json::to_string(&message).unwrap() + "\n";
     for (record, title, body) in [
-        (plaintext, "demo_sub → root · 演示完成", "演示完成"),
-        (encrypted, "root → demo_sub · new task", "(encrypted)"),
+        (plaintext, "demo_sub → 演示完成", "演示完成"),
+        (encrypted, "new task → demo_sub", "(encrypted)"),
         (
             message.as_str(),
-            "demo_sub → root",
+            "demo_sub → message",
             "**完成** [report](https://example.com/report)\n\nPayload:\n保留正文",
         ),
     ] {
@@ -973,7 +973,7 @@ fn tool_list_rows_group_members_and_preserve_relative_paths() {
 fn tool_list_rows_keep_shell_display_names_and_grouped_subjects() {
     let event = codex_events("codex-inner/git-chain.jsonl").remove(0);
     assert_eq!(event.body, "git {status, diff}, sed");
-    assert_eq!(event.calls[0].detail_left, "Exec Command");
+    assert_eq!(event.calls[0].detail_left, "Exec command");
     assert_eq!(event.calls[0].detail_title, "git {status, diff}, sed");
     let mut record = list_row_records().remove(0);
     let block = &mut record["message"]["content"][0];
@@ -1032,8 +1032,8 @@ fn tool_list_rows_keep_codex_native_file_paths() {
     assert_eq!(entries.len(), 3);
     for (event, expected) in entries.into_iter().zip([
         "sed",
-        "Apply Patch /workspace/agents/src/log.rs · /workspace/agents/src/providers/codex/rollout.rs",
-        "Apply Patch /private/tmp/agents-http-settings/report.md",
+        "Apply patch /workspace/agents/src/log.rs · /workspace/agents/src/providers/codex/rollout.rs",
+        "Apply patch /private/tmp/agents-http-settings/report.md",
     ]) {
         assert_eq!(event.body, expected);
         for range in &event.paths {
@@ -1115,6 +1115,26 @@ fn codex_collaboration_message_sections_snapshot() {
     let snapshot = format!("{}\n", snapshot.trim_end());
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/ui_snapshots/codex_collaboration_messages.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}
+
+#[test]
+fn codex_perspective_list_snapshot() {
+    let mut snapshot = String::new();
+    for session in ["root", "alpha", "beta", "alpha_kid"] {
+        snapshot.push_str(&format!("{session}\n"));
+        for event in codex_events(&format!("codex-perspective/{session}.jsonl")) {
+            snapshot.push_str(&super::body_line(&event, 160, Path::new("/workspace")).to_string());
+            snapshot.push('\n');
+        }
+        snapshot.push('\n');
+    }
+    let snapshot = format!("{}\n", snapshot.trim_end());
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/codex_perspective_list.txt");
     if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
         std::fs::write(&path, &snapshot).unwrap();
     }

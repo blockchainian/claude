@@ -1,17 +1,17 @@
-root → claude_calls · new task — 120 columns
-Spawn Agent                                           claude_calls
+Spawn agent · claude_calls — 120 columns
+Spawn agent                                           claude_calls
 
                                                        [scrubbed]
-root → claude_calls · new task — 200 columns
-Spawn Agent                                                                                   claude_calls
+Spawn agent · claude_calls — 200 columns
+Spawn agent                                                                                   claude_calls
 
                                                                                                [scrubbed]
-root → codex_calls · new task — 120 columns
-Spawn Agent                                            codex_calls
+Spawn agent · codex_calls — 120 columns
+Spawn agent                                            codex_calls
 
                                                        [scrubbed]
-root → codex_calls · new task — 200 columns
-Spawn Agent                                                                                    codex_calls
+Spawn agent · codex_calls — 200 columns
+Spawn agent                                                                                    codex_calls
 
                                                                                                [scrubbed]
 WebFetch https://render.com/docs/postgresql-instance-types — 120 columns

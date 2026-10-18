@@ -116,7 +116,7 @@ fn request_user_input_pending_answered_and_offline() {
             if state == "pending" {
                 assert_eq!(
                     session.latest_activity().unwrap().label,
-                    "Request User Input Color"
+                    "Request user input Color"
                 );
             }
             session.process = None;
@@ -917,7 +917,7 @@ fn file_change_without_start_preserves_session_list() {
         .unwrap();
     assert_eq!(
         session.activity.as_ref().unwrap().label,
-        "Apply Patch /workspace/project/design.md"
+        "Apply patch /workspace/project/design.md"
     );
 }
 

@@ -1,12 +1,12 @@
 codex-agent-messages/new-task.jsonl
 
-New Task                                             root → demo_sub                                            09:55:00
+New task                                             root → demo_sub                                            09:55:00
 
                                                        (encrypted)
 
 codex-agent-messages/final-answer.jsonl
 
-Final Answer                                         demo_sub → root                                            09:56:06
+Final answer                                         demo_sub → root                                            09:56:06
 
                                                         演 示 完 成
 
@@ -30,13 +30,13 @@ Message                                            tests_audit → root         
 
 codex-collaboration/spawn_agent.jsonl
 
-Spawn Agent                                             demo_sub                                                09:54:58
+Spawn agent                                             demo_sub                                                09:54:58
 
                                                        (encrypted)
 
 codex-collaboration/send_message.jsonl
 
-Send Message                                      root → rename_gating                                          18:30:39
+Send message                                      root → rename_gating                                          18:30:39
 
                                                        (encrypted)
                                                             ↓
@@ -44,7 +44,7 @@ Send Message                                      root → rename_gating        
 
 codex-collaboration/followup_task.jsonl
 
-Followup Task                                        root → ux_probe                                            10:55:06
+Followup task                                        root → ux_probe                                            10:55:06
 
                                                        (encrypted)
                                                             ↓
