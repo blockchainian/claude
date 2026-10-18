@@ -129,7 +129,6 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         (KeyCode::Char('f'), KeyModifiers::NONE),
         (KeyCode::Char('n'), KeyModifiers::NONE),
         (KeyCode::Char('x'), KeyModifiers::NONE),
-        (KeyCode::Char('w'), KeyModifiers::NONE),
     ] {
         let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
         let session = view.selected_row().unwrap().clone();
@@ -139,7 +138,6 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
             KeyCode::Char('f') => Action::Fork(session.id),
             KeyCode::Char('n') => Action::NewDraft { cwd: session.cwd },
             KeyCode::Char('x') => Action::Stop(session.id),
-            KeyCode::Char('w') => Action::Unsupported("New worktree"),
             _ => unreachable!(),
         };
         assert_eq!(

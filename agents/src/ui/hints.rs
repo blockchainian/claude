@@ -74,7 +74,6 @@ impl View {
                 "Tasks",
                 &[
                     ("n", "New"),
-                    ("w", "New worktree"),
                     ("o", "Terminal"),
                     ("f", "Fork"),
                     ("r", "Rename"),

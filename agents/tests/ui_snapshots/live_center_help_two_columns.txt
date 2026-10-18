@@ -4,13 +4,12 @@
 
  Navigate            Tasks
  ↑      Up           n          New
- ↓      Down         w          New worktree
- enter  Open         o          Terminal
- pgup   Page up      f          Fork
- pgdn   Page down    r          Rename
- ⌃c     Quit         x          Stop
- esc    Back         a          Archive
-                     h          Hide
+ ↓      Down         o          Terminal
+ enter  Open         f          Fork
+ pgup   Page up      r          Rename
+ pgdn   Page down    x          Stop
+ ⌃c     Quit         a          Archive
+ esc    Back         h          Hide
                      backspace  Delete
                      p          Pin/unpin
 
@@ -18,6 +17,7 @@
  tab/⇧tab  Filter    /                       Search
  /         Search    2× click top border     Earliest
  g         Group     2× click bottom border  Latest
+
 
 
 

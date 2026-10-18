@@ -1283,7 +1283,6 @@ impl View {
                     .unwrap_or_else(|| self.startup_cwd.clone());
                 return Some(Action::NewDraft { cwd });
             }
-            KeyCode::Char('w') => return Some(Action::Unsupported("New worktree")),
             KeyCode::Char('r') => {
                 if let Some(session) = self.selected_row() {
                     if !self.selected_capabilities().rename {
