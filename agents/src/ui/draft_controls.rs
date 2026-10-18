@@ -144,14 +144,20 @@ impl Selector {
                 }));
                 rows
             }
-            SelectorKind::Branch { branches, .. } => {
+            SelectorKind::Branch {
+                branches, editor, ..
+            } => {
                 let mut rows: Vec<_> = branches
                     .iter()
                     .enumerate()
                     .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
                     .collect();
                 rows.push(ListRow::Text(Line::default()));
-                rows.push(ListRow::Choice(branches.len(), Line::from(CREATE_BRANCH)));
+                rows.push(if editor.is_some() {
+                    ListRow::Input(branches.len())
+                } else {
+                    ListRow::Choice(branches.len(), Line::from(CREATE_BRANCH))
+                });
                 rows
             }
             SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. } => values
@@ -485,18 +491,8 @@ impl View {
                 .iter()
                 .find(|(_, index)| Some(*index) == selector.create_index())
         {
-            let (text, _) = editor.window(usize::from(rect.width.saturating_sub(1)));
-            Clear.render(*rect, buf);
-            render::line(
-                Line::from(format!("❯ {text}")),
-                Rect::new(
-                    rect.x.saturating_sub(1),
-                    rect.y,
-                    rect.width.saturating_add(1),
-                    1,
-                ),
-                buf,
-            );
+            let (text, _) = editor.window(usize::from(rect.width));
+            render::line(Line::from(text.to_owned()), *rect, buf);
         }
         self.viewport.borrow_mut().picker_rows = rows;
     }
@@ -687,7 +683,7 @@ mod tests {
         screen(&view, area);
         assert_eq!(view.cursor_pos(area).unwrap().1, create.y);
         let rendered = screen(&view, area);
-        assert!(rendered.contains("❯ jk/你 好"), "{rendered}");
+        assert!(rendered.contains("jk/你 好"), "{rendered}");
         assert!(!rendered.contains("New branch"));
         assert_eq!(view.input_box.editor.text(), "unfinished task");
         assert!(!rendered.contains("Create new branch"));

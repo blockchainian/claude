@@ -48,6 +48,7 @@ pub(super) fn render_input_row(
 }
 
 const HORIZONTAL_PADDING: u16 = 1;
+const PANEL_GAP: u16 = 2 * HORIZONTAL_PADDING + 1;
 
 /// Fills a list row through both padding cells, stopping before column separators.
 pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
@@ -152,11 +153,11 @@ impl View {
             Rect::default()
         };
         let (body, log_list) = if wide && show_log {
-            let column_width = (body.width - 6) / 4;
-            let log_width = body.width - 6 - 2 * column_width;
+            let column_width = (body.width - 2 * PANEL_GAP) / 4;
+            let log_width = body.width - 2 * PANEL_GAP - 2 * column_width;
             (
                 Rect {
-                    width: body.width - log_width - 3,
+                    width: body.width - log_width - PANEL_GAP,
                     ..body
                 },
                 Rect::new(body.right() - log_width, body.y, log_width, body.height),
@@ -164,15 +165,15 @@ impl View {
         } else {
             (body, Rect::default())
         };
-        let [list, gap, details] = if body.width >= 7 {
+        let [list, gap, details] = if body.width >= 2 * PANEL_GAP + 1 {
             let content = Rect {
-                width: body.width - 3,
+                width: body.width - PANEL_GAP,
                 ..body
             };
             let [list, mut details] =
                 Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
                     .areas(content);
-            let gap = Rect::new(list.right(), body.y, 3, body.height);
+            let gap = Rect::new(list.right(), body.y, PANEL_GAP, body.height);
             details.x += gap.width;
             [list, gap, details]
         } else {
@@ -235,8 +236,8 @@ impl View {
                 .iter()
                 .find(|(_, index)| Some(*index) == selector.create_index())
         {
-            let (_, cursor) = editor.window(usize::from(rect.width.saturating_sub(1)));
-            return Some((rect.x + 1 + cursor, rect.y));
+            let (_, cursor) = editor.window(usize::from(rect.width));
+            return Some((rect.x + cursor, rect.y));
         }
         if !self.help
             && self.confirm_dialog.is_none()
@@ -369,14 +370,14 @@ impl View {
         }
         for y in layout.gap.y..layout.gap.bottom() {
             if layout.gap.width > 1 {
-                buf[(layout.gap.x + 1, y)]
+                buf[(layout.gap.x + HORIZONTAL_PADDING, y)]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
         }
         if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
             for y in layout.log.y..layout.log.bottom() {
-                buf[(layout.log.x.saturating_sub(2), y)]
+                buf[(layout.log.x.saturating_sub(HORIZONTAL_PADDING + 1), y)]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
@@ -444,7 +445,7 @@ impl View {
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
             let left = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.log.x.saturating_sub(2)
+                layout.log.x.saturating_sub(HORIZONTAL_PADDING + 1)
             } else {
                 area.x
             };
@@ -458,9 +459,9 @@ impl View {
         if let Some(details_rule) = details_rule {
             // The title and status rules run from the separator's joint on the left to the log's
             // joint or the screen's right edge.
-            let left = layout.gap.x + 1;
+            let left = layout.gap.x + HORIZONTAL_PADDING;
             let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
-                layout.log.x - 1
+                layout.log.x - HORIZONTAL_PADDING
             } else {
                 area.right()
             };
@@ -475,11 +476,15 @@ impl View {
         }
         let mut separators = vec![];
         if layout.gap.width > 1 {
-            separators.push((layout.gap.x + 1, layout.gap.y, layout.gap.bottom()));
+            separators.push((
+                layout.gap.x + HORIZONTAL_PADDING,
+                layout.gap.y,
+                layout.gap.bottom(),
+            ));
         }
         if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
             separators.push((
-                layout.log.x.saturating_sub(2),
+                layout.log.x.saturating_sub(HORIZONTAL_PADDING + 1),
                 layout.log.y,
                 layout.log.bottom(),
             ));
@@ -1706,6 +1711,61 @@ mod background_title_tests {
                     "{title} {time:?}"
                 );
                 assert_eq!(buf[(0, 1)].symbol(), "o");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod branch_input_tests {
+    use super::*;
+    use crate::ui::draft_controls::{Selector, SelectorKind};
+
+    #[test]
+    fn branch_input_uses_panel_padding_without_marker_or_highlight() {
+        for width in [100, 160, 200] {
+            for text in ["", "feature/你好", "feature/".repeat(30).as_str()] {
+                let area = Rect::new(4, 2, width, 40);
+                let mut view = View::default();
+                let mut editor = line_edit::LineEdit::default();
+                editor.insert(text);
+                view.selector = Some(Selector::new(
+                    SelectorKind::Branch {
+                        draft: 1,
+                        branches: vec!["main".into()],
+                        editor: Some(editor),
+                    },
+                    1,
+                ));
+                let layout = view.center_layout(area);
+                // The prompt and the panel both take their outer margin from this constant.
+                let prompt = layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0));
+                assert_eq!(layout.top.right(), area.right() - HORIZONTAL_PADDING);
+                assert_eq!(prompt.x, area.x + HORIZONTAL_PADDING);
+                let mut buffer = Buffer::empty(area);
+                view.render(area, &mut buffer);
+                let rows = &view.viewport.borrow().picker_rows;
+                let rect = rows[1].0;
+                assert_eq!(rect.x, layout.details.x);
+                assert_eq!(buffer[(rect.x, rows[0].0.y)].symbol(), "m");
+                for x in rect.x - HORIZONTAL_PADDING..rect.right() + HORIZONTAL_PADDING {
+                    let cell = &buffer[(x, rect.y)];
+                    assert_ne!(cell.symbol(), "❯");
+                    assert_eq!(cell.bg, Color::Reset, "{text:?} column {x}");
+                    assert!(cell.modifier.is_empty(), "{text:?} column {x}");
+                    if x < rect.x || x >= rect.right() {
+                        assert_eq!(cell.symbol(), " ", "padding column {x}");
+                    }
+                }
+                let editor = view.selector.as_ref().unwrap().branch_editor().unwrap();
+                let (visible, caret) = editor.window(usize::from(rect.width));
+                let mut expected = Buffer::empty(rect);
+                Clear.render(rect, &mut expected);
+                line(Line::from(visible.to_owned()), rect, &mut expected);
+                for x in rect.x..rect.right() {
+                    assert_eq!(buffer[(x, rect.y)], expected[(x, rect.y)]);
+                }
+                assert_eq!(view.cursor_pos(area), Some((rect.x + caret, rect.y)));
             }
         }
     }

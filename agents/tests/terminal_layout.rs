@@ -271,15 +271,40 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
     tmux.mouse(0, create_column, row, true);
     let editing = tmux.capture_when(|capture| !capture.contains("Create new branch"));
     let editor = editing.lines().nth(row).unwrap();
-    assert_eq!(
-        editor.find('❯').map(|offset| editor[..offset].width()),
-        Some(create_column - 1)
-    );
+    assert!(!editor.contains('❯'), "{editor}");
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&colored, 200, 50);
+    // The details panel ends at the next vertical separator.
+    let branch_suffix = &branch_line[branch_line.find("main").unwrap()..];
+    let end = create_column + branch_suffix[..branch_suffix.find('│').unwrap()].width();
+    for x in create_column - 1..end {
+        let cell = parser.screen().cell(row as u16, x as u16).unwrap();
+        assert!(cell.contents().trim().is_empty(), "column {x}: {colored}");
+        assert_eq!(
+            cell.bgcolor(),
+            vt100::Color::Default,
+            "column {x}: {colored}"
+        );
+    }
     assert!(editing.contains("New task ❯ unfinished task"));
     assert!(!editing.contains("New branch"));
     let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_y}"]);
     assert_eq!(cursor.trim().parse::<usize>().unwrap(), row);
+    let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_x}"]);
+    assert_eq!(cursor.trim().parse::<usize>().unwrap(), create_column);
     tmux.run(&["send-keys", "-t", "probe", "-l", "feature/probe"]);
+    let typed =
+        tmux.capture_when(|capture| capture.lines().nth(row).unwrap().contains("feature/probe"));
+    let input = typed.lines().nth(row).unwrap();
+    assert_eq!(
+        input[..input.find("feature/probe").unwrap()].width(),
+        create_column
+    );
+    let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_x}"]);
+    assert_eq!(
+        cursor.trim().parse::<usize>().unwrap(),
+        create_column + "feature/probe".len()
+    );
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| {
         capture.contains("New task ❯ unfinished task") && capture.contains("feature/probe")
