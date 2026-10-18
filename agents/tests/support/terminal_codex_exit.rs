@@ -81,6 +81,56 @@ fn terminal_codex_exit_sections() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_codex_completed_subagent_calls() {
+    let (_directory, tmux) = start_codex_probe(
+        "subagent-completed",
+        include_str!("../fixtures/codex-inner/subagent-completed.jsonl"),
+    );
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "65"]);
+    let initial = tmux.capture_when(|capture| capture.contains("\"tool\": \"wait\""));
+    let (row, line) = initial
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("CollabAgentToolCall"))
+        .unwrap();
+    let column = line[..line.find("CollabAgentToolCall").unwrap()].width();
+    tmux.mouse(0, column, row, true);
+    let mut captures = Vec::new();
+    for (index, (item, marker)) in [
+        ("CollabAgentToolCall", "\"tool\": \"wait\""),
+        ("SubAgentActivity", "\"kind\": \"completed\""),
+        ("SubAgentActivity", "\"kind\": \"started\""),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index > 0 {
+            tmux.run(&["send-keys", "-t", "probe", "Up"]);
+        }
+        let capture = tmux.capture_when(|capture| {
+            capture.contains(item) && capture.contains(marker) && capture.contains("(no output)")
+        });
+        let rows: Vec<_> = capture.lines().collect();
+        let output = rows
+            .iter()
+            .position(|row| row.contains("(no output)"))
+            .unwrap();
+        assert_eq!(rows[output - 1].trim(), "↓", "{capture}");
+        captures.push(capture);
+    }
+    let path = std::env::temp_dir().join("agents-codex-subagent-completed-tmux.txt");
+    std::fs::write(&path, captures.join("\n\n")).unwrap();
+    let verdict = serde_json::json!({"verdict": "pass", "events": 3, "capture": path});
+    std::fs::write(
+        std::env::temp_dir().join("agents-codex-subagent-completed.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_failed_plain_output_uses_error_color() {
     for (name, fixture, message) in [
         (

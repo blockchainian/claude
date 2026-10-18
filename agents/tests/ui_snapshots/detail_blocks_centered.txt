@@ -9,7 +9,7 @@ SubAgentActivity — 120 columns
                                 "type": "SubAgentActivity"
                               }
                                                             ↓
-                                                           •··
+                                                       (no output)
 SubAgentActivity — 200 columns
                                                                                             SubAgentActivity
 
@@ -21,7 +21,7 @@ SubAgentActivity — 200 columns
                                                                         "type": "SubAgentActivity"
                                                                       }
                                                                                                     ↓
-                                                                                                   •··
+                                                                                               (no output)
 spawn_agent (claude_calls) [scrubbed] — 120 columns
 spawn_agent                                           claude_calls
 

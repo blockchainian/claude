@@ -686,7 +686,8 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         title: subject.unwrap_or_else(|| name.clone()),
         name,
         input,
-        output,
+        // Completed items can have no result body; an empty output still marks completion.
+        output: Some(output.unwrap_or_default()),
         exit_code: item["exit_code"]
             .as_i64()
             .filter(|code| item_type == "CommandExecution" && *code != 0),
@@ -1865,7 +1866,7 @@ mod tests {
         no_result["payload"]["item"]["result"] = Value::Null;
         assert_eq!(
             completed_tool(&no_result).unwrap().unwrap().calls[0].output,
-            None
+            Some(Vec::new())
         );
         let mut json_result = mcp.clone();
         json_result["payload"]["item"]["result"]["content"][0]["text"] = r#"{"ok":true}"#.into();

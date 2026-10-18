@@ -1,5 +1,7 @@
 # Codex inner activity records
 
+- `subagent-completed.jsonl`: verbatim records from `2026/10/18/rollout-2026-10-18T09-54-54-01a14ff0-0c10-70f2-aaff-6b6b6c7bc8aa.jsonl`, lines 12, 21, 22 and 32. Includes distinct started/completed item IDs for the same agent, completed collaboration wait, and task completion.
+
 Extracted from real local Codex rollouts. Source paths below are relative to the Codex `sessions/` directory. Identity metadata, command output, patch diff, MCP result, and wrapper output bodies were omitted; activity fields and timestamps were retained. Review-mode details in the non-activity fixture were also omitted.
 
 - `file-change.jsonl`: `2026/10/03/rollout-2026-10-03T17-51-35-01a10465-1340-71c0-a3e6-c74f8578f5bc.jsonl`, lines 84.

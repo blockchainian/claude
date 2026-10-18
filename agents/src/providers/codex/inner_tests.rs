@@ -151,6 +151,94 @@ fn collaboration_tool_activity_is_rendered() {
 }
 
 #[test]
+fn completed_subagent_items_have_finished_calls_without_pairing_item_ids() {
+    let entries = events("subagent-completed");
+    let records = records("subagent-completed");
+    assert_eq!(entries.len(), 3);
+    assert_ne!(
+        records[0]["payload"]["item"]["id"],
+        records[1]["payload"]["item"]["id"]
+    );
+    assert_eq!(
+        records[0]["payload"]["item"]["agent_thread_id"],
+        records[1]["payload"]["item"]["agent_thread_id"]
+    );
+    for (entry, record) in entries.iter().zip(&records) {
+        assert_record_timing(entry, record);
+        assert_eq!(entry.calls.len(), 1);
+    }
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| &entry.calls[0].output)
+            .collect::<Vec<_>>(),
+        vec![&Some(Vec::new()); 3]
+    );
+}
+
+#[test]
+fn completed_subagent_calls_finish_as_each_record_arrives() {
+    use std::io::Write;
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    let mut reader = super::rollout::Reader::new(file.path().to_path_buf(), false);
+    for record in records("subagent-completed") {
+        writeln!(file, "{record}").unwrap();
+        let update = reader.refresh(100).unwrap();
+        assert!(
+            update
+                .events
+                .iter()
+                .flat_map(|event| &event.calls)
+                .all(|call| call.output.is_some())
+        );
+    }
+}
+
+#[test]
+fn completed_collaboration_calls_finish_for_every_tool_and_status() {
+    for tool in [
+        "spawn_agent",
+        "send_input",
+        "resume_agent",
+        "close_agent",
+        "wait",
+    ] {
+        for status in ["completed", "failed"] {
+            let mut record = records("collaboration").remove(0);
+            record["payload"]["item"]["tool"] = tool.into();
+            record["payload"]["item"]["status"] = status.into();
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), format!("{record}\n")).unwrap();
+            let entries = tail(file.path(), 100).unwrap();
+            assert_eq!(
+                entries[0].calls[0].output,
+                Some(Vec::new()),
+                "{tool}: {status}"
+            );
+            assert_eq!(entries[0].calls[0].is_error, status == "failed");
+        }
+    }
+}
+
+#[test]
+fn completed_items_without_result_bodies_are_finished() {
+    for name in [
+        "subagent",
+        "collaboration",
+        "extension",
+        "image-view",
+        "image-generation",
+    ] {
+        for entry in events(name) {
+            assert!(
+                entry.calls.iter().all(|call| call.output.is_some()),
+                "{name}: {entry:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn inner_activity_respects_page_count() {
     let path = fixture("inline-array");
     let entries = events("inline-array");
