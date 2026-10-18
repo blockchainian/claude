@@ -40,6 +40,20 @@ pub(in crate::providers::codex) fn archive(client: &mut Client, thread_id: &str)
 }
 
 #[derive(Deserialize)]
+struct UnarchiveResponse {
+    #[serde(rename = "thread")]
+    _thread: serde_json::Value,
+}
+
+pub(in crate::providers::codex) fn unarchive(
+    client: &mut Client,
+    thread_id: &str,
+) -> io::Result<()> {
+    let _: UnarchiveResponse = client.request("thread/unarchive", ThreadParams { thread_id })?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
 struct DeleteResponse {}
 
 /// Interrupts any running turn and unloads the thread before removing its persisted data.

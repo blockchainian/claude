@@ -340,10 +340,6 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
     {
         return Ok(None);
     }
-    // Codex's agents overview lists only unarchived threads.
-    if column::<bool>(row, "archived")? == Some(true) {
-        return Ok(None);
-    }
     let id: String = row.get("id")?;
     let prompt = column::<String>(row, "first_user_message")?.unwrap_or_default();
     let agent_path = subagent
@@ -405,6 +401,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         transcript: column::<String>(row, "rollout_path")?
             .filter(|p| !p.is_empty())
             .map(PathBuf::from),
+        archived: column::<bool>(row, "archived")?.unwrap_or(false),
     }))
 }
 
@@ -599,8 +596,18 @@ impl Provider for CodexProvider {
         }
         let home = self.home.clone();
         let id = session.id.id.clone();
+        let archived = session.archived;
         Some(Box::new(move || {
             let mut client = app_server::Client::connect(&home)?;
+            // Codex refuses to resume an archived thread, so a prompt brings it back first.
+            if archived
+                && matches!(
+                    input,
+                    SessionInput::Prompt(_) | SessionInput::PromptWithImages { .. }
+                )
+            {
+                app_server::thread::unarchive(&mut client, &id)?;
+            }
             match input {
                 SessionInput::Prompt(text) => {
                     app_server::thread::prompt(&mut client, &id, &text, &[])
@@ -630,6 +637,9 @@ impl Provider for CodexProvider {
     fn archive(&self, session: &Session) -> io::Result<()> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
+        }
+        if session.archived {
+            return Ok(());
         }
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::archive(&mut client, &session.id.id)

@@ -936,6 +936,7 @@ fn session(
         background: summary.background,
         last_prompt: summary.last_prompt,
         transcript: path,
+        archived: false,
     }
 }
 

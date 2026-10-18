@@ -1091,10 +1091,7 @@ impl App {
             Action::Archive(id) => {
                 if let Some(session) = self.session(&id) {
                     match self.hub.provider(id.provider).archive(&session) {
-                        Ok(()) => {
-                            self.view.hide(&id);
-                            self.refresh();
-                        }
+                        Ok(()) => self.refresh(),
                         Err(error) => self
                             .view
                             .set_notice(Some(format!("Failed to archive: {error}"))),

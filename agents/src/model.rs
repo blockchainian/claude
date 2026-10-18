@@ -123,6 +123,8 @@ pub struct Session {
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,
     pub transcript: Option<PathBuf>,
+    /// Archived by its provider; still listed as inactive.
+    pub archived: bool,
 }
 
 /// Why a Claude session running in another terminal takes no input here, and how to fix it.

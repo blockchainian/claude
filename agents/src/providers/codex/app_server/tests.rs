@@ -191,12 +191,12 @@ fn stop_and_archive_thread(manager: bool) {
     .unwrap();
     assert!(archived);
     assert!(
-        !provider
+        provider
             .snapshot(1)
             .unwrap()
             .sessions
             .iter()
-            .any(|candidate| candidate.id == session.id)
+            .any(|candidate| candidate.id == session.id && candidate.archived)
     );
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
     provider.delete(&session).and_then(|delete| delete()).unwrap();

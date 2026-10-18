@@ -52,6 +52,7 @@ fn fixture() -> View {
         tasks: Vec::new(),
         last_prompt: None,
         transcript: None,
+        archived: false,
     };
     view.set_sessions(vec![row], false);
     view

@@ -165,6 +165,7 @@ mod tests {
             tasks: Vec::new(),
             last_prompt: None,
             transcript: None,
+            archived: false,
         }
     }
     fn screen(view: &View, width: u16, height: u16) -> String {

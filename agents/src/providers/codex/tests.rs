@@ -127,15 +127,18 @@ fn request_user_input_pending_answered_and_offline() {
 }
 
 #[test]
-fn archived_threads_are_not_listed() {
+fn archived_threads_are_listed_as_inactive() {
     let (dir, mut provider) = fixture();
     Connection::open(dir.path().join("state_5.sqlite"))
         .unwrap()
         .execute("UPDATE threads SET archived=1 WHERE id='thread-0'", [])
         .unwrap();
     let sessions = provider.refresh(2).sessions;
-    assert_eq!(sessions.len(), 13);
-    assert!(!sessions.iter().any(|session| session.id.id == "thread-0"));
+    assert_eq!(sessions.len(), 14);
+    let archived = sessions.iter().find(|s| s.id.id == "thread-0").unwrap();
+    assert!(archived.archived);
+    assert_eq!(archived.status, SessionStatus::Inactive);
+    assert!(sessions.iter().filter(|s| s.archived).count() == 1);
 }
 
 #[test]
