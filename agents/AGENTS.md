@@ -28,6 +28,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Details panel
 
+- Sections run Tasks, Background, Update, Last activity, Needs attention, then the prompt and its queued prompts at the bottom.
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
 - The activity section is `Last activity`.
 
@@ -39,7 +40,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - Selected rows use the task cursor style across the column, including both padding cells.
 - A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. The detail wheel scrolls only its content.
 - Selecting the newest event follows arriving events. Older selections stay on their event and show the border's New button only when new events arrive; clicking it selects newest and follows again.
-- Switching tasks resets the log selection to newest and resumes following.
+- Switching tasks or sending a prompt resets the log selection to newest and resumes following.
 - Double click, text selection and list/detail search remain independent of following.
 - Log details are a sequence of sections, one per message or tool call, with no merged event title. Every section starts with a plain title row that scrolls with its body; sections have one blank row between them. Tool titles put the subagent type (or tool display name) on the left and description, name or tool title in the center; task notifications use `Task <id>` on the left. Message titles put the sender on the left and kind in the center. Single-tool and message sections use the event time; merged tool sections use each call’s duration. Subagent types, names and descriptions appear only in titles.
 - Log detail times share the list’s time-column geometry at the panel’s right edge. Title rows place details on the left, the title on the panel midline and the time in its column; titles move left to clear the time column and truncate only when wider than the available space. Body groups stay left of the time column and use the same panel-midline placement: prose wraps at the reading width, while preformatted lines use the full available width and truncate with an ellipsis. List rows also center on the panel midline, moving left to clear the time column.

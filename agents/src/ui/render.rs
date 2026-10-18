@@ -771,9 +771,8 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: prompt, tasks, background, message, activity,
-        // needs attention. The title
-        // sits on the rule above the panel.
+        // Sections top to bottom: tasks, background, message, activity, needs attention,
+        // prompt. The title sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
@@ -811,63 +810,6 @@ impl View {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        if !session.prompt.trim().is_empty()
-            || session
-                .parent
-                .as_ref()
-                .is_none_or(|parent| parent.provider != ProviderId::Codex)
-        {
-            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
-                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
-            } else {
-                centered_header("Prompt".dim().into(), Line::default(), width)
-            };
-            separate_section(&mut items);
-            items.push(prompt_header.into());
-            let prompt_text = match session.prompt.trim() {
-                "" => "No prompt available.",
-                prompt => prompt,
-            };
-            let prompt_start = items.len();
-            let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
-            items.extend(prompt_body.into_iter().map(Item::from));
-            bodies.push(prompt_start..items.len());
-            keys.push(body_key("Prompt", &session.prompt));
-            copies.push(
-                Some((session.prompt.as_str(), "Copied prompt"))
-                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
-            );
-            body_links.push(super::links::text_links(
-                &session.prompt,
-                &session.cwd,
-                &session.prompt_images,
-            ));
-            item_links.resize(items.len(), Vec::new());
-        }
-        for queued in &session.queued {
-            let first = wrap_details(queued, &session.cwd, width, true)
-                .into_iter()
-                .next()
-                .unwrap_or_default();
-            let visible = if first.width() > width {
-                width - 1
-            } else {
-                width
-            } as u16;
-            let mut cells =
-                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
-                    .pop()
-                    .unwrap_or_default();
-            cells.retain(|(columns, _)| columns.end <= visible);
-            item_links.push(super::links::row_links(
-                &cells,
-                &super::links::text_links(queued, &session.cwd, &[]),
-            ));
-            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
         if !tasks.is_empty() {
             separate_section(&mut items);
             let in_progress = tasks
@@ -1062,6 +1004,63 @@ impl View {
             copies.push(None);
             body_links.push(Vec::new());
         }
+        item_links.resize(items.len(), Vec::new());
+
+        if !session.prompt.trim().is_empty()
+            || session
+                .parent
+                .as_ref()
+                .is_none_or(|parent| parent.provider != ProviderId::Codex)
+        {
+            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
+            } else {
+                centered_header("Prompt".dim().into(), Line::default(), width)
+            };
+            separate_section(&mut items);
+            items.push(prompt_header.into());
+            let prompt_text = match session.prompt.trim() {
+                "" => "No prompt available.",
+                prompt => prompt,
+            };
+            let prompt_start = items.len();
+            let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
+            items.extend(prompt_body.into_iter().map(Item::from));
+            bodies.push(prompt_start..items.len());
+            keys.push(body_key("Prompt", &session.prompt));
+            copies.push(
+                Some((session.prompt.as_str(), "Copied prompt"))
+                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
+            );
+            body_links.push(super::links::text_links(
+                &session.prompt,
+                &session.cwd,
+                &session.prompt_images,
+            ));
+            item_links.resize(items.len(), Vec::new());
+        }
+        for queued in &session.queued {
+            let first = wrap_details(queued, &session.cwd, width, true)
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            let visible = if first.width() > width {
+                width - 1
+            } else {
+                width
+            } as u16;
+            let mut cells =
+                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
+                    .pop()
+                    .unwrap_or_default();
+            cells.retain(|(columns, _)| columns.end <= visible);
+            item_links.push(super::links::row_links(
+                &cells,
+                &super::links::text_links(queued, &session.cwd, &[]),
+            ));
+            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+        }
+
         item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];

@@ -1,9 +1,9 @@
-                 Prompt
-Parent
-
                Background
 ───────────── Nested agent ─────── 2m 5s
 Read files
 ───────────── Check files ──────── 1m 5s
 Read files
 ────────────── Run checks ────────── 10s
+
+                 Prompt
+Parent

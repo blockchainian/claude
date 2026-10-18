@@ -527,13 +527,20 @@ impl View {
             return;
         }
         let target = self.task_input(id);
-        if let crate::providers::SessionInput::Prompt(text)
+        let prompt = if let crate::providers::SessionInput::Prompt(text)
         | crate::providers::SessionInput::PromptWithImages { text, .. } = input
         {
             target.begin_send(text);
-        }
+            true
+        } else {
+            false
+        };
         target.state = prompt_box::SendState::Ready;
         target.submitting = true;
+        // A new prompt takes the log back to its newest event and keeps following it.
+        if prompt && self.selected_id() == Some(id) {
+            self.show_newest_log();
+        }
     }
 
     pub(crate) fn input_complete(

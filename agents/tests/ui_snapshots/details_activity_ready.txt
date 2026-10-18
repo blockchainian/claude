@@ -1,8 +1,8 @@
-                 Prompt           10m 5s
-Activity task
-
                  Update           1h ago
 Checking the project
 
              Last activity        7s ago
 Run checks
+
+                 Prompt           10m 5s
+Activity task

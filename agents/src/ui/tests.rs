@@ -747,8 +747,8 @@ fn details_body_changed_while_away_opens_folded() {
         details_panel(&view);
     }
     let scrolled = details_reveal(&view);
-    let prompt = 0;
-    assert!(scrolled[prompt] > 0 && scrolled[1] > 0, "{scrolled:?}");
+    let prompt = scrolled.len() - 1;
+    assert!(scrolled[prompt] > 0 && scrolled[0] > 0, "{scrolled:?}");
     let index = view.selected;
     key(&mut view, KeyCode::Down);
     details_panel(&view);
@@ -805,13 +805,14 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
         before[(pr.x, pr.y)].diff_option,
         ratatui::buffer::CellDiffOption::ForcedWidth(_)
     ));
-    let prompt = viewport.details_scroll.bodies[0].start as u16 + body.y;
-    assert!(viewport.details_scroll.hidden[0] > 0);
+    let prompt_index = viewport.details_scroll.bodies.len() - 1;
+    let prompt = viewport.details_scroll.bodies[prompt_index].start as u16 + body.y;
+    assert!(viewport.details_scroll.hidden[prompt_index] > 0);
     drop(viewport);
     view.scroll_content_row(true, false, prompt);
     let mut after = Buffer::empty(area);
     view.render_at(area, &mut after, now);
-    assert!(view.viewport.borrow().details_scroll.reveal[0] > 0);
+    assert!(view.viewport.borrow().details_scroll.reveal[prompt_index] > 0);
     let after_y = (body.y..body.bottom())
         .find(|&y| {
             (body.x..body.right())
@@ -1928,8 +1929,8 @@ fn details_include_attention_and_clip_messages() {
             .lines()
             .position(|line| !line.contains("Group:") && line.contains(label))
     };
-    assert!(position("Prompt") < position("Update"));
-    assert!(position("Prompt") < position("Needs attention"));
+    assert!(position("Update") < position("Prompt"));
+    assert!(position("Needs attention") < position("Prompt"));
     let viewport = view.viewport.borrow();
     let folder = viewport
         .details_links
@@ -2140,6 +2141,8 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
     assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+    let rendered = screen(&view, 120, 48);
+    assert!(rendered.find("1. Cancel").unwrap() < rendered.find("2. Permanently delete").unwrap());
     assert_eq!(
         view.center_footer_hints().to_string(),
         "↑/↓ move  enter select  esc back"
@@ -2238,7 +2241,7 @@ fn lifecycle_fixture() -> View {
 }
 
 #[test]
-fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
+fn archive_dialog_shows_codex_copy_and_one_accepts_at_once() {
     let mut view = lifecycle_fixture();
     for row in &mut view.rows {
         row.id.provider = ProviderId::Codex;
@@ -2264,15 +2267,21 @@ fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(dialog.contains("then archives them. Their history can be restored from the"));
-    assert!(rendered.contains("2. Archive task and child agents"));
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(rendered.contains("1. Archive task and child agents"));
+    assert!(view.confirm_dialog.as_ref().unwrap().confirm);
+    assert!(rendered.find("1. Archive").unwrap() < rendered.find("2. Cancel").unwrap());
+    assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Archive(id.clone())));
     key(&mut view, KeyCode::Char('a'));
     assert_eq!(
-        key(&mut view, KeyCode::Char('2')),
+        key(&mut view, KeyCode::Char('1')),
         Some(Action::Archive(id.clone()))
     );
     key(&mut view, KeyCode::Char('a'));
     key(&mut view, KeyCode::Down);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    key(&mut view, KeyCode::Char('a'));
+    key(&mut view, KeyCode::Down);
+    key(&mut view, KeyCode::Up);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
         Some(Action::Archive(id.clone()))
@@ -2280,7 +2289,7 @@ fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
 }
 
 #[test]
-fn archive_dialog_shows_claude_copy_and_two_accepts_at_once() {
+fn archive_dialog_shows_claude_copy_and_one_accepts_at_once() {
     let mut view = lifecycle_fixture();
     assert_eq!(key(&mut view, KeyCode::Char('a')), None);
     let rendered = screen(&view, 120, 48);
@@ -2292,12 +2301,57 @@ fn archive_dialog_shows_claude_copy_and_two_accepts_at_once() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(dialog.contains("This stops the session, then archives it on claude.ai. Its history can be restored from the resume picker."));
-    assert!(rendered.contains("2. Archive session"));
+    assert!(rendered.contains("1. Archive session"));
     assert!(!rendered.contains("Archive task and child agents"));
+    assert!(view.confirm_dialog.as_ref().unwrap().confirm);
+    assert!(rendered.find("1. Archive session").unwrap() < rendered.find("2. Cancel").unwrap());
     assert_eq!(
-        key(&mut view, KeyCode::Char('2')),
+        key(&mut view, KeyCode::Char('1')),
         Some(Action::Archive(session_key("42")))
     );
+}
+
+#[test]
+fn removal_dialog_mouse_follows_visible_options() {
+    for archive in [true, false] {
+        for option in 0..2 {
+            let mut view = lifecycle_fixture();
+            key(&mut view, if archive { KeyCode::Char('a') } else { KeyCode::Backspace });
+            let area = Rect::new(7, 3, 120, 48);
+            let mut buf = Buffer::empty(area);
+            view.render(area, &mut buf);
+            let label = format!("{}.", option + 1);
+            let (x, y) = (area.y..area.bottom())
+                .flat_map(|y| (area.x..area.right() - 1).map(move |x| (x, y)))
+                .find(|&(x, y)| format!("{}{}", buf[(x, y)].symbol(), buf[(x + 1, y)].symbol()) == label)
+                .unwrap();
+            let action = click_mouse(&mut view, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+            let expected = if (option == 0) == archive {
+                Some(if archive { Action::Archive(session_key("42")) } else { Action::Delete(session_key("42")) })
+            } else { None };
+            assert_eq!(action, expected);
+            assert!(view.confirm_dialog.is_none());
+        }
+    }
+}
+
+#[test]
+fn archive_dialog_cancel_and_position_keys() {
+    for code in [KeyCode::Char('2'), KeyCode::Esc] {
+        let mut view = lifecycle_fixture();
+        key(&mut view, KeyCode::Char('a'));
+        assert_eq!(key(&mut view, code), None);
+        assert!(view.confirm_dialog.is_none());
+    }
+    for code in [KeyCode::End, KeyCode::PageDown] {
+        let mut view = lifecycle_fixture();
+        key(&mut view, KeyCode::Char('a'));
+        key(&mut view, code);
+        assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+        key(&mut view, KeyCode::Home);
+        assert!(view.confirm_dialog.as_ref().unwrap().confirm);
+        assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::Archive(session_key("42"))));
+    }
 }
 
 #[test]
@@ -2773,8 +2827,8 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
             assert_eq!(viewport.details_scroll.fallback_max, None);
             assert_eq!(viewport.details_copy.len(), 3);
             assert!(viewport.details_scroll.hidden[0] > 0);
-            assert!(viewport.details_scroll.hidden[1] > 0);
-            assert_eq!(viewport.details_scroll.hidden[2], 0);
+            assert_eq!(viewport.details_scroll.hidden[1], 0);
+            assert!(viewport.details_scroll.hidden[2] > 0);
         } else {
             assert!(viewport.details_scroll.fallback_max.unwrap() > 0);
         }
@@ -3372,7 +3426,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_prompt_tasks_background_update_activity() {
+fn details_sections_run_tasks_background_update_activity_prompt() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         kind: crate::log::Kind::Tool,
@@ -3392,11 +3446,11 @@ fn details_sections_run_prompt_tasks_background_update_activity() {
     }];
     let rendered = queued_details(row, 40);
     let positions = [
-        "Prompt\n",
         "Tasks",
         "Background\n",
         "Update",
         "Last activity",
+        "Prompt\n",
     ]
     .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
@@ -3422,7 +3476,7 @@ fn details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_details(row.clone(), 22);
-    assert!(rendered.find("Prompt\n").unwrap() < rendered.find("Background\n").unwrap());
+    assert!(rendered.find("Background\n").unwrap() < rendered.find("Prompt\n").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
@@ -3440,7 +3494,7 @@ fn details_background_boxes_tail_and_clip_output() {
             .collect::<Vec<_>>()
             .join("\n")
             .starts_with(
-                "Prompt\nBackground task\n\nBackground\n…\n\nUpdate\nChecking the project"
+                "Background\n…\n\nUpdate\nChecking the project\n\nPrompt\nBackground task"
             ),
         "{clipped}"
     );
@@ -3666,19 +3720,30 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 1)].fg, crate::theme::inline_code_color());
+    let prompt_y = rendered
+        .lines()
+        .position(|line| line.trim() == "Prompt")
+        .unwrap() as u16;
+    let update_y = rendered
+        .lines()
+        .position(|line| line.trim() == "Update")
+        .unwrap() as u16;
+    assert_eq!(
+        buffer[(4, prompt_y + 1)].fg,
+        crate::theme::inline_code_color()
+    );
     assert!(
-        buffer[(14, 1)]
+        buffer[(14, prompt_y + 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, 2)]
+        buffer[(2, prompt_y + 2)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 7)].fg, Color::Yellow);
-    assert_eq!(buffer[(0, 9)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, update_y + 3)].fg, Color::Yellow);
+    assert_eq!(buffer[(0, update_y + 5)].fg, Color::Cyan);
 }
 
 #[test]

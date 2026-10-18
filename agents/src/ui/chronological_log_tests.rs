@@ -47,6 +47,24 @@ fn chronological_rows_follow_appends_at_bottom() {
 }
 
 #[test]
+fn sending_a_prompt_returns_the_log_to_live_tail() {
+    let (_dir, mut view, events) = fixture();
+    view.set_log(events[..8].to_vec());
+    draw(&view);
+    view.navigate_log(KeyCode::Home);
+    draw(&view);
+    assert!(!view.following_log());
+    let id = view.selected_id().unwrap().clone();
+    view.input_sending(&id, &crate::providers::SessionInput::Prompt("next".into()));
+    draw(&view);
+    assert!(view.following_log());
+    view.set_log(events[..10].to_vec());
+    draw(&view);
+    assert_eq!(view.viewport.borrow().log_rows, vec![6, 7, 8, 9]);
+    assert_eq!(view.viewport.borrow().log_unseen, 0);
+}
+
+#[test]
 fn chronological_appends_preserve_older_view_and_count_new_rows() {
     let (_dir, mut view, events) = fixture();
     view.set_log(events[..8].to_vec());
