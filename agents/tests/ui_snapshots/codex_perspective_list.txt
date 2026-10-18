@@ -1,6 +1,6 @@
 root
-Spawn agent · alpha
-Spawn agent · beta
+Spawn agent → alpha
+Spawn agent → beta
 Wait agent
 message → beta
 Wait agent
@@ -13,13 +13,13 @@ Wait agent
 beta → beta 完成
 Wait agent
 alpha → alpha 完成
-Followup task · alpha
+Followup task → alpha
 Wait agent
 alpha → 追加完成
 
 alpha
 root → new task
-Spawn agent · alpha_kid
+Spawn agent → alpha_kid
 Wait agent
 alpha_kid → 孙子完成
 message → beta

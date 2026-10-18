@@ -698,7 +698,7 @@ fn agent_route(
     let route = format!("{} → {}", agent_name(sender), agent_name(target));
     let title = if rule.assignment {
         format!(
-            "{} · {}",
+            "{} → {}",
             crate::providers::tool::title_name(name),
             agent_name(target)
         )
@@ -2463,7 +2463,7 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "Spawn agent · claude_calls");
+        assert_eq!(call.title, "Spawn agent → claude_calls");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2849,7 +2849,7 @@ mod tests {
                     format!("message → {subject}")
                 } else {
                     format!(
-                        "{} · {subject}",
+                        "{} → {subject}",
                         crate::providers::tool::title_name(payload["name"].as_str().unwrap())
                     )
                 };
@@ -3062,9 +3062,9 @@ mod tests {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
-                "Spawn agent · real_scan",
+                "Spawn agent → real_scan",
                 "message → root",
-                "Followup task · ux_probe",
+                "Followup task → ux_probe",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -3292,8 +3292,8 @@ mod perspective_tests {
     fn perspective_assignments_use_function_names() {
         let events = fixture("root");
         for (name, title) in [
-            ("spawn_agent", "Spawn agent · alpha"),
-            ("followup_task", "Followup task · alpha"),
+            ("spawn_agent", "Spawn agent → alpha"),
+            ("followup_task", "Followup task → alpha"),
         ] {
             assert!(
                 events

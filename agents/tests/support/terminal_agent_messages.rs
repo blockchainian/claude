@@ -92,8 +92,8 @@ fn terminal_codex_agent_message_bodies() {
     let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
     for (fixture, subject) in collaboration {
         let label = match subject {
-            "demo_sub" => format!("Spawn agent · {subject}"),
-            "ux_probe" => format!("Followup task · {subject}"),
+            "demo_sub" => format!("Spawn agent → {subject}"),
+            "ux_probe" => format!("Followup task → {subject}"),
             _ => format!("message → {subject}"),
         };
         let (row, line) = encrypted_capture
@@ -227,7 +227,7 @@ fn terminal_codex_collaboration_navigation() {
     let (column, row) = find(&capture, "Collaboration parent");
     tmux.mouse(0, column, row, true);
     let capture = tmux.capture_when(|capture| capture.contains("demo_sub → 演示完成"));
-    let (column, row) = find(&capture, "Spawn agent · demo_sub");
+    let (column, row) = find(&capture, "Spawn agent → demo_sub");
     tmux.mouse(0, column, row, true);
     let spawn = tmux.capture_when(|capture| {
         capture.contains("Spawn agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")

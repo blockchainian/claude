@@ -1,16 +1,16 @@
-Spawn agent · claude_calls — 120 columns
+Spawn agent → claude_calls — 120 columns
 Spawn agent                                           claude_calls
 
                                                        [scrubbed]
-Spawn agent · claude_calls — 200 columns
+Spawn agent → claude_calls — 200 columns
 Spawn agent                                                                                   claude_calls
 
                                                                                                [scrubbed]
-Spawn agent · codex_calls — 120 columns
+Spawn agent → codex_calls — 120 columns
 Spawn agent                                            codex_calls
 
                                                        [scrubbed]
-Spawn agent · codex_calls — 200 columns
+Spawn agent → codex_calls — 200 columns
 Spawn agent                                                                                    codex_calls
 
                                                                                                [scrubbed]
