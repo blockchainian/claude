@@ -26,14 +26,15 @@ fn terminal_ask_questions_render_real_rejection_and_answer() {
         let path = std::env::temp_dir().join(format!("agents-ask-question-{name}.txt"));
         std::fs::write(&path, &capture).unwrap();
         assert!(capture.contains(header), "{capture}");
-        assert!(capture.contains("\"questions\": ["), "{capture}");
+        assert!(capture.contains("• "), "{capture}");
+        assert!(!capture.contains("\"questions\": ["), "{capture}");
         assert!(capture.contains("(Recommended)"), "{capture}");
         assert!(!capture.contains("questions: [{"), "{capture}");
         let output_at = capture.find(output).expect(&capture);
         if name == "rejected" {
             assert!(
                 output_at
-                    > capture
+                    < capture
                         .find("The user doesn't want to proceed")
                         .expect(&capture)
             );

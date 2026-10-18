@@ -265,7 +265,14 @@ fn detail_without_subject_centers_tool_in_both_modes() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-names.jsonl");
     let event = crate::providers::claude::log::tail(&path, 200)
         .unwrap()
-        .remove(0);
+        .into_iter()
+        .find(|event| {
+            event
+                .calls
+                .iter()
+                .any(|call| call.name == "SubagentHandback")
+        })
+        .unwrap();
     for width in [200, 120] {
         let (mut view, now) = log_fixture();
         view.select_fixture_event(Some(event.clone()));
@@ -276,7 +283,7 @@ fn detail_without_subject_centers_tool_in_both_modes() {
             view.center_layout(Rect::new(0, 0, width, 50)).log,
         );
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
-        let title = "Agent";
+        let title = "SubagentHandback";
         assert_eq!(
             header[..header.rfind(title).unwrap()].width(),
             usize::from(super::super::centering::centered_x(
@@ -290,7 +297,7 @@ fn detail_without_subject_centers_tool_in_both_modes() {
             screen
                 .lines()
                 .skip(usize::from(detail.y + 2))
-                .any(|line| line.contains("\"description\":"))
+                .any(|line| line.contains("\"message\":"))
         );
     }
 }

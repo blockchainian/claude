@@ -20,12 +20,23 @@ fn output(event: &crate::log::Event) -> &str {
 }
 
 #[test]
-fn ask_question_titles_use_tool_name_without_subject() {
-    for fixture in [REJECTED, ANSWERED] {
-        let title = "AskUserQuestion";
+fn ask_question_list_uses_questions_and_detail_uses_headers() {
+    for (fixture, title) in [
+        (REJECTED, "AskUserQuestion · 压缩摘要"),
+        (ANSWERED, "AskUserQuestion · 子命令 · cd"),
+    ] {
         let event = question_event(fixture);
-        assert_eq!(event.calls[0].title, title);
-        assert_eq!(event.body, title);
+        let record: serde_json::Value =
+            serde_json::from_str(fixture.lines().next().unwrap()).unwrap();
+        let questions = record["message"]["content"][0]["input"]["questions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|question| question["question"].as_str().unwrap())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        assert_eq!(event.calls[0].title, questions);
+        assert_eq!(event.body, questions);
         assert!(log::shows_calls(&event));
         let (mut view, now) = log_fixture();
         view.set_log(vec![event.clone()]);
@@ -33,15 +44,18 @@ fn ask_question_titles_use_tool_name_without_subject() {
         let screen = log_screen(&view, 180, 60, now);
         let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
         let title: String = title.chars().filter(|ch| !ch.is_whitespace()).collect();
-        assert!(compact.matches(&title).count() >= 2, "{screen}");
+        assert!(compact.contains(&title), "{screen}");
         let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
-        assert!(detail.sections[0].title.left.is_none());
-        assert_eq!(detail.sections[0].title.title, event.calls[0].title);
+        assert_eq!(
+            detail.sections[0].title.left.as_deref(),
+            Some("AskUserQuestion")
+        );
+        assert_eq!(detail.sections[0].title.title, event.calls[0].detail_title);
     }
 }
 
 #[test]
-fn ask_question_input_is_copyable_json() {
+fn ask_question_input_is_a_copyable_bullet_list() {
     let mut records: Vec<serde_json::Value> = REJECTED
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -55,8 +69,10 @@ fn ask_question_input_is_copyable_json() {
             .join("\n");
         let event = question_event(&fixture);
         let parts = detail_parts(&event);
-        let expected =
-            serde_json::to_string_pretty(&records[0]["message"]["content"][0]["input"]).unwrap();
+        let suffix = if multi { " (multi-select)" } else { "" };
+        let expected = format!(
+            "• 压缩摘要那条在 agents 里怎么处理？{suffix}\n  • 显示成压缩标记 (Recommended): 不当用户消息，日志里出一行“Conversation compacted”之类的系统行\n  • 直接隐藏: 日志里完全不显示这条"
+        );
         assert_eq!(parts[0].source, expected);
         for width in [24, 180] {
             let (mut view, now) = log_fixture();
@@ -81,13 +97,10 @@ fn ask_question_input_is_copyable_json() {
             assert!(!rows.is_empty());
             for row in rows {
                 for (columns, bytes) in &row.cells {
-                    let source = &parts[0].source[bytes.clone()];
-                    let cell = buf[(region.area.x + columns.start, row.y)].symbol();
-                    if cell == "…" {
-                        assert!(!source.is_empty());
-                    } else {
-                        assert_eq!(source, cell);
-                    }
+                    assert_eq!(
+                        &parts[0].source[bytes.clone()],
+                        buf[(region.area.x + columns.start, row.y)].symbol()
+                    );
                 }
             }
         }
@@ -95,11 +108,19 @@ fn ask_question_input_is_copyable_json() {
 }
 
 #[test]
-fn ask_question_rejection_preserves_output_order() {
+fn ask_question_rejection_moves_questions_before_explanation() {
     let event = question_event(REJECTED);
     let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
     let original = record["message"]["content"][0]["content"].as_str().unwrap();
-    assert_eq!(output(&event), original);
+    let (explanation, questions) = original.split_once("Questions asked:").unwrap();
+    assert_eq!(
+        output(&event),
+        format!(
+            "Questions asked:{}\n\n{}",
+            questions.trim_end(),
+            explanation.trim_end()
+        )
+    );
     assert!(log::open_text(&event).contains(output(&event)));
 }
 

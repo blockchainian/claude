@@ -1,5 +1,6 @@
 use crate::log::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
+use crate::providers::tool::{Format, Input, Subject, Summary as ToolSummary};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -15,9 +16,76 @@ fn tool_kind(name: &str) -> Kind {
 }
 
 const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
-    subjects: &[("exec_command", "path"), ("apply_patch", "paths")],
-    inputs: &[("exec_command", "command"), ("apply_patch", "")],
+    subjects: &[
+        ("exec_command", Subject::Field("path")),
+        ("apply_patch", Subject::Field("paths")),
+        ("AskUserQuestion", Subject::QuestionHeaders),
+        ("request_user_input", Subject::QuestionHeaders),
+        ("Agent", Subject::Field("description")),
+        ("Task", Subject::Field("description")),
+        ("spawn_agent", Subject::Field("task_name")),
+        ("SendMessage", Subject::Field("to")),
+        ("send_message", Subject::Field("target")),
+        ("WebFetch", Subject::Field("url")),
+        ("Skill", Subject::Field("skill")),
+    ],
+    inputs: &[
+        ("exec_command", Input::Field("command"), Format::Text),
+        ("apply_patch", Input::Field(""), Format::Text),
+        ("AskUserQuestion", Input::QuestionList, Format::Text),
+        ("request_user_input", Input::QuestionList, Format::Text),
+        ("Agent", Input::Field("prompt"), Format::Markdown),
+        ("Task", Input::Field("prompt"), Format::Markdown),
+        ("spawn_agent", Input::AgentMessage, Format::Markdown),
+        ("SendMessage", Input::Field("message"), Format::Markdown),
+        ("send_message", Input::Field("message"), Format::Markdown),
+        ("WebFetch", Input::Field("prompt"), Format::Text),
+        ("Skill", Input::Arguments, Format::Text),
+    ],
+    expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
+    summaries: &[
+        ("AskUserQuestion", ToolSummary::Questions),
+        ("request_user_input", ToolSummary::Questions),
+        (
+            "spawn_agent",
+            ToolSummary::Participant {
+                field: "task_name",
+                label: None,
+            },
+        ),
+        (
+            "send_message",
+            ToolSummary::Participant {
+                field: "target",
+                label: Some("To"),
+            },
+        ),
+    ],
+    activities: &[],
 };
+
+#[derive(Clone, Copy)]
+enum Output {
+    QuestionRejection,
+}
+
+const OUTPUTS: &[(&str, Output)] = &[
+    ("AskUserQuestion", Output::QuestionRejection),
+    ("request_user_input", Output::QuestionRejection),
+];
+
+fn response_output(name: &str, text: &str) -> Vec<Section> {
+    let mode = OUTPUTS.iter().find_map(|(tool, mode)| {
+        (*tool == name.rsplit('.').next().unwrap_or(name)).then_some(*mode)
+    });
+    let text = match mode {
+        Some(Output::QuestionRejection) => {
+            crate::providers::tool::rejected_questions(text).unwrap_or_else(|| text.to_owned())
+        }
+        None => text.to_owned(),
+    };
+    vec![text_section("output", &text)]
+}
 
 const CHUNK: u64 = 64 * 1024;
 
@@ -463,9 +531,11 @@ fn tool_body(payload: &Value) -> Option<String> {
         return None;
     }
     let arguments = tool_arguments(payload).unwrap_or(Value::Null);
+    let raw_name = response_tool_name(payload);
     let (name, subject, _) =
-        crate::providers::tool::presentation(&response_tool_name(payload), &arguments, &TOOL_RULES);
-    Some(subject.unwrap_or(name))
+        crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
+    crate::providers::tool::summary(&raw_name, &arguments, &TOOL_RULES, false)
+        .or_else(|| Some(subject.unwrap_or(name)))
 }
 
 fn tool_arguments(payload: &Value) -> Option<Value> {
@@ -498,12 +568,19 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let mut call = ToolCall {
         detail_left: subject.as_ref().map(|_| name.clone()).unwrap_or_default(),
         detail_title: subject.clone().unwrap_or_else(|| name.clone()),
-        show_details: true,
+        show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: subject.unwrap_or_else(|| name.clone()),
+        title: crate::providers::tool::summary(
+            &response_tool_name(payload),
+            arguments.as_ref().unwrap_or(&Value::Null),
+            &TOOL_RULES,
+            false,
+        )
+        .or(subject)
+        .unwrap_or_else(|| name.clone()),
         name,
         input,
-        output: output.map(|text| vec![text_section("output", text)]),
+        output: output.map(|text| response_output(&response_tool_name(payload), text)),
         exit_code: None,
         is_error: false,
         duration: None,
@@ -1628,7 +1705,7 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "spawn_agent");
+        assert_eq!(call.title, "spawn_agent (claude_calls) [scrubbed]");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -1667,9 +1744,9 @@ mod tests {
             .filter(|call| call.name == "spawn_agent")
             .collect();
         assert_eq!(spawn.len(), 2);
-        assert!(
-            spawn[0].input.iter().any(|section| matches!(section, Section::Json { text, .. } if serde_json::from_str::<Value>(text).unwrap()["message"] == "[scrubbed]"))
-        );
+        assert!(spawn[0].input.iter().any(
+            |section| matches!(section, Section::Markdown { text, .. } if text == "[scrubbed]")
+        ));
         assert!(spawn[0].output.is_some());
         assert_eq!(spawn[1].output, None);
         let custom = calls.iter().find(|call| call.name == "js_repl").unwrap();
@@ -1899,6 +1976,90 @@ mod tests {
     }
 
     #[test]
+    fn question_rejection_moves_recorded_questions_before_explanation() {
+        let payload = input_records("pending")
+            .into_iter()
+            .find(|record| record["payload"]["name"] == "request_user_input")
+            .unwrap()["payload"]
+            .clone();
+        let result: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-questions-rejected.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let output = result["message"]["content"][0]["content"].as_str().unwrap();
+        let (explanation, questions) = output.split_once("Questions asked:").unwrap();
+        let call = response_tool_call(&payload, Some(output));
+        assert_eq!(
+            call.output.unwrap(),
+            vec![text_section(
+                "output",
+                &format!(
+                    "Questions asked:{}\n\n{}",
+                    questions.trim_end(),
+                    explanation.trim_end()
+                )
+            )]
+        );
+    }
+
+    #[test]
+    fn real_question_details_use_headers_and_question_list() {
+        let record = input_records("pending")
+            .into_iter()
+            .find(|record| record["payload"]["name"] == "request_user_input")
+            .unwrap();
+        let call = response_tool_call(&record["payload"], None);
+        assert_eq!(call.detail_left, "request_user_input");
+        assert_eq!(call.detail_title, "request_user_input · Color");
+        assert_eq!(call.title, "Pick a color?");
+        assert!(call.show_details);
+        assert_eq!(
+            call.input,
+            vec![Section::Prose {
+                text: "• Pick a color?\n  • Red: Choose red.\n  • Blue: Choose blue.".into(),
+                markdown: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn real_agent_details_use_markdown_messages() {
+        for (line, (tool, subject)) in
+            include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
+                .lines()
+                .take(2)
+                .zip([("spawn_agent", "real_scan"), ("send_message", "/root")])
+        {
+            let record: Value = serde_json::from_str(line).unwrap();
+            for name in [tool.to_owned(), format!("collaboration.{tool}")] {
+                let mut payload = record["payload"].clone();
+                payload["name"] = name.clone().into();
+                let call = response_tool_call(&payload, None);
+                assert_eq!(
+                    call.detail_left,
+                    crate::providers::tool::display_tool_name(&name)
+                );
+                assert_eq!(call.detail_title, subject);
+                let mut expected = Vec::new();
+                if tool == "spawn_agent" {
+                    expected.push(Section::Text {
+                        label: String::new(),
+                        text: format!("task_name: {subject}"),
+                    });
+                }
+                expected.push(Section::Markdown {
+                    label: "message".into(),
+                    text: "Review files.".into(),
+                });
+                assert_eq!(call.input, expected);
+            }
+        }
+    }
+
+    #[test]
     fn request_user_input_log_and_activity_show_question_texts() {
         for mode in ["default", "plan"] {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1906,10 +2067,10 @@ mod tests {
             let events = tail(&path, 100).unwrap();
             let question = events
                 .iter()
-                .find(|event| event.body == "request_user_input")
+                .find(|event| event.body == "Pick a color?")
                 .unwrap();
             assert_eq!(question.kind, Kind::Assistant);
-            assert_eq!(question.body, "request_user_input");
+            assert_eq!(question.body, "Pick a color?");
             assert!(question.ended_at.is_none());
             let summary = summary(&path).unwrap();
             assert_eq!(
@@ -1936,7 +2097,7 @@ mod tests {
                 }]
             );
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, "request_user_input");
+            assert_eq!(activity.label, "Pick a color?");
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -2017,7 +2178,7 @@ mod tests {
         call["payload"]["name"] = "functions.request_user_input".into();
         assert_eq!(
             tool_body(&call["payload"]).unwrap(),
-            "functions request_user_input"
+            "Pick a color? · Pick a size?"
         );
         records.push(call);
         assert_eq!(
@@ -2033,7 +2194,11 @@ mod tests {
     fn real_agent_names_in_log_and_activity() {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
-            .zip(["spawn_agent", "send_message", "followup_task"])
+            .zip([
+                "spawn_agent (real_scan) Review files.",
+                "To (/root) Review files.",
+                "followup_task",
+            ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), line).unwrap();
@@ -2067,7 +2232,11 @@ mod tests {
             record["payload"]["arguments"] = serde_json::json!({key:"reviewer"}).to_string().into();
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
-            let expected = crate::providers::tool::display_tool_name(name);
+            let expected = if name == "collaboration.send_message" {
+                "To (reviewer)".to_owned()
+            } else {
+                crate::providers::tool::display_tool_name(name)
+            };
             assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
             assert_eq!(
                 summary(file.path()).unwrap().activity.unwrap().label,

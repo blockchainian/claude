@@ -1,32 +1,16 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                               AskUserQuestion                                                      09:00:00
+AskUserQuestion                                          AskUserQuestion · 压 缩 摘 要                                                  09:00:00
 
-                         {
-                           "questions": [
-                             {
-                               "header": "压 缩 摘 要 ",
-                               "multiSelect": false,
-                               "options": [
-                                 {
-                                   "description": "不 当 用 户 消 息 ， 日 志 里 出 一 行 “Conversation compacted”之 类 的 系 统 行 ",
-                                   "label": "显 示 成 压 缩 标 记  (Recommended)"
-                                 },
-                                 {
-                                   "description": "日 志 里 完 全 不 显 示 这 条 ",
-                                   "label": "直 接 隐 藏 "
-                                 }
-                               ],
-                               "question": "压 缩 摘 要 那 条 在  agents 里 怎 么 处 理 ？ "
-                             }
-                           ]
-                         }
+                      • 压 缩 摘 要 那 条 在  agents 里 怎 么 处 理 ？
+                        • 显 示 成 压 缩 标 记  (Recommended): 不 当 用 户 消 息 ， 日 志 里 出 一 行 “Conversation compacted”之 类 的 系 统 行
+                        • 直 接 隐 藏 : 日 志 里 完 全 不 显 示 这 条
                                                                       ↓
+Questions asked:
+- "压 缩 摘 要 那 条 在  agents 里 怎 么 处 理 ？ "
+  (No answer provided)
+
 The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT…
 The user wants to clarify these questions.
     This means they may have additional information, context or questions for you.
     Take their response into account and then reformulate the questions if appropriate.
     Start by asking them what they would like to clarify.
-
-    Questions asked:
-- "压 缩 摘 要 那 条 在  agents 里 怎 么 处 理 ？ "
-  (No answer provided)

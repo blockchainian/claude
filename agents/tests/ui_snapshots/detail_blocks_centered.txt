@@ -22,65 +22,59 @@ SubAgentActivity — 200 columns
                                                                       }
                                                                                                     ↓
                                                                                                    •··
-spawn_agent — 120 columns
-                                                       spawn_agent
+spawn_agent (claude_calls) [scrubbed] — 120 columns
+spawn_agent                                           claude_calls
 
-                                              {
-                                                "message": "[scrubbed]",
-                                                "task_name": "claude_calls"
-                                              }
+                                                 task_name: claude_calls
+                                                 [scrubbed]
                                                             ↓
                                            {
                                              "task_name": "/root/claude_calls"
                                            }
-spawn_agent — 200 columns
-                                                                                               spawn_agent
+spawn_agent (claude_calls) [scrubbed] — 200 columns
+spawn_agent                                                                                   claude_calls
 
-                                                                                      {
-                                                                                        "message": "[scrubbed]",
-                                                                                        "task_name": "claude_calls"
-                                                                                      }
+                                                                                         task_name: claude_calls
+                                                                                         [scrubbed]
                                                                                                     ↓
                                                                                    {
                                                                                      "task_name": "/root/claude_calls"
                                                                                    }
-spawn_agent — 120 columns
-                                                       spawn_agent
+spawn_agent (codex_calls) [scrubbed] — 120 columns
+spawn_agent                                            codex_calls
 
-                                              {
-                                                "message": "[scrubbed]",
-                                                "task_name": "codex_calls"
-                                              }
+                                                 task_name: codex_calls
+                                                 [scrubbed]
                                                             ↓
                                                            •··
-spawn_agent — 200 columns
-                                                                                               spawn_agent
+spawn_agent (codex_calls) [scrubbed] — 200 columns
+spawn_agent                                                                                    codex_calls
 
-                                                                                      {
-                                                                                        "message": "[scrubbed]",
-                                                                                        "task_name": "codex_calls"
-                                                                                      }
+                                                                                         task_name: codex_calls
+                                                                                         [scrubbed]
                                                                                                     ↓
                                                                                                    •··
-WebFetch — 120 columns
-                                                        WebFetch
+WebFetch render.com/docs/postgresql-instance-types — 120 columns
+WebFetch                            https://render.com/docs/postgresql-instance-types
 
-{
-  "prompt": "Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection l…
-  "url": "https://render.com/docs/postgresql-instance-types"
-}
+     url: https://render.com/docs/postgresql-instance-types
+     Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and
+     price. Include any sentence about how the connection limit is computed.
                                                             ↓
-The server returned HTTP 404 Not Found.
+  The server returned HTTP 404 Not Found.
 
-The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. `gh…
-WebFetch — 200 columns
-                                                                                                WebFetch
+  The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. gh
+  for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
+WebFetch render.com/docs/postgresql-instance-types — 200 columns
+WebFetch                                                                    https://render.com/docs/postgresql-instance-types
 
-{
-  "prompt": "Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and price. Include any sentence about how the connection limit is computed…
-  "url": "https://render.com/docs/postgresql-instance-types"
-}
+                                                          url: https://render.com/docs/postgresql-instance-types
+                                                          Quote verbatim the table of Postgres instance types with RAM, CPU, max connections
+                                                          (connection limit) and price. Include any sentence about how the connection limit is
+                                                          computed.
                                                                                                     ↓
-             The server returned HTTP 404 Not Found.
+                                                            The server returned HTTP 404 Not Found.
 
-             The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. `gh` for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
+                                                            The response body was not retrieved. If this URL requires authentication, use an
+                                                            authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
+                                                            WebFetch.

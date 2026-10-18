@@ -15,20 +15,59 @@ pub(super) fn tool_hidden(name: &str) -> bool {
     )
 }
 
+use crate::providers::tool::{Format, Input, Subject, Summary};
+
 const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
     subjects: &[
-        ("Read", "file_path"),
-        ("Write", "file_path"),
-        ("Edit", "file_path"),
-        ("Bash", "description"),
-        ("ToolSearch", "query"),
+        ("Read", Subject::Field("file_path")),
+        ("Write", Subject::Field("file_path")),
+        ("Edit", Subject::Field("file_path")),
+        ("Bash", Subject::Field("description")),
+        ("ToolSearch", Subject::Field("query")),
+        ("AskUserQuestion", Subject::QuestionHeaders),
+        ("request_user_input", Subject::QuestionHeaders),
+        ("Agent", Subject::Field("description")),
+        ("Task", Subject::Field("description")),
+        ("spawn_agent", Subject::Field("description")),
+        ("SendMessage", Subject::Field("to")),
+        ("send_message", Subject::Field("to")),
+        ("WebFetch", Subject::Field("url")),
+        ("Skill", Subject::Field("skill")),
     ],
     inputs: &[
-        ("Read", ""),
-        ("Write", "content"),
-        ("Edit", ""),
-        ("Bash", "command"),
-        ("ToolSearch", ""),
+        ("Read", Input::Field(""), Format::Text),
+        ("Write", Input::Field("content"), Format::Text),
+        ("Edit", Input::Field(""), Format::Text),
+        ("Bash", Input::Field("command"), Format::Text),
+        ("ToolSearch", Input::Field(""), Format::Text),
+        ("AskUserQuestion", Input::QuestionList, Format::Text),
+        ("request_user_input", Input::QuestionList, Format::Text),
+        ("Agent", Input::Field("prompt"), Format::Markdown),
+        ("Task", Input::Field("prompt"), Format::Markdown),
+        ("spawn_agent", Input::Field("prompt"), Format::Markdown),
+        ("SendMessage", Input::Field("message"), Format::Markdown),
+        ("send_message", Input::Field("message"), Format::Markdown),
+        ("WebFetch", Input::FetchPrompt, Format::Text),
+        ("Skill", Input::Arguments, Format::Text),
+    ],
+    expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
+    summaries: &[
+        ("AskUserQuestion", Summary::Questions),
+        ("request_user_input", Summary::Questions),
+        ("Agent", Summary::Agent),
+        ("Task", Summary::Task),
+        ("SendMessage", Summary::Recipient),
+        ("WebFetch", Summary::WebFetch),
+        ("Skill", Summary::Skill),
+    ],
+    activities: &[
+        ("AskUserQuestion", Summary::Questions),
+        ("request_user_input", Summary::Questions),
+        ("Agent", Summary::AgentActivity),
+        ("Task", Summary::TaskActivity),
+        ("SendMessage", Summary::Recipient),
+        ("WebFetch", Summary::WebFetch),
+        ("Skill", Summary::Description),
     ],
 };
 
@@ -39,6 +78,9 @@ enum Output {
     Patch,
     Shell,
     Matches,
+    Questions,
+    Markdown,
+    Fetch,
 }
 
 const OUTPUTS: &[(&str, Output)] = &[
@@ -47,6 +89,11 @@ const OUTPUTS: &[(&str, Output)] = &[
     ("Edit", Output::Patch),
     ("Bash", Output::Shell),
     ("ToolSearch", Output::Matches),
+    ("AskUserQuestion", Output::Questions),
+    ("request_user_input", Output::Questions),
+    ("Agent", Output::Markdown),
+    ("SendMessage", Output::Markdown),
+    ("WebFetch", Output::Fetch),
 ];
 
 pub(super) fn tool_kind(name: &str) -> Kind {
@@ -60,6 +107,9 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     let name = block["name"].as_str()?;
     if tool_hidden(name) {
         return None;
+    }
+    if let Some(summary) = crate::providers::tool::summary(name, &block["input"], &RULES, true) {
+        return Some(summary);
     }
     let (name, subject, _) = crate::providers::tool::presentation(name, &block["input"], &RULES);
     Some(subject.unwrap_or(name))
@@ -564,10 +614,24 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             }
             crate::providers::tool::mcp_content(&content)
         };
+        if let Some(Output::Questions) = mode
+            && result.error
+            && let Some(output) = crate::providers::tool::rejected_questions(&result.content)
+        {
+            return vec![text_section("output", &output)];
+        }
         if result.error {
             return generic();
         }
         match mode {
+            Some(Output::Markdown) => vec![Section::Markdown {
+                label: "output".to_owned(),
+                text: result.content.clone(),
+            }],
+            Some(Output::Fetch) if value["result"].is_string() => vec![Section::Markdown {
+                label: "output".to_owned(),
+                text: value["result"].as_str().unwrap().to_owned(),
+            }],
             Some(Output::Read) if value["type"] == "image" => {
                 vec![Section::Placeholder(format!(
                     "[image {}]",
@@ -624,9 +688,9 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             String::new()
         },
         detail_title: title.clone(),
-        show_details: true,
+        show_details: crate::providers::tool::expanded(name, &RULES),
         id: String::new(),
-        title,
+        title: crate::providers::tool::summary(name, input, &RULES, false).unwrap_or(title),
         name: name.to_owned(),
         input: sections,
         output,
@@ -982,8 +1046,10 @@ impl Log {
         let detail_call = tool_call(name, input, result);
         let call = detail_call.title.clone();
         let path = RULES.subjects.iter().find_map(|(tool, field)| {
-            (*tool == name && *field == "file_path" && !detail_call.detail_left.is_empty())
-                .then_some(call.as_str())
+            (*tool == name
+                && *field == Subject::Field("file_path")
+                && !detail_call.detail_left.is_empty())
+            .then_some(call.as_str())
         });
         let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
@@ -1543,24 +1609,104 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn undeclared_skill_input_stays_json_and_title_uses_tool_name() {
+    fn declared_tool_details_restore_real_transcript_inputs() {
+        for fixture in [
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl"),
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl"),
+            include_str!("../../../tests/fixtures/claude-skill-call.jsonl"),
+        ] {
+            for line in fixture.lines() {
+                let record: Value = serde_json::from_str(line).unwrap();
+                for block in record["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(name) = block["name"].as_str() else {
+                        continue;
+                    };
+                    let (subject, field, markdown) = match name {
+                        "Agent" | "Task" => ("description", "prompt", true),
+                        "SendMessage" => ("to", "message", true),
+                        "WebFetch" => ("url", "prompt", false),
+                        "Skill" => ("skill", "args", false),
+                        _ => continue,
+                    };
+                    let input = &block["input"];
+                    let call = super::tool_call(name, input, None);
+                    assert_eq!(call.detail_title, input[subject].as_str().unwrap_or(name));
+                    assert_eq!(
+                        call.detail_left,
+                        if input[subject]
+                            .as_str()
+                            .is_some_and(|s| !s.trim().is_empty())
+                        {
+                            name
+                        } else {
+                            ""
+                        }
+                    );
+                    let text = input[field].as_str().unwrap_or("").to_owned();
+                    match name {
+                        "Agent" | "Task" => {
+                            assert_eq!(
+                                call.input[0],
+                                Section::Markdown {
+                                    label: "prompt".into(),
+                                    text
+                                }
+                            );
+                        }
+                        "WebFetch" => assert!(
+                            matches!(&call.input[0], Section::Text { text, .. } if text == &format!("url: {}", input["url"].as_str().unwrap()))
+                        ),
+                        "SendMessage" => assert_eq!(
+                            call.input[0],
+                            Section::Markdown {
+                                label: "message".into(),
+                                text
+                            }
+                        ),
+                        "Skill" => assert_eq!(
+                            call.input,
+                            vec![Section::Text {
+                                label: "args".into(),
+                                text
+                            }]
+                        ),
+                        _ => assert_eq!(call.input, vec![Section::Prose { text, markdown }]),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn skill_input_uses_args_and_skill_subject() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-skill-call.jsonl")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         let events = events_from(records.clone());
         let call = &events[0].calls[0];
-        assert_eq!(events[0].body, "Skill");
-        assert_eq!(call.title, "Skill");
-        assert_eq!(call.detail_left, "");
+        let input = &records[0]["message"]["content"][0]["input"];
+        assert_eq!(
+            events[0].body,
+            "computer-use:capture-window Visual Studio Code"
+        );
+        assert_eq!(call.detail_title, input["skill"].as_str().unwrap());
+        assert_eq!(call.detail_left, "Skill");
         assert_eq!(
             call.input,
-            crate::providers::tool::json_input(&records[0]["message"]["content"][0]["input"])
+            vec![Section::Text {
+                text: input["args"].as_str().unwrap().to_owned(),
+                label: "args".into(),
+            }]
         );
     }
 
     #[test]
-    fn undeclared_agent_input_stays_json_without_a_subject() {
+    fn agent_input_uses_markdown_prompt_and_description_subject() {
         let fixture =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-display.jsonl");
         for call in tail(&fixture, 10)
@@ -1568,9 +1714,9 @@ pub(crate) mod tests {
             .iter()
             .flat_map(|event| &event.calls)
         {
-            assert_eq!(call.detail_title, "Agent");
-            assert_eq!(call.detail_left, "");
-            assert!(matches!(call.input[0], Section::Json { .. }));
+            assert_ne!(call.detail_title, "Agent");
+            assert_eq!(call.detail_left, "Agent");
+            assert!(matches!(call.input[0], Section::Markdown { .. }));
         }
     }
 
@@ -1588,16 +1734,16 @@ pub(crate) mod tests {
                 .iter()
                 .find(|call| call.name == "Agent")
                 .unwrap()
-                .title,
-            "Agent"
+                .detail_title,
+            "写工具详情计划"
         );
         assert_eq!(
             calls
                 .iter()
                 .find(|call| call.name == "Skill")
                 .unwrap()
-                .title,
-            "Skill"
+                .detail_title,
+            "secrets:secrets-manager"
         );
     }
 
@@ -1741,8 +1887,8 @@ pub(crate) mod tests {
             matches!(&edit.output.as_ref().unwrap()[0], Section::Diff { text, .. } if text.starts_with("@@ -"))
         );
         let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
-        assert_eq!(agent.detail_title, "Agent");
-        assert!(matches!(&agent.input[0], Section::Json { .. }));
+        assert_ne!(agent.detail_title, "Agent");
+        assert!(matches!(&agent.input[0], Section::Markdown { .. }));
     }
 
     #[test]
@@ -1841,14 +1987,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn undeclared_questions_use_tool_name_in_log_and_activity() {
+    fn questions_use_question_texts_in_log_and_activity() {
         for fixture in [
             include_str!("../../../tests/fixtures/claude-questions-pending.jsonl"),
             include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
         ] {
             let record: serde_json::Value =
                 serde_json::from_str(fixture.lines().next().unwrap()).unwrap();
-            let _expected = record["message"]["content"][0]["input"]["questions"]
+            let expected = record["message"]["content"][0]["input"]["questions"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -1859,12 +2005,12 @@ pub(crate) mod tests {
             write!(file, "{fixture}").unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, "AskUserQuestion");
+            assert_eq!(events[0].body, expected);
             assert_eq!(events[0].kind, Kind::Assistant);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, "AskUserQuestion");
+            assert_eq!(activity.label, expected);
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -1874,10 +2020,10 @@ pub(crate) mod tests {
         let expected = [
             "Bash",
             "找那个会话",
-            "SendMessage",
-            "SendMessage",
+            "To (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
+            "To (team-lead) Report: /tmp/research",
             "SubagentHandback",
-            "WebFetch",
+            "WebFetch code.claude.com/docs/en/hooks",
             "Bash",
             "Bash",
         ];
@@ -1899,7 +2045,7 @@ pub(crate) mod tests {
     #[test]
     fn real_agent_names_in_log_and_activity() {
         let expected = [
-            "Agent",
+            "reviewer · Review files",
             "SubagentHandback",
             "(worker-id) Checks passed.",
             "(team-lead) Review files.",
@@ -1933,7 +2079,7 @@ pub(crate) mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         for (mut record, tool_name, expected) in [
-            (records[0].clone(), "Task", "Task"),
+            (records[0].clone(), "Task", "Task (reviewer) Review files"),
             (records[1].clone(), "SubagentHandback", "SubagentHandback"),
         ] {
             let block = &mut record["message"]["content"][0];
@@ -1967,7 +2113,14 @@ pub(crate) mod tests {
             ("SubagentHandback", "SubagentHandback"),
         ] {
             for participant in ["reviewer", " "] {
-                let expected = label;
+                let expected = match (name, participant.trim().is_empty()) {
+                    ("Agent", false) => "reviewer",
+                    ("Agent", true) => "Agent",
+                    ("Task", false) => "Task (reviewer)",
+                    ("SendMessage", false) => "To (reviewer)",
+                    ("SendMessage", true) => "To",
+                    _ => label,
+                };
                 let mut record = record.clone();
                 let block = &mut record["message"]["content"][0];
                 block["name"] = name.into();

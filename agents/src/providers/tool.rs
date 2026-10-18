@@ -70,68 +70,269 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Subject {
+    Field(&'static str),
+    QuestionHeaders,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Input {
+    Field(&'static str),
+    QuestionList,
+    Arguments,
+    FetchPrompt,
+    AgentMessage,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Format {
+    Text,
+    Markdown,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Summary {
+    Questions,
+    Agent,
+    Task,
+    Recipient,
+    WebFetch,
+    Skill,
+    AgentActivity,
+    TaskActivity,
+    Description,
+    Participant {
+        field: &'static str,
+        label: Option<&'static str>,
+    },
+}
+
 pub(crate) struct Rules {
-    pub subjects: &'static [(&'static str, &'static str)],
-    pub inputs: &'static [(&'static str, &'static str)],
+    pub subjects: &'static [(&'static str, Subject)],
+    pub inputs: &'static [(&'static str, Input, Format)],
+    pub expanded: &'static [(&'static str, bool)],
+    pub summaries: &'static [(&'static str, Summary)],
+    pub activities: &'static [(&'static str, Summary)],
 }
 
 const MCP_RULES: Rules = Rules {
     subjects: &[
-        ("codex-manager start", "name"),
-        ("codex-manager send", "threadId"),
-        ("codex-manager interrupt", "threadId"),
-        ("codex-manager detach", "threadId"),
+        ("codex-manager start", Subject::Field("name")),
+        ("codex-manager send", Subject::Field("threadId")),
+        ("codex-manager interrupt", Subject::Field("threadId")),
+        ("codex-manager detach", Subject::Field("threadId")),
     ],
     inputs: &[
-        ("codex-manager start", "prompt"),
-        ("codex-manager send", "prompt"),
+        ("codex-manager start", Input::Field("prompt"), Format::Text),
+        ("codex-manager send", Input::Field("prompt"), Format::Text),
     ],
+    expanded: &[],
+    summaries: &[],
+    activities: &[],
 };
+
+fn find<T: Copy>(name: &str, table: &[(&str, T)]) -> Option<T> {
+    table.iter().find_map(|(tool, value)| {
+        (*tool == name || (!name.contains(' ') && *tool == name.rsplit('.').next().unwrap_or(name)))
+            .then_some(*value)
+    })
+}
+
+fn text<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
+    input[field].as_str().filter(|text| !text.trim().is_empty())
+}
+
+pub(crate) fn expanded(name: &str, rules: &Rules) -> bool {
+    find(name, rules.expanded).unwrap_or(true)
+}
+
+pub(crate) fn summary(name: &str, input: &Value, rules: &Rules, activity: bool) -> Option<String> {
+    let mode = find(
+        name,
+        if activity {
+            rules.activities
+        } else {
+            rules.summaries
+        },
+    )?;
+    let description = || text(input, "description").unwrap_or(name).to_owned();
+    let participant = |field, message| crate::log::participant_text(text(input, field), message);
+    let first_detail = || {
+        ["description", "file_path", "prompt", "query", "message"]
+            .into_iter()
+            .find_map(|field| text(input, field))
+            .unwrap_or("")
+    };
+    Some(match mode {
+        Summary::Questions => question_texts(input).join(" · "),
+        Summary::Agent => {
+            let detail = [text(input, "name"), text(input, "description")]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            if detail.is_empty() {
+                name.to_owned()
+            } else {
+                detail
+            }
+        }
+        Summary::AgentActivity => match text(input, "name") {
+            Some(_) => [text(input, "name"), text(input, "description")]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · "),
+            None => description(),
+        },
+        Summary::Task => format!("{name} {}", participant("name", first_detail()))
+            .trim_end()
+            .to_owned(),
+        Summary::TaskActivity => match text(input, "name") {
+            Some(_) => format!("{name} {}", participant("name", first_detail()))
+                .trim_end()
+                .to_owned(),
+            None => description(),
+        },
+        Summary::Recipient => {
+            let message = text(input, "summary")
+                .or_else(|| text(input, "message").and_then(|text| text.lines().next()))
+                .unwrap_or("");
+            format!("To {}", participant("to", message))
+                .trim_end()
+                .to_owned()
+        }
+        Summary::WebFetch => {
+            let url = text(input, "url").unwrap_or("");
+            let address = url.split_once("://").map_or(url, |(_, address)| address);
+            format!("{name} {}", address.split(['?', '#']).next().unwrap_or(""))
+                .trim_end()
+                .to_owned()
+        }
+        Summary::Skill => [
+            text(input, "skill").unwrap_or(name),
+            text(input, "args").unwrap_or(""),
+        ]
+        .join(" ")
+        .trim_end()
+        .to_owned(),
+        Summary::Description => description(),
+        Summary::Participant { field, label } => {
+            let detail = participant(field, input["message"].as_str().unwrap_or(""));
+            let label = label.unwrap_or(name);
+            if detail.trim().is_empty() {
+                label.to_owned()
+            } else {
+                let detail: String = detail
+                    .chars()
+                    .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+                    .collect();
+                format!("{label} {detail}")
+            }
+        }
+    })
+}
 
 pub(crate) fn presentation(
     name: &str,
     input: &Value,
     rules: &Rules,
 ) -> (String, Option<String>, Vec<Section>) {
+    let raw_name = name;
     let name = display_tool_name(name);
-    let find = |table: &[(&str, &'static str)]| {
+    let mut remaining = input.clone();
+    let subject = match find(raw_name, rules.subjects).or_else(|| find(&name, MCP_RULES.subjects)) {
+        Some(Subject::Field(field)) => remaining
+            .as_object_mut()
+            .and_then(|object| object.remove(field))
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_owned)
+            }),
+        Some(Subject::QuestionHeaders) => Some(
+            std::iter::once(name.as_str())
+                .chain(
+                    input["questions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|question| text(question, "header")),
+                )
+                .collect::<Vec<_>>()
+                .join(" · "),
+        ),
+        None => None,
+    };
+    let input_rule = |name: &str, table: &[(&str, Input, Format)]| {
         table
             .iter()
-            .find_map(|(tool, field)| (*tool == name).then_some(*field))
+            .find_map(|(tool, input, format)| find(name, &[(*tool, (*input, *format))]))
     };
-    let mut remaining = input.clone();
-    let subject = find(rules.subjects)
-        .or_else(|| find(MCP_RULES.subjects))
-        .and_then(|field| {
-            remaining
-                .as_object_mut()
-                .and_then(|object| object.remove(field))
-                .and_then(|value| {
-                    value
-                        .as_str()
-                        .filter(|text| !text.trim().is_empty())
-                        .map(str::to_owned)
-                })
-        });
-    let input = match find(rules.inputs).or_else(|| find(MCP_RULES.inputs)) {
-        Some("") => Vec::new(),
-        Some(field) => remaining
-            .get(field)
-            .and_then(Value::as_str)
-            .filter(|text| !text.trim().is_empty())
-            .map(|text| {
-                vec![Section::Prose {
-                    text: text.to_owned(),
-                    markdown: false,
-                }]
-            })
-            .unwrap_or_default(),
+    let rule = input_rule(raw_name, rules.inputs).or_else(|| input_rule(&name, MCP_RULES.inputs));
+    let sections = match rule {
+        Some((Input::Field(""), _)) => Vec::new(),
+        Some((method, format)) => {
+            let (body, mut sections) = match method {
+                Input::Field(field) => {
+                    (text(&remaining, field).unwrap_or("").to_owned(), Vec::new())
+                }
+                Input::QuestionList => (question_list(input), Vec::new()),
+                Input::Arguments => (input["args"].as_str().unwrap_or("").to_owned(), Vec::new()),
+                Input::AgentMessage => (
+                    text(input, "message").unwrap_or("").to_owned(),
+                    text(input, "task_name")
+                        .map(|name| {
+                            vec![Section::Text {
+                                label: String::new(),
+                                text: format!("task_name: {name}"),
+                            }]
+                        })
+                        .unwrap_or_default(),
+                ),
+                Input::FetchPrompt => (
+                    text(input, "prompt").unwrap_or("").to_owned(),
+                    text(input, "url")
+                        .map(|url| {
+                            vec![Section::Text {
+                                label: String::new(),
+                                text: format!("url: {url}"),
+                            }]
+                        })
+                        .unwrap_or_default(),
+                ),
+            };
+            if !body.trim().is_empty() {
+                let section = match format {
+                    Format::Text if matches!(method, Input::Arguments) => Section::Text {
+                        label: "args".into(),
+                        text: body,
+                    },
+                    Format::Text => Section::Prose {
+                        text: body,
+                        markdown: false,
+                    },
+                    Format::Markdown => Section::Markdown {
+                        label: match method {
+                            Input::Field(field) => field,
+                            Input::AgentMessage => "message",
+                            _ => "",
+                        }
+                        .into(),
+                        text: body,
+                    },
+                };
+                sections.push(section);
+            }
+            sections
+        }
         None => json_input(&remaining),
     };
-    (name, subject, input)
+    (name, subject, sections)
 }
 
-#[cfg(test)]
 pub(crate) fn question_texts(input: &Value) -> Vec<String> {
     input["questions"]
         .as_array()
@@ -140,6 +341,38 @@ pub(crate) fn question_texts(input: &Value) -> Vec<String> {
         .filter_map(|question| question["question"].as_str())
         .map(str::to_owned)
         .collect()
+}
+
+pub(crate) fn rejected_questions(text: &str) -> Option<String> {
+    let (explanation, questions) = text.split_once("Questions asked:")?;
+    Some(format!(
+        "Questions asked:{}\n\n{}",
+        questions.trim_end(),
+        explanation.trim_end()
+    ))
+}
+
+fn question_list(input: &Value) -> String {
+    let mut lines = Vec::new();
+    for question in input["questions"].as_array().into_iter().flatten() {
+        let Some(text) = question["question"].as_str() else {
+            continue;
+        };
+        let suffix = if question["multiSelect"] == true {
+            " (multi-select)"
+        } else {
+            ""
+        };
+        lines.push(format!("• {text}{suffix}"));
+        for option in question["options"].as_array().into_iter().flatten() {
+            if let (Some(label), Some(description)) =
+                (option["label"].as_str(), option["description"].as_str())
+            {
+                lines.push(format!("  • {label}: {description}"));
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 /// Add explicit headings for separately reported stderr output.
@@ -206,6 +439,9 @@ mod tests {
         let rules = super::Rules {
             subjects: &[],
             inputs: &[],
+            expanded: &[],
+            summaries: &[],
+            activities: &[],
         };
         for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
             let (name, subject, input) = super::presentation(name, &call["input"], &rules);

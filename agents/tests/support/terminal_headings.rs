@@ -108,7 +108,7 @@ fn terminal_log_section_titles_and_scrolling() {
     });
     let rows = section_rows(&capture, 200);
     assert!(rows[0].contains("Agent"), "{capture}");
-    assert!(!rows[0].contains("实测 attach 发提示词"), "{capture}");
+    assert!(rows[0].contains("实测 attach 发提示词"), "{capture}");
     assert!(!rows[0].contains("sonnet"), "{capture}");
     assert!(!rows[0].contains('─'), "{capture}");
     assert!(rows[1].trim_end_matches('│').trim().is_empty(), "{capture}");
@@ -117,9 +117,9 @@ fn terminal_log_section_titles_and_scrolling() {
         "{capture}"
     );
     let body = rows[2..].join("\n");
-    assert!(body.contains("general-purpose"), "{capture}");
-    assert!(body.contains("attach-probe"), "{capture}");
-    assert!(body.contains("实测 attach 发提示词"), "{capture}");
+    assert!(!body.contains("general-purpose"), "{capture}");
+    assert!(!body.contains("attach-probe"), "{capture}");
+    assert!(!body.contains("实测 attach 发提示词"), "{capture}");
     assert!(
         body.contains("You have a hard 10-minute limit"),
         "{capture}"

@@ -9115,8 +9115,8 @@ fn claude_agent_display_from_real_records() {
             .iter()
             .find(|e| e.calls.iter().any(|c| c.id == id))
             .unwrap();
-        assert_eq!(event.body, "Agent");
-        assert_eq!(event.calls[0].title, "Agent");
+        assert_eq!(event.body, label);
+        assert_eq!(event.calls[0].title, label);
         let (mut view, now) = log_fixture();
         view.select_fixture_event(Some(event.clone()));
         let screen = log_screen(&view, 200, 45, now);
@@ -9125,7 +9125,7 @@ fn claude_agent_display_from_real_records() {
         let header = usize::from(detail.y + 1);
         assert!(!rows[header].contains(metadata), "{screen}");
         assert!(
-            rows[header + 1..].iter().any(|row| row.contains(metadata)),
+            !rows[header + 1..].iter().any(|row| row.trim() == metadata),
             "{screen}"
         );
         assert!(!label.is_empty());
@@ -9152,7 +9152,7 @@ fn claude_agent_display_from_real_records() {
             let mut buffer = Buffer::empty(Rect::new(0, 0, 200, 45));
             view.render_at(buffer.area, &mut buffer, now);
             let title = view.viewport.borrow().log_text.sources[0].text.to_string();
-            assert!(title.contains("Agent"));
+            assert_eq!(title, description);
             assert!((0..200).any(|x| buffer[(x, header as u16)].symbol() == "A"));
         }
         let description = event.calls[0].detail_title.clone();

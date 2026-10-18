@@ -139,7 +139,7 @@ fn pending_tool_copy_preserves_prompt_without_display_only_suffix() {
 }
 
 #[test]
-fn question_agent_inputs_preserve_json_and_tool_output() {
+fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
     for fixture in [
         include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
@@ -158,31 +158,17 @@ fn question_agent_inputs_preserve_json_and_tool_output() {
                     .input
                     .iter()
                     .find_map(|s| match s {
-                        crate::log::Section::Json { text, .. } => {
-                            Some(serde_json::from_str::<serde_json::Value>(text).unwrap())
-                        }
+                        crate::log::Section::Prose { text, .. } => Some(text.as_str()),
+                        crate::log::Section::Markdown { text, .. } => Some(text.as_str()),
                         _ => None,
                     })
                     .unwrap();
                 let segment = drawn
                     .sources
                     .iter()
-                    .position(|s| {
-                        input
-                            .as_object()
-                            .unwrap()
-                            .keys()
-                            .all(|key| s.text.contains(&format!("\"{key}\":")))
-                    })
+                    .position(|s| s.text.as_ref() == input)
                     .unwrap();
-                let source = &drawn.sources[segment].text;
-                assert!(source.starts_with('{'));
-                assert!(
-                    drawn
-                        .rows
-                        .iter()
-                        .any(|(id, cells)| *id == segment && !cells.is_empty())
-                );
+                assert_reading_column(&drawn, segment);
             }
         }
     }
@@ -542,7 +528,7 @@ fn centered_detail_blocks_snapshot() {
 }
 
 #[test]
-fn undeclared_agent_subject_fields_stay_in_json() {
+fn description_takes_priority_over_name_in_real_agent_inputs() {
     let parsed = events(include_str!(
         "../../tests/fixtures/claude-agent-display.jsonl"
     ));
@@ -556,7 +542,10 @@ fn undeclared_agent_subject_fields_stay_in_json() {
         })
         .unwrap();
     let call = &event.calls[0];
-    assert_eq!(Some(call.detail_title.as_str()), Some("Agent"));
+    assert_eq!(
+        Some(call.detail_title.as_str()),
+        Some("实测 attach 发提示词")
+    );
     let body = body_parts(event);
     assert!(
         !body
@@ -776,4 +765,50 @@ fn merged_tool_durations_are_separate_from_content_lines() {
             );
         }
     }
+}
+
+#[test]
+fn restored_tool_details_snapshot() {
+    let mut entries = Vec::new();
+    for fixture in [
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
+        include_str!("../../tests/fixtures/claude-tool-details.jsonl"),
+        include_str!("../../tests/fixtures/claude-skill-call.jsonl"),
+        include_str!("../../tests/fixtures/claude-agent-names.jsonl"),
+    ] {
+        entries.extend(events(fixture));
+    }
+    entries.extend(codex_events("codex-agent-names.jsonl"));
+    let mut snapshot = String::new();
+    for event in entries {
+        for call in &event.calls {
+            if !matches!(
+                call.name.as_str(),
+                "Agent"
+                    | "Task"
+                    | "SendMessage"
+                    | "WebFetch"
+                    | "Skill"
+                    | "spawn_agent"
+                    | "send_message"
+            ) {
+                continue;
+            }
+            let mut selected = event.clone();
+            selected.calls = vec![call.clone()];
+            for width in [120, 200] {
+                snapshot.push_str(&format!("{} {} — {width} columns\n", call.name, call.id));
+                for line in layout(&selected, width).lines {
+                    snapshot.push_str(line.to_string().trim_end());
+                    snapshot.push('\n');
+                }
+            }
+        }
+    }
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/restored_tool_details.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }

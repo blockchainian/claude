@@ -114,10 +114,7 @@ fn request_user_input_pending_answered_and_offline() {
                 }
             );
             if state == "pending" {
-                assert_eq!(
-                    session.latest_activity().unwrap().label,
-                    "request_user_input"
-                );
+                assert_eq!(session.latest_activity().unwrap().label, "Pick a color?");
             }
             session.process = None;
             apply_rollout(&mut session, rollout::summary(&path).unwrap());

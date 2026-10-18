@@ -2056,7 +2056,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
         (
             "question",
             include_str!("fixtures/claude-questions-pending.jsonl").to_owned(),
-            "\"questions\": [",
+            "• 怎么判断",
             false,
         ),
         (
