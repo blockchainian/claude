@@ -17,6 +17,9 @@ const DETACH_TIMEOUT: Duration = Duration::from_secs(3);
 pub type Screen = Arc<Mutex<TerminalScreen>>;
 
 /// Parses the live output while keeping a synchronized update off the displayed screen.
+/// The longest a starting program's screen stays hidden behind the loading indicator.
+const STARTUP_LIMIT: Duration = Duration::from_secs(2);
+
 pub struct TerminalScreen {
     parser: vt100::Parser<Replies>,
     displayed: vt100::Screen,
@@ -69,12 +72,12 @@ impl TerminalScreen {
     }
 
     pub fn ready(&self, now: Instant) -> bool {
-        self.ready || now.saturating_duration_since(self.opened) >= Duration::from_secs(1)
+        self.ready || now.saturating_duration_since(self.opened) >= STARTUP_LIMIT
     }
 
     pub fn loading_remaining(&self, now: Instant) -> Option<Duration> {
         (!self.ready(now)).then(|| {
-            Duration::from_secs(1).saturating_sub(now.saturating_duration_since(self.opened))
+            STARTUP_LIMIT.saturating_sub(now.saturating_duration_since(self.opened))
         })
     }
 
@@ -391,14 +394,14 @@ mod tests {
     }
 
     #[test]
-    fn startup_empty_frames_wait_until_the_one_second_deadline() {
+    fn startup_empty_frames_wait_until_the_startup_limit() {
         let mut screen = TerminalScreen::new(14, 101);
         let start = Instant::now();
         screen.process(b"\x1b[?2026h\x1b[?2026l");
         screen.check_ready(start, |_| false);
         assert!(!screen.ready(start));
-        assert!(!screen.ready(start + Duration::from_millis(999)));
-        assert!(screen.ready(start + Duration::from_secs(1)));
+        assert!(!screen.ready(start + STARTUP_LIMIT - Duration::from_millis(1)));
+        assert!(screen.ready(start + STARTUP_LIMIT));
     }
 
     #[test]
