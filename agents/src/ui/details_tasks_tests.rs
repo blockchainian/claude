@@ -41,7 +41,7 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     let find = |s: &str| rows.iter().position(|line| line.contains(s)).unwrap();
     assert!(find("Tasks") < find("Prompt"));
     assert!(find("Tasks") < find("Update"));
-    assert!(find("Update") < find("Prompt"));
+    assert!(find("Prompt") < find("Update"));
     assert!(find("Tasks") < find("Needs attention"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));

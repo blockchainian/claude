@@ -747,8 +747,8 @@ fn details_body_changed_while_away_opens_folded() {
         details_panel(&view);
     }
     let scrolled = details_reveal(&view);
-    let prompt = scrolled.len() - 1;
-    assert!(scrolled[prompt] > 0 && scrolled[0] > 0, "{scrolled:?}");
+    let prompt = 0;
+    assert!(scrolled[prompt] > 0 && scrolled[1] > 0, "{scrolled:?}");
     let index = view.selected;
     key(&mut view, KeyCode::Down);
     details_panel(&view);
@@ -805,7 +805,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
         before[(pr.x, pr.y)].diff_option,
         ratatui::buffer::CellDiffOption::ForcedWidth(_)
     ));
-    let prompt_index = viewport.details_scroll.bodies.len() - 1;
+    let prompt_index = 0;
     let prompt = viewport.details_scroll.bodies[prompt_index].start as u16 + body.y;
     assert!(viewport.details_scroll.hidden[prompt_index] > 0);
     drop(viewport);
@@ -1970,8 +1970,8 @@ fn details_include_attention_and_clip_messages() {
             .lines()
             .position(|line| !line.contains("Group:") && line.contains(label))
     };
-    assert!(position("Update") < position("Prompt"));
-    assert!(position("Needs attention") < position("Prompt"));
+    assert!(position("Prompt") < position("Update"));
+    assert!(position("Prompt") < position("Needs attention"));
     let viewport = view.viewport.borrow();
     let folder = viewport
         .details_links
@@ -2848,8 +2848,8 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
             assert_eq!(viewport.details_scroll.fallback_max, None);
             assert_eq!(viewport.details_copy.len(), 3);
             assert!(viewport.details_scroll.hidden[0] > 0);
-            assert_eq!(viewport.details_scroll.hidden[1], 0);
-            assert!(viewport.details_scroll.hidden[2] > 0);
+            assert!(viewport.details_scroll.hidden[1] > 0);
+            assert_eq!(viewport.details_scroll.hidden[2], 0);
         } else {
             assert!(viewport.details_scroll.fallback_max.unwrap() > 0);
         }
@@ -3542,7 +3542,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_tasks_background_update_activity_prompt() {
+fn details_sections_run_tasks_background_prompt_update_activity() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         kind: crate::log::Kind::Tool,
@@ -3564,9 +3564,9 @@ fn details_sections_run_tasks_background_update_activity_prompt() {
     let positions = [
         "Tasks",
         "Background\n",
+        "Prompt\n",
         "Update",
         "Last activity",
-        "Prompt\n",
     ]
     .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
@@ -3610,7 +3610,7 @@ fn details_background_boxes_tail_and_clip_output() {
             .collect::<Vec<_>>()
             .join("\n")
             .starts_with(
-                "Background\n…\n\nUpdate\nChecking the project\n\nPrompt\nBackground task"
+                "Background\n…\n\nPrompt\nBackground task\n\nUpdate\nChecking the project"
             ),
         "{clipped}"
     );

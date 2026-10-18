@@ -2,15 +2,15 @@
 ● Working first
 ○ Pending first
 
+                 Prompt
+Session title
+
                  Update
 Task update
 
             Needs attention
 Open task to review.
 Waiting for your response.
-
-                 Prompt
-Session title
 
 
 

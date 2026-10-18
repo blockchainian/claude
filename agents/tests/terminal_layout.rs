@@ -1715,7 +1715,7 @@ fn terminal_details_section_positions() {
                         .collect()
                 })
                 .collect();
-            let positions = ["Prompt", "Tasks", "Background", "Update", "Last activity"]
+            let positions = ["Tasks", "Background", "Prompt", "Update", "Last activity"]
                 .map(|label| panel.iter().position(|row| row.contains(label)).unwrap());
             assert!(positions.is_sorted(), "{panel:?}");
             for label in ["Update", "Prompt", "Tasks"] {
