@@ -41,7 +41,7 @@ impl View {
     }
 
     /// The open terminal's screen while its session is the selected one.
-    fn shown_terminal(&self) -> Option<&Screen> {
+    pub(super) fn shown_terminal(&self) -> Option<&Screen> {
         let (id, screen) = self.terminal.as_ref()?;
         (self.selected_id() == Some(id)).then_some(screen)
     }
@@ -107,7 +107,12 @@ impl View {
     }
 
     /// Draws the shown terminal below the panel's top rule; returns false when none is shown.
-    pub(super) fn render_terminal(&self, area: Rect, buf: &mut Buffer) -> bool {
+    pub(super) fn render_terminal(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
         let Some(screen) = self.shown_terminal() else {
             return false;
         };
@@ -117,7 +122,21 @@ impl View {
             ..area
         };
         self.viewport.borrow_mut().terminal = area;
-        render(screen.lock().expect("terminal screen lock").screen(), area, buf);
+        let screen = screen.lock().expect("terminal screen lock");
+        if screen.ready(std::time::Instant::now()) {
+            render(screen.screen(), area, buf);
+        } else if !area.is_empty() {
+            let x = super::centering::centered_x(area, area, 3);
+            buf.set_stringn(
+                x,
+                area.y,
+                super::tool_detail::running_frame(now),
+                usize::from(area.width),
+                super::style::log_styles(&crate::log::Kind::Tool)
+                    .1
+                    .add_modifier(Modifier::DIM),
+            );
+        }
         true
     }
 
@@ -128,7 +147,7 @@ impl View {
         }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();
-        if screen.hide_cursor() {
+        if !parser.ready(std::time::Instant::now()) || screen.hide_cursor() {
             return None;
         }
         let area = self.viewport.borrow().terminal;
@@ -237,7 +256,9 @@ pub(super) fn key_bytes(key: KeyEvent, application_cursor: bool) -> Vec<u8> {
         KeyCode::PageUp => tilde(5),
         KeyCode::PageDown => tilde(6),
         KeyCode::F(n @ 1..=4) if modifier == 1 => vec![0x1b, b'O', b'P' + n - 1],
-        KeyCode::F(n @ 1..=4) => format!("\x1b[1;{modifier}{}", (b'P' + n - 1) as char).into_bytes(),
+        KeyCode::F(n @ 1..=4) => {
+            format!("\x1b[1;{modifier}{}", (b'P' + n - 1) as char).into_bytes()
+        }
         KeyCode::F(n @ 5..=12) => tilde([15, 17, 18, 19, 20, 21, 23, 24][usize::from(n - 5)]),
         _ => Vec::new(),
     }
@@ -277,9 +298,7 @@ pub(super) fn mouse_bytes(
         MouseEventKind::Up(pressed) if mode != Mode::None && mode != Mode::Press => {
             (button(pressed)?, true)
         }
-        MouseEventKind::Drag(pressed)
-            if matches!(mode, Mode::ButtonMotion | Mode::AnyMotion) =>
-        {
+        MouseEventKind::Drag(pressed) if matches!(mode, Mode::ButtonMotion | Mode::AnyMotion) => {
             (button(pressed)? + 32, false)
         }
         MouseEventKind::ScrollUp if mode != Mode::None => (64, false),

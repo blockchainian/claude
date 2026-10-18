@@ -508,6 +508,10 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 }
 
 impl Provider for CodexProvider {
+    fn terminal_screen_is_loading(&self, screen: &str) -> bool {
+        screen.contains("Resuming session")
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::Codex
     }

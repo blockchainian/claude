@@ -16,6 +16,10 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
     let screen: Screen =
         std::sync::Arc::new(std::sync::Mutex::new(TerminalScreen::new(rows, cols)));
     screen.lock().unwrap().process(text);
+    screen
+        .lock()
+        .unwrap()
+        .check_ready(std::time::Instant::now(), |_| false);
     view.show_terminal(session_key("log"), screen.clone());
     log_screen(&view, 100, 45, now);
     (view, now, screen)
@@ -53,7 +57,7 @@ fn the_terminal_draws_the_program_screen_below_the_panel_rule() {
 
 #[test]
 fn synchronized_output_keeps_the_displayed_screen_and_cursor_until_the_frame_ends() {
-    let (view, now, screen) = open_terminal(b"\x1b[12;3H\x1b[?25h");
+    let (view, now, screen) = open_terminal(b"READY\x1b[12;3H\x1b[?25h");
     let area = Rect::new(0, 0, 100, 45);
     let before = log_screen(&view, 100, 45, now);
     let cursor = view.cursor_pos(area);
@@ -74,7 +78,7 @@ fn synchronized_output_keeps_the_displayed_screen_and_cursor_until_the_frame_end
 
 #[test]
 fn a_synchronized_redraw_retains_the_last_published_frame_before_its_clear_prefix() {
-    let (view, now, screen) = open_terminal(b"\x1b[12;3H\x1b[?25h");
+    let (view, now, screen) = open_terminal(b"READY\x1b[12;3H\x1b[?25h");
     let area = Rect::new(0, 0, 100, 45);
     let before = log_screen(&view, 100, 45, now);
     let cursor = view.cursor_pos(area);
@@ -172,5 +176,20 @@ fn a_focused_terminal_takes_pastes() {
     assert_eq!(
         view.terminal_paste("text"),
         Some(Action::TerminalPaste("text".into()))
+    );
+}
+
+#[test]
+fn loading_terminal_shows_running_dots_without_a_cursor() {
+    let (view, now, _screen) = open_terminal(b"");
+    let drawn = log_screen(&view, 100, 45, now);
+    assert!(
+        drawn.contains(super::super::tool_detail::running_frame(now)),
+        "{drawn}"
+    );
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 100, 45)), None);
+    assert_eq!(
+        drawn,
+        include_str!("../../tests/ui_snapshots/terminal_loading.txt")
     );
 }

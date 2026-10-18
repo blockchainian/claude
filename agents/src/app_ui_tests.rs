@@ -1271,7 +1271,8 @@ fn terminal_repaint_never_shows_the_hardware_cursor_over_painted_cells() {
         .screen
         .lock()
         .unwrap()
-        .process(b"\x1b[4;6H");
+        .process(b"READY\x1b[4;6H");
+    app.sync_terminal();
     let area = ratatui::layout::Rect::new(0, 0, 100, 45);
     let output = tempfile::NamedTempFile::new().unwrap();
     let mut terminal = Terminal::with_options(

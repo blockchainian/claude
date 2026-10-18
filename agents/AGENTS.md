@@ -47,6 +47,8 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Session terminal
 
+- Opening a session terminal shows the running dots without a cursor until a published frame has visible text and the provider considers it ready, with a one-second limit.
+
 - `o`, or a right click on the log detail, runs the selected session's program in the log detail panel: `codex resume` for Codex, `claude attach` for a Claude background job, and for a Claude session with no live process `claude --resume <id> --bg` followed by `claude attach`. A Claude session running in another terminal shows `Running in a terminal · /bg` instead.
 - A right click on the terminal switches back to the log detail; the dashboard always keeps the right button. Switching back, selecting another task, quitting or the program exiting closes the terminal, and returning to the task shows the log detail: Codex clients are ended, since the app-server owns the turn, and Claude attach clients detach with Ctrl-Z. Client cleanup runs in the background; reopening the same session waits for it, and quitting waits for all clients to be reaped.
 - The focused terminal takes every key and paste. A left click on another panel moves focus away; a left click on the terminal moves it back. Every mouse event over the terminal except the right button goes to the program as far as its mouse reporting asks, and is dropped otherwise.

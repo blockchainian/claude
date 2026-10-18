@@ -154,6 +154,15 @@ impl App {
             self.close_terminal();
             return;
         }
+        terminal
+            .screen
+            .lock()
+            .expect("terminal screen lock")
+            .check_ready(std::time::Instant::now(), |screen| {
+                self.hub
+                    .provider(terminal.id.provider)
+                    .terminal_screen_is_loading(screen)
+            });
         if let Some((rows, cols)) = self.view.terminal_size()
             && let Err(error) = terminal.resize(rows, cols)
         {

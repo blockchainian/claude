@@ -115,6 +115,10 @@ pub type CreateJob = Box<dyn FnOnce() -> io::Result<Output> + Send>;
 
 pub trait Provider {
     fn id(&self) -> ProviderId;
+    /// Whether a published terminal screen still shows startup progress.
+    fn terminal_screen_is_loading(&self, _screen: &str) -> bool {
+        false
+    }
     /// Directories watched for changes; missing directories are skipped.
     fn watch_roots(&self) -> io::Result<Vec<PathBuf>>;
     fn capabilities(&self) -> Capabilities;

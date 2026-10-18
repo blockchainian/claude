@@ -20,13 +20,20 @@ pub type Screen = Arc<Mutex<TerminalScreen>>;
 pub struct TerminalScreen {
     parser: vt100::Parser<Replies>,
     displayed: vt100::Screen,
+    opened: Instant,
+    ready: bool,
 }
 
 impl TerminalScreen {
     pub fn new(rows: u16, cols: u16) -> Self {
         let parser = vt100::Parser::new_with_callbacks(rows, cols, 0, Replies::default());
         let displayed = parser.screen().clone();
-        Self { parser, displayed }
+        Self {
+            parser,
+            displayed,
+            opened: Instant::now(),
+            ready: false,
+        }
     }
 
     pub fn process(&mut self, output: &[u8]) -> Vec<u8> {
@@ -37,12 +44,38 @@ impl TerminalScreen {
         if !self.parser.callbacks().synchronized {
             self.displayed = self.parser.screen().clone();
         }
+        if !self.parser.callbacks().used_synchronization && !self.ready {
+            self.parser
+                .callbacks_mut()
+                .frames
+                .push(self.displayed.contents());
+        }
         std::mem::take(&mut self.parser.callbacks_mut().pending)
     }
 
     /// The last published screen and cursor, held until a synchronized update completes.
     pub fn screen(&self) -> &vt100::Screen {
         &self.displayed
+    }
+
+    /// Checks every published frame, including frames sharing a single PTY read.
+    pub fn check_ready(&mut self, now: Instant, is_loading: impl Fn(&str) -> bool) {
+        let frames = std::mem::take(&mut self.parser.callbacks_mut().frames);
+        self.ready = self.ready(now)
+            || frames
+                .iter()
+                .any(|text| text.chars().any(|c| !c.is_whitespace()) && !is_loading(text));
+        self.parser.callbacks_mut().collect_frames = !self.ready;
+    }
+
+    pub fn ready(&self, now: Instant) -> bool {
+        self.ready || now.saturating_duration_since(self.opened) >= Duration::from_secs(1)
+    }
+
+    pub fn loading_remaining(&self, now: Instant) -> Option<Duration> {
+        (!self.ready(now)).then(|| {
+            Duration::from_secs(1).saturating_sub(now.saturating_duration_since(self.opened))
+        })
     }
 
     fn set_size(&mut self, rows: u16, cols: u16) {
@@ -74,8 +107,8 @@ impl SessionTerminal {
         wake: impl Fn() + Send + 'static,
     ) -> io::Result<Self> {
         let (rows, cols) = (rows.max(1), cols.max(1));
-        let pty = Pty::spawn(command, rows, cols)?;
         let screen: Screen = Arc::new(Mutex::new(TerminalScreen::new(rows, cols)));
+        let pty = Pty::spawn(command, rows, cols)?;
         let dirty = Arc::new(AtomicBool::new(false));
         let closed = Arc::new(AtomicBool::new(false));
         let mut reader = pty.reader()?;
@@ -200,11 +233,26 @@ fn read_frame(reader: &mut std::fs::File, output: &mut Vec<u8>) -> io::Result<bo
 }
 
 /// Handles synchronized updates and terminal queries, which vt100 leaves unhandled.
-#[derive(Default)]
 struct Replies {
     pending: Vec<u8>,
     synchronized: bool,
     completed: Option<vt100::Screen>,
+    used_synchronization: bool,
+    collect_frames: bool,
+    frames: Vec<String>,
+}
+
+impl Default for Replies {
+    fn default() -> Self {
+        Self {
+            pending: Vec::new(),
+            synchronized: false,
+            completed: None,
+            used_synchronization: false,
+            collect_frames: true,
+            frames: Vec::new(),
+        }
+    }
 }
 
 impl vt100::Callbacks for Replies {
@@ -221,11 +269,15 @@ impl vt100::Callbacks for Replies {
                 'h' => {
                     // DECSET is idempotent, including repeated begins in one update.
                     self.synchronized = true;
+                    self.used_synchronization = true;
                 }
                 'l' if self.synchronized => {
                     self.synchronized = false;
                     // Retain this frame if another update begins in the same PTY read.
                     self.completed = Some(screen.clone());
+                    if self.collect_frames {
+                        self.frames.push(screen.contents());
+                    }
                 }
                 _ => {}
             }
@@ -269,6 +321,96 @@ mod tests {
             provider: ProviderId::Codex,
             id: "thread".into(),
         }
+    }
+
+    fn replay_ready(raw: &[u8], provider: &dyn crate::providers::Provider) -> Vec<(String, bool)> {
+        let mut screen = TerminalScreen::new(14, 101);
+        let now = Instant::now();
+        let mut start = 0;
+        let mut frames = Vec::new();
+        for end in raw
+            .windows(8)
+            .enumerate()
+            .filter_map(|(i, bytes)| (bytes == b"\x1b[?2026l").then_some(i + 8))
+        {
+            screen.process(&raw[start..end]);
+            screen.check_ready(now, |text| provider.terminal_screen_is_loading(text));
+            frames.push((screen.screen().contents(), screen.ready(now)));
+            start = end;
+        }
+        frames
+    }
+
+    #[test]
+    fn startup_waits_through_recorded_resume_frames() {
+        let provider =
+            crate::providers::codex::CodexProvider::new("unused".into(), "unused".into());
+        let frames = replay_ready(
+            include_bytes!("../tests/fixtures/codex-terminal/resume.raw"),
+            &provider,
+        );
+        let resuming: Vec<_> = frames
+            .iter()
+            .filter(|(text, _)| text.contains("Resuming session"))
+            .collect();
+        assert!(resuming.len() > 20);
+        assert!(resuming.iter().all(|(_, ready)| !ready));
+        assert!(frames.last().unwrap().1);
+        assert!(!frames.last().unwrap().0.contains("Resuming session"));
+    }
+
+    #[test]
+    fn startup_recorded_read_boundaries_do_not_release_partial_frames() {
+        let raw = include_bytes!("../tests/fixtures/codex-terminal/resume.raw");
+        let provider =
+            crate::providers::codex::CodexProvider::new("unused".into(), "unused".into());
+        let mut screen = TerminalScreen::new(14, 101);
+        let now = Instant::now();
+        for chunk in include_str!("../tests/fixtures/codex-terminal/chunks.jsonl").lines() {
+            let (_, offset, count): (f64, usize, usize) = serde_json::from_str(chunk).unwrap();
+            screen.process(&raw[offset..offset + count]);
+            screen.check_ready(now, |text| {
+                crate::providers::Provider::terminal_screen_is_loading(&provider, text)
+            });
+            if screen.screen().contents().contains("Resuming session") {
+                assert!(!screen.ready(now));
+            }
+        }
+        assert!(screen.ready(now));
+    }
+
+    #[test]
+    fn startup_attach_is_ready_on_its_first_text_frame() {
+        let provider = crate::providers::claude::ClaudeProvider::new("unused".into());
+        let frames = replay_ready(
+            include_bytes!("../tests/fixtures/claude-attach/attach.raw"),
+            &provider,
+        );
+        assert!(!frames[0].0.trim().is_empty());
+        assert!(frames[0].1);
+    }
+
+    #[test]
+    fn startup_empty_frames_wait_until_the_one_second_deadline() {
+        let mut screen = TerminalScreen::new(14, 101);
+        let start = Instant::now();
+        screen.process(b"\x1b[?2026h\x1b[?2026l");
+        screen.check_ready(start, |_| false);
+        assert!(!screen.ready(start));
+        assert!(!screen.ready(start + Duration::from_millis(999)));
+        assert!(screen.ready(start + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn startup_unsynchronized_text_is_ready_at_publication() {
+        let mut screen = TerminalScreen::new(14, 101);
+        let now = Instant::now();
+        screen.process(b" \r\n");
+        screen.check_ready(now, |_| false);
+        assert!(!screen.ready(now));
+        screen.process(b"READY");
+        screen.check_ready(now, |_| false);
+        assert!(screen.ready(now));
     }
 
     #[test]

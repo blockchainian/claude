@@ -127,7 +127,7 @@ impl View {
 
     pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        if self.render_terminal(area, buf) {
+        if self.render_terminal(area, buf, now) {
             return;
         }
         let Some(session) = self.selected_row() else {
@@ -563,6 +563,11 @@ impl View {
 
     /// Wake only when an animated tool output is in the visible detail viewport.
     pub(crate) fn tool_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
+        if let Some(screen) = self.shown_terminal() {
+            return screen.lock().expect("terminal screen lock")
+                .loading_remaining(std::time::Instant::now())
+                .map(|remaining| remaining.min(super::tool_detail::running_redraw_in(now)));
+        }
         let viewport = self.viewport.borrow();
         let layout = viewport.log_detail_layout.as_ref()?;
         let visible = viewport.log_detail_scroll
