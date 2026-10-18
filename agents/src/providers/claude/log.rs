@@ -690,6 +690,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             _ => generic(),
         }
     });
+    subject = crate::providers::tool::result_subject(name, output.as_deref(), &RULES).or(subject);
     let title = subject.clone().unwrap_or_else(|| display_name.clone());
     let mut call = ToolCall {
         started_at: None,
@@ -1251,6 +1252,35 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn detach_subject_uses_result_name() {
+        let records = include_str!("../../../tests/fixtures/claude-manager-detach-name.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let events = events_from(records);
+        assert_eq!(events[0].body, "codex-manager detach 模型和new挪位");
+        assert_eq!(events[0].calls[0].detail_title, "模型和new挪位");
+    }
+
+    #[test]
+    fn detach_subject_falls_back_to_thread_id() {
+        let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/claude-manager-detach.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let thread_id = records[0]["message"]["content"][0]["input"]["threadId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for records in [records[..1].to_vec(), records] {
+            let events = events_from(records);
+            assert_eq!(events[0].body, format!("codex-manager detach {thread_id}"));
+            assert_eq!(events[0].calls[0].detail_title, thread_id);
+        }
+    }
+
     #[test]
     fn mcp_real_nested_arguments_are_a_single_json_section() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/mcp-claude/nested.jsonl")

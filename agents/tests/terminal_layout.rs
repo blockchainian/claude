@@ -2700,3 +2700,27 @@ mod paths;
 
 #[path = "support/terminal_log_scroll.rs"]
 mod terminal_log_scroll;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_manager_detach_result_name() {
+    use std::io::Write;
+    let (_directory, tmux, transcript) = start_probe("manager-detach-result-name");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap()
+        .write_all(include_bytes!("fixtures/claude-manager-detach-name.jsonl"))
+        .unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .filter(|line| line.contains("codex-manager detach") && line.contains("模型和new挪位"))
+            .count()
+            == 2
+    });
+    let path = std::env::temp_dir().join("agents-detach-result-name.txt");
+    std::fs::write(&path, capture).unwrap();
+    println!("{}", serde_json::json!({"verdict":"pass", "capture":path}));
+}

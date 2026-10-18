@@ -729,6 +729,9 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     } else if arguments.is_none() {
         input = vec![text_section("input", raw)];
     }
+    let output = output.map(|text| response_output(&raw_name, text));
+    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref(), &TOOL_RULES)
+        .or(subject);
     let display_name = crate::providers::tool::title_name(&name);
     let mut call = ToolCall {
         detail_left: display_name.to_owned(),
@@ -748,7 +751,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         agent_thread_id: None,
         agent_path: None,
         input,
-        output: output.map(|text| response_output(&raw_name, text)),
+        output,
         exit_code: None,
         is_error: false,
         duration: None,
@@ -837,6 +840,8 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let raw_name = name;
     let (name, subject, input) =
         crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
+    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref(), &TOOL_RULES)
+        .or(subject);
     let display_name = crate::providers::tool::title_name(&name);
     let exit_code = item["exit_code"]
         .as_i64()
@@ -1647,9 +1652,9 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 return Ok(true);
             }
             (Some("response_item"), Some("function_call" | "custom_tool_call")) => {
-                let Some(mut body) = tool_body(payload) else {
+                if tool_body(payload).is_none() {
                     return Ok(true);
-                };
+                }
                 if let Some(id) = payload["call_id"].as_str()
                     && !seen.insert(id.to_owned())
                 {
@@ -1660,6 +1665,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     .and_then(|id| results.remove(id));
                 let mut call =
                     response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
+                let mut body = call.title.clone();
                 if let Some((_, detail, title)) = agent_route(
                     &response_tool_name(payload),
                     call.agent_path.as_deref(),
@@ -1916,6 +1922,51 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detach_subject_uses_json_output_with_input_fallback() {
+        let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/claude-manager-detach-name.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let block = &records[0]["message"]["content"][0];
+        let input = &block["input"];
+        let output = records[1]["message"]["content"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        let payload = serde_json::json!({"type":"function_call", "name": block["name"], "arguments":input.to_string(), "call_id":block["id"]});
+        for (output, expected) in [
+            (Some(output), "模型和new挪位"),
+            (None, input["threadId"].as_str().unwrap()),
+            (Some("{}"), input["threadId"].as_str().unwrap()),
+        ] {
+            let call = response_tool_call(&payload, output);
+            assert_eq!(call.detail_title, expected);
+            assert!(call.title.contains(expected));
+            let mut records: Vec<Value> =
+                include_str!("../../../tests/fixtures/codex-tool-calls.jsonl")
+                    .lines()
+                    .take(2)
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            records[0]["payload"] = payload.clone();
+            records[1]["payload"]["call_id"] = block["id"].clone();
+            if let Some(output) = output {
+                records[1]["payload"]["output"] = output.into();
+            } else {
+                records.truncate(1);
+            }
+            let records: Vec<_> = records
+                .into_iter()
+                .enumerate()
+                .map(|(index, record)| (index as u64, record))
+                .collect();
+            let file = tempfile::NamedTempFile::new().unwrap();
+            let events = events(file.path(), &records, 10).unwrap();
+            assert!(events[0].1.body.contains(expected), "{}", events[0].1.body);
+        }
+    }
+
     #[test]
     fn real_command_list_preserves_summary_and_failure_status() {
         let record: Value = serde_json::from_str(include_str!(

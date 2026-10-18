@@ -91,8 +91,14 @@ pub(crate) fn title_name(name: &str) -> String {
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Subject {
     Field(&'static str),
+    ResultField {
+        result: &'static str,
+        input: &'static str,
+    },
     QuestionHeaders,
-    Shell { description: bool },
+    Shell {
+        description: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -133,7 +139,13 @@ const MCP_RULES: Rules = Rules {
         ("codex-manager start", Subject::Field("name")),
         ("codex-manager send", Subject::Field("threadId")),
         ("codex-manager interrupt", Subject::Field("threadId")),
-        ("codex-manager detach", Subject::Field("threadId")),
+        (
+            "codex-manager detach",
+            Subject::ResultField {
+                result: "name",
+                input: "threadId",
+            },
+        ),
     ],
     inputs: &[
         (
@@ -236,6 +248,29 @@ pub(crate) fn list_title(name: &str, subject: Option<&str>, input: &Value) -> St
     groups.finish().unwrap()
 }
 
+fn subject_rule(name: &str, rules: &Rules) -> Option<Subject> {
+    find(name, rules.subjects).or_else(|| find(&display_tool_name(name), MCP_RULES.subjects))
+}
+
+/// Read a declared subject from JSON output, leaving the input subject as fallback.
+pub(crate) fn result_subject(
+    name: &str,
+    output: Option<&[Section]>,
+    rules: &Rules,
+) -> Option<String> {
+    let Subject::ResultField { result, .. } = subject_rule(name, rules)? else {
+        return None;
+    };
+    output?.iter().find_map(|section| {
+        let source = match section {
+            Section::Text { text, .. } | Section::Structured { text, .. } => text,
+            _ => return None,
+        };
+        let value: Value = serde_json::from_str(source).ok()?;
+        text(&value, result).map(str::to_owned)
+    })
+}
+
 fn shell_command(input: &Value) -> Option<&str> {
     text(input, "command").or_else(|| text(input, "cmd"))
 }
@@ -248,8 +283,8 @@ pub(crate) fn presentation(
     let raw_name = name;
     let name = display_tool_name(name);
     let mut remaining = input.clone();
-    let subject = match find(raw_name, rules.subjects).or_else(|| find(&name, MCP_RULES.subjects)) {
-        Some(Subject::Field(field)) => remaining
+    let subject = match subject_rule(raw_name, rules) {
+        Some(Subject::Field(field) | Subject::ResultField { input: field, .. }) => remaining
             .as_object_mut()
             .and_then(|object| object.remove(field))
             .and_then(|value| {
@@ -496,6 +531,55 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn result_subject_follows_the_declared_fields() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-manager-detach-name.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let rules = super::Rules {
+            subjects: &[(
+                "inspect",
+                super::Subject::ResultField {
+                    result: "name",
+                    input: "threadId",
+                },
+            )],
+            inputs: &[],
+            expanded: &[],
+            activities: &[],
+        };
+        let input = &records[0]["message"]["content"][0]["input"];
+        let content = &records[1]["message"]["content"][0]["content"];
+        let output = super::mcp_content(content);
+        assert_eq!(
+            super::result_subject("inspect", Some(&output), &rules).as_deref(),
+            Some("模型和new挪位")
+        );
+        assert_eq!(
+            super::presentation("inspect", input, &rules).1.as_deref(),
+            input["threadId"].as_str()
+        );
+        let mut value: serde_json::Value =
+            serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+        for name in [
+            serde_json::Value::Null,
+            serde_json::json!(" "),
+            serde_json::json!(42),
+        ] {
+            value["name"] = name;
+            let output = vec![crate::log::Section::Structured {
+                label: "output".into(),
+                text: value.to_string(),
+            }];
+            assert_eq!(
+                super::result_subject("inspect", Some(&output), &rules),
+                None
+            );
+        }
+    }
+
     #[test]
     fn unsupported_content_blocks_keep_type_and_mime_without_payload() {
         let record: serde_json::Value =
