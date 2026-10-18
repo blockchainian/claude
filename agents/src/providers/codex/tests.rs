@@ -477,6 +477,49 @@ fn manager_children_bypass_codex_paging_and_keep_descendants() {
 }
 
 #[test]
+fn archived_manager_threads_page_as_roots_and_keep_native_children() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "attached");
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET archived=1 WHERE id IN ('thread-12', 'thread-13')",
+            [],
+        )
+        .unwrap();
+
+    let snapshot = provider.snapshot(2).unwrap();
+    let archived = snapshot
+        .sessions
+        .iter()
+        .find(|s| s.id.id == "thread-12")
+        .unwrap();
+    assert!(archived.archived);
+    assert_eq!(archived.parent, None);
+    assert_eq!(archived.status, SessionStatus::Inactive);
+    assert_eq!(archived.name.as_deref(), Some("Managed worker"));
+    assert_eq!(archived.title, "Managed worker");
+    let child = snapshot
+        .sessions
+        .iter()
+        .find(|s| s.id.id == "thread-13")
+        .unwrap();
+    assert_eq!(child.parent.as_ref(), Some(&archived.id));
+    assert!(!snapshot.has_more);
+
+    for pages in [0, 1] {
+        let snapshot = provider.snapshot(pages).unwrap();
+        assert!(snapshot.has_more);
+        assert!(
+            snapshot
+                .sessions
+                .iter()
+                .all(|s| s.id.id != "thread-12" && s.id.id != "thread-13")
+        );
+    }
+}
+
+#[test]
 fn manager_waiting_and_asks_override_rollout_status_and_clear() {
     let (dir, mut provider) = fixture();
     let session = manager_fixture(dir.path(), &mut provider, "attached");

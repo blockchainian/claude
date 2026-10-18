@@ -127,7 +127,9 @@ impl CodexProvider {
                     });
                 }
                 if let Some(link) = manager.get(&session.id.id) {
-                    session.parent = Some(link.parent.clone());
+                    if !session.archived {
+                        session.parent = Some(link.parent.clone());
+                    }
                     if session.name.is_none() {
                         session.name = link.name.clone();
                     }
