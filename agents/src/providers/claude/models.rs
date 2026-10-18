@@ -7,20 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
-struct Account {
-    #[serde(rename = "oauthAccount")]
-    oauth_account: Option<OauthAccount>,
-}
-
-#[derive(Deserialize)]
-struct OauthAccount {
-    #[serde(rename = "organizationUuid")]
-    organization_uuid: String,
-    #[serde(rename = "accountUuid")]
-    account_uuid: String,
-}
-
-#[derive(Deserialize)]
 struct Cache {
     version: u32,
     catalog: Catalog,
@@ -62,13 +48,7 @@ struct Runtime {
 
 /// The cache Claude Code itself reads: named by the account's organization and a hash of its id.
 fn cache_path(config_dir: &Path) -> Option<PathBuf> {
-    let account = [config_dir.join(".claude.json")]
-        .into_iter()
-        .chain(config_dir.parent().map(|home| home.join(".claude.json")))
-        .find_map(|path| fs::read(path).ok())?;
-    let account = serde_json::from_slice::<Account>(&account)
-        .ok()?
-        .oauth_account?;
+    let account = super::account::read(config_dir).ok()?;
     let hash = Sha256::digest(account.account_uuid.to_lowercase().as_bytes());
     let hash: String = hash
         .iter()

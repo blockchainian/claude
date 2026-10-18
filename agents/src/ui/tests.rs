@@ -2240,6 +2240,20 @@ fn lifecycle_fixture() -> View {
 #[test]
 fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
     let mut view = lifecycle_fixture();
+    for row in &mut view.rows {
+        row.id.provider = ProviderId::Codex;
+    }
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Codex,
+        Capabilities {
+            archive: true,
+            ..Capabilities::default()
+        },
+    )]));
+    let id = SessionKey {
+        provider: ProviderId::Codex,
+        id: "42".into(),
+    };
     assert_eq!(key(&mut view, KeyCode::Char('a')), None);
     let rendered = screen(&view, 120, 48);
     assert!(rendered.contains("Archive “Current task”?"));
@@ -2255,12 +2269,33 @@ fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
     key(&mut view, KeyCode::Char('a'));
     assert_eq!(
         key(&mut view, KeyCode::Char('2')),
-        Some(Action::Archive(session_key("42")))
+        Some(Action::Archive(id.clone()))
     );
     key(&mut view, KeyCode::Char('a'));
     key(&mut view, KeyCode::Down);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
+        Some(Action::Archive(id.clone()))
+    );
+}
+
+#[test]
+fn archive_dialog_shows_claude_copy_and_two_accepts_at_once() {
+    let mut view = lifecycle_fixture();
+    assert_eq!(key(&mut view, KeyCode::Char('a')), None);
+    let rendered = screen(&view, 120, 48);
+    assert!(rendered.contains("Archive “Current task”?"));
+    let dialog = rendered
+        .lines()
+        .filter_map(|line| line.split('│').nth(1))
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(dialog.contains("This stops the session, then archives it on claude.ai. Its history can be restored from the resume picker."));
+    assert!(rendered.contains("2. Archive session"));
+    assert!(!rendered.contains("Archive task and child agents"));
+    assert_eq!(
+        key(&mut view, KeyCode::Char('2')),
         Some(Action::Archive(session_key("42")))
     );
 }

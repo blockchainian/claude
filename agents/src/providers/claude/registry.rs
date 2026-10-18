@@ -10,6 +10,7 @@ use std::path::Path;
 pub(in crate::providers) struct Entry {
     pub pid: Option<u32>,
     pub session_id: Option<String>,
+    pub bridge_session_id: Option<String>,
     pub cwd: Option<String>,
     pub started_at: Option<i64>,
     pub proc_start: Option<String>,
@@ -146,6 +147,16 @@ pub(super) mod tests {
         value["procStart"] = start.format("%a %b %e %H:%M:%S %Y").to_string().into();
         fs::create_dir_all(dir.join("sessions")).unwrap();
         value
+    }
+
+    #[test]
+    fn parses_remote_control_bridge_session_id() {
+        let entry: Entry =
+            serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
+        assert_eq!(
+            entry.bridge_session_id.as_deref(),
+            Some("session_01WnvuRYWGwQdQwyagwMG4N7")
+        );
     }
 
     #[test]

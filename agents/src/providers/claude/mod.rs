@@ -1,5 +1,7 @@
 //! Session sources: the live registry and transcripts.
 
+mod account;
+mod api;
 mod attach;
 #[cfg(test)]
 mod attach_live_tests;
@@ -88,44 +90,11 @@ pub fn delete_session(config_dir: &Path, session: &Session) -> io::Result<()> {
         .as_deref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Nothing to delete"))?;
     if let Some(process) = &session.process {
+        let entry = session_entry(config_dir, session)?.expect("session has a process");
         let pid = process.pid;
-        if pid == 0 || pid > i32::MAX as u32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Invalid process id",
-            ));
-        }
         let directory = config_dir.join("sessions");
         let path = directory.join(format!("{pid}.json"));
-        let entry: registry::Entry = serde_json::from_slice(&fs::read(&path)?)?;
-        if entry.pid != Some(pid)
-            || entry.session_id.as_deref() != Some(session.id.id.as_str())
-            || entry.started_at != process.started_at.map(|time| time.timestamp_millis())
-        {
-            return Err(io::Error::other("Session registry changed"));
-        }
-        if let Some(job) = &session.background_job {
-            if entry.kind.as_deref() != Some("bg") || entry.job_id.as_deref() != Some(&job.id) {
-                return Err(io::Error::other("Background job identity changed"));
-            }
-            background_command("stop", &job.id)?;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while process_exists(pid)? {
-                let starts = registry::process_starts(&[pid]);
-                if !starts
-                    .get(&pid)
-                    .is_some_and(|actual| registry::matches_start(&entry, actual))
-                {
-                    break;
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Err(io::Error::other("Claude background session did not stop"));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-        } else {
-            stop_process(&entry)?;
-        }
+        stop_session(session, &entry)?;
         // A process may remove its own registry entry while shutting down.
         match fs::read(&path) {
             Ok(bytes) => {
@@ -158,6 +127,58 @@ pub fn delete_session(config_dir: &Path, session: &Session) -> io::Result<()> {
         background_command("rm", &job.id)?;
     }
     delete(transcript)
+}
+
+/// Reads the registry entry only if it still belongs to this session process.
+fn session_entry(config_dir: &Path, session: &Session) -> io::Result<Option<registry::Entry>> {
+    let Some(process) = &session.process else {
+        return Ok(None);
+    };
+    let pid = process.pid;
+    if pid == 0 || pid > i32::MAX as u32 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid process id",
+        ));
+    }
+    let directory = config_dir.join("sessions");
+    let path = directory.join(format!("{pid}.json"));
+    let entry: registry::Entry = serde_json::from_slice(&fs::read(&path)?)?;
+    if entry.pid != Some(pid)
+        || entry.session_id.as_deref() != Some(session.id.id.as_str())
+        || entry.started_at != process.started_at.map(|time| time.timestamp_millis())
+    {
+        return Err(io::Error::other("Session registry changed"));
+    }
+    Ok(Some(entry))
+}
+
+/// Stops a registered session through its background job or terminal process.
+fn stop_session(session: &Session, entry: &registry::Entry) -> io::Result<()> {
+    let pid = entry.pid.expect("validated process id");
+    if let Some(job) = &session.background_job {
+        if entry.kind.as_deref() != Some("bg") || entry.job_id.as_deref() != Some(&job.id) {
+            return Err(io::Error::other("Background job identity changed"));
+        }
+        background_command("stop", &job.id)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while process_exists(pid)? {
+            let starts = registry::process_starts(&[pid]);
+            if !starts
+                .get(&pid)
+                .is_some_and(|actual| registry::matches_start(entry, actual))
+            {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::other("Claude background session did not stop"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    } else {
+        stop_process(entry)?;
+    }
+    Ok(())
 }
 
 fn background_command(action: &str, job_id: &str) -> io::Result<()> {
@@ -722,6 +743,7 @@ impl Provider for ClaudeProvider {
             fork: true,
             rename: true,
             delete: true,
+            archive: true,
             ..Capabilities::default()
         }
     }
@@ -888,8 +910,28 @@ impl Provider for ClaudeProvider {
         let session = session.clone();
         Ok(Box::new(move || delete_session(&config_dir, &session)))
     }
-    fn archive(&self, _: &Session) -> io::Result<()> {
-        Err(io::ErrorKind::Unsupported.into())
+    fn archive(&self, session: &Session) -> io::Result<()> {
+        let ended = || {
+            io::Error::other("session has already ended; Claude Code archived it when it stopped")
+        };
+        let entry = match session_entry(&self.config_dir, session) {
+            Ok(Some(entry)) => entry,
+            Ok(None) => return Err(ended()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(ended()),
+            Err(error) => return Err(error),
+        };
+        let pid = entry.pid.expect("validated process id");
+        if !process_exists(pid)? {
+            return Err(ended());
+        }
+        let bridge_id = entry
+            .bridge_session_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| io::Error::other("session has no Remote Control link"))?;
+        let mut client = api::Client::connect(&self.config_dir)?;
+        stop_session(session, &entry)?;
+        api::session::archive(&mut client, bridge_id)
     }
 }
 
@@ -1216,6 +1258,42 @@ mod tests {
     }
 
     #[test]
+    fn archive_rejects_ended_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = transcript(dir.path(), "00000000-0000-0000-0000-000000000001", 0);
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        assert_eq!(
+            provider.archive(&session).unwrap_err().to_string(),
+            "session has already ended; Claude Code archived it when it stopped"
+        );
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn archive_without_remote_control_keeps_process_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut entry = registry::tests::fixture(dir.path());
+        entry.as_object_mut().unwrap().remove("bridgeSessionId");
+        let id = entry["sessionId"].as_str().unwrap();
+        transcript(dir.path(), id, 0);
+        let registry_path = dir
+            .path()
+            .join("sessions")
+            .join(format!("{}.json", std::process::id()));
+        fs::write(&registry_path, serde_json::to_vec(&entry).unwrap()).unwrap();
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        assert!(session.process.is_some());
+        assert_eq!(
+            provider.archive(&session).unwrap_err().to_string(),
+            "session has no Remote Control link"
+        );
+        assert!(process_exists(std::process::id()).unwrap());
+        assert!(registry_path.exists());
+    }
+
+    #[test]
     fn provider_identity_and_capabilities() {
         let dir = tempfile::tempdir().unwrap();
         let provider: Box<dyn Provider> = Box::new(ClaudeProvider::new(dir.path().into()));
@@ -1228,7 +1306,7 @@ mod tests {
                 rename: true,
                 delete: true,
                 stop: false,
-                archive: false,
+                archive: true,
             }
         );
     }
@@ -1711,6 +1789,41 @@ mod delete_tests {
 mod delete_live_tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn stop_session_rejects_changed_background_identity_without_signalling() {
+        for (kind, job_id) in [("interactive", "expected-job"), ("bg", "another-job")] {
+            let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+            let mut entry: registry::Entry =
+                serde_json::from_str(include_str!("../../../tests/fixtures/registry.json"))
+                    .unwrap();
+            entry.pid = Some(child.id());
+            entry.kind = Some(kind.into());
+            entry.job_id = Some(job_id.into());
+            let mut session = session(
+                entry.session_id.clone().unwrap(),
+                Summary::default(),
+                None,
+                Utc::now(),
+            );
+            session.background_job = Some(crate::model::BackgroundJob {
+                id: "expected-job".into(),
+                needs: None,
+            });
+
+            let result = stop_session(&session, &entry);
+            let running = child.try_wait().unwrap().is_none();
+            if running {
+                child.kill().unwrap();
+            }
+            child.wait().unwrap();
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "Background job identity changed"
+            );
+            assert!(running, "a mismatched background job must not be signalled");
+        }
+    }
 
     #[test]
     fn delete_stops_matching_process_and_removes_registry_and_keys() {
