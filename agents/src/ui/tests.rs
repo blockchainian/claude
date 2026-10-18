@@ -8060,16 +8060,18 @@ fn open_view_scrollbar() {
     let scrollbar_x = layout.log_detail.right() - 1;
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(scrollbar_x, area.top())].symbol(), "│");
+    assert_eq!(buf[(scrollbar_x, area.top())].symbol(), "▕");
     assert_eq!(buf[(scrollbar_x, area.top())].fg, Color::Reset);
     assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), " ");
+    assert_eq!(buf[(scrollbar_x, layout.log_detail.top())].symbol(), "─");
+    assert_eq!(buf[(scrollbar_x, layout.log_detail.bottom())].symbol(), " ");
     for y in area.top()..area.bottom() {
-        assert_ne!(buf[(area.right() - 1, y)].symbol(), "│");
+        assert_ne!(buf[(area.right() - 1, y)].symbol(), "▕");
     }
     view.viewport.borrow_mut().log_detail_scroll = usize::MAX;
     log_screen(&view, 100, 25, now);
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "│");
+    assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "▕");
 }
 
 #[test]

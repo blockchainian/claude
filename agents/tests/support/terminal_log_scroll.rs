@@ -295,3 +295,37 @@ fn terminal_log_scroll_live_appends_keep_short_entries_moving() {
         println!("{verdict}");
     }
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_scrollbar_uses_right_edge_blocks_below_rule() {
+    let (_directory, tmux, _) = start_probe_with_transcript("scrollbar", &scroll_transcript());
+    let capture = tmux.capture_when(|text| text.contains("scroll after"));
+    let detail_row = capture
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains("scroll after"))
+        .map(|(row, _)| row)
+        .last()
+        .unwrap();
+    tmux.mouse(64, 90, detail_row, false);
+    let capture = tmux.capture_when(|text| text.contains('▕'));
+    let rows = capture.lines().collect::<Vec<_>>();
+    let top = rows.iter().rposition(|line| line.starts_with('─')).unwrap();
+    assert_eq!(rows[top].chars().last(), Some('─'), "{capture}");
+    assert_eq!(rows[top + 1].chars().last(), Some('▕'), "{capture}");
+    for row in &rows[top + 1..rows.len() - 1] {
+        assert!(
+            matches!(row.chars().nth(199), Some('▕' | ' ') | None),
+            "{capture}"
+        );
+    }
+    let verdict =
+        serde_json::json!({"verdict":"pass", "thumb":"▕", "top_rule":"─", "track":"blank"});
+    if let Some(output) = std::env::var_os("AGENTS_SCROLLBAR_VERDICT") {
+        let output = std::path::PathBuf::from(output);
+        std::fs::write(output.with_extension("capture.txt"), &capture).unwrap();
+        std::fs::write(output, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    }
+    println!("{verdict}");
+}

@@ -246,7 +246,7 @@ impl View {
             for row in 0..height {
                 buf[(scrollbar_x, body_area.y + row as u16)].set_symbol(
                     if (top..top + thumb).contains(&row) {
-                        "│"
+                        "▕"
                     } else {
                         " "
                     },
