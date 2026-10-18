@@ -355,7 +355,7 @@ pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>)
         .iter()
         .any(|question| !answers.contains_key(question["question"].as_str().unwrap_or("")))
     {
-        blocks.push("⚠ You have not answered all questions".to_owned());
+        blocks.push("You have not answered all questions".to_owned());
     }
     let lines: Vec<String> = questions
         .iter()

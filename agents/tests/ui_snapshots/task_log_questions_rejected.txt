@@ -5,6 +5,6 @@ AskUserQuestion                                                   压 缩 摘 �
                        1. 显 示 成 压 缩 标 记  (Recommended): 不 当 用 户 消 息 ， 日 志 里 出 一 行 “Conversation compacted”之 类 的 系 统 行
                        2. 直 接 隐 藏 : 日 志 里 完 全 不 显 示 这 条
                                                                       ↓
-                                                    Chat about this
+                                                     Chat about this
 
-                                                    ⚠ You have not answered all questions
+                                                     You have not answered all questions

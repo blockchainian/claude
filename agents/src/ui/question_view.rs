@@ -402,7 +402,7 @@ impl QuestionView {
         let start = lines.len();
         if self.pages.iter().any(|page| !page.answered()) {
             lines.push(Line::styled(
-                "⚠ You have not answered all questions",
+                "You have not answered all questions",
                 super::style::attention_title_style(),
             ));
             lines.push(Line::default());
