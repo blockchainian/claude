@@ -61,6 +61,11 @@ enum Input {
     },
     /// The session terminal's screen changed or its program closed the terminal.
     TerminalOutput,
+    /// A terminal client has detached or been killed and reaped.
+    TerminalClosed {
+        id: SessionKey,
+        result: io::Result<()>,
+    },
 }
 
 struct InputReader {
@@ -122,6 +127,8 @@ pub struct App {
     terminal: Option<crate::session_terminal::SessionTerminal>,
     /// The task whose terminal should reopen when selected again.
     terminal_task: Option<SessionKey>,
+    /// Clients being reaped before the same session can open another terminal.
+    closing_terminals: std::collections::HashMap<SessionKey, session_terminal::TerminalClose>,
     last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
@@ -184,6 +191,7 @@ impl App {
             launch: None,
             terminal: None,
             terminal_task: None,
+            closing_terminals: std::collections::HashMap::new(),
             last_session: None,
             log_stamp: None,
             full_log_stamp: None,
@@ -451,6 +459,7 @@ impl App {
                 }
                 Input::Deleted { id, result } => self.deleted(&id, result),
                 Input::TerminalOutput => {}
+                Input::TerminalClosed { id, result } => self.terminal_closed(&id, result),
             }
         }
         Ok(false)

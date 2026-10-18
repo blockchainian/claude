@@ -1,5 +1,6 @@
 //! Programs run on a pseudo-terminal whose master side this process reads and writes.
 
+use std::cell::Cell;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -10,6 +11,7 @@ use std::time::{Duration, Instant};
 pub struct Pty {
     child: Child,
     master: File,
+    output_claimed: Cell<bool>,
 }
 
 impl Pty {
@@ -56,7 +58,11 @@ impl Pty {
             });
         }
         let child = command.spawn()?;
-        Ok(Self { child, master })
+        Ok(Self {
+            child,
+            master,
+            output_claimed: Cell::new(false),
+        })
     }
 
     #[cfg(test)]
@@ -68,9 +74,11 @@ impl Pty {
         Ok(self.child.try_wait()?.is_some())
     }
 
-    /// A second handle on the master side, for a thread that blocks on output.
+    /// Gives output to a reader thread; shutdown leaves draining to that reader.
     pub fn reader(&self) -> io::Result<File> {
-        self.master.try_clone()
+        let reader = self.master.try_clone()?;
+        self.output_claimed.set(true);
+        Ok(reader)
     }
 
     /// Waits up to `timeout` for output and appends it to `output`; returns false once the
@@ -123,7 +131,12 @@ impl Pty {
             Some(bytes) => self.write(bytes),
             None => Ok(()),
         };
-        let deadline = Instant::now() + if detach.is_some() { timeout } else { Duration::ZERO };
+        let deadline = Instant::now()
+            + if detach.is_some() {
+                timeout
+            } else {
+                Duration::ZERO
+            };
         loop {
             if self.child.try_wait()?.is_some() {
                 return write;
@@ -133,8 +146,13 @@ impl Pty {
                 self.child.wait()?;
                 return write;
             }
-            // Drain output while waiting: a full PTY buffer must not block the child's exit.
-            let _ = self.read(Duration::from_millis(50), &mut Vec::new());
+            if self.output_claimed.get() {
+                // A second blocking read can race the terminal reader and miss the deadline.
+                std::thread::sleep(Duration::from_millis(10));
+            } else {
+                // Drain output while waiting: a full PTY buffer must not block the child's exit.
+                let _ = self.read(Duration::from_millis(50), &mut Vec::new());
+            }
         }
     }
 }
@@ -205,6 +223,30 @@ mod tests {
         let mut output = Vec::new();
         while pty.read(Duration::from_millis(100), &mut output).unwrap() {}
         assert!(String::from_utf8_lossy(&output).contains("20 60"));
+    }
+
+    #[test]
+    fn close_leaves_output_to_the_terminal_reader() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "stty raw -echo; printf READY; read line; dd if=/dev/zero bs=65536 count=16 2>/dev/null"]);
+        let mut pty = Pty::spawn(command, 5, 20).unwrap();
+        let mut ready = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.ends_with(b"READY") {
+            assert!(Instant::now() < deadline);
+            pty.read(Duration::from_millis(50), &mut ready).unwrap();
+        }
+        let mut reader = pty.reader().unwrap();
+        let thread = std::thread::spawn(move || {
+            // Let shutdown start while the terminal reader is between frames.
+            std::thread::sleep(Duration::from_millis(50));
+            let mut output = Vec::new();
+            while read_available(&mut reader, &mut output).unwrap() {}
+            output
+        });
+        pty.close(Some(b"\n"), Duration::from_secs(3)).unwrap();
+        assert!(pty.exited().unwrap());
+        assert_eq!(thread.join().unwrap().len(), 1048576);
     }
 
     #[test]
