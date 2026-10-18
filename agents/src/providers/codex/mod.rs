@@ -2,6 +2,8 @@ mod app_server;
 #[cfg(test)]
 mod inner_tests;
 mod manager;
+#[cfg(test)]
+mod memory_tests;
 pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;

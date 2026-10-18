@@ -1,3 +1,6 @@
+#[path = "codex_memory_tests.rs"]
+mod codex_memory_tests;
+
 #[path = "codex_subagents_tests.rs"]
 mod codex_subagents_tests;
 

@@ -1,3 +1,6 @@
+#[path = "support/terminal_memory_citation.rs"]
+mod terminal_memory_citation;
+
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;

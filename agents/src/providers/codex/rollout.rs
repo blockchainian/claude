@@ -293,6 +293,12 @@ fn assistant_source(record: &Value, offset: u64) -> Option<String> {
         .then(|| source(record, offset))
 }
 
+fn completed_assistant(record: &Value) -> bool {
+    record["type"] == "event_msg"
+        && record["payload"]["type"] == "item_completed"
+        && record["payload"]["item"]["type"] == "AgentMessage"
+}
+
 fn timestamp(record: &Value) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(record["timestamp"].as_str()?)
         .ok()
@@ -907,6 +913,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
     let mut boundary = false;
     let mut message_source_closed = false;
+    let mut message_pending_completion = false;
     let mut outputs = HashSet::new();
     let mut pending = Vec::new();
     walk(path, |record, offset| {
@@ -941,6 +948,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         if record["type"] == "event_msg" && payload["type"] == "task_started" {
             summary.prompt_at.get_or_insert(at);
             message_source_closed = true;
+            message_pending_completion = false;
         }
         if !boundary && record["type"] == "event_msg" {
             match payload["type"].as_str() {
@@ -955,12 +963,22 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             }
         }
         let message = assistant_text(&record)?;
-        if summary.last_message.is_none()
-            && let Some(text) = message.as_ref()
+        let message_source = assistant_source(&record, offset);
+        // Both stored forms share a message id. A turn can contain several
+        // replies, so only the completion for the selected id can replace it.
+        let selected_completion = completed_assistant(&record)
+            && message_source.is_some()
+            && message_source == summary.detail_sources[1];
+        let resolves_source = !message_source_closed
+            && summary.detail_sources[1].is_none()
+            && message_source.is_some();
+        if let Some(text) = message.as_ref()
+            && (summary.last_message.is_none() || resolves_source || selected_completion)
         {
-            summary.detail_sources[1] = assistant_source(&record, offset);
+            summary.detail_sources[1] = message_source.clone();
             summary.last_message = Some(printable(text));
             summary.last_message_at = Some(at);
+            message_pending_completion = message_source.is_some() && !completed_assistant(&record);
         }
         // Completion notifications repeat the reply but have no log row. Keep
         // the identity of the latest message record in that turn instead.
@@ -993,6 +1011,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             && summary.prompt_at.is_some()
             && summary.last_message.is_some()
             && summary.activity.is_some()
+            && !message_pending_completion
             && (summary.detail_sources[1].is_some() || message_source_closed)))
     })?;
     summary.pending_questions = pending.into_iter().rev().flatten().collect();
@@ -1168,7 +1187,9 @@ impl Reader {
             self.entries.extend(suffix);
         }
         let parsed_before_older = parsed_bytes;
-        while self.entries.len() < requested && self.oldest > 0 {
+        while self.oldest > 0
+            && (self.entries.len() < requested || missing_assistant_context(&self.records))
+        {
             let end = self.oldest;
             let target = end.saturating_sub(CHUNK);
             let mut older = Vec::new();
@@ -1230,6 +1251,35 @@ impl Reader {
     }
 }
 
+/// A page starting inside a reply must include its completion or turn boundary.
+fn missing_assistant_context(records: &[(u64, Value)]) -> bool {
+    let mut pending = HashSet::new();
+    let mut completed = HashSet::new();
+    let mut boundary = false;
+    for (_, record) in records {
+        let payload = &record["payload"];
+        if completed_assistant(record) {
+            if let Some(id) = payload["item"]["id"].as_str() {
+                completed.insert(id);
+            }
+        } else if (record["type"] == "event_msg" && payload["type"] == "task_started")
+            || (record["type"] == "response_item"
+                && payload["type"] == "message"
+                && payload["role"] == "user")
+        {
+            boundary = true;
+        } else if !boundary
+            && record["type"] == "response_item"
+            && payload["type"] == "message"
+            && payload["role"] == "assistant"
+            && let Some(id) = payload["id"].as_str()
+        {
+            pending.insert(id);
+        }
+    }
+    pending.iter().any(|id| !completed.contains(id))
+}
+
 impl crate::log::Reader for Reader {
     fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
         Reader::refresh(self, requested)
@@ -1258,6 +1308,13 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
     let mut completed_prompt = None;
+    let mut completed_messages = HashMap::new();
+    for (offset, record) in records {
+        if completed_assistant(record) {
+            let id = required_text(&record["payload"]["item"], "id")?;
+            completed_messages.insert(id, (*offset, record));
+        }
+    }
     let mut visit = |record: &Value, offset: u64| -> io::Result<bool> {
         let Some(at) = timestamp(record) else {
             return Ok(true);
@@ -1266,7 +1323,6 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             completed_prompt = Some((offset, record.clone()));
             return Ok(true);
         }
-        let payload = &record["payload"];
         let mut images = Vec::new();
         let mut calls = Vec::new();
         let mut detail_body = None;
@@ -1275,6 +1331,16 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             offset,
         };
         let mut source_records = vec![reference(offset)];
+        // The raw response may be persisted after its processed completion.
+        // Resolve by id before deduplication, independent of append order.
+        let record = assistant_source(record, offset)
+            .and_then(|id| completed_messages.get(id.as_str()))
+            .map(|(completed_offset, completed)| {
+                source_records.push(reference(*completed_offset));
+                *completed
+            })
+            .unwrap_or(record);
+        let payload = &record["payload"];
         if let Some(mut event) = completed_tool(record)? {
             event.source = Some(source(record, offset));
             event.source_records = source_records;
@@ -2479,11 +2545,13 @@ mod tests {
             .collect();
         records.retain(|r| r["payload"]["type"] != "task_complete");
         let text = "中".repeat(70_000);
-        let message = records
-            .iter_mut()
-            .find(|r| r["payload"]["role"] == "assistant")
-            .unwrap();
-        message["payload"]["content"][0]["text"] = serde_json::json!(text);
+        for record in &mut records {
+            if completed_assistant(record) {
+                record["payload"]["item"]["content"][0]["text"] = serde_json::json!(text);
+            } else if record["payload"]["role"] == "assistant" {
+                record["payload"]["content"][0]["text"] = serde_json::json!(text);
+            }
+        }
         for record in records {
             writeln!(file, "{record}").unwrap();
         }
