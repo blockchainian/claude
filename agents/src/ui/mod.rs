@@ -185,46 +185,11 @@ struct TaskPanels {
     log_search: log_search::LogSearch,
 }
 
-#[derive(Clone, Copy)]
-enum Removal {
-    Archive,
-    Delete,
-}
-
-impl Removal {
-    /// Choices in display order; the first choice is selected when opened.
-    fn options(self) -> [bool; 2] {
-        match self {
-            Self::Archive => [true, false],
-            Self::Delete => [false, true],
-        }
-    }
-}
-
-/// Confirmation before archiving or deleting a task.
+/// Confirmation before deleting a task.
 struct ConfirmDialog {
-    removal: Removal,
     id: SessionKey,
     title: String,
     confirm: bool,
-}
-
-impl ConfirmDialog {
-    fn new(removal: Removal, id: SessionKey, title: String) -> Self {
-        Self {
-            removal,
-            id,
-            title,
-            confirm: removal.options()[0],
-        }
-    }
-
-    fn action(&self) -> Action {
-        match self.removal {
-            Removal::Archive => Action::Archive(self.id.clone()),
-            Removal::Delete => Action::Delete(self.id.clone()),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

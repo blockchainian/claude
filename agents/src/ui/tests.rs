@@ -2281,151 +2281,78 @@ fn lifecycle_fixture() -> View {
 }
 
 #[test]
-fn archive_dialog_shows_codex_copy_and_one_accepts_at_once() {
-    let mut view = lifecycle_fixture();
-    for row in &mut view.rows {
-        row.id.provider = ProviderId::Codex;
-    }
-    view.set_capabilities(HashMap::from([(
-        ProviderId::Codex,
-        Capabilities {
-            archive: true,
-            ..Capabilities::default()
-        },
-    )]));
-    let id = SessionKey {
-        provider: ProviderId::Codex,
-        id: "42".into(),
-    };
-    assert_eq!(key(&mut view, KeyCode::Char('a')), None);
-    let rendered = screen(&view, 120, 48);
-    assert!(rendered.contains("Archive “Current task”?"));
-    let dialog = rendered
-        .lines()
-        .filter_map(|line| line.split('│').nth(1))
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(dialog.contains(
-        "This stops any running work in this task and its child agents, then archives them."
-    ));
-    assert!(!dialog.contains("resume picker"));
-    assert!(rendered.contains("1. Archive task and child agents"));
-    assert!(view.confirm_dialog.as_ref().unwrap().confirm);
-    assert!(rendered.find("1. Archive").unwrap() < rendered.find("2. Cancel").unwrap());
-    assert_eq!(
-        key(&mut view, KeyCode::Enter),
-        Some(Action::Archive(id.clone()))
-    );
-    key(&mut view, KeyCode::Char('a'));
-    assert_eq!(
-        key(&mut view, KeyCode::Char('1')),
-        Some(Action::Archive(id.clone()))
-    );
-    key(&mut view, KeyCode::Char('a'));
-    key(&mut view, KeyCode::Down);
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    key(&mut view, KeyCode::Char('a'));
-    key(&mut view, KeyCode::Down);
-    key(&mut view, KeyCode::Up);
-    assert_eq!(
-        key(&mut view, KeyCode::Enter),
-        Some(Action::Archive(id.clone()))
-    );
-}
-
-#[test]
-fn archive_dialog_shows_claude_copy_and_one_accepts_at_once() {
-    let mut view = lifecycle_fixture();
-    assert_eq!(key(&mut view, KeyCode::Char('a')), None);
-    let rendered = screen(&view, 120, 48);
-    assert!(rendered.contains("Archive “Current task”?"));
-    let dialog = rendered
-        .lines()
-        .filter_map(|line| line.split('│').nth(1))
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(dialog.contains(
-        "This stops any running work in this task and its child agents, then archives them."
-    ));
-    assert!(!dialog.contains("resume picker"));
-    assert!(rendered.contains("1. Archive task and child agents"));
-    assert!(view.confirm_dialog.as_ref().unwrap().confirm);
-    assert!(
-        rendered.find("1. Archive task and child agents").unwrap()
-            < rendered.find("2. Cancel").unwrap()
-    );
-    assert_eq!(
-        key(&mut view, KeyCode::Char('1')),
-        Some(Action::Archive(session_key("42")))
-    );
-}
-
-#[test]
-fn removal_dialog_mouse_follows_visible_options() {
-    for archive in [true, false] {
-        for option in 0..2 {
-            let mut view = if archive {
-                lifecycle_fixture()
-            } else {
-                fixture()
-            };
-            key(
-                &mut view,
-                if archive {
-                    KeyCode::Char('a')
-                } else {
-                    KeyCode::Backspace
-                },
-            );
-            let area = Rect::new(7, 3, 120, 48);
-            let mut buf = Buffer::empty(area);
-            view.render(area, &mut buf);
-            let label = format!("{}.", option + 1);
-            let (x, y) = (area.y..area.bottom())
-                .flat_map(|y| (area.x..area.right() - 1).map(move |x| (x, y)))
-                .find(|&(x, y)| {
-                    format!("{}{}", buf[(x, y)].symbol(), buf[(x + 1, y)].symbol()) == label
-                })
-                .unwrap();
-            let action = click_mouse(
-                &mut view,
-                mouse(MouseEventKind::Down(MouseButton::Left), x, y),
-            );
-            let expected = if (option == 0) == archive {
-                Some(if archive {
-                    Action::Archive(session_key("42"))
-                } else {
-                    Action::Delete(session_key("42"))
-                })
-            } else {
-                None
-            };
-            assert_eq!(action, expected);
-            assert!(view.confirm_dialog.is_none());
-        }
-    }
-}
-
-#[test]
-fn archive_dialog_cancel_and_position_keys() {
-    for code in [KeyCode::Char('2'), KeyCode::Esc] {
+fn archive_directly_returns_action_without_a_dialog() {
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
         let mut view = lifecycle_fixture();
-        key(&mut view, KeyCode::Char('a'));
+        for row in &mut view.rows {
+            row.id.provider = provider;
+        }
+        view.set_capabilities(HashMap::from([(
+            provider,
+            Capabilities {
+                archive: true,
+                ..Capabilities::default()
+            },
+        )]));
+        let id = view.selected_id().unwrap().clone();
+        assert_eq!(
+            key(&mut view, KeyCode::Char('a')),
+            Some(Action::Archive(id))
+        );
+        assert!(view.confirm_dialog.is_none());
+        assert!(!screen(&view, 120, 48).contains("Archive “"));
+    }
+}
+
+#[test]
+fn delete_dialog_mouse_follows_visible_options() {
+    for option in 0..2 {
+        let mut view = fixture();
+        key(&mut view, KeyCode::Backspace);
+        let area = Rect::new(7, 3, 120, 48);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        let label = format!("{}.", option + 1);
+        let (x, y) = (area.y..area.bottom())
+            .flat_map(|y| (area.x..area.right() - 1).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                format!("{}{}", buf[(x, y)].symbol(), buf[(x + 1, y)].symbol()) == label
+            })
+            .unwrap();
+        let action = click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+        );
+        let expected = if option == 1 {
+            Some(Action::Delete(session_key("42")))
+        } else {
+            None
+        };
+        assert_eq!(action, expected);
+        assert!(view.confirm_dialog.is_none());
+    }
+}
+
+#[test]
+fn delete_dialog_cancel_and_position_keys() {
+    for code in [KeyCode::Char('1'), KeyCode::Esc] {
+        let mut view = fixture();
+        key(&mut view, KeyCode::Backspace);
         assert_eq!(key(&mut view, code), None);
         assert!(view.confirm_dialog.is_none());
     }
     for code in [KeyCode::End, KeyCode::PageDown] {
-        let mut view = lifecycle_fixture();
-        key(&mut view, KeyCode::Char('a'));
-        key(&mut view, code);
+        let mut view = fixture();
+        key(&mut view, KeyCode::Backspace);
         assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
-        key(&mut view, KeyCode::Home);
+        key(&mut view, code);
         assert!(view.confirm_dialog.as_ref().unwrap().confirm);
+        key(&mut view, KeyCode::Home);
+        assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+        key(&mut view, code);
         assert_eq!(
             key(&mut view, KeyCode::Enter),
-            Some(Action::Archive(session_key("42")))
+            Some(Action::Delete(session_key("42")))
         );
     }
 }

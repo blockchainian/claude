@@ -1394,8 +1394,7 @@ fn archive_success_keeps_active_tab_and_releases_hidden_task() {
     draw(&mut app, 120);
     assert_eq!(app.view.selected_id(), Some(&target.id));
     key(&mut app, KeyCode::Char('a'));
-    assert!(lines(&draw(&mut app, 120)).join("\n").contains("Archive"));
-    key(&mut app, KeyCode::Char('1'));
+    assert!(!lines(&draw(&mut app, 120)).join("\n").contains("Archive “"));
     assert!(
         app.view.selected_id().is_none(),
         "archive must move selection before refreshing"

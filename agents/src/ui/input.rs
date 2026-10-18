@@ -424,7 +424,7 @@ impl View {
                     drop(viewport);
                     if let Some(confirm) = choice {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
-                        return confirm.then(|| dialog.action());
+                        return confirm.then_some(Action::Delete(dialog.id));
                     }
                 }
                 _ => self.mouse_press = None,
@@ -1119,30 +1119,27 @@ impl View {
                     KeyCode::Enter => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         if dialog.confirm {
-                            return Some(dialog.action());
+                            return Some(Action::Delete(dialog.id));
                         }
                     }
                     KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
                         dialog.confirm = !dialog.confirm;
                     }
                     // Each item's number accepts it at once.
-                    KeyCode::Char(number @ ('1' | '2')) => {
+                    KeyCode::Char('1') => self.confirm_dialog = None,
+                    KeyCode::Char('2') => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
-                        if dialog.removal.options()[usize::from(number == '2')] {
-                            return Some(dialog.action());
-                        }
+                        return Some(Action::Delete(dialog.id));
                     }
-                    KeyCode::Home | KeyCode::PageUp => dialog.confirm = dialog.removal.options()[0],
-                    KeyCode::End | KeyCode::PageDown => {
-                        dialog.confirm = dialog.removal.options()[1]
-                    }
+                    KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
+                    KeyCode::End | KeyCode::PageDown => dialog.confirm = true,
                     _ => {}
                 }
             } else if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match key.code {
                     KeyCode::Char('p' | 'k' | 'n' | 'j') => dialog.confirm = !dialog.confirm,
-                    KeyCode::Char('b') => dialog.confirm = dialog.removal.options()[0],
-                    KeyCode::Char('f') => dialog.confirm = dialog.removal.options()[1],
+                    KeyCode::Char('b') => dialog.confirm = false,
+                    KeyCode::Char('f') => dialog.confirm = true,
                     _ => {}
                 }
             }
@@ -1359,11 +1356,7 @@ impl View {
                     if !self.selected_capabilities().archive {
                         return Some(Action::Unsupported("Archive"));
                     }
-                    self.confirm_dialog = Some(ConfirmDialog::new(
-                        Removal::Archive,
-                        session.id.clone(),
-                        session.display_title().to_owned(),
-                    ));
+                    return Some(Action::Archive(session.id.clone()));
                 }
             }
             KeyCode::Backspace => {
@@ -1375,11 +1368,11 @@ impl View {
                     if !self.selected_capabilities().delete {
                         return Some(Action::Unsupported("Delete"));
                     }
-                    self.confirm_dialog = Some(ConfirmDialog::new(
-                        Removal::Delete,
-                        session.id.clone(),
-                        session.display_title().to_owned(),
-                    ));
+                    self.confirm_dialog = Some(ConfirmDialog {
+                        id: session.id.clone(),
+                        title: session.display_title().to_owned(),
+                        confirm: false,
+                    });
                 }
             }
             KeyCode::Char('o') => {

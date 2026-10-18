@@ -491,23 +491,12 @@ impl View {
         use ratatui::widgets::{Block, Borders};
         let width = area.width.min(80);
         let content_width = usize::from(width.saturating_sub(4).max(1));
-        let (title, description, label) = match dialog.removal {
-            Removal::Archive => (
-                format!("Archive “{}”?", dialog.title),
-                "This stops any running work in this task and its child agents, then archives them.",
-                "Archive task and child agents",
-            ),
-            Removal::Delete => (
-                format!("Permanently delete “{}”?", dialog.title),
-                "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.",
-                "Permanently delete task and child agents",
-            ),
-        };
-        let description = if matches!(dialog.removal, Removal::Delete)
-            && self
-                .rows
-                .iter()
-                .any(|session| session.id == dialog.id && session.background_job.is_some())
+        let title = format!("Permanently delete “{}”?", dialog.title);
+        let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
+        let description = if self
+            .rows
+            .iter()
+            .any(|session| session.id == dialog.id && session.background_job.is_some())
         {
             format!("{description} Worktrees and branches created by agents remain.")
         } else {
@@ -522,9 +511,11 @@ impl View {
         }
         lines.push(Line::default());
         let options_start = lines.len() as u16;
-        let options = dialog.removal.options();
-        for (index, confirm) in options.into_iter().enumerate() {
-            let label = if confirm { label } else { "Cancel" };
+        for (index, label) in ["Cancel", "Permanently delete task and child agents"]
+            .into_iter()
+            .enumerate()
+        {
+            let confirm = index == 1;
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
@@ -558,7 +549,7 @@ impl View {
         }
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
-        viewport.confirm_options = options
+        viewport.confirm_options = [false, true]
             .into_iter()
             .enumerate()
             .filter_map(|(index, confirm)| {

@@ -145,29 +145,23 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
             Some(expected)
         );
     }
-    for (code, removal) in [
-        (KeyCode::Char('a'), Removal::Archive),
-        (KeyCode::Backspace, Removal::Delete),
-    ] {
-        let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
-        let id = view.selected_id().unwrap().clone();
-        assert_eq!(
-            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            None
-        );
-        assert!(view.confirm_dialog.is_some());
-        if matches!(removal, Removal::Delete) {
-            view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        }
-        let expected = match removal {
-            Removal::Archive => Action::Archive(id),
-            Removal::Delete => Action::Delete(id),
-        };
-        assert_eq!(
-            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            Some(expected)
-        );
-    }
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    let id = view.selected_id().unwrap().clone();
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+        Some(Action::Archive(id.clone()))
+    );
+    assert!(view.confirm_dialog.is_none());
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+        None
+    );
+    assert!(view.confirm_dialog.is_some());
+    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(Action::Delete(id))
+    );
 }
 
 #[test]
