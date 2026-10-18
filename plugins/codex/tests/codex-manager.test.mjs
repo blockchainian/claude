@@ -1556,6 +1556,31 @@ test("requests the daemon sends for an attached session are left to the client i
   }
 });
 
+for (const name of ["模型和new挪位", undefined]) {
+  test(`detach returns the started thread's name (${name ?? "unnamed"})`, { timeout: 20_000 }, async () => {
+    const home = await tempHome();
+    const script = daemonScript();
+    const daemon = await fakeDaemon(script.handler);
+    const mcp = await mcpChild(home, daemon);
+    try {
+      const started = await mcp.call("start", { cwd: "/tmp", prompt: "Finish the task", name });
+      assert.equal(started.isError, false, started.text);
+      const [socket] = script.sockets;
+      send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "completed" } } });
+      await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).length === 1);
+      const detached = await mcp.call("detach", { threadId: "thread-A" });
+      assert.equal(detached.isError, false, detached.text);
+      const expected = { threadId: "thread-A", detached: true, archived: true };
+      if (name !== undefined) expected.name = name;
+      assert.deepEqual(detached.json, expected);
+    } finally {
+      await mcp.close();
+      await daemon.close();
+      await home.close();
+    }
+  });
+}
+
 test("detach archives a started thread, refuses a running one, and refuses later send or attach", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
@@ -1617,7 +1642,7 @@ test("detach unsubscribes an attached session and later send or attach subscribe
     const detach = async () => {
       const detached = await mcp.call("detach", { threadId: "thread-existing" });
       assert.equal(detached.isError, false, detached.text);
-      assert.deepEqual(detached.json, { threadId: "thread-existing", detached: true, status: "unsubscribed" });
+      assert.deepEqual(detached.json, { threadId: "thread-existing", name: "existing", detached: true, status: "unsubscribed" });
       assert.equal(script.messages.at(-1).method, "thread/unsubscribe");
       assert.deepEqual(script.messages.at(-1).params, { threadId: "thread-existing" });
       assert.equal((await mcp.call("list", {})).json.threads[0].detached, true);
