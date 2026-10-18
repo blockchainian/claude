@@ -2016,11 +2016,12 @@ fn terminal_detail_reading_column_preserves_original_copy() {
     // Keep recorded upstream bodies, field names and command line breaks intact.
     for (kind, records, needle, prose) in [
         ("assistant", String::new(), "对，必须", true),
+        // MCP inputs use the preformatted JSON column, including prompt fields.
         (
             "send",
             include_str!("fixtures/reading-column-send.jsonl").to_owned(),
             "Additional scope",
-            true,
+            false,
         ),
         ("user", format!("{user}\n"), "cctail", true),
         (
@@ -2057,7 +2058,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             "tool-prompt",
             include_str!("fixtures/claude-manager-start.jsonl").to_owned(),
             "Implement workstream A",
-            true,
+            false,
         ),
         (
             "command",
@@ -2167,7 +2168,6 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 group_right <= usize::from(width) - 11,
                 "{kind} enters the time column at {width}: {capture}"
             );
-            let expected_left = group_left;
             if kind == "send" {
                 assert!(
                     rows[rule + 1]
@@ -2175,40 +2175,74 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                         .starts_with("codex-manager send"),
                     "tool title missing from centered header: {capture}"
                 );
-                let summary = rows
-                    .iter()
-                    .skip(rule + 3)
-                    .find(|line| line.contains("threadId: 00000000-0000-4000-8000-000000000000"))
-                    .expect("identifier remains an ordinary input field");
-                assert_eq!(
-                    summary.len() - summary.trim_start().len(),
-                    expected_left,
+                assert_eq!(group[0].trim(), "{", "{capture}");
+                assert_eq!(group.last().unwrap().trim(), "}", "{capture}");
+                assert!(
+                    group
+                        .iter()
+                        .any(|line| line.contains("\"prompt\": \"Additional scope")),
                     "{capture}"
+                );
+                assert!(
+                    group.iter().any(|line| line
+                        .contains("\"threadId\": \"00000000-0000-4000-8000-000000000000\"")),
+                    "{capture}"
+                );
+                assert!(
+                    group.iter().any(|line| line.ends_with('…')),
+                    "long JSON lines must truncate: {capture}"
+                );
+                // Copy the input block, including bytes hidden by visual truncation.
+                let clipboard = directory.path().join("clipboard/text");
+                if clipboard.exists() {
+                    std::fs::remove_file(&clipboard).unwrap();
+                }
+                let click = format!(
+                    "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+                    left + 1,
+                    row + 1,
+                    left + 1,
+                    row + 1
+                )
+                .repeat(2);
+                tmux.run(&["send-keys", "-t", "probe", "-l", &click]);
+                tmux.wait_for(|_| clipboard.exists());
+                let copied = std::fs::read_to_string(&clipboard).unwrap();
+                assert!(
+                    copied.starts_with('{') && copied.trim_end().ends_with('}'),
+                    "{copied}"
+                );
+                let record: serde_json::Value = serde_json::from_str(records.trim()).unwrap();
+                let input = &record["message"]["content"][0]["input"];
+                for source_line in input["prompt"].as_str().unwrap().lines() {
+                    assert!(
+                        copied.contains(source_line),
+                        "source text lost during copy: {source_line}: {copied}"
+                    );
+                }
+                assert!(
+                    copied.contains(input["threadId"].as_str().unwrap()),
+                    "{copied}"
                 );
             }
             if kind == "tool-prompt" {
                 let header = rows[rule + 1];
                 assert!(
-                    header.contains("codex-manager start") && header.contains("Claude 图片链接"),
+                    header.trim_start().starts_with("codex-manager start"),
                     "{capture}"
                 );
-                assert!(
-                    !rows
-                        .iter()
-                        .skip(rule + 3)
-                        .any(|line| line.contains("Claude 图片链接")),
-                    "{capture}"
-                );
-                let cwd = rows
-                    .iter()
-                    .skip(rule + 3)
-                    .find(|line| line.contains("cwd"))
-                    .expect("remaining cwd field");
-                assert_eq!(
-                    cwd.len() - cwd.trim_start().len(),
-                    expected_left,
-                    "cwd outside reading column: {capture}"
-                );
+                assert!(!header.contains("Claude 图片链接"), "{capture}");
+                assert_eq!(group[0].trim(), "{", "{capture}");
+                for field in [
+                    "\"cwd\": \"/workspace/agents\"",
+                    "\"name\": \"Claude 图片链接\"",
+                    "\"prompt\": \"Implement workstream A",
+                ] {
+                    assert!(
+                        group.iter().any(|line| line.contains(field)),
+                        "missing {field}: {capture}"
+                    );
+                }
             }
             if kind == "assistant" {
                 // Drag in screen coordinates to the next character's boundary.
@@ -2281,7 +2315,7 @@ fn terminal_manager_detach_title() {
     )
     .unwrap();
     tmux.run(&["send-keys", "-t", "probe", "End"]);
-    tmux.wait_for(|capture| capture.contains("threadId: 01a1489e"));
+    tmux.wait_for(|capture| capture.contains("\"threadId\": \"01a1489e"));
     for width in [200_u16, 120, 150, 149] {
         tmux.run(&[
             "resize-window",
@@ -2301,7 +2335,7 @@ fn terminal_manager_detach_title() {
                     line.width() == usize::from(width)
                         && line.matches('─').count() > usize::from(width / 2)
                 })
-                && capture.contains("threadId: 01a1489e")
+                && capture.contains("\"threadId\": \"01a1489e")
         });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = capture.lines().collect();
@@ -2314,7 +2348,12 @@ fn terminal_manager_detach_title() {
             rows[rule + 2].trim_end_matches('│').trim().is_empty(),
             "{capture}"
         );
-        assert!(rows[rule + 3].contains("threadId: 01a1489e"), "{capture}");
+        assert_eq!(rows[rule + 3].trim(), "{", "{capture}");
+        assert!(
+            rows[rule + 4].contains("\"threadId\": \"01a1489e"),
+            "{capture}"
+        );
+        assert_eq!(rows[rule + 5].trim(), "}", "{capture}");
         assert!(
             title.trim_start().starts_with("codex-manager detach"),
             "{capture}"
@@ -2323,7 +2362,7 @@ fn terminal_manager_detach_title() {
         let input = rows
             .iter()
             .skip(rule + 2)
-            .find(|line| line.contains("threadId: 01a1489e"))
+            .find(|line| line.contains("\"threadId\": \"01a1489e"))
             .expect("thread input block");
         let input_left = input.width() - input.trim_start().width();
         assert_eq!(
@@ -2336,7 +2375,7 @@ fn terminal_manager_detach_title() {
         );
         assert_eq!(
             input_left,
-            terminal_detail_width::detail_center(usize::from(width), input.trim().width()),
+            terminal_detail_width::detail_center(usize::from(width), input.trim().width() + 2) + 2,
             "{capture}"
         );
         assert!(
@@ -2368,9 +2407,9 @@ mod terminal_detail_width;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_start_description_header() {
+fn terminal_start_tool_name_header() {
     use std::io::Write;
-    let (_directory, tmux, transcript) = start_probe("start-description");
+    let (_directory, tmux, transcript) = start_probe("start-tool-name");
     std::fs::OpenOptions::new()
         .append(true)
         .open(transcript)
@@ -2391,23 +2430,18 @@ fn terminal_start_description_header() {
             capture.lines().count() == 50
                 && capture.lines().any(|line| {
                     line.trim_start().starts_with("codex-manager start")
-                        && line.contains("Claude 图片链接")
-                        && line
-                            .split_once("codex-manager start")
-                            .is_some_and(|(_, tail)| !tail.trim().is_empty())
+                        && line.matches("codex-manager start").count() == 2
                 })
                 && capture.contains("Implement workstream A")
         });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        let path = std::env::temp_dir().join(format!("agents-start-description-live-{width}.txt"));
+        let path = std::env::temp_dir().join(format!("agents-start-tool-name-live-{width}.txt"));
         std::fs::write(&path, &capture).unwrap();
         let rows: Vec<_> = capture.lines().collect();
         let header = rows
             .iter()
-            .rposition(|line| {
-                line.contains("Claude 图片链接") && line.contains("codex-manager start")
-            })
-            .expect("three-slot title bar");
+            .rposition(|line| line.matches("codex-manager start").count() == 2)
+            .expect("tool name title bar");
         let bar = rows[header];
         let clock = |line: &str| -> String {
             line.chars()
@@ -2443,23 +2477,28 @@ fn terminal_start_description_header() {
             "tool name stays in the left segment: {capture}"
         );
         assert_eq!(
-            bar[..bar.find("Claude 图片链接").unwrap()].width(),
-            terminal_detail_width::detail_center(usize::from(width), "Claude 图片链接".width()),
-            "description stays on the panel midline: {capture}"
+            bar[..bar.rfind("codex-manager start").unwrap()].width(),
+            terminal_detail_width::detail_center(usize::from(width), "codex-manager start".width()),
+            "tool name stays on the panel midline: {capture}"
         );
-        assert!(
-            !rows
-                .iter()
-                .skip(header + 1)
-                .any(|line| line.contains("Claude 图片链接")),
+        assert!(!bar.contains("Claude 图片链接"), "{capture}");
+        assert_eq!(
+            rows[header + 2].trim_end_matches('│').trim(),
+            "{",
             "{capture}"
         );
-        assert!(
-            rows.iter()
-                .skip(header + 1)
-                .any(|line| line.contains("cwd: /workspace/agents")),
-            "{capture}"
-        );
+        for field in [
+            "\"cwd\": \"/workspace/agents\"",
+            "\"name\": \"Claude 图片链接\"",
+            "\"prompt\": \"Implement workstream A",
+        ] {
+            assert!(
+                rows.iter()
+                    .skip(header + 2)
+                    .any(|line| line.contains(field)),
+                "missing {field}: {capture}"
+            );
+        }
         println!(
             "{{\"verdict\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
             path.display()

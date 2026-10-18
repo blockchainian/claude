@@ -188,37 +188,55 @@ fn terminal_parallel_tools_have_only_section_titles() {
     let capture = tmux.capture_when(|capture| {
         let rows = section_rows(capture, 200);
         rows.iter()
-            .any(|row| row.starts_with(" codex-manager start") && row.contains("Claude 图片链接"))
-            && rows.iter().any(|row| {
-                row.starts_with(" codex-manager start") && row.contains("Codex 图片链接")
-            })
+            .filter(|row| row.trim_start().starts_with("codex-manager start"))
+            .count()
+            == 2
+            && rows
+                .iter()
+                .any(|row| row.contains("\"name\": \"Claude 图片链接\""))
+            && rows
+                .iter()
+                .any(|row| row.contains("\"name\": \"Codex 图片链接\""))
     });
     let rows = section_rows(&capture, 200);
     assert!(rows[0].starts_with(" codex-manager start"), "{capture}");
-    assert!(rows[0].contains("Claude 图片链接"), "{capture}");
-    assert_eq!(
-        rows.iter()
-            .filter(|row| row.starts_with(" codex-manager start"))
-            .count(),
-        2,
-        "{capture}"
-    );
     assert!(!rows.iter().any(|row| row.contains('─')), "{capture}");
     assert!(
         !rows.iter().any(|row| row.contains("codex-manager start ·")),
         "{capture}"
     );
-    for title in ["Claude 图片链接", "Codex 图片链接"] {
-        let index = rows
-            .iter()
-            .position(|row| row.starts_with(" codex-manager start") && row.contains(title))
-            .unwrap();
+    let titles: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.starts_with(" codex-manager start"))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(titles.len(), 2, "{capture}");
+    for (section, name) in ["Claude 图片链接", "Codex 图片链接"]
+        .into_iter()
+        .enumerate()
+    {
+        let index = titles[section];
         let row = rows[index];
-        assert!(rows[index + 1].trim().is_empty(), "{capture}");
-        assert!(rows[index + 2].contains("cwd:"), "{capture}");
+        assert!(!row.contains(name), "{capture}");
+        assert_eq!(row.matches("codex-manager start").count(), 2, "{capture}");
         assert_eq!(
-            row[..row.find(title).unwrap()].width(),
-            terminal_detail_width::detail_center(200, title.width()),
+            row[..row.rfind("codex-manager start").unwrap()].width(),
+            terminal_detail_width::detail_center(200, "codex-manager start".width()),
+            "{capture}"
+        );
+        assert!(rows[index + 1].trim().is_empty(), "{capture}");
+        assert_eq!(rows[index + 2].trim(), "{", "{capture}");
+        assert!(
+            rows[index + 3].contains("\"cwd\": \"/workspace/agents\""),
+            "{capture}"
+        );
+        assert!(
+            rows[index + 4].contains(&format!("\"name\": \"{name}\"")),
+            "{capture}"
+        );
+        assert!(
+            rows[index + 5].contains("\"prompt\": \"Implement workstream"),
             "{capture}"
         );
     }
