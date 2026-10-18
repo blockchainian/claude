@@ -201,10 +201,18 @@ fn raw_answers(
     if questions.len() != answer.len() {
         return Err(mismatch());
     }
+    // Claude Code can leave questions unanswered only through its Submit tab.
+    let review = questions.len() > 1 || questions.iter().any(|q| q.multi);
     let mut result = BTreeMap::new();
     for q in questions {
         let values = answer.get(&q.id).ok_or_else(mismatch)?;
-        if values.is_empty() || (!q.multi && values.len() != 1) {
+        if values.is_empty() {
+            if !review {
+                return Err(mismatch());
+            }
+            continue;
+        }
+        if !q.multi && values.len() != 1 {
             return Err(mismatch());
         }
         let mut raw = Vec::new();
@@ -457,7 +465,8 @@ impl<'a> AnswerFlow<'a> {
             return Err(mismatch());
         }
         if self.choice == choices.len() {
-            if !q.multi {
+            // Tab leaves a finished multi-select page or skips an unanswered one.
+            if !q.multi && !choices.is_empty() {
                 return Err(mismatch());
             }
             next.advance_page();
@@ -800,6 +809,104 @@ mod tests {
             next.next(&screen).unwrap().1,
             Delivery::Paste("custom multi note".into())
         );
+    }
+
+    #[test]
+    fn recorded_unanswered_questions_are_skipped_and_submitted() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-attach/ask/unanswered");
+        let capture =
+            include_str!("../../../tests/fixtures/claude-attach/ask/unanswered/transcript.jsonl");
+        for (line, header, values, expected) in [
+            (
+                0,
+                "SkipFirst",
+                vec![vec![], vec!["Green"]],
+                vec![&b"\t"[..], b"2", b"\r"],
+            ),
+            (1, "SkipMulti", vec![vec![]], vec![b"\t", b"\r"]),
+        ] {
+            let record: Value = serde_json::from_str(capture.lines().nth(line).unwrap()).unwrap();
+            let questions: Vec<Question> = record["toolUseResult"]["questions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|q| Question {
+                    id: q["question"].as_str().unwrap().to_owned(),
+                    text: q["question"].as_str().unwrap().to_owned(),
+                    header: q["header"].as_str().unwrap().to_owned(),
+                    multi: q["multiSelect"].as_bool().unwrap(),
+                    other: true,
+                    secret: false,
+                    options: serde_json::from_value(q["options"].clone()).unwrap(),
+                })
+                .collect();
+            let answer = Answer {
+                answers: questions
+                    .iter()
+                    .zip(values)
+                    .map(|(q, values)| {
+                        (
+                            q.id.clone(),
+                            crate::ask::QuestionAnswer {
+                                answers: values.into_iter().map(str::to_owned).collect(),
+                                other: None,
+                            },
+                        )
+                    })
+                    .collect(),
+            };
+            let ask = Ask {
+                id: record["message"]["content"][0]["tool_use_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                kind: AskKind::Questions {
+                    questions,
+                    blocking: true,
+                },
+                session: "claude:recorded".parse().unwrap(),
+                since: "2026-10-18T00:00:00Z".parse().unwrap(),
+            };
+            let mut flow = AnswerFlow::new(&ask, &answer).unwrap();
+            for (index, expected) in expected.into_iter().enumerate() {
+                let screen = std::fs::read_to_string(
+                    directory.join(format!("{header}-{index:02}.screen.txt")),
+                )
+                .unwrap();
+                let (next, delivery) = flow
+                    .next(&screen)
+                    .unwrap_or_else(|error| panic!("{header} step {index}: {error}"));
+                assert_eq!(
+                    delivery,
+                    Delivery::Keys(expected.to_vec()),
+                    "{header} {index}"
+                );
+                flow = next;
+            }
+            assert_eq!(flow.phase, Phase::Done, "{header}");
+            assert!(
+                verify_result(
+                    &format!("{}\n", capture.lines().nth(line).unwrap()),
+                    &ask,
+                    &flow.expected
+                )
+                .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn lone_single_question_needs_an_answer() {
+        let (ask, _) = fixture_ask(
+            include_str!("../../../tests/fixtures/claude-attach/ask/production/transcript.jsonl"),
+            "Transport single?",
+        );
+        let AskKind::Questions { questions, .. } = &ask.kind;
+        let answer = Answer {
+            answers: [(questions[0].id.clone(), Default::default())].into(),
+        };
+        assert!(AnswerFlow::new(&ask, &answer).is_err());
     }
 
     #[test]

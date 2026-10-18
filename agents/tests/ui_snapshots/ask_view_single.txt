@@ -11,3 +11,4 @@ Probe single choice?
   4. Type something.
 
 ↑/↓ move · Enter to confirm · Esc to close
+

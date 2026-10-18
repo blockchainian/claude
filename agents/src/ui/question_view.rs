@@ -29,13 +29,23 @@ struct Page {
     focus: usize,
     selected: Vec<usize>,
     other: LineEdit,
-    committed: bool,
 }
+
+impl Page {
+    fn answered(&self) -> bool {
+        !self.selected.is_empty() || !self.other.is_empty()
+    }
+}
+
+/// Rows on the Submit tab, which follows the questions when Claude Code shows one.
+const REVIEW_ROWS: [&str; 2] = ["Submit answers", "Cancel"];
 
 pub(super) struct QuestionView {
     ask: Ask,
+    /// The shown tab: a question, or the Submit tab after the last question.
     page: usize,
     pages: Vec<Page>,
+    review_focus: usize,
     error: Option<String>,
 }
 
@@ -47,6 +57,7 @@ impl QuestionView {
             ask,
             page: 0,
             pages,
+            review_focus: 0,
             error: None,
         }
     }
@@ -70,8 +81,13 @@ impl QuestionView {
                     }),
             );
         }
+        let switch = if self.tabs() > 1 {
+            "←/→ switch · "
+        } else {
+            ""
+        };
         lines.push(Line::styled(
-            "↑/↓ move · Enter to confirm · Esc to close",
+            format!("{switch}↑/↓ move · Enter to confirm · Esc to close"),
             Style::default().dim(),
         ));
         lines
@@ -87,51 +103,95 @@ impl QuestionView {
         questions
     }
 
+    /// Whether the questions end with a Submit tab, as Claude Code shows for several
+    /// questions or a multi-select one; a lone single-select question submits its choice.
+    fn has_review(&self) -> bool {
+        self.questions().len() > 1 || self.questions().iter().any(|question| question.multi)
+    }
+
+    fn tabs(&self) -> usize {
+        self.pages.len() + usize::from(self.has_review())
+    }
+
+    fn reviewing(&self) -> bool {
+        self.has_review() && self.page == self.pages.len()
+    }
+
+    fn other_row(question: &Question) -> bool {
+        question.other || question.options.is_empty()
+    }
+
+    /// The row after a multi-select question's options that moves on to the next tab.
+    fn submit_row(&self) -> Option<usize> {
+        let question = self.questions().get(self.page)?;
+        question
+            .multi
+            .then(|| question.options.len() + usize::from(Self::other_row(question)))
+    }
+
     fn editing(&self) -> bool {
         self.questions().get(self.page).is_some_and(|question| {
-            question.options.is_empty() || self.pages[self.page].focus == question.options.len()
+            Self::other_row(question) && self.pages[self.page].focus == question.options.len()
         })
     }
 
     fn rows(&self) -> usize {
+        if self.reviewing() {
+            return REVIEW_ROWS.len();
+        }
         self.questions().get(self.page).map_or(0, |question| {
-            (question.options.len() + usize::from(question.other)).max(1)
+            question.options.len()
+                + usize::from(Self::other_row(question))
+                + usize::from(question.multi)
         })
     }
 
-    fn finish_page(&mut self) -> Option<Outcome> {
-        if self.pages[self.page].selected.is_empty() && self.pages[self.page].other.is_empty() {
-            self.pages[self.page].committed = false;
-            return None;
+    fn focused(&self) -> usize {
+        if self.reviewing() {
+            self.review_focus
+        } else {
+            self.pages[self.page].focus
         }
-        self.pages[self.page].committed = true;
-        if self.page + 1 < self.pages.len() {
-            self.page += 1;
-            return None;
+    }
+
+    fn set_focus(&mut self, row: usize) {
+        if self.reviewing() {
+            self.review_focus = row;
+        } else {
+            self.pages[self.page].focus = row;
         }
-        if let Some(unanswered) = self
-            .pages
-            .iter()
-            .position(|page| !page.committed || (page.selected.is_empty() && page.other.is_empty()))
-        {
-            self.page = unanswered;
-            return None;
-        }
+    }
+
+    fn submit(&self) -> Outcome {
         let answers = self
             .questions()
             .iter()
             .zip(&self.pages)
-            .map(|(question, page)| {
-                let answers: Vec<String> = page
-                    .selected
-                    .iter()
-                    .map(|&index| question.options[index].label.clone())
-                    .collect();
-                let other = (!page.other.is_empty()).then(|| page.other.text().to_owned());
-                (question.id.clone(), QuestionAnswer { answers, other })
-            })
+            .map(|(question, page)| (question.id.clone(), Self::answer(question, page)))
             .collect();
-        Some(Outcome::Submit(Answer { answers }))
+        Outcome::Submit(Answer { answers })
+    }
+
+    fn answer(question: &Question, page: &Page) -> QuestionAnswer {
+        QuestionAnswer {
+            answers: page
+                .selected
+                .iter()
+                .map(|&index| question.options[index].label.clone())
+                .collect(),
+            other: (!page.other.is_empty()).then(|| page.other.text().to_owned()),
+        }
+    }
+
+    /// Moves to the next tab, or submits when there is no Submit tab to move to.
+    fn advance(&mut self) -> Option<Outcome> {
+        if self.page + 1 < self.tabs() {
+            self.page += 1;
+            self.review_focus = 0;
+            None
+        } else {
+            Some(self.submit())
+        }
     }
 
     fn toggle(&mut self, index: usize) {
@@ -158,30 +218,28 @@ impl QuestionView {
             (key.code, modifiers),
             (KeyCode::PageUp, KeyModifiers::NONE) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
         ) {
-            self.page = self.page.saturating_sub(1);
+            self.scroll(false, true);
             return None;
         }
         if matches!(
             (key.code, modifiers),
             (KeyCode::PageDown, KeyModifiers::NONE) | (KeyCode::Char('n'), KeyModifiers::CONTROL)
         ) {
-            self.page = (self.page + 1).min(self.pages.len() - 1);
+            self.scroll(true, true);
             return None;
         }
-        let question = &self.questions()[self.page];
-        let multi = question.multi;
-        let option_count = question.options.len();
-        let other = question.other;
         if self.editing() {
             match key.code {
                 KeyCode::Enter if modifiers == KeyModifiers::NONE => {
                     if self.pages[self.page].other.is_empty() {
                         return None;
                     }
-                    if !multi {
-                        self.pages[self.page].selected.clear();
+                    if let Some(row) = self.submit_row() {
+                        self.pages[self.page].focus = row;
+                        return None;
                     }
-                    return self.finish_page();
+                    self.pages[self.page].selected.clear();
+                    return self.advance();
                 }
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
                 _ => {
@@ -193,43 +251,21 @@ impl QuestionView {
         if modifiers != KeyModifiers::NONE {
             return None;
         }
-        let focus = self.pages[self.page].focus;
+        let focus = self.focused();
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.pages[self.page].focus = (focus + self.rows() - 1) % self.rows();
+                self.set_focus((focus + self.rows() - 1) % self.rows());
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.pages[self.page].focus = (focus + 1) % self.rows();
+                self.set_focus((focus + 1) % self.rows());
             }
-            KeyCode::Left | KeyCode::Char('h') => {
-                self.page = self.page.saturating_sub(1);
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                self.page = (self.page + 1).min(self.pages.len() - 1);
-            }
-            KeyCode::Tab => {
-                if other {
-                    self.pages[self.page].focus = option_count;
-                }
-            }
-            KeyCode::BackTab => self.pages[self.page].focus = 0,
+            KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
+            KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.scroll(true, true),
             KeyCode::Char(digit @ '1'..='9') => {
                 return self.choose(digit as usize - '1' as usize);
             }
-            KeyCode::Char(' ') if multi && focus < option_count => self.toggle(focus),
-            KeyCode::Char(' ') if !multi && focus < option_count => {
-                self.pages[self.page].selected = vec![focus];
-                self.pages[self.page].other.clear();
-                return self.finish_page();
-            }
-            KeyCode::Enter => {
-                if !multi {
-                    self.pages[self.page].selected = vec![focus];
-                    self.pages[self.page].other.clear();
-                }
-                return self.finish_page();
-            }
-            KeyCode::Backspace | KeyCode::Delete => {
+            KeyCode::Char(' ') | KeyCode::Enter => return self.choose(focus),
+            KeyCode::Backspace | KeyCode::Delete if !self.reviewing() => {
                 self.pages[self.page].selected.clear();
             }
             _ => {}
@@ -237,22 +273,37 @@ impl QuestionView {
         None
     }
 
-    /// Answers with an option the way its digit key does; the free-text row only takes focus.
+    /// Acts on a row the way its digit key does: a single-select option answers and moves
+    /// on, a multi-select option toggles, the free-text row takes focus, and the Submit
+    /// tab's rows submit or cancel.
     pub(super) fn choose(&mut self, index: usize) -> Option<Outcome> {
+        if self.reviewing() {
+            return match index {
+                0 => Some(self.submit()),
+                1 => Some(Outcome::Dismiss),
+                _ => None,
+            };
+        }
         let question = self.questions().get(self.page)?;
-        let (multi, option_count, other) =
-            (question.multi, question.options.len(), question.other);
+        let (multi, option_count, other) = (
+            question.multi,
+            question.options.len(),
+            Self::other_row(question),
+        );
         if index < option_count {
+            self.pages[self.page].focus = index;
             if multi {
                 self.toggle(index);
-            } else {
-                self.pages[self.page].focus = index;
-                self.pages[self.page].selected = vec![index];
-                self.pages[self.page].other.clear();
-                return self.finish_page();
+                return None;
             }
-        } else if (other || option_count == 0) && index == option_count {
+            self.pages[self.page].selected = vec![index];
+            self.pages[self.page].other.clear();
+            return self.advance();
+        }
+        if other && index == option_count {
             self.pages[self.page].focus = index;
+        } else if self.submit_row() == Some(index) {
+            return self.advance();
         }
         None
     }
@@ -260,12 +311,12 @@ impl QuestionView {
     /// Moves the focus to a row without answering.
     pub(super) fn focus(&mut self, index: usize) {
         if index < self.rows() {
-            self.pages[self.page].focus = index;
+            self.set_focus(index);
         }
     }
 
     pub(super) fn show_page(&mut self, page: usize) {
-        if page < self.pages.len() {
+        if page < self.tabs() {
             self.page = page;
         }
     }
@@ -274,7 +325,7 @@ impl QuestionView {
         self.page
     }
 
-    /// Steps the focused row, or the shown question over the tab row, stopping at either end.
+    /// Steps the focused row, or the shown tab, stopping at either end.
     pub(super) fn scroll(&mut self, forward: bool, tabs: bool) {
         let step = |value: usize, len: usize| {
             if forward {
@@ -284,10 +335,22 @@ impl QuestionView {
             }
         };
         if tabs {
-            self.page = step(self.page, self.pages.len());
+            self.page = step(self.page, self.tabs());
         } else if !self.pages.is_empty() {
-            self.pages[self.page].focus = step(self.pages[self.page].focus, self.rows());
+            self.set_focus(step(self.focused(), self.rows()));
         }
+    }
+
+    fn tab_labels(&self) -> Vec<&str> {
+        let mut labels: Vec<&str> = self
+            .questions()
+            .iter()
+            .map(|question| question.header.as_str())
+            .collect();
+        if self.has_review() {
+            labels.push("Submit");
+        }
+        labels
     }
 
     pub(super) fn target(&self, area: Rect, column: u16, row: u16) -> Option<Target> {
@@ -298,11 +361,11 @@ impl QuestionView {
         let y = usize::from(row - area.y);
         if offset == 0 && y == 0 && !self.pages.is_empty() {
             let mut x = area.x;
-            for (index, question) in self.questions().iter().enumerate() {
+            for (index, label) in self.tab_labels().into_iter().enumerate() {
                 if index > 0 {
                     x += "·".width() as u16;
                 }
-                let width = (question.header.width() + 2) as u16;
+                let width = (label.width() + 2) as u16;
                 if (x..x.saturating_add(width)).contains(&column) {
                     return Some(Target::Tabs(Some(index)));
                 }
@@ -321,14 +384,65 @@ impl QuestionView {
         }
     }
 
-    /// The view's lines, the focused line, and the option each body line belongs to.
-    fn lines(&self, width: u16) -> (Vec<Line<'static>>, usize, Vec<Option<usize>>) {
-        let Some(question) = self.questions().get(self.page) else {
-            return (vec![Line::from("No pending questions")], 0, vec![None]);
+    /// A row with the focus marker and its number, such as "› 2. Green".
+    fn row_line(focused: bool, number: usize, text: Vec<Span<'static>>) -> Line<'static> {
+        let marker = if focused { "›" } else { " " };
+        let mut spans = vec![Span::raw(format!("{marker} {number}. "))];
+        spans.extend(text);
+        Line::from(spans)
+    }
+
+    fn review_lines(&self, width: u16, lines: &mut Vec<Line<'static>>) -> Vec<Option<usize>> {
+        let wrap = |text: &str, indent: &str| {
+            textwrap::wrap(
+                text,
+                textwrap::Options::new(usize::from(width.max(1)))
+                    .initial_indent(indent)
+                    .subsequent_indent(indent),
+            )
+            .into_iter()
+            .map(|line| Line::from(line.into_owned()))
+            .collect::<Vec<_>>()
         };
-        let page = &self.pages[self.page];
+        lines.push(Line::styled("Review your answers", Style::default().bold()));
+        lines.push(Line::default());
+        if self.pages.iter().any(|page| !page.answered()) {
+            lines.push(Line::styled(
+                "⚠ You have not answered all questions",
+                super::style::attention_title_style(),
+            ));
+        }
+        for (question, page) in self.questions().iter().zip(&self.pages) {
+            if !page.answered() {
+                continue;
+            }
+            let answer = Self::answer(question, page);
+            let values: Vec<String> = answer.answers.into_iter().chain(answer.other).collect();
+            lines.extend(wrap(&format!("● {}", question.text), " "));
+            lines.extend(wrap(&format!("→ {}", values.join(", ")), "   "));
+        }
+        lines.push(Line::default());
+        lines.push(Line::from("Ready to submit your answers?"));
+        lines.push(Line::default());
+        let mut rows = vec![None; lines.len()];
+        for (index, label) in REVIEW_ROWS.into_iter().enumerate() {
+            rows.push(Some(index));
+            lines.push(Self::row_line(
+                self.review_focus == index,
+                index + 1,
+                vec![Span::raw(label)],
+            ));
+        }
+        rows
+    }
+
+    /// The view's lines, the focused line, and the row each body line belongs to.
+    fn lines(&self, width: u16) -> (Vec<Line<'static>>, usize, Vec<Option<usize>>) {
+        if self.pages.is_empty() {
+            return (vec![Line::from("No pending questions")], 0, vec![None]);
+        }
         let mut tabs = Vec::new();
-        for (index, question) in self.questions().iter().enumerate() {
+        for (index, label) in self.tab_labels().into_iter().enumerate() {
             if index > 0 {
                 tabs.push(Span::styled("·", Style::default().dim()));
             }
@@ -337,20 +451,34 @@ impl QuestionView {
             } else {
                 super::style::inactive_tab_style()
             };
-            tabs.push(Span::styled(format!(" {} ", question.header), style));
+            tabs.push(Span::styled(format!(" {label} "), style));
         }
         let mut lines = vec![Line::from(tabs), Line::default()];
+        let mut rows = if self.reviewing() {
+            self.review_lines(width, &mut lines)
+        } else {
+            self.question_lines(width, &mut lines)
+        };
+        let focus_row = rows
+            .iter()
+            .position(|&row| row == Some(self.focused()))
+            .unwrap_or(0);
+        lines.push(Line::default());
+        rows.push(None);
+        lines.extend(self.footer(width));
+        (lines, focus_row, rows)
+    }
+
+    fn question_lines(&self, width: u16, lines: &mut Vec<Line<'static>>) -> Vec<Option<usize>> {
+        let question = &self.questions()[self.page];
+        let page = &self.pages[self.page];
         for text in textwrap::wrap(&question.text, usize::from(width.max(1))) {
             lines.push(Line::from(text.into_owned()));
         }
         lines.push(Line::default());
-        let mut focus_row = lines.len();
         let mut rows = vec![None; lines.len()];
         for (index, option) in question.options.iter().enumerate() {
             let focused = page.focus == index;
-            if focused {
-                focus_row = lines.len();
-            }
             let marker = if focused { "›" } else { " " };
             let check = if question.multi {
                 if page.selected.contains(&index) {
@@ -384,12 +512,8 @@ impl QuestionView {
             }
             rows.resize(lines.len(), Some(index));
         }
-        if question.other || question.options.is_empty() {
-            let focused = page.focus == question.options.len();
-            if focused {
-                focus_row = lines.len();
-            }
-            let marker = if focused { "›" } else { " " };
+        if Self::other_row(question) {
+            let row = question.options.len();
             let text = if page.other.is_empty() {
                 Span::styled("Type something.", Style::default().dim())
             } else if question.secret {
@@ -402,16 +526,15 @@ impl QuestionView {
                         .to_owned(),
                 )
             };
-            lines.push(Line::from(vec![
-                Span::raw(format!("{marker} {}. ", question.options.len() + 1)),
-                text,
-            ]));
-            rows.push(Some(question.options.len()));
+            lines.push(Self::row_line(page.focus == row, row + 1, vec![text]));
+            rows.push(Some(row));
         }
-        lines.push(Line::default());
-        rows.push(None);
-        lines.extend(self.footer(width));
-        (lines, focus_row, rows)
+        if let Some(row) = self.submit_row() {
+            let marker = if page.focus == row { "›" } else { " " };
+            lines.push(Line::from(format!("{marker}    Submit")));
+            rows.push(Some(row));
+        }
+        rows
     }
 
     pub(super) fn height(&self, width: u16) -> u16 {
@@ -419,7 +542,7 @@ impl QuestionView {
     }
 
     /// The lines that fit `area`, scrolled to keep the focus and footer visible, with each
-    /// visible body line's option and the number of body lines scrolled off the top.
+    /// visible body line's row and the number of body lines scrolled off the top.
     fn visible(&self, area: Rect) -> (Vec<Line<'static>>, Vec<Option<usize>>, usize) {
         let (mut lines, focus, rows) = self.lines(area.width);
         let height = usize::from(area.height);
@@ -446,16 +569,16 @@ impl QuestionView {
         if !self.editing() || area.is_empty() {
             return None;
         }
-        let (_, focus, _) = self.lines(area.width);
-        let visible = self.body_height(area);
-        if visible == 0 {
-            return None;
-        }
-        let row = focus.min(visible - 1) as u16;
+        let (_, rows, _) = self.visible(area);
+        let focus = self.pages[self.page].focus;
+        let row = rows.iter().position(|&row| row == Some(focus))?;
         let (_, caret) = self.pages[self.page]
             .other
             .window(usize::from(area.width.saturating_sub(5)));
-        Some((area.x + (5 + caret).min(area.width - 1), area.y + row))
+        Some((
+            area.x + (5 + caret).min(area.width - 1),
+            area.y + row as u16,
+        ))
     }
 }
 
@@ -574,6 +697,7 @@ mod tests {
         assert!(press(&mut view, KeyCode::Char('1')).is_none());
         press(&mut view, KeyCode::Char('1'));
         press(&mut view, KeyCode::Char('1'));
+        assert!(press(&mut view, KeyCode::Right).is_none());
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(
             answer.answers["Probe multiple choices?"].answers,
@@ -582,12 +706,20 @@ mod tests {
     }
 
     #[test]
-    fn ask_view_empty_multi_stays_open() {
+    fn ask_view_multi_enter_toggles_and_submit_row_moves_on() {
         let mut view = QuestionView::new(fixture("Multi"));
         assert!(press(&mut view, KeyCode::Enter).is_none());
-        press(&mut view, KeyCode::Char('1'));
-        press(&mut view, KeyCode::Char('1'));
+        assert!(screen(&view, 60, 14).contains("› 1. [x] Red"));
         assert!(press(&mut view, KeyCode::Enter).is_none());
+        assert!(press(&mut view, KeyCode::Up).is_none());
+        assert!(screen(&view, 60, 14).contains("›    Submit"));
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+        assert!(screen(&view, 60, 14).contains("You have not answered all questions"));
+        let answer = submitted(press(&mut view, KeyCode::Enter));
+        assert_eq!(
+            answer.answers["Probe multiple choices?"],
+            QuestionAnswer::default()
+        );
     }
 
     #[test]
@@ -595,6 +727,10 @@ mod tests {
         let mut view = QuestionView::new(fixture("First"));
         assert!(press(&mut view, KeyCode::Char('2')).is_none());
         press(&mut view, KeyCode::Down);
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+        let review = screen(&view, 60, 14);
+        assert!(review.contains("● Probe second page?"), "{review}");
+        assert!(!review.contains("not answered"), "{review}");
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(answer.answers.len(), 2);
         assert_eq!(answer.answers["Probe first page?"].answers, ["Green"]);
@@ -635,7 +771,19 @@ mod tests {
             ),
         ] {
             let view = QuestionView::new(fixture(header));
-            assert_eq!(screen(&view, 60, 13), expected, "{header}");
+            if let Some(directory) = std::env::var_os("UPDATE_ASK_VIEW_SNAPSHOT") {
+                let name = match header {
+                    "Single" => "ask_view_single.txt",
+                    "Multi" => "ask_view_multi.txt",
+                    _ => "ask_view_two.txt",
+                };
+                std::fs::write(
+                    std::path::Path::new(&directory).join(name),
+                    screen(&view, 60, 14),
+                )
+                .unwrap();
+            }
+            assert_eq!(screen(&view, 60, 14), expected, "{header}");
         }
     }
     #[test]
@@ -674,7 +822,9 @@ mod tests {
         view.show_page(1);
         assert!(screen(&view, 60, 13).contains("Probe second page?"));
         view.scroll(true, true);
-        assert_eq!(view.page(), 1);
+        view.scroll(true, true);
+        assert_eq!(view.page(), 2);
+        view.scroll(false, true);
         view.scroll(false, true);
         view.scroll(false, true);
         assert_eq!(view.page(), 0);
@@ -695,19 +845,31 @@ mod tests {
         press(&mut view, KeyCode::Down);
         press(&mut view, KeyCode::Char(' '));
         press(&mut view, KeyCode::Char(' '));
+        press(&mut view, KeyCode::Right);
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(answer.answers["Probe multiple choices?"].answers, ["Red"]);
     }
 
     #[test]
-    fn ask_view_page_navigation_keeps_answers_and_blocks_unanswered() {
+    fn ask_view_submit_tab_sends_unanswered_questions() {
         let mut view = QuestionView::new(fixture("First"));
         press(&mut view, KeyCode::Right);
         assert!(press(&mut view, KeyCode::Char('3')).is_none());
-        assert!(screen(&view, 60, 13).contains("First"));
-        press(&mut view, KeyCode::Char('2'));
-        let answer = submitted(press(&mut view, KeyCode::Enter));
-        assert_eq!(answer.answers["Probe first page?"].answers, ["Green"]);
+        let review = screen(&view, 60, 14);
+        assert!(
+            review.contains("You have not answered all questions"),
+            "{review}"
+        );
+        assert!(press(&mut view, KeyCode::Down).is_none());
+        assert!(matches!(
+            press(&mut view, KeyCode::Char('2')),
+            Some(Outcome::Dismiss)
+        ));
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
+        assert_eq!(
+            answer.answers["Probe first page?"],
+            QuestionAnswer::default()
+        );
         assert_eq!(answer.answers["Probe second page?"].answers, ["Blue"]);
     }
 

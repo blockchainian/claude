@@ -1,4 +1,4 @@
- Multi
+ Multi · Submit
 
 Probe multiple choices?
 
@@ -9,5 +9,6 @@ Probe multiple choices?
   3. [ ] Blue
      Blue choice
   4. Type something.
+     Submit
 
-↑/↓ move · Enter to confirm · Esc to close
+←/→ switch · ↑/↓ move · Enter to confirm · Esc to close

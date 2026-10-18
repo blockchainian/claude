@@ -364,6 +364,57 @@ fn ask_live_single_multi_two_other() {
 }
 
 #[test]
+#[ignore = "starts billable disposable Claude sessions and adds/removes isolated cwd trust"]
+fn ask_live_unanswered_questions() {
+    let mut probe = Probe::new().unwrap();
+    probe.start_prompt("This is an isolated terminal answer transport probe. Use ONLY AskUserQuestion. Make exactly TWO calls in order and wait for each answer before the next. Do not answer yourself. Use exact question/header text. Every question has options Red (description Red choice), Green (description Green choice), Blue (description Blue choice). Call 1: two questions in ONE call: question='Skip first?' header='SkipFirst' multiSelect=false and question='Skip second?' header='SkipSecond' multiSelect=false. Call 2: one question question='Skip multi?' header='SkipMulti' multiSelect=true. After both answers reply DONE and stop. This explicitly requests testing interactive question behavior.").unwrap();
+    for (text, answers) in [
+        ("Skip first?", vec![vec![], vec!["Green"]]),
+        ("Skip multi?", vec![vec![]]),
+    ] {
+        let state = probe.waiting(text).unwrap();
+        let id = state["sessionId"].as_str().unwrap().to_owned();
+        use crate::providers::Provider;
+        let mut provider = crate::providers::claude::ClaudeProvider::new(probe.config.clone());
+        let deadline = Instant::now() + Duration::from_secs(25);
+        let session = loop {
+            if let Some(session) = provider
+                .refresh(1)
+                .sessions
+                .into_iter()
+                .find(|s| s.id.id == id && s.ask.is_some())
+            {
+                break session;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "live provider did not resolve pending ask"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        let transcript = probe.transcript(&id).unwrap();
+        let mut app = crate::app::live_tests::app(Box::new(provider), probe.cwd.path().to_owned());
+        crate::app::live_tests::answer_questions(
+            &mut app,
+            session,
+            answers
+                .into_iter()
+                .map(|values| values.into_iter().map(str::to_owned).collect())
+                .collect(),
+        );
+        if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
+            fs::write(
+                PathBuf::from(directory).join(format!("unanswered-{text}.jsonl")),
+                fs::read(&transcript).unwrap(),
+            )
+            .unwrap();
+        }
+        eprintln!("verified live {text}");
+    }
+    probe.cleanup().unwrap();
+}
+
+#[test]
 #[ignore = "probes billable disposable Claude multi Other key map and records actual screens"]
 fn ask_live_multi_other_keymap() {
     let mut probe = Probe::new().unwrap();

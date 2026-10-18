@@ -377,7 +377,9 @@ fn question_sections(input: &Value) -> Vec<Section> {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|option| text(option, "label").map(|label| (label, text(option, "description"))));
+            .filter_map(|option| {
+                text(option, "label").map(|label| (label, text(option, "description")))
+            });
         let lines: Vec<String> = std::iter::once(format!("{asked}{suffix}"))
             .chain(
                 options

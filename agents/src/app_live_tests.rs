@@ -174,7 +174,12 @@ pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<
         screen.contains(&questions[0].text),
         "question view absent: {screen}"
     );
+    let key = |app: &mut App, code| {
+        app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    };
     for (question, answers) in questions.iter().zip(values) {
+        // Single-select choices move on by themselves; other pages move on to the next tab.
+        let moves_on = !question.multi && !answers.is_empty();
         for answer in answers {
             if let Some(note) = answer.strip_prefix("user_note: ") {
                 app.handle_event(Event::Key(KeyEvent::new(
@@ -199,12 +204,12 @@ pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<
                 )));
             }
         }
-        if question.multi {
-            app.handle_event(Event::Key(KeyEvent::new(
-                KeyCode::Enter,
-                KeyModifiers::NONE,
-            )));
+        if !moves_on {
+            key(app, KeyCode::Right);
         }
+    }
+    if questions.len() > 1 || questions.iter().any(|question| question.multi) {
+        key(app, KeyCode::Enter);
     }
     assert!(
         app.pending_inputs.contains(&id),
