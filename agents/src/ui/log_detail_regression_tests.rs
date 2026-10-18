@@ -203,7 +203,7 @@ fn tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting() 
             lang: "rust".into(),
             text: "let value = 42;".into(),
         },
-        crate::log::Section::Json {
+        crate::log::Section::Structured {
             label: String::new(),
             text: "{\"answer\":42}".into(),
         },

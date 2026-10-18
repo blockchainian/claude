@@ -7015,7 +7015,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             prefix: 0,
             text: command.into(),
         },
-        crate::log::Section::Json {
+        crate::log::Section::Structured {
             label: "input".into(),
             text: r#"{"timeout":1000}"#.into(),
         },
@@ -9589,6 +9589,9 @@ fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
         }
     }
 }
+
+#[path = "structured_ui_tests.rs"]
+mod structured_ui_tests;
 
 #[path = "log_agent_tests.rs"]
 mod log_agent_tests;

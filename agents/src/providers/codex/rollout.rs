@@ -734,7 +734,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                             .get("structuredContent")
                             .filter(|value| !value.is_null())
                         {
-                            sections.push(Section::Json {
+                            sections.push(Section::Structured {
                                 label: "output".to_owned(),
                                 text: structured.to_string(),
                             });
@@ -2193,7 +2193,7 @@ mod tests {
             let call = &completed_tool(&record).unwrap().unwrap().calls[0];
             assert_eq!(call.output.as_ref().unwrap().len(), 2, "{}", call.name);
             assert_eq!(call.input.len(), 1);
-            assert!(matches!(&call.input[0], Section::Json { label, text }
+            assert!(matches!(&call.input[0], Section::Structured { label, text }
                 if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));
             let result = &record["payload"]["item"]["result"];
             assert!(
@@ -2209,7 +2209,7 @@ mod tests {
                     };
                     assert_eq!(text, mime);
                 }
-                Section::Json { label, text } => {
+                Section::Structured { label, text } => {
                     assert_eq!(label, "output");
                     assert_eq!(
                         serde_json::from_str::<Value>(text).unwrap(),
@@ -2254,7 +2254,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(mcp).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].input[0], Section::Json {label, text} if label == "input" && serde_json::from_str::<Value>(text).unwrap() == mcp["payload"]["item"]["arguments"])
+            matches!(&event.calls[0].input[0], Section::Structured {label, text} if label == "input" && serde_json::from_str::<Value>(text).unwrap() == mcp["payload"]["item"]["arguments"])
         );
         assert!(
             matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text == "Delivered to Claude.")
@@ -2337,7 +2337,7 @@ mod tests {
             let expected = if arguments.is_null() {
                 Vec::new()
             } else {
-                vec![Section::Json {
+                vec![Section::Structured {
                     label: "input".into(),
                     text: arguments.to_string(),
                 }]

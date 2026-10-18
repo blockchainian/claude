@@ -1,3 +1,6 @@
+#[path = "support/terminal_structured.rs"]
+mod terminal_structured;
+
 #[path = "support/terminal_task_navigation.rs"]
 mod terminal_task_navigation;
 

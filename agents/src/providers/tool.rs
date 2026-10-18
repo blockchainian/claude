@@ -9,7 +9,7 @@ pub(crate) fn json_input(value: &Value) -> Vec<Section> {
     if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
         Vec::new()
     } else {
-        vec![Section::Json {
+        vec![Section::Structured {
             label: "input".into(),
             text: value.to_string(),
         }]

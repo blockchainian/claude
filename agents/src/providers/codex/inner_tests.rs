@@ -123,7 +123,7 @@ fn image_view_retains_image_path_for_rendering() {
     let records = records("image-view");
     assert_eq!(entries[0].body, "ImageView");
     assert!(entries[0].paths.is_empty());
-    let crate::log::Section::Json { text, .. } = &entries[0].calls[0].input[0] else {
+    let crate::log::Section::Structured { text, .. } = &entries[0].calls[0].input[0] else {
         panic!("image arguments require JSON");
     };
     assert_eq!(

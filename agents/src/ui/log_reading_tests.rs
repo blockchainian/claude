@@ -175,7 +175,7 @@ fn mcp_inputs_keep_only_declared_prompt_in_body() {
         assert_reading_column(&drawn, segment);
     }
     event.calls[0].input = vec![
-        crate::log::Section::Json {
+        crate::log::Section::Structured {
             label: "input".into(),
             text: r#"{"threadId":"abc-123"}"#.into(),
         },
@@ -297,7 +297,7 @@ fn generic_roles_are_explicit_and_field_names_are_literal() {
         "name",
         "description",
     ] {
-        let fields = Section::Json {
+        let fields = Section::Structured {
             label: "input".into(),
             text: serde_json::json!({key: "Some words to read. ".repeat(12)}).to_string(),
         };
@@ -351,7 +351,7 @@ fn command_and_all_output_body_formats_keep_their_width() {
             lang: "text".into(),
             text: text.clone(),
         },
-        Section::Json {
+        Section::Structured {
             label: "output".into(),
             text: serde_json::json!({"prompt": text}).to_string(),
         },

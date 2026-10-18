@@ -3,27 +3,12 @@
 use super::content::{Block, Kind as ContentKind};
 use super::detail_model::{Detail, Group, Section as DetailSection, TitleRow};
 use super::highlight;
+#[cfg(test)]
+use super::structured_text::json::{JSON_SCAN_BUDGET, json_lines};
+use super::structured_text::{self, Document};
 use crate::log::{Event, Kind, Section};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-
-#[cfg(test)]
-thread_local! {
-    static JSON_SCAN_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
-}
-
-#[cfg(test)]
-fn record_json_scan(bytes: usize) {
-    JSON_SCAN_BUDGET.with(|budget| {
-        if let Some(remaining) = budget.get() {
-            budget.set(Some(
-                remaining
-                    .checked_sub(bytes)
-                    .expect("JSON detection exceeded its linear scan budget"),
-            ));
-        }
-    });
-}
 
 /// One part of the open view: the text it is drawn from, which the selection copies, and
 /// how that text turns into lines.
@@ -43,8 +28,8 @@ enum Body {
     Code(String),
     /// Shell command ranges retain original bytes while separators are display-only.
     Shell(Vec<super::shell_commands::Command>),
-    /// Parsed JSON with multiline string values.
-    Json(serde_json::Value),
+    /// Parsed structured content with its format-owned rendering.
+    Structured(Box<dyn Document>),
     Diff,
     Markdown,
     /// A message or free-text input, with a shared reading column.
@@ -62,7 +47,7 @@ impl Body {
             | Self::Running
             | Self::Code(_)
             | Self::Shell(_)
-            | Self::Json(_)
+            | Self::Structured(_)
             | Self::Diff
             | Self::Text => ContentKind::Preformatted,
         }
@@ -77,36 +62,42 @@ impl Part {
         }
     }
 
-    /// Split embedded JSON from text; each fragment retains its content semantics.
+    /// Split structured blocks from text, retaining each fragment's copy source.
     pub fn text_parts(source: String, markdown: bool) -> Vec<Self> {
         let mut parts = Vec::new();
         let mut cursor = 0;
         let mut text_start = 0;
+        let code_blocks = if markdown {
+            structured_text::code_blocks(&source)
+        } else {
+            Vec::new()
+        };
+        let mut code_blocks = code_blocks.into_iter().peekable();
         while cursor < source.len() {
-            #[cfg(test)]
-            record_json_scan(1);
-            let byte = source.as_bytes()[cursor];
-            let (end, value) = if matches!(byte, b'{' | b'[') {
-                embedded_json(&source, cursor)
-            } else {
-                (cursor + 1, None)
-            };
-            if let Some(value) = value.filter(|value| {
-                value.as_object().is_some_and(|object| !object.is_empty())
-                    || value.as_array().is_some_and(|array| !array.is_empty())
-            }) {
+            if let Some(range) = code_blocks.peek() {
+                if range.end <= cursor {
+                    code_blocks.next();
+                    continue;
+                }
+                if range.contains(&cursor) {
+                    cursor = range.end;
+                    continue;
+                }
+            }
+            let (end, document) = structured_text::detect(&source, cursor);
+            if let Some(document) =
+                document.filter(|_| !markdown || structured_text::line_block(&source, cursor, end))
+            {
                 if text_start < cursor
                     && let Some(text) =
                         text_boundary(&source[text_start..cursor], text_start > 0, true)
                 {
                     parts.push(Self::text_fragment(text.into(), markdown));
                 }
-                parts.push(Self::json(value));
-                cursor = end;
+                parts.push(Self::structured(document));
                 text_start = end;
-            } else {
-                cursor = end;
             }
+            cursor = end;
         }
         if (text_start < source.len() || parts.is_empty())
             && let Some(text) = text_boundary(&source[text_start..], text_start > 0, false)
@@ -116,13 +107,8 @@ impl Part {
         parts
     }
 
-    fn json(value: serde_json::Value) -> Self {
-        let source = json_lines(&value)
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-        Self::new(source, Body::Json(value))
+    fn structured(document: Box<dyn Document>) -> Self {
+        Self::new(document.text(), Body::Structured(document))
     }
 
     fn text_fragment(source: String, markdown: bool) -> Self {
@@ -130,19 +116,21 @@ impl Part {
     }
 
     pub fn text(source: String, markdown: bool) -> Self {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&source)
-            && (value.is_object() || value.is_array())
-        {
-            return Self::json(value);
+        if let Some(document) = structured_text::parse(&source) {
+            return Self::structured(document);
         }
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
 
+    #[cfg(test)]
     pub fn prose(source: String, markdown: bool) -> Self {
         Self::text(source, markdown).into_prose(false)
     }
 
     pub fn prose_parts(source: String, markdown: bool) -> Vec<Self> {
+        if let Some(document) = structured_text::parse(&source) {
+            return vec![Self::structured(document)];
+        }
         Self::text_parts(source, markdown)
             .into_iter()
             .map(|part| part.into_prose(true))
@@ -151,7 +139,7 @@ impl Part {
 
     fn into_prose(mut self, detect_markdown: bool) -> Self {
         self.body = match self.body {
-            Body::Json(value) => Body::Json(value),
+            Body::Structured(value) => Body::Structured(value),
             Body::Markdown => Body::Prose(true),
             Body::Text => {
                 Body::Prose(detect_markdown && super::markdown::has_markers(&self.source))
@@ -191,8 +179,34 @@ impl Part {
             &self.source,
             lines,
             self.markdown(),
-            (!matches!(self.body, Body::Json(_))).then_some(cwd),
+            (!matches!(self.body, Body::Structured(_))).then_some(cwd),
         )
+    }
+
+    /// Provider ranges name literal content; formatting moves it to the copy source.
+    pub fn remap_links(
+        &self,
+        original: &str,
+        ranges: &[std::ops::Range<usize>],
+        cwd: &std::path::Path,
+        links: &mut Vec<super::links::Link>,
+    ) {
+        for range in ranges {
+            let text = &original[range.clone()];
+            if text.is_empty() {
+                continue;
+            }
+            let mapped: Vec<_> = self
+                .source
+                .match_indices(text)
+                .map(|(start, text)| start..start + text.len())
+                .collect();
+            for link in super::links::path_links(&self.source, &mapped, cwd) {
+                if !links.iter().any(|other| other.range == link.range) {
+                    links.push(link);
+                }
+            }
+        }
     }
 
     /// Lay out prose at `width`, preserving logical lines in preformatted blocks.
@@ -264,7 +278,7 @@ impl Part {
             ))],
             Body::Code(lang) => highlight::code_lines(source, lang),
             Body::Shell(commands) => shell_lines(&self.source, commands),
-            Body::Json(value) => json_lines(value),
+            Body::Structured(document) => document.highlighted(),
             Body::Diff => highlight::diff_lines(source),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
             Body::Text | Body::Prose(false) => source
@@ -383,152 +397,6 @@ fn shell_maps(
     maps
 }
 
-/// Pretty JSON with string line breaks aligned to the opening content column.
-fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
-    use highlight::JsonToken;
-
-    struct Printer {
-        lines: Vec<Line<'static>>,
-        styles: [Style; 7],
-    }
-
-    impl Printer {
-        fn push(&mut self, text: impl Into<String>, token: JsonToken) {
-            self.lines
-                .last_mut()
-                .expect("JSON line exists")
-                .spans
-                .push(Span::styled(text.into(), self.styles[token as usize]));
-        }
-
-        fn newline(&mut self, indent: usize) {
-            self.lines.push(Line::from(" ".repeat(indent)));
-        }
-
-        fn string(&mut self, text: &str, token: JsonToken, multiline: bool, indent: usize) {
-            let quote = if multiline {
-                JsonToken::StringQuote
-            } else {
-                token
-            };
-            self.push("\"", quote);
-            // Continuations use the value's structural indent, preserving its own whitespace.
-            // Serialize each logical line so all other JSON escapes retain their spelling.
-            let normalized = if multiline {
-                text.replace("\r\n", "\n")
-            } else {
-                text.into()
-            };
-            for (index, line) in normalized.split_inclusive('\n').enumerate() {
-                if index > 0 && multiline {
-                    self.newline(indent);
-                }
-                let line = if multiline {
-                    line.strip_suffix('\n').unwrap_or(line)
-                } else {
-                    line
-                };
-                let encoded = serde_json::to_string(line).expect("JSON string serializes");
-                let content = &encoded[1..encoded.len() - 1];
-                let mut start = 0;
-                let mut cursor = 0;
-                while cursor < content.len() {
-                    if content.as_bytes()[cursor] != b'\\' {
-                        cursor += 1;
-                        continue;
-                    }
-                    self.push(&content[start..cursor], token);
-                    let end = cursor
-                        + if content.as_bytes()[cursor + 1] == b'u' {
-                            6
-                        } else {
-                            2
-                        };
-                    self.push(&content[cursor..end], JsonToken::Escape);
-                    cursor = end;
-                    start = end;
-                }
-                self.push(&content[start..], token);
-            }
-            if multiline && normalized.ends_with('\n') {
-                self.newline(indent);
-            }
-            self.push("\"", quote);
-        }
-
-        /// Render a multi-line Markdown value between its quotes, indented like its continuations.
-        fn markdown(&mut self, text: &str, indent: usize) {
-            self.push("\"", JsonToken::StringQuote);
-            let base = self.styles[JsonToken::String as usize];
-            for (index, line) in super::markdown::render(text, usize::MAX)
-                .into_iter()
-                .enumerate()
-            {
-                if index > 0 {
-                    self.newline(indent);
-                }
-                let spans = &mut self.lines.last_mut().expect("JSON line exists").spans;
-                spans.extend(line.spans.into_iter().map(|mut span| {
-                    span.style = base.patch(span.style);
-                    span
-                }));
-            }
-            self.push("\"", JsonToken::StringQuote);
-        }
-
-        fn value(&mut self, value: &serde_json::Value, indent: usize) {
-            use serde_json::Value;
-            match value {
-                Value::Object(values) => {
-                    self.push("{", JsonToken::Punctuation);
-                    for (index, (key, value)) in values.iter().enumerate() {
-                        self.newline(indent + 2);
-                        self.string(key, JsonToken::Key, false, indent + 2);
-                        self.push(": ", JsonToken::Punctuation);
-                        self.value(value, indent + 2);
-                        if index + 1 < values.len() {
-                            self.push(",", JsonToken::Punctuation);
-                        }
-                    }
-                    if !values.is_empty() {
-                        self.newline(indent);
-                    }
-                    self.push("}", JsonToken::Punctuation);
-                }
-                Value::Array(values) => {
-                    self.push("[", JsonToken::Punctuation);
-                    for (index, value) in values.iter().enumerate() {
-                        self.newline(indent + 2);
-                        self.value(value, indent + 2);
-                        if index + 1 < values.len() {
-                            self.push(",", JsonToken::Punctuation);
-                        }
-                    }
-                    if !values.is_empty() {
-                        self.newline(indent);
-                    }
-                    self.push("]", JsonToken::Punctuation);
-                }
-                Value::String(text)
-                    if text.contains('\n') && super::markdown::has_markers(text) =>
-                {
-                    self.markdown(text, indent)
-                }
-                Value::String(text) => self.string(text, JsonToken::String, true, indent),
-                Value::Number(number) => self.push(number.to_string(), JsonToken::Number),
-                Value::Bool(_) | Value::Null => self.push(value.to_string(), JsonToken::Literal),
-            }
-        }
-    }
-
-    let mut printer = Printer {
-        lines: vec![Line::default()],
-        styles: highlight::json_styles(),
-    };
-    printer.value(value, 0);
-    printer.lines
-}
-
 /// Build one titled section per message or tool call.
 pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     let sections = if super::log::shows_calls(event) {
@@ -545,10 +413,10 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
             event.kind,
             Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
         ) {
-            vec![Part::prose(
+            Part::prose_parts(
                 event.detail_body.as_ref().unwrap_or(&event.body).clone(),
                 true,
-            )]
+            )
         } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
             Part::prose_parts(event.body.clone(), false)
         } else if event.kind == Kind::Tool {
@@ -692,16 +560,21 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             return;
         }
         Section::Prose { text, markdown } => {
-            parts.push(Part::prose(text.clone(), *markdown));
+            parts.extend(
+                Part::text_parts(text.clone(), *markdown)
+                    .into_iter()
+                    .map(|part| part.into_prose(false)),
+            );
             return;
         }
         Section::Label(text) => {
             parts.push(Part::new(text.clone(), Body::Label(label_style)));
             return;
         }
-        Section::Json { text, .. } => {
-            let value = serde_json::from_str(text).expect("provider JSON section is valid");
-            parts.push(Part::json(value));
+        Section::Structured { text, .. } => {
+            let document =
+                structured_text::parse(text).expect("provider structured section is valid");
+            parts.push(Part::structured(document));
             return;
         }
         Section::Placeholder(text) => {
@@ -712,14 +585,14 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
         Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
-        Section::Markdown { label, text } => (
-            label,
-            if text_output {
-                Part::text(cells(text), true)
+        Section::Markdown { text, .. } => {
+            parts.extend(if text_output {
+                Part::text_parts(cells(text), true)
             } else {
-                Part::prose(cells(text), true)
-            },
-        ),
+                Part::prose_parts(cells(text), true)
+            });
+            return;
+        }
         Section::Text { text, .. } => {
             if text_output {
                 parts.extend(Part::text_parts(cells(text), false));
@@ -735,70 +608,24 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
     parts.push(body);
 }
 
-/// A JSON block boundary already supplies the adjacent line break.
-fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> Option<&str> {
-    if after_json && before_json && matches!(source, "\n" | "\r\n") {
+/// A structured block boundary already supplies the adjacent line break.
+fn text_boundary(mut source: &str, after_block: bool, before_block: bool) -> Option<&str> {
+    if after_block && before_block && matches!(source, "\n" | "\r\n") {
         return None;
     }
-    if after_json {
+    if after_block {
         source = source
             .strip_prefix("\r\n")
             .or_else(|| source.strip_prefix('\n'))
             .unwrap_or(source);
     }
-    if before_json {
+    if before_block {
         source = source
             .strip_suffix("\r\n")
             .or_else(|| source.strip_suffix('\n'))
             .unwrap_or(source);
     }
     Some(source)
-}
-
-/// Scan each candidate once, then parse only its balanced span. Failed spans stay prose.
-fn embedded_json(source: &str, start: usize) -> (usize, Option<serde_json::Value>) {
-    if source.as_bytes()[start] == b'['
-        && source[..start]
-            .chars()
-            .next_back()
-            .is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '_' | ']' | ')' | '"'))
-    {
-        return (start + 1, None);
-    }
-    let mut brackets = Vec::new();
-    let mut quoted = false;
-    let mut escaped = false;
-    for (offset, &byte) in source.as_bytes()[start..].iter().enumerate() {
-        #[cfg(test)]
-        record_json_scan(1);
-        if quoted {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                quoted = false;
-            }
-            continue;
-        }
-        match byte {
-            b'"' => quoted = true,
-            b'{' | b'[' => brackets.push(byte),
-            b'}' | b']' => {
-                let end = start + offset + 1;
-                if brackets.pop() != Some(if byte == b'}' { b'{' } else { b'[' }) {
-                    return (end, None);
-                }
-                if brackets.is_empty() {
-                    #[cfg(test)]
-                    record_json_scan(end - start);
-                    return (end, serde_json::from_str(&source[start..end]).ok());
-                }
-            }
-            _ => {}
-        }
-    }
-    (source.len(), None)
 }
 
 /// Copy sources preserve tabs and omit trailing line breaks.
@@ -1088,7 +915,7 @@ mod tests {
                 assert!(parts[0].markdown());
             } else {
                 assert_eq!(parts.len(), 3);
-                assert!(matches!(parts[1].body, Body::Json(_)));
+                assert!(matches!(parts[1].body, Body::Structured(_)));
             }
         }
     }
@@ -1216,7 +1043,7 @@ mod tests {
         let mut parts = Vec::new();
         push_section(
             &mut parts,
-            &Section::Json {
+            &Section::Structured {
                 label: "input".into(),
                 text: source.into(),
             },
@@ -1302,7 +1129,7 @@ mod tests {
         );
         assert_eq!(parts.len(), 5);
         assert_eq!(parts[0].source, "before ");
-        assert!(matches!(parts[1].body, Body::Json(_)));
+        assert!(matches!(parts[1].body, Body::Structured(_)));
         assert!(parts[1].source.contains("\n  \"items\": ["));
         assert_eq!(parts[2].source, " after ");
         assert_eq!(parts[3].source, "[\n  3,\n  4\n]");
@@ -1315,7 +1142,7 @@ mod tests {
                 part.markdown(),
             );
             for (line, map) in lines.iter().zip(maps) {
-                if matches!(part.body, Body::Json(_)) {
+                if matches!(part.body, Body::Structured(_)) {
                     assert_eq!(
                         map.iter()
                             .map(|(cells, _)| (cells.end - cells.start) as usize)
@@ -1569,7 +1396,7 @@ mod tests {
         );
         push_section(
             &mut parts,
-            &Section::Json {
+            &Section::Structured {
                 label: "input".into(),
                 text: r#"{"timeout":1000}"#.into(),
             },
@@ -1922,3 +1749,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "structured_text_tests.rs"]
+mod structured_text_tests;

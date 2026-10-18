@@ -1268,7 +1268,7 @@ pub(crate) mod tests {
         let events = events_from(records);
         assert_eq!(
             events[0].calls[0].input,
-            vec![Section::Json {
+            vec![Section::Structured {
                 label: "input".into(),
                 text: input.to_string(),
             }]
@@ -1296,7 +1296,7 @@ pub(crate) mod tests {
             let expected = if input.is_null() {
                 Vec::new()
             } else {
-                vec![Section::Json {
+                vec![Section::Structured {
                     label: "input".into(),
                     text: input.to_string(),
                 }]

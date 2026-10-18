@@ -947,7 +947,7 @@ fn detail_parts_layout(
                 if part.running() && width > 0 {
                     layout.running.push(first);
                 }
-                let links = if part.markdown()
+                let mut links = if part.markdown()
                     || (!shows_calls(event)
                         && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
                 {
@@ -965,6 +965,9 @@ fn detail_parts_layout(
                     };
                     super::links::path_links(&part.source, &paths, cwd)
                 };
+                if !shows_calls(event) {
+                    part.remap_links(&event.body, &event.paths, cwd, &mut links);
+                }
                 for (line, cells) in lines.into_iter().zip(&mut maps) {
                     let mut line = truncate_detail_line(line, cells, width);
                     if padding > 0 {

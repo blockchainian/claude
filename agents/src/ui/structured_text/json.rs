@@ -1,0 +1,252 @@
+//! JSON detection and the multiline-value printer.
+use super::super::highlight;
+use super::{Document, Format};
+use ratatui::{
+    style::Style,
+    text::{Line, Span},
+};
+
+pub(super) struct Json;
+struct JsonDocument(serde_json::Value);
+
+impl Format for Json {
+    fn candidate(&self, source: &str, start: usize) -> Option<usize> {
+        matches!(source.as_bytes()[start], b'{' | b'[').then(|| candidate_end(source, start))
+    }
+
+    fn parse(&self, source: &str) -> Option<Box<dyn Document>> {
+        let value: serde_json::Value = serde_json::from_str(source).ok()?;
+        (value.is_object() || value.is_array())
+            .then(|| Box::new(JsonDocument(value)) as Box<dyn Document>)
+    }
+}
+
+impl Document for JsonDocument {
+    fn text(&self) -> String {
+        self.highlighted()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+    fn syntax(&self) -> &'static str {
+        "json"
+    }
+    fn is_empty(&self) -> bool {
+        self.0.as_object().is_some_and(|value| value.is_empty())
+            || self.0.as_array().is_some_and(|value| value.is_empty())
+    }
+    fn highlighted(&self) -> Vec<Line<'static>> {
+        json_lines(&self.0)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(in super::super) static JSON_SCAN_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(in super::super) fn record_json_scan(bytes: usize) {
+    JSON_SCAN_BUDGET.with(|budget| {
+        if let Some(remaining) = budget.get() {
+            budget.set(Some(
+                remaining
+                    .checked_sub(bytes)
+                    .expect("JSON detection exceeded its linear scan budget"),
+            ));
+        }
+    });
+}
+
+/// Scan each candidate once, then parse only its balanced span. Failed spans stay prose.
+fn candidate_end(source: &str, start: usize) -> usize {
+    if source.as_bytes()[start] == b'['
+        && source[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '_' | ']' | ')' | '"'))
+    {
+        return start + 1;
+    }
+    let mut brackets = Vec::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, &byte) in source.as_bytes()[start..].iter().enumerate() {
+        #[cfg(test)]
+        record_json_scan(1);
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'{' | b'[' => brackets.push(byte),
+            b'}' | b']' => {
+                let end = start + offset + 1;
+                if brackets.pop() != Some(if byte == b'}' { b'{' } else { b'[' }) {
+                    return end;
+                }
+                if brackets.is_empty() {
+                    #[cfg(test)]
+                    record_json_scan(end - start);
+                    return end;
+                }
+            }
+            _ => {}
+        }
+    }
+    source.len()
+}
+
+/// Pretty JSON with string line breaks aligned to the opening content column.
+pub(in super::super) fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
+    use highlight::JsonToken;
+
+    struct Printer {
+        lines: Vec<Line<'static>>,
+        styles: [Style; 7],
+    }
+
+    impl Printer {
+        fn push(&mut self, text: impl Into<String>, token: JsonToken) {
+            self.lines
+                .last_mut()
+                .expect("JSON line exists")
+                .spans
+                .push(Span::styled(text.into(), self.styles[token as usize]));
+        }
+
+        fn newline(&mut self, indent: usize) {
+            self.lines.push(Line::from(" ".repeat(indent)));
+        }
+
+        fn string(&mut self, text: &str, token: JsonToken, multiline: bool, indent: usize) {
+            let quote = if multiline {
+                JsonToken::StringQuote
+            } else {
+                token
+            };
+            self.push("\"", quote);
+            // Continuations use the value's structural indent, preserving its own whitespace.
+            // Serialize each logical line so all other JSON escapes retain their spelling.
+            let normalized = if multiline {
+                text.replace("\r\n", "\n")
+            } else {
+                text.into()
+            };
+            for (index, line) in normalized.split_inclusive('\n').enumerate() {
+                if index > 0 && multiline {
+                    self.newline(indent);
+                }
+                let line = if multiline {
+                    line.strip_suffix('\n').unwrap_or(line)
+                } else {
+                    line
+                };
+                let encoded = serde_json::to_string(line).expect("JSON string serializes");
+                let content = &encoded[1..encoded.len() - 1];
+                let mut start = 0;
+                let mut cursor = 0;
+                while cursor < content.len() {
+                    if content.as_bytes()[cursor] != b'\\' {
+                        cursor += 1;
+                        continue;
+                    }
+                    self.push(&content[start..cursor], token);
+                    let end = cursor
+                        + if content.as_bytes()[cursor + 1] == b'u' {
+                            6
+                        } else {
+                            2
+                        };
+                    self.push(&content[cursor..end], JsonToken::Escape);
+                    cursor = end;
+                    start = end;
+                }
+                self.push(&content[start..], token);
+            }
+            if multiline && normalized.ends_with('\n') {
+                self.newline(indent);
+            }
+            self.push("\"", quote);
+        }
+
+        /// Render a multi-line Markdown value between its quotes, indented like its continuations.
+        fn markdown(&mut self, text: &str, indent: usize) {
+            self.push("\"", JsonToken::StringQuote);
+            let base = self.styles[JsonToken::String as usize];
+            for (index, line) in super::super::markdown::render(text, usize::MAX)
+                .into_iter()
+                .enumerate()
+            {
+                if index > 0 {
+                    self.newline(indent);
+                }
+                let spans = &mut self.lines.last_mut().expect("JSON line exists").spans;
+                spans.extend(line.spans.into_iter().map(|mut span| {
+                    span.style = base.patch(span.style);
+                    span
+                }));
+            }
+            self.push("\"", JsonToken::StringQuote);
+        }
+
+        fn value(&mut self, value: &serde_json::Value, indent: usize) {
+            use serde_json::Value;
+            match value {
+                Value::Object(values) => {
+                    self.push("{", JsonToken::Punctuation);
+                    for (index, (key, value)) in values.iter().enumerate() {
+                        self.newline(indent + 2);
+                        self.string(key, JsonToken::Key, false, indent + 2);
+                        self.push(": ", JsonToken::Punctuation);
+                        self.value(value, indent + 2);
+                        if index + 1 < values.len() {
+                            self.push(",", JsonToken::Punctuation);
+                        }
+                    }
+                    if !values.is_empty() {
+                        self.newline(indent);
+                    }
+                    self.push("}", JsonToken::Punctuation);
+                }
+                Value::Array(values) => {
+                    self.push("[", JsonToken::Punctuation);
+                    for (index, value) in values.iter().enumerate() {
+                        self.newline(indent + 2);
+                        self.value(value, indent + 2);
+                        if index + 1 < values.len() {
+                            self.push(",", JsonToken::Punctuation);
+                        }
+                    }
+                    if !values.is_empty() {
+                        self.newline(indent);
+                    }
+                    self.push("]", JsonToken::Punctuation);
+                }
+                Value::String(text)
+                    if text.contains('\n') && super::super::markdown::has_markers(text) =>
+                {
+                    self.markdown(text, indent)
+                }
+                Value::String(text) => self.string(text, JsonToken::String, true, indent),
+                Value::Number(number) => self.push(number.to_string(), JsonToken::Number),
+                Value::Bool(_) | Value::Null => self.push(value.to_string(), JsonToken::Literal),
+            }
+        }
+    }
+
+    let mut printer = Printer {
+        lines: vec![Line::default()],
+        styles: highlight::json_styles(),
+    };
+    printer.value(value, 0);
+    printer.lines
+}

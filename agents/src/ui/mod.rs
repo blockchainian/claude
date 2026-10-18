@@ -35,6 +35,7 @@ mod selection_tabs;
 mod shell_commands;
 mod shortcut_help;
 mod style;
+mod structured_text;
 mod terminal_panel;
 mod text_selection;
 mod text_selection_layout;

@@ -1,0 +1,100 @@
+  Active 1                                                                                                  Inactive 0
+────────────────────────────────────────────────────────────┬──────────────────── Task log example ─────────────────────
+                        /tmp/project                        │                          Prompt
+ ● Task log example                  Working            now │ Task log example
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+────────────────────────────────────────────────────────────┴──────────────────────── Working ──────────────── project╶─
+ Task log example ❮ Running in a terminal · /bg
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                 Please inspect the task                                       11:58:00
+                                                 I will check the files                                             10s
+                                            Read src/main.rs， Read src/app.rs                                       15s
+                                                      failed check                                                  15s
+                                                 Also inspect the tests                                        11:59:00
+                                                 run a background job *                                              5s
+ A long response whose whitespace collapses and whose body must be truncated before the right aligned timest…  11:59:20
+                                                        run tests                                                    5s
+ # Result {"answer":[1,2]} <plist version="1.0"><dict><key>settings</key><array> <dict><key>settings</key><d…       35s
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                          Error                                                     35s
+
+                                           # Result
+                                           {
+                                             "answer": [
+                                               1,
+                                               2
+                                             ]
+                                           }
+                                           <plist version="1.0">
+                                             <dict>
+                                               <key>settings</key>
+                                               <array>
+                                                 <dict>
+                                                   <key>settings</key>
+                                                   <dict>
+                                                     <key>background</key>
+                                                     <string>#123456</string>
+                                                   </dict>
+                                                 </dict>
+                                               </array>
+                                             </dict>
+                                           </plist>
+                                           **finished**
+
+
+
+
+
+
+
+ ? help  esc Previous  ↑/↓ move  enter Terminal  n new

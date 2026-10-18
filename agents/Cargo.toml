@@ -21,6 +21,7 @@ notify = "7"
 nucleo-matcher = "0.3"
 plist = "1"
 pulldown-cmark = { version = "0.10", default-features = false }
+roxmltree = "0.21.1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "unstable-widget-ref"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
