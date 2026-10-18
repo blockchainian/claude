@@ -27,6 +27,9 @@ mod terminal_images;
 #[path = "support/terminal_drafts.rs"]
 mod terminal_drafts;
 
+#[path = "support/terminal_task_follow.rs"]
+mod terminal_task_follow;
+
 struct Tmux(String);
 
 impl Tmux {

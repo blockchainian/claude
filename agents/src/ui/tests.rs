@@ -1276,26 +1276,67 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
 }
 
 #[test]
-fn refresh_follows_selected_working_session_to_inactive() {
-    let mut view = fixture();
-    view.select(
-        view.rows
-            .iter()
-            .position(|s| s.id == session_key("46"))
-            .unwrap(),
-    );
-    assert_eq!(view.selected_id(), Some(&session_key("46")));
-    let mut rows = view.rows.clone();
-    rows.iter_mut()
-        .find(|s| s.id == session_key("46"))
-        .unwrap()
-        .status = SessionStatus::Inactive;
+fn refresh_keeps_active_when_selected_task_becomes_inactive() {
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for status in [
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::NeedsInput,
+        ] {
+            for renaming in [false, true] {
+                let mut view = test_view(Grouping::Project, false);
+                view.capabilities
+                    .insert(provider, view.capabilities[&ProviderId::Claude]);
+                let mut task = session("a", "Selected task", status, 120);
+                task.id.provider = provider;
+                let other = session("other", "Other active task", SessionStatus::Ready, 60);
+                view.set_sessions(vec![task.clone(), other.clone()], false);
+                view.select(view.rows.iter().position(|row| row.id == task.id).unwrap());
+                if renaming {
+                    key(&mut view, KeyCode::Char('r'));
+                    assert_eq!(view.rename_target.as_ref(), Some(&task.id));
+                }
+                task.status = SessionStatus::Inactive;
 
-    view.set_sessions(rows, false);
+                view.set_sessions(vec![task, other.clone()], false);
 
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
-    assert_eq!(view.selected_id(), Some(&session_key("46")));
-    assert_eq!(view.tab_selections[1], Some(session_key("46")));
+                assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+                assert_eq!(view.selected_id(), Some(&other.id));
+                assert_eq!(view.selected, view.fallback_selection());
+                assert!(view.rename_target.is_none());
+                assert!(!screen(&view, 120, 24).contains("Rename ❯"));
+            }
+        }
+    }
+}
+
+#[test]
+fn refresh_follows_selected_inactive_task_to_active() {
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for status in [
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::NeedsInput,
+        ] {
+            let mut view = test_view(Grouping::Project, false);
+            let mut task = session("b", "Selected task", SessionStatus::Inactive, 120);
+            task.id.provider = provider;
+            let other = session("other", "Other active task", SessionStatus::Ready, 60);
+            view.set_sessions(vec![task.clone(), other.clone()], false);
+            key(&mut view, KeyCode::Tab);
+            view.select(view.rows.iter().position(|row| row.id == task.id).unwrap());
+            task.status = status;
+
+            view.set_sessions(vec![task.clone(), other], false);
+
+            assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+            assert_eq!(view.selected_id(), Some(&task.id));
+            assert_eq!(view.tab_selections[0], Some(task.id.clone()));
+            key(&mut view, KeyCode::Tab);
+            key(&mut view, KeyCode::Tab);
+            assert_eq!(view.selected_id(), Some(&task.id));
+        }
+    }
 }
 
 #[test]
@@ -1337,7 +1378,7 @@ fn refresh_keeps_selected_session_on_active_when_ready_becomes_working() {
 }
 
 #[test]
-fn refresh_follows_selected_ready_session_to_inactive() {
+fn refresh_keeps_active_when_selected_ready_session_becomes_inactive() {
     let mut view = fixture();
     let mut rows = view.rows.clone();
     rows.iter_mut()
@@ -1347,12 +1388,11 @@ fn refresh_follows_selected_ready_session_to_inactive() {
 
     view.set_sessions(rows, false);
 
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
-    assert_eq!(view.tab_selections[1], Some(session_key("42")));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
     key(&mut view, KeyCode::Tab);
     key(&mut view, KeyCode::Tab);
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
 }
 
 #[test]
@@ -1556,6 +1596,7 @@ fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
         row.status = SessionStatus::Inactive;
     }
     view.set_sessions(rows, true);
+    key(&mut view, KeyCode::Tab);
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
     while view.selected_id() != Some(&session_key("45")) {
         key(&mut view, KeyCode::Down);
@@ -2079,7 +2120,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
 }
 
 #[test]
-fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
+fn rename_drops_inactive_removed_or_hidden_target() {
     let mut view = fixture();
     view.status_filter = TASK_FILTERS
         .iter()
@@ -2092,10 +2133,11 @@ fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
         .unwrap()
         .status = SessionStatus::Inactive;
     view.set_sessions(rows, false);
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
-    assert!(screen(&view, 88, 16).contains("Rename ❯ Current task"));
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
-    view.hide(&session_key("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    key(&mut view, KeyCode::Char('r'));
+    view.hide(&session_key("46"));
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
     let mut view = fixture();
     key(&mut view, KeyCode::Char('r'));
@@ -2121,7 +2163,10 @@ fn live_center_rename_active() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let input = view.center_layout(area).search;
-    assert_eq!(input.bottom(), view.center_layout(area).usage_chart.bottom());
+    assert_eq!(
+        input.bottom(),
+        view.center_layout(area).usage_chart.bottom()
+    );
     assert_eq!(buf[(input.x, input.y)].fg, Color::Cyan);
     assert!(
         buf[(input.x, input.y)]

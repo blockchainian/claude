@@ -187,7 +187,7 @@ impl View {
         if let Some((_, session)) = arrived.last()
             && let Some(index) = self.rows.iter().position(|row| &row.id == session)
         {
-            self.status_filter = tab_for_status(Some(self.rows[index].status), self.status_filter);
+            self.status_filter = tab_for_status(self.rows[index].status);
             self.select(index);
         }
     }

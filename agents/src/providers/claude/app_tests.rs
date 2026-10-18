@@ -1248,13 +1248,11 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
         app.view = crate::ui::View::default();
         app.view.set_capabilities(app.hub.capabilities());
         app.view.set_input_choices(app.hub.input_choices());
-        let tab = match rows.first().map(|row| row.status) {
-            Some(SessionStatus::NeedsInput) => 3,
-            Some(SessionStatus::Inactive) => 4,
-            _ => 0,
-        };
+        let inactive = rows
+            .first()
+            .is_some_and(|row| row.status == SessionStatus::Inactive);
         app.view.set_sessions(rows, false);
-        for _ in 0..tab {
+        if inactive {
             key(&mut app, KeyCode::Tab);
         }
         assert!(!key(&mut app, KeyCode::Char('n')));
@@ -1299,6 +1297,7 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
         .unwrap();
     assert!(children.join("custom-title.json").is_file());
     app.refresh();
+    key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Home);
     for _ in 0..app.sessions.len() {
         if app.view.selected_id() == Some(&target.id) {

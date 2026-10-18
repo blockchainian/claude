@@ -91,12 +91,18 @@ const MESSAGE_LIFETIME: Duration = Duration::from_secs(1);
 /// Longest gap between two clicks on one task that still opens it.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
 
-fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
+fn tab_for_status(status: SessionStatus) -> usize {
     match status {
-        Some(status) if TASK_FILTERS[current_tab].1.contains(&status) => current_tab,
-        Some(SessionStatus::Ready | SessionStatus::Working | SessionStatus::NeedsInput) => 0,
-        Some(SessionStatus::Inactive) => 1,
-        None => 0,
+        SessionStatus::Inactive => 1,
+        _ => 0,
+    }
+}
+
+/// Follow reactivated tasks to Active, but stay in the current tab when a task stops.
+fn tab_after_refresh(status: Option<SessionStatus>, current_tab: usize) -> usize {
+    match status {
+        Some(SessionStatus::Inactive) => current_tab,
+        Some(_) | None => 0,
     }
 }
 
@@ -270,8 +276,6 @@ pub struct View {
     status_filter: usize,
     /// The task each tab shows selected when it is entered, by tab index.
     tab_selections: Vec<Option<SessionKey>>,
-    /// The task the user chose last, or the refresh followed to a new tab.
-    chosen: Option<SessionKey>,
     search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<SessionKey>,
@@ -404,7 +408,6 @@ impl View {
             hidden: HashSet::new(),
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
-            chosen: None,
             search: line_edit::LineEdit::default(),
             searching: false,
             rename_target: None,
@@ -645,17 +648,13 @@ impl View {
             && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
         {
             let status = selected_index.map(|index| self.rows[index].status);
-            if self.rename_target.as_ref() == selected.as_ref()
-                && status == Some(SessionStatus::Inactive)
-            {
-                self.status_filter = TASK_FILTERS.len() - 1;
-            } else if let Some(parent) = selected_parent {
+            if let Some(parent) = selected_parent {
                 selected_index = self
                     .visible_indices()
                     .into_iter()
                     .find(|&index| self.rows[index].id == parent);
             } else {
-                self.status_filter = tab_for_status(status, self.status_filter);
+                self.status_filter = tab_after_refresh(status, self.status_filter);
             }
         }
         self.selected = if show_more {
@@ -973,20 +972,11 @@ impl View {
         self.remember_selection();
     }
 
-    /// Makes the selected task the selection of every tab that lists it.
+    /// Remembers the selected task in its visible tab, including children of a different status.
     fn remember_selection(&mut self) {
-        let Some((id, status)) = self.selected_row().and_then(|session| {
-            self.group_index(self.selected)
-                .map(|root| (session.id.clone(), self.rows[root].status))
-        }) else {
-            return;
-        };
-        for (tab, (_, statuses)) in TASK_FILTERS.iter().enumerate() {
-            if statuses.contains(&status) {
-                self.tab_selections[tab] = Some(id.clone());
-            }
+        if let Some(id) = self.selected_id().cloned() {
+            self.tab_selections[self.status_filter] = Some(id);
         }
-        self.chosen = Some(id);
     }
 
     fn reconcile_selection(&mut self) {

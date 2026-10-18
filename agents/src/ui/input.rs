@@ -189,10 +189,6 @@ impl View {
     }
 
     fn set_filter(&mut self, idx: usize) {
-        // A chosen task may have changed status since; remember it in the tabs that list it now.
-        if self.selected_id() == self.chosen.as_ref() {
-            self.remember_selection();
-        }
         self.leave_draft();
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
@@ -1262,11 +1258,7 @@ impl View {
             return None;
         }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
-            let backwards =
-                key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
-            let idx = (self.status_filter + if backwards { TASK_FILTERS.len() - 1 } else { 1 })
-                % TASK_FILTERS.len();
-            self.set_filter(idx);
+            self.set_filter(1 - self.status_filter);
             return None;
         }
         if plain && key.code == KeyCode::Char('/') {
