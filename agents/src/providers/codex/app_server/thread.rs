@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 #[derive(Serialize)]
@@ -118,6 +119,25 @@ pub(in crate::providers::codex) fn interrupt(
 ) -> io::Result<()> {
     let _: InterruptResponse =
         client.request("turn/interrupt", InterruptParams { thread_id, turn_id })?;
+    Ok(())
+}
+
+/// Interrupts the running turn and waits until the daemon reports it has ended.
+pub(in crate::providers::codex) fn stop(client: &mut Client, thread_id: &str) -> io::Result<()> {
+    let Some(turn_id) = running_turn(client, thread_id)? else {
+        return Ok(());
+    };
+    interrupt(client, thread_id, &turn_id)?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while running_turn(client, thread_id)?.is_some() {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Codex turn did not stop before detach",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     Ok(())
 }
 

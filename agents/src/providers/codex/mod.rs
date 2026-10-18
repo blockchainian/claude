@@ -697,9 +697,26 @@ impl Provider for CodexProvider {
             return Err(io::ErrorKind::Unsupported.into());
         }
         let home = self.home.clone();
+        let manager_home = self.manager_home.clone();
+        let config = super::claude::config_dir();
         let id = session.id.id.clone();
         let archived = session.archived;
         Ok(Box::new(move || {
+            if manager::links(&manager_home, &config)?.contains_key(&id) {
+                let mut client = app_server::Client::connect(&home)?;
+                app_server::thread::stop(&mut client, &id)?;
+                let output = manager::detach_command(&config, &manager_home, &home, &id)?.output()?;
+                if !output.status.success() {
+                    return Err(io::Error::other(format!(
+                        "codex-manager detach failed ({}): {}",
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+                let _: serde_json::Value = serde_json::from_slice(&output.stdout)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                return Ok(());
+            }
             if archived {
                 return Ok(());
             }

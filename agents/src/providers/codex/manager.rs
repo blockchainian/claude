@@ -2,7 +2,52 @@
 
 use super::{ProviderId, SessionKey};
 use serde::Deserialize;
-use std::{collections::HashMap, fs, io, path::Path};
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+#[derive(Deserialize)]
+struct InstalledPlugins {
+    plugins: HashMap<String, Vec<InstalledPlugin>>,
+}
+
+#[derive(Deserialize)]
+struct InstalledPlugin {
+    scope: String,
+    #[serde(rename = "installPath")]
+    install_path: PathBuf,
+}
+
+pub(super) fn detach_command(
+    config: &Path,
+    state: &Path,
+    codex_home: &Path,
+    thread_id: &str,
+) -> io::Result<Command> {
+    let installed: InstalledPlugins =
+        serde_json::from_slice(&fs::read(config.join("plugins/installed_plugins.json"))?)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let plugin = installed
+        .plugins
+        .get("codex@blockchainian")
+        .and_then(|entries| entries.iter().find(|entry| entry.scope == "user"))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "codex@blockchainian is not installed at user scope",
+            )
+        })?;
+    let mut command = Command::new("node");
+    command
+        .arg(plugin.install_path.join("codex-manager/manager.mjs"))
+        .args(["detach", "--thread", thread_id])
+        .env("CODEX_MANAGER_STATE_DIR", state)
+        .env("CODEX_HOME", codex_home);
+    Ok(command)
+}
 
 pub(super) struct Link {
     pub parent: SessionKey,
@@ -115,6 +160,59 @@ pub(super) fn links(home: &Path, claude_config: &Path) -> io::Result<HashMap<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detach_uses_the_installed_user_plugin_and_provider_directories() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("claude");
+        fs::create_dir_all(config.join("plugins")).unwrap();
+        let record = config.join("plugins/installed_plugins.json");
+        let mut installed: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-manager/installed-plugins.json"
+        ))
+        .unwrap();
+        for path in ["plugin cache/codex/first", "plugin cache/codex/second"] {
+            let install = directory.path().join(path);
+            installed["plugins"]["codex@blockchainian"][0]["installPath"] =
+                install.to_str().unwrap().into();
+            fs::write(&record, installed.to_string()).unwrap();
+            let state = directory.path().join("manager");
+            let home = directory.path().join("codex");
+            let command = detach_command(&config, &state, &home, "thread-12").unwrap();
+            assert_eq!(command.get_program(), "node");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                [
+                    install.join("codex-manager/manager.mjs").as_os_str(),
+                    "detach".as_ref(),
+                    "--thread".as_ref(),
+                    "thread-12".as_ref(),
+                ]
+            );
+            assert_eq!(
+                command.get_envs().collect::<HashMap<_, _>>(),
+                HashMap::from([
+                    ("CODEX_HOME".as_ref(), Some(home.as_os_str())),
+                    ("CODEX_MANAGER_STATE_DIR".as_ref(), Some(state.as_os_str())),
+                ])
+            );
+        }
+        installed["plugins"].as_object_mut().unwrap().clear();
+        fs::write(&record, installed.to_string()).unwrap();
+        assert_eq!(
+            detach_command(&config, directory.path(), directory.path(), "thread-12")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+        fs::write(&record, "invalid").unwrap();
+        assert_eq!(
+            detach_command(&config, directory.path(), directory.path(), "thread-12")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 
     #[test]
     fn follows_current_claude_session_for_every_thread_and_falls_back() {

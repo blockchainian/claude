@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "plugins": {
+    "codex@blockchainian": [
+      {
+        "scope": "user",
+        "installPath": "/plugins/cache/blockchainian/codex/0.20.13",
+        "version": "0.20.13",
+        "installedAt": "2026-07-22T10:08:58.751Z",
+        "lastUpdated": "2026-10-17T16:24:51.761Z",
+        "gitCommitSha": "b502c2d54c32c953a6c6ddc3988905bb19e9a62e"
+      }
+    ]
+  }
+}

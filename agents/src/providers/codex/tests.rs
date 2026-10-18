@@ -477,6 +477,27 @@ fn manager_children_bypass_codex_paging_and_keep_descendants() {
 }
 
 #[test]
+fn archived_manager_threads_still_need_detach() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "attached");
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute("UPDATE threads SET archived=1 WHERE id='thread-12'", [])
+        .unwrap();
+    let snapshot = provider.snapshot(2).unwrap();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|s| s.id.id == "thread-12")
+        .unwrap();
+    assert!(session.archived && session.parent.is_some());
+    assert_eq!(
+        provider.archive(session).unwrap()().unwrap_err().to_string(),
+        "Codex's app-server daemon isn't running"
+    );
+}
+
+#[test]
 fn manager_waiting_and_asks_override_rollout_status_and_clear() {
     let (dir, mut provider) = fixture();
     let session = manager_fixture(dir.path(), &mut provider, "attached");

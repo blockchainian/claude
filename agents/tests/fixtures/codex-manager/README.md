@@ -8,3 +8,6 @@ The attached capture has no `detached` field; the detached capture has
 
 No pending approvals or ask files existed during capture. Tests exercise their
 creation and removal using the formats written by `manager.mjs` and `inbox.mjs`.
+
+`installed-plugins.json` retains the local Claude plugin registry's version and
+Codex user installation entry, with the home directory removed from its path.
