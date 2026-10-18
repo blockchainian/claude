@@ -478,7 +478,7 @@ struct Log {
     path: Option<PathBuf>,
     offset: u64,
     companions: std::collections::HashMap<String, Vec<crate::log::SourceRecord>>,
-    images: super::images::Companions,
+    images: super::images::PromptImages,
     error: Option<io::Error>,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
@@ -1831,30 +1831,13 @@ pub(crate) mod tests {
                 .collect::<String>(),
         )
         .unwrap();
-        for missing in [false, true] {
-            if missing {
-                std::fs::remove_file(dir.path().join("images/8.png")).unwrap();
-            }
-            let events = super::tail(&path, 20).unwrap();
-            assert_eq!(events.len(), 2);
-            for (event, numbers) in events
-                .iter()
-                .zip([vec![6], if missing { vec![9] } else { vec![8, 9] }])
-            {
-                assert_eq!(event.kind, crate::log::Kind::User);
-                assert_eq!(
-                    event.images,
-                    numbers
-                        .into_iter()
-                        .map(|number| crate::log::Image {
-                            label: format!("[Image #{number}]"),
-                            path: dir.path().join(format!("images/{number}.png")),
-                        })
-                        .collect::<Vec<_>>()
-                );
-            }
-            assert_eq!(super::tail(&path, 1).unwrap()[0].images, events[1].images);
+        let events = super::tail(&path, 20).unwrap();
+        assert_eq!(events.len(), 2);
+        for (event, numbers) in events.iter().zip([&[6][..], &[8, 9]]) {
+            assert_eq!(event.kind, crate::log::Kind::User);
+            super::super::transcript::tests::assert_embedded_images(&event.images, numbers);
         }
+        assert_eq!(super::tail(&path, 1).unwrap()[0].images, events[1].images);
     }
 
     use super::*;

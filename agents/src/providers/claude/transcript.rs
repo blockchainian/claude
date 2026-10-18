@@ -655,7 +655,7 @@ fn read_messages(
     let mut model_found = false;
     let mut effort_found = false;
     let mut tool_results = HashSet::new();
-    let mut images = super::images::Companions::default();
+    let mut images = super::images::PromptImages::default();
     let mut image_error = None;
     let mut ask_error = None;
     walk_records(file, start, bytes, sidechains, |record| {
@@ -1103,25 +1103,35 @@ pub(super) mod tests {
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
 
     pub(in crate::providers::claude) fn image_fixture() -> (tempfile::TempDir, Vec<Value>) {
-        let dir = tempfile::tempdir().unwrap();
-        let records: Vec<Value> =
-            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
-                .lines()
-                .map(|line| {
-                    let line =
-                        line.replace("/redacted/claude-session", dir.path().to_str().unwrap());
-                    serde_json::from_str(&line).unwrap()
-                })
-                .collect();
-        std::fs::create_dir(dir.path().join("images")).unwrap();
-        for number in [6, 8, 9] {
-            std::fs::write(
-                dir.path().join(format!("images/{number}.png")),
-                b"\x89PNG\r\n\x1a\n",
-            )
-            .unwrap();
+        let records = include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        (tempfile::tempdir().unwrap(), records)
+    }
+
+    /// Asserts `images` are the labelled PNGs embedded in the transcript.
+    pub(in crate::providers::claude) fn assert_embedded_images(
+        images: &[crate::log::Image],
+        numbers: &[u64],
+    ) {
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| image.label.clone())
+                .collect::<Vec<_>>(),
+            numbers
+                .iter()
+                .map(|number| format!("[Image #{number}]"))
+                .collect::<Vec<_>>()
+        );
+        for image in images {
+            assert!(
+                std::fs::read(&image.path)
+                    .unwrap()
+                    .starts_with(b"\x89PNG\r\n")
+            );
         }
-        (dir, records)
     }
 
     #[test]
@@ -1138,25 +1148,9 @@ pub(super) mod tests {
             }
         }
         std::fs::write(&path, &bytes).unwrap();
-        for missing in [false, true] {
-            if missing {
-                std::fs::remove_file(dir.path().join("images/8.png")).unwrap();
-            }
-            let summary = read(&path, bytes.len() as u64).unwrap();
-            let session =
-                super::super::session("test".into(), summary, Some(path.clone()), Utc::now());
-            let numbers = if missing { vec![9] } else { vec![8, 9] };
-            assert_eq!(
-                session.prompt_images,
-                numbers
-                    .into_iter()
-                    .map(|number| crate::log::Image {
-                        label: format!("[Image #{number}]"),
-                        path: dir.path().join(format!("images/{number}.png")),
-                    })
-                    .collect::<Vec<_>>()
-            );
-        }
+        let summary = read(&path, bytes.len() as u64).unwrap();
+        let session = super::super::session("test".into(), summary, Some(path), Utc::now());
+        assert_embedded_images(&session.prompt_images, &[8, 9]);
     }
 
     #[test]
