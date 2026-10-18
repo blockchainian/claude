@@ -124,8 +124,16 @@ const MCP_RULES: Rules = Rules {
         ("codex-manager detach", Subject::Field("threadId")),
     ],
     inputs: &[
-        ("codex-manager start", Input::Field("prompt"), Format::Text),
-        ("codex-manager send", Input::Field("prompt"), Format::Text),
+        (
+            "codex-manager start",
+            Input::Field("prompt"),
+            Format::Markdown,
+        ),
+        (
+            "codex-manager send",
+            Input::Field("prompt"),
+            Format::Markdown,
+        ),
     ],
     expanded: &[],
     summaries: &[],
@@ -449,9 +457,9 @@ mod tests {
             assert_eq!(subject.as_deref(), Some("tool-calls"));
             assert_eq!(
                 input,
-                vec![crate::log::Section::Prose {
+                vec![crate::log::Section::Markdown {
+                    label: "prompt".into(),
                     text: call["input"]["prompt"].as_str().unwrap().into(),
-                    markdown: false,
                 }]
             );
         }

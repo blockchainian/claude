@@ -1934,9 +1934,9 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(
                 call.input,
-                vec![Section::Prose {
+                vec![Section::Markdown {
+                    label: "prompt".into(),
                     text: block["input"]["prompt"].as_str().unwrap().to_owned(),
-                    markdown: false
                 }]
             );
         }
