@@ -369,3 +369,73 @@ fn search_finds_hidden_suffix_at_100_columns() {
 fn search_finds_hidden_suffix_at_200_columns() {
     assert_hidden_suffix_search(200);
 }
+
+#[test]
+fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
+    let fixture = include_str!("../../tests/fixtures/claude-write/python.jsonl");
+    let mut record: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    let mut snapshot = String::new();
+    for (path, content, token, highlighted) in [
+        ("/tmp/tail.py", None, "\"user\"", true),
+        (
+            "/tmp/Dockerfile",
+            Some("FROM alpine\nRUN echo hello\n"),
+            "FROM",
+            true,
+        ),
+        (
+            "/tmp/tail.unknown-syntax",
+            Some("import json, sys\n"),
+            "import",
+            false,
+        ),
+        (
+            "/tmp/no-extension",
+            Some("import json, sys\n"),
+            "import",
+            false,
+        ),
+    ] {
+        record["message"]["content"][0]["input"]["file_path"] = path.into();
+        if let Some(content) = content {
+            record["message"]["content"][0]["input"]["content"] = content.into();
+        }
+        let transcript = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(transcript.path(), format!("{record}\n")).unwrap();
+        let event = crate::providers::claude::log::tail(transcript.path(), 1)
+            .unwrap()
+            .remove(0);
+        assert_eq!(event.calls[0].detail_title, path);
+        let view = View::new(Grouping::Project, false);
+        let area = Rect::new(0, 0, 120, 24);
+        let mut buffer = Buffer::empty(area);
+        view.render_event_detail(
+            &event,
+            "12:34:56",
+            area,
+            &mut buffer,
+            Path::new("/"),
+            event.started_at,
+        );
+        let color = text_cell(&buffer, token).fg;
+        assert_eq!(color != Color::Reset, highlighted, "{path}: {color:?}");
+        snapshot.push_str(&format!("{path}\n"));
+        for y in area.y..area.bottom() {
+            let row: String = (area.x..area.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            if row.trim().is_empty() {
+                continue;
+            }
+            snapshot.push_str(row.trim_end());
+            snapshot.push('\n');
+        }
+        snapshot.push_str(&format!("{token}: {color:?}\n\n"));
+    }
+    snapshot.pop();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/claude_write.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}

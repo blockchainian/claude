@@ -535,6 +535,16 @@ fn code_section(label: &str, lang: &str, text: &str) -> Section {
     }
 }
 
+fn file_code_section(label: &str, path: &str, text: &str) -> Section {
+    let path = Path::new(path);
+    let lang = path
+        .extension()
+        .or_else(|| path.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    code_section(label, lang, text)
+}
+
 fn patch_section(value: &serde_json::Value) -> Option<Section> {
     let hunks = value["structuredPatch"].as_array()?;
     let text = hunks
@@ -584,6 +594,12 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
                 start.saturating_add(count.saturating_sub(1))
             ));
         }
+    }
+    if matches!(mode, Some(Output::Write))
+        && let (Some(path), Some(content)) =
+            (input["file_path"].as_str(), input["content"].as_str())
+    {
+        sections = vec![file_code_section("input", path, content)];
     }
     if matches!(mode, Some(Output::Shell)) {
         sections = sections
@@ -647,14 +663,9 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
                 ))]
             }
             Some(Output::Read) if value["file"]["content"].is_string() => {
-                let lang = value["file"]["filePath"]
-                    .as_str()
-                    .and_then(|path| Path::new(path).extension())
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("");
-                vec![code_section(
+                vec![file_code_section(
                     "output",
-                    lang,
+                    value["file"]["filePath"].as_str().unwrap_or(""),
                     value["file"]["content"].as_str().unwrap(),
                 )]
             }
@@ -1911,12 +1922,13 @@ pub(crate) mod tests {
         let write = calls.iter().find(|call| call.name == "Write").unwrap();
         assert_eq!(
             write.input,
-            vec![Section::Prose {
+            vec![Section::Code {
+                label: "input".into(),
+                lang: "md".into(),
                 text: records[6]["message"]["content"][0]["input"]["content"]
                     .as_str()
                     .unwrap()
                     .to_owned(),
-                markdown: false
             }]
         );
         for call in calls.iter().filter(|call| call.name.starts_with("mcp__")) {

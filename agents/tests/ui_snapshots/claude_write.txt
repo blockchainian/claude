@@ -1,0 +1,34 @@
+/tmp/tail.py
+Write                                                 /tmp/tail.py                                              12:34:56
+                                         import json, sys
+                                         out = []
+                                         for line in open(sys.argv[1]):
+                                             r = json.loads(line)
+                                             t = r.get("type")
+                                             if t not in ("user", "assistant"):
+                                                 continue
+                                                            ↓
+                                                           ·•·
+"user": Indexed(29)
+
+/tmp/Dockerfile
+Write                                                /tmp/Dockerfile                                            12:34:56
+                                                     FROM alpine
+                                                     RUN echo hello
+                                                            ↓
+                                                           ·•·
+FROM: Indexed(23)
+
+/tmp/tail.unknown-syntax
+Write                                           /tmp/tail.unknown-syntax                                        12:34:56
+                                                    import json, sys
+                                                            ↓
+                                                           ·•·
+import: Reset
+
+/tmp/no-extension
+Write                                               /tmp/no-extension                                           12:34:56
+                                                    import json, sys
+                                                            ↓
+                                                           ·•·
+import: Reset
