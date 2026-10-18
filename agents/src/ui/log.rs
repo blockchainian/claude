@@ -232,75 +232,11 @@ impl View {
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
-        let record = event
-            .source_records
-            .first()
-            .map(|record| (&record.path, record.offset));
-        let key = detail_key(&(
-            self.selected_id(),
-            &event.source,
-            record,
-            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
-        ));
-        let switched = viewport.log_detail_key != Some(key);
-        if switched {
-            let mut left = std::mem::take(&mut viewport.log_detail_state);
-            left.left_keys = Some(std::mem::take(&mut left.keys));
-            if let Some(previous) = viewport.log_detail_key.replace(key) {
-                viewport.log_detail_saved.insert(previous, left);
-            }
-            viewport.log_detail_state = viewport.log_detail_saved.remove(&key).unwrap_or_default();
-        }
-        let requested_scroll = viewport.log_detail_scroll;
-        let state = &mut viewport.log_detail_state;
-        state.content_top = body_area.y;
-        state.prepare(layout.body_keys.clone());
-        let position = state.position();
-        // Search and drag selection address the full source layout with a plain offset.
-        let external_scroll = (!switched || requested_scroll > 0) && requested_scroll != position;
-        let wants = layout
-            .bodies
-            .iter()
-            .map(|body| body.len())
-            .collect::<Vec<_>>();
-        let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
-        let mut kept: Vec<usize> = (0..layout.lines.len()).collect();
-        let mut cuts = Vec::new();
-        let scroll = if height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
-            && !self.log_detail_search.active()
-            && !external_scroll
-            && state.offset == 0
-        {
-            let allocations = super::render::allocate(&wants, height - static_rows);
-            state.budget(&wants, &allocations);
-            state.bodies.clear();
-            let mut removed = 0;
-            for (index, body) in layout.bodies.iter().enumerate() {
-                let rows = allocations[index] + state.reveal[index];
-                let start = body.start - removed;
-                state.bodies.push(start..start + rows);
-                kept.retain(|row| !((body.start + rows)..body.end).contains(row));
-                if rows > 0 && state.reveal[index] < state.hidden[index] {
-                    cuts.push(body.start + rows - 1);
-                }
-                removed += body.len() - rows;
-            }
-            state.reveal.iter().sum()
-        } else {
-            state.hidden.clear();
-            state.bodies.clear();
-            let max = layout.lines.len().saturating_sub(height);
-            state.fallback_max = Some(max);
-            state.offset = if switched && !external_scroll {
-                state.offset
-            } else {
-                requested_scroll
-            }
-            .min(max);
-            state.offset
-        };
-        viewport.log_detail_max = layout.lines.len().saturating_sub(height);
-        viewport.log_detail_scroll = scroll;
+        viewport.log_detail_columns = Some(columns);
+        let rows = self.detail_scroll_layout(event, &layout, body_area, &mut viewport);
+        let scroll = rows.scroll;
+        let cuts = rows.cuts;
+        let kept = rows.kept;
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(height + viewport.log_detail_max)
@@ -386,6 +322,99 @@ impl View {
             }
         }
         self.highlight_text_selection(text_selection::Panel::Log, buf);
+    }
+
+    fn detail_scroll_layout(
+        &self,
+        event: &Event,
+        layout: &DetailLayout,
+        body_area: Rect,
+        viewport: &mut Viewport,
+    ) -> super::details_scroll::DetailsLayout {
+        let record = event
+            .source_records
+            .first()
+            .map(|record| (&record.path, record.offset));
+        let key = detail_key(&(
+            self.selected_id(),
+            &event.source,
+            record,
+            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
+        ));
+        let switched = viewport.log_detail_key != Some(key);
+        if switched {
+            let mut left = std::mem::take(&mut viewport.log_detail_state);
+            left.left_keys = Some(std::mem::take(&mut left.keys));
+            if let Some(previous) = viewport.log_detail_key.replace(key) {
+                viewport.log_detail_saved.insert(previous, left);
+            }
+            viewport.log_detail_state = viewport.log_detail_saved.remove(&key).unwrap_or_default();
+        }
+        let height = usize::from(body_area.height);
+        let requested_scroll = viewport.log_detail_scroll;
+        let state = &mut viewport.log_detail_state;
+        state.content_top = body_area.y;
+        state.prepare(layout.body_keys.clone());
+        let position = state.position();
+        // Search and drag selection address the full source layout with a plain offset.
+        let external_scroll = (!switched || requested_scroll > 0) && requested_scroll != position;
+        let wants = layout
+            .bodies
+            .iter()
+            .map(|body| body.len())
+            .collect::<Vec<_>>();
+        let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
+        let allocations = if height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
+            && !self.log_detail_search.active()
+            && !external_scroll
+            && state.offset == 0
+        {
+            Some(super::render::allocate(&wants, height - static_rows))
+        } else {
+            state.offset = if switched && !external_scroll {
+                state.offset
+            } else {
+                requested_scroll
+            };
+            None
+        };
+        let rows = state.layout(
+            &vec![1; layout.lines.len()],
+            &layout.bodies,
+            allocations.as_deref(),
+            0..0,
+            height,
+        );
+        viewport.log_detail_max = rows.max;
+        viewport.log_detail_scroll = rows.scroll;
+        rows
+    }
+
+    /// Refresh geometry before consuming input, including inputs batched ahead of a draw.
+    pub(super) fn prepare_log_detail_scroll(&self) {
+        let Some(event) = self.visible_log_event() else {
+            return;
+        };
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        let mut viewport = self.viewport.borrow_mut();
+        let Some(columns) = viewport.log_detail_columns else {
+            return;
+        };
+        let area = viewport.log_detail;
+        let mut body_area =
+            super::render::row(columns.text, LOG_TOP, area.height.saturating_sub(LOG_TOP));
+        if self.log_detail_search.active() {
+            body_area.height = body_area.height.saturating_sub(1);
+        }
+        let layout = viewport.log_detail_layout.take().unwrap_or_else(|| {
+            let mut layout = self.selected_detail_layout(event, columns, &session.cwd, Utc::now());
+            layout.height = usize::from(body_area.height);
+            layout
+        });
+        self.detail_scroll_layout(event, &layout, body_area, &mut viewport);
+        viewport.log_detail_layout = Some(layout);
     }
 
     pub(super) fn jump_detail_match(&mut self) {

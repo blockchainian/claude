@@ -272,3 +272,165 @@ fn log_scroll_same_source_keeps_position_when_event_kind_changes() {
     panel(&view, now);
     assert_eq!(view.viewport.borrow().log_detail_scroll, offset);
 }
+
+#[test]
+fn log_scroll_chinese_json_round_trip() {
+    for height in 3..20 {
+        let (mut view, now) = tool_fixture();
+        view.log[0].calls.truncate(1);
+        view.log[0].calls[0].input = vec![crate::log::Section::Prose {
+            markdown: false,
+            text: "请检查会话面板的滚动行为，确保标题和内容都能完整显示。".repeat(80),
+        }];
+        view.log[0].calls[0].output = Some(vec![crate::log::Section::Structured {
+            label: String::new(),
+            text: serde_json::json!({"status":"ok", "results": (0..30).collect::<Vec<_>>()})
+                .to_string(),
+        }]);
+        let initial = panel_at(&view, now, height);
+        for _ in 0..10 {
+            view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            panel_at(&view, now, height);
+        }
+        for step in 0..10 {
+            let before = view.viewport.borrow().log_detail_scroll;
+            view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            panel_at(&view, now, height);
+            assert!(
+                view.viewport.borrow().log_detail_scroll < before,
+                "height {height}, step {step}, before {before}"
+            );
+        }
+        assert_eq!(panel_at(&view, now, height), initial, "height {height}");
+    }
+}
+
+#[test]
+fn log_scroll_new_rows_do_not_consume_short_entry_navigation() {
+    for new in [0, 1, 2, 3, 7] {
+        for detail in [false, true] {
+            let (mut view, now) = fixture(false);
+            let template = view.log[1].clone();
+            let events = (0..20)
+                .map(|i| {
+                    let mut event = template.clone();
+                    event.source = Some(format!("short-{i}"));
+                    event.body = format!("short item {i}");
+                    event
+                })
+                .collect();
+            view.set_log(events);
+            view.select_log_event(Some(12));
+            view.viewport.borrow_mut().log_unseen = 0;
+            let draw = |view: &View| {
+                let mut buf = Buffer::empty(Rect::new(0, 0, 120, 30));
+                view.viewport.borrow_mut().log = Rect::new(0, 0, 120, 9);
+                view.viewport.borrow_mut().log_scroll = 9;
+                view.render_log(Rect::new(0, 0, 120, 9), &mut buf, now);
+                panel(view, now);
+            };
+            draw(&view);
+            let mut events = view.log.clone();
+            events.extend((0..new).map(|i| {
+                let mut event = template.clone();
+                event.source = Some(format!("new-{i}"));
+                event
+            }));
+            view.set_log(events);
+            draw(&view);
+            assert_eq!(view.viewport.borrow().log_unseen, new);
+            for forward in [true, false] {
+                let index = view.log_selected.unwrap();
+                view.handle_mouse(mouse(
+                    if forward {
+                        MouseEventKind::ScrollDown
+                    } else {
+                        MouseEventKind::ScrollUp
+                    },
+                    10,
+                    if detail { 15 } else { 3 },
+                ));
+                draw(&view);
+                assert_eq!(
+                    view.log_selected,
+                    Some(if forward { index + 1 } else { index - 1 }),
+                    "new={new}, detail={detail}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn log_scroll_wheel_stops_at_title_before_changing_event() {
+    let (mut view, now) = fixture(true);
+    panel(&view, now);
+    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    let scrolled = panel(&view, now);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 1);
+    wheel(&mut view, false);
+    assert_eq!(
+        view.log_selected,
+        Some(1),
+        "first wheel must restore the title: {scrolled}"
+    );
+    panel(&view, now);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
+    wheel(&mut view, false);
+    assert_eq!(view.log_selected, Some(0));
+}
+
+#[test]
+fn log_scroll_short_entry_uses_its_layout_during_live_input_batch() {
+    for (new, forward) in [(2, false), (2, true), (3, false), (3, true)] {
+        let (mut view, now) = fixture(true);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/background/two-awaits.jsonl");
+        view.log[2] = crate::providers::claude::log::tail(&path, usize::MAX)
+            .unwrap()
+            .remove(0);
+        let mut events = view.log.clone();
+        let mut tail = events[0].clone();
+        tail.source = Some("tail".into());
+        events.push(tail);
+        view.set_log(events);
+        view.viewport.borrow_mut().log_unseen = 0;
+        panel(&view, now);
+        wheel(&mut view, true);
+        panel(&view, now);
+        // The app drains input and LogLoaded events before drawing the next frame.
+        view.move_log_selection(true);
+        let mut events = view.log.clone();
+        for i in 0..new {
+            let mut event = events[0].clone();
+            event.source = Some(format!("new-{i}"));
+            events.push(event);
+        }
+        view.set_log(events);
+        assert_eq!(view.viewport.borrow().log_unseen, new);
+        assert_eq!(view.log_selected, Some(2));
+        wheel(&mut view, forward);
+        assert_eq!(
+            view.log_selected,
+            Some(if forward { 3 } else { 1 }),
+            "short entry must leave on first wheel, new={new}"
+        );
+    }
+}
+
+#[test]
+fn log_scroll_wheel_stops_at_bottom_before_changing_event() {
+    let (mut view, now) = fixture(true);
+    panel(&view, now);
+    let max = view.viewport.borrow().log_detail_max;
+    for _ in 0..max - 1 {
+        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        panel(&view, now);
+    }
+    wheel(&mut view, true);
+    panel(&view, now);
+    assert_eq!(view.log_selected, Some(1));
+    assert_eq!(view.viewport.borrow().log_detail_scroll, max);
+    wheel(&mut view, true);
+    assert_eq!(view.log_selected, Some(2));
+}

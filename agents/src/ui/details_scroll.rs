@@ -1,5 +1,14 @@
 use super::DetailsScroll;
 
+/// Source items and cuts used by both drawing and scroll boundaries.
+pub(super) struct DetailsLayout {
+    pub kept: Vec<usize>,
+    pub cuts: Vec<usize>,
+    pub scroll: usize,
+    pub total: usize,
+    pub max: usize,
+}
+
 impl DetailsScroll {
     /// Restores unchanged bodies and folds bodies that changed while away.
     pub(super) fn prepare(&mut self, keys: Vec<u64>) {
@@ -34,6 +43,82 @@ impl DetailsScroll {
         for (reveal, hidden) in self.reveal.iter_mut().zip(&self.hidden) {
             *reveal = (*reveal).min(*hidden);
         }
+    }
+
+    /// Lay out the actual rendered items, including titles and multi-row boxes.
+    pub(super) fn layout(
+        &mut self,
+        heights: &[usize],
+        bodies: &[std::ops::Range<usize>],
+        allocations: Option<&[usize]>,
+        excluded: std::ops::Range<usize>,
+        available: usize,
+    ) -> DetailsLayout {
+        let mut keep = vec![true; heights.len()];
+        keep[excluded].fill(false);
+        let max = heights
+            .iter()
+            .zip(&keep)
+            .filter(|(_, kept)| **kept)
+            .map(|(height, _)| height)
+            .sum::<usize>()
+            .saturating_sub(available);
+        let mut cuts = Vec::new();
+        if let Some(allocations) = allocations {
+            let wants = bodies
+                .iter()
+                .map(|body| {
+                    assert!(
+                        heights[body.clone()].iter().all(|&height| height == 1),
+                        "foldable bodies must contain rendered text rows"
+                    );
+                    body.len()
+                })
+                .collect::<Vec<_>>();
+            self.budget(&wants, allocations);
+            for (index, body) in bodies.iter().enumerate() {
+                let rows = allocations[index] + self.reveal[index];
+                keep[body.start + rows..body.end].fill(false);
+                if rows > 0 && self.reveal[index] < self.hidden[index] {
+                    cuts.push(body.start + rows - 1);
+                }
+            }
+        } else {
+            self.hidden.clear();
+            self.fallback_max = Some(max);
+            self.offset = self.offset.min(max);
+        }
+        let mut offsets = vec![0];
+        for (&height, &kept) in heights.iter().zip(&keep) {
+            offsets.push(offsets.last().unwrap() + if kept { height } else { 0 });
+        }
+        self.bodies = bodies
+            .iter()
+            .map(|body| offsets[body.start]..offsets[body.end])
+            .collect();
+        DetailsLayout {
+            kept: keep
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &kept)| kept.then_some(index))
+                .collect(),
+            cuts,
+            scroll: self.position(),
+            total: *offsets.last().unwrap(),
+            max,
+        }
+    }
+
+    /// A gesture reaches its boundary before a later gesture can leave the window.
+    pub(super) fn scroll_rows(&mut self, forward: bool, row: u16, rows: usize) -> bool {
+        let mut consumed = false;
+        for _ in 0..rows {
+            if !self.scroll_window(forward, row) {
+                break;
+            }
+            consumed = true;
+        }
+        consumed
     }
 
     pub(super) fn position(&self) -> usize {

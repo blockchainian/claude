@@ -146,6 +146,7 @@ struct Viewport {
     log_detail_saved: HashMap<u64, DetailsScroll>,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,
+    log_detail_columns: Option<detail_model::DetailColumns>,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
