@@ -43,6 +43,7 @@ pub(super) enum SelectorKind {
     Model {
         target: ControlTarget,
         values: Vec<String>,
+        labels: Vec<String>,
     },
     Effort {
         target: ControlTarget,
@@ -160,11 +161,13 @@ impl Selector {
                 });
                 rows
             }
-            SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. } => values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| ListRow::Choice(index, Line::from(value.clone())))
-                .collect(),
+            SelectorKind::Model { labels: values, .. } | SelectorKind::Effort { values, .. } => {
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| ListRow::Choice(index, Line::from(value.clone())))
+                    .collect()
+            }
         }
     }
 }
@@ -295,7 +298,15 @@ impl View {
             .and_then(|current| values.iter().position(|value| *value == current))
             .unwrap_or_default();
         let kind = if field == Field::Model {
-            SelectorKind::Model { target, values }
+            let labels = values
+                .iter()
+                .map(|model| self.model_text(provider, model))
+                .collect();
+            SelectorKind::Model {
+                target,
+                values,
+                labels,
+            }
         } else {
             SelectorKind::Effort { target, values }
         };
@@ -399,7 +410,8 @@ impl View {
                     (branch != draft.setup.branch).then_some(BranchChoice::Existing(branch));
                 None
             }
-            SelectorKind::Model { target, values } | SelectorKind::Effort { target, values } => {
+            SelectorKind::Model { target, values, .. }
+            | SelectorKind::Effort { target, values } => {
                 let value = values.get(index)?.clone();
                 let target = target.clone();
                 let model = matches!(selector.kind, SelectorKind::Model { .. });

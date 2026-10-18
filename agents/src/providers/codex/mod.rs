@@ -266,6 +266,7 @@ impl ModelCatalog {
                 .into_iter()
                 .map(|model| crate::providers::ModelChoice {
                     id: model.slug.clone(),
+                    label: model.display_name.clone(),
                     efforts: model
                         .supported_reasoning_levels
                         .iter()

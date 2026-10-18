@@ -58,9 +58,9 @@ impl View {
                     .status
                     .label()
                     .to_owned(),
-                Grouping::Model => self.rows[self.group_index(index).unwrap()]
-                    .model_name()
-                    .to_owned(),
+                Grouping::Model => self
+                    .session_model_text(&self.rows[self.group_index(index).unwrap()])
+                    .unwrap_or_else(|| "Unknown".to_owned()),
             }
         };
         if self.grouping == Grouping::Project && !self.is_pinned(index) {

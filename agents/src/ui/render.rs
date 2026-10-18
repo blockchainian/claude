@@ -697,12 +697,15 @@ impl View {
     fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
         let (model, effort) = match (self.selected_row(), self.selected_draft()) {
             (Some(session), _) => (
-                session.model_label().map(str::to_owned),
+                self.session_model_text(session),
                 session.effort.clone(),
             ),
             // A new task shows its defaults too, so both stay clickable.
             (None, Some(draft)) => (
-                Some(draft.setup.model.as_deref().unwrap_or("Default").to_owned()),
+                Some(draft.setup.model.as_deref().map_or_else(
+                    || "Default".to_owned(),
+                    |model| self.model_text(draft.setup.provider, model),
+                )),
                 Some(
                     draft
                         .setup

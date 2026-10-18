@@ -944,10 +944,10 @@ fn model_catalog_labels_refresh_only_when_modified() {
         .unwrap();
     let label = |provider: &mut CodexProvider| {
         provider.refresh(1).sessions[0]
-            .model_label()
-            .map(str::to_owned)
+            .model_label
+            .clone()
     };
-    assert_eq!(label(&mut provider).as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(label(&mut provider), None);
     let path = dir.path().join("models_cache.json");
     std::fs::write(
         &path,
@@ -979,12 +979,12 @@ fn model_catalog_labels_refresh_only_when_modified() {
             std::fs::FileTimes::new().set_modified(modified + std::time::Duration::from_secs(1)),
         )
         .unwrap();
-    assert_eq!(label(&mut provider).as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(label(&mut provider), None);
     db.execute("UPDATE threads SET model='gpt-6-astra'", [])
         .unwrap();
     assert_eq!(label(&mut provider).as_deref(), Some("GPT-6-Astra"));
     std::fs::remove_file(path).unwrap();
-    assert_eq!(label(&mut provider).as_deref(), Some("gpt-6-astra"));
+    assert_eq!(label(&mut provider), None);
 }
 
 #[test]

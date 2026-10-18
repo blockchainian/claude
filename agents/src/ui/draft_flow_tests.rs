@@ -194,7 +194,7 @@ fn rendered_draft_model_click_opens_and_double_click_applies_provider_choice() {
                 .map(|x| buffer[(x, rect.y)].symbol())
                 .collect::<String>()
                 .trim_end()
-                == "claude-haiku-5-5"
+                == "Haiku 5.5"
         })
         .copied()
         .unwrap();
@@ -221,7 +221,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
     });
     view.rows[view.selected].effort = Some("high".into());
     view.rows[view.selected].model_label = Some("Opus 5.5".into());
-    let model_name = view.rows[view.selected].model_label().unwrap().to_owned();
+    let model_name = view.rows[view.selected].model_label.clone().unwrap();
     for width in [149, 150, 200] {
         let area = Rect::new(0, 0, width, 60);
         let mut buffer = Buffer::empty(area);
@@ -271,6 +271,29 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
 }
 
 #[test]
+fn model_group_heading_and_log_border_show_the_catalog_name() {
+    let (_directory, mut view) = fixture();
+    view.rows[view.selected].model = Some("claude-opus-5-5".into());
+    view.rows[view.selected].model_label = None;
+    view.grouping = crate::model::Grouping::Model;
+    let buffer = render(&view);
+    let text = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.lines()
+            .any(|line| line.split('│').next().unwrap().trim() == "Opus 5.5"),
+        "{text}"
+    );
+    assert!(text.contains("╴Opus 5.5 "), "{text}");
+    assert!(!text.contains("claude-opus-5-5"), "{text}");
+}
+#[test]
 fn log_model_targets_cover_only_visible_border_value_cells() {
     let (_directory, mut view) = fixture();
     let row = &mut view.rows[view.selected];
@@ -315,14 +338,16 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             );
             let available = (rule.width / 2).saturating_sub(4);
             let show_effort = effort.is_some() && available > 0;
-            let name_width = available.min("claude-opus-5-5".len() as u16);
+            // The catalog's name for `claude-opus-5-5`.
+            let name = "Opus 5.5";
+            let name_width = available.min(name.len() as u16);
             let start = rule.x + 2;
             let expected_name = if name_width == 0 {
                 String::new()
-            } else if name_width < "claude-opus-5-5".len() as u16 {
-                format!("{}…", &"claude-opus-5-5"[..usize::from(name_width - 1)])
+            } else if name_width < name.len() as u16 {
+                format!("{}…", &name[..usize::from(name_width - 1)])
             } else {
-                "claude-opus-5-5".into()
+                name.into()
             };
             let drawn = (start..start + name_width)
                 .map(|x| buffer[(x, rule.y)].symbol())
@@ -351,7 +376,13 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                 );
                 if let Some(field) = expected {
                     let symbol = buffer[(x, y)].symbol();
-                    assert!(!symbol.trim().is_empty());
+                    if field == Field::Model {
+                        // A model name's own spaces are part of the value.
+                        let expected = expected_name.chars().nth(usize::from(x - start));
+                        assert_eq!(symbol.chars().next(), expected);
+                    } else {
+                        assert!(!symbol.trim().is_empty());
+                    }
                     assert!(
                         buffer[(x, y)]
                             .modifier

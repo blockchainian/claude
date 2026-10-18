@@ -96,6 +96,8 @@ pub enum SessionInput {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ModelChoice {
     pub id: String,
+    /// The provider's own name for the model, such as `Opus 5.5`.
+    pub label: String,
     pub efforts: Vec<String>,
     pub default_effort: Option<String>,
 }
@@ -114,6 +116,11 @@ impl InputChoices {
         let name = name.split('[').next().unwrap_or(name);
         let id = self.aliases.get(name).map_or(name, String::as_str);
         self.models.iter().find(|model| model.id == id)
+    }
+
+    /// The provider's own name for the model `name` names, by id or alias.
+    pub fn label(&self, name: &str) -> Option<&str> {
+        self.model(name).map(|model| model.label.as_str())
     }
 }
 

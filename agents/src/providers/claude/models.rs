@@ -32,6 +32,7 @@ struct AliasTarget {
 #[derive(Deserialize)]
 struct Model {
     id: String,
+    name: String,
     section: Option<String>,
     #[serde(default)]
     disabled: bool,
@@ -91,6 +92,7 @@ pub fn input_choices(config_dir: &Path, version: Option<&str>) -> InputChoices {
                 let runtime = model.runtime;
                 ModelChoice {
                     id: model.id,
+                    label: model.name,
                     efforts: runtime
                         .as_ref()
                         .map(|runtime| runtime.effort_levels.clone())

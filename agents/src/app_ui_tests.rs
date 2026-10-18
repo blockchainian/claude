@@ -453,11 +453,11 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
     let ((x, y), _) = row_ends(&buffer, "Default");
     click(&mut app, x, y);
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "claude-haiku-5-5");
+    let (x, y) = position(&buffer, "Haiku 5.5");
     click(&mut app, x, y);
     click(&mut app, x, y);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("╴claude-haiku-5-5 "), "{rendered}");
+    assert!(rendered.contains("╴Haiku 5.5 "), "{rendered}");
     let buffer = draw(&mut app, 180);
     let (_, (x, y)) = row_ends(&buffer, "Default");
     click(&mut app, x, y);
@@ -468,7 +468,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
         KeyModifiers::CONTROL,
     )));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("╴claude-haiku-5-5 "), "{rendered}");
+    assert!(rendered.contains("╴Haiku 5.5 "), "{rendered}");
     assert!(!rendered.contains("xhigh"), "{rendered}");
 }
 
