@@ -62,7 +62,12 @@ fn parse_page(screen: &str, question: &Value) -> io::Result<Question> {
         .iter()
         .position(|line| numbered(line).is_some())
         .ok_or_else(mismatch)?;
-    if normalized(&lines[1..first].join(" ")) != normalized(text) {
+    // Claude may draw the question behind a quote bar.
+    let asked: Vec<&str> = lines[1..first]
+        .iter()
+        .map(|line| line.trim_start().strip_prefix('│').unwrap_or(line))
+        .collect();
+    if normalized(&asked.join(" ")) != normalized(text) {
         return Err(mismatch());
     }
     let mut multi = None;
@@ -894,6 +899,20 @@ mod tests {
                 .unwrap()
             );
         }
+    }
+
+    #[test]
+    fn recorded_quoted_question_text_parses() {
+        let screen =
+            include_str!("../../../tests/fixtures/claude-attach/ask/quoted/single.screen.txt");
+        let block: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-attach/ask/quoted/block.json"
+        ))
+        .unwrap();
+        let mut question = block["questions"][0].clone();
+        question["header"] = json!(headers(screen).unwrap()[0]);
+        let parsed = parse_page(screen, &question).unwrap();
+        assert_eq!(parsed.text, block["questions"][0]["question"].as_str().unwrap());
     }
 
     #[test]

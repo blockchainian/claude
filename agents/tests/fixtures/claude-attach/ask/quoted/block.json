@@ -1,0 +1,1 @@
+{"questions":[{"options":[{"description":"在终端里的 Claude 问题界面上点过或按过键，再回到我们界面按 1","label":"开着终端点了终端"},{"description":"终端开着但没碰它，只在我们界面作答后按 1","label":"开着终端没碰"},{"description":"终端没开，只是 Claude 自己的界面在别处也显示着","label":"没开终端"}],"question":"报错那次我没复现出来：用真实 Claude 会话、开着终端作答，终端会先关掉，答案也提交成功了。你当时是哪种情况？"}]}

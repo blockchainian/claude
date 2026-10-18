@@ -166,6 +166,8 @@ pub(crate) fn answer_questions_in_terminal(
 
 fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>, open_terminal: bool) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    // Wide characters draw with a blank continuation cell, so compare text without spaces.
+    let compact = |text: &str| text.split_whitespace().collect::<String>();
     let ask = session
         .ask
         .clone()
@@ -196,7 +198,7 @@ fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>, open_termin
             .collect();
         let row = rows
             .iter()
-            .position(|row| row.contains(&questions[0].text))
+            .position(|row| compact(row).contains(&compact(&questions[0].text)))
             .expect("question row") as u16;
         for kind in [
             crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -218,7 +220,7 @@ fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>, open_termin
         .map(|cell| cell.symbol())
         .collect();
     assert!(
-        screen.contains(&questions[0].text),
+        compact(&screen).contains(&compact(&questions[0].text)),
         "question view absent: {screen}"
     );
     let key = |app: &mut App, code| {

@@ -418,6 +418,38 @@ fn ask_live_unanswered_questions() {
 }
 
 #[test]
+#[ignore = "starts billable disposable Claude sessions and adds/removes isolated cwd trust"]
+fn ask_live_unicode_other_note() {
+    let mut probe = Probe::new().unwrap();
+    let text = "报错那次我没复现出来：用真实 Claude 会话、开着终端作答，终端会先关掉，答案也提交成功了。你当时是哪种情况？";
+    probe.start_prompt(&format!("This is an isolated terminal answer transport probe. Use ONLY AskUserQuestion. Make exactly ONE call and wait for the answer. Do not answer yourself. One question, multiSelect=false, header='复现', question exactly '{text}', options: label '开着终端点了终端' description '在终端里的 Claude 问题界面上点过或按过键，再回到我们界面按 1'; label '开着终端没碰' description '终端开着但没碰它，只在我们界面作答后按 1'; label '没开终端' description '终端没开，只是 Claude 自己的界面在别处也显示着'. After the answer reply DONE and stop. This explicitly requests testing interactive question behavior.")).unwrap();
+    let state = probe.waiting(text).unwrap();
+    let id = state["sessionId"].as_str().unwrap().to_owned();
+    use crate::providers::Provider;
+    let mut provider = crate::providers::claude::ClaudeProvider::new(probe.config.clone());
+    let deadline = Instant::now() + Duration::from_secs(25);
+    let session = loop {
+        if let Some(session) = provider
+            .refresh(1)
+            .sessions
+            .into_iter()
+            .find(|s| s.id.id == id && s.ask.is_some())
+        {
+            break session;
+        }
+        assert!(Instant::now() < deadline, "live provider did not resolve pending ask");
+        thread::sleep(Duration::from_millis(50));
+    };
+    let mut app = crate::app::live_tests::app(Box::new(provider), probe.cwd.path().to_owned());
+    crate::app::live_tests::answer_questions(
+        &mut app,
+        session,
+        vec![vec!["user_note: 我记不清楚了。".to_owned()]],
+    );
+    probe.cleanup().unwrap();
+}
+
+#[test]
 #[ignore = "probes billable disposable Claude multi Other key map and records actual screens"]
 fn ask_live_multi_other_keymap() {
     let mut probe = Probe::new().unwrap();
