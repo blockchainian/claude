@@ -26,6 +26,10 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - Selection follows a top-level task to Inactive; a child leaving the tab selects its visible parent, otherwise the usual fallback.
 - Tabs start on Active; saved fields for removed status tabs are ignored.
 
+## Panel inputs
+
+- Every one-line input in a panel (task search, rename, log search, log detail search) takes its panel's bottom row and draws through `render_input_row`: a cyan label, the plain text and the terminal cursor, with no row highlight.
+
 ## Details panel
 
 - Sections run Tasks, Background, Update, Last activity, Needs attention, then the prompt and its queued prompts at the bottom.

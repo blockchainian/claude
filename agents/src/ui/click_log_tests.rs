@@ -496,13 +496,19 @@ fn detail_slash_search_jumps_and_highlights_without_closing() {
         !view.log_search.active(),
         "detail search must not filter the list"
     );
-    let screen = log_screen(&view, 100, 25, now);
-    let (x, y) = rendered_cell(&screen, "globalState");
+    // Wide enough that the matching line is not truncated before the match.
+    let screen = log_screen(&view, 300, 25, now);
+    let body = screen
+        .lines()
+        .take_while(|line| !line.contains("Search ❯"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (x, y) = rendered_cell(&body, "globalState");
     assert!(
         view.viewport.borrow().log_detail_scroll > 0,
         "search must reveal the matching line"
     );
-    let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 25));
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 300, 25));
     view.render_at(buffer.area, &mut buffer, now);
     assert!(
         buffer[(x, y)]

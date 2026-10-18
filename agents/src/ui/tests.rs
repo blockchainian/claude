@@ -2025,7 +2025,7 @@ fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     assert!(screen(&view, 88, 16).contains("Rename ❯ Current task"));
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 2)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 13)));
     for c in " updated  ".chars() {
         key(&mut view, KeyCode::Char(c));
     }
@@ -2120,20 +2120,15 @@ fn live_center_rename_active() {
     let area = Rect::new(0, 0, 88, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
-    assert_eq!(buf[(2, 2)].fg, Color::Cyan);
+    let input = view.center_layout(area).search;
+    assert_eq!(input.bottom(), view.center_layout(area).usage_chart.bottom());
+    assert_eq!(buf[(input.x, input.y)].fg, Color::Cyan);
     assert!(
-        buf[(2, 2)]
+        buf[(input.x, input.y)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
-    assert_eq!(
-        buf[(view.center_layout(area).search.right() - 1, 2)].style(),
-        Style::default()
-            .fg(Color::Reset)
-            .bg(Color::Reset)
-            .underline_color(Color::Reset)
-            .patch(super::style::active_tab_style())
-    );
+    assert_eq!(buf[(input.right() - 1, input.y)].bg, Color::Reset);
 }
 
 #[test]
@@ -5842,12 +5837,7 @@ mod input_row {
                         let task_cell = &task[(task_row.x + x, task_row.y)];
                         let log_cell = &log[(log_row.x + x, log_row.y)];
                         assert_eq!(task_cell, log_cell, "width={width}, column={x}");
-                        assert_eq!(
-                            task_cell.bg,
-                            super::super::style::active_tab_style()
-                                .bg
-                                .unwrap_or(Color::Reset)
-                        );
+                        assert_eq!(task_cell.bg, Color::Reset);
                     }
                 }
             });
@@ -5855,14 +5845,14 @@ mod input_row {
     }
 
     #[test]
-    fn search_prompt_keeps_cyan_and_light_background_for_wide_text() {
+    fn search_prompt_keeps_cyan_without_a_row_background_for_wide_text() {
         use super::super::style::{selection_style_for, with_selection_style};
         let light = selection_style_for(false, true, true);
         with_selection_style(light, || {
             let (task, row, _, _, _, _) = rendered_inputs(24, "你好", false);
             assert_eq!(task[(row.x, row.y)].fg, Color::Cyan);
             for x in row.x..row.right() {
-                assert_eq!(task[(x, row.y)].bg, Color::Indexed(111));
+                assert_eq!(task[(x, row.y)].bg, Color::Reset);
             }
         });
     }
@@ -9388,10 +9378,9 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         view.searching = false;
         key(&mut view, KeyCode::Char('r'));
         let rename = view.center_layout(area);
-        assert_eq!(rename.search.y, baseline.y);
-        assert_eq!(rename.list.y, baseline.y + 1);
-        assert_eq!(rename.list.bottom(), baseline.bottom());
-        assert_eq!(rename.usage_chart, rename.list);
+        assert_eq!(rename.search, layout.search);
+        assert_eq!(rename.list, layout.list);
+        assert_eq!(rename.usage_chart, layout.usage_chart);
         view.render_at(area, &mut after, now);
         let input: String = (rename.search.x..rename.search.right())
             .map(|x| after[(x, rename.search.y)].symbol())

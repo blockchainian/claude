@@ -38,13 +38,8 @@ pub(super) fn render_input_row(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let style = super::style::active_tab_style();
-    buf.set_style(area, style);
     let (text, _) = input_row(prompt, edit, area);
     line(text, area, buf);
-    // Wide graphemes reset their continuation cells while rendering. Apply the row fill
-    // afterward as well, preserving the prompt's foreground color.
-    buf.set_style(area, Style { fg: None, ..style });
 }
 
 pub(super) const HORIZONTAL_PADDING: u16 = 1;
@@ -179,13 +174,9 @@ impl View {
         } else {
             [body, Rect::default(), Rect::default()]
         };
-        // Keep the chart's original canvas and scale when the search row takes list space.
-        let mut usage_chart = list;
-        let (list, search) = if self.rename_target.is_some() {
-            let input = row(list, 0, 1);
-            usage_chart = row(list, input.height, list.height.saturating_sub(input.height));
-            (usage_chart, input)
-        } else if self.searching {
+        // Keep the chart's original canvas and scale when the input row takes list space.
+        let usage_chart = list;
+        let (list, search) = if self.searching || self.rename_target.is_some() {
             let input = log::search_input_rect(list);
             (
                 row(list, 0, list.height.saturating_sub(input.height)),
