@@ -702,13 +702,8 @@ impl View {
             })
             .map(|(_, child)| child)
             .collect();
-        children.sort_by_key(|child| {
-            (
-                child.parent.as_ref() != Some(&session.id),
-                child.started_at,
-                &child.id,
-            )
-        });
+        // All working descendants share start order, regardless of depth; unknown starts come last.
+        children.sort_by_key(|child| (child.started_at.is_none(), child.started_at, &child.id));
         children.into_iter()
     }
 

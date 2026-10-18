@@ -55,7 +55,7 @@ fn nested_background_includes_working_descendants_of_every_session() {
     let child = view.rows.iter().position(|s| s.id.id == "child").unwrap();
     view.rows[child].status = SessionStatus::Working;
     for (id, expected) in [
-        ("root", vec!["child", "grandchild", "deep"]),
+        ("root", vec!["grandchild", "deep", "child"]),
         ("child", vec!["grandchild", "deep"]),
         ("grandchild", vec!["deep"]),
     ] {
@@ -67,6 +67,24 @@ fn nested_background_includes_working_descendants_of_every_session() {
             expected
         );
     }
+}
+
+#[test]
+fn background_descendants_put_unknown_starts_last_then_use_id() {
+    let mut view = tree();
+    for child in &mut view.rows {
+        if child.id.id != "root" {
+            child.status = SessionStatus::Working;
+            child.started_at = (child.id.id == "deep").then_some(Utc::now());
+        }
+    }
+    let root = view.rows.iter().find(|s| s.id.id == "root").unwrap();
+    assert_eq!(
+        view.subagents_for(root)
+            .map(|s| s.id.id.as_str())
+            .collect::<Vec<_>>(),
+        ["deep", "child", "grandchild"]
+    );
 }
 
 #[test]

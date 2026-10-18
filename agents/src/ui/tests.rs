@@ -3447,6 +3447,7 @@ fn details_background_includes_only_working_subagents() {
     nested.id = session_key("agent-nested");
     nested.parent = Some(worker.id.clone());
     nested.title = "Nested agent".into();
+    nested.started_at = Some(now - Duration::seconds(125));
     let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![parent, worker, idle, other, nested], false);
     view.selected = view

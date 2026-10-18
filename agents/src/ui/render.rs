@@ -921,8 +921,28 @@ impl View {
                     .map(|(task, output)| Item::Background { task, output }),
             );
             items.extend(subagents.into_iter().map(Item::Subagent));
-            // Tasks showing output come first; each group keeps its order.
-            items[start..].sort_by_key(|item| item.height() == 1);
+            // Mix tasks and descendants: two-line entries first, then oldest starts,
+            // unknown starts last, with identity/path breaking ties regardless of depth or kind.
+            items[start..].sort_by_key(|item| {
+                let (started_at, identity, provider) = match item {
+                    Item::Background { task, .. } => {
+                        (Some(task.started_at), task.output.as_os_str(), None)
+                    }
+                    Item::Subagent(child) => (
+                        child.started_at,
+                        std::ffi::OsStr::new(&child.id.id),
+                        Some(child.id.provider),
+                    ),
+                    Item::Text(_) => unreachable!("Background contains only tasks and descendants"),
+                };
+                (
+                    item.height() == 1,
+                    started_at.is_none(),
+                    started_at,
+                    identity,
+                    provider,
+                )
+            });
             background = start..items.len();
         }
 

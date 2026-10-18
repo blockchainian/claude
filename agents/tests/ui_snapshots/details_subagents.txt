@@ -2,8 +2,8 @@
 Parent
 
                Background
-───────────── Check files ──────── 1m 5s
+───────────── Nested agent ─────── 2m 5s
 Read files
-───────────── Nested agent ─────── 1m 5s
+───────────── Check files ──────── 1m 5s
 Read files
 ────────────── Run checks ────────── 10s
