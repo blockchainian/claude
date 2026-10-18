@@ -121,6 +121,102 @@ fn nested_rows_render_increasing_indent() {
     );
 }
 
+fn branching_tree() -> View {
+    let mut view = tree();
+    let child = view.rows.iter_mut().find(|s| s.id.id == "child").unwrap();
+    child.status = SessionStatus::Working;
+    let mut rows = view.rows.clone();
+    for (id, title, parent, age) in [
+        ("sibling", "Sibling task", "root", 200),
+        ("cousin", "Cousin task", "sibling", 0),
+        ("grand-sibling", "Grand sibling", "child", 200),
+    ] {
+        let mut sibling = session(id, title, SessionStatus::Working, age);
+        sibling.parent = Some(session_key(parent));
+        rows.push(sibling);
+    }
+    view.set_sessions(rows, false);
+    view
+}
+
+fn connector_row(view: &View, title: &str, height: u16) -> Vec<String> {
+    let area = Rect::new(0, 0, 80, height);
+    let mut buf = Buffer::empty(area);
+    view.render_center_rows(area, &mut buf, Utc::now());
+    let y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains(title)
+        })
+        .unwrap();
+    (0..area.width)
+        .map(|x| buf[(x, y)].symbol().to_owned())
+        .collect()
+}
+
+#[test]
+fn nested_connectors_continue_through_ancestors_with_visible_siblings() {
+    let mut view = branching_tree();
+    let row = connector_row(&view, "Provider adapters", 12);
+    assert_eq!(row[0], "│");
+    let mut snapshot = String::new();
+    for (title, prefix) in [
+        ("Codex task", "├─ "),
+        ("Provider adapters", "│  ├─ "),
+        ("Deep worker", "│  │  └─ "),
+        ("Grand sibling", "│  └─ "),
+        ("Sibling task", "└─ "),
+        ("Cousin task", "   └─ "),
+    ] {
+        let row = connector_row(&view, title, 12);
+        let actual = row[..prefix.chars().count()].concat();
+        assert_eq!(actual, prefix, "{title}");
+        snapshot.push_str(&format!("{actual}{title}\n"));
+    }
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/nested_tree_connectors.txt");
+    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+
+    // Search and tabs use the same visible tree as the list.
+    view.search.set_text("Root task");
+    assert_eq!(
+        connector_row(&view, "Deep worker", 12)[..9].concat(),
+        "│  │  └─ "
+    );
+    view.search.clear();
+    view.rows
+        .iter_mut()
+        .find(|s| s.id.id == "root")
+        .unwrap()
+        .status = SessionStatus::Inactive;
+    view.status_filter = 1;
+    assert_eq!(
+        connector_row(&view, "Deep worker", 12)[..9].concat(),
+        "│  │  └─ "
+    );
+    view.hidden.insert(session_key("grand-sibling"));
+    view.hidden.insert(session_key("sibling"));
+    assert_eq!(
+        connector_row(&view, "Deep worker", 12)[..9].concat(),
+        "      └─ "
+    );
+}
+
+#[test]
+fn nested_connectors_include_siblings_outside_the_viewport() {
+    let mut view = branching_tree();
+    view.selected = view.rows.iter().position(|s| s.id.id == "deep").unwrap();
+    assert_eq!(
+        connector_row(&view, "Deep worker", 3)[..9].concat(),
+        "│  │  └─ "
+    );
+}
+
 #[path = "codex_subagent_details_tests.rs"]
 mod details;
 

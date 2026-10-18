@@ -97,6 +97,15 @@ impl View {
             return;
         }
         let entries = self.center_rows(&indices, self.grouping);
+        let mut has_next_sibling = vec![false; self.rows.len()];
+        let mut parents = std::collections::HashSet::new();
+        for entry in entries.iter().rev() {
+            if let CenterRow::Task(index) | CenterRow::Parent(index) = entry
+                && let Some(parent) = self.rows[*index].parent.as_ref()
+            {
+                has_next_sibling[*index] = !parents.insert(parent);
+            }
+        }
         // Hand out accents top to bottom before drawing.
         for entry in &entries {
             if let CenterRow::Task(index) | CenterRow::Parent(index) = entry {
@@ -195,30 +204,23 @@ impl View {
             let depth = self.ancestors(index).count();
             let indent = u16::try_from(depth).unwrap_or(u16::MAX).saturating_mul(3);
             if indent > 0 {
-                let has_next_sibling = entries
-                    .iter()
-                    .skip(start + offset + 1)
-                    .find_map(|entry| {
-                        let CenterRow::Task(next) = entry else {
-                            return None;
-                        };
-                        (self.ancestors(*next).count() <= depth)
-                            .then_some(self.rows[*next].parent == task.parent)
-                    })
-                    .unwrap_or(false);
-                line(
-                    Line::from(if has_next_sibling {
-                        "├─ "
+                let ancestors: Vec<_> = self.ancestors(index).collect();
+                let mut prefix = String::new();
+                for ancestor in ancestors.iter().rev().skip(1) {
+                    prefix.push_str(if has_next_sibling[*ancestor] {
+                        "│  "
                     } else {
-                        "└─ "
-                    })
-                    .style(style),
-                    Rect::new(
-                        rect.x + rect.width.min(indent.saturating_sub(3)),
-                        rect.y,
-                        rect.width.saturating_sub(indent.saturating_sub(3)).min(3),
-                        1,
-                    ),
+                        "   "
+                    });
+                }
+                prefix.push_str(if has_next_sibling[index] {
+                    "├─ "
+                } else {
+                    "└─ "
+                });
+                line(
+                    Line::from(prefix).style(style),
+                    Rect::new(rect.x, rect.y, rect.width.min(indent), 1),
                     buf,
                 );
             }
