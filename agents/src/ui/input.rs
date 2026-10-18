@@ -939,6 +939,11 @@ impl View {
         }
         Some(Action::Open(id))
     }
+    fn can_stop_selected(&self) -> bool {
+        self.selected_capabilities().stop
+            || self.selected_row().is_some_and(Session::is_live_background)
+    }
+
     fn selected_capabilities(&self) -> Capabilities {
         self.selected_id()
             .and_then(|key| self.capabilities.get(&key.provider))
@@ -1013,6 +1018,11 @@ impl View {
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
                 Some(prompt_box::PromptAction::PasteImage) => Some(Action::PasteImage),
+                Some(prompt_box::PromptAction::Stop) => self
+                    .selected_id()
+                    .filter(|_| self.can_stop_selected())
+                    .cloned()
+                    .map(Action::Stop),
                 Some(prompt_box::PromptAction::Submit(text)) => {
                     let images = self.input_box.editor.image_paths();
                     if !images.is_empty() && self.selected_draft.is_none() {
@@ -1386,9 +1396,7 @@ impl View {
             KeyCode::Char('x') => {
                 let id = self.selected_id()?.clone();
                 return Some(
-                    if self.selected_capabilities().stop
-                        || self.selected_row().is_some_and(Session::is_live_background)
-                    {
+                    if self.can_stop_selected() {
                         Action::Stop(id)
                     } else {
                         Action::Unsupported("Stop")

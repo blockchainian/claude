@@ -26,6 +26,7 @@ pub(super) enum PromptAction {
     Submit(String),
     PasteImage,
     Quit,
+    Stop,
 }
 
 #[derive(Default)]
@@ -219,7 +220,10 @@ impl PromptBox {
             }
             self.editor.clear();
         } else if key.code == KeyCode::Esc {
-            self.focused = false;
+            if self.editor.is_empty() {
+                return Some(PromptAction::Stop);
+            }
+            self.editor.clear();
         } else if (key.code == KeyCode::Enter
             && key
                 .modifiers
@@ -347,17 +351,24 @@ mod tests {
     }
 
     #[test]
-    fn control_c_clears_then_quits_and_escape_unfocuses() {
+    fn control_c_clears_then_quits() {
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let clear = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(editor.handle_key(clear), None);
         assert!(editor.editor.is_empty());
         assert_eq!(editor.handle_key(clear), Some(PromptAction::Quit));
-        key(&mut editor, KeyCode::Esc);
-        assert!(!editor.focused);
-        key(&mut editor, KeyCode::Char('x'));
+    }
+
+    #[test]
+    fn escape_clears_then_stops_and_keeps_focus() {
+        let mut editor = focused();
+        editor.paste(REAL_TEXT);
+        let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(editor.handle_key(escape), None);
         assert!(editor.editor.is_empty());
+        assert_eq!(editor.handle_key(escape), Some(PromptAction::Stop));
+        assert!(editor.focused);
     }
 
     #[test]

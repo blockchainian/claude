@@ -35,6 +35,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 ## Log panels
 
 - The last clicked panel owns keyboard focus, even if it accepts no keys; clicking the prompt returns focus to its input.
+- Esc in the prompt input clears its text; on an empty input it stops the task's running turn, the same as `x`. In a new task, Esc cancels the task.
 
 - The log list selects one event, oldest first, newest at the bottom; the detail shows that event.
 - Selected rows use the task cursor style across the column, including both padding cells.

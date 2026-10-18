@@ -2383,6 +2383,24 @@ fn archive_dialog_cancel_and_position_keys() {
 }
 
 #[test]
+fn escape_in_an_empty_prompt_stops_only_a_stoppable_task() {
+    let mut view = lifecycle_fixture();
+    view.focus_input();
+    view.input_box.editor.set_text("draft");
+    assert_eq!(key(&mut view, KeyCode::Esc), None);
+    assert!(view.input_box.editor.is_empty());
+    assert_eq!(
+        key(&mut view, KeyCode::Esc),
+        Some(Action::Stop(session_key("42")))
+    );
+    assert!(view.input_box.focused);
+    let mut view = fixture();
+    view.focus_input();
+    assert_eq!(key(&mut view, KeyCode::Esc), None);
+    assert!(view.input_box.focused);
+}
+
+#[test]
 fn archive_and_stop_follow_capabilities() {
     let mut view = lifecycle_fixture();
     assert_eq!(
