@@ -1623,8 +1623,7 @@ pub(super) mod log_markdown {
         let buffer = body_buffer(Kind::User, "# Title\n\nplain  text\n- item", 80);
         let x = body_padding(&buffer) as u16;
         assert_eq!(body_text(&buffer).trim(), "Title plain text • item");
-        assert!(buffer[(x, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(x + 6, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(buffer[(x, 0)].modifier.contains(Modifier::BOLD));
         assert!(!buffer[(x + 6, 0)].modifier.contains(Modifier::BOLD));
     }
 

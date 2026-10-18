@@ -62,8 +62,7 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                     Tag::Heading { level, .. } => {
                         writer.separate();
                         writer.styles.push(match level {
-                            HeadingLevel::H1 => style.bold().underlined(),
-                            HeadingLevel::H2 => style.bold(),
+                            HeadingLevel::H1 | HeadingLevel::H2 => style.bold(),
                             HeadingLevel::H3 => style.bold().italic(),
                             _ => style.italic(),
                         });
@@ -373,7 +372,7 @@ mod tests {
     #[test]
     fn headings_quotes_and_code() {
         for (source, modifier) in [
-            ("# title", Modifier::BOLD | Modifier::UNDERLINED),
+            ("# title", Modifier::BOLD),
             ("## title", Modifier::BOLD),
             ("### title", Modifier::BOLD | Modifier::ITALIC),
             ("#### title", Modifier::ITALIC),
@@ -382,7 +381,7 @@ mod tests {
         ] {
             let lines = render(source, 40);
             assert_eq!(lines[0].to_string(), "title");
-            assert!(lines[0].spans[0].style.add_modifier.contains(modifier));
+            assert_eq!(lines[0].spans[0].style.add_modifier, modifier);
         }
         assert_eq!(
             render("> quote", 40)[0].spans[0].style.fg,
