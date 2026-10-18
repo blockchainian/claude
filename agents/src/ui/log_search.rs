@@ -135,13 +135,7 @@ impl View {
     }
 
     pub(crate) fn matching_log_count(&self) -> usize {
-        self.log
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                !self.log_search.active() || self.log_search.matches.binary_search(index).is_ok()
-            })
-            .count()
+        self.shown_log_events().count()
     }
 
     pub(super) fn log_matches(&self, index: usize) -> bool {

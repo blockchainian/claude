@@ -1120,90 +1120,57 @@ impl View {
         };
         let available = usize::from(area.height);
         let budget = budget_details(&items, &bodies, background, available);
-        let (scroll, body_rows) = {
+        let (scroll, body_rows, total) = {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.details_scroll;
             state.content_top = content_top;
             state.prepare(keys);
-            if let Some(budget) = &budget {
-                state.budget(
-                    &bodies.iter().map(|body| body.len()).collect::<Vec<_>>(),
-                    &budget
-                        .bodies
-                        .iter()
-                        .map(|&(rows, _)| rows)
-                        .collect::<Vec<_>>(),
-                );
-                let mut keep = vec![true; items.len()];
-                if let Some(cut) = &budget.background_cut {
+            let excluded = budget
+                .as_ref()
+                .and_then(|budget| budget.background_cut.as_ref())
+                .map_or(0..0, |cut| {
                     items[cut.start] = "…".dim().into();
-                    keep[cut.start + 1..cut.end].fill(false);
-                }
-                for (i, body) in bodies.iter().enumerate() {
-                    let rows = budget.bodies[i].0 + state.reveal[i];
-                    keep[body.start + rows..body.end].fill(false);
-                    if rows > 0 && state.reveal[i] < state.hidden[i] {
-                        let Item::Text(last) = &mut items[body.start + rows - 1] else {
-                            unreachable!("details bodies contain text rows");
-                        };
-                        *last =
-                            truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
-                        last.spans.push("…".dim());
-                        if let Some(mapped) = &mut text_rows[body.start + rows - 1] {
-                            mapped
-                                .cells
-                                .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
-                        }
-                        item_links[body.start + rows - 1]
-                            .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
-                    }
-                }
-                state.bodies = bodies
+                    cut.start + 1..cut.end
+                });
+            let heights = items.iter().map(Item::height).collect::<Vec<_>>();
+            let allocations = budget.as_ref().map(|budget| {
+                budget
+                    .bodies
                     .iter()
-                    .enumerate()
-                    .map(|(i, body)| {
-                        let start = items[..body.start]
-                            .iter()
-                            .zip(&keep)
-                            .filter(|(_, keep)| **keep)
-                            .map(|(item, _)| item.height())
-                            .sum::<usize>();
-                        start..start + budget.bodies[i].0 + state.reveal[i]
-                    })
-                    .collect();
-                let mut index = 0;
-                items.retain(|_| {
-                    let retain = keep[index];
-                    index += 1;
-                    retain
-                });
-                let mut index = 0;
-                text_rows.retain(|_| {
-                    let retain = keep[index];
-                    index += 1;
-                    retain
-                });
-                let mut index = 0;
-                item_links.retain(|_| {
-                    let retain = keep[index];
-                    index += 1;
-                    retain
-                });
-                (state.reveal.iter().sum::<usize>(), state.bodies.clone())
-            } else {
-                state.hidden.clear();
-                state.bodies.clear();
-                let total = items.iter().map(Item::height).sum::<usize>();
-                let max = total.saturating_sub(available);
-                state.fallback_max = Some(max);
-                state.offset = state.offset.min(max);
-                let row_of = |index: usize| items[..index].iter().map(Item::height).sum::<usize>();
-                let rows = bodies
-                    .iter()
-                    .map(|body| row_of(body.start)..row_of(body.end))
-                    .collect();
-                (state.offset, rows)
+                    .map(|&(rows, _)| rows)
+                    .collect::<Vec<_>>()
+            });
+            let layout = state.layout(
+                &heights,
+                &bodies,
+                allocations.as_deref(),
+                excluded,
+                available,
+            );
+            for &cut in &layout.cuts {
+                let Item::Text(last) = &mut items[cut] else {
+                    unreachable!("details bodies contain text rows");
+                };
+                *last = truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
+                last.spans.push("…".dim());
+                if let Some(mapped) = &mut text_rows[cut] {
+                    mapped
+                        .cells
+                        .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
+                }
+                item_links[cut].retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
             }
+            let mut keep = vec![false; items.len()];
+            for &index in &layout.kept {
+                keep[index] = true;
+            }
+            let mut rows = keep.iter();
+            items.retain(|_| *rows.next().unwrap());
+            let mut rows = keep.iter();
+            text_rows.retain(|_| *rows.next().unwrap());
+            let mut rows = keep.iter();
+            item_links.retain(|_| *rows.next().unwrap());
+            (layout.scroll, state.bodies.clone(), layout.total)
         };
         self.viewport.borrow_mut().details_copy = body_rows
             .into_iter()
@@ -1216,7 +1183,6 @@ impl View {
                 Some((screen_row(start)..screen_row(end), text.to_owned(), label))
             })
             .collect();
-        let total = items.iter().map(Item::height).sum::<usize>();
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
