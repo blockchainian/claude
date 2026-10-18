@@ -1,4 +1,4 @@
-First  ·  question 1/2
+ First · Second
 
 Probe first page?
 
@@ -8,6 +8,6 @@ Probe first page?
      Green choice
   3. Blue
      Blue choice
-  4. Other
+  4. Type something.
 
 ↑/↓ move · Enter to confirm · Esc to close

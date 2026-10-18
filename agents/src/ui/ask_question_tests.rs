@@ -22,8 +22,8 @@ fn output(event: &crate::log::Event) -> &str {
 #[test]
 fn ask_question_list_uses_questions_and_detail_uses_headers() {
     for (fixture, title) in [
-        (REJECTED, "AskUserQuestion · 压缩摘要"),
-        (ANSWERED, "AskUserQuestion · 子命令 · cd"),
+        (REJECTED, ["压缩摘要"].as_slice()),
+        (ANSWERED, ["子命令", "cd"].as_slice()),
     ] {
         let event = question_event(fixture);
         let record: serde_json::Value =
@@ -43,19 +43,26 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
         view.select_fixture_event(Some(event.clone()));
         let screen = log_screen(&view, 180, 60, now);
         let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
-        let title: String = title.chars().filter(|ch| !ch.is_whitespace()).collect();
-        assert!(compact.contains(&title), "{screen}");
+        assert!(!compact.contains("AskUserQuestion·"), "{screen}");
         let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
         assert_eq!(
             detail.sections[0].title.left.as_deref(),
             Some("AskUserQuestion")
         );
-        assert_eq!(detail.sections[0].title.title, event.calls[0].detail_title);
+        assert_eq!(
+            detail
+                .sections
+                .iter()
+                .map(|section| section.title.title.as_str())
+                .collect::<Vec<_>>(),
+            title
+        );
+        assert_eq!(event.calls[0].detail_title, title.join(" · "));
     }
 }
 
 #[test]
-fn ask_question_input_is_a_copyable_bullet_list() {
+fn ask_question_input_is_a_copyable_numbered_list() {
     let mut records: Vec<serde_json::Value> = REJECTED
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -71,7 +78,7 @@ fn ask_question_input_is_a_copyable_bullet_list() {
         let parts = detail_parts(&event);
         let suffix = if multi { " (multi-select)" } else { "" };
         let expected = format!(
-            "• 压缩摘要那条在 agents 里怎么处理？{suffix}\n  • 显示成压缩标记 (Recommended): 不当用户消息，日志里出一行“Conversation compacted”之类的系统行\n  • 直接隐藏: 日志里完全不显示这条"
+            "压缩摘要那条在 agents 里怎么处理？{suffix}\n1. 显示成压缩标记 (Recommended): 不当用户消息，日志里出一行“Conversation compacted”之类的系统行\n2. 直接隐藏: 日志里完全不显示这条"
         );
         assert_eq!(parts[0].source, expected);
         for width in [24, 180] {
@@ -199,7 +206,7 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
                     .all(|(cells, _)| cells.end <= columns.text.width)
             );
         }
-        assert_eq!(region.sources[1].text.as_ref(), parts[0].source);
+        assert_eq!(region.sources[1].text.trim_end(), parts[0].source);
         drop(viewport);
         let screen = log_screen(&view, 180, 70, now);
         assert_eq!(

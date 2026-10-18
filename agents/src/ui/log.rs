@@ -564,7 +564,9 @@ impl View {
     /// Wake only when an animated tool output is in the visible detail viewport.
     pub(crate) fn tool_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
         if let Some(screen) = self.shown_terminal() {
-            return screen.lock().expect("terminal screen lock")
+            return screen
+                .lock()
+                .expect("terminal screen lock")
                 .loading_remaining(std::time::Instant::now())
                 .map(|remaining| remaining.min(super::tool_detail::running_redraw_in(now)));
         }
@@ -998,12 +1000,13 @@ pub(super) fn shows_calls(event: &Event) -> bool {
 /// The copied event text, including the titles separating merged tool calls.
 pub(super) fn open_text(event: &Event) -> String {
     let detail = super::tool_detail::detail(event, String::new(), Style::new().dim());
+    let titled = shows_calls(event) && detail.sections.len() > 1;
     let mut sources = Vec::new();
     for (index, section) in detail.sections.into_iter().enumerate() {
         if index > 0 {
             sources.push(String::new());
         }
-        if shows_calls(event) && event.calls.len() > 1 {
+        if titled {
             sources.push(section.title.source());
         }
         for group in section.groups {

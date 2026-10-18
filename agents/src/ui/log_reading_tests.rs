@@ -166,7 +166,8 @@ fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
                 let segment = drawn
                     .sources
                     .iter()
-                    .position(|s| s.text.as_ref() == input)
+                    // A section break appends a newline to the section's last source.
+                    .position(|s| s.text.trim_end() == input)
                     .unwrap();
                 assert_reading_column(&drawn, segment);
             }

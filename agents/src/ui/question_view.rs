@@ -254,16 +254,19 @@ impl QuestionView {
             return (vec![Line::from("No pending questions")], 0);
         };
         let page = &self.pages[self.page];
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(question.header.clone(), Style::default().bold()),
-                Span::styled(
-                    format!("  ·  question {}/{}", self.page + 1, self.pages.len()),
-                    Style::default().dim(),
-                ),
-            ]),
-            Line::default(),
-        ];
+        let mut tabs = Vec::new();
+        for (index, question) in self.questions().iter().enumerate() {
+            if index > 0 {
+                tabs.push(Span::styled("·", Style::default().dim()));
+            }
+            let style = if index == self.page {
+                super::style::active_tab_style()
+            } else {
+                super::style::inactive_tab_style()
+            };
+            tabs.push(Span::styled(format!(" {} ", question.header), style));
+        }
+        let mut lines = vec![Line::from(tabs), Line::default()];
         for text in textwrap::wrap(&question.text, usize::from(width.max(1))) {
             lines.push(Line::from(text.into_owned()));
         }
@@ -285,11 +288,6 @@ impl QuestionView {
                 ""
             };
             let prefix = format!("{marker} {}. {check}", index + 1);
-            let style = if focused {
-                super::style::selection_style()
-            } else {
-                Style::default()
-            };
             let available = usize::from(width).saturating_sub(prefix.width()).max(1);
             for (row, text) in textwrap::wrap(&option.label, available)
                 .into_iter()
@@ -300,7 +298,7 @@ impl QuestionView {
                 } else {
                     " ".repeat(prefix.chars().count())
                 };
-                lines.push(Line::styled(format!("{prefix}{text}"), style));
+                lines.push(Line::from(format!("{prefix}{text}")));
             }
             if !option.description.is_empty() {
                 for text in textwrap::wrap(
@@ -318,24 +316,21 @@ impl QuestionView {
             }
             let marker = if focused { "›" } else { " " };
             let text = if page.other.is_empty() {
-                "Other".to_owned()
+                Span::styled("Type something.", Style::default().dim())
             } else if question.secret {
-                "•".repeat(page.other.text().chars().count())
+                Span::raw("•".repeat(page.other.text().chars().count()))
             } else {
-                page.other
-                    .window(usize::from(width.saturating_sub(5)))
-                    .0
-                    .to_owned()
+                Span::raw(
+                    page.other
+                        .window(usize::from(width.saturating_sub(5)))
+                        .0
+                        .to_owned(),
+                )
             };
-            let style = if focused {
-                super::style::selection_style()
-            } else {
-                Style::default()
-            };
-            lines.push(Line::styled(
-                format!("{marker} {}. {text}", question.options.len() + 1),
-                style,
-            ));
+            lines.push(Line::from(vec![
+                Span::raw(format!("{marker} {}. ", question.options.len() + 1)),
+                text,
+            ]));
         }
         lines.push(Line::default());
         lines.extend(self.footer(width));
@@ -384,6 +379,7 @@ mod tests {
     use super::*;
     use crate::ask::QuestionOption;
     use chrono::Utc;
+    use ratatui::style::{Color, Modifier};
     use serde_json::Value;
 
     fn fixture(header: &str) -> Ask {
@@ -557,6 +553,27 @@ mod tests {
             assert_eq!(screen(&view, 60, 13), expected, "{header}");
         }
     }
+    #[test]
+    fn ask_view_highlights_only_the_active_tab() {
+        let mut view = QuestionView::new(fixture("First"));
+        press(&mut view, KeyCode::Right);
+        press(&mut view, KeyCode::Up);
+        let area = Rect::new(0, 0, 60, 13);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        let selection = super::super::style::selection_style();
+        assert_eq!(buf[(1, 0)].symbol(), "F");
+        assert_eq!(buf[(1, 0)].bg, Color::Reset);
+        assert_eq!(buf[(9, 0)].symbol(), "S");
+        assert_eq!(Some(buf[(9, 0)].bg), selection.bg);
+        let other = (0..13)
+            .find(|&y| buf[(0, y)].symbol() == "›")
+            .expect("focused row");
+        assert_eq!(buf[(5, other)].symbol(), "T");
+        assert!(buf[(5, other)].modifier.contains(Modifier::DIM));
+        assert!((0..60).all(|x| buf[(x, other)].bg == Color::Reset));
+    }
+
     #[test]
     fn ask_view_other_digits_are_text_and_multi_space_toggles() {
         let mut view = QuestionView::new(fixture("Custom"));

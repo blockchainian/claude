@@ -2013,15 +2013,18 @@ mod tests {
             .unwrap();
         let call = response_tool_call(&record["payload"], None);
         assert_eq!(call.detail_left, "request_user_input");
-        assert_eq!(call.detail_title, "request_user_input · Color");
+        assert_eq!(call.detail_title, "Color");
         assert_eq!(call.title, "Pick a color?");
         assert!(call.show_details);
         assert_eq!(
             call.input,
-            vec![Section::Prose {
-                text: "• Pick a color?\n  • Red: Choose red.\n  • Blue: Choose blue.".into(),
-                markdown: false,
-            }]
+            vec![
+                Section::Label("Color".into()),
+                Section::Prose {
+                    text: "Pick a color?\n1. Red: Choose red.\n2. Blue: Choose blue.".into(),
+                    markdown: false,
+                }
+            ]
         );
     }
 

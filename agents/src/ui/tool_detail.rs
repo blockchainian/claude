@@ -504,7 +504,7 @@ fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
 pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
     let sections = if super::log::shows_calls(event) {
         let mut sections = parts(event);
-        if let [section] = sections.as_mut_slice() {
+        if let ([_], Some(section)) = (event.calls.as_slice(), sections.first_mut()) {
             section.title.time = Some(time);
             section.title.meta_style = meta_style;
         }
@@ -562,18 +562,42 @@ fn parts(event: &Event) -> Vec<DetailSection> {
     event
         .calls
         .iter()
-        .map(|call| {
+        .flat_map(|call| {
             let (left, title) = call_title(call);
+            let mut sections = vec![DetailSection {
+                title: TitleRow {
+                    left,
+                    title,
+                    title_style: label_style,
+                    time: call.duration.map(super::formatting::format_log_duration),
+                    meta_style: Style::new().dim(),
+                },
+                groups: Vec::new(),
+            }];
+            // An input label titles its own section, such as each question an ask poses.
             let mut input = Vec::new();
-            let title = TitleRow {
-                left,
-                title,
-                title_style: label_style,
-                time: call.duration.map(super::formatting::format_log_duration),
-                meta_style: Style::new().dim(),
-            };
             for section in &call.input {
-                push_section(&mut input, section, label_style, false);
+                match section {
+                    Section::Label(label) if input.is_empty() && sections.len() == 1 => {
+                        sections[0].title.title = label.clone();
+                    }
+                    Section::Label(label) => {
+                        let parts = std::mem::take(&mut input);
+                        let previous = sections.last_mut().expect("call has a section");
+                        previous.groups.push(Group { parts });
+                        sections.push(DetailSection {
+                            title: TitleRow {
+                                left: None,
+                                title: label.clone(),
+                                title_style: label_style,
+                                time: None,
+                                meta_style: Style::new().dim(),
+                            },
+                            groups: Vec::new(),
+                        });
+                    }
+                    _ => push_section(&mut input, section, label_style, false),
+                }
             }
             let mut groups = Vec::new();
             if !input.is_empty() {
@@ -609,7 +633,12 @@ fn parts(event: &Event) -> Vec<DetailSection> {
             groups.push(Group {
                 parts: output_parts,
             });
-            DetailSection { title, groups }
+            sections
+                .last_mut()
+                .expect("call has a section")
+                .groups
+                .extend(groups);
+            sections
         })
         .collect()
 }

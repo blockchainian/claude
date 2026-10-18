@@ -1,4 +1,4 @@
-Multi  ·  question 1/1
+ Multi
 
 Probe multiple choices?
 
@@ -8,6 +8,6 @@ Probe multiple choices?
      Green choice
   3. [ ] Blue
      Blue choice
-  4. Other
+  4. Type something.
 
 ↑/↓ move · Enter to confirm · Esc to close

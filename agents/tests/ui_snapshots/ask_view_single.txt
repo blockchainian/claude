@@ -1,4 +1,4 @@
-Single  ·  question 1/1
+ Single
 
 Probe single choice?
 
@@ -8,6 +8,6 @@ Probe single choice?
      Green choice
   3. Blue
      Blue choice
-  4. Other
+  4. Type something.
 
 ↑/↓ move · Enter to confirm · Esc to close

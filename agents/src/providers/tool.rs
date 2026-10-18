@@ -261,17 +261,15 @@ pub(crate) fn presentation(
                     .map(str::to_owned)
             }),
         Some(Subject::QuestionHeaders) => Some(
-            std::iter::once(name.as_str())
-                .chain(
-                    input["questions"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|question| text(question, "header")),
-                )
+            input["questions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|question| text(question, "header"))
                 .collect::<Vec<_>>()
                 .join(" · "),
-        ),
+        )
+        .filter(|headers| !headers.is_empty()),
         None => None,
     };
     let input_rule = |name: &str, table: &[(&str, Input, Format)]| {
@@ -287,7 +285,7 @@ pub(crate) fn presentation(
                 Input::Field(field) => {
                     (text(&remaining, field).unwrap_or("").to_owned(), Vec::new())
                 }
-                Input::QuestionList => (question_list(input), Vec::new()),
+                Input::QuestionList => (String::new(), question_sections(input)),
                 Input::Arguments => (input["args"].as_str().unwrap_or("").to_owned(), Vec::new()),
                 Input::AgentMessage => (
                     text(input, "message").unwrap_or("").to_owned(),
@@ -360,27 +358,42 @@ pub(crate) fn rejected_questions(text: &str) -> Option<String> {
     ))
 }
 
-fn question_list(input: &Value) -> String {
-    let mut lines = Vec::new();
+/// One titled section per question: its text, then its numbered options.
+fn question_sections(input: &Value) -> Vec<Section> {
+    let mut sections = Vec::new();
     for question in input["questions"].as_array().into_iter().flatten() {
-        let Some(text) = question["question"].as_str() else {
+        let Some(asked) = text(question, "question") else {
             continue;
         };
+        if let Some(header) = text(question, "header") {
+            sections.push(Section::Label(header.to_owned()));
+        }
         let suffix = if question["multiSelect"] == true {
             " (multi-select)"
         } else {
             ""
         };
-        lines.push(format!("• {text}{suffix}"));
-        for option in question["options"].as_array().into_iter().flatten() {
-            if let (Some(label), Some(description)) =
-                (option["label"].as_str(), option["description"].as_str())
-            {
-                lines.push(format!("  • {label}: {description}"));
-            }
-        }
+        let options = question["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|option| text(option, "label").map(|label| (label, text(option, "description"))));
+        let lines: Vec<String> = std::iter::once(format!("{asked}{suffix}"))
+            .chain(
+                options
+                    .enumerate()
+                    .map(|(index, (label, description))| match description {
+                        Some(description) => format!("{}. {label}: {description}", index + 1),
+                        None => format!("{}. {label}", index + 1),
+                    }),
+            )
+            .collect();
+        sections.push(Section::Prose {
+            text: lines.join("\n"),
+            markdown: false,
+        });
     }
-    lines.join("\n")
+    sections
 }
 
 /// Add explicit headings for separately reported stderr output.
