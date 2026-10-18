@@ -554,11 +554,11 @@ class Manager {
     if (thread.attached) {
       const { status } = await client.request("thread/unsubscribe", { threadId });
       this.updateThread(threadId, { detached: true });
-      return { threadId, detached: true, status };
+      return { threadId, name: thread.name ?? undefined, detached: true, status };
     }
     await client.request("thread/archive", { threadId });
     this.updateThread(threadId, { detached: true });
-    return { threadId, detached: true, archived: true };
+    return { threadId, name: thread.name ?? undefined, detached: true, archived: true };
   }
 
   async list({ state } = {}) {
