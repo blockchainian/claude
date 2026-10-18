@@ -117,7 +117,7 @@ pub(super) fn with_restored_defaults<T>(
             if let Some(previous) = previous {
                 values.insert(key.to_owned(), previous);
             } else {
-                values.remove(key);
+                values.shift_remove(key);
             }
         }
         if changed {
@@ -282,6 +282,37 @@ mod tests {
             0o640
         );
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn restore_keeps_the_file_key_order() {
+        let (_directory, path) = fixture();
+        let original = r#"{
+  "respectGitignore": true,
+  "model": "claude-opus-5-5",
+  "env": {
+    "ZETA": "1",
+    "ALPHA": "2"
+  },
+  "attribution": {
+    "pr": "",
+    "commit": ""
+  }
+}
+"#;
+        fs::write(&path, original).unwrap();
+        with_restored_defaults(&path, || {
+            fs::write(
+                &path,
+                original.replace(
+                    r#""model": "claude-opus-5-5","#,
+                    r#""model": "haiku",
+  "effortLevel": "low","#,
+                ),
+            )
+        })
+        .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
     }
 
     #[test]
