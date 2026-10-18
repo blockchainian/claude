@@ -767,6 +767,20 @@ impl App {
             self.input_error(&input, "This task cannot receive that input".into());
             return;
         };
+        // A closing terminal client still owns the session's input until it leaves.
+        let closing = self
+            .closing_terminals
+            .get_mut(&id)
+            .and_then(session_terminal::TerminalClose::take);
+        let job: Job = match closing {
+            Some(close) => Box::new(move || {
+                close
+                    .join()
+                    .map_err(|_| io::Error::other("Terminal close panicked"))?;
+                job()
+            }),
+            None => job,
+        };
         self.start_input_job(id, input, job);
     }
 

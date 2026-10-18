@@ -134,7 +134,8 @@ impl App {
         }
     }
 
-    /// Delivers input through the session's open terminal when its provider requests it.
+    /// Delivers input through the session's open terminal when its provider requests it,
+    /// or closes the terminal for input it cannot take.
     pub(super) fn send_to_terminal(&mut self, id: &SessionKey, input: &SessionInput) -> bool {
         let Some(terminal) = self.terminal.as_mut().filter(|terminal| &terminal.id == id) else {
             return false;
@@ -148,7 +149,10 @@ impl App {
                 terminal.paste(text).and_then(|()| terminal.write(submit))
             }
             TerminalInput::Write(bytes) => terminal.write(bytes),
-            TerminalInput::Unsupported(reason) => Err(std::io::Error::other(reason)),
+            TerminalInput::Close => {
+                self.close_terminal();
+                return false;
+            }
         };
         match (input, result) {
             (SessionInput::Prompt(_), result) => self.view.input_complete(id, input, result),
@@ -161,6 +165,13 @@ impl App {
 
 /// Joins cleanup on shutdown, including when the completion message is still queued.
 pub(super) struct TerminalClose(Option<std::thread::JoinHandle<()>>);
+
+impl TerminalClose {
+    /// Hands over the cleanup thread to a job that must wait for the client to leave.
+    pub(super) fn take(&mut self) -> Option<std::thread::JoinHandle<()>> {
+        self.0.take()
+    }
+}
 
 impl Drop for TerminalClose {
     fn drop(&mut self) {
@@ -425,17 +436,6 @@ mod tests {
         assert!(!app.send_to_terminal(&other, &SessionInput::Interrupt));
         assert!(app.send_to_terminal(&id, &SessionInput::Prompt("line 1\nline 2".into())));
         assert!(app.send_to_terminal(&id, &SessionInput::Interrupt));
-        for input in [
-            SessionInput::SetModel("model".into()),
-            SessionInput::SetEffort("high".into()),
-            SessionInput::PromptWithImages {
-                text: "image".into(),
-                images: vec![],
-            },
-        ] {
-            assert!(app.send_to_terminal(&id, &input));
-            assert!(draw(&mut app).contains("Use the open terminal for this input"));
-        }
         let expected = b"\x1b[200~line 1\nline 2\x1b[201~\r\x1b";
         while std::fs::read(&output).unwrap_or_default().len() < expected.len() {
             assert!(Instant::now() < deadline, "terminal never received input");
@@ -453,7 +453,17 @@ mod tests {
         app.terminal.as_mut().unwrap().id = codex_id.clone();
         assert!(!app.send_to_terminal(&codex_id, &SessionInput::Prompt("not sent".into())));
         assert!(!app.send_to_terminal(&codex_id, &SessionInput::Interrupt));
-        app.close_terminal();
+        app.hub = Hub::new(vec![Box::new(
+            crate::providers::claude::ClaudeProvider::new(directory.path().to_owned()),
+        )]);
+        app.terminal.as_mut().unwrap().id = id.clone();
+        let images = SessionInput::PromptWithImages {
+            text: "image".into(),
+            images: vec![],
+        };
+        assert!(!app.send_to_terminal(&id, &images));
+        assert!(app.terminal.is_none());
+        assert!(app.closing_terminals.contains_key(&id));
         finish_close(&mut app);
     }
 

@@ -715,7 +715,7 @@ impl Provider for ClaudeProvider {
                 submit: b"\r",
             },
             SessionInput::Interrupt => TerminalInput::Write(b"\x1b"),
-            _ => TerminalInput::Unsupported("Use the open terminal for this input"),
+            _ => TerminalInput::Close,
         })
     }
 
