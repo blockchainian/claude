@@ -153,6 +153,7 @@ fn json_styles_for(theme: &Theme) -> [Style; 7] {
 }
 
 /// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.
+#[cfg(test)]
 pub(super) fn json_key_foreground() -> Color {
     json_styles()[JsonToken::Key as usize]
         .fg

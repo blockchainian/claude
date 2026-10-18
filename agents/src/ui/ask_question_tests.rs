@@ -20,11 +20,9 @@ fn output(event: &crate::log::Event) -> &str {
 }
 
 #[test]
-fn ask_question_titles_include_all_headers_in_list_and_detail() {
-    for (fixture, title) in [
-        (REJECTED, "AskUserQuestion · 压缩摘要"),
-        (ANSWERED, "AskUserQuestion · 子命令 · cd"),
-    ] {
+fn ask_question_titles_use_tool_name_without_subject() {
+    for fixture in [REJECTED, ANSWERED] {
+        let title = "AskUserQuestion";
         let event = question_event(fixture);
         assert_eq!(event.calls[0].title, title);
         assert_eq!(event.body, title);
@@ -37,16 +35,13 @@ fn ask_question_titles_include_all_headers_in_list_and_detail() {
         let title: String = title.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(compact.matches(&title).count() >= 2, "{screen}");
         let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
-        assert_eq!(
-            detail.sections[0].title.left.as_deref(),
-            Some("AskUserQuestion")
-        );
+        assert!(detail.sections[0].title.left.is_none());
         assert_eq!(detail.sections[0].title.title, event.calls[0].title);
     }
 }
 
 #[test]
-fn ask_question_input_is_a_copyable_bullet_list() {
+fn ask_question_input_is_copyable_json() {
     let mut records: Vec<serde_json::Value> = REJECTED
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -60,10 +55,8 @@ fn ask_question_input_is_a_copyable_bullet_list() {
             .join("\n");
         let event = question_event(&fixture);
         let parts = detail_parts(&event);
-        let suffix = if multi { " (multi-select)" } else { "" };
-        let expected = format!(
-            "• 压缩摘要那条在 agents 里怎么处理？{suffix}\n  • 显示成压缩标记 (Recommended): 不当用户消息，日志里出一行“Conversation compacted”之类的系统行\n  • 直接隐藏: 日志里完全不显示这条"
-        );
+        let expected =
+            serde_json::to_string_pretty(&records[0]["message"]["content"][0]["input"]).unwrap();
         assert_eq!(parts[0].source, expected);
         for width in [24, 180] {
             let (mut view, now) = log_fixture();
@@ -88,10 +81,13 @@ fn ask_question_input_is_a_copyable_bullet_list() {
             assert!(!rows.is_empty());
             for row in rows {
                 for (columns, bytes) in &row.cells {
-                    assert_eq!(
-                        &parts[0].source[bytes.clone()],
-                        buf[(region.area.x + columns.start, row.y)].symbol()
-                    );
+                    let source = &parts[0].source[bytes.clone()];
+                    let cell = buf[(region.area.x + columns.start, row.y)].symbol();
+                    if cell == "…" {
+                        assert!(!source.is_empty());
+                    } else {
+                        assert_eq!(source, cell);
+                    }
                 }
             }
         }
@@ -99,19 +95,11 @@ fn ask_question_input_is_a_copyable_bullet_list() {
 }
 
 #[test]
-fn ask_question_rejection_moves_questions_before_explanation() {
+fn ask_question_rejection_preserves_output_order() {
     let event = question_event(REJECTED);
     let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
     let original = record["message"]["content"][0]["content"].as_str().unwrap();
-    let (explanation, questions) = original.split_once("Questions asked:").unwrap();
-    assert_eq!(
-        output(&event),
-        format!(
-            "Questions asked:{}\n\n{}",
-            questions.trim_end(),
-            explanation.trim_end()
-        )
-    );
+    assert_eq!(output(&event), original);
     assert!(log::open_text(&event).contains(output(&event)));
 }
 

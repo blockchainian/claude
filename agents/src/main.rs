@@ -13,7 +13,6 @@ mod refresh;
 mod session_terminal;
 mod repository;
 mod sessions;
-mod shell_summary;
 mod state;
 mod tasks;
 mod terminal_background;

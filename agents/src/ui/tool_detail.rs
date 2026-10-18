@@ -40,8 +40,6 @@ enum Body {
     Arrow,
     /// The dim animation that a call has no output yet.
     Running,
-    /// `key: value` lines.
-    Fields(Vec<std::ops::Range<usize>>),
     /// Code highlighted as the given language.
     Code(String),
     /// Shell command ranges retain original bytes while separators are display-only.
@@ -52,7 +50,6 @@ enum Body {
     Markdown,
     /// A message or free-text input, with a shared reading column.
     Prose(bool),
-    InputFields(Vec<std::ops::Range<usize>>),
     /// Literal output with its original logical lines.
     Text,
 }
@@ -64,12 +61,10 @@ impl Body {
             Self::Label(_)
             | Self::Arrow
             | Self::Running
-            | Self::Fields(_)
             | Self::Code(_)
             | Self::Shell(_)
             | Self::Json(_)
             | Self::Diff
-            | Self::InputFields(_)
             | Self::Text => ContentKind::Preformatted,
         }
     }
@@ -238,34 +233,6 @@ impl Part {
                 running_frame(now),
                 Style::new().dim(),
             ))],
-            Body::Fields(keys) | Body::InputFields(keys) => {
-                let key_style = Style::default().fg(highlight::json_key_foreground());
-                let mut offset = 0;
-                let lines = self.source.split_inclusive('\n').map(|raw| {
-                    let text = raw.lines().next().expect("split field line exists");
-                    let end = offset + text.len();
-                    let key = keys.iter().find(|key| key.start < end && key.end > offset);
-                    let line = if let Some(key) = key {
-                        let start = key.start.saturating_sub(offset);
-                        let end = key.end.min(end) - offset;
-                        let mut spans = Vec::new();
-                        if start > 0 {
-                            spans.push(Span::raw(text[..start].replace('\t', "    ")));
-                        }
-                        spans.push(Span::styled(
-                            text[start..end].replace('\t', "    "),
-                            key_style,
-                        ));
-                        spans.push(Span::raw(text[end..].replace('\t', "    ")));
-                        Line::from(spans)
-                    } else {
-                        Line::from(text.replace('\t', "    "))
-                    };
-                    offset += raw.len();
-                    line
-                });
-                lines.collect()
-            }
             Body::Code(lang) => highlight::code_lines(source, lang),
             Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Json(value) => json_lines(value),
@@ -550,7 +517,17 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
 
 /// Choose the tool section's metadata and centered title together.
 fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
-    (Some(call.detail_left.clone()), call.detail_title.clone())
+    let mut left = call.detail_left.clone();
+    if let Some(code) = call.exit_code.filter(|code| *code != 0) {
+        if left.is_empty() {
+            left = call.name.clone();
+        }
+        left.push_str(&format!(" · exit {code}"));
+    }
+    (
+        (!left.is_empty()).then_some(left),
+        call.detail_title.clone(),
+    )
 }
 
 /// One section per call; arrows are independent alignment groups.
@@ -576,19 +553,6 @@ fn parts(event: &Event) -> Vec<DetailSection> {
             let mut groups = Vec::new();
             if !input.is_empty() {
                 groups.push(Group { parts: input });
-            }
-            if let Some(code) = call.exit_code {
-                groups.push(Group {
-                    parts: vec![Part::new("", Body::Arrow)],
-                });
-                let mut status = Vec::new();
-                push_section(
-                    &mut status,
-                    &Section::Fields(vec![("exit code".into(), code.to_string())]),
-                    label_style,
-                    false,
-                );
-                groups.push(Group { parts: status });
             }
             groups.push(Group {
                 parts: vec![Part::new("", Body::Arrow)],
@@ -639,26 +603,6 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             parts.push(Part::new(text.clone(), Body::Label(label_style)));
             return;
         }
-        Section::Fields(fields) => {
-            let mut text = String::new();
-            let mut keys = Vec::new();
-            for (key, value) in fields {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                keys.push(text.len()..text.len() + key.len());
-                text.push_str(key);
-                text.push_str(": ");
-                text.push_str(value);
-            }
-            let body = if text_output {
-                Body::Fields(keys)
-            } else {
-                Body::InputFields(keys)
-            };
-            parts.push(Part::new(cells(&text), body));
-            return;
-        }
         Section::Json { text, .. } => {
             let value = serde_json::from_str(text).expect("provider JSON section is valid");
             parts.push(Part::json(value));
@@ -689,7 +633,7 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             return;
         }
     };
-    if matches!(section, Section::Diff { .. }) {
+    if matches!(section, Section::Diff { .. }) && !label.is_empty() {
         parts.push(Part::new(label.clone(), Body::Label(label_style)));
     }
     parts.push(body);
@@ -836,7 +780,9 @@ mod tests {
                 .flat_map(|group| &group.parts)
                 .map(|part| part.source.as_str())
                 .collect();
-            assert!(!body.contains(&title.left.as_deref().unwrap()));
+            if let Some(left) = title.left.as_deref() {
+                assert!(!body.contains(&left));
+            }
         }
         let mut message = event(vec![]);
         message.kind = Kind::Assistant;
@@ -902,7 +848,7 @@ mod tests {
             assert_eq!(detail.sections.len(), count);
             for section in &detail.sections {
                 let title = &section.title;
-                assert_eq!(title.left.as_deref(), Some("general-purpose"));
+                assert_eq!(title.left.as_deref(), Some("general-purpose · exit 1"));
                 assert_eq!(title.title, "Inspect source");
                 assert_eq!(
                     title.time.as_deref(),
@@ -913,13 +859,11 @@ mod tests {
                     super::super::style::log_styles(&Kind::Tool).0
                 );
                 assert_eq!(title.meta_style, Style::new().dim());
-                assert_eq!(section.groups.len(), 5);
+                assert_eq!(section.groups.len(), 3);
                 assert_eq!(section.groups[0].parts.len(), 1);
                 assert_eq!(section.groups[0].parts[0].source, "Find the entry");
                 assert!(matches!(section.groups[1].parts[0].body, Body::Arrow));
-                assert_eq!(section.groups[2].parts[0].source, "exit code: 1");
-                assert!(matches!(section.groups[3].parts[0].body, Body::Arrow));
-                assert!(section.groups[4].parts[0].running());
+                assert!(section.groups[2].parts[0].running());
             }
         }
         call.detail_title = "source-reader".into();
@@ -927,9 +871,12 @@ mod tests {
         call.detail_title = "Agent".into();
         assert_eq!(call_title(&call).1, "Agent");
         call.detail_left = "Task call-id".into();
-        assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id"));
+        assert_eq!(
+            call_title(&call).0.as_deref(),
+            Some("Task call-id · exit 1")
+        );
         call.detail_left = "Read".into();
-        assert_eq!(call_title(&call).0.as_deref(), Some("Read"));
+        assert_eq!(call_title(&call).0.as_deref(), Some("Read · exit 1"));
     }
 
     #[test]
@@ -1446,7 +1393,10 @@ mod tests {
         );
         push_section(
             &mut parts,
-            &Section::Fields(vec![("timeout".into(), "1000".into())]),
+            &Section::Json {
+                label: "input".into(),
+                text: r#"{"timeout":1000}"#.into(),
+            },
             Style::default(),
             false,
         );
@@ -1456,9 +1406,12 @@ mod tests {
                 .map(|part| part.source.as_str())
                 .collect::<Vec<_>>()
                 .join("\n"),
-            "command: a && bb\ntimeout: 1000"
+            "command: a && bb\n{\n  \"timeout\": 1000\n}"
         );
-        assert_eq!(texts(&parts, 80), ["┌ command: a", "└ bb", "timeout: 1000"]);
+        assert_eq!(
+            texts(&parts, 80),
+            ["┌ command: a", "└ bb", "{", "  \"timeout\": 1000", "}"]
+        );
         assert_eq!(
             command_part("echo 'broken && next").lines(
                 80,
@@ -1468,41 +1421,6 @@ mod tests {
             .to_string(),
             "echo 'broken && next"
         );
-    }
-
-    #[test]
-    fn fields_keys_match_json_key_foregrounds() {
-        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        let mut parts = Vec::new();
-        push_section(
-            &mut parts,
-            &Section::Fields(vec![("path".into(), "first\nvalue: unchanged".into())]),
-            Style::default(),
-            false,
-        );
-        let json = highlight::code_lines(r#"{"path": "first"}"#, "json");
-        let key = json[0]
-            .spans
-            .iter()
-            .find(|span| span.content.contains("path"))
-            .unwrap();
-        assert!(key.style.fg.is_some());
-        let body_style = Style::default().fg(ratatui::style::Color::Gray);
-        let lines = parts[0].lines(80, body_style, chrono::DateTime::UNIX_EPOCH);
-        assert_eq!(lines[0].spans[0].content, "path");
-        assert_eq!(lines[0].spans[0].style.fg, key.style.fg);
-        assert_eq!(lines[0].spans[1].content, ": first");
-        assert_eq!(lines[0].spans[1].style, body_style);
-        assert_eq!(lines[1].to_string(), "value: unchanged");
-        assert!(lines[1].spans.iter().all(|span| span.style == body_style));
-        assert_eq!(parts[0].source, "path: first\nvalue: unchanged");
-        for (line, cells) in lines.iter().zip(parts[0].maps(&lines)) {
-            let copied: String = cells
-                .iter()
-                .map(|(_, bytes)| &parts[0].source[bytes.clone()])
-                .collect();
-            assert_eq!(copied, line.to_string());
-        }
     }
 
     #[test]

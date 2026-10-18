@@ -46,7 +46,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .collect();
     assert_eq!(entries.len(), 2);
     let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
-    assert_eq!(bodies, ["cat, git {log, status}, shasum", "gh pr"]);
+    assert_eq!(bodies, ["exec_command", "exec_command"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
         assert_record_timing(entry, record);
@@ -59,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "type → 1");
+    assert_eq!(entries[0].body, "exec_command");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -77,7 +77,7 @@ fn file_change_uses_record_paths() {
         .next()
         .unwrap()
         .clone();
-    assert_eq!(entries[0].body, format!("apply_patch {path}"));
+    assert_eq!(entries[0].body, path);
     assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], record);
@@ -87,7 +87,7 @@ fn file_change_uses_record_paths() {
 fn mcp_call_uses_record_server_tool_and_duration() {
     let entries = events("mcp");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "claude.ask_claude");
+    assert_eq!(entries[0].body, "claude ask_claude");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("mcp")[0]);
 }
@@ -102,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "sleep");
+    assert_eq!(entries[0].body, "exec_command");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }
@@ -111,10 +111,7 @@ fn long_command_written_after_wrapper_output_retains_command_duration() {
 fn web_extension_is_tool_activity() {
     let entries = events("extension");
     assert_eq!(entries.len(), 1);
-    assert_eq!(
-        entries[0].body,
-        "web.search site:pond.dflow.net \"dev-quote-api.dflow.net\""
-    );
+    assert_eq!(entries[0].body, "Extension");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("extension")[0]);
 }
@@ -124,10 +121,15 @@ fn image_view_retains_image_path_for_rendering() {
     let entries = events("image-view");
     assert_eq!(entries.len(), 1);
     let records = records("image-view");
-    let path = records[0]["payload"]["item"]["path"].as_str().unwrap();
-    let path = path.strip_prefix("file://").unwrap();
-    assert_eq!(entries[0].body, format!("view_image {path}"));
-    assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
+    assert_eq!(entries[0].body, "ImageView");
+    assert!(entries[0].paths.is_empty());
+    let crate::log::Section::Json { text, .. } = &entries[0].calls[0].input[0] else {
+        panic!("image arguments require JSON");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(text).unwrap()["path"],
+        records[0]["payload"]["item"]["path"]
+    );
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records[0]);
 }
@@ -136,7 +138,7 @@ fn image_view_retains_image_path_for_rendering() {
 fn subagent_activity_is_rendered() {
     let entries = events("subagent");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "subagent interacted (/root)");
+    assert_eq!(entries[0].body, "SubAgentActivity");
     assert_eq!(entries[0].kind, Kind::Tool);
 }
 
@@ -144,7 +146,7 @@ fn subagent_activity_is_rendered() {
 fn collaboration_tool_activity_is_rendered() {
     let entries = events("collaboration");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "wait");
+    assert_eq!(entries[0].body, "CollabAgentToolCall");
     assert_eq!(entries[0].kind, Kind::Tool);
 }
 
@@ -171,7 +173,7 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 fn file_change_without_start_log_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "apply_patch /workspace/project/design.md");
+    assert_eq!(entries[0].body, "/workspace/project/design.md");
     let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
     assert_eq!(entries[0].started_at, completion);
     assert_eq!(entries[0].ended_at, Some(completion));
@@ -184,7 +186,7 @@ fn file_change_without_start_summary_succeeds() {
         .unwrap()
         .activity
         .unwrap();
-    assert_eq!(activity.label, "apply_patch /workspace/project/design.md");
+    assert_eq!(activity.label, "/workspace/project/design.md");
     assert_eq!(
         activity.at,
         DateTime::from_timestamp_millis(1781329074517).unwrap()

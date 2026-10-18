@@ -56,26 +56,23 @@ fn terminal_codex_exit_sections() {
         include_str!("../fixtures/codex-command-failed.jsonl"),
     );
     let capture = tmux.capture_when(|capture| {
-        capture.contains("false → 1")
-            && capture.contains("exit code: 1")
+        capture.contains("exec_command")
+            && capture.contains("exit 1")
             && capture.contains("[scrubbed]")
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    assert!(capture.contains("false → 1"), "{capture}");
+    assert!(capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
         .iter()
-        .position(|row| row.contains("exit code: 1"))
+        .position(|row| row.contains("exit 1"))
         .expect(&capture);
-    assert!(rows[status - 2].contains("false"), "{capture}");
-    assert_eq!(rows[status - 1].trim(), "↓", "{capture}");
-    assert_eq!(rows[status + 1].trim(), "↓", "{capture}");
-    assert!(rows[status + 2].contains("[scrubbed]"), "{capture}");
-    let arrows: Vec<_> = [status - 1, status + 1]
-        .map(|row| rows[row].find('↓').unwrap())
-        .into();
-    assert_eq!(arrows[0], arrows[1]);
+    assert!(rows[status].contains("exec_command"), "{capture}");
+    assert!(rows[status + 2].contains("false"), "{capture}");
+    assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
+    assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
+    assert_eq!(capture.matches("exit 1").count(), 1, "{capture}");
     println!(
         "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
         path.display()

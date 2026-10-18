@@ -1772,7 +1772,7 @@ pub(super) mod tests {
                         .unwrap();
                         let activity = summary.activity.unwrap();
                         if name == "TaskStop" {
-                            assert_eq!(activity.label, description.unwrap_or(name));
+                            assert_eq!(activity.label, name);
                             assert_eq!(
                                 activity.at,
                                 assistant["timestamp"]

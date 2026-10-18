@@ -25,7 +25,7 @@ fn codex_exit_event(code: i32) -> crate::log::Event {
 }
 
 #[test]
-fn codex_nonzero_exit_parts_have_separate_centering_and_copy_sources() {
+fn codex_nonzero_exit_title_keeps_status_out_of_body() {
     let event = codex_exit_event(1);
     let parts = detail_parts(&event);
     let lines: Vec<_> = parts
@@ -33,30 +33,30 @@ fn codex_nonzero_exit_parts_have_separate_centering_and_copy_sources() {
         .flat_map(|part| part.lines(80, Style::default(), event.started_at))
         .map(|line| line.to_string())
         .collect();
-    assert_eq!(lines, ["false", "↓", "exit code: 1", "↓", "[scrubbed]"]);
+    assert_eq!(lines, ["false", "↓", "[scrubbed]"]);
     let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
-    assert_eq!(detail.sections[0].groups.len(), 5);
+    assert_eq!(detail.sections[0].groups.len(), 3);
+    assert_eq!(
+        detail.sections[0].title.left.as_deref(),
+        Some("exec_command · exit 1")
+    );
+    assert_eq!(detail.sections[0].title.title, "exec_command");
     assert!(
         detail.sections[0]
             .groups
             .iter()
             .all(|group| group.parts.len() == 1)
     );
-    assert_eq!(parts[2].source, "exit code: 1");
-    for index in [1, 3] {
-        let lines = parts[index].lines(80, Style::default(), event.started_at);
-        assert!(parts[index].source.is_empty());
-        assert!(parts[index].maps(&lines)[0].is_empty());
-    }
+    assert_eq!(parts[2].source, "[scrubbed]");
+    let arrow_lines = parts[1].lines(80, Style::default(), event.started_at);
+    assert!(parts[1].source.is_empty());
+    assert!(parts[1].maps(&arrow_lines)[0].is_empty());
     let lines = parts[2].lines(80, Style::default(), event.started_at);
     assert_eq!(
         parts[2].maps(&lines)[0].last().unwrap().1.end,
         parts[2].source.len()
     );
-    assert_eq!(
-        super::super::log::open_text(&event),
-        "false\n\nexit code: 1\n\n[scrubbed]"
-    );
+    assert_eq!(super::super::log::open_text(&event), "false\n\n[scrubbed]");
     assert!(event.calls[0].is_error);
 }
 
@@ -73,9 +73,10 @@ fn codex_zero_exit_parts_keep_input_arrow_output() {
 }
 
 #[test]
-fn codex_nonzero_exit_list_ends_with_arrow_and_number() {
-    assert!(codex_exit_event(1).body.ends_with(" → 1"));
-    assert!(!codex_exit_event(0).body.contains("→"));
+fn codex_exit_list_uses_tool_name_without_subject() {
+    for code in [0, 1] {
+        assert_eq!(codex_exit_event(code).body, "exec_command");
+    }
 }
 
 #[test]
@@ -88,8 +89,10 @@ fn codex_exit_detail_snapshot() {
     event.duration = None;
     view.set_log(vec![event]);
     let rendered = log_screen(&view, 100, 40, now);
-    assert_eq!(
-        rendered,
-        include_str!("../../tests/ui_snapshots/codex_exit_detail.txt")
-    );
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/codex_exit_detail.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &rendered).unwrap();
+    }
+    assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
 }

@@ -2,7 +2,7 @@ use crate::log::{Section, ToolCall};
 use serde_json::Value;
 
 pub(crate) fn json_input(value: &Value) -> Vec<Section> {
-    if value.is_null() {
+    if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
         Vec::new()
     } else {
         vec![Section::Json {
@@ -49,7 +49,11 @@ pub(crate) fn display_tool_name(name: &str) -> String {
         .strip_prefix("mcp__")
         .and_then(|rest| rest.split_once("__"))
     else {
-        return name.to_owned();
+        return name
+            .split_once('.')
+            .filter(|(server, tool)| !server.is_empty() && !tool.is_empty())
+            .map(|(server, tool)| format!("{server} {tool}"))
+            .unwrap_or_else(|| name.to_owned());
     };
     let server = if let Some(rest) = server.strip_prefix("plugin_") {
         match rest.split_once('_') {
@@ -66,69 +70,68 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     }
 }
 
-pub(super) enum Title {
-    Questions,
-    Agent,
-    Skill,
-    Recipient,
-    Shell,
-    Tool,
+pub(crate) struct Rules {
+    pub subjects: &'static [(&'static str, &'static str)],
+    pub inputs: &'static [(&'static str, &'static str)],
 }
 
-pub(super) fn title(name: &str, input: &Value, kind: Title) -> String {
-    let text = |key: &str| input[key].as_str().filter(|text| !text.trim().is_empty());
-    match kind {
-        Title::Questions => std::iter::once(name)
-            .chain(
-                input["questions"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|question| {
-                        question["header"]
-                            .as_str()
-                            .filter(|header| !header.trim().is_empty())
-                    }),
-            )
-            .collect::<Vec<_>>()
-            .join(" · "),
-        Title::Agent => {
-            let agent = text("subagent_type")
-                .map(|kind| format!("{kind} agent"))
-                .unwrap_or_else(|| "Agent".to_owned());
-            text("description")
-                .map(|description| format!("{agent} {description}"))
-                .unwrap_or(agent)
-        }
-        Title::Skill => text("skill").unwrap_or(name).to_owned(),
-        Title::Recipient => text("to")
-            .or_else(|| text("target"))
-            .map(|recipient| format!("To {recipient}"))
-            .unwrap_or_else(|| name.to_owned()),
-        _ if name.starts_with("mcp__") => display_tool_name(name),
-        _ if text("description").is_some() => text("description").unwrap().to_owned(),
-        Title::Shell => {
-            let command = text("command").or_else(|| text("cmd")).unwrap_or("");
-            let summary = crate::shell_summary::summarize_shell_commands(command);
-            if summary.is_empty() {
-                name.to_owned()
-            } else {
-                summary
-            }
-        }
-        Title::Tool => name.to_owned(),
-    }
+const MCP_RULES: Rules = Rules {
+    subjects: &[
+        ("codex-manager start", "name"),
+        ("codex-manager send", "threadId"),
+        ("codex-manager interrupt", "threadId"),
+        ("codex-manager detach", "threadId"),
+    ],
+    inputs: &[
+        ("codex-manager start", "prompt"),
+        ("codex-manager send", "prompt"),
+    ],
+};
+
+pub(crate) fn presentation(
+    name: &str,
+    input: &Value,
+    rules: &Rules,
+) -> (String, Option<String>, Vec<Section>) {
+    let name = display_tool_name(name);
+    let find = |table: &[(&str, &'static str)]| {
+        table
+            .iter()
+            .find_map(|(tool, field)| (*tool == name).then_some(*field))
+    };
+    let mut remaining = input.clone();
+    let subject = find(rules.subjects)
+        .or_else(|| find(MCP_RULES.subjects))
+        .and_then(|field| {
+            remaining
+                .as_object_mut()
+                .and_then(|object| object.remove(field))
+                .and_then(|value| {
+                    value
+                        .as_str()
+                        .filter(|text| !text.trim().is_empty())
+                        .map(str::to_owned)
+                })
+        });
+    let input = match find(rules.inputs).or_else(|| find(MCP_RULES.inputs)) {
+        Some("") => Vec::new(),
+        Some(field) => remaining
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| {
+                vec![Section::Prose {
+                    text: text.to_owned(),
+                    markdown: false,
+                }]
+            })
+            .unwrap_or_default(),
+        None => json_input(&remaining),
+    };
+    (name, subject, input)
 }
 
-/// Retain the input description alongside specialized input sections.
-pub(crate) fn include_description(sections: &mut Vec<Section>, input: &Value) {
-    if let Some(description) = input["description"].as_str()
-        && !sections.iter().any(|section| matches!(section, Section::Fields(fields) if fields.iter().any(|(key, _)| key == "description")))
-    {
-        sections.push(Section::Fields(vec![("description".into(), description.into())]));
-    }
-}
-
+#[cfg(test)]
 pub(crate) fn question_texts(input: &Value) -> Vec<String> {
     input["questions"]
         .as_array()
@@ -139,27 +142,8 @@ pub(crate) fn question_texts(input: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Assign detail metadata and presentation before crossing the UI boundary.
+/// Add explicit headings for separately reported stderr output.
 pub(super) fn annotate(call: &mut ToolCall) {
-    call.detail_title = ["description", "name"]
-        .into_iter()
-        .find_map(|label| {
-            call.input
-                .iter()
-                .filter_map(|section| match section {
-                    Section::Fields(fields) => Some(fields),
-                    _ => None,
-                })
-                .flatten()
-                .find_map(|(key, value)| {
-                    (key == label && !value.trim().is_empty()).then(|| value.clone())
-                })
-        })
-        .unwrap_or_else(|| call.title.clone());
-    call.input = std::mem::take(&mut call.input)
-        .into_iter()
-        .flat_map(input_section)
-        .collect();
     if let Some(output) = &mut call.output {
         *output = std::mem::take(output)
             .into_iter()
@@ -186,66 +170,6 @@ fn label_section(section: Section) -> Vec<Section> {
         .collect()
 }
 
-fn free_text(key: &str) -> bool {
-    matches!(key, "prompt" | "message" | "question")
-}
-
-fn input_section(section: Section) -> Vec<Section> {
-    match section {
-        Section::Fields(fields) => {
-            let fields: Vec<_> = fields
-                .into_iter()
-                .filter(|(key, _)| {
-                    !matches!(key.as_str(), "name" | "description" | "subagent_type")
-                })
-                .collect();
-            if fields
-                .iter()
-                .any(|(key, _)| matches!(key.as_str(), "command" | "cmd"))
-            {
-                return fields
-                    .into_iter()
-                    .flat_map(|(key, value)| {
-                        if matches!(key.as_str(), "command" | "cmd") {
-                            vec![Section::Shell {
-                                prefix: key.len() + 2,
-                                text: format!("{key}: {value}"),
-                            }]
-                        } else {
-                            input_section(Section::Fields(vec![(key, value)]))
-                        }
-                    })
-                    .collect();
-            }
-            let ordinary: Vec<_> = fields
-                .iter()
-                .filter(|(key, _)| !free_text(key))
-                .cloned()
-                .collect();
-            let mut sections = Vec::new();
-            if !ordinary.is_empty() {
-                sections.push(Section::Fields(ordinary));
-            }
-            sections.extend(fields.into_iter().filter(|(key, _)| free_text(key)).map(
-                |(_, text)| Section::Prose {
-                    text,
-                    markdown: true,
-                },
-            ));
-            sections
-        }
-        Section::Code { label, lang, text } if label == "command" && lang == "bash" => {
-            vec![Section::Shell { text, prefix: 0 }]
-        }
-        Section::Text { label, text } if free_text(&label) || label == "questions" => {
-            vec![Section::Prose {
-                text: text.trim_end_matches(['\n', '\r']).to_owned(),
-                markdown: false,
-            }]
-        }
-        section => label_section(section),
-    }
-}
 #[cfg(test)]
 mod tests {
     #[test]
@@ -263,6 +187,36 @@ mod tests {
                 vec![crate::log::Section::Placeholder(format!(
                     "[{kind} image/png]"
                 ))]
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_presentation_uses_shared_tables_and_removes_title_fields() {
+        let record: serde_json::Value =
+            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .find(|record: &serde_json::Value| {
+                    record["message"]["content"][0]["name"]
+                        == "mcp__plugin_codex_codex-manager__start"
+                })
+                .unwrap();
+        let call = &record["message"]["content"][0];
+        let rules = super::Rules {
+            subjects: &[],
+            inputs: &[],
+        };
+        for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
+            let (name, subject, input) = super::presentation(name, &call["input"], &rules);
+            assert_eq!(name, "codex-manager start");
+            assert_eq!(subject.as_deref(), Some("tool-calls"));
+            assert_eq!(
+                input,
+                vec![crate::log::Section::Prose {
+                    text: call["input"]["prompt"].as_str().unwrap().into(),
+                    markdown: false,
+                }]
             );
         }
     }

@@ -127,8 +127,6 @@ pub enum Section {
     Prose { text: String, markdown: bool },
     /// A visible section heading.
     Label(String),
-    /// `key: value` lines, in order.
-    Fields(Vec<(String, String)>),
     /// JSON displayed with indentation, syntax colors and multiline string values.
     Json { label: String, text: String },
     /// An unsupported content block, displayed dimly without its payload.

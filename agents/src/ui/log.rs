@@ -1731,7 +1731,7 @@ pub(super) mod log_markdown {
     fn merged_tool_row_abbreviates_every_path() {
         assert_eq!(
             merged_tool_row(70),
-            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs"
+            "/o…/w…/a…/s…/ui/tests.rs，/o…/work/agents/src/providers/codex/tests.rs"
         );
     }
 
@@ -1739,7 +1739,7 @@ pub(super) mod log_markdown {
     fn merged_tool_row_keeps_every_file_name_whole() {
         assert_eq!(
             merged_tool_row(40),
-            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/c…/tests.rs"
+            "/o…/w…/a…/s…/ui/tests.rs，/o…/w…/a…/s…/p…/c…/tests.rs"
         );
     }
 
@@ -1849,7 +1849,6 @@ mod panel_detail_tests {
                 assert_eq!(layout.lines[row + 1].to_string(), "");
                 assert!(layout.rows[row + 1].1.is_empty());
                 assert_eq!(layout.rows[row + 2].0, id + 1);
-                assert!(!layout.rows[row + 2].1.is_empty());
             }
         }
     }

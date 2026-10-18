@@ -162,12 +162,12 @@ fn start_detail_header(width: u16) -> (String, String, super::super::detail_mode
 }
 
 #[test]
-fn mcp_start_centers_tool_and_keeps_name_in_json_body() {
+fn mcp_start_centers_subject_and_shows_only_prompt() {
     for width in [200, 120, 100] {
         let (header, body, columns) = start_detail_header(width);
-        let title = "codex-manager start";
+        let title = "Claude 图片链接";
         assert_eq!(
-            header[..header.rfind(title).expect("center tool title")].width(),
+            header[..header.rfind(title).expect("center subject")].width(),
             usize::from(super::super::centering::centered_x(
                 columns.panel,
                 columns.text,
@@ -182,8 +182,11 @@ fn mcp_start_centers_tool_and_keeps_name_in_json_body() {
             header[..header.find("41s").unwrap()].width(),
             usize::from(columns.time.right()) - 3
         );
-        assert!(body.contains("\"name\": \"Claude 图片链接\""), "{body}");
-        assert!(body.contains("\"cwd\": \"/workspace/agents\""));
+        assert!(body.contains("Implement workstream A"), "{body}");
+        assert!(!body.contains("\"name\":"), "{body}");
+        assert!(!body.contains("\"cwd\":"), "{body}");
+        assert!(!body.contains("\"prompt\":"), "{body}");
+        assert!(!body.contains("Claude 图片链接"), "{body}");
     }
     let (header, body, _) = start_detail_header(200);
     let snapshot = format!(
@@ -208,12 +211,13 @@ fn mcp_start_tool_metadata_truncates_before_title_and_time() {
     let (header, body, columns) = start_detail_header(45);
     assert!(header.contains('…'), "{header}");
     assert!(header.contains("codex-manager"), "{header}");
-    assert!(!header.contains("Claude 图片链接"));
+    assert!(header.contains("Claude 图片链接"), "{header}");
     assert_eq!(
         header[..header.find("41s").unwrap()].width(),
         usize::from(columns.time.right()) - 3
     );
-    assert!(body.contains("\"cwd\":"), "{body}");
+    assert!(body.contains("Implement workstream A"), "{body}");
+    assert!(!body.contains("\"cwd\":"), "{body}");
 }
 
 #[test]
@@ -256,9 +260,9 @@ fn preformatted_detail_rows_stay_in_content_column() {
 }
 
 #[test]
-fn detail_without_description_centers_tool_in_both_modes() {
+fn detail_without_subject_centers_tool_in_both_modes() {
     let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-manager-detach.jsonl");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-names.jsonl");
     let event = crate::providers::claude::log::tail(&path, 200)
         .unwrap()
         .remove(0);
@@ -272,7 +276,7 @@ fn detail_without_description_centers_tool_in_both_modes() {
             view.center_layout(Rect::new(0, 0, width, 50)).log,
         );
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
-        let title = "codex-manager detach";
+        let title = "Agent";
         assert_eq!(
             header[..header.rfind(title).unwrap()].width(),
             usize::from(super::super::centering::centered_x(
@@ -281,11 +285,12 @@ fn detail_without_description_centers_tool_in_both_modes() {
                 title.width() as u16,
             ))
         );
+        assert!(header[..header.find(title).unwrap()].trim().is_empty());
         assert!(
             screen
                 .lines()
                 .skip(usize::from(detail.y + 2))
-                .any(|line| line.contains("\"threadId\": \"01a1489e"))
+                .any(|line| line.contains("\"description\":"))
         );
     }
 }

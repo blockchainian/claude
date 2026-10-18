@@ -4,18 +4,18 @@ use super::*;
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_ask_questions_render_real_rejection_and_answer() {
     let (_directory, tmux, transcript) = start_probe("ask-questions");
-    tmux.run(&["resize-window", "-t", "probe", "-x", "220", "-y", "70"]);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "220", "-y", "140"]);
     for (name, fixture, header, output) in [
         (
             "rejected",
             include_str!("../fixtures/claude-questions-rejected.jsonl"),
-            "AskUserQuestion · 压缩摘要",
+            "AskUserQuestion",
             "Questions asked:",
         ),
         (
             "answered",
             include_str!("../fixtures/claude-questions-answered.jsonl"),
-            "AskUserQuestion · 子命令 · cd",
+            "AskUserQuestion",
             "Your questions have been answered:",
         ),
     ] {
@@ -26,14 +26,14 @@ fn terminal_ask_questions_render_real_rejection_and_answer() {
         let path = std::env::temp_dir().join(format!("agents-ask-question-{name}.txt"));
         std::fs::write(&path, &capture).unwrap();
         assert!(capture.contains(header), "{capture}");
-        assert!(capture.contains("• "), "{capture}");
-        assert!(capture.contains("(Recommended):"), "{capture}");
+        assert!(capture.contains("\"questions\": ["), "{capture}");
+        assert!(capture.contains("(Recommended)"), "{capture}");
         assert!(!capture.contains("questions: [{"), "{capture}");
         let output_at = capture.find(output).expect(&capture);
         if name == "rejected" {
             assert!(
                 output_at
-                    < capture
+                    > capture
                         .find("The user doesn't want to proceed")
                         .expect(&capture)
             );

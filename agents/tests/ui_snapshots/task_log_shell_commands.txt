@@ -4,7 +4,9 @@
                                          │ printf longer
                                          └ echo done
                                            pwd
-                                         timeout: 1000
+                                         {
+                                           "timeout": 1000
+                                         }
                                                   ↓
                                            running 3 tests
                                            ...

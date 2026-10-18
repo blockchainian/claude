@@ -572,13 +572,15 @@ fn background_return_restores_detail_search() {
 }
 
 #[test]
-fn manager_detach_detail_keeps_tool_title_and_centered_input() {
+fn manager_detach_detail_centers_thread_and_has_no_input() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-manager-detach.jsonl");
     let event = crate::providers::claude::log::tail(&path, 200)
         .unwrap()
         .remove(0);
-    assert_eq!(event.calls[0].title, "codex-manager detach");
+    let thread_id = "01a1489e-5020-7f40-90e8-c9413012630b";
+    assert_eq!(event.calls[0].title, thread_id);
+    assert!(event.calls[0].input.is_empty());
     let (mut view, now) = log_fixture();
     view.select_fixture_event(Some(event));
     let buf = detail_buffer(&view, 160, now);
@@ -590,8 +592,8 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
     let title = rows
         .iter()
         .find(|row| row.contains("codex-manager detach"))
-        .expect("detail must retain the log-list tool title");
-    let left = title.rfind("codex-manager detach").unwrap();
+        .expect("detail must retain the tool name beside its subject");
+    let left = title.find(thread_id).unwrap();
     let viewport = view.viewport.borrow();
     let columns = super::super::detail_model::detail_columns(
         viewport.log_detail,
@@ -602,14 +604,20 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
         usize::from(super::super::centering::centered_x(
             columns.panel,
             columns.text,
-            "codex-manager detach".len() as u16,
+            thread_id.len() as u16,
         ))
     );
-    let input = rows
-        .iter()
-        .find(|row| row.contains("\"threadId\": \"01a1489e"))
-        .expect("thread input remains visible");
-    assert!(input.len() - input.trim_start().len() > 20);
+    assert_eq!(
+        title.find("codex-manager detach"),
+        Some(usize::from(columns.text.x))
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.contains("\"threadId\": \"01a1489e"))
+            .count(),
+        1,
+        "the thread ID remains only in the generic output"
+    );
     let snapshot = rows
         .iter()
         .map(|row| row.trim_end())
@@ -621,5 +629,8 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
     if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
         std::fs::write(&path, &snapshot).unwrap();
     }
-    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+    assert_eq!(
+        snapshot.trim_end(),
+        std::fs::read_to_string(path).unwrap().trim_end()
+    );
 }

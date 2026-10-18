@@ -70,7 +70,7 @@ fn prose_body_kinds_use_the_log_column_width() {
 }
 
 #[test]
-fn mcp_json_inputs_keep_names_and_fields_in_body() {
+fn mcp_inputs_keep_only_declared_prompt_in_body() {
     let parsed = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
     let event = parsed
         .iter()
@@ -84,13 +84,13 @@ fn mcp_json_inputs_keep_names_and_fields_in_body() {
     let mut event = event.clone();
     event.calls = vec![call.clone()];
     let parts = body_parts(&event);
-    assert_eq!(event.calls[0].detail_title, "codex-manager start");
+    assert_eq!(event.calls[0].detail_title, "tool-calls");
+    assert_eq!(event.calls[0].detail_left, "codex-manager start");
     let input = parts
         .iter()
-        .find(|part| part.source.contains("\"cwd\":"))
+        .find(|part| part.source.starts_with("Goal:"))
         .unwrap();
-    assert!(input.source.contains("\"name\": \"tool-calls\""));
-    assert!(input.source.contains("\"prompt\":"));
+    assert!(!input.source.contains("\"cwd\":"));
     for width in [200, 120] {
         let drawn = layout(&event, width);
         let segment = drawn
@@ -101,7 +101,10 @@ fn mcp_json_inputs_keep_names_and_fields_in_body() {
         assert_reading_column(&drawn, segment);
     }
     event.calls[0].input = vec![
-        crate::log::Section::Fields(vec![("threadId".into(), "abc-123".into())]),
+        crate::log::Section::Json {
+            label: "input".into(),
+            text: r#"{"threadId":"abc-123"}"#.into(),
+        },
         crate::log::Section::Prose {
             text: "Continue reading this message. ".repeat(20),
             markdown: true,
@@ -114,12 +117,12 @@ fn mcp_json_inputs_keep_names_and_fields_in_body() {
         drawn
             .sources
             .iter()
-            .any(|s| s.text.starts_with("threadId:"))
+            .any(|s| s.text.contains("\"threadId\":"))
     );
 }
 
 #[test]
-fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
+fn question_agent_inputs_preserve_json_and_tool_output() {
     for fixture in [
         include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
@@ -138,17 +141,31 @@ fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
                     .input
                     .iter()
                     .find_map(|s| match s {
-                        crate::log::Section::Prose { text, .. } => Some(text.as_str()),
-                        crate::log::Section::Markdown { text, .. } => Some(text.as_str()),
+                        crate::log::Section::Json { text, .. } => {
+                            Some(serde_json::from_str::<serde_json::Value>(text).unwrap())
+                        }
                         _ => None,
                     })
                     .unwrap();
                 let segment = drawn
                     .sources
                     .iter()
-                    .position(|s| s.text.as_ref() == input)
+                    .position(|s| {
+                        input
+                            .as_object()
+                            .unwrap()
+                            .keys()
+                            .all(|key| s.text.contains(&format!("\"{key}\":")))
+                    })
                     .unwrap();
-                assert_reading_column(&drawn, segment);
+                let source = &drawn.sources[segment].text;
+                assert!(source.starts_with('{'));
+                assert!(
+                    drawn
+                        .rows
+                        .iter()
+                        .any(|(id, cells)| *id == segment && !cells.is_empty())
+                );
             }
         }
     }
@@ -202,7 +219,10 @@ fn generic_roles_are_explicit_and_field_names_are_literal() {
         "name",
         "description",
     ] {
-        let fields = Section::Fields(vec![(key.into(), "Some words to read. ".repeat(12))]);
+        let fields = Section::Json {
+            label: "input".into(),
+            text: serde_json::json!({key: "Some words to read. ".repeat(12)}).to_string(),
+        };
         event.calls[0].input = vec![
             fields.clone(),
             Section::Prose {
@@ -212,7 +232,7 @@ fn generic_roles_are_explicit_and_field_names_are_literal() {
         ];
         event.calls[0].output = Some(vec![fields]);
         let drawn = layout(&event, 200);
-        assert!(drawn.sources[1].text.starts_with(&format!("{key}: ")));
+        assert!(drawn.sources[1].text.contains(&format!("\"{key}\": ")));
         assert!(drawn.sources[2].text.starts_with("Explicit prose."));
         assert_reading_column(&drawn, 2);
         assert!(
@@ -221,7 +241,7 @@ fn generic_roles_are_explicit_and_field_names_are_literal() {
                 .last()
                 .unwrap()
                 .text
-                .starts_with(&format!("{key}: "))
+                .contains(&format!("\"{key}\": "))
         );
     }
 }
@@ -253,7 +273,10 @@ fn command_and_all_output_body_formats_keep_their_width() {
             lang: "text".into(),
             text: text.clone(),
         },
-        Section::Fields(vec![("prompt".into(), text.clone())]),
+        Section::Json {
+            label: "output".into(),
+            text: serde_json::json!({"prompt": text}).to_string(),
+        },
     ]);
     for part in body_parts(&event) {
         for width in [200, 120] {
@@ -502,7 +525,7 @@ fn centered_detail_blocks_snapshot() {
 }
 
 #[test]
-fn description_takes_priority_over_name_in_real_agent_inputs() {
+fn undeclared_agent_subject_fields_stay_in_json() {
     let parsed = events(include_str!(
         "../../tests/fixtures/claude-agent-display.jsonl"
     ));
@@ -516,10 +539,7 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
         })
         .unwrap();
     let call = &event.calls[0];
-    assert_eq!(
-        Some(call.detail_title.as_str()),
-        Some("实测 attach 发提示词")
-    );
+    assert_eq!(Some(call.detail_title.as_str()), Some("Agent"));
     let body = body_parts(event);
     assert!(
         !body

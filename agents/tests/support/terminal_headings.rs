@@ -104,11 +104,11 @@ fn terminal_log_section_titles_and_scrolling() {
     let capture = tmux.capture_when(|capture| {
         section_rows(capture, 200)
             .first()
-            .is_some_and(|row| row.contains("general-purpose"))
+            .is_some_and(|row| row.contains("Agent"))
     });
     let rows = section_rows(&capture, 200);
-    assert!(rows[0].starts_with(" general-purpose"), "{capture}");
-    assert!(rows[0].contains("实测 attach 发提示词"), "{capture}");
+    assert!(rows[0].contains("Agent"), "{capture}");
+    assert!(!rows[0].contains("实测 attach 发提示词"), "{capture}");
     assert!(!rows[0].contains("sonnet"), "{capture}");
     assert!(!rows[0].contains('─'), "{capture}");
     assert!(rows[1].trim_end_matches('│').trim().is_empty(), "{capture}");
@@ -117,9 +117,9 @@ fn terminal_log_section_titles_and_scrolling() {
         "{capture}"
     );
     let body = rows[2..].join("\n");
-    assert!(!body.contains("general-purpose"), "{capture}");
-    assert!(!body.contains("attach-probe"), "{capture}");
-    assert!(!body.contains("实测 attach 发提示词"), "{capture}");
+    assert!(body.contains("general-purpose"), "{capture}");
+    assert!(body.contains("attach-probe"), "{capture}");
+    assert!(body.contains("实测 attach 发提示词"), "{capture}");
     assert!(
         body.contains("You have a hard 10-minute limit"),
         "{capture}"
@@ -140,7 +140,7 @@ fn terminal_log_section_titles_and_scrolling() {
         capture.lines().count() == 30
             && section_rows(capture, 90)
                 .first()
-                .is_some_and(|row| row.starts_with(" Plan"))
+                .is_some_and(|row| row.contains("Agent"))
             && capture.contains("Write an implementation")
     });
     let divider = before
@@ -152,7 +152,7 @@ fn terminal_log_section_titles_and_scrolling() {
     tmux.mouse(65, 45, divider + 2, false);
     let after = tmux.capture_when(|capture| {
         let rows = section_rows(capture, 90);
-        !rows.iter().any(|row| row.starts_with(" Plan"))
+        !rows.iter().any(|row| row.contains("Agent"))
             && rows.iter().any(|row| !row.trim().is_empty())
     });
     assert_ne!(before, after);
@@ -191,12 +191,8 @@ fn terminal_parallel_tools_have_only_section_titles() {
             .filter(|row| row.trim_start().starts_with("codex-manager start"))
             .count()
             == 2
-            && rows
-                .iter()
-                .any(|row| row.contains("\"name\": \"Claude 图片链接\""))
-            && rows
-                .iter()
-                .any(|row| row.contains("\"name\": \"Codex 图片链接\""))
+            && rows.iter().any(|row| row.contains("Claude 图片链接"))
+            && rows.iter().any(|row| row.contains("Codex 图片链接"))
     });
     let rows = section_rows(&capture, 200);
     assert!(rows[0].starts_with(" codex-manager start"), "{capture}");
@@ -218,25 +214,23 @@ fn terminal_parallel_tools_have_only_section_titles() {
     {
         let index = titles[section];
         let row = rows[index];
-        assert!(!row.contains(name), "{capture}");
-        assert_eq!(row.matches("codex-manager start").count(), 2, "{capture}");
+        assert!(row.contains(name), "{capture}");
+        assert_eq!(row.matches("codex-manager start").count(), 1, "{capture}");
         assert_eq!(
-            row[..row.rfind("codex-manager start").unwrap()].width(),
-            terminal_detail_width::detail_center(200, "codex-manager start".width()),
+            row[..row.find(name).unwrap()].width(),
+            terminal_detail_width::detail_center(200, name.width()),
             "{capture}"
         );
         assert!(rows[index + 1].trim().is_empty(), "{capture}");
-        assert_eq!(rows[index + 2].trim(), "{", "{capture}");
         assert!(
-            rows[index + 3].contains("\"cwd\": \"/workspace/agents\""),
+            rows[index + 2].contains("Implement workstream"),
             "{capture}"
         );
         assert!(
-            rows[index + 4].contains(&format!("\"name\": \"{name}\"")),
-            "{capture}"
-        );
-        assert!(
-            rows[index + 5].contains("\"prompt\": \"Implement workstream"),
+            !rows[index + 2..]
+                .iter()
+                .take_while(|row| row.trim() != "↓")
+                .any(|row| row.contains("\"cwd\":")),
             "{capture}"
         );
     }

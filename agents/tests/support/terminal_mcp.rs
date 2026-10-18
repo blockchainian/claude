@@ -50,11 +50,7 @@ fn terminal_claude_mcp_generic_details() {
         (
             "multiline",
             include_str!("../fixtures/claude-manager-start.jsonl"),
-            vec![
-                "\"prompt\": \"Implement workstream A",
-                "Rules:",
-                "\"name\": \"Claude 图片链接\"",
-            ],
+            vec!["Implement workstream A", "Rules:", "Claude 图片链接"],
         ),
     ] {
         std::fs::OpenOptions::new()

@@ -1,76 +1,86 @@
-subagent interacted (/root) — 120 columns
-SubAgentActivity                                    SubAgentActivity
+SubAgentActivity — 120 columns
+                                                    SubAgentActivity
 
-                                  agent_path: /root
-                                  agent_thread_id: 01a10da3-df29-7380-abe4-8c64f7ed5f8d
-                                  id: call_6pn4aC9AEdpX2uAtX7PAxvQe
-                                  kind: interacted
-                                  type: SubAgentActivity
+                              {
+                                "agent_path": "/root",
+                                "agent_thread_id": "01a10da3-df29-7380-abe4-8c64f7ed5f8d",
+                                "id": "call_6pn4aC9AEdpX2uAtX7PAxvQe",
+                                "kind": "interacted",
+                                "type": "SubAgentActivity"
+                              }
                                                             ↓
                                                            •··
-subagent interacted (/root) — 200 columns
-SubAgentActivity                                                                            SubAgentActivity
+SubAgentActivity — 200 columns
+                                                                                            SubAgentActivity
 
-                                                                          agent_path: /root
-                                                                          agent_thread_id: 01a10da3-df29-7380-abe4-8c64f7ed5f8d
-                                                                          id: call_6pn4aC9AEdpX2uAtX7PAxvQe
-                                                                          kind: interacted
-                                                                          type: SubAgentActivity
+                                                                      {
+                                                                        "agent_path": "/root",
+                                                                        "agent_thread_id": "01a10da3-df29-7380-abe4-8c64f7ed5f8d",
+                                                                        "id": "call_6pn4aC9AEdpX2uAtX7PAxvQe",
+                                                                        "kind": "interacted",
+                                                                        "type": "SubAgentActivity"
+                                                                      }
                                                                                                     ↓
                                                                                                    •··
-spawn_agent (claude_calls) [scrubbed] — 120 columns
-spawn_agent                                               Agent
+spawn_agent — 120 columns
+                                                       spawn_agent
 
-                                                 task_name: claude_calls
-                                                 [scrubbed]
+                                              {
+                                                "message": "[scrubbed]",
+                                                "task_name": "claude_calls"
+                                              }
                                                             ↓
                                            {
                                              "task_name": "/root/claude_calls"
                                            }
-spawn_agent (claude_calls) [scrubbed] — 200 columns
-spawn_agent                                                                                       Agent
+spawn_agent — 200 columns
+                                                                                               spawn_agent
 
-                                                                                         task_name: claude_calls
-                                                                                         [scrubbed]
+                                                                                      {
+                                                                                        "message": "[scrubbed]",
+                                                                                        "task_name": "claude_calls"
+                                                                                      }
                                                                                                     ↓
                                                                                    {
                                                                                      "task_name": "/root/claude_calls"
                                                                                    }
-spawn_agent (codex_calls) [scrubbed] — 120 columns
-spawn_agent                                               Agent
+spawn_agent — 120 columns
+                                                       spawn_agent
 
-                                                 task_name: codex_calls
-                                                 [scrubbed]
+                                              {
+                                                "message": "[scrubbed]",
+                                                "task_name": "codex_calls"
+                                              }
                                                             ↓
                                                            •··
-spawn_agent (codex_calls) [scrubbed] — 200 columns
-spawn_agent                                                                                       Agent
+spawn_agent — 200 columns
+                                                                                               spawn_agent
 
-                                                                                         task_name: codex_calls
-                                                                                         [scrubbed]
+                                                                                      {
+                                                                                        "message": "[scrubbed]",
+                                                                                        "task_name": "codex_calls"
+                                                                                      }
                                                                                                     ↓
                                                                                                    •··
-WebFetch render.com/docs/postgresql-instance-types — 120 columns
-WebFetch                                                WebFetch
+WebFetch — 120 columns
+                                                        WebFetch
 
-     url: https://render.com/docs/postgresql-instance-types
-     Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and
-     price. Include any sentence about how the connection limit is computed.
+{
+  "prompt": "Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection l…
+  "url": "https://render.com/docs/postgresql-instance-types"
+}
                                                             ↓
-  The server returned HTTP 404 Not Found.
+The server returned HTTP 404 Not Found.
 
-  The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. gh
-  for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
-WebFetch render.com/docs/postgresql-instance-types — 200 columns
-WebFetch                                                                                        WebFetch
+The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. `gh…
+WebFetch — 200 columns
+                                                                                                WebFetch
 
-                                                          url: https://render.com/docs/postgresql-instance-types
-                                                          Quote verbatim the table of Postgres instance types with RAM, CPU, max connections
-                                                          (connection limit) and price. Include any sentence about how the connection limit is
-                                                          computed.
+{
+  "prompt": "Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection limit) and price. Include any sentence about how the connection limit is computed…
+  "url": "https://render.com/docs/postgresql-instance-types"
+}
                                                                                                     ↓
-                                                            The server returned HTTP 404 Not Found.
+             The server returned HTTP 404 Not Found.
 
-                                                            The response body was not retrieved. If this URL requires authentication, use an
-                                                            authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
-                                                            WebFetch.
+             The response body was not retrieved. If this URL requires authentication, use an authenticated tool (e.g. `gh` for GitHub, or an MCP-provided fetch tool) instead of WebFetch.

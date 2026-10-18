@@ -1,4 +1,6 @@
-use crate::log::{Event, Kind, Section, ToolCall, participant_text};
+#[cfg(test)]
+use crate::log::participant_text;
+use crate::log::{Event, Kind, Section, ToolCall};
 use chrono::{DateTime, Utc};
 use std::{
     io::{self, Read, Seek, SeekFrom},
@@ -13,15 +15,39 @@ pub(super) fn tool_hidden(name: &str) -> bool {
     )
 }
 
-fn input_text<'a>(input: &'a serde_json::Value, key: &str) -> Option<&'a str> {
-    input[key].as_str().filter(|text| !text.trim().is_empty())
+const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
+    subjects: &[
+        ("Read", "file_path"),
+        ("Write", "file_path"),
+        ("Edit", "file_path"),
+        ("Bash", "description"),
+        ("ToolSearch", "query"),
+    ],
+    inputs: &[
+        ("Read", ""),
+        ("Write", "content"),
+        ("Edit", ""),
+        ("Bash", "command"),
+        ("ToolSearch", ""),
+    ],
+};
+
+#[derive(Clone, Copy)]
+enum Output {
+    Read,
+    Write,
+    Patch,
+    Shell,
+    Matches,
 }
 
-fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
-    ["description", "file_path", "prompt", "query", "message"]
-        .into_iter()
-        .find_map(|key| input_text(input, key).map(|text| (key, text)))
-}
+const OUTPUTS: &[(&str, Output)] = &[
+    ("Read", Output::Read),
+    ("Write", Output::Write),
+    ("Edit", Output::Patch),
+    ("Bash", Output::Shell),
+    ("ToolSearch", Output::Matches),
+];
 
 pub(super) fn tool_kind(name: &str) -> Kind {
     match name.rsplit('.').next() {
@@ -30,110 +56,13 @@ pub(super) fn tool_kind(name: &str) -> Kind {
     }
 }
 
-fn base_tool_title(name: &str, input: &serde_json::Value) -> String {
-    use crate::providers::tool::Title;
-    let kind = match name.rsplit('.').next().unwrap_or(name) {
-        "AskUserQuestion" => Title::Questions,
-        "Agent" | "Task" | "spawn_agent" => Title::Agent,
-        "Skill" => Title::Skill,
-        "SendMessage" | "send_message" | "followup_task" => Title::Recipient,
-        "Bash" | "exec" | "exec_command" | "shell" => Title::Shell,
-        _ => Title::Tool,
-    };
-    crate::providers::tool::title(name, input, kind)
-}
-
-fn tool_title(name: &str, input: &serde_json::Value) -> String {
-    if name == "Agent" {
-        return name.to_owned();
-    }
-    let title = base_tool_title(name, input);
-    if name == "Skill"
-        && let Some(args) = input["args"].as_str().filter(|args| !args.is_empty())
-    {
-        format!("{title} {args}")
-    } else {
-        title
-    }
-}
-
-fn tool_detail(name: &str, input: &serde_json::Value) -> String {
-    match name {
-        "AskUserQuestion" => crate::providers::tool::question_texts(input).join(" · "),
-        "Bash" => input_text(input, "description")
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                crate::shell_summary::summarize_shell_commands(
-                    input_text(input, "command").unwrap_or(""),
-                )
-            }),
-        "WebFetch" => input_text(input, "url")
-            .map(|url| {
-                let address = url.split_once("://").map_or(url, |(_, address)| address);
-                address.split(['?', '#']).next().unwrap_or("").to_owned()
-            })
-            .unwrap_or_default(),
-        "SendMessage" => {
-            let message = input_text(input, "summary")
-                .or_else(|| input_text(input, "message").and_then(|text| text.lines().next()));
-            participant_text(input_text(input, "to"), message.unwrap_or(""))
-        }
-        "Agent" => [input_text(input, "name"), input_text(input, "description")]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · "),
-        "Task" => participant_text(
-            input_text(input, "name"),
-            default_detail(input).map(|(_, text)| text).unwrap_or(""),
-        ),
-        "SubagentHandback" => participant_text(
-            input_text(input, "name"),
-            input_text(input, "message")
-                .and_then(|text| text.lines().next())
-                .unwrap_or(""),
-        ),
-        _ => default_detail(input)
-            .map(|(_, text)| text)
-            .unwrap_or("")
-            .to_owned(),
-    }
-}
-
-fn tool_label(name: &str, detail: &str) -> String {
-    let name = if name == "SendMessage" { "To" } else { name };
-    if detail.is_empty() {
-        crate::providers::tool::display_tool_name(name)
-    } else if matches!(name, "Bash" | "AskUserQuestion" | "Agent") {
-        detail.to_owned()
-    } else {
-        let label = crate::providers::tool::display_tool_name(name);
-        if label == name {
-            format!("{label} {detail}")
-        } else {
-            [label.as_str(), detail].join(" · ")
-        }
-    }
-}
-
 pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     let name = block["name"].as_str()?;
     if tool_hidden(name) {
         return None;
     }
-    let input = &block["input"];
-    if matches!(
-        name,
-        "Bash" | "WebFetch" | "SendMessage" | "SubagentHandback" | "AskUserQuestion"
-    ) || (matches!(name, "Agent" | "Task") && input_text(input, "name").is_some())
-    {
-        Some(tool_label(name, &tool_detail(name, input)))
-    } else {
-        Some(input_text(input, "description").map_or_else(
-            || crate::providers::tool::display_tool_name(name),
-            str::to_owned,
-        ))
-    }
+    let (name, subject, _) = crate::providers::tool::presentation(name, &block["input"], &RULES);
+    Some(subject.unwrap_or(name))
 }
 
 #[cfg(test)]
@@ -541,37 +470,6 @@ fn result_text(value: &serde_json::Value) -> String {
     })
 }
 
-fn fields(input: &serde_json::Value, keys: &[&str]) -> Section {
-    Section::Fields(
-        keys.iter()
-            .filter_map(|key| {
-                input.get(*key).map(|value| {
-                    (
-                        (*key).to_owned(),
-                        value
-                            .as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| value.to_string()),
-                    )
-                })
-            })
-            .collect(),
-    )
-}
-
-fn all_fields(input: &serde_json::Value) -> Section {
-    fields(
-        input,
-        &input
-            .as_object()
-            .into_iter()
-            .flatten()
-            .filter(|(key, _)| key.as_str() != "description")
-            .map(|(key, _)| key.as_str())
-            .collect::<Vec<_>>(),
-    )
-}
-
 fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
@@ -587,205 +485,152 @@ fn code_section(label: &str, lang: &str, text: &str) -> Section {
     }
 }
 
-fn line_range(start: u64, count: Option<u64>) -> String {
-    match count {
-        Some(count) => format!(
-            "lines {start}–{}",
-            start.saturating_add(count.saturating_sub(1))
-        ),
-        None => format!("lines {start}–"),
-    }
+fn patch_section(value: &serde_json::Value) -> Option<Section> {
+    let hunks = value["structuredPatch"].as_array()?;
+    let text = hunks
+        .iter()
+        .map(|hunk| {
+            std::iter::once(format!(
+                "@@ -{},{} +{},{} @@",
+                hunk["oldStart"], hunk["oldLines"], hunk["newStart"], hunk["newLines"]
+            ))
+            .chain(
+                hunk["lines"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|line| line.as_str().map(str::to_owned)),
+            )
+            .collect::<Vec<_>>()
+            .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(Section::Diff {
+        label: String::new(),
+        text,
+    })
 }
 
 fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -> ToolCall {
-    let path = input["file_path"].as_str().unwrap_or("");
-    let lang = Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("");
-    let value = result.map(|result| &result.value);
-    let mut sections = match name {
-        "AskUserQuestion" => {
-            let mut lines = Vec::new();
-            for question in input["questions"].as_array().into_iter().flatten() {
-                let Some(text) = question["question"].as_str() else {
-                    continue;
-                };
-                let suffix = if question["multiSelect"] == true {
-                    " (multi-select)"
-                } else {
-                    ""
-                };
-                lines.push(format!("• {text}{suffix}"));
-                for option in question["options"].as_array().into_iter().flatten() {
-                    if let (Some(label), Some(description)) =
-                        (option["label"].as_str(), option["description"].as_str())
-                    {
-                        lines.push(format!("  • {label}: {description}"));
-                    }
-                }
-            }
-            vec![text_section("questions", &lines.join("\n"))]
-        }
-        "Bash" => vec![code_section(
-            "command",
-            "bash",
-            input["command"].as_str().unwrap_or(""),
-        )],
-        "Read" if input.get("offset").is_some() || input.get("limit").is_some() => {
-            let start = input["offset"].as_u64().unwrap_or(1);
-            let end = input["limit"].as_u64().map_or_else(String::new, |count| {
-                start.saturating_add(count.saturating_sub(1)).to_string()
-            });
-            vec![text_section("path", &format!("{path}:{start}-{end}"))]
-        }
-        "Read" | "Write" => vec![text_section("path", path)],
-        // The diff's label shows the path.
-        "Edit" => Vec::new(),
-        "WebFetch" => vec![fields(input, &["url", "prompt"])],
-        "Agent" | "Task" => vec![
-            Section::Markdown {
-                label: "prompt".to_owned(),
-                text: input["prompt"].as_str().unwrap_or("").to_owned(),
-            },
-            fields(input, &["name"]),
-        ],
-        "SendMessage" => vec![Section::Markdown {
-            label: "message".to_owned(),
-            text: input["message"].as_str().unwrap_or("").to_owned(),
-        }],
-        "Skill" => vec![text_section("args", input["args"].as_str().unwrap_or(""))],
-        _ if name.starts_with("mcp__") => crate::providers::tool::json_input(input),
-        _ => vec![all_fields(input)],
-    };
-    match name {
-        "Edit" => {
-            let patch = value.and_then(|value| value["structuredPatch"].as_array());
-            let diff = if let Some(hunks) = patch {
-                hunks
-                    .iter()
-                    .map(|hunk| {
-                        let header = format!(
-                            "@@ -{},{} +{},{} @@",
-                            hunk["oldStart"], hunk["oldLines"], hunk["newStart"], hunk["newLines"]
-                        );
-                        std::iter::once(header)
-                            .chain(
-                                hunk["lines"]
-                                    .as_array()
-                                    .into_iter()
-                                    .flatten()
-                                    .filter_map(|line| line.as_str().map(str::to_owned)),
-                            )
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else {
-                [("old_string", "-"), ("new_string", "+")]
-                    .into_iter()
-                    .flat_map(|(key, prefix)| {
-                        input[key]
-                            .as_str()
-                            .unwrap_or("")
-                            .lines()
-                            .map(move |line| format!("{prefix}{line}"))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-            sections.push(Section::Diff {
-                label: path.to_owned(),
-                text: diff,
-            });
-        }
-        "Write" => sections.push(code_section(
-            "content",
-            lang,
-            input["content"].as_str().unwrap_or(""),
-        )),
-        _ => {}
-    }
-    let output = result.map(|result| {
-        let fallback = || vec![text_section("output", &result.content)];
-        let value = &result.value;
-        if name.starts_with("mcp__") {
-            return crate::providers::tool::mcp_content(&result.raw_content);
-        }
-        if name == "AskUserQuestion"
-            && result.error
-            && let Some((explanation, questions)) = result.content.split_once("Questions asked:")
+    let (display_name, mut subject, mut sections) =
+        crate::providers::tool::presentation(name, input, &RULES);
+    let mode = OUTPUTS
+        .iter()
+        .find_map(|(tool, mode)| (*tool == display_name).then_some(*mode));
+    if matches!(mode, Some(Output::Read))
+        && let Some(result) = result
+    {
+        subject = result.value["file"]["filePath"].as_str().map(str::to_owned);
+        if (input.get("offset").is_some() || input.get("limit").is_some())
+            && let (Some(path), Some(start), Some(count)) = (
+                subject.as_mut(),
+                result.value["file"]["startLine"].as_u64(),
+                result.value["file"]["numLines"].as_u64(),
+            )
         {
-            return vec![text_section(
-                "output",
-                &format!(
-                    "Questions asked:{}\n\n{}",
-                    questions.trim_end(),
-                    explanation.trim_end()
-                ),
-            )];
+            path.push_str(&format!(
+                ":{start}-{}",
+                start.saturating_add(count.saturating_sub(1))
+            ));
         }
-        if result.error {
-            return fallback();
-        }
-        if matches!(name, "Agent" | "SendMessage") {
-            return vec![Section::Markdown {
-                label: "output".to_owned(),
-                text: result.content.clone(),
-            }];
-        }
-        if !(value.is_object() || value.is_array()) {
-            return fallback();
-        }
-        match name {
-            "Bash" => {
-                let mut output: Vec<_> = ["stdout", "stderr"]
-                    .into_iter()
-                    .filter_map(|key| {
-                        value[key]
-                            .as_str()
-                            .filter(|text| !text.is_empty())
-                            .map(|text| text_section(key, text))
-                    })
-                    .collect();
-                if output.is_empty() {
-                    output.push(text_section("stdout", "(no output)"));
-                }
-                output
+    }
+    if matches!(mode, Some(Output::Shell)) {
+        sections = sections
+            .into_iter()
+            .map(|section| match section {
+                Section::Prose { text, .. } => Section::Shell { text, prefix: 0 },
+                section => section,
+            })
+            .collect();
+    }
+    let exit_code = result.and_then(|result| {
+        result
+            .content
+            .lines()
+            .next()?
+            .strip_prefix("Exit code ")?
+            .parse()
+            .ok()
+    });
+    let output = result.map(|result| {
+        let value = &result.value;
+        let generic = || {
+            let mut content = result.raw_content.clone();
+            if exit_code.is_some()
+                && let Some(text) = content.as_str()
+            {
+                content = text.split_once('\n').map_or("", |(_, body)| body).into();
             }
-            "Read" if value["file"].is_object() => {
-                let file = &value["file"];
-                let label = file["startLine"]
-                    .as_u64()
-                    .map(|start| line_range(start, file["numLines"].as_u64()))
-                    .unwrap_or_else(|| "content".to_owned());
+            crate::providers::tool::mcp_content(&content)
+        };
+        if result.error {
+            return generic();
+        }
+        match mode {
+            Some(Output::Read) if value["type"] == "image" => {
+                vec![Section::Placeholder(format!(
+                    "[image {}]",
+                    value["file"]["type"].as_str().unwrap_or("unknown")
+                ))]
+            }
+            Some(Output::Read) if value["file"]["content"].is_string() => {
+                let lang = value["file"]["filePath"]
+                    .as_str()
+                    .and_then(|path| Path::new(path).extension())
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("");
                 vec![code_section(
-                    &label,
+                    "output",
                     lang,
-                    file["content"].as_str().unwrap_or(""),
+                    value["file"]["content"].as_str().unwrap(),
                 )]
             }
-            "WebFetch" if value["result"].is_string() => vec![Section::Markdown {
-                label: "output".to_owned(),
-                text: value["result"].as_str().unwrap().to_owned(),
-            }],
-            _ => fallback(),
+            Some(Output::Patch) => patch_section(value)
+                .map(|section| vec![section])
+                .unwrap_or_else(generic),
+            Some(Output::Write) if value["type"] == "update" => patch_section(value)
+                .map(|section| vec![section])
+                .unwrap_or_else(generic),
+            Some(Output::Shell) if value.is_object() => ["stdout", "stderr"]
+                .into_iter()
+                .filter_map(|key| {
+                    value[key]
+                        .as_str()
+                        .filter(|text| !text.is_empty())
+                        .map(|text| text_section(key, text))
+                })
+                .collect(),
+            Some(Output::Matches) if value["matches"].is_array() => {
+                vec![text_section(
+                    "output",
+                    &value["matches"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|name| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )]
+            }
+            _ => generic(),
         }
     });
-    if !name.starts_with("mcp__") {
-        crate::providers::tool::include_description(&mut sections, input);
-    }
+    let title = subject.clone().unwrap_or_else(|| display_name.clone());
     let mut call = ToolCall {
-        detail_left: crate::providers::tool::display_tool_name(name),
-        detail_title: String::new(),
-        show_details: name == "AskUserQuestion",
+        detail_left: if subject.is_some() {
+            display_name
+        } else {
+            String::new()
+        },
+        detail_title: title.clone(),
+        show_details: true,
         id: String::new(),
-        title: tool_title(name, input),
+        title,
         name: name.to_owned(),
         input: sections,
         output,
-        exit_code: None,
+        exit_code,
         is_error: result.is_some_and(|result| result.error),
         duration: None,
     };
@@ -1134,27 +979,12 @@ impl Log {
         }
         let input = &block["input"];
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
-        let detail = default_detail(input);
-        let path = detail
-            .filter(|(key, _)| *key == "file_path")
-            .filter(|_| name != "Bash")
-            .filter(|_| result.is_none_or(|result| result.denial.is_none()))
-            .map(|(_, path)| path);
-        let detail = tool_detail(name, input);
-        let display_name = crate::providers::tool::display_tool_name(name);
-        let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
-            if display_name == name {
-                format!("{display_name}: {reason}")
-            } else {
-                tool_label(name, reason)
-            }
-        } else if matches!(name, "AskUserQuestion" | "Skill") {
-            tool_title(name, input)
-        } else if let Some(path) = path {
-            tool_label(name, path)
-        } else {
-            tool_label(name, &detail)
-        };
+        let detail_call = tool_call(name, input, result);
+        let call = detail_call.title.clone();
+        let path = RULES.subjects.iter().find_map(|(tool, field)| {
+            (*tool == name && *field == "file_path" && !detail_call.detail_left.is_empty())
+                .then_some(call.as_str())
+        });
         let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
             (self.entries[index].event.kind == Kind::Assistant) != (kind == Kind::Assistant)
@@ -1207,26 +1037,7 @@ impl Log {
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
         let path = path.map(|path| call.len() - path.len()..call.len());
-        // A path call followed by a path call of the same tool shares its verb: "Edit a b".
-        let verb = path
-            .as_ref()
-            .map(|range| call[..range.start].to_owned())
-            .unwrap_or_default();
-        let shared = path.is_some()
-            && entry
-                .event
-                .calls
-                .first()
-                .is_some_and(|call| call.name == name)
-            && body.starts_with(&verb)
-            && entry.event.paths.first().map(|range| range.start) == Some(verb.len());
-        let (body, call) = if shared {
-            for range in &mut entry.event.paths {
-                *range = range.start - verb.len()..range.end - verb.len();
-            }
-            let separator = if display_name == name { " " } else { " · " };
-            (&body[verb.len()..], format!("{call}{separator}"))
-        } else if body.is_empty() {
+        let (body, call) = if body.is_empty() {
             (body, call)
         } else {
             (body, format!("{call}，"))
@@ -1236,14 +1047,9 @@ impl Log {
         }
         entry.event.paths.splice(0..0, path);
         entry.event.body = format!("{call}{body}");
-        let mut detail = tool_call(name, input, result);
+        let mut detail = detail_call;
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
-        if name == "Agent"
-            && let Some(kind) = input_text(input, "subagent_type")
-        {
-            detail.detail_left = kind.to_owned();
-        }
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
@@ -1716,159 +1522,82 @@ pub(crate) mod tests {
 
     #[test]
     fn real_mcp_calls_share_display_names_and_keep_raw_names() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/claude-tool-calls.jsonl");
-        let events = super::tail(&path, 100).unwrap();
-        let event = events
-            .iter()
-            .find(|event| {
-                event.calls.len() == 2
-                    && event
-                        .calls
-                        .iter()
-                        .all(|call| call.name == "mcp__plugin_codex_codex-manager__start")
-            })
-            .unwrap();
-        assert!(event.body.contains("codex-manager start"));
-        assert!(!event.body.contains("mcp__"));
-        assert!(
-            event
-                .calls
-                .iter()
-                .all(|call| call.title == "codex-manager start")
-        );
-        let record: serde_json::Value =
-            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-                .find(|record| record["message"]["content"][0]["id"] == event.calls[0].id)
-                .unwrap();
-        assert_eq!(
-            super::tool_activity(&record["message"]["content"][0]).unwrap(),
-            "codex-manager start"
-        );
-        let input = &record["message"]["content"][0]["input"];
-        let prompt = input["prompt"].as_str().unwrap();
-        assert!(
-            event
-                .body
-                .contains(&format!("codex-manager start · {prompt}"))
-        );
-        assert_eq!(
-            super::tool_label("mcp__plugin_codex_codex-manager__start", ""),
-            "codex-manager start"
-        );
-        assert_eq!(
-            super::tool_label("mcp__tool", prompt),
-            format!("mcp__tool {prompt}")
-        );
-        assert_eq!(
-            super::tool_label("mcp__plugin_codex_codex-manager__send", prompt),
-            format!("codex-manager send · {prompt}")
-        );
-        let url = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .find(|record| record["message"]["content"][0]["name"] == "WebFetch")
-            .unwrap()["message"]["content"][0]["input"]["url"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        assert_eq!(
-            super::tool_label("mcp__claude-in-chrome__navigate", &url),
-            format!("claude-in-chrome navigate · {url}")
-        );
-    }
-
-    #[test]
-    fn skill_rows_and_titles_use_name_and_optional_args() {
-        use std::io::Write;
-        let fixture = include_str!("../../../tests/fixtures/claude-skill-call.jsonl");
-        for args in [Some("Visual Studio Code"), Some(""), None] {
-            let mut records: Vec<serde_json::Value> = fixture
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-            let input = records[0]["message"]["content"][0]["input"]
-                .as_object_mut()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let events = events_from(records.clone());
+        for call in events
+            .iter()
+            .flat_map(|event| &event.calls)
+            .filter(|call| call.name.starts_with("mcp__"))
+        {
+            assert!(!call.title.contains("mcp__"));
+            let block = records
+                .iter()
+                .map(|record| &record["message"]["content"][0])
+                .find(|block| block["id"] == call.id)
                 .unwrap();
-            match args {
-                Some(args) => {
-                    input.insert("args".to_owned(), args.into());
-                }
-                None => {
-                    input.remove("args");
-                }
-            }
-            let mut file = tempfile::NamedTempFile::new().unwrap();
-            for record in records {
-                writeln!(file, "{record}").unwrap();
-            }
-            let events = super::tail(file.path(), 100).unwrap();
-            assert_eq!(events.len(), 1);
-            let expected = if args == Some("Visual Studio Code") {
-                "computer-use:capture-window Visual Studio Code"
-            } else {
-                "computer-use:capture-window"
-            };
-            assert_eq!(events[0].body, expected);
-            assert_eq!(events[0].calls[0].title, expected);
-            assert_eq!(events[0].calls[0].name, "Skill");
+            assert_eq!(tool_activity(block).unwrap(), call.title);
         }
     }
 
     #[test]
-    fn agent_subagent_type_preserves_input_including_general_purpose() {
-        let fixture =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-display.jsonl");
-        let events = tail(&fixture, 10).unwrap();
-        let types: Vec<_> = events
-            .iter()
-            .flat_map(|event| &event.calls)
-            .map(|call| Some(call.detail_left.as_str()))
+    fn undeclared_skill_input_stays_json_and_title_uses_tool_name() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-skill-call.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
             .collect();
+        let events = events_from(records.clone());
+        let call = &events[0].calls[0];
+        assert_eq!(events[0].body, "Skill");
+        assert_eq!(call.title, "Skill");
+        assert_eq!(call.detail_left, "");
         assert_eq!(
-            types,
-            [
-                Some("general-purpose"),
-                Some("fork"),
-                Some("feature:ux-implementer")
-            ]
+            call.input,
+            crate::providers::tool::json_input(&records[0]["message"]["content"][0]["input"])
         );
     }
 
     #[test]
+    fn undeclared_agent_input_stays_json_without_a_subject() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-display.jsonl");
+        for call in tail(&fixture, 10)
+            .unwrap()
+            .iter()
+            .flat_map(|event| &event.calls)
+        {
+            assert_eq!(call.detail_title, "Agent");
+            assert_eq!(call.detail_left, "");
+            assert!(matches!(call.input[0], Section::Json { .. }));
+        }
+    }
+
+    #[test]
     fn real_call_titles_and_ids_match_inputs() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/claude-tool-calls.jsonl");
-        let events = super::tail(&path, 100).unwrap();
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = tail(&path, 100).unwrap();
         let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
         let bash = calls.iter().find(|call| call.name == "Bash").unwrap();
         assert_eq!(bash.title, "改到持久目录");
         assert_eq!(bash.id, "toolu_01XU5dCe5eBxX8ccqC2DwN2G");
-        let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
-        assert_eq!(agent.title, "Agent");
-        let skill = calls.iter().find(|call| call.name == "Skill").unwrap();
-        assert_eq!(skill.title, "secrets:secrets-manager [scrubbed]");
-        assert_eq!(skill.input, vec![super::text_section("args", "[scrubbed]")]);
-        let records: Vec<serde_json::Value> =
-            include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-        let send = records
-            .iter()
-            .flat_map(|record| {
-                record["message"]["content"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-            })
-            .find(|block| block["name"] == "SendMessage")
-            .unwrap();
         assert_eq!(
-            super::tool_call("SendMessage", &send["input"], None).title,
-            format!("To {}", send["input"]["to"].as_str().unwrap())
+            calls
+                .iter()
+                .find(|call| call.name == "Agent")
+                .unwrap()
+                .title,
+            "Agent"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .find(|call| call.name == "Skill")
+                .unwrap()
+                .title,
+            "Skill"
         );
     }
 
@@ -1887,21 +1616,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn tool_inputs_retain_descriptions_for_detail_headers() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/claude-tool-calls.jsonl");
-        let events = super::tail(&path, 100).unwrap();
-        for name in ["Bash", "Agent"] {
-            let call = events
-                .iter()
-                .flat_map(|event| &event.calls)
-                .find(|call| call.name == name)
-                .unwrap();
-
-            assert!(!call.detail_title.is_empty());
-            assert!(!call.input.iter().any(|section| matches!(section,
-                Section::Fields(fields) if fields.iter().any(|(key, _)| key == "description"))));
-        }
+    fn bash_subject_is_removed_from_command_only_input() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = tail(&path, 100).unwrap();
+        let bash = events
+            .iter()
+            .flat_map(|event| &event.calls)
+            .find(|call| call.name == "Bash")
+            .unwrap();
+        assert_eq!(bash.detail_left, "Bash");
+        assert_eq!(bash.input.len(), 1);
+        assert!(matches!(bash.input[0], Section::Shell { .. }));
     }
 
     #[test]
@@ -1990,6 +1716,36 @@ pub(crate) mod tests {
     use std::io::Write;
 
     #[test]
+    fn declared_tool_rules_remove_subjects_and_move_patch_to_output() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let events = events_from(records.clone());
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        let read = calls.iter().find(|call| call.name == "Read").unwrap();
+        let file = &records[3]["toolUseResult"]["file"];
+        assert_eq!(
+            read.detail_title,
+            format!(
+                "{}:{}-{}",
+                file["filePath"].as_str().unwrap(),
+                file["startLine"],
+                file["startLine"].as_u64().unwrap() + file["numLines"].as_u64().unwrap() - 1
+            )
+        );
+        assert!(read.input.is_empty());
+        let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
+        assert!(edit.input.is_empty());
+        assert!(
+            matches!(&edit.output.as_ref().unwrap()[0], Section::Diff { text, .. } if text.starts_with("@@ -"))
+        );
+        let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
+        assert_eq!(agent.detail_title, "Agent");
+        assert!(matches!(&agent.input[0], Section::Json { .. }));
+    }
+
+    #[test]
     fn tool_calls_keep_input_and_result_sections() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
@@ -1997,122 +1753,47 @@ pub(crate) mod tests {
             .collect();
         let events = events_from(records.clone());
         let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
-        assert!(calls.len() >= 10);
         let bash = calls.iter().find(|call| call.name == "Bash").unwrap();
-        assert!(matches!(&bash.input[0], Section::Shell { prefix: 0, .. }));
+        assert!(matches!(bash.input[0], Section::Shell { prefix: 0, .. }));
         let output = bash.output.as_ref().unwrap();
         assert!(matches!(&output[0], Section::Text { label, .. } if label == "stdout"));
         assert!(matches!(&output[1], Section::Label(label) if label == "stderr"));
         let read = calls.iter().find(|call| call.name == "Read").unwrap();
-        assert!(
-            matches!(&read.output.as_ref().unwrap()[0], Section::Code { lang, text, .. }
-            if lang == "conf" && !text.contains("1→"))
-        );
-        let raw_file = &records[3]["toolUseResult"]["file"];
         assert_eq!(
             read.output.as_ref().unwrap()[0],
             code_section(
-                &line_range(
-                    raw_file["startLine"].as_u64().unwrap(),
-                    raw_file["numLines"].as_u64()
-                ),
+                "output",
                 "conf",
-                raw_file["content"].as_str().unwrap()
+                records[3]["toolUseResult"]["file"]["content"]
+                    .as_str()
+                    .unwrap()
             )
         );
-        let read_input = &records
-            .iter()
-            .map(|record| &record["message"]["content"][0])
-            .find(|block| block["name"] == "Read")
-            .unwrap()["input"];
-        let offset = read_input["offset"].as_u64().unwrap();
+        let write = calls.iter().find(|call| call.name == "Write").unwrap();
         assert_eq!(
-            read.input,
-            [text_section(
-                "path",
-                &format!(
-                    "{}:{offset}-{}",
-                    read_input["file_path"].as_str().unwrap(),
-                    offset + read_input["limit"].as_u64().unwrap() - 1
-                )
-            )]
+            write.input,
+            vec![Section::Prose {
+                text: records[6]["message"]["content"][0]["input"]["content"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                markdown: false
+            }]
         );
-        let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
-        assert_eq!(edit.input.len(), 1);
-        assert!(matches!(&edit.input[0], Section::Diff { text, .. } if text.starts_with("@@ -")));
-        let patch = &records[5]["toolUseResult"]["structuredPatch"][0];
-        if let Section::Diff { text, .. } = &edit.input[0] {
-            assert!(text.starts_with(&format!(
-                "@@ -{},{} +{},{} @@\n",
-                patch["oldStart"], patch["oldLines"], patch["newStart"], patch["newLines"]
-            )));
-            assert!(
-                text.ends_with(
-                    patch["lines"]
-                        .as_array()
-                        .unwrap()
-                        .last()
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                )
+        for call in calls.iter().filter(|call| call.name.starts_with("mcp__")) {
+            let block = records
+                .iter()
+                .map(|record| &record["message"]["content"][0])
+                .find(|block| block["id"] == call.id)
+                .unwrap();
+            assert_eq!(
+                call.input,
+                vec![Section::Prose {
+                    text: block["input"]["prompt"].as_str().unwrap().to_owned(),
+                    markdown: false
+                }]
             );
         }
-        let mcp = calls
-            .iter()
-            .find(|call| call.name.starts_with("mcp__"))
-            .unwrap();
-        assert!(
-            matches!(&mcp.output.as_ref().unwrap()[0], Section::Text { text, .. }
-            if serde_json::from_str::<Value>(text).unwrap().is_object())
-        );
-        let parallel = events
-            .iter()
-            .find(|event| {
-                event.calls.len() == 2
-                    && event
-                        .calls
-                        .iter()
-                        .all(|call| call.name.starts_with("mcp__"))
-            })
-            .unwrap();
-        assert_eq!(
-            parallel
-                .calls
-                .iter()
-                .map(|call| call.name.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "mcp__plugin_codex_codex-manager__start",
-                "mcp__plugin_codex_codex-manager__start"
-            ]
-        );
-        for (call, record) in parallel.calls.iter().zip(&records[16..18]) {
-            let input = &record["message"]["content"][0]["input"];
-            assert_eq!(call.detail_title, "codex-manager start");
-            assert_eq!(call.input, crate::providers::tool::json_input(input));
-        }
-        assert!(parallel.calls[1].output.is_none());
-        for (name, input_index, output_index) in
-            [("Write", 6, 7), ("WebFetch", 8, 9), ("Agent", 10, 11)]
-        {
-            let call = calls.iter().find(|call| call.name == name).unwrap();
-            let raw_input = &records[input_index]["message"]["content"][0]["input"];
-            let raw_result = &records[output_index]["toolUseResult"];
-            match name {
-                "Write" => assert!(
-                    matches!(&call.input[1], Section::Code { text, lang, .. } if text == raw_input["content"].as_str().unwrap() && lang == "md")
-                ),
-                "WebFetch" => assert!(
-                    matches!(&call.output.as_ref().unwrap()[0], Section::Markdown { text, .. } if text == raw_result["result"].as_str().unwrap())
-                ),
-                "Agent" => assert!(
-                    matches!(&call.input[0], Section::Markdown { text, .. } if text == raw_input["prompt"].as_str().unwrap())
-                ),
-                _ => unreachable!(),
-            }
-        }
-        assert!(calls.iter().any(|call| call.is_error));
     }
 
     #[test]
@@ -2121,26 +1802,19 @@ pub(crate) mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        let name = "mcp__plugin_codex_codex-manager__send";
-        let reference = records[1]["message"]["content"][0]["content"][0].clone();
-        for (content, expected) in [
-            (json!([reference]), name.to_owned()),
-            (json!([reference, reference]), format!("{name}\n{name}")),
-            (
-                json!([{"type":"text","text":"before"}, reference, {"type":"text","text":"after"}]),
-                format!("before\n{name}\nafter"),
-            ),
-        ] {
-            let mut records = records.clone();
-            records[1]["message"]["content"][0]["content"] = content;
-            let events = events_from(records);
-            assert_eq!(events.len(), 1);
-            assert_eq!(events[0].calls.len(), 1);
-            assert_eq!(
-                events[0].calls[0].output,
-                Some(vec![text_section("output", &expected)])
-            );
-        }
+        let expected = records[1]["toolUseResult"]["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let events = events_from(records);
+        assert_eq!(
+            events[0].calls[0].output,
+            Some(vec![text_section("output", &expected)])
+        );
+        assert!(events[0].calls[0].input.is_empty());
     }
 
     #[test]
@@ -2149,96 +1823,32 @@ pub(crate) mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        let bash = &records[0]["message"]["content"][0];
-        let mut result = ResultAt {
-            source_records: Vec::new(),
-            at: at(1),
-            sequence: 1,
-            error: false,
-            denial: None,
-            content: "reason".to_owned(),
-            raw_content: Value::Null,
-            value: Value::Null,
-        };
-        for value in [Value::Null, json!("metadata"), json!(3)] {
-            result.value = value;
-            assert_eq!(
-                tool_call("Bash", &bash["input"], Some(&result)).output,
-                Some(vec![text_section("output", "reason")])
-            );
-        }
-        result.value = json!({"stdout":"", "stderr":""});
-        assert_eq!(
-            tool_call("Bash", &bash["input"], Some(&result)).output,
-            Some(vec![text_section("stdout", "(no output)")])
-        );
-        result.error = true;
-        assert_eq!(
-            tool_call("Bash", &bash["input"], Some(&result)).output,
-            Some(vec![text_section("output", "reason")])
-        );
-        result.error = false;
-        result.value = Value::Null;
-        assert!(
-            matches!(&tool_call("Agent", &records[10]["message"]["content"][0]["input"], Some(&result)).output.unwrap()[0], Section::Markdown { text, .. } if text == "reason")
-        );
-        result.value = Value::Null;
-        let edit = tool_call(
-            "Edit",
-            &records[4]["message"]["content"][0]["input"],
-            Some(&result),
-        );
-        assert!(
-            matches!(&edit.input[0], Section::Diff { text, .. } if text.contains("\n+") && text.starts_with('-'))
-        );
-        assert_eq!(
-            tool_call(
-                "Read",
-                &records[2]["message"]["content"][0]["input"],
-                Some(&result)
-            )
-            .output,
-            Some(vec![text_section("output", "reason")])
-        );
+        let mut error = records[1].clone();
+        error["message"]["content"][0]["is_error"] = true.into();
+        error["message"]["content"][0]["content"] = "Exit code 1\nreason".into();
+        error["toolUseResult"] = "Error: Exit code 1\nreason".into();
+        let events = events_from(vec![records[0].clone(), error]);
+        let call = &events[0].calls[0];
+        assert_eq!(call.exit_code, Some(1));
+        assert_eq!(call.output, Some(vec![text_section("output", "reason")]));
+        assert!(call.is_error);
         assert_eq!(
             result_text(
                 &json!([{"type":"image"},{"type":"text","text":"one"},{"type":"text","text":"two"}])
             ),
             "one\ntwo"
         );
-        assert!(
-            tool_call("Read", &records[2]["message"]["content"][0]["input"], None)
-                .output
-                .is_none()
-        );
-        let mut record = records[0].clone();
-        record["wireToolInputs"] = json!({"command":"wrong"});
-        let events = events_from(vec![record]);
-        assert_eq!(
-            events[0].calls[0].input[0],
-            Section::Shell {
-                prefix: 0,
-                text: bash["input"]["command"].as_str().unwrap().to_owned()
-            }
-        );
-        assert_eq!(
-            all_fields(&json!({"flag":true,"nested":{"n":1}})),
-            Section::Fields(vec![
-                ("flag".to_owned(), "true".to_owned()),
-                ("nested".to_owned(), "{\"n\":1}".to_owned())
-            ])
-        );
     }
 
     #[test]
-    fn ask_user_question_texts_in_log_and_latest_activity() {
+    fn undeclared_questions_use_tool_name_in_log_and_activity() {
         for fixture in [
             include_str!("../../../tests/fixtures/claude-questions-pending.jsonl"),
             include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
         ] {
             let record: serde_json::Value =
                 serde_json::from_str(fixture.lines().next().unwrap()).unwrap();
-            let expected = record["message"]["content"][0]["input"]["questions"]
+            let _expected = record["message"]["content"][0]["input"]["questions"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -2249,12 +1859,12 @@ pub(crate) mod tests {
             write!(file, "{fixture}").unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, "AskUserQuestion · 子命令 · cd");
+            assert_eq!(events[0].body, "AskUserQuestion");
             assert_eq!(events[0].kind, Kind::Assistant);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, expected);
+            assert_eq!(activity.label, "AskUserQuestion");
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -2262,14 +1872,14 @@ pub(crate) mod tests {
     #[test]
     fn real_tool_details_match_log_and_latest_activity() {
         let expected = [
-            "mkdir, cd, ls, wc, head",
+            "Bash",
             "找那个会话",
-            "To (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
-            "To (team-lead) Report: /tmp/research",
-            "SubagentHandback Report: /tmp/research",
-            "WebFetch code.claude.com/docs/en/hooks",
-            "cd, ls, sed, wc",
-            "cd, cat, wc, sed",
+            "SendMessage",
+            "SendMessage",
+            "SubagentHandback",
+            "WebFetch",
+            "Bash",
+            "Bash",
         ];
         for (line, expected) in include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
             .lines()
@@ -2289,8 +1899,8 @@ pub(crate) mod tests {
     #[test]
     fn real_agent_names_in_log_and_activity() {
         let expected = [
-            "reviewer · Review files",
-            "SubagentHandback Checks passed.",
+            "Agent",
+            "SubagentHandback",
             "(worker-id) Checks passed.",
             "(team-lead) Review files.",
             "(peer-session) Checks passed.",
@@ -2317,18 +1927,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn task_names_and_named_handbacks_share_log_and_activity_format() {
+    fn undeclared_task_and_handback_use_tool_names_in_log_and_activity() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         for (mut record, tool_name, expected) in [
-            (records[0].clone(), "Task", "Task (reviewer) Review files"),
-            (
-                records[1].clone(),
-                "SubagentHandback",
-                "SubagentHandback (reviewer) Checks passed.",
-            ),
+            (records[0].clone(), "Task", "Task"),
+            (records[1].clone(), "SubagentHandback", "SubagentHandback"),
         ] {
             let block = &mut record["message"]["content"][0];
             block["name"] = tool_name.into();
@@ -2346,7 +1952,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn agent_names_without_details_or_names_keep_clean_spacing() {
+    fn undeclared_tools_do_not_infer_subjects_from_participant_names() {
         let record: Value = serde_json::from_str(
             include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
                 .lines()
@@ -2357,20 +1963,11 @@ pub(crate) mod tests {
         for (name, label) in [
             ("Agent", "Agent"),
             ("Task", "Task"),
-            ("SendMessage", "To"),
+            ("SendMessage", "SendMessage"),
             ("SubagentHandback", "SubagentHandback"),
         ] {
-            for (participant, expected) in [
-                (
-                    "reviewer",
-                    if name == "Agent" {
-                        "reviewer".to_owned()
-                    } else {
-                        format!("{label} (reviewer)")
-                    },
-                ),
-                (" ", label.to_owned()),
-            ] {
+            for participant in ["reviewer", " "] {
+                let expected = label;
                 let mut record = record.clone();
                 let block = &mut record["message"]["content"][0];
                 block["name"] = name.into();
@@ -2390,7 +1987,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bash_blank_description_uses_command_in_both_surfaces() {
+    fn bash_blank_description_uses_tool_name_in_both_surfaces() {
         let mut record: Value = serde_json::from_str(
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
                 .lines()
@@ -2402,13 +1999,13 @@ pub(crate) mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
         let events = tail_session(file.path(), 8, true).unwrap();
-        assert_eq!(events[0].body, "cd, ls, sed, wc");
+        assert_eq!(events[0].body, "Bash");
         let summary = super::super::transcript::read_subagent(
             file.path(),
             file.as_file().metadata().unwrap().len(),
         )
         .unwrap();
-        assert_eq!(summary.activity.unwrap().label, "cd, ls, sed, wc");
+        assert_eq!(summary.activity.unwrap().label, "Bash");
     }
 
     #[test]
@@ -2492,7 +2089,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn automode_blocked_is_denied_with_classifier_reason() {
+    fn automode_blocked_preserves_denied_kind_and_result_reason() {
         let records = denial_records(include_str!(
             "../../../tests/fixtures/automode_blocked.jsonl"
         ));
@@ -2500,12 +2097,15 @@ pub(crate) mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash: Create Unsafe Agents");
+        assert_eq!(events[0].body, "Bash");
+        assert!(
+            matches!(&events[0].calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text.contains("Create Unsafe Agents"))
+        );
         assert_eq!(events[0].ended_at, Some(end));
     }
 
     #[test]
-    fn automode_blocked_without_brackets_is_denied_as_dangerous() {
+    fn automode_blocked_without_brackets_keeps_denied_kind() {
         let records = denial_records(include_str!(
             "../../../tests/fixtures/automode_blocked_dangerous.jsonl"
         ));
@@ -2513,7 +2113,7 @@ pub(crate) mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Edit: Dangerous");
+        assert_eq!(events[0].body, "Edit");
         assert_eq!(events[0].ended_at, Some(end));
     }
 
@@ -2527,7 +2127,7 @@ pub(crate) mod tests {
         records.push(reply);
         let events = events_from(records);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash: Safety Check");
+        assert_eq!(events[0].body, "Bash");
         assert_eq!(events[0].ended_at, Some(end));
         assert_eq!(events[1].previous_end, Some(end));
     }
@@ -2546,12 +2146,12 @@ pub(crate) mod tests {
             records[1]["permissionDecision"]["reasonType"] = reason.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Error);
-            assert_eq!(events[0].body, "echo");
+            assert_eq!(events[0].body, "Bash");
         }
     }
 
     #[test]
-    fn automode_reason_without_complete_brackets_uses_dangerous() {
+    fn automode_reason_without_complete_brackets_keeps_denied_kind() {
         for text in ["denied", "Reason: [unfinished"] {
             let mut records = denial_records(include_str!(
                 "../../../tests/fixtures/automode_blocked.jsonl"
@@ -2559,7 +2159,7 @@ pub(crate) mod tests {
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert_eq!(events[0].body, "Bash: Dangerous");
+            assert_eq!(events[0].body, "Bash");
         }
     }
 
@@ -2581,7 +2181,7 @@ pub(crate) mod tests {
             let events = events_from(records);
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert!(events[0].body.contains("Bash: Create Unsafe Agents"));
+            assert!(events[0].body.contains("Bash"));
             assert!(events[0].body.contains("Read"));
         }
     }
@@ -3006,10 +2606,7 @@ pub(crate) mod tests {
                 name,
                 json!({"file_path":"~/Users/project/src/main.rs"}),
             )]);
-            assert_eq!(
-                events[0].body,
-                format!("{name} ~/Users/project/src/main.rs")
-            );
+            assert_eq!(events[0].body, "~/Users/project/src/main.rs");
             assert_eq!(
                 &events[0].body[events[0].paths[0].clone()],
                 "~/Users/project/src/main.rs"
@@ -3018,7 +2615,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bash_description_replaces_only_the_exact_tool_name() {
+    fn only_declared_subject_fields_affect_rows() {
         for (name, input, expected) in [
             (
                 "Bash",
@@ -3027,16 +2624,8 @@ pub(crate) mod tests {
             ),
             ("Bash", json!({}), "Bash"),
             ("Bash", json!({"description":" \n "}), "Bash"),
-            (
-                "Read",
-                json!({"description":"inspect files"}),
-                "Read inspect files",
-            ),
-            (
-                "bash",
-                json!({"description":"inspect files"}),
-                "bash inspect files",
-            ),
+            ("Read", json!({"description":"inspect files"}), "Read"),
+            ("bash", json!({"description":"inspect files"}), "bash"),
         ] {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             writeln!(file, "{}", tool(1, "call", "a", name, input)).unwrap();
@@ -3047,7 +2636,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn parallel_calls_apply_bash_description_per_call() {
+    fn parallel_calls_use_declared_subjects_or_tool_names() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for r in [
             tool(
@@ -3070,7 +2659,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "inspect files，Bash，Read read config");
+        assert_eq!(events[0].body, "inspect files，Bash，Read");
     }
 
     #[test]
@@ -3120,7 +2709,7 @@ pub(crate) mod tests {
             events[1].started_at,
             "2026-10-06T16:39:29.554Z".parse::<DateTime<Utc>>().unwrap()
         );
-        assert_eq!(events[2].body, "Read src/main.rs，Grep needle");
+        assert_eq!(events[2].body, "Read，Grep");
         assert_eq!(events[2].started_at, at(30));
         assert_eq!(events[2].ended_at, Some(at(35)));
         assert_eq!(events[3].body, "build *");
@@ -3163,8 +2752,9 @@ pub(crate) mod tests {
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Error);
-        assert_eq!(events[0].body, "Read a b");
-        assert_eq!(events[0].paths, [5..6, 7..8]);
+        assert_eq!(events[0].body, "Read，b");
+        assert_eq!(events[0].paths.len(), 1);
+        assert_eq!(events[0].paths[0], "Read，".len().."Read，b".len());
         assert_eq!(events[0].ended_at, None);
         assert_eq!(events[0].started_at, at(1));
     }
@@ -3197,10 +2787,7 @@ pub(crate) mod tests {
         assert_eq!(events[0].started_at, at(2));
         assert_eq!(events[0].previous_end, Some(at(1)));
         assert_eq!(events[0].ended_at, Some(at(5)));
-        assert_eq!(
-            events[0].body,
-            format!("Read {}，Read b", "x".repeat(70_000))
-        );
+        assert_eq!(events[0].body, "Read，Read");
     }
     #[test]
     fn stops_in_the_tail_of_a_large_file() {

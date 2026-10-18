@@ -10,16 +10,16 @@
  Task log example ❮ Running in a terminal · /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                        Please inspect the task                             11:58:00
-                                     Bash: Create Unsafe Agents                                 15s
-                                         Bash: Safety Check                                     10s
-                                           Edit: Dangerous                                      10s
+                                                Bash                                            15s
+                                                Bash                                            10s
+                                                Edit                                            10s
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- Edit                                           Edit                                            10s
-
+                                                Edit                                            10s
 
                                                   ↓
  Reason: The server-side auto mode classifier judged this action dangerous (it gave no e…
+
 
  ? help  esc back  ↑/↓ move  enter open  n new
