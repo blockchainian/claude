@@ -985,7 +985,11 @@ impl View {
                 )
                 .into(),
                 truncate_line_with_ellipsis_if_overflow(
-                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
+                    style::exit_code_line(
+                        label,
+                        activity.exit_code,
+                        style::log_styles(&activity.kind).1,
+                    ),
                     width,
                 )
                 .into(),

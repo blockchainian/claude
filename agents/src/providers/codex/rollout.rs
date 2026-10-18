@@ -140,7 +140,7 @@ fn list_title(
                 .or(subject.filter(|text| !text.is_empty()))
                 .unwrap_or(display_name);
             match exit_code {
-                Some(code) => format!("{title} (exit {code})"),
+                Some(code) => format!("{title} ({code})"),
                 None => title.to_owned(),
             }
         }
@@ -1132,6 +1132,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         {
             summary.detail_sources[0] = Some(source(&record, offset));
             summary.activity = Some(Activity {
+                exit_code: event.calls.first().and_then(|call| call.exit_code),
                 kind: event.kind,
                 label: event.body,
                 at,
@@ -1146,7 +1147,12 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             };
             if let Some((kind, label)) = activity {
                 summary.detail_sources[0] = Some(source(&record, offset));
-                summary.activity = Some(Activity { kind, label, at });
+                summary.activity = Some(Activity {
+                    exit_code: None,
+                    kind,
+                    label,
+                    at,
+                });
             }
         }
         Ok(!(boundary
@@ -1906,7 +1912,7 @@ mod tests {
         failed["exit_code"] = 2.into();
         assert_eq!(
             completed_call(&failed, Some("yarn tsc".into())).title,
-            "yarn tsc (exit 2)"
+            "yarn tsc (2)"
         );
         let mut empty = record["payload"]["item"].clone();
         empty["exit_code"] = 0.into();

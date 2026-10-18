@@ -447,6 +447,7 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
         vec![DetailSection {
             title: TitleRow {
                 left: event.sender.clone(),
+                exit_code: None,
                 title: if event.kind == Kind::Tool {
                     event.body.clone()
                 } else {
@@ -469,7 +470,7 @@ fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
         if left.is_empty() {
             left = call.name.clone();
         }
-        left.push_str(&format!(" · exit {code}"));
+        left.push_str(&format!(" · {code}"));
     }
     (
         (!left.is_empty()).then_some(left),
@@ -489,6 +490,7 @@ fn parts(event: &Event) -> Vec<DetailSection> {
             let mut sections = vec![DetailSection {
                 title: TitleRow {
                     left,
+                    exit_code: call.exit_code.filter(|code| *code != 0),
                     title,
                     title_style: label_style,
                     time: call
@@ -517,6 +519,7 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                         sections.push(DetailSection {
                             title: TitleRow {
                                 left: None,
+                                exit_code: None,
                                 title: label.clone(),
                                 title_style: label_style,
                                 time: None,
@@ -859,7 +862,7 @@ mod tests {
             assert_eq!(detail.sections.len(), count);
             for section in &detail.sections {
                 let title = &section.title;
-                assert_eq!(title.left.as_deref(), Some("general-purpose · exit 1"));
+                assert_eq!(title.left.as_deref(), Some("general-purpose · 1"));
                 assert_eq!(title.title, "Inspect source");
                 assert_eq!(
                     title.time.as_deref(),
@@ -882,12 +885,9 @@ mod tests {
         call.detail_title = "Agent".into();
         assert_eq!(call_title(&call).1, "Agent");
         call.detail_left = "Task call-id".into();
-        assert_eq!(
-            call_title(&call).0.as_deref(),
-            Some("Task call-id · exit 1")
-        );
+        assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id · 1"));
         call.detail_left = "Read".into();
-        assert_eq!(call_title(&call).0.as_deref(), Some("Read · exit 1"));
+        assert_eq!(call_title(&call).0.as_deref(), Some("Read · 1"));
     }
 
     #[test]

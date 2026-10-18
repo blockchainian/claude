@@ -786,6 +786,7 @@ fn read_messages(
                 })
         {
             summary.activity = Some(Activity {
+                exit_code: None,
                 kind,
                 label: label.to_owned(),
                 at,

@@ -34,6 +34,7 @@ pub(super) fn detail_columns(panel: Rect, list: Rect) -> DetailColumns {
 /// optional time in the time column. Every section uses it.
 pub(super) struct TitleRow {
     pub left: Option<String>,
+    pub exit_code: Option<i64>,
     pub title: String,
     /// The style of the centered title.
     pub title_style: Style,

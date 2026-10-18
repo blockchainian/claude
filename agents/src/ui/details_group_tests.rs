@@ -26,6 +26,7 @@ fn section_labels_stay_centered_before_right_values() {
     row.last_message = Some("Reply".into());
     row.last_message_at = Some(now - Duration::seconds(7));
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Thinking".into(),
         at: now - Duration::seconds(7),

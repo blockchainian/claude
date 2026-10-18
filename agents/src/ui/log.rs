@@ -1144,7 +1144,14 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         let (text, paths) = display_paths(event, cwd);
         let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width, cwd);
         FittedBody {
-            line: Line::from(Span::styled(shortened, body_style)),
+            line: super::style::exit_code_line(
+                shortened,
+                match event.calls.as_slice() {
+                    [call] => call.exit_code,
+                    _ => None,
+                },
+                body_style,
+            ),
             source: text,
             paths,
         }

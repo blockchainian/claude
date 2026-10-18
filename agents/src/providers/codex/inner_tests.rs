@@ -59,10 +59,11 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "type (exit 1)");
+    assert_eq!(entries[0].body, "type (1)");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
+    assert_eq!(activity.exit_code, Some(1));
 }
 
 #[test]

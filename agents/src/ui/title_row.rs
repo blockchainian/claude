@@ -42,10 +42,14 @@ impl TitleRow {
         }
         let label = self.left_label(padding);
 
-        let mut spans = vec![Span::styled(
-            format!("{label}{}", " ".repeat(padding - label.width())),
-            self.meta_style,
-        )];
+        let label_width = label.width();
+        let mut spans = label.spans;
+        if padding > label_width {
+            spans.push(Span::styled(
+                " ".repeat(padding - label_width),
+                self.meta_style,
+            ));
+        }
         let title_width = title.width();
         spans.extend(title.spans);
         spans.push(Span::styled(
@@ -61,13 +65,13 @@ impl TitleRow {
     }
 
     fn left_label(&self, width: usize) -> Line<'static> {
+        let text = self
+            .left
+            .as_deref()
+            .unwrap_or("")
+            .replace(['\n', '\r', '\t'], " ");
         truncate_line_with_ellipsis_if_overflow(
-            Line::from(
-                self.left
-                    .as_deref()
-                    .unwrap_or("")
-                    .replace(['\n', '\r', '\t'], " "),
-            ),
+            super::style::exit_code_line(text, self.exit_code, self.meta_style),
             width,
         )
     }
@@ -85,6 +89,7 @@ mod tests {
     fn row(title: &str) -> TitleRow {
         TitleRow {
             left: None,
+            exit_code: None,
             title: title.into(),
             title_style: Style::new().fg(Color::Blue).bold(),
             time: Some("12s".into()),
@@ -176,10 +181,23 @@ mod tests {
         let (line, maps) = row.line(columns);
         let left_width = usize::from(maps.first().unwrap().0.start);
         assert_eq!(left_width, 18);
-        assert!(line.spans[0].content.ends_with('…'));
-        assert_eq!(line.spans[0].width(), left_width);
-        assert_eq!(line.spans[0].style, row.meta_style);
-        assert_eq!(line.spans[1].style, row.title_style);
+        let mut buffer = ratatui::buffer::Buffer::empty(columns.text);
+        ratatui::widgets::Widget::render(line.clone(), columns.text, &mut buffer);
+        assert_eq!(
+            buffer[(columns.text.x + left_width as u16 - 1, columns.text.y)].symbol(),
+            "…"
+        );
+        for x in columns.text.x..columns.text.x + left_width as u16 {
+            assert!(
+                buffer[(x, columns.text.y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+        }
+        assert_eq!(
+            buffer[(columns.text.x + left_width as u16, columns.text.y)].fg,
+            row.title_style.fg.unwrap()
+        );
         assert_eq!(
             maps.iter()
                 .map(|(_, bytes)| &row.title[bytes.clone()])

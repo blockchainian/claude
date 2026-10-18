@@ -1,6 +1,6 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────── Task log example ───────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │                                 type (exit 1)
+              /tmp/project              │                 Prompt                 │                                   type (1)
  ● Task log example         Working     │ Task log example                       │       Apply Patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms
                                         │                                        │                               Claude Ask Claude                          28s
                                         │                                        │                                   Extension                               1s

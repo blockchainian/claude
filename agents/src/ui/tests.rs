@@ -2725,6 +2725,7 @@ fn details_activity_and_message_are_independent() {
     row.turn_messages = 42;
     row.last_record_at = Some(now - Duration::seconds(3595));
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: now - Duration::seconds(7),
@@ -2807,6 +2808,7 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
     let activity = "Check reports/activity.md";
     let message = "Reply reports/reply.md";
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: activity.into(),
         at: now,
@@ -2868,6 +2870,7 @@ fn details_activity_uses_tool_color() {
     let now = Utc::now();
     let mut row = session("activity", "Activity task", SessionStatus::Ready, 0);
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: now - Duration::minutes(2),
@@ -2909,6 +2912,7 @@ fn details_message_uses_model_color_under_markdown() {
     let now = Utc::now();
     let mut row = session("message", "Message task", SessionStatus::Ready, 0);
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: now - Duration::minutes(5),
@@ -3551,6 +3555,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 fn details_sections_run_tasks_background_prompt_update_activity() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: Utc::now(),
@@ -3640,6 +3645,7 @@ fn details_background_includes_only_working_subagents() {
     worker.parent = Some(parent.id.clone());
     worker.started_at = Some(now - Duration::seconds(65));
     worker.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Read files\nextra line".into(),
         at: now,
@@ -6698,6 +6704,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
     let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
     row.pending_questions = vec!["Pick a color?".into()];
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: crate::log::Kind::Assistant,
         label: "Pick a color?".into(),
         at: Utc::now(),
@@ -8796,6 +8803,7 @@ fn details_click_selects_source(index: usize, label: &'static str) {
     let prompt = view.log[0].clone();
     let row = &mut view.rows[view.selected];
     row.activity = Some(crate::model::Activity {
+        exit_code: None,
         kind: activity.kind.clone(),
         label: activity.body.clone(),
         at: activity.started_at,

@@ -57,13 +57,13 @@ fn terminal_codex_exit_sections() {
     );
     let capture = tmux.capture_when(|capture| {
         capture.contains("Exec Command")
-            && capture.contains("exit 1")
+            && capture.contains("· 1")
             && capture.contains("[scrubbed]")
     });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
     assert_eq!(capture.matches("Exec Command").count(), 1, "{capture}");
-    assert!(capture.contains("false (exit 1)"), "{capture}");
+    assert!(capture.contains("false (1)"), "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
@@ -74,12 +74,42 @@ fn terminal_codex_exit_sections() {
     assert!(rows[status + 2].contains("false"), "{capture}");
     assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
     assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
-    assert!(rows[status].contains("Exec Command · exit 1"), "{capture}");
+    assert!(rows[status].contains("Exec Command · 1"), "{capture}");
     assert!(rows[status].contains("false"), "{capture}");
-    println!(
-        "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
-        path.display()
-    );
+    let ansi = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&ansi, 160, 45);
+    let screen = parser.screen();
+    for (marker, count) in [("Exec Command · 1", 1), ("false (1)", 2)] {
+        let rows: Vec<_> = screen
+            .rows(0, 160)
+            .enumerate()
+            .filter(|(_, row)| row.contains(marker))
+            .collect();
+        assert_eq!(rows.len(), count, "{capture}");
+        for (row, text) in rows {
+            let start = text[..text.find(marker).unwrap()].width();
+            let digit = start + marker.trim_end_matches(')').width() - 1;
+            assert_eq!(
+                screen.cell(row as u16, digit as u16).unwrap().fgcolor(),
+                vt100::Color::Idx(1)
+            );
+            assert_ne!(
+                screen
+                    .cell(row as u16, (digit - 2) as u16)
+                    .unwrap()
+                    .fgcolor(),
+                vt100::Color::Idx(1)
+            );
+        }
+    }
+    assert!(!capture.contains("exit"), "{capture}");
+    let verdict = serde_json::json!({"verdict": "pass", "capture": path});
+    std::fs::write(
+        std::env::temp_dir().join("agents-exit-status-verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
 }
 
 #[test]
@@ -174,7 +204,7 @@ fn terminal_failed_plain_output_uses_default_foreground() {
         (
             "command-failed-output",
             include_str!("../fixtures/codex-command-failed.jsonl"),
-            ("Exec Command · exit 1", "Exec Command"),
+            ("Exec Command · 1", "Exec Command"),
             "[scrubbed]",
         ),
     ] {

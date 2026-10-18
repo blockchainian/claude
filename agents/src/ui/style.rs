@@ -150,3 +150,24 @@ pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
 pub(super) fn log_jump_style() -> Style {
     Style::default().bold().not_dim()
 }
+
+/// Keep a command label's style while coloring only its non-zero exit status.
+pub(super) fn exit_code_line(text: String, code: Option<i64>, style: Style) -> Line<'static> {
+    if let Some(code) = code.filter(|code| *code != 0) {
+        let digits = code.to_string();
+        let status = [
+            (format!(" · {digits}"), " · ", ""),
+            (format!(" ({digits})"), " (", ")"),
+        ];
+        for (suffix, separator, closing) in status {
+            if let Some(prefix) = text.strip_suffix(&suffix) {
+                return Line::from(vec![
+                    Span::styled(format!("{prefix}{separator}"), style),
+                    Span::styled(digits, log_styles(&crate::log::Kind::Error).1.not_dim()),
+                    Span::styled(closing, style),
+                ]);
+            }
+        }
+    }
+    Line::from(Span::styled(text, style))
+}
