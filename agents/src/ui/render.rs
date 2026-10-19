@@ -666,16 +666,17 @@ impl View {
             .filter(fits);
         let elapsed = elapsed.map(|elapsed| {
             let mut spans = Vec::new();
-            if let Some(seconds) = session
+            // An expired prompt cache shows ⏸︎ where its countdown was.
+            if let Some(remaining) = session
                 .and_then(|session| session.cache_expires_at)
                 .map(|expires| expires - now)
-                .filter(|remaining| {
-                    *remaining >= chrono::Duration::seconds(1)
-                        && *remaining <= chrono::Duration::minutes(15)
-                })
-                .map(|remaining| remaining.num_seconds())
+                .filter(|remaining| *remaining <= chrono::Duration::minutes(15))
             {
-                let countdown = format_duration(seconds);
+                let countdown = if remaining < chrono::Duration::seconds(1) {
+                    "⏸\u{fe0e}".to_owned()
+                } else {
+                    format_duration(remaining.num_seconds())
+                };
                 if fits(&format!("{countdown} · {elapsed}")) {
                     spans.push(Span::styled(countdown, style::error_style()));
                     spans.push(" · ".dim());

@@ -11,7 +11,7 @@ fn visible(cell: &ratatui::buffer::Cell) -> &str {
 }
 
 #[test]
-fn prompt_cache_countdown_uses_error_style_before_wall_time() {
+fn prompt_cache_countdown_or_expiry_uses_error_style_before_wall_time() {
     let now = DateTime::UNIX_EPOCH + Duration::days(20_000);
     for seconds in [
         None,
@@ -40,14 +40,18 @@ fn prompt_cache_countdown_uses_error_style_before_wall_time() {
             let row = (0..width)
                 .map(|x| visible(&buf[(x, y)]))
                 .collect::<String>();
-            if let Some(seconds) = seconds.filter(|seconds| (1..=900).contains(seconds)) {
-                let countdown = formatting::format_duration(seconds);
+            if let Some(seconds) = seconds.filter(|seconds| *seconds <= 900) {
+                let countdown = if seconds < 1 {
+                    "⏸\u{fe0e}".to_owned()
+                } else {
+                    formatting::format_duration(seconds)
+                };
                 let expected = format!("{countdown} · 2h 0m");
                 assert!(row.contains(&expected), "{width} {seconds}: {row}");
                 let x = row[..row.find(&expected).unwrap()].chars().count() as u16;
                 assert_eq!(buf[(x, y)].fg, style::error_style().fg.unwrap());
                 assert!(!buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
-                let wall_x = x + countdown.len() as u16 + 3;
+                let wall_x = x + countdown.width() as u16 + 3;
                 assert!(
                     buf[(wall_x, y)]
                         .modifier
