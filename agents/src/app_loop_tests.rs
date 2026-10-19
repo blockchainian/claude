@@ -24,7 +24,7 @@ fn idle_loop_finishes_click_without_delaying_log_selection() {
     )
     .unwrap();
     let preferences = Preferences {
-        double_click_ms: 120,
+        double_click_ms: 20,
         ..Preferences::default()
     };
     preferences.save(directory.path()).unwrap();

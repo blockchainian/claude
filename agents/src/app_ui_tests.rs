@@ -3,6 +3,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use ratatui::backend::TestBackend;
 
 fn fixture() -> (tempfile::TempDir, App) {
+    fixture_with_double_click_ms(Preferences::default().double_click_ms)
+}
+
+fn fixture_with_double_click_ms(double_click_ms: u64) -> (tempfile::TempDir, App) {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("projects/probe");
     crate::providers::claude::write_fixture_cache(directory.path());
@@ -11,6 +15,12 @@ fn fixture() -> (tempfile::TempDir, App) {
         project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
         include_bytes!("../tests/fixtures/transcript.jsonl"),
     )
+    .unwrap();
+    Preferences {
+        double_click_ms,
+        ..Preferences::default()
+    }
+    .save(directory.path())
     .unwrap();
     let mut app = App::new(
         Hub::new(vec![Box::new(
@@ -478,7 +488,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
 
 #[test]
 fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() {
-    let (directory, mut app) = fixture();
+    let (directory, mut app) = fixture_with_double_click_ms(20);
     let repository = directory.path().join("repository");
     std::fs::create_dir(&repository).unwrap();
     for arguments in [
@@ -601,7 +611,7 @@ fn detail(buffer: &ratatui::buffer::Buffer) -> String {
 #[test]
 fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
-        let (_directory, mut app) = fixture();
+        let (_directory, mut app) = fixture_with_double_click_ms(20);
         let path = app.sessions[0].transcript.clone().unwrap();
         let payload = include_str!("../tests/fixtures/transcript.jsonl");
         let records: Vec<_> = payload.split_inclusive('\n').collect();
@@ -697,7 +707,7 @@ fn narrow_and_wide_log_double_click_focuses_list_and_keeps_preview_following() {
 #[test]
 fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
-        let (_directory, mut app) = fixture();
+        let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
         let original = detail(&draw_size(&mut app, width, height));
         let initial = draw_size(&mut app, width, height);
@@ -745,7 +755,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
 #[test]
 fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
     for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
-        let (_directory, mut app) = fixture();
+        let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
         let prompt = position(&buffer, "❯").1;
@@ -787,6 +797,7 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
     // The wide detail must stay one row short of its event so that the wheel has room to scroll.
     for (width, height) in [(120, 30), (100, 30), (180, 23)] {
         let (_directory, mut app) = border_fixture();
+        app.view.set_double_click_ms(20);
         let buffer = draw_size(&mut app, width, height);
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
@@ -1095,7 +1106,7 @@ mod details_alignment;
 fn app_log_padding_and_clicks_follow_real_transcript_rows() {
     for width in [149, 200] {
         for edge in [false, true] {
-            let (_directory, mut app) = fixture();
+            let (_directory, mut app) = fixture_with_double_click_ms(20);
             select_archive(&mut app);
             let buffer = draw(&mut app, width);
             let separators: Vec<_> = (0..width)
