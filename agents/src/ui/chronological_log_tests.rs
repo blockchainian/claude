@@ -69,7 +69,10 @@ fn sending_a_prompt_returns_the_log_to_live_tail() {
 
 #[test]
 fn escape_stopping_a_running_turn_returns_its_prompt_to_the_input() {
-    for (status, restored) in [(SessionStatus::Working, true), (SessionStatus::Ready, false)] {
+    for (status, restored) in [
+        (SessionStatus::Working, true),
+        (SessionStatus::Ready, false),
+    ] {
         let (_dir, mut view, events) =
             transcript_view(include_str!("../../tests/fixtures/claude-start.jsonl"));
         view.set_log(events.clone());
@@ -286,10 +289,14 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
 #[test]
 fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
     use unicode_width::UnicodeWidthStr;
+    let (_dir, template, events) = fixture();
     for width in [60, 80, 100, 149, 150, 200] {
         for unseen in [3, 100_000_000] {
-            let (_dir, mut view, events) = fixture();
-            view.set_log(events);
+            let mut view = View::new(Grouping::Project, false);
+            view.set_sessions(template.rows.clone(), false);
+            view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            view.log_session = view.selected_id().cloned();
+            view.set_log(events.clone());
             view.select_log_event(Some(3));
             view.rows[view.selected].model =
                 Some("provider/model-with-a-very-long-display-name".into());
