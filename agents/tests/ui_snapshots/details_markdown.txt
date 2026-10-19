@@ -12,4 +12,4 @@ Use cargo and tests
 Project
 /tmp/project
 
-Model: Unknown
+Unknown

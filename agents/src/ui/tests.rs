@@ -1648,7 +1648,7 @@ fn details_include_attention_and_clip_messages() {
     view.set_sessions(vec![row], false);
     let rendered = screen(&view, 160, 50);
     for label in [
-        "Model: claude-opus",
+        "claude-opus",
         "Project · main",
         "main",
         "Needs attention",
@@ -1668,17 +1668,17 @@ fn details_include_attention_and_clip_messages() {
     assert!(position("Last message") < position("Prompt"));
     assert!(position("Prompt") < position("Project ·"));
     assert!(position("Project ·") < project);
-    assert!(project < position("Model: claude-opus"));
+    assert!(project < position("claude-opus"));
     assert!(
         rendered
             .lines()
-            .any(|line| line.contains("Model: claude-opus · high"))
+            .any(|line| line.contains("claude-opus · high"))
     );
     assert!(!rendered.contains("Reasoning"));
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 20)].symbol(), "M");
+    assert_eq!(buf[(0, 20)].symbol(), "c");
     assert_eq!(buf[(0, 21)].symbol(), " ");
 }
 
@@ -2678,7 +2678,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     }
     buf.reset();
     view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 4), "Model: Unknown");
+    assert_eq!(line(&buf, 4), "Unknown");
     assert_eq!(line(&buf, 5), "");
 }
 
@@ -2752,7 +2752,7 @@ fn details_background_boxes_tail_and_clip_output() {
     assert!(clipped.starts_with("Background\n…\n"));
     assert!(clipped.contains("Last message"));
     assert!(clipped.contains("Project"));
-    assert!(clipped.ends_with("Model: Unknown"));
+    assert!(clipped.ends_with("Unknown"));
     assert!(!clipped.contains("xxxxxxxx"));
 }
 
@@ -3609,7 +3609,7 @@ mod details_budget {
         assert!(!rows.iter().any(|line| line.contains("Check 5")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
         assert!(rows.iter().any(|line| line == "Prompt text…"));
-        assert!(rows[22].starts_with("Model:"));
+        assert!(rows[22].starts_with("Unknown"));
         assert!(rows[23].is_empty());
     }
 
@@ -3666,7 +3666,7 @@ mod details_budget {
         for header in ["Prompt", "Last message", "Needs attention"] {
             assert!(rest.iter().any(|line| line == header), "{header}: {rest:?}");
         }
-        assert!(rest[22].starts_with("Model:"));
+        assert!(rest[22].starts_with("Unknown"));
         assert!(rest[23].is_empty());
         let prompt = rest.iter().position(|line| line == "Prompt").unwrap();
         let project = rest.iter().position(|line| line == "Project").unwrap();
@@ -4747,7 +4747,7 @@ mod subagent_rows {
             .unwrap();
         assert!(header.contains("Working · Check files"), "{header}");
         let rendered = screen(&view, 120, 30);
-        assert!(rendered.contains("Model: child-model"));
+        assert!(rendered.contains("child-model"));
         assert!(!rendered.contains("Needs attention"));
         let (x, y) = rendered_cell(&rendered, "Review results");
         click_mouse(
@@ -6880,4 +6880,158 @@ fn background_delete_confirmation_explains_agents_worktree_retention() {
         shown.contains("Worktrees and") && shown.contains("branches created by agents remain."),
         "{shown}"
     );
+}
+
+#[test]
+fn details_model_has_no_prefix() {
+    let mut row = session("weekly", "Weekly task", SessionStatus::Ready, 0);
+    row.model = Some("claude-opus".into());
+    row.effort = Some("high".into());
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 100, 20);
+    let mut buffer = Buffer::empty(area);
+    view.render_details(area, &mut buffer, Utc::now());
+    let lines = buffer
+        .content
+        .chunks(100)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>();
+    assert!(
+        lines.iter().any(|line| line.trim() == "claude-opus · high"),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn details_weekly_usage_text_and_targets() {
+    use crate::providers::WeeklyUsage;
+    let mut row = session("weekly", "Weekly task", SessionStatus::Ready, 0);
+    row.model = Some("claude-opus".into());
+    row.effort = Some("high".into());
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let reset = chrono::DateTime::parse_from_rfc3339("2026-10-23T15:59:59.800627+00:00")
+        .unwrap()
+        .with_timezone(&Utc);
+    let render = |view: &View| {
+        let area = Rect::new(5, 3, 100, 20);
+        let mut buffer = Buffer::empty(area);
+        view.render_details(area, &mut buffer, Utc::now());
+        buffer
+            .content
+            .chunks(100)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(!render(&view).contains("weekly"));
+    for (left, suffix) in [
+        (82, "".to_owned()),
+        (20, "".to_owned()),
+        (
+            2,
+            format!(
+                " · resets {}",
+                reset.with_timezone(&chrono::Local).format("%a %H:%M")
+            ),
+        ),
+    ] {
+        view.weekly_usage.insert(
+            ProviderId::Claude,
+            WeeklyUsage {
+                left_percent: left,
+                resets_at: Some(reset),
+            },
+        );
+        let text = render(&view);
+        assert!(
+            text.contains(&format!("claude-opus · high · weekly {left}% left{suffix}")),
+            "{text}"
+        );
+        assert_eq!(text.contains("resets"), left < 20);
+        if left == 82 {
+            assert_eq!(
+                text.trim_end().to_owned() + "\n\n",
+                include_str!("../../tests/ui_snapshots/details_weekly_usage.txt")
+            );
+        }
+        let targets = &view.viewport.borrow().field_targets;
+        let model = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0;
+        let effort = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Effort)
+            .unwrap()
+            .0;
+        assert_eq!((model.x, model.width), (5, 11));
+        assert_eq!((effort.x, effort.width), (19, 4));
+    }
+    view.weekly_usage
+        .get_mut(&ProviderId::Claude)
+        .unwrap()
+        .resets_at = None;
+    assert!(!render(&view).contains("resets"));
+    view.rows[0].effort = None;
+    assert!(render(&view).contains("claude-opus · weekly 2% left"));
+    view.rows[0].id.provider = ProviderId::Codex;
+    assert!(!render(&view).contains("weekly"));
+}
+
+#[test]
+#[ignore = "reads local credentials and live provider usage; requires the running Codex daemon"]
+fn details_weekly_usage_live_accounts() {
+    let (mut hub, _) = crate::providers::configured().unwrap();
+    let sessions = hub.refresh().sessions;
+    let jobs = hub.weekly_usage_jobs(std::time::Instant::now());
+    let workers = jobs
+        .into_iter()
+        .map(|(provider, job)| (provider, std::thread::spawn(job)))
+        .collect::<Vec<_>>();
+    for (provider, worker) in workers {
+        hub.weekly_usage_complete(provider, worker.join().unwrap());
+    }
+    let mut lines = Vec::new();
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        assert!(
+            hub.weekly_usage().contains_key(&provider),
+            "{provider}: live weekly usage unavailable"
+        );
+        let row = sessions
+            .iter()
+            .find(|row| row.id.provider == provider && row.model.is_some())
+            .expect("real session with model")
+            .clone();
+        let mut view = test_view(Grouping::Project, false);
+        view.weekly_usage = hub.weekly_usage().clone();
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, 160, 80);
+        let mut buffer = Buffer::empty(area);
+        view.render_details(area, &mut buffer, Utc::now());
+        let text = buffer
+            .content
+            .chunks(160)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .find(|line| line.contains(" · weekly "))
+            .expect("rendered live usage line");
+        assert!(!text.contains("Model: "));
+        println!("{provider}: {}", text.trim());
+        lines.push(text.trim().to_owned());
+    }
+    if let Some(path) = std::env::var_os("AGENTS_USAGE_PROBE_RESULT") {
+        std::fs::write(
+            path,
+            serde_json::to_vec(&serde_json::json!({"verdict":"passed","lines":lines})).unwrap(),
+        )
+        .unwrap();
+    }
 }

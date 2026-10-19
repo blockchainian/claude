@@ -8,4 +8,4 @@ Question task
 Project
 /tmp/project
 
-Model: Unknown
+Unknown

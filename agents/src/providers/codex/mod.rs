@@ -8,7 +8,9 @@ mod send_tests;
 #[cfg(test)]
 mod tests;
 
-use super::{Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot};
+use super::{
+    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, WeeklyUsageJob,
+};
 use crate::{
     log,
     model::{Action, Process, Session, SessionStatus},
@@ -389,6 +391,13 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 impl Provider for CodexProvider {
     fn id(&self) -> ProviderId {
         ProviderId::Codex
+    }
+    fn weekly_usage(&self) -> Option<WeeklyUsageJob> {
+        let home = self.home.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::account::weekly_usage(&mut client)
+        }))
     }
     fn capabilities(&self) -> Capabilities {
         Capabilities {

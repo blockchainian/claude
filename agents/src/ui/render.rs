@@ -772,9 +772,23 @@ impl View {
             }
             None => None,
         };
-        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
+        let mut model = vec![session.model_name().to_owned().into()];
         if let Some(effort) = effort {
             model.extend([" · ".dim(), effort.to_owned().into()]);
+        }
+        if let Some(usage) = self.weekly_usage.get(&session.id.provider) {
+            model.push(format!(" · weekly {}% left", usage.left_percent).dim());
+            if usage.left_percent < 20
+                && let Some(resets_at) = usage.resets_at
+            {
+                model.push(
+                    format!(
+                        " · resets {}",
+                        resets_at.with_timezone(&chrono::Local).format("%a %H:%M")
+                    )
+                    .dim(),
+                );
+            }
         }
         let mut model_item = items.len() + 1;
         // A blank row keeps the model off the bottom rule.
@@ -947,15 +961,14 @@ impl View {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if item_index == model_item {
-                    let model_width = ("Model: ".width() + session.model_name().width())
-                        .min(usize::from(area.width)) as u16;
+                    let model_width =
+                        session.model_name().width().min(usize::from(area.width)) as u16;
                     self.viewport
                         .borrow_mut()
                         .field_targets
                         .push((Rect::new(area.x, y, model_width, 1), Field::Model));
                     if let Some(effort) = effort {
-                        let offset =
-                            "Model: ".width() + session.model_name().width() + " · ".width();
+                        let offset = session.model_name().width() + " · ".width();
                         let rect = Rect::new(area.x + offset as u16, y, effort.width() as u16, 1)
                             .intersection(area);
                         if !rect.is_empty() {

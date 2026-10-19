@@ -1,0 +1,8 @@
+Prompt
+Weekly task
+
+Project
+/tmp/project
+
+claude-opus · high · weekly 82% left
+

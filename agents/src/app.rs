@@ -31,6 +31,10 @@ use std::time::Instant;
 const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 
 enum Input {
+    WeeklyUsage {
+        provider: ProviderId,
+        result: io::Result<Option<crate::providers::WeeklyUsage>>,
+    },
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
     Created {
@@ -232,6 +236,7 @@ impl App {
                 return Ok(());
             }
             self.view.expire_messages(Instant::now());
+            self.refresh_weekly_usage();
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
@@ -304,6 +309,10 @@ impl App {
         let mut next = Some(first);
         while let Some(input) = next.take().or_else(|| self.receiver.try_recv().ok()) {
             match input {
+                Input::WeeklyUsage { provider, result } => {
+                    self.hub.weekly_usage_complete(provider, result);
+                    self.view.weekly_usage = self.hub.weekly_usage().clone();
+                }
                 Input::Terminal(event) => {
                     if self.handle_event(event?) {
                         return Ok(true);
@@ -541,6 +550,18 @@ impl App {
         };
         if changed || self.view.usage_session() != Some(&session.id) {
             self.view.set_usage(&session.id, series.bins.clone());
+        }
+    }
+
+    fn refresh_weekly_usage(&mut self) {
+        for (provider, job) in self.hub.weekly_usage_jobs(Instant::now()) {
+            let sender = self.sender.clone();
+            thread::spawn(move || {
+                let _ = sender.send(Input::WeeklyUsage {
+                    provider,
+                    result: job(),
+                });
+            });
         }
     }
 

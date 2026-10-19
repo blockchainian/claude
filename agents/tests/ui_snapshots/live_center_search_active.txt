@@ -7,7 +7,7 @@
   › ○ Task to find                          │ Project
                                             │ /tmp/project
                                             │
-                                            │ Model: Unknown
+                                            │ Unknown
                                             │
                                             │
                                             │

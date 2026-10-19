@@ -7,7 +7,7 @@
     ● Needs an answer                                                     Needs input     2h ago  │ Project
                                                                                                   │ /tmp/project
   /tmp/project  4                                                                                 │
-    ○ A longer task title that uses the available column                  Ready           5m ago  │ Model: Unknown
+    ○ A longer task title that uses the available column                  Ready           5m ago  │ Unknown
     ● Failed task                                                         Needs input     1h ago  │
     ● Working task                                                        Working         1d ago  │
     ○ Unloaded task                                                       Inactive        2d ago  │
