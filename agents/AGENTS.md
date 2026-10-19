@@ -27,8 +27,6 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ### Install
 
-> Install into `~/.cargo/bin`, the `agents` on PATH.
-
 - `cargo install --path . --locked` — builds and installs the current source
 
 ## Checks
