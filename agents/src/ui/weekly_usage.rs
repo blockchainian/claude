@@ -15,6 +15,17 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
 }
 
 fn detailed_provider_text(name: &str, usage: &WeeklyUsage, left: bool) -> String {
+    let details = provider_details(usage, left);
+    if details.is_empty() {
+        name.to_owned()
+    } else if left {
+        format!("{details} {name}")
+    } else {
+        format!("{name} {details}")
+    }
+}
+
+fn provider_details(usage: &WeeklyUsage, left: bool) -> String {
     let reset = usage.resets_at.map(|reset| {
         let reset = reset + chrono::Duration::seconds(30);
         format!(
@@ -31,14 +42,18 @@ fn detailed_provider_text(name: &str, usage: &WeeklyUsage, left: bool) -> String
     } else {
         [reset, credits]
     };
-    let details = parts.into_iter().flatten().collect::<Vec<_>>().join(", ");
-    if details.is_empty() {
-        name.to_owned()
-    } else if left {
-        format!("{details} {name}")
+    parts.into_iter().flatten().collect::<Vec<_>>().join(", ")
+}
+
+fn half_width(width: u16, available: [u16; 2]) -> u16 {
+    let budget = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        width / 2
     } else {
-        format!("{name} {details}")
-    }
+        (usize::from(width) * 3 / 4) as u16
+    };
+    ((budget.saturating_sub(1)) / 2)
+        .min(available[0].saturating_sub(1))
+        .min(available[1].saturating_sub(1))
 }
 
 fn compact_provider(
@@ -132,15 +147,8 @@ pub(super) fn render(
         }
     }
     let names = ["Claude", "Codex"];
+    let half = half_width(area.width, available);
     if view == UsageView::Compact {
-        let budget = if area.width >= super::render::WIDE_LAYOUT_COLUMNS {
-            area.width / 2
-        } else {
-            (usize::from(area.width) * 3 / 4) as u16
-        };
-        let half = ((budget.saturating_sub(1)) / 2)
-            .min(available[0].saturating_sub(1))
-            .min(available[1].saturating_sub(1));
         let text_widths = std::array::from_fn::<_, 2, _>(|i| {
             usage[i].map_or(0, |usage| {
                 names[i].len() as u16 + provider_text(names[i], usage, view).len() as u16 + 3
@@ -184,52 +192,146 @@ pub(super) fn render(
         }
         return Some(Rect::new(center - half, area.y, half * 2 + 1, 1));
     }
-    let texts = std::array::from_fn::<_, 2, _>(|i| {
-        usage[i].map(|usage| detailed_provider_text(names[i], usage, i == 0))
-    });
+    let texts =
+        std::array::from_fn::<_, 2, _>(|i| usage[i].map(|usage| provider_details(usage, i == 0)));
     let widths = texts.each_ref().map(|text| {
         text.as_ref()
             .map_or(0, |text| Line::from(text.as_str()).width() as u16)
     });
-    if (0..2).any(|i| usage[i].is_some() && widths[i] + 2 > available[i]) {
+    if (0..2).any(|i| usage[i].is_some() && widths[i] + names[i].len() as u16 + 3 > half) {
         return None;
     }
-    let mut target = Rect::new(center, area.y, 1, 1);
+    let mut target = None::<Rect>;
     for i in 0..2 {
         if usage[i].is_none() {
             continue;
         }
-        let width = widths[i] + 1;
         let side = Rect::new(
-            if i == 0 { center - width } else { center + 1 },
+            if i == 0 { center - half } else { center + 1 },
             area.y,
-            width,
+            half,
             1,
         );
-        target = if i == 0 {
-            Rect::new(side.x, area.y, center + 1 - side.x, 1)
+        target = Some(target.map_or(side, |target| target.union(side)));
+        let details = texts[i].as_ref().unwrap();
+        let gap = " ".repeat(usize::from(half - widths[i] - names[i].len() as u16 - 2));
+        let text = if i == 0 {
+            format!(" {details}{gap}{} ", names[i])
         } else {
-            Rect::new(target.x, area.y, side.right() - target.x, 1)
+            format!(" {}{gap}{details} ", names[i])
         };
-        let text = texts[i].as_ref().unwrap().clone();
-        let line = Line::from(text);
-        let line = if i == 0 {
-            line.right_aligned()
-        } else {
-            line.left_aligned()
-        };
-        let text_area = Rect::new(side.x + u16::from(i == 1), side.y, side.width - 1, 1);
-        line.render(text_area, buf);
+        Line::from(text).render(side, buf);
     }
     if usage.iter().all(Option::is_some) {
         Line::from("·").render(Rect::new(center, area.y, 1, 1), buf);
     }
-    Some(target)
+    target
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detailed_usage_puts_details_at_outer_edges() {
+        let usage = WeeklyUsage {
+            used_percent: 21.0,
+            resets_at: Some("2026-10-23T16:00:00Z".parse().unwrap()),
+            reset_credits: Some(1),
+        };
+        let reset = usage
+            .resets_at
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%a %H:%M")
+            .to_string();
+        for (width, half) in [(200, 49), (149, 55)] {
+            for present in [[true, true], [true, false], [false, true]] {
+                let area = Rect::new(3, 2, width, 1);
+                let center = area.x + width / 2;
+                let mut buf = Buffer::empty(area);
+                let target = render(
+                    area,
+                    &[],
+                    present.map(|p| p.then_some(&usage)),
+                    UsageView::Detailed,
+                    false,
+                    &mut buf,
+                )
+                .unwrap();
+                let left = format!("1 credit, resets {reset}");
+                let right = format!("resets {reset}, 1 credit");
+                let expected_left = format!(" {left:<pad$}Claude ", pad = usize::from(half) - 8);
+                let expected_right = format!(" Codex{right:>pad$} ", pad = usize::from(half) - 7);
+                let row = (area.x..area.right())
+                    .map(|x| buf[(x, area.y)].symbol())
+                    .collect::<String>();
+                let cells = row.chars().collect::<Vec<_>>();
+                let middle = usize::from(width / 2);
+                assert_eq!(
+                    cells[middle],
+                    if present == [true, true] { '·' } else { ' ' }
+                );
+                for (i, expected) in [expected_left, expected_right].iter().enumerate() {
+                    let start = if i == 0 {
+                        middle - usize::from(half)
+                    } else {
+                        middle + 1
+                    };
+                    let actual = cells[start..start + usize::from(half)]
+                        .iter()
+                        .collect::<String>();
+                    assert_eq!(
+                        actual,
+                        if present[i] {
+                            expected.clone()
+                        } else {
+                            " ".repeat(usize::from(half))
+                        },
+                        "{width}, {present:?}"
+                    );
+                }
+                let expected = match present {
+                    [true, true] => Rect::new(center - half, area.y, half * 2 + 1, 1),
+                    [true, false] => Rect::new(center - half, area.y, half, 1),
+                    [false, true] => Rect::new(center + 1, area.y, half, 1),
+                    _ => unreachable!(),
+                };
+                assert_eq!(target, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn detailed_usage_requires_space_between_details_and_name() {
+        let usage = WeeklyUsage {
+            used_percent: 21.0,
+            resets_at: Some("2026-10-23T16:00:00Z".parse().unwrap()),
+            reset_credits: Some(12345),
+        };
+        // At 150 columns the budget shrinks; tabs can also reduce either half.
+        for (width, tabs) in [
+            (80, vec![]),
+            (150, vec![]),
+            (200, vec![(0, Rect::new(0, 0, 65, 1))]),
+            (200, vec![(0, Rect::new(136, 0, 64, 1))]),
+        ] {
+            let area = Rect::new(0, 0, width, 1);
+            let mut buf = Buffer::empty(area);
+            assert_eq!(
+                render(
+                    area,
+                    &tabs,
+                    [Some(&usage); 2],
+                    UsageView::Detailed,
+                    false,
+                    &mut buf
+                ),
+                None
+            );
+            assert!(buf.content.iter().all(|cell| cell.symbol() == " "));
+        }
+    }
 
     #[test]
     fn detailed_labels_stay_next_to_center() {

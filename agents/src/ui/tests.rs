@@ -10331,7 +10331,7 @@ fn task_header_weekly_usage_details_and_compact_reset() {
         let text = weekly_header(&view, width);
         if width == 160 {
             assert!(
-                text.contains("1 credit, resets ") && text.contains("Claude · Codex resets"),
+                text.contains("1 credit, resets ") && text.contains("Claude · Codex"),
                 "{text}"
             );
             assert!(text.contains("2 credits"));
