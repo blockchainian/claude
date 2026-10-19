@@ -717,11 +717,15 @@ impl View {
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
+        // Keep short branch labels intact; longer labels share the folder's width budget.
+        let right = right.map(|span| {
+            truncate_line_with_ellipsis_if_overflow(Line::from(span), folder_width.max(20))
+        });
         // The title stays centered on the whole rule, so the wider side label's width is kept
         // clear on both sides, plus the corner, one rule cell and a space on each side.
         let side = right
             .as_ref()
-            .map_or(0, |span| span.width())
+            .map_or(0, |line| line.width())
             .max(folder.width());
         let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
         let editor = self.title_editor();
@@ -778,7 +782,7 @@ impl View {
             rule,
             label_width,
             Some(Line::from(Span::styled(folder, style::time_style()))),
-            right.map(Line::from),
+            right,
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();

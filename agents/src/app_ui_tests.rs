@@ -856,25 +856,33 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
 
 #[test]
 fn new_key_without_selection_prepares_the_startup_repository() {
-    let (_directory, mut app) = fixture();
-    assert!(app.view.selected_id().is_none());
+    let (directory, mut app) = fixture();
+    let branch = "workstream/branch-name-tests";
     let output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["init", "-b", branch])
+        .current_dir(directory.path())
         .output()
         .unwrap();
-    assert!(output.status.success());
-    let branch = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        !branch.trim().is_empty(),
-        "test requires a checked-out branch"
-    );
+    assert!(output.status.success(), "{output:?}");
+    app.view.startup_cwd = directory.path().to_owned();
+    assert!(app.view.selected_id().is_none());
     key(&mut app, KeyCode::Char('n'));
     let buffer = draw(&mut app, 240);
     let rendered = lines(&buffer).join("\n");
     assert!(rendered.contains("New task"), "{rendered}");
+    let (title_x, title_y) = position(&buffer, "New task");
+    let separators: Vec<_> = (0..buffer.area.width)
+        .filter(|&x| buffer[(x, 2)].symbol() == "│")
+        .collect();
+    assert_eq!(separators.len(), 2);
+    let rule_start = separators[0];
+    let rule_end = separators[1] + 1;
+    assert_eq!(title_x, rule_start + (rule_end - rule_start - 10) / 2 + 1);
+    assert!(segment(&buffer, title_x + 8..rule_end, title_y).contains("workstream/"));
+    // A wider panel can show the complete branch alongside the centered title.
+    let rendered = lines(&draw(&mut app, 360)).join("\n");
     assert!(
-        rendered.contains(&format!(" {}╶", branch.trim())),
+        rendered.contains(&format!(" {branch}╶")),
         "startup repository was not prepared:\n{rendered}"
     );
 }
