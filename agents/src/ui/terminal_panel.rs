@@ -47,7 +47,9 @@ impl View {
     }
 
     fn terminal_focused(&self) -> bool {
-        self.mouse_focus == Panel::Terminal && self.shown_terminal().is_some()
+        self.confirm_dialog.is_none()
+            && self.mouse_focus == Panel::Terminal
+            && self.shown_terminal().is_some()
     }
 
     fn focus(&mut self, panel: Panel) {
@@ -78,7 +80,8 @@ impl View {
     pub(super) fn terminal_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
         let area = self.viewport.borrow().terminal;
         let position = (mouse.column, mouse.row).into();
-        if !area.contains(position)
+        if self.confirm_dialog.is_some()
+            || !area.contains(position)
             || self.shown_terminal().is_none()
             || matches!(
                 mouse.kind,

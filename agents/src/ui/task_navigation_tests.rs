@@ -189,7 +189,7 @@ fn escape_closes_overlays_without_consuming_history() {
             1 => view.rename_target = second.clone(),
             2 => {
                 view.confirm_dialog = Some(ConfirmDialog {
-                    id: second.clone().unwrap(),
+                    action: ConfirmAction::Delete(second.clone().unwrap()),
                     title: "Task".into(),
                     confirm: false,
                 })

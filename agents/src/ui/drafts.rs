@@ -318,7 +318,7 @@ impl View {
         if let Some(draft) = self.selected_draft() {
             if let Some(name) = &draft.name {
                 self.confirm_dialog = Some(ConfirmDialog {
-                    id: draft.key(),
+                    action: ConfirmAction::Delete(draft.key()),
                     title: name.clone(),
                     confirm: false,
                 });

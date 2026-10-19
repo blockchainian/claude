@@ -287,6 +287,10 @@ pub enum Action {
     },
     /// Backspace, then confirmation: permanently delete the session transcript.
     Delete(SessionKey),
+    RedeemResetCredit {
+        provider: crate::providers::ProviderId,
+        request: crate::providers::ResetCreditRequest,
+    },
     /// `a`, then confirmation: archive the session and its child agents.
     Archive(SessionKey),
     /// `x`: interrupt the session's running turn.

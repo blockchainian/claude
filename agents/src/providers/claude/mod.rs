@@ -866,6 +866,18 @@ impl Provider for ClaudeProvider {
         models::input_choices(&self.config_dir, models::installed_version().as_deref())
     }
 
+    fn account_usage(&self) -> Option<crate::providers::AccountUsageJob> {
+        Some(Box::new(weekly_usage::read_account_usage))
+    }
+
+    fn redeem_reset_credit(
+        &self,
+        request: crate::providers::ResetCreditRequest,
+    ) -> Option<crate::providers::ResetCreditJob> {
+        let config_dir = self.config_dir.clone();
+        Some(Box::new(move || weekly_usage::redeem(&config_dir, request)))
+    }
+
     fn weekly_usage(&self) -> Option<crate::providers::WeeklyUsageJob> {
         Some(Box::new(weekly_usage::read))
     }

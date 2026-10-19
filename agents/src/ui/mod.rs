@@ -34,6 +34,7 @@ mod prompt_box;
 mod question_flow;
 mod question_view;
 mod render;
+mod reset_credit;
 mod rows;
 mod selection_tabs;
 mod shell_commands;
@@ -204,11 +205,19 @@ struct TaskPanels {
     log_search: log_search::LogSearch,
 }
 
-/// Confirmation before deleting a task.
+/// Confirmation before a destructive provider action.
 struct ConfirmDialog {
-    id: SessionKey,
+    action: ConfirmAction,
     title: String,
     confirm: bool,
+}
+
+enum ConfirmAction {
+    Delete(SessionKey),
+    Reset {
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+    },
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -287,6 +296,8 @@ pub struct View {
     stopping_prompt: Option<(SessionKey, String)>,
     rename: line_edit::LineEdit,
     confirm_dialog: Option<ConfirmDialog>,
+    reset_incidents: Vec<reset_credit::ResetIncident>,
+    reset_pending: HashSet<ProviderId>,
     help: bool,
     loading: bool,
     has_more: bool,
@@ -433,6 +444,8 @@ impl View {
             stopping_prompt: None,
             rename: line_edit::LineEdit::default(),
             confirm_dialog: None,
+            reset_incidents: Vec::new(),
+            reset_pending: HashSet::new(),
             help: false,
             loading: false,
             has_more: false,

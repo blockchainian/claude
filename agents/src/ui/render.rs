@@ -524,20 +524,39 @@ impl View {
             self.viewport.borrow_mut().marker = None;
         }
     }
-    fn render_confirm_dialog(&self, dialog: &ConfirmDialog, area: Rect, buf: &mut Buffer) {
+    pub(super) fn render_confirm_dialog(
+        &self,
+        dialog: &ConfirmDialog,
+        area: Rect,
+        buf: &mut Buffer,
+    ) {
         use ratatui::widgets::{Block, Borders};
         let width = area.width.min(80);
         let content_width = usize::from(width.saturating_sub(4).max(1));
-        let title = format!("Permanently delete “{}”?", dialog.title);
-        let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
-        let description = if self
-            .rows
-            .iter()
-            .any(|session| session.id == dialog.id && session.background_job.is_some())
-        {
-            format!("{description} Worktrees and branches created by agents remain.")
-        } else {
-            description.to_owned()
+        let (title, description, confirm_label) = match &dialog.action {
+            ConfirmAction::Delete(id) => {
+                let title = format!("Permanently delete “{}”?", dialog.title);
+                let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
+                let description = if self
+                    .rows
+                    .iter()
+                    .any(|session| session.id == *id && session.background_job.is_some())
+                {
+                    format!("{description} Worktrees and branches created by agents remain.")
+                } else {
+                    description.to_owned()
+                };
+                (
+                    title,
+                    description,
+                    "Permanently delete task and child agents",
+                )
+            }
+            ConfirmAction::Reset { provider, request } => {
+                let (title, description) =
+                    reset_credit::reset_text(*provider, &request.offer, Utc::now());
+                (title, description, "Redeem reset credit")
+            }
         };
         let mut lines = Vec::new();
         for text in textwrap::wrap(&title, content_width) {
@@ -548,10 +567,7 @@ impl View {
         }
         lines.push(Line::default());
         let options_start = lines.len() as u16;
-        for (index, label) in ["Cancel", "Permanently delete task and child agents"]
-            .into_iter()
-            .enumerate()
-        {
+        for (index, label) in ["Cancel", confirm_label].into_iter().enumerate() {
             let confirm = index == 1;
             let selected = dialog.confirm == confirm;
             let text = format!(
@@ -1024,7 +1040,8 @@ impl View {
                 &activity.paths,
                 width,
                 &session.cwd,
-            ).line;
+            )
+            .line;
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
@@ -1037,11 +1054,7 @@ impl View {
                     .into(),
                     width,
                 )),
-                truncate_line_with_ellipsis_if_overflow(
-                    label,
-                    width,
-                )
-                .into(),
+                truncate_line_with_ellipsis_if_overflow(label, width).into(),
             ]);
             bodies.push(start..items.len());
             keys.push(body_key("Last activity", &activity.label));
@@ -1257,7 +1270,9 @@ impl View {
                 })
                 .collect::<Vec<_>>();
             let markdown = match *label {
-                "Copied latest activity" => activity.is_some_and(|activity| super::text::is_prose(&activity.kind)),
+                "Copied latest activity" => {
+                    activity.is_some_and(|activity| super::text::is_prose(&activity.kind))
+                }
                 "Copied tasks" => false,
                 _ => true,
             };
@@ -1404,8 +1419,14 @@ impl View {
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
                             super::log::summary_line(
-                                text, &kind, exit_code, paths, usize::from(item_area.width), &child.cwd,
-                            ).line,
+                                text,
+                                &kind,
+                                exit_code,
+                                paths,
+                                usize::from(item_area.width),
+                                &child.cwd,
+                            )
+                            .line,
                             usize::from(item_area.width),
                         )
                     });
@@ -1731,14 +1752,31 @@ impl<T: Into<Line<'static>>> From<T> for Item<'_> {
 
 /// A working subagent's current tool call, or its last message between calls,
 /// with the log kind that styles it.
-fn subagent_line(child: &Session) -> (&str, crate::log::Kind, Option<i64>, &[std::ops::Range<usize>]) {
+fn subagent_line(
+    child: &Session,
+) -> (
+    &str,
+    crate::log::Kind,
+    Option<i64>,
+    &[std::ops::Range<usize>],
+) {
     let activity = child
         .latest_activity()
         .filter(|_| child.status == SessionStatus::Working);
     if let Some(activity) = activity {
-        (&activity.label, activity.kind.clone(), activity.exit_code, &activity.paths)
+        (
+            &activity.label,
+            activity.kind.clone(),
+            activity.exit_code,
+            &activity.paths,
+        )
     } else {
-        (child.last_message.as_deref().unwrap_or_default(), crate::log::Kind::Assistant, None, &[])
+        (
+            child.last_message.as_deref().unwrap_or_default(),
+            crate::log::Kind::Assistant,
+            None,
+            &[],
+        )
     }
 }
 

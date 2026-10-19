@@ -1,7 +1,7 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
-pub(crate) mod tool;
 pub(crate) mod text;
+pub(crate) mod tool;
 
 use crate::log;
 use crate::model::{Action, Session};
@@ -164,6 +164,52 @@ impl WeeklyUsage {
 
 pub type WeeklyUsageJob = Box<dyn FnOnce() -> io::Result<Option<WeeklyUsage>> + Send>;
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum UsageWindow {
+    FiveHour,
+    Weekly,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResetCreditOffer {
+    pub window: UsageWindow,
+    pub resets_at: chrono::DateTime<chrono::Utc>,
+    pub credit_id: String,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResetCreditRequest {
+    pub offer: ResetCreditOffer,
+    pub idempotency_key: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AccountUsage {
+    pub weekly: Option<WeeklyUsage>,
+    pub reset_offers: Vec<ResetCreditOffer>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ResetCreditOutcome {
+    Reset,
+    AlreadyRedeemed,
+    NothingToReset,
+    NoCredit,
+    Cooldown,
+    Ineligible,
+    Unavailable,
+}
+
+pub struct ResetCreditRedemption {
+    pub outcome: ResetCreditOutcome,
+    pub reason: Option<String>,
+    pub usage: AccountUsage,
+}
+
+pub type AccountUsageJob = Box<dyn FnOnce() -> io::Result<AccountUsage> + Send>;
+pub type ResetCreditJob = Box<dyn FnOnce() -> io::Result<ResetCreditRedemption> + Send>;
+
 pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
 pub type CreateJob = Box<dyn FnOnce() -> io::Result<Output> + Send>;
 
@@ -224,6 +270,20 @@ pub trait Provider {
     }
     /// Builds a background request without performing network or credential I/O.
     fn weekly_usage(&self) -> Option<WeeklyUsageJob> {
+        None
+    }
+    fn account_usage(&self) -> Option<AccountUsageJob> {
+        self.weekly_usage().map(|job| {
+            Box::new(move || {
+                Ok(AccountUsage {
+                    weekly: job()?,
+                    reset_offers: Vec::new(),
+                })
+            }) as AccountUsageJob
+        })
+    }
+    /// Builds a redemption request; only the confirmed action executes it.
+    fn redeem_reset_credit(&self, _request: ResetCreditRequest) -> Option<ResetCreditJob> {
         None
     }
     fn input_choices(&self) -> InputChoices {

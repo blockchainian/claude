@@ -64,6 +64,7 @@ impl Hub {
         self.weekly_usage.values = values;
     }
 
+    #[cfg(test)]
     pub fn weekly_usage_jobs(
         &mut self,
         now: std::time::Instant,
@@ -72,6 +73,21 @@ impl Hub {
             .iter()
             .filter_map(|provider| {
                 let job = provider.weekly_usage()?;
+                self.weekly_usage
+                    .start(provider.id(), now)
+                    .then_some((provider.id(), job))
+            })
+            .collect()
+    }
+
+    pub fn account_usage_jobs(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Vec<(ProviderId, crate::providers::AccountUsageJob)> {
+        self.providers
+            .iter()
+            .filter_map(|provider| {
+                let job = provider.account_usage()?;
                 self.weekly_usage
                     .start(provider.id(), now)
                     .then_some((provider.id(), job))

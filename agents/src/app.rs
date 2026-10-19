@@ -31,9 +31,14 @@ use std::time::Instant;
 const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 
 enum Input {
-    WeeklyUsage {
+    AccountUsage {
         provider: ProviderId,
-        result: io::Result<Option<crate::providers::WeeklyUsage>>,
+        result: io::Result<crate::providers::AccountUsage>,
+    },
+    ResetCreditRedeemed {
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+        result: io::Result<crate::providers::ResetCreditRedemption>,
     },
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
@@ -322,6 +327,7 @@ impl App {
             }
             self.view.expire_messages(Instant::now());
             self.refresh_weekly_usage();
+            self.view.present_reset_credit();
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
@@ -444,8 +450,15 @@ impl App {
         let mut next = Some(first);
         while let Some(input) = next.take().or_else(|| self.receiver.try_recv().ok()) {
             match input {
-                Input::WeeklyUsage { provider, result } => {
-                    self.complete_weekly_usage(provider, result);
+                Input::AccountUsage { provider, result } => {
+                    self.complete_account_usage(provider, result);
+                }
+                Input::ResetCreditRedeemed {
+                    provider,
+                    request,
+                    result,
+                } => {
+                    self.complete_reset_credit(provider, request, result);
                 }
                 Input::Terminal(event) => {
                     if self.handle_event(event?) {
@@ -809,14 +822,87 @@ impl App {
     }
 
     fn refresh_weekly_usage(&mut self) {
-        for (provider, job) in self.hub.weekly_usage_jobs(Instant::now()) {
+        for (provider, job) in self.hub.account_usage_jobs(Instant::now()) {
             let sender = self.sender.clone();
             thread::spawn(move || {
-                let _ = sender.send(Input::WeeklyUsage {
+                let _ = sender.send(Input::AccountUsage {
                     provider,
                     result: job(),
                 });
             });
+        }
+    }
+
+    fn complete_account_usage(
+        &mut self,
+        provider: ProviderId,
+        result: io::Result<crate::providers::AccountUsage>,
+    ) {
+        match result {
+            Ok(usage) => {
+                self.view.offer_reset_credit(provider, usage.reset_offers);
+                self.complete_weekly_usage(provider, Ok(usage.weekly));
+            }
+            Err(error) => self.complete_weekly_usage(provider, Err(error)),
+        }
+    }
+
+    fn redeem_reset_credit(
+        &mut self,
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+    ) {
+        let Some(job) = self
+            .hub
+            .provider(provider)
+            .redeem_reset_credit(request.clone())
+        else {
+            self.view.reset_credit_completed(provider);
+            self.view
+                .set_notice(Some(io::ErrorKind::Unsupported.to_string()));
+            return;
+        };
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| Err(io::Error::other("Reset credit job panicked")));
+            let _ = sender.send(Input::ResetCreditRedeemed {
+                provider,
+                request,
+                result,
+            });
+        });
+    }
+
+    fn complete_reset_credit(
+        &mut self,
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+        result: io::Result<crate::providers::ResetCreditRedemption>,
+    ) {
+        use crate::providers::ResetCreditOutcome;
+        match result {
+            Ok(redemption) => {
+                self.view.reset_credit_completed(provider);
+                self.complete_account_usage(provider, Ok(redemption.usage));
+                let failure = match redemption.outcome {
+                    ResetCreditOutcome::Reset
+                    | ResetCreditOutcome::AlreadyRedeemed
+                    | ResetCreditOutcome::NothingToReset => None,
+                    ResetCreditOutcome::NoCredit => Some("noCredit"),
+                    ResetCreditOutcome::Cooldown => Some("cooldown"),
+                    ResetCreditOutcome::Ineligible => Some("ineligible"),
+                    ResetCreditOutcome::Unavailable => Some("unavailable"),
+                };
+                if let Some(failure) = failure {
+                    self.view
+                        .set_notice(Some(redemption.reason.unwrap_or_else(|| failure.into())));
+                }
+            }
+            Err(error) => {
+                self.view.reset_credit_failed(provider, &request);
+                self.view.set_notice(Some(error.to_string()));
+            }
         }
     }
 
@@ -1132,6 +1218,9 @@ impl App {
             return false;
         }
         match action {
+            Action::RedeemResetCredit { provider, request } => {
+                self.redeem_reset_credit(provider, request)
+            }
             Action::Batch(actions) => {
                 for action in actions {
                     if self.handle_action(Some(action)) {
@@ -1459,3 +1548,7 @@ mod log_search_tests;
 #[cfg(test)]
 #[path = "app_weekly_usage_tests.rs"]
 mod weekly_usage_tests;
+
+#[cfg(test)]
+#[path = "app_reset_credit_tests.rs"]
+mod reset_credit_tests;

@@ -14,8 +14,8 @@ mod subagents_tests;
 mod tests;
 
 use super::{
-    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, TerminalCommand,
-    WeeklyUsageJob,
+    AccountUsageJob, Capabilities, Job, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
+    SessionInput, SessionKey, Snapshot, TerminalCommand, WeeklyUsageJob,
 };
 #[cfg(test)]
 use crate::log;
@@ -612,6 +612,22 @@ impl Provider for CodexProvider {
             app_server::account::weekly_usage(&mut client)
         }))
     }
+    fn account_usage(&self) -> Option<AccountUsageJob> {
+        let home = self.home.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::account::account_usage(&mut client)
+        }))
+    }
+
+    fn redeem_reset_credit(&self, request: ResetCreditRequest) -> Option<ResetCreditJob> {
+        let home = self.home.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::account::redeem_reset_credit(&mut client, request)
+        }))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume: true,
@@ -742,7 +758,8 @@ impl Provider for CodexProvider {
             if manager::links(&manager_home, &config)?.contains_key(&id) {
                 let mut client = app_server::Client::connect(&home)?;
                 app_server::thread::stop(&mut client, &id)?;
-                let output = manager::detach_command(&config, &manager_home, &home, &id)?.output()?;
+                let output =
+                    manager::detach_command(&config, &manager_home, &home, &id)?.output()?;
                 if !output.status.success() {
                     return Err(io::Error::other(format!(
                         "codex-manager detach failed ({}): {}",

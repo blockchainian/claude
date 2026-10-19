@@ -176,7 +176,7 @@ mod tests {
                 0 => view.input_box.focused = true,
                 1 => {
                     view.confirm_dialog = Some(ConfirmDialog {
-                        id,
+                        action: ConfirmAction::Delete(id),
                         title: "Task".into(),
                         confirm: false,
                     });

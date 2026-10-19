@@ -462,9 +462,10 @@ impl View {
                         .map(|(_, confirm)| *confirm);
                     drop(viewport);
                     if let Some(confirm) = choice {
-                        let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         return if confirm {
-                            self.confirm_delete(dialog.id)
+                            let dialog =
+                                self.confirm_dialog.take().expect("confirm dialog is open");
+                            self.accept_confirmation(dialog)
                         } else {
                             self.cancel_confirmation();
                             None
@@ -1217,9 +1218,10 @@ impl View {
                         self.cancel_confirmation();
                     }
                     KeyCode::Enter => {
-                        let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         if dialog.confirm {
-                            return self.confirm_delete(dialog.id);
+                            let dialog =
+                                self.confirm_dialog.take().expect("confirm dialog is open");
+                            return self.accept_confirmation(dialog);
                         }
                         self.cancel_confirmation();
                     }
@@ -1232,7 +1234,7 @@ impl View {
                     }
                     KeyCode::Char('2') => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
-                        return self.confirm_delete(dialog.id);
+                        return self.accept_confirmation(dialog);
                     }
                     KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
                     KeyCode::End | KeyCode::PageDown => dialog.confirm = true,
@@ -1506,7 +1508,7 @@ impl View {
                         return Some(Action::Unsupported("Delete"));
                     }
                     self.confirm_dialog = Some(ConfirmDialog {
-                        id: session.id.clone(),
+                        action: ConfirmAction::Delete(session.id.clone()),
                         title: session.display_title().to_owned(),
                         confirm: false,
                     });
