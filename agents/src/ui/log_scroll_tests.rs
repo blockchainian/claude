@@ -547,7 +547,7 @@ fn column_of(row: &str, needle: &str) -> Option<usize> {
 }
 
 #[test]
-fn log_detail_footer_shows_the_scrolled_off_title_aligned_with_it() {
+fn log_detail_footer_shows_the_scrolled_off_title_before_the_time_column() {
     for width in [100, 160] {
         let (mut view, _) = fixture(true);
         let rows = screen_rows(&view, width, 40);
@@ -561,7 +561,6 @@ fn log_detail_footer_shows_the_scrolled_off_title_aligned_with_it() {
             .to_owned();
         assert!(!title.is_empty(), "{}", rows.join("\n"));
         assert!(!footer.contains(&title), "title on screen: {footer}");
-        let title_x = column_of(&rows[detail_y + 1], &title).unwrap();
         let time_x = view
             .viewport
             .borrow()
@@ -578,18 +577,11 @@ fn log_detail_footer_shows_the_scrolled_off_title_aligned_with_it() {
             "hints stay: {scrolled}"
         );
         let x = column_of(scrolled, &title).unwrap_or_else(|| panic!("{scrolled}"));
-        if title_x > footer.trim_end().width() + 1 {
-            assert_eq!(
-                x, title_x,
-                "wide panels center the footer title: {scrolled}"
-            );
-        } else {
-            assert_eq!(
-                x + title.width() + 2,
-                time_x,
-                "narrow panels end it before the time column: {scrolled}"
-            );
-        }
+        assert_eq!(
+            x + title.width() + 2,
+            time_x,
+            "the footer title ends before the time column: {scrolled}"
+        );
         assert!(scrolled[..].chars().skip(time_x).all(|c| c == ' '));
 
         detail_wheel(&mut view, false);

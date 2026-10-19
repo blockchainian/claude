@@ -1345,8 +1345,8 @@ pub(super) fn open_text(event: &Event) -> String {
         .join("\n")
 }
 
-/// Draws a scrolled-off section title in the footer after the hints: on the detail's midline
-/// when that clears them, otherwise ending at the text column so the time column stays empty.
+/// Draws a scrolled-off section title at the footer's right end, after the hints, ending at
+/// the text column so the time column stays empty.
 pub(super) fn render_footer_title(
     title: Line<'static>,
     columns: DetailColumns,
@@ -1364,13 +1364,7 @@ pub(super) fn render_footer_title(
         usize::from(end - start),
     );
     let width = title.width() as u16;
-    let centered = super::centering::centered_x(columns.panel, columns.text, width);
-    let x = if centered >= start {
-        centered
-    } else {
-        end - width
-    };
-    title.render(Rect::new(x, footer.y, width, 1), buf);
+    title.render(Rect::new(end - width, footer.y, width, 1), buf);
 }
 
 /// The footer confirmation after copying an open log event.
