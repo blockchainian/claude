@@ -426,6 +426,12 @@ fn column_byte(text: &str, column: usize, end: bool) -> usize {
 }
 
 impl View {
+    pub(super) fn cancel_list_selection(&self, panel: Panel) {
+        if self.selecting_list(panel) {
+            self.text_selection.borrow_mut().take();
+        }
+    }
+
     /// Keeps a list selection on its rows after their ids grew by `rows`.
     pub(super) fn shift_list_selection(&self, panel: Panel, rows: usize) {
         let mut selection = self.text_selection.borrow_mut();

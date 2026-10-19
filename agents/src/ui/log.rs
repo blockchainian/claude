@@ -641,6 +641,13 @@ impl View {
             .or(self.log_selected);
         let selected_full = selected_index
             .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+        let selected_order = (self.log_sort == LogSort::Duration
+            && self.selecting_list(text_selection::Panel::LogList))
+        .then(|| {
+            self.shown_log_events()
+                .map(|(full, _)| full + update.prepended)
+                .collect::<Vec<_>>()
+        });
         let old_len = self.log.len();
         let appended_start = update.events.len().saturating_sub(update.appended);
         self.last_update = Utc::now();
@@ -648,11 +655,17 @@ impl View {
         // Rematching below uses the explicitly shifted full-list position.
         self.log_selected = None;
         self.prepare_log_search();
+        if let Some(order) = selected_order
+            && (update.reset || !self.shown_log_events().map(|(full, _)| full).eq(order))
+        {
+            // A continuous text range cannot preserve rows that become discontiguous.
+            self.cancel_list_selection(text_selection::Panel::LogList);
+        }
         let added = self
             .shown_log_events()
             .filter(|(full, _)| *full >= appended_start)
             .count();
-        let mut prepended = self
+        let prepended = self
             .shown_log_events()
             .filter(|(full, _)| *full < update.prepended)
             .count();
@@ -682,7 +695,6 @@ impl View {
             prepended as isize
         };
         if self.log_sort == LogSort::Duration {
-            prepended = shift.max(0) as usize;
             self.viewport.borrow_mut().log_unseen = 0;
         }
         if let Some(previous) = &mut self.log_background_return {
@@ -704,7 +716,9 @@ impl View {
                 viewport.log_unseen += added;
             }
             drop(viewport);
-            self.shift_list_selection(text_selection::Panel::LogList, prepended);
+            if self.log_sort == LogSort::Time {
+                self.shift_list_selection(text_selection::Panel::LogList, prepended);
+            }
         } else {
             self.viewport.borrow_mut().log_scroll = max_scroll;
         }

@@ -391,9 +391,11 @@ fn duration_updates_preserve_screen_row_and_follow_slowest() {
         5
     );
     assert_eq!(view.log_selected.unwrap() - view.log_scroll(), screen_row);
-    // Replacing the same row can also move it down, reducing the scroll.
+    let scroll_before = view.log_scroll();
+    // A longer duration moves this row below the selected event, reducing the scroll.
     events[8].duration = Some(chrono::Duration::seconds(50));
     view.set_log(events[..9].to_vec());
+    assert_eq!(view.log_scroll(), scroll_before - 1);
     draw(&view);
     assert_eq!(view.log_selected.unwrap() - view.log_scroll(), screen_row);
     assert_eq!(view.viewport.borrow().log_unseen, 0);
@@ -419,4 +421,54 @@ fn duration_updates_preserve_screen_row_and_follow_slowest() {
     });
     assert_eq!(view.log_sort, LogSort::Duration);
     assert_eq!(view.log_order, [0, 1, 2]);
+}
+
+#[test]
+fn duration_updates_cancel_list_drag_only_when_event_order_changes() {
+    for change in ["reorder", "append", "remove", "prepend", "unchanged"] {
+        let (_dir, mut view, mut events) = fixture();
+        events.truncate(8);
+        for (index, event) in events.iter_mut().enumerate() {
+            event.kind = crate::log::Kind::Tool;
+            event.completed_time = true;
+            event.ended_at = Some(event.started_at);
+            event.duration = Some(chrono::Duration::seconds(10 + index as i64));
+        }
+        view.set_log(events.clone());
+        view.mouse_focus = Panel::LogList;
+        view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        view.select_log_event(Some(0));
+        view.viewport.borrow_mut().log_scroll = 0;
+        draw(&view);
+        view.begin_text_selection(0, 1);
+        view.extend_text_selection(99, 2);
+        assert!(view.text_selection_dragging());
+        let mut prepended = 0;
+        match change {
+            "reorder" => events.swap(0, 1),
+            "append" => events.push(events[0].clone()),
+            "remove" => {
+                events.pop();
+            }
+            "prepend" => {
+                events.insert(0, events[0].clone());
+                prepended = 1;
+            }
+            "unchanged" => {}
+            _ => unreachable!(),
+        }
+        view.apply_log_update(crate::log::Update {
+            events,
+            prepended,
+            ..Default::default()
+        });
+        assert_eq!(
+            view.text_selection_dragging(),
+            change == "unchanged",
+            "{change}"
+        );
+        draw(&view);
+        let copied = view.finish_text_selection(99, 2);
+        assert_eq!(copied.is_some(), change == "unchanged", "{change}");
+    }
 }
