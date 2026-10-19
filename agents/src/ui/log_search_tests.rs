@@ -310,6 +310,82 @@ fn duration_keys_include_messages_none_ties_and_running_update_time() {
 }
 
 #[test]
+fn duration_toggle_preserves_background_return_event() {
+    for duration_first in [false, true] {
+        for update_before_return in [false, true] {
+            let (_dir, mut view) = fixture();
+            let mut events: Vec<_> = view.log.iter().cycle().take(3).cloned().collect();
+            for (index, event) in events.iter_mut().enumerate() {
+                event.kind = crate::log::Kind::Tool;
+                event.completed_time = true;
+                event.ended_at = Some(event.started_at);
+                event.duration = Some(chrono::Duration::seconds([30, 10, 20][index]));
+            }
+            view.set_log(events.clone());
+            view.mouse_focus = Panel::LogList;
+            if duration_first {
+                key(&mut view, KeyCode::Char('t'));
+            }
+            view.select_log_event(view.shown_position(0));
+            let output = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(
+                output.path(),
+                include_str!("../../tests/fixtures/claude-peer-message.txt"),
+            )
+            .unwrap();
+            view.rows[view.selected]
+                .background
+                .push(crate::model::BackgroundTask {
+                    description: "Background output".into(),
+                    output: Some(output.path().into()),
+                    started_at: events[0].started_at,
+                });
+            let area = Rect::new(0, 0, 160, 40);
+            view.render_at(area, &mut Buffer::empty(area), Utc::now());
+            let (x, y) = {
+                let viewport = view.viewport.borrow();
+                (viewport.details.x, viewport.details_background[0].0.start)
+            };
+            for _ in 0..2 {
+                for kind in [
+                    MouseEventKind::Down(MouseButton::Left),
+                    MouseEventKind::Up(MouseButton::Left),
+                ] {
+                    view.handle_mouse(MouseEvent {
+                        kind,
+                        column: x,
+                        row: y,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                }
+            }
+            assert!(view.log_background_return.is_some());
+            view.mouse_focus = Panel::LogList;
+            key(&mut view, KeyCode::Char('t'));
+            if update_before_return {
+                view.set_log(events.clone());
+            }
+            for kind in [
+                MouseEventKind::Down(MouseButton::Right),
+                MouseEventKind::Up(MouseButton::Right),
+            ] {
+                view.handle_mouse(MouseEvent {
+                    kind,
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                });
+            }
+            assert_eq!(
+                view.visible_log_event(),
+                Some(&events[0]),
+                "duration_first={duration_first}, update={update_before_return}"
+            );
+        }
+    }
+}
+
+#[test]
 fn duration_empty_toggle_and_top_navigation_do_not_page() {
     let (_dir, mut view) = fixture();
     view.set_log(Vec::new());
