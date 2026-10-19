@@ -1,5 +1,13 @@
 use super::*;
 
+// Cached-usage assertions must not race a live account refresh. Keep the real app
+// and providers, but deny IP connections for both launches of this probe.
+const OFFLINE_COMMAND: &[&str] = &[
+    "/usr/bin/sandbox-exec",
+    "-p",
+    r#"(version 1) (allow default) (deny network-outbound (remote ip "*:*"))"#,
+];
+
 #[test]
 #[ignore = "requires tmux; starts the real app with isolated preferences and cached usage"]
 fn terminal_weekly_usage_cache_toggle_and_restart() {
@@ -10,12 +18,13 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
             "codex":{"used_percent":16,"resets_at":"2026-10-25T08:32:50Z","reset_credits":2}
         }}}
     });
-    let (directory, tmux, _) = start_probe_with_setup(
+    let (directory, tmux, _) = start_probe_with_command(
         "weekly-usage",
         include_str!("../fixtures/transcript.jsonl"),
         |directory| {
             std::fs::write(directory.join("claude/agents.json"), initial.to_string()).unwrap()
         },
+        OFFLINE_COMMAND,
     );
     let state_path = directory.path().join("claude/agents.json");
     let capture = tmux.capture_when(|capture| {
@@ -68,13 +77,10 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    tmux.run(&[
-        "respawn-pane",
-        "-k",
-        "-t",
-        "probe",
-        binary.to_str().unwrap(),
-    ]);
+    let mut restart = vec!["respawn-pane", "-k", "-t", "probe"];
+    restart.extend_from_slice(OFFLINE_COMMAND);
+    restart.push(binary.to_str().unwrap());
+    tmux.run(&restart);
     tmux.wait_for(|capture| {
         capture
             .lines()

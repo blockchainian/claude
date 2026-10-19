@@ -292,6 +292,15 @@ fn start_probe_with_setup(
     contents: &str,
     setup: impl FnOnce(&Path),
 ) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
+    start_probe_with_command(name, contents, setup, &[])
+}
+
+fn start_probe_with_command(
+    name: &str,
+    contents: &str,
+    setup: impl FnOnce(&Path),
+    command_prefix: &[&str],
+) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
@@ -308,32 +317,37 @@ fn start_probe_with_setup(
     let tmux_config = directory.path().join("tmux.conf");
     std::fs::write(&tmux_config, "set -g default-terminal tmux-256color\n").unwrap();
     let tmux = Tmux(format!("agents-{name}-{}", std::process::id()));
-    tmux.run(&[
-        "-f",
-        tmux_config.to_str().unwrap(),
-        "new-session",
-        "-d",
-        "-s",
-        "probe",
-        "-x",
-        "200",
-        "-y",
-        "50",
-        "-e",
-        &format!("CLAUDE_CONFIG_DIR={}", config.display()),
-        "-e",
-        &format!("CLAUDE_CODE_TMPDIR={}", directory.path().display()),
-        "-e",
-        &format!("CODEX_HOME={}", codex.display()),
-        "-e",
-        &format!(
-            "AGENTS_CLIPBOARD_DIR={}",
-            directory.path().join("clipboard").display()
-        ),
-        "-e",
-        &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
-        binary.to_str().unwrap(),
-    ]);
+    tmux.run(
+        &[
+            "-f",
+            tmux_config.to_str().unwrap(),
+            "new-session",
+            "-d",
+            "-s",
+            "probe",
+            "-x",
+            "200",
+            "-y",
+            "50",
+            "-e",
+            &format!("CLAUDE_CONFIG_DIR={}", config.display()),
+            "-e",
+            &format!("CLAUDE_CODE_TMPDIR={}", directory.path().display()),
+            "-e",
+            &format!("CODEX_HOME={}", codex.display()),
+            "-e",
+            &format!(
+                "AGENTS_CLIPBOARD_DIR={}",
+                directory.path().join("clipboard").display()
+            ),
+            "-e",
+            &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
+        ]
+        .into_iter()
+        .chain(command_prefix.iter().copied())
+        .chain(std::iter::once(binary.to_str().unwrap()))
+        .collect::<Vec<_>>(),
+    );
     // Wait for provider discovery before sending input, including on busy hosts.
     tmux.wait_for(|capture| {
         capture
