@@ -58,6 +58,10 @@ fn cache() -> &'static Cache {
 
 /// Positive results live for the process; misses retry after five seconds.
 pub(super) fn target(cwd: &Path, sha: &str) -> Option<PathBuf> {
+    target_at(cwd, sha, Instant::now())
+}
+
+fn target_at(cwd: &Path, sha: &str, now: Instant) -> Option<PathBuf> {
     let cache = cache();
     let key = (cwd.to_path_buf(), sha.to_owned());
     let mut entries = cache.entries.lock().expect("commit cache poisoned");
@@ -66,7 +70,10 @@ pub(super) fn target(cwd: &Path, sha: &str) -> Option<PathBuf> {
             return entry.target.clone();
         }
         cache.visible.store(true, Ordering::Relaxed);
-        if entry.checked.is_none_or(|at| at.elapsed() < RETRY_AFTER) {
+        if entry
+            .checked
+            .is_none_or(|at| now.saturating_duration_since(at) < RETRY_AFTER)
+        {
             return None;
         }
     }
@@ -195,8 +202,18 @@ mod tests {
             cache().entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked,
             Some(checked)
         );
+        let retry_at = checked + Duration::from_secs(5);
+        assert_eq!(
+            target_at(dir.path(), &sha, retry_at - Duration::from_nanos(1)),
+            None,
+            "negative cache must suppress retry until five seconds have passed"
+        );
+        assert_eq!(
+            cache().entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked,
+            Some(checked)
+        );
         let url = loop {
-            if let Some(url) = target(dir.path(), &sha) {
+            if let Some(url) = target_at(dir.path(), &sha, retry_at) {
                 break url;
             }
             assert!(Instant::now() < deadline, "new commit stayed unlinked");
