@@ -30,6 +30,8 @@ struct Page {
     focus: usize,
     selected: Vec<usize>,
     other: LineEdit,
+    /// Whether a multi-select question's free-text row is checked; typing checks it.
+    other_checked: bool,
 }
 
 impl Page {
@@ -219,10 +221,12 @@ impl QuestionView {
         }
         if self.editing() {
             match key.code {
+                KeyCode::Char(' ') | KeyCode::Enter
+                    if modifiers == KeyModifiers::NONE && self.pages[self.page].other.is_empty() =>
+                {
+                    return self.choose(self.pages[self.page].focus);
+                }
                 KeyCode::Enter if modifiers == KeyModifiers::NONE => {
-                    if self.pages[self.page].other.is_empty() {
-                        return None;
-                    }
                     if !self.questions()[self.page].multi {
                         self.pages[self.page].selected.clear();
                     }
@@ -230,7 +234,9 @@ impl QuestionView {
                 }
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
                 _ => {
-                    self.pages[self.page].other.handle(key);
+                    let page = &mut self.pages[self.page];
+                    page.other.handle(key);
+                    page.other_checked |= !page.other.is_empty();
                     return None;
                 }
             }
@@ -275,8 +281,9 @@ impl QuestionView {
     }
 
     /// Acts on a row the way its digit key does: a single-select option answers and moves
-    /// on, a multi-select option toggles, the free-text row takes focus, and the Submit
-    /// tab's rows submit or cancel.
+    /// on, a multi-select option toggles, the free-text row takes focus and, on a
+    /// multi-select question, toggles while empty, and the Submit tab's rows submit or
+    /// cancel.
     pub(super) fn choose(&mut self, index: usize) -> Option<Outcome> {
         if self.reviewing() {
             return match index {
@@ -302,7 +309,11 @@ impl QuestionView {
             return self.advance();
         }
         if other && index == option_count {
-            self.pages[self.page].focus = index;
+            let page = &mut self.pages[self.page];
+            page.focus = index;
+            if multi {
+                page.other_checked = !page.other_checked || !page.other.is_empty();
+            }
         }
         None
     }
@@ -373,10 +384,26 @@ impl QuestionView {
 
     pub(super) fn paste(&mut self, text: &str) {
         if self.editing() {
-            self.pages[self.page]
-                .other
+            let page = &mut self.pages[self.page];
+            page.other
                 .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
+            page.other_checked |= !page.other.is_empty();
         }
+    }
+
+    /// A multi-select row's checkbox, or nothing on a single-select question.
+    fn check(multi: bool, checked: bool) -> &'static str {
+        match (multi, checked) {
+            (false, _) => "",
+            (true, false) => "[ ] ",
+            (true, true) => "[x] ",
+        }
+    }
+
+    /// The free-text row's checkbox.
+    fn other_check(&self) -> &'static str {
+        let multi = self.questions()[self.page].multi;
+        Self::check(multi, self.pages[self.page].other_checked)
     }
 
     /// A row with the focus marker and its number, such as "› 2. Green".
@@ -476,15 +503,7 @@ impl QuestionView {
         for (index, option) in question.options.iter().enumerate() {
             let focused = page.focus == index;
             let marker = if focused { "›" } else { " " };
-            let check = if question.multi {
-                if page.selected.contains(&index) {
-                    "[x] "
-                } else {
-                    "[ ] "
-                }
-            } else {
-                ""
-            };
+            let check = Self::check(question.multi, page.selected.contains(&index));
             let prefix = format!("{marker} {}. {check}", index + 1);
             let available = usize::from(width).saturating_sub(prefix.width()).max(1);
             for (row, text) in textwrap::wrap(&option.label, available)
@@ -510,6 +529,7 @@ impl QuestionView {
         }
         if Self::other_row(question) {
             let row = question.options.len();
+            let check = self.other_check();
             let text = if page.other.is_empty() {
                 Span::styled("Type something.", Style::default().dim())
             } else if question.secret {
@@ -517,12 +537,16 @@ impl QuestionView {
             } else {
                 Span::raw(
                     page.other
-                        .window(usize::from(width.saturating_sub(5)))
+                        .window(usize::from(width.saturating_sub(5 + check.width() as u16)))
                         .0
                         .to_owned(),
                 )
             };
-            lines.push(Self::row_line(page.focus == row, row + 1, vec![text]));
+            lines.push(Self::row_line(
+                page.focus == row,
+                row + 1,
+                vec![Span::raw(check), text],
+            ));
             rows.push(Some(row));
         }
         rows
@@ -578,11 +602,12 @@ impl QuestionView {
         let (_, rows, _) = self.visible(area);
         let focus = self.pages[self.page].focus;
         let row = rows.iter().position(|&row| row == Some(focus))?;
+        let start = 5 + self.other_check().width() as u16;
         let (_, caret) = self.pages[self.page]
             .other
-            .window(usize::from(area.width.saturating_sub(5)));
+            .window(usize::from(area.width.saturating_sub(start)));
         Some((
-            area.x + (5 + caret).min(area.width - 1),
+            area.x + (start + caret).min(area.width - 1),
             area.y + row as u16,
         ))
     }
@@ -912,6 +937,39 @@ mod tests {
         press(&mut view, KeyCode::Right);
         let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(answer.answers["Probe multiple choices?"].answers, ["Red"]);
+    }
+
+    #[test]
+    fn ask_view_empty_other_checks_on_space_enter_and_click_without_typing() {
+        let mut view = QuestionView::new(fixture("Multi"));
+        press(&mut view, KeyCode::Up);
+        assert!(screen(&view, 60, 14).contains("› 4. [ ] Type something."));
+        assert!(press(&mut view, KeyCode::Char(' ')).is_none());
+        assert!(screen(&view, 60, 14).contains("› 4. [x] Type something."));
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+        assert!(screen(&view, 60, 14).contains("› 4. [ ] Type something."));
+        assert!(view.choose(3).is_none());
+        assert!(screen(&view, 60, 14).contains("› 4. [x] Type something."));
+        for code in [KeyCode::Char('a'), KeyCode::Char(' '), KeyCode::Char('b')] {
+            press(&mut view, code);
+        }
+        assert!(view.choose(3).is_none());
+        assert!(screen(&view, 60, 14).contains("› 4. [x] a b"));
+        assert!(press(&mut view, KeyCode::Enter).is_none());
+        let answer = submitted(press(&mut view, KeyCode::Char('1')));
+        assert_eq!(
+            answer.answers["Probe multiple choices?"].other.as_deref(),
+            Some("a b")
+        );
+        let mut view = QuestionView::new(fixture("Custom"));
+        press(&mut view, KeyCode::Char('4'));
+        press(&mut view, KeyCode::Char(' '));
+        press(&mut view, KeyCode::Char('x'));
+        let answer = submitted(press(&mut view, KeyCode::Enter));
+        assert_eq!(
+            answer.answers["Probe custom text?"].other.as_deref(),
+            Some("x")
+        );
     }
 
     #[test]
