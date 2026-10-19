@@ -64,13 +64,14 @@ pub(super) fn render_list(
     let height = usize::from(area.height);
     let position = rows
         .iter()
-        .position(|row| matches!(row, ListRow::Choice(index, _) if *index == selected))
-        .unwrap_or_default();
+        .position(|row| matches!(row, ListRow::Choice(index, _) if *index == selected));
     let mut start = scroll.get().min(rows.len().saturating_sub(height));
-    if position < start {
-        start = position;
-    } else if position >= start + height {
-        start = position + 1 - height;
+    if let Some(position) = position {
+        if position < start {
+            start = position;
+        } else if position >= start + height {
+            start = position + 1 - height;
+        }
     }
     scroll.set(start);
     let mut drawn = Vec::new();

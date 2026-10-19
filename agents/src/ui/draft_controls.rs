@@ -157,19 +157,11 @@ impl Selector {
                 }));
                 rows
             }
-            SelectorKind::Branch {
-                branches, editing, ..
-            } => {
-                let mut rows: Vec<_> = branches
-                    .iter()
-                    .enumerate()
-                    .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
-                    .collect();
-                if !editing {
-                    rows.push(ListRow::Choice(branches.len(), Line::from(NEW_BRANCH)));
-                }
-                rows
-            }
+            SelectorKind::Branch { branches, .. } => branches
+                .iter()
+                .enumerate()
+                .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
+                .collect(),
             SelectorKind::Model { labels: values, .. } | SelectorKind::Effort { values, .. } => {
                 values
                     .iter()
@@ -612,9 +604,9 @@ impl View {
             return;
         };
         Clear.render(area, buf);
-        // The input row takes the panel's bottom row, below the list.
-        let branch = selector.branch_editor().filter(|_| area.height > 0);
-        let list = if branch.is_some() {
+        // Both branch controls take the bottom row, below the scrolling branches.
+        let create = selector.create_index().filter(|_| area.height > 0);
+        let list = if create.is_some() {
             render::row(area, 0, area.height - 1)
         } else {
             area
@@ -626,11 +618,21 @@ impl View {
             list,
             buf,
         );
-        if let Some(editor) = branch {
+        if let Some(index) = create {
             let row = super::log::search_input_rect(area);
-            render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
-            rows.push((row, selector.create_index().expect("branch input choice")));
-            self.viewport.borrow_mut().details_input = row;
+            if let Some(editor) = selector.branch_editor() {
+                render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
+                self.viewport.borrow_mut().details_input = row;
+            } else {
+                super::navigation::render_list(
+                    &[ListRow::Choice(index, Line::from(NEW_BRANCH))],
+                    selector.selected,
+                    &Cell::new(0),
+                    row,
+                    buf,
+                );
+            }
+            rows.push((row, index));
         }
         self.viewport.borrow_mut().picker_rows = rows;
     }
@@ -820,7 +822,13 @@ mod tests {
         assert_eq!(view.input_label(), "named task");
         let area = Rect::new(0, 0, 160, 40);
         let rows = panel_rows(&view, area);
-        assert_eq!(&rows[..3], &["feature/a", "main", "Create new branch"]);
+        assert_eq!(&rows[..2], &["feature/a", "main"]);
+        assert!(rows[2..rows.len() - 1].iter().all(String::is_empty));
+        assert_eq!(rows.last().unwrap(), NEW_BRANCH);
+        assert_eq!(
+            row_of(&view, 2).y,
+            view.viewport.borrow().details.bottom() - 1
+        );
         assert!(!view.selector.as_ref().unwrap().input_active());
         assert_eq!(view.selector.as_ref().unwrap().selected, 2);
         assert_eq!(view.cursor_pos(area), None);
@@ -852,6 +860,78 @@ mod tests {
         assert!(view.drafts.is_empty());
         assert!(view.selector.is_none());
         assert!(view.input_box.editor.is_empty());
+    }
+
+    #[test]
+    fn branch_button_stays_below_scrolling_choices_with_matching_highlight_and_hits() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = repository(directory.path());
+        let mut view = draft_view(&repository, directory.path());
+        prompt_step(&mut view);
+        let branches: Vec<_> = (0..30).map(|index| format!("branch/{index:02}")).collect();
+        if let SelectorKind::Branch {
+            branches: choices, ..
+        } = &mut view.selector.as_mut().unwrap().kind
+        {
+            *choices = branches.clone();
+        }
+        view.selector.as_mut().unwrap().selected = branches.len();
+        let area = Rect::new(3, 2, 160, 16);
+        for code in [
+            None,
+            Some(KeyCode::Up),
+            Some(KeyCode::Up),
+            Some(KeyCode::Down),
+            Some(KeyCode::Down),
+            Some(KeyCode::Down),
+            Some(KeyCode::Up),
+        ] {
+            if let Some(code) = code {
+                view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+            }
+            let mut buffer = Buffer::empty(area);
+            view.render(area, &mut buffer);
+            let viewport = view.viewport.borrow();
+            let bottom = viewport.details.bottom() - 1;
+            let selected = view.selector.as_ref().unwrap().selected;
+            assert_eq!(row_of(&view, branches.len()).y, bottom);
+            assert_eq!(
+                viewport.picker_rows.len(),
+                usize::from(viewport.details.height)
+            );
+            for (rect, index) in &viewport.picker_rows {
+                let expected = if *index == branches.len() {
+                    NEW_BRANCH
+                } else {
+                    &branches[*index]
+                };
+                let text: String = (rect.x..rect.right())
+                    .map(|x| buffer[(x, rect.y)].symbol())
+                    .collect();
+                assert_eq!(text.trim_end(), expected);
+                assert_eq!(
+                    buffer[(rect.right() - 1, rect.y)].bg == style::cursor_style().bg.unwrap(),
+                    *index == selected
+                );
+                if *index < branches.len() {
+                    assert!(rect.y < bottom);
+                }
+            }
+            assert!(
+                viewport
+                    .picker_rows
+                    .iter()
+                    .any(|(_, index)| *index == selected)
+            );
+        }
+        let button = row_of(&view, branches.len());
+        assert_eq!(
+            click(&mut view, Rect::new(button.right() - 1, button.y, 1, 1)),
+            None
+        );
+        assert!(view.selector.as_ref().unwrap().input_active());
+        screen(&view, area);
+        assert_eq!(view.viewport.borrow().details_input, button);
     }
 
     #[test]

@@ -419,6 +419,11 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
         .lines()
         .position(|line| line.contains("New branch ❯"))
         .unwrap();
+    assert_eq!(
+        row, input_row,
+        "button and editor share the bottom row: {input}"
+    );
+    println!("--- branch button screen ---\n{capture}--- branch editor screen ---\n{input}--- branch screens end ---");
     let input_line = input.lines().nth(input_row).unwrap();
     let input_column = input_line[..input_line.find("New branch ❯").unwrap()].width();
     for column in input_column..input_column + "New branch ❯ ".width() {
