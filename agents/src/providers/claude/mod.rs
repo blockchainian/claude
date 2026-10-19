@@ -422,13 +422,13 @@ impl ClaudeProvider {
                     .name
                     .as_deref()
                     .filter(|_| entry.name_source.as_deref() == Some("user"))
-                    .map(transcript::printable)
+                    .map(crate::providers::text::printable)
             });
             if !has_title
                 && entry.name_source.as_deref() == Some("derived")
                 && let Some(name) = entry.name.as_deref().filter(|name| !name.trim().is_empty())
             {
-                session.title = transcript::printable(name);
+                session.title = crate::providers::text::printable(name);
             }
             session.status = entry
                 .status

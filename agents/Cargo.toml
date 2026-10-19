@@ -37,6 +37,7 @@ unicode-width = "0.2"
 url = "2"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 vt100 = "0.16"
+vte = "0.15"
 sha2 = "0.10"
 
 # macOS's default `unpacked` keeps one .o per codegen unit in target/debug/deps for

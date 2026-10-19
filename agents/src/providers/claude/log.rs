@@ -1200,8 +1200,8 @@ impl Log {
 
 /// Extracts the visible text of supported harness messages.
 fn wrapped_message(text: &str) -> Option<(Kind, Option<String>, String)> {
-    if let Some(body) = pasted_content(text) {
-        return Some((Kind::User, None, user_text(&body)));
+    if pasted_content(text).is_some() {
+        return Some((Kind::User, None, prompt_body(text)));
     }
     let (kind, (name, body)) = super::peer::wrapped_message(text)?;
     let body = body.trim().to_owned();
@@ -1258,19 +1258,9 @@ pub(super) fn pasted_content(mut text: &str) -> Option<String> {
     found.then_some(body)
 }
 
-fn user_text(text: &str) -> String {
-    text.lines()
-        .filter(|line| {
-            !line.trim().strip_prefix("```").is_some_and(|suffix| {
-                suffix.is_empty()
-                    || suffix
-                        .chars()
-                        .all(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-' | '+' | '#' | '.'))
-            })
-        })
-        .flat_map(str::split_whitespace)
-        .collect::<Vec<_>>()
-        .join(" ")
+/// Unwrap pasted text without changing its code blocks or whitespace.
+pub(super) fn prompt_body(text: &str) -> String {
+    crate::providers::text::printable(&pasted_content(text).unwrap_or_else(|| text.to_owned()))
 }
 
 #[cfg(test)]
@@ -2739,7 +2729,7 @@ pub(crate) mod tests {
         let peer_body = include_str!("../../../tests/fixtures/claude-peer-message.txt").trim();
         assert_eq!(peer_body.matches('\n').count(), 11);
         for (pair, kind, sender, body) in [
-            (&events[0..2], Kind::User, None, "first line second line"),
+            (&events[0..2], Kind::User, None, "first line\nsecond line\n"),
             (
                 &events[2..4],
                 Kind::Agent,
@@ -2777,9 +2767,9 @@ pub(crate) mod tests {
         assert_eq!(events[0].kind, Kind::User);
         assert_eq!(events[1].kind, Kind::QueuedUser);
         for event in events {
-            assert!(event.body.starts_with("17:58:53 User 实话实说吧啊"));
+            assert!(event.body.contains("17:58:53 User    实话实说吧啊"));
             assert!(event.body.contains("那个五点五十八五十三秒"));
-            assert!(!event.body.contains("```"));
+            assert!(event.body.contains("```"));
             assert!(!event.body.contains("<pasted_content"));
         }
     }
@@ -2797,7 +2787,7 @@ pub(crate) mod tests {
             assert_eq!(events.len(), 2);
             assert_eq!(events[0].kind, Kind::User);
             for event in events {
-                assert_eq!(event.body, "before first second between third after");
+                assert_eq!(event.body, pasted_content(content).unwrap());
             }
         }
     }

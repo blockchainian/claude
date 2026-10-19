@@ -1,3 +1,4 @@
+use crate::providers::text::printable;
 use crate::log::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::tool::{Format, Input, Subject};
@@ -404,11 +405,6 @@ fn timestamp(record: &Value) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-fn printable(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .collect()
-}
 
 fn content_text(content: &Value) -> Option<String> {
     if let Some(text) = content.as_str() {

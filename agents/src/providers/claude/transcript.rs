@@ -1,3 +1,4 @@
+use crate::providers::text::printable;
 use crate::ask::{AskKind, Question, QuestionOption};
 use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 #[cfg(test)]
@@ -309,11 +310,6 @@ impl Summary {
     }
 }
 
-pub(super) fn printable(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .collect()
-}
 
 /// The model id and human-readable name of a model attachment, such as "Opus 5.5".
 fn model_identity(record: &Value) -> Option<(String, String)> {
@@ -453,7 +449,7 @@ fn prompt_text(record: &Value) -> Option<String> {
 
 /// Text the user typed, with pasted blocks shown as their content.
 fn typed_text(text: String) -> String {
-    super::log::pasted_content(&text).unwrap_or(text)
+    super::log::prompt_body(&text)
 }
 
 fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
@@ -473,14 +469,11 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
     }
     queue
         .into_iter()
-        .map(typed_text)
-        .filter(|content| !content.trim_start().starts_with('<'))
-        .map(|content| {
-            printable(&content)
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
+        .filter(|content| {
+            super::peer::wrapped_message(content).is_none()
+                && !content.trim_start().starts_with("<task-notification>")
         })
+        .map(typed_text)
         .collect()
 }
 
@@ -1189,6 +1182,25 @@ pub(super) mod tests {
         }
     }
 
+    #[test]
+    fn pasted_prompt_and_queue_keep_the_log_message_body() {
+        let record: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+        let raw = record["message"]["content"].as_str().unwrap();
+        let expected = super::super::log::pasted_content(raw).unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{record}").unwrap();
+        let event = super::super::log::tail(file.path(), 1).unwrap().remove(0);
+        assert_eq!(event.body, expected);
+        assert_eq!(summary(&file).prompt, expected);
+        assert_eq!(queued_prompts(vec![QueueOperation::Enqueue(raw.into())]), [expected]);
+    }
+
+    #[test]
+    fn queued_xml_prompt_keeps_the_document() {
+        let xml = include_str!("../../../tests/fixtures/structured_text/real-theme.plist");
+        assert_eq!(queued_prompts(vec![QueueOperation::Enqueue(xml.into())]), [xml]);
+    }
+
     fn assert_summary(summary: &Summary) {
         let records: Vec<Value> = FIXTURE
             .lines()
@@ -1479,7 +1491,7 @@ pub(super) mod tests {
             summary.prompt,
             "```\n\n\n```\n\n\nImplement workstream A.\n\nRules:\n- Do not push.\n\n\n```\n\n发现了一个 bug。\n\n\n```\n嗯。"
         );
-        assert_eq!(summary.queued, ["queued paste"]);
+        assert_eq!(summary.queued, ["queued paste\n"]);
     }
 
     #[test]
@@ -1567,7 +1579,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn system_items_are_hidden_but_consume_their_dequeue() {
+    fn notifications_are_hidden_and_xml_keeps_its_queue_position() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         idle_prompt(&mut file);
         queue(
@@ -1577,13 +1589,13 @@ pub(super) mod tests {
         );
         queue(&mut file, "enqueue", "A");
         queue(&mut file, "enqueue", "<other-session>hello</other-session>");
-        assert_eq!(summary(&file).queued, ["A"]);
+        assert_eq!(summary(&file).queued, ["A", "<other-session>hello</other-session>"]);
         queue(&mut file, "dequeue", "");
         user(&mut file, "  <task-notification>done</task-notification>");
-        assert_eq!(summary(&file).queued, ["A"]);
+        assert_eq!(summary(&file).queued, ["A", "<other-session>hello</other-session>"]);
         queue(&mut file, "dequeue", "");
         user(&mut file, "A");
-        assert!(summary(&file).queued.is_empty());
+        assert_eq!(summary(&file).queued, ["<other-session>hello</other-session>"]);
     }
 
     #[test]
@@ -1609,7 +1621,7 @@ pub(super) mod tests {
         queue(&mut file, "enqueue", &format!("{prefix}B"));
         queue(&mut file, "remove", &format!("{prefix}B"));
         queue(&mut file, "enqueue", "A\n\tB\0C");
-        assert_eq!(summary(&file).queued, [format!("{prefix}A"), "A BC".into()]);
+        assert_eq!(summary(&file).queued, [format!("{prefix}A"), "A\n\tBC".into()]);
     }
 
     #[test]
