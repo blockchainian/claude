@@ -1,86 +1,18 @@
 //! Finds the file paths in displayed text, for shortening and for links alike.
-use std::{cell::RefCell, collections::VecDeque, ops::Range, path::Path, rc::Rc};
-
-const PATH_CACHE_ENTRIES: usize = 128;
-const PATH_CACHE_BYTES: usize = 4 * 1024 * 1024;
-const PATH_ENTRY_BYTES: usize = std::mem::size_of::<PathEntry>() + 2 * std::mem::size_of::<usize>();
-
-struct PathCandidate {
-    range: Range<usize>,
-    rooted: bool,
-}
-
-struct PathEntry {
-    text: String,
-    candidates: Rc<[PathCandidate]>,
-    bytes: usize,
-}
-
-#[derive(Default)]
-struct PathCache {
-    entries: VecDeque<PathEntry>,
-    bytes: usize,
-}
-
-thread_local! {
-    static PATH_CANDIDATES: RefCell<PathCache> = RefCell::new(PathCache::default());
-}
+use std::ops::Range;
+use std::path::Path;
 
 /// The paths in `text`: absolute and home paths, and relative paths that exist under `cwd`.
 pub(super) fn text_paths(text: &str, cwd: &Path) -> Vec<Range<usize>> {
-    let candidates = path_candidates(text);
-    candidates
-        .iter()
-        .filter(|candidate| candidate.rooted || cwd.join(&text[candidate.range.clone()]).exists())
-        .map(|candidate| candidate.range.clone())
-        .collect()
-}
-
-/// Caches lexical candidates only; relative path existence is checked by each caller.
-fn path_candidates(text: &str) -> Rc<[PathCandidate]> {
-    if let Some(candidates) = PATH_CANDIDATES.with(|cache| {
-        cache
-            .borrow()
-            .entries
-            .iter()
-            .find(|entry| entry.text == text)
-            .map(|entry| Rc::clone(&entry.candidates))
-    }) {
-        return candidates;
-    }
-    let candidates: Rc<[PathCandidate]> = text_words(text)
-        .filter_map(|(start, word)| {
-            word_path(word).map(|range| PathCandidate {
-                rooted: is_rooted(&word[range.clone()]),
-                range: start + range.start..start + range.end,
-            })
-        })
-        .collect();
-    PATH_CANDIDATES.with(|cache| {
-        cache
-            .borrow_mut()
-            .insert(text, Rc::clone(&candidates), PATH_CACHE_BYTES);
-    });
-    candidates
-}
-
-impl PathCache {
-    fn insert(&mut self, text: &str, candidates: Rc<[PathCandidate]>, byte_limit: usize) {
-        let bytes = PATH_ENTRY_BYTES + text.len() + std::mem::size_of_val(candidates.as_ref());
-        if bytes > byte_limit {
-            return;
+    let mut paths = Vec::new();
+    for (start, word) in text_words(text) {
+        if let Some(range) = word_path(word)
+            && (is_rooted(&word[range.clone()]) || cwd.join(&word[range.clone()]).exists())
+        {
+            paths.push(start + range.start..start + range.end);
         }
-        while self.entries.len() >= PATH_CACHE_ENTRIES || self.bytes + bytes > byte_limit {
-            let entry = self.entries.pop_front().expect("nonempty path cache");
-            self.bytes -= entry.bytes;
-        }
-        self.entries.push_back(PathEntry {
-            text: text.to_owned(),
-            candidates,
-            bytes,
-        });
-        self.bytes += bytes;
     }
+    paths
 }
 
 /// A path inside `cwd`, relative to that directory. Component boundaries matter;
@@ -124,17 +56,10 @@ fn text_words(text: &str) -> impl Iterator<Item = (usize, &str)> {
     })
 }
 
-#[cfg(test)]
-thread_local! {
-    static PATH_WORD_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 /// The bytes of the path-shaped part of one word, before any existence check:
 /// an absolute or home path after punctuation, or a relative path such as
 /// `src/ui/log.rs`. URLs and words with letters before the path stay prose.
 pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
-    #[cfg(test)]
-    PATH_WORD_SCANS.with(|count| count.set(count.get() + 1));
     // A rooted path starts at the first `/` or `~` after punctuation only, so
     // `a/b` and `https://…` are not rooted while `报告：/tmp/…` is.
     let rooted = word
@@ -247,93 +172,6 @@ mod tests {
             .into_iter()
             .map(|range| &text[range])
             .collect()
-    }
-
-    fn recorded_path_text() -> String {
-        let payload: serde_json::Value = serde_json::from_str(
-            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
-                .lines()
-                .next()
-                .unwrap(),
-        )
-        .unwrap();
-        payload["message"]["content"][0]["input"]["command"]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    }
-
-    #[test]
-    fn recorded_path_candidates_are_reused() {
-        let text = recorded_path_text();
-        PATH_WORD_SCANS.with(|count| count.set(0));
-        let first = text_paths(&text, Path::new("/"));
-        assert!(!first.is_empty());
-        let scans = PATH_WORD_SCANS.with(|count| count.get());
-        assert!(scans > 0);
-        assert_eq!(text_paths(&text, Path::new("/")), first);
-        assert_eq!(PATH_WORD_SCANS.with(|count| count.get()), scans);
-    }
-
-    #[test]
-    fn path_candidates_use_exact_content_and_bound_retained_memory() {
-        PATH_CANDIDATES.with(|cache| *cache.borrow_mut() = PathCache::default());
-        let text = recorded_path_text();
-        let original = path_candidates(&text);
-        assert!(Rc::ptr_eq(&original, &path_candidates(&text)));
-        let changed = format!("{text} /cache/added.rs");
-        let candidates = path_candidates(&changed);
-        assert_eq!(
-            &changed[candidates.last().unwrap().range.clone()],
-            "/cache/added.rs"
-        );
-        assert!(!Rc::ptr_eq(&original, &candidates));
-        for index in 0..PATH_CACHE_ENTRIES {
-            path_candidates(&format!("{text} {index}"));
-        }
-        PATH_CANDIDATES.with(|cache| {
-            let cache = cache.borrow();
-            assert_eq!(cache.entries.len(), PATH_CACHE_ENTRIES);
-            assert!(!cache.entries.iter().any(|entry| entry.text == text));
-        });
-        let entry_bytes = PATH_ENTRY_BYTES + text.len() + std::mem::size_of_val(original.as_ref());
-        let byte_limit = entry_bytes * 2;
-        assert!(byte_limit < PATH_CACHE_BYTES);
-        let mut cache = PathCache::default();
-        cache.insert(&text, Rc::clone(&original), byte_limit);
-        cache.insert(&text, Rc::clone(&original), byte_limit);
-        assert_eq!(cache.entries.len(), 2);
-        cache.insert(&changed, Rc::clone(&candidates), byte_limit);
-        assert!(cache.bytes <= byte_limit);
-        assert_eq!(cache.entries.len(), 1);
-        assert_eq!(cache.entries[0].text, changed);
-        cache.insert(&text, Rc::clone(&original), entry_bytes - 1);
-        assert_eq!(cache.entries.len(), 1);
-        assert_eq!(cache.entries[0].text, changed);
-    }
-
-    #[test]
-    fn cached_candidates_keep_relative_paths_live_for_each_directory() {
-        let text = format!("{} src/ui/log.rs", recorded_path_text());
-        let first = tempfile::tempdir().unwrap();
-        let second = tempfile::tempdir().unwrap();
-        let before = found(&text, first.path());
-        assert!(!before.contains(&"src/ui/log.rs"));
-        std::fs::create_dir_all(second.path().join("src/ui")).unwrap();
-        let path = second.path().join("src/ui/log.rs");
-        std::fs::write(&path, "").unwrap();
-        assert!(found(&text, second.path()).contains(&"src/ui/log.rs"));
-        assert_eq!(found(&text, first.path()), before);
-        std::fs::create_dir_all(first.path().join("src/ui")).unwrap();
-        let path_first = first.path().join("src/ui/log.rs");
-        std::fs::write(&path_first, "").unwrap();
-        assert!(found(&text, first.path()).contains(&"src/ui/log.rs"));
-        std::fs::remove_file(path_first).unwrap();
-        std::fs::remove_file(path).unwrap();
-        assert_eq!(found(&text, first.path()), before);
-        assert_eq!(found(&text, second.path()), before);
-        let changed = text.replace("src/ui/log.rs", "src/ui/missing.rs");
-        assert!(!found(&changed, second.path()).contains(&"src/ui/log.rs"));
     }
 
     #[test]

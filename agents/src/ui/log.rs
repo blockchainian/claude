@@ -898,27 +898,23 @@ fn render_event(
         } else {
             super::links::path_links(&fitted.source, &fitted.paths, cwd)
         };
-        if links.is_empty() {
-            Vec::new()
-        } else {
-            let mut maps = super::text_selection_layout::map_lines_in(
-                &fitted.source,
-                std::slice::from_ref(&body),
-                is_prose(&event.kind),
-                Some(cwd),
-            );
-            let mut cells = maps.pop().unwrap_or_default();
-            cells.retain(|(columns, _)| columns.end <= visible);
-            super::links::drawn_links(
-                &[text_selection::DrawnRow {
-                    segment: 0,
-                    x: body_x,
-                    y: area.y,
-                    cells,
-                }],
-                &links,
-            )
-        }
+        let mut maps = super::text_selection_layout::map_lines_in(
+            &fitted.source,
+            std::slice::from_ref(&body),
+            is_prose(&event.kind),
+            Some(cwd),
+        );
+        let mut cells = maps.pop().unwrap_or_default();
+        cells.retain(|(columns, _)| columns.end <= visible);
+        super::links::drawn_links(
+            &[text_selection::DrawnRow {
+                segment: 0,
+                x: body_x,
+                y: area.y,
+                cells,
+            }],
+            &links,
+        )
     };
     if let Some(indices) = indices {
         let ellipsis = if clipped { body.spans.pop() } else { None };
@@ -1990,33 +1986,6 @@ mod panel_detail_tests {
                 groups: vec![Group { parts: vec![part] }],
             }],
         )
-    }
-
-    #[test]
-    fn linkless_log_rows_skip_source_mapping() {
-        let events = fixture_events(include_str!("../../tests/fixtures/transcript.jsonl"));
-        let event = events
-            .iter()
-            .find(|event| event.kind == Kind::Assistant)
-            .unwrap();
-        let area = Rect::new(0, 0, 120, 1);
-        let mut buffer = Buffer::empty(area);
-        super::super::text_selection_layout::MAP_LINES_CALLS.set(0);
-        let links = render_event(
-            event,
-            "12:34:56",
-            false,
-            area,
-            &mut buffer,
-            None,
-            Path::new("/workspace"),
-        );
-        assert!(links.is_empty());
-        assert!(buffer.content.iter().any(|cell| cell.symbol() != " "));
-        assert_eq!(
-            super::super::text_selection_layout::MAP_LINES_CALLS.get(),
-            0
-        );
     }
 
     #[test]

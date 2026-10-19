@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -8,14 +7,9 @@ use unicode_width::UnicodeWidthStr;
 
 pub(super) type CellMap = (Range<u16>, Range<usize>);
 
-#[cfg(test)]
-thread_local! {
-    pub(super) static MAP_LINES_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 #[derive(Clone)]
-struct Token<'a> {
-    text: Cow<'a, str>,
+struct Token {
+    text: String,
     source: Option<Range<usize>>,
 }
 
@@ -31,8 +25,6 @@ pub(super) fn map_lines_in(
     markdown: bool,
     cwd: Option<&std::path::Path>,
 ) -> Vec<Vec<CellMap>> {
-    #[cfg(test)]
-    MAP_LINES_CALLS.set(MAP_LINES_CALLS.get() + 1);
     let mut tokens = source_tokens(source, markdown);
     if let Some(cwd) = cwd {
         for range in super::paths::text_paths(source, cwd) {
@@ -72,7 +64,7 @@ pub(super) fn map_lines_in(
                     tokens.splice(
                         start..start,
                         prefix.graphemes(true).map(|text| Token {
-                            text: text.to_owned().into(),
+                            text: text.to_owned(),
                             source: Some(range.start..end),
                         }),
                     );
@@ -86,7 +78,7 @@ pub(super) fn map_lines_in(
         .iter()
         .enumerate()
         .map(|(line_index, line)| {
-            while cursor < tokens.len() && matches!(tokens[cursor].text.as_ref(), "\n" | "\r") {
+            while cursor < tokens.len() && matches!(tokens[cursor].text.as_str(), "\n" | "\r") {
                 cursor += 1;
             }
             let mut cells = 0u16;
@@ -162,7 +154,7 @@ pub(super) fn map_lines_in(
                         && tokens[end].text != "/"
                         && !tokens[end].text.trim().is_empty()
                         && !matches!(
-                            tokens[end].text.as_ref(),
+                            tokens[end].text.as_str(),
                             "，" | "。" | "；" | "：" | "！" | "？"
                         )
                     {
@@ -170,7 +162,7 @@ pub(super) fn map_lines_in(
                     }
                     while end > start
                         && matches!(
-                            tokens[end - 1].text.as_ref(),
+                            tokens[end - 1].text.as_str(),
                             "`" | ")" | "\"" | "'" | "," | "." | ";" | ":"
                         )
                     {
@@ -211,13 +203,9 @@ pub(super) fn map_lines_in(
 }
 
 /// Gives every visible path grapheme the original bytes it represents, including omitted components.
-fn path_tokens<'a>(
-    tokens: &[Token<'a>],
-    path: &Range<usize>,
-    display: &str,
-) -> Option<Vec<Token<'a>>> {
+fn path_tokens(tokens: &[Token], path: &Range<usize>, display: &str) -> Option<Vec<Token>> {
     let mut forms = vec![tokens.to_vec()];
-    let text: String = tokens.iter().map(|token| token.text.as_ref()).collect();
+    let text: String = tokens.iter().map(|token| token.text.as_str()).collect();
     if let Ok(home) = std::env::var("HOME")
         && text.starts_with(&format!("{home}/"))
     {
@@ -229,9 +217,9 @@ fn path_tokens<'a>(
         home_tokens.extend_from_slice(&tokens[count..]);
         forms.push(home_tokens);
     }
-    let mut best: Option<(usize, Vec<Token<'a>>)> = None;
-    let mut consider = |candidate: Vec<Token<'a>>| {
-        let label: String = candidate.iter().map(|token| token.text.as_ref()).collect();
+    let mut best: Option<(usize, Vec<Token>)> = None;
+    let mut consider = |candidate: Vec<Token>| {
+        let label: String = candidate.iter().map(|token| token.text.as_str()).collect();
         if display.starts_with(&label) && best.as_ref().is_none_or(|(len, _)| label.len() > *len) {
             best = Some((label.len(), candidate));
         }
@@ -287,7 +275,7 @@ fn path_tokens<'a>(
     best.map(|(_, tokens)| tokens)
 }
 
-fn source_tokens(source: &str, markdown: bool) -> Vec<Token<'_>> {
+fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
     let mut tokens = Vec::new();
     if !markdown {
         push_text(&mut tokens, source, 0..source.len(), source, false);
@@ -307,7 +295,7 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token<'_>> {
             Event::Start(Tag::TableCell) => {
                 if table_cells > 0 {
                     tokens.extend(" │ ".graphemes(true).map(|text| Token {
-                        text: text.to_owned().into(),
+                        text: text.to_owned(),
                         source: None,
                     }));
                 }
@@ -330,7 +318,7 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token<'_>> {
                     _ => format!("{}• ", " ".repeat(padding)),
                 };
                 tokens.extend(marker.graphemes(true).map(|text| Token {
-                    text: text.to_owned().into(),
+                    text: text.to_owned(),
                     source: None,
                 }));
             }
@@ -352,11 +340,11 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token<'_>> {
     tokens
 }
 
-fn push_text<'a>(
-    tokens: &mut Vec<Token<'a>>,
+fn push_text(
+    tokens: &mut Vec<Token>,
     text: &str,
     range: Range<usize>,
-    source: &'a str,
+    source: &str,
     decode_entities: bool,
 ) {
     let raw = &source[range.clone()];
@@ -394,21 +382,6 @@ fn push_text<'a>(
         } else {
             range.clone()
         };
-        if !grapheme
-            .chars()
-            .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r'))
-        {
-            let text = if &source[bytes.clone()] == grapheme {
-                Cow::Borrowed(&source[bytes.clone()])
-            } else {
-                Cow::Owned(grapheme.to_owned())
-            };
-            tokens.push(Token {
-                text,
-                source: Some(bytes),
-            });
-            continue;
-        }
         let expanded = grapheme.replace('\t', "    ");
         let displayed: String = expanded
             .chars()
@@ -421,7 +394,7 @@ fn push_text<'a>(
             })
             .collect();
         tokens.extend(displayed.graphemes(true).map(|text| Token {
-            text: text.to_owned().into(),
+            text: text.to_owned(),
             source: Some(bytes.clone()),
         }));
     }
@@ -430,23 +403,6 @@ fn push_text<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn recorded_plain_text_tokens_borrow_their_source() {
-        let record: serde_json::Value = include_str!("../../tests/fixtures/transcript.jsonl")
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .find(|record: &serde_json::Value| record["type"] == "assistant")
-            .unwrap();
-        let source = record["message"]["content"][0]["text"].as_str().unwrap();
-        let tokens = source_tokens(source, false);
-        assert!(!tokens.is_empty());
-        for token in tokens {
-            let bytes = token.source.unwrap();
-            assert_eq!(token.text, source[bytes.clone()]);
-            assert_eq!(token.text.as_ptr(), source[bytes].as_ptr());
-        }
-    }
 
     #[test]
     fn compressed_fixture_paths_keep_every_cell_linked_and_copy_original_bytes() {

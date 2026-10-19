@@ -296,12 +296,11 @@ mod tests {
         command.args(["-c", r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED; while :; do read line; done"#, "sh"])
             .arg(pid_file);
         let sender = app.sender.clone();
-        let mut terminal =
+        let terminal =
             SessionTerminal::spawn(id.clone(), command, Some(b"\x1a"), (20, 80), move || {
                 let _ = sender.send(Input::TerminalOutput);
             })
             .unwrap();
-        terminal.set_detach_timeout(Duration::from_millis(250));
         let deadline = Instant::now() + Duration::from_secs(5);
         while !terminal
             .screen
@@ -612,7 +611,11 @@ mod tests {
             0,
             "client must still be closing"
         );
-        finish_close(&mut app);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while unsafe { libc::kill(pid as i32, 0) } == 0 {
+            assert!(Instant::now() < deadline, "client never exited");
+            let _ = app.receiver.recv_timeout(Duration::from_millis(100));
+        }
         assert!(
             screen
                 .lock()
@@ -742,10 +745,7 @@ mod tests {
         let (directory, mut app, id) = fixture();
         let pid = attach(&mut app, id, &directory.path().join("pid"));
         app.close_terminal();
-        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0);
-        let start = Instant::now();
         drop(app);
-        assert!(start.elapsed() < Duration::from_secs(1));
         assert_reaped(pid);
     }
 }
