@@ -26,7 +26,7 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
         && let Some(count) = credits
     {
         text.push_str(&format!(
-            ", {count} reset credit{}",
+            ", {count} credit{}",
             if count == 1 { "" } else { "s" }
         ));
     }
@@ -103,9 +103,9 @@ mod tests {
                         }
                         if has_credits && (view == UsageView::Detailed || left < 5) {
                             expected.push_str(if credits == Some(1) {
-                                ", 1 reset credit"
+                                ", 1 credit"
                             } else {
-                                ", 2 reset credits"
+                                ", 2 credits"
                             });
                         }
                         for name in ["Claude", "Codex"] {

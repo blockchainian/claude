@@ -40,7 +40,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     ] {
         let reset = reset.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
         let time = reset.with_timezone(&chrono::Local).format("%a %H:%M");
-        let credits = if name == "Claude" { "1 reset credit" } else { "2 reset credits" };
+        let credits = if name == "Claude" { "1 credit" } else { "2 credits" };
         assert!(
             detailed.contains(&format!("{name} resets {time}, {credits}")),
             "{detailed}"
