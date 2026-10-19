@@ -19,6 +19,14 @@ Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from 
 
 ## Install
 
+### Agent command center
+
+```sh
+cargo install --locked --git https://github.com/blockchainian/claude agents
+```
+
+`agents` is the terminal dashboard for Claude Code and Codex sessions; run it from the directory whose sessions you want to see.
+
 ### Claude Code
 
 ```
@@ -61,14 +69,6 @@ Intel exposes fourteen skills in Codex; its case-study Workflow remains Claude-o
 Each plugin's README covers its requirements and platform-specific behavior.
 Skills resolve script paths from the loaded `SKILL.md` directory in each shell call.
 For Mobile phone automation, review and trust `phone-session-gate` in `/hooks` first.
-
-### agents
-
-```sh
-cargo install --locked --git https://github.com/blockchainian/claude agents
-```
-
-`agents` is the terminal dashboard for Claude Code and Codex sessions; run it from the directory whose sessions you want to see.
 
 ## License
 
