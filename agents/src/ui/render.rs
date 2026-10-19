@@ -828,12 +828,11 @@ impl View {
         if self.log_sort != LogSort::Duration || border.is_empty() {
             return Rect::default();
         }
-        let label = "Sort · duration";
-        let width = (label.width() as u16).min(border.width);
-        let area = Rect::new(border.right() - width, border.y, width, 1);
-        Clear.render(area, buf);
-        line(Line::from(label).dim(), area, buf);
-        area
+        render_rule_ends(border, 0, None, Some(Line::from("duration").dim()), buf)
+            .1
+            // Reserve the label's leading space as well as its text for model controls.
+            .map(|area| Rect::new(area.x - 1, area.y, area.width + 1, area.height))
+            .unwrap_or_default()
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
@@ -1993,11 +1992,21 @@ mod background_title_tests {
                 let text: String = (border.x..border.right())
                     .map(|x| buf[(x, border.y)].symbol())
                     .collect();
-                assert_eq!(text.contains("Sort · duration"), sort == LogSort::Duration);
+                assert_eq!(text.contains("duration"), sort == LogSort::Duration);
+                assert!(!text.contains("Sort · "), "{text}");
                 if sort == LogSort::Duration {
-                    assert!(text.ends_with("Sort · duration"), "{text}");
-                    let label_x = border.right() - 15;
-                    for x in label_x..border.right() {
+                    assert!(text.ends_with(" duration╶─"), "{text}");
+                    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                        "tests/ui_snapshots/log_duration_border_{width}.txt"
+                    ));
+                    let snapshot = format!("{text}\n");
+                    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+                        std::fs::write(&path, &snapshot).unwrap();
+                    }
+                    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+                    let label_x = border.right() - 10;
+                    assert_eq!(buf[(label_x - 1, border.y)].symbol(), " ");
+                    for x in label_x..border.right() - 1 {
                         assert!(
                             buf[(x, border.y)]
                                 .modifier
@@ -2015,7 +2024,10 @@ mod background_title_tests {
                                 .unwrap()
                                 .0;
                             assert_eq!(rect.y, border.y);
-                            assert!(rect.right() < label_x);
+                            assert!(rect.right() + 1 < label_x);
+                            if field == Field::Effort {
+                                assert_eq!(buf[(rect.right(), border.y)].symbol(), " ");
+                            }
                         }
                     }
                 }
