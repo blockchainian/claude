@@ -535,3 +535,95 @@ fn terminal_draft_defaults_and_inherited_choices() {
     .unwrap();
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_picker_bottom_layout() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    repository(&source, "main");
+    let output = Command::new("git")
+        .args(["branch", "feature/layout"])
+        .current_dir(&source)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let (_directory, tmux, _) =
+        start_probe_with_setup("picker-bottom", &transcript_at(&source), |directory| {
+            use sha2::{Digest, Sha256};
+            let config = directory.join("claude");
+            std::fs::write(
+                config.join(".claude.json"),
+                r#"{"oauthAccount":{"organizationUuid":"org-1","accountUuid":"ACCOUNT-1"}}"#,
+            )
+            .unwrap();
+            let hash = Sha256::digest(b"account-1")
+                .iter()
+                .take(6)
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            let cache = config.join("cache/model-catalog");
+            std::fs::create_dir_all(&cache).unwrap();
+            std::fs::write(
+                cache.join(format!("org-1-{hash}-cc.json")),
+                include_str!("../fixtures/claude-model-catalog.json"),
+            )
+            .unwrap();
+        });
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    let capture = assert_title_caret(&tmux, "New task", 0);
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("New task") && line.contains("main"))
+        .unwrap();
+    tmux.mouse(0, line[..line.find("main").unwrap()].width(), row, true);
+    let capture = tmux.capture_when(|capture| capture.contains("Create new branch"));
+    let lines: Vec<_> = capture.lines().collect();
+    let create = lines
+        .iter()
+        .position(|line| line.contains("Create new branch"))
+        .unwrap();
+    let branch = lines
+        .iter()
+        .position(|line| line.split('│').any(|part| part.trim() == "main"))
+        .unwrap();
+    assert_eq!(create - branch, 2, "{capture}");
+    assert!(
+        lines[create - 1]
+            .split('│')
+            .next_back()
+            .unwrap()
+            .trim()
+            .is_empty(),
+        "{capture}"
+    );
+    assert!(lines[create + 1].contains("New task"), "{capture}");
+    println!(
+        "BRANCH CAPTURE\n{}",
+        lines[branch - 1..=create + 1].join("\n")
+    );
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let capture = assert_title_caret(&tmux, "New task", 0);
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("Opus 5.5") && line.contains("medium"))
+        .unwrap();
+    tmux.mouse(0, line[..line.find("Opus 5.5").unwrap()].width(), row, true);
+    let capture =
+        tmux.capture_when(|capture| capture.contains("enter select") && capture.contains("Sonnet"));
+    let lines: Vec<_> = capture.lines().collect();
+    let bottom = lines
+        .iter()
+        .position(|line| line.contains("New task") && line.contains('─'))
+        .unwrap();
+    assert!(
+        lines[bottom - 1]
+            .split('│')
+            .any(|part| part.trim() == "Sonnet 4.6"),
+        "{capture}"
+    );
+    println!("MODEL CAPTURE\n{}", lines[bottom - 5..=bottom].join("\n"));
+    println!("{{\"picker_bottom\":\"pass\",\"branch_gap\":\"pass\"}}");
+}

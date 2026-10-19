@@ -458,16 +458,15 @@ impl View {
             )
         } else if let Some(session) = self.selected_row() {
             if matches!(field, Field::Branch | Field::Directory)
-                || !session.is_live_background()
-                || session.input_disabled_reason().is_some()
+                || !session.can_resume()
             {
                 return;
             }
             (
                 session.id.provider,
                 ControlTarget::Session(session.id.clone()),
-                session.model.clone(),
-                session.effort.clone(),
+                self.session_settings(session).0.map(str::to_owned),
+                self.session_settings(session).1.map(str::to_owned),
             )
         } else {
             return;
@@ -695,6 +694,17 @@ impl View {
                         self.draft_changed(id);
                         None
                     }
+                    ControlTarget::Session(id)
+                        if !self.rows.iter().find(|session| session.id == id)?.is_live_background() =>
+                    {
+                        let settings = self.pending_settings.entry(id).or_default();
+                        if model {
+                            settings.model = Some(value);
+                        } else {
+                            settings.effort = Some(value);
+                        }
+                        None
+                    }
                     ControlTarget::Session(id) => Some(if model {
                         Action::SetModel { id, model: value }
                     } else {
@@ -739,15 +749,18 @@ impl View {
             return;
         };
         self.clear_overlay(area, false, buf);
-        // Both branch controls take the bottom row, below the scrolling branches.
+        // Reserve the branch control and a gap when one branch still fits above it.
         let create = selector.create_index().filter(|_| area.height > 0);
-        let list = if create.is_some() {
-            render::row(area, 0, area.height - 1)
+        let choices = selector.rows();
+        let reserved = if create.is_some() {
+            1 + u16::from(area.height >= 3 && !choices.is_empty())
         } else {
-            area
+            0
         };
+        let height = usize::from(area.height - reserved).min(choices.len()) as u16;
+        let list = render::row(area, area.height - reserved - height, height);
         let mut rows = super::navigation::render_list(
-            &selector.rows(),
+            &choices,
             selector.selected,
             &selector.scroll,
             list,
@@ -776,6 +789,8 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("picker_layout_tests.rs");
+
     fn draft_view(cwd: &Path, config: &Path) -> View {
         crate::providers::claude::write_fixture_cache(config);
         let mut view = View::default();
@@ -979,8 +994,11 @@ mod tests {
         assert_eq!(view.input_label(), "named task");
         let area = Rect::new(0, 0, 160, 40);
         let rows = panel_rows(&view, area);
-        assert_eq!(&rows[..2], &["feature/a", "main"]);
-        assert!(rows[2..rows.len() - 1].iter().all(String::is_empty));
+        assert!(rows[..rows.len() - 4].iter().all(String::is_empty));
+        assert_eq!(
+            &rows[rows.len() - 4..rows.len() - 1],
+            &["feature/a", "main", ""]
+        );
         assert_eq!(rows.last().unwrap(), NEW_BRANCH);
         assert_eq!(
             row_of(&view, 2).y,
@@ -1056,7 +1074,7 @@ mod tests {
             assert_eq!(row_of(&view, branches.len()).y, bottom);
             assert_eq!(
                 viewport.picker_rows.len(),
-                usize::from(viewport.details.height)
+                usize::from(viewport.details.height - 1)
             );
             for (rect, index) in &viewport.picker_rows {
                 let expected = if *index == branches.len() {
