@@ -389,7 +389,8 @@ fn locks_require_a_holder_not_just_a_file() {
     assert!(!lock_held(&path).unwrap());
     writer.lock().unwrap();
     assert!(lock_held(&path).unwrap());
-    drop(writer);
+    // Parallel process launches can inherit this descriptor until exec finishes.
+    writer.unlock().unwrap();
     assert!(!lock_held(&path).unwrap());
     assert_eq!(status(false, false), SessionStatus::Inactive);
     assert_eq!(status(false, true), SessionStatus::Inactive);
