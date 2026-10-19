@@ -88,7 +88,7 @@ fn file_change_uses_record_paths() {
 fn mcp_call_uses_record_server_tool_and_duration() {
     let entries = events("mcp");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "Claude ask claude");
+    assert_eq!(entries[0].body, "claude ask claude");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("mcp")[0]);
 }

@@ -587,7 +587,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
     let thread_id = "01a1489e-5020-7f40-90e8-c9413012630b";
     assert_eq!(
         event.calls[0].title,
-        format!("Codex-manager detach {thread_id}")
+        format!("codex-manager detach {thread_id}")
     );
     assert!(event.calls[0].input.is_empty());
     let (mut view, now) = log_fixture();
@@ -600,7 +600,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         .collect();
     let title = rows
         .iter()
-        .find(|row| row.contains("Codex-manager detach"))
+        .find(|row| row.contains("codex-manager detach"))
         .expect("detail must retain the tool name beside its subject");
     let left = title.find(thread_id).unwrap();
     let viewport = view.viewport.borrow();
@@ -617,7 +617,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         ))
     );
     assert_eq!(
-        title.find("Codex-manager detach"),
+        title.find("codex-manager detach"),
         Some(usize::from(columns.text.x))
     );
     assert_eq!(

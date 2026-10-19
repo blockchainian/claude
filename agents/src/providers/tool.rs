@@ -95,18 +95,21 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     title_name(&name)
 }
 
-/// Underscore identifiers use sentence case; camel-case identifiers retain their spelling.
+/// MCP server spelling is preserved; only underscore tool identifiers use sentence case.
 pub(crate) fn title_name(name: &str) -> String {
     let name = tool_name(name);
-    let text = if name.contains('_') || name.chars().all(|c| !c.is_lowercase()) {
-        name.split('_')
-            .filter(|word| !word.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_lowercase()
-    } else {
-        name.to_owned()
-    };
+    if let Some((server, tool)) = name.split_once(' ') {
+        return format!("{server} {}", tool.replace('_', " "));
+    }
+    if !name.contains('_') {
+        return name;
+    }
+    let text = name
+        .split('_')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
     let mut chars = text.chars();
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().collect::<String>() + chars.as_str()
@@ -514,6 +517,25 @@ fn label_section(section: Section) -> Vec<Section> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn captured_mcp_names_preserve_server_and_tool_case() {
+        let record: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/mcp-codex/image.json"))
+                .unwrap();
+        let item = &record["payload"]["item"];
+        let server = item["server"].as_str().unwrap();
+        let tool = item["tool"].as_str().unwrap();
+        let raw = format!("mcp__{server}__{tool}");
+        assert_eq!(
+            super::display_tool_name(&raw),
+            format!("{server} {}", tool.replace('_', " "))
+        );
+        assert_eq!(
+            super::display_tool_name("mcp__claude-client__ask_claude"),
+            "claude-client ask claude"
+        );
+    }
+
+    #[test]
     fn captured_tool_names_share_one_display_rule() {
         let record: serde_json::Value = serde_json::from_str(
             include_str!("../../tests/fixtures/codex-agent-names.jsonl")
@@ -638,7 +660,7 @@ mod tests {
         };
         for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
             let (name, subject, input) = super::presentation(name, &call["input"], &rules);
-            assert_eq!(name, "Codex-manager start");
+            assert_eq!(name, "codex-manager start");
             assert_eq!(subject.as_deref(), Some("tool-calls"));
             assert_eq!(
                 input,
@@ -655,17 +677,17 @@ mod tests {
         for (name, expected) in [
             (
                 "mcp__plugin_codex_codex-manager__send",
-                "Codex-manager send",
+                "codex-manager send",
             ),
             (
                 "mcp__plugin_codex_codex-manager__start",
-                "Codex-manager start",
+                "codex-manager start",
             ),
             (
                 "mcp__claude-in-chrome__navigate",
-                "Claude-in-chrome navigate",
+                "claude-in-chrome navigate",
             ),
-            ("mcp__context7__query-docs", "Context7 query-docs"),
+            ("mcp__context7__query-docs", "context7 query-docs"),
             ("mcp__tool", "mcp__tool"),
             ("mcp____send", "mcp____send"),
             ("mcp__server__", "mcp__server__"),

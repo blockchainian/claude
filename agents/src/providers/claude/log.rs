@@ -1335,7 +1335,7 @@ pub(crate) mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         let events = events_from(records);
-        assert_eq!(events[0].body, "Codex-manager detach 模型和new挪位");
+        assert_eq!(events[0].body, "codex-manager detach 模型和new挪位");
         assert_eq!(events[0].calls[0].detail_title, "模型和new挪位");
     }
 
@@ -1352,7 +1352,7 @@ pub(crate) mod tests {
             .to_owned();
         for records in [records[..1].to_vec(), records] {
             let events = events_from(records);
-            assert_eq!(events[0].body, format!("Codex-manager detach {thread_id}"));
+            assert_eq!(events[0].body, format!("codex-manager detach {thread_id}"));
             assert_eq!(events[0].calls[0].detail_title, thread_id);
         }
     }
@@ -3037,7 +3037,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "Codex-manager detach, TaskStop");
+        assert_eq!(events[0].body, "codex-manager detach, TaskStop");
     }
 
     #[test]
