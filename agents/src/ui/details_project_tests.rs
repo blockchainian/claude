@@ -136,3 +136,55 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
         }
     }
 }
+
+#[test]
+fn status_rule_names_a_worktree_task_by_its_repository_and_opens_the_worktree() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path().join("repository");
+    let worktree = directory.path().join("feature-tree");
+    std::fs::create_dir(&repository).unwrap();
+    for arguments in [
+        &["init", "-b", "main"][..],
+        &[
+            "-c",
+            "user.name=Probe",
+            "-c",
+            "user.email=probe@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ],
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature",
+            worktree.to_str().unwrap(),
+        ],
+    ] {
+        let output = std::process::Command::new("git")
+            .args(arguments)
+            .current_dir(&repository)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    for cwd in [&repository, &worktree] {
+        let mut view = fixture();
+        let selected = &mut view.rows[view.selected];
+        selected.title = "T".into();
+        selected.cwd = cwd.clone();
+        view.project_groups = view.rows.iter().map(ProjectGroup::for_session).collect();
+        let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
+        view.render(buf.area, &mut buf);
+        let (folder, target) = view.viewport.borrow().details_links[0].clone();
+        assert_eq!(&target, cwd);
+        assert_eq!(
+            (folder.x..folder.right())
+                .map(|x| visible(&buf[(x, folder.y)]))
+                .collect::<String>(),
+            "repository"
+        );
+    }
+}

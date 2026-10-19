@@ -674,16 +674,19 @@ impl View {
             .selected_row()
             .filter(|_| self.selected_draft().is_none());
         let draft = self.selected_draft();
-        let (title, title_style, cwd) = match (session, draft) {
+        // A linked worktree is named by its repository, though its link opens the worktree.
+        let (title, title_style, cwd, heading) = match (session, draft) {
             (Some(session), _) => (
                 session.display_title().to_owned(),
                 self.title_style(&session.id).bold(),
                 &session.cwd,
+                self.project_groups[self.selected].heading.clone(),
             ),
             (None, Some(draft)) => (
                 draft.name.clone().unwrap_or_else(|| "New task".to_owned()),
                 Style::default().bold(),
                 &draft.setup.cwd,
+                draft.heading(),
             ),
             (None, None) => return,
         };
@@ -697,7 +700,7 @@ impl View {
         }
         let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
         let folder_width = folder_width.min(usize::from(rule.width / 3));
-        let folder = super::formatting::format_directory_display(cwd, Some(folder_width));
+        let folder = super::formatting::format_directory_display(&heading, Some(folder_width));
         let right = match (session, draft) {
             (Some(session), _) => session
                 .pr
