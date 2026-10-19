@@ -36,7 +36,7 @@ Spawn agent                                             demo_sub                
 
 codex-collaboration/send_message.jsonl
 
-Send message                                      root → rename_gating                                          18:30:39
+Message                                               rename_gating                                             18:30:39
 
                                                        (encrypted)
                                                             ↓
@@ -44,7 +44,7 @@ Send message                                      root → rename_gating        
 
 codex-collaboration/followup_task.jsonl
 
-Followup task                                        root → ux_probe                                            10:55:06
+Followup task                                           ux_probe                                                10:55:06
 
                                                        (encrypted)
                                                             ↓

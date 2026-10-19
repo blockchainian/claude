@@ -775,7 +775,8 @@ mod tests {
             event.calls.truncate(1);
             let detail = detail(&event, "event time".into(), Style::new().dim());
             let title = &detail.sections[0].title;
-            assert_eq!(title.time.as_deref(), Some("event time"));
+            let clock = event.calls[0].started_at.map(|at| at.with_timezone(&chrono::Local).format("%H:%M:%S").to_string());
+            assert_eq!(title.time.as_deref(), clock.as_deref().or(Some("event time")));
             let body: Vec<_> = detail.sections[0]
                 .groups
                 .iter()

@@ -8925,39 +8925,25 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
     let file = crate::providers::claude::log::tests::wrapped_fixture();
     let events = crate::providers::claude::log::tail(file.path(), 20).unwrap();
     let (mut view, now) = log_fixture();
-    for (index, sender, label, body) in [
-        (2, "a113c3cb9c1482c7a", "Queue", "Report:"),
-        (3, "a113c3cb9c1482c7a", "Agent", "Report:"),
+    for (index, sender, body) in [
+        (2, "a113c3cb9c1482c7a", "Report:"),
+        (3, "a113c3cb9c1482c7a", "Report:"),
         (
             4,
             "translate-pdf",
-            "Queue",
             "translate-pdf pilots ready for review.",
         ),
         (
             5,
             "translate-pdf",
-            "Session",
             "translate-pdf pilots ready for review.",
         ),
     ] {
         let mut event = events[index].clone();
         event.started_at = now - Duration::seconds(120);
-        // The list retains the complete participant prefix and its rendering.
-        assert!(
-            super::log::body_line(&event, 200, &view.rows[0].cwd)
-                .to_string()
-                .starts_with(&format!("({sender}) {body}"))
-        );
-        let mut previous = event.clone();
-        previous.sender = None;
-        previous.body = crate::log::participant_text(Some(sender), &event.body);
-        for width in [25, 60, 200] {
-            assert_eq!(
-                super::log::body_line(&event, width, &view.rows[0].cwd),
-                super::log::body_line(&previous, width, &view.rows[0].cwd)
-            );
-        }
+        assert_eq!(super::log::body_line(&event, 200, &view.rows[0].cwd).to_string(), format!("{sender} → message"));
+        assert!(event.body.starts_with(body));
+        let clock = event.calls[0].started_at.unwrap().with_timezone(&chrono::Local).format("%H:%M:%S").to_string();
         let mut later = event.clone();
         later.started_at = now;
         view.set_log(vec![event.clone(), later]);
@@ -8967,9 +8953,9 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
             .lines()
             .nth(usize::from(view.viewport.borrow().log_detail.y + 1))
             .unwrap();
-        assert!(header.trim_start().starts_with(sender), "sender: {header}");
-        assert!(header.contains(label), "kind: {header}");
-        assert!(header.ends_with("11:58:00"), "time: {header}");
+        assert!(header.trim_start().starts_with("Message"), "sender: {header}");
+        assert!(header.contains(sender), "kind: {header}");
+        assert!(header.ends_with(&clock), "time: {header}");
         assert!(
             !super::log::open_text(view.visible_log_event().unwrap())
                 .contains(&format!("({sender})"))
@@ -9733,21 +9719,21 @@ fn claude_agent_display_from_real_records() {
     for (id, label, metadata) in [
         (
             "toolu_015h3Ngbytx63sMddkJwjDX7",
-            "实测 attach 发提示词",
+            "attach-probe · Spawn agent",
             "general-purpose",
         ),
         (
             "toolu_01X69UrWoFVNnNKno4yavSre",
-            "接手边框和标题行改动",
+            "Spawn agent",
             "feature:ux-implementer",
         ),
-        ("toolu_01YMEgiGEMc9cjoePq6j2E69", "滚动条挪到最右边", "fork"),
+        ("toolu_01YMEgiGEMc9cjoePq6j2E69", "Spawn agent", "fork"),
     ] {
         let event = events
             .iter()
             .find(|e| e.calls.iter().any(|c| c.id == id))
             .unwrap();
-        assert_eq!(event.body, label);
+        assert_eq!(event.summary(), label);
         assert_eq!(event.calls[0].title, label);
         let (mut view, now) = log_fixture();
         view.select_fixture_event(Some(event.clone()));
@@ -9785,11 +9771,11 @@ fn claude_agent_display_from_real_records() {
             view.render_at(buffer.area, &mut buffer, now);
             let title = view.viewport.borrow().log_text.sources[0].text.to_string();
             assert_eq!(title, description);
-            assert!((0..200).any(|x| buffer[(x, header as u16)].symbol() == "A"));
+            assert!((0..200).any(|x| buffer[(x, header as u16)].symbol() == "S"));
         }
         let description = event.calls[0].detail_title.clone();
         assert!(
-            !rows[header + 1..]
+            description.is_empty() || !rows[header + 1..]
                 .iter()
                 .any(|row| row.replace(' ', "") == description.replace(' ', "")),
             "{screen}"

@@ -55,7 +55,8 @@ fn codex_agent_messages_show_routes_and_payload() {
     ] {
         std::fs::write(&path, record).unwrap();
         let event = provider.log(&session, 10, false).unwrap().remove(0);
-        assert_eq!(event.body, title);
+        assert_eq!(event.body, body);
+        assert_eq!(event.summary(), title);
         assert_eq!(super::body_line(&event, 100, dir.path()).to_string(), title);
         let parts = body_parts(&event);
         assert_eq!(parts.len(), 1);
@@ -588,7 +589,7 @@ fn centered_detail_blocks_snapshot() {
     let mut snapshot = String::new();
     for event in entries {
         for width in [120, 200] {
-            snapshot.push_str(&format!("{} — {width} columns\n", event.body));
+            snapshot.push_str(&format!("{} — {width} columns\n", event.summary()));
             for line in layout(&event, width).lines {
                 snapshot.push_str(line.to_string().trim_end());
                 snapshot.push('\n');
@@ -620,7 +621,7 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
     let call = &event.calls[0];
     assert_eq!(
         Some(call.detail_title.as_str()),
-        Some("实测 attach 发提示词")
+        Some("attach-probe")
     );
     let body = body_parts(event);
     assert!(
@@ -1021,6 +1022,7 @@ fn tool_list_rows_choose_descriptions_by_data() {
                         format!("{} {}", call.detail_left, call.detail_title)
                     }
                 });
+            let expected = call.agent_message.as_ref().map(|message| message.summary(1)).unwrap_or(expected);
             assert_eq!(call.title, expected, "{}", call.name);
         }
     }

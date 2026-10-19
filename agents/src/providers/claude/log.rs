@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::log::participant_text;
 use crate::log::{Event, Kind, Section, ToolCall};
 use chrono::{DateTime, Utc};
 use std::{
@@ -1165,12 +1163,12 @@ impl Log {
         let input = &block["input"];
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
         let detail_call = tool_call(name, input, result);
-        if detail_call.agent_message.is_some() {
+        if let Some(message) = &detail_call.agent_message {
             self.batch = None;
             let records = result.map(|result| result.source_records.clone()).unwrap_or_default();
             let ended_at = result.map(|result| result.at);
             let denied = result.is_some_and(|result| result.denial.is_some());
-            self.push(tool_kind(name), detail_call.agent_message.as_ref().unwrap().content.text().to_owned(), at);
+            self.push(tool_kind(name), message.content.text().to_owned(), at);
             let event = &mut self.entries.last_mut().unwrap().event;
             event.source_records.extend(records);
             let mut call = detail_call;
