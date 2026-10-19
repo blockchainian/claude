@@ -75,6 +75,12 @@ export function planFile(source, { shortLen = 3, maxIds = 60, contextBytes = 800
   const { ast, bindings } = analyze(source);
   const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length <= shortLen)
     .sort((a,b)=>a.identifier.start-b.identifier.start);
+  if (bytes(source) <= contextBytes && candidates.length <= maxIds) {
+    return { stages: [candidates.length ? [{
+      id: `Program:${ast.program.start}:${ast.program.end}:${contextBytes}:${candidates[0].identifier.start}:file`,
+      keys: candidates.map(b=>b.identifier.start),
+    }] : []] };
+  }
   const stages = [[], []];
   const groups = new Map();
   for (const b of candidates) {
@@ -178,12 +184,14 @@ export function renderBatch(source, batch, renames = new Map()) {
   }
   for (const [scope, temp, name] of pending) scope.rename(temp, name);
 
+  if (batch.id.endsWith(':file')) return { context: printContext(owner), placeholders };
+
   const selected = batch.keys.map(key=>bindings.get(key).identifier);
   const containsKey = node => selected.some(id=>inside(id,node));
   // A detached function keeps its declaration header, so sibling context stays legal.
   traverse(ast, { enter(p) {
     if (!isOwner(p) || p.node === owner || !inside(p.node,contextOwner)) return;
-    if (owner.type === 'Program' || (!containsKey(p.node) && p.node !== contextOwner)) {
+    if (owner.type !== 'Program' && !containsKey(p.node) && p.node !== contextOwner) {
       if (p.isClass()) p.node.body.body = [];
       else if (p.node.body.type === 'BlockStatement') p.node.body.body = [];
       else p.node.body = { type:'UnaryExpression',operator:'void',prefix:true,argument:{type:'NumericLiteral',value:0} };
@@ -192,6 +200,17 @@ export function renderBatch(source, batch, renames = new Map()) {
   } });
   if (owner.type === 'Program') {
     owner.body = owner.body.filter(node=>node.type.startsWith('Import') || containsKey(node));
+    // Preserve implementation prefixes, shortening the longest function body first.
+    const bodies = [];
+    traverse(ast, { Function(p) {
+      if (p.node.body.type === 'BlockStatement' && !containsKey(p.node.body)) bodies.push(p.node.body);
+    } });
+    while (bytes(printContext(owner)) > budget) {
+      const longest = bodies.filter(body=>body.body.length)
+        .sort((a,b)=>bytes(printContext(b))-bytes(printContext(a)))[0];
+      if (!longest) break;
+      longest.body.pop();
+    }
   }
   if (bytes(printContext(contextOwner)) > budget) {
     // Retain the declaration heads if a flat body cannot fit the byte target.

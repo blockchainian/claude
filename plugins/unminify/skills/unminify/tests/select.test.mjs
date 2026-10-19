@@ -18,6 +18,42 @@ function bindings(code) {
   return result;
 }
 const allBatches = p => p.stages.flat();
+test('a small file keeps all candidates and the complete body in one batch', () => {
+  const code = `function a(b, c) {
+  const d = [];
+  for (let e = 0; e < b.length; e++) {
+    if (b[e] > c) d.push(b[e]);
+  }
+  return d;
+}
+console.log(a([1, 5, 9], 4));`;
+  const plan = planFile(code, options);
+  assert.equal(plan.stages.length, 1);
+  assert.equal(allBatches(plan).length, 1);
+  assert.deepEqual(plan.stages[0][0].keys, [...bindings(code).keys()].sort((a,b)=>a-b));
+  const { context, placeholders } = renderBatch(code, plan.stages[0][0], new Map());
+  assert.match(context, /for \(let v5 = 0; v5 < v2.length; v5\+\+\)/);
+  assert.match(context, /if \(v2\[v5\] > v3\) v4.push\(v2\[v5\]\)/);
+  assert.match(context, /return v4;/);
+  assert.match(context, /console.log\(v1\(\[1, 5, 9\], 4\)\)/);
+  assert.equal(Object.keys(placeholders).length, 5);
+  assert.doesNotThrow(()=>parse(context,{sourceType:'module'}));
+});
+test('large Preact module contexts retain function bodies within the byte budget', () => {
+  for (const contextBytes of [8000, 2500]) {
+    const plan = planFile(source, { ...options, contextBytes });
+    assert.equal(plan.stages.length, 2);
+    for (const batch of plan.stages[0]) {
+      const { context } = renderBatch(source, batch, new Map());
+      assert.ok(Buffer.byteLength(context) <= contextBytes);
+      assert.doesNotThrow(()=>parse(context,{sourceType:'module'}));
+      const ast = parse(context,{sourceType:'module'});
+      let bodyStatements = 0;
+      traverse(ast, { FunctionDeclaration(p) { bodyStatements += p.node.body.body.length; } });
+      assert.ok(bodyStatements > 0, 'top-level declarations retain implementation statements');
+    }
+  }
+});
 test('real Preact artifact: candidates exclude imports and long names; stages partition all bindings', () => {
   const bs = bindings(source);
   const plan = planFile(source, options);
@@ -97,7 +133,7 @@ test('render handles shorthand, destructuring, exports and preexisting placehold
 });
 test('module and function ranges starting at zero remain distinguishable', () => {
   const code = 'function f(e) { return e; }';
-  const plan = planFile(code,options);
+  const plan = planFile(code,{...options,maxIds:1});
   assert.equal(plan.stages[0].length,1);
   assert.equal(plan.stages[1].length,1);
   assert.notEqual(plan.stages[0][0].id,plan.stages[1][0].id);
@@ -119,7 +155,7 @@ test('resolved names cannot collide with intermediate names during rendering', (
   const code = 'let a=1,b=2;function f(e){return a+b+e}';
   const bs = bindings(code);
   const key = name => [...bs].find(([,b])=>b.identifier.name===name)[0];
-  const batch = planFile(code,options).stages[1][0];
+  const batch = planFile(code,{...options,maxIds:2}).stages[1][0];
   const {context}=renderBatch(code,batch,new Map([[key('a'),'_binding2'],[key('b'),'_binding']]));
   assert.match(context,/_binding2 \+ _binding \+ v1/);
 });
@@ -129,11 +165,11 @@ test('a real function fits exactly at both planning boundaries', () => {
     if (!functionSource && p.node.params.length >= 2 && p.node.end-p.node.start<250) functionSource=source.slice(p.node.start,p.node.end);
   } });
   assert.ok(functionSource);
-  const initial=planFile(functionSource,options);
-  const count=initial.stages[1].flatMap(b=>b.keys).length;
+  const count=bindings(functionSource).size;
   const budget=Buffer.byteLength(functionSource);
   const exact=planFile(functionSource,{...options,maxIds:count,contextBytes:budget});
-  assert.equal(exact.stages[1].length,1);
-  assert.ok(planFile(functionSource,{...options,maxIds:count-1,contextBytes:budget}).stages[1].length>1);
-  assert.ok(planFile(functionSource,{...options,maxIds:count,contextBytes:budget-1}).stages[1].length>1);
+  assert.equal(exact.stages.length,1);
+  assert.equal(allBatches(exact).length,1);
+  assert.ok(allBatches(planFile(functionSource,{...options,maxIds:count-1,contextBytes:budget})).length>1);
+  assert.ok(allBatches(planFile(functionSource,{...options,maxIds:count,contextBytes:budget-1})).length>1);
 });
