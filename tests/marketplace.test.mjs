@@ -8,7 +8,7 @@ test("the marketplace lists every plugin in the repository", async () => {
   const marketplace = JSON.parse(await readFile(".claude-plugin/marketplace.json", "utf8"));
 
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map((entry) => entry.name).sort(), ["cloudflare", "codex", "computer-use", "creator", "feature", "intel", "mobile", "proxy", "render", "secrets", "unminify", "web"]);
+  assert.deepEqual(marketplace.plugins.map((entry) => entry.name).sort(), ["cloudflare", "codex", "computer-use", "creator", "feature", "intel", "mobile", "proxy", "render", "secrets", "web"]);
 
   for (const entry of marketplace.plugins) {
     const plugin = JSON.parse(await readFile(`${entry.source}/.claude-plugin/plugin.json`, "utf8"));
@@ -20,7 +20,7 @@ test("the marketplace lists every plugin in the repository", async () => {
 test("the Codex marketplace exposes the selected plugins and Claude client", async () => {
   const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude", "unminify"]);
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude"]);
 
   for (const entry of marketplace.plugins) {
     assert.equal(entry.source.source, "local");
@@ -100,7 +100,7 @@ for (const script of ["displayOrigin.swift"]) {
   });
 }
 
-test("Intel shares sixteen portable skills and keeps case-study Claude-only", async () => {
+test("Intel shares seventeen portable skills and keeps case-study Claude-only", async () => {
   const root = "plugins/intel";
   const claude = JSON.parse(await readFile(`${root}/.claude-plugin/plugin.json`, "utf8"));
   const codex = JSON.parse(await readFile(`${root}/.codex-plugin/plugin.json`, "utf8"));
@@ -110,7 +110,7 @@ test("Intel shares sixteen portable skills and keeps case-study Claude-only", as
     "analyze-appstore-reviews", "analyze-x-mentions", "analyze-x-user", "analyze-x-users",
     "digest", "download-book", "fetch-app-reviews", "fetch-tiktok-mentions",
     "fetch-x-feed", "fetch-x-mentions", "fetch-x-posts", "fetch-x-user-posts",
-    "find-domain-names", "manage-x-account", "transcribe", "translate/epub",
+    "find-domain-names", "manage-x-account", "transcribe", "translate/epub", "unminify",
   ].map((name) => `./skills/${name}`));
   for (const skill of codex.skills) {
     const text = await readFile(`${root}/${skill}/SKILL.md`, "utf8");

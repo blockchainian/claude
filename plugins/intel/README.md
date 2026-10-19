@@ -3,7 +3,8 @@
 Research skills for Claude Code and Codex. They turn long-form sources (articles, podcasts, videos,
 live streams, PDFs and whole books) into transcripts, highlights and translations, archive and
 analyze what people say about an app on X, TikTok and the App Store, research creators in depth,
-find book downloads and check which brand domains are still registrable. They also archive and
+find book downloads, check which brand domains are still registrable and give minified
+JavaScript identifiers meaningful names. They also archive and
 measure the X Following feed and trending topics, save feed digests, and preview or perform
 X account actions through opencli.
 
@@ -60,9 +61,16 @@ path.
 | `analyze-x-users` | Profile the accounts that mention an app. |
 | `analyze-x-user` | Profile one X account from its own timeline. |
 | `fetch-tiktok-mentions` | Archive a brand's TikTok videos, comments and video files. |
+| `unminify` | Rename short JavaScript identifiers with model-suggested, scope-checked names. |
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
 ## Tests
 
-Run `npm run test:intel` from the marketplace root.
+Run `npm run test:intel` from the marketplace root. The unminify end-to-end check calls the real
+model with the user's Codex login and is not part of the suite; pass it sample files kept outside
+this repository:
+
+```sh
+node plugins/intel/skills/unminify/scripts/e2e.mjs <sample.js>...
+```
