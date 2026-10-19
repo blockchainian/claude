@@ -304,6 +304,25 @@ mod tests {
     }
 
     #[test]
+    fn title_editor_cursor_takes_precedence_over_a_pending_question() {
+        let mut view = fixture();
+        assert!(view.active_question().is_some());
+        view.rename_target = view.selected_id().cloned();
+        view.rename.set_text("你好");
+        view.input_box.focused = false;
+        let area = Rect::new(0, 0, 160, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        let input = view.viewport.borrow().title_input;
+        assert_eq!(view.cursor_pos(area), Some((input.x + 4, input.y)));
+        assert!(
+            view.center_footer_hints()
+                .to_string()
+                .contains("enter rename")
+        );
+    }
+
+    #[test]
     fn ask_flow_replaces_prompt_and_routes_answer() {
         let mut view = fixture();
         let screen = screen(&view, 100, 40);

@@ -5,6 +5,12 @@ use super::*;
 fn terminal_prompt_mouse_click_places_caret() {
     let (_directory, tmux, _transcript) = start_probe("prompt-mouse");
     begin_named_draft(&tmux, "Mouse probe");
+    let capture = tmux.capture_when(|capture| capture.contains("Mouse probe ❯"));
+    assert!(
+        title_rule_position(&capture, "Mouse probe").is_some(),
+        "the prompt keeps the name on the details rule: {capture}"
+    );
+    assert!(!capture.contains("Rename ❯"), "{capture}");
     tmux.run(&[
         "send-keys",
         "-t",

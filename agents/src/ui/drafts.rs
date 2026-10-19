@@ -103,6 +103,7 @@ impl View {
                 draft.job = Some(job);
             }
             Err(error) => {
+                self.close_draft_selector(id);
                 self.drafts.retain(|draft| draft.id != id);
                 self.set_notice(Some(error.to_string()));
             }

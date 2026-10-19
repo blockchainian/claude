@@ -571,16 +571,16 @@ fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay(
 }
 
 #[test]
-fn new_task_takes_its_name_at_the_details_bottom_then_its_prompt() {
+fn new_task_takes_its_name_on_the_rule_then_its_prompt() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
     view.open_name(id);
     assert_eq!(view.selected_draft().unwrap().step, Step::Name);
     assert!(!view.input_box.focused);
     let buffer = render(&view);
-    let input = view.viewport.borrow().details_input;
+    let input = view.viewport.borrow().title_input;
     let details = view.viewport.borrow().details;
-    assert_eq!(input.y, details.bottom() - 1);
+    assert_eq!(input.y, details.bottom());
     // Wide characters own the cell after them.
     let row = |buffer: &Buffer, rect: Rect| {
         (rect.x..rect.right())
@@ -602,7 +602,13 @@ fn new_task_takes_its_name_at_the_details_bottom_then_its_prompt() {
     assert_eq!(view.selected_draft().unwrap().step, Step::Name);
     view.handle_paste("改 Claude Code 的颜色");
     let buffer = render(&view);
-    assert_eq!(row(&buffer, input), "改 Claude Code 的颜色");
+    let input = view.viewport.borrow().title_input;
+    let (visible, caret) = view.rename.window(usize::from(input.width));
+    assert_eq!(row(&buffer, input), visible.trim_end());
+    assert_eq!(
+        view.cursor_pos(buffer.area),
+        Some((input.x + caret, input.y))
+    );
     assert!(
         !buffer[(input.x, input.y)]
             .modifier
@@ -643,17 +649,16 @@ fn new_task_takes_its_name_at_the_details_bottom_then_its_prompt() {
 }
 
 #[test]
-fn name_step_escape_returns_to_the_prompt_outside_a_repository() {
+fn name_step_escape_cancels_the_entire_draft() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
     view.open_name(id);
     view.handle_paste("half a name");
     key(&mut view, KeyCode::Esc);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
+    assert!(view.selected_draft().is_none());
     assert!(view.selector.is_none());
-    assert!(view.input_box.focused);
     assert!(view.input_box.editor.is_empty());
-    assert_eq!(view.drafts.len(), 1);
+    assert!(view.drafts.is_empty());
 }
 
 #[test]

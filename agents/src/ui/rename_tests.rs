@@ -198,3 +198,99 @@ fn manager_thread_hides_itself_and_pins_its_parent_group() {
     assert!(view.hidden.contains(&child.id));
     assert!(!view.hidden.contains(&parent));
 }
+
+#[test]
+fn title_requires_double_click_to_rename() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    let area = Rect::new(0, 0, 160, 40);
+    view.render(area, &mut Buffer::empty(area));
+    let title = view.viewport.borrow().details_title;
+    assert!(title.width > 0);
+    let click = |view: &mut View| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: title.x,
+                row: title.y,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+    };
+    click(&mut view);
+    assert!(view.rename_target.is_none());
+    click(&mut view);
+    assert_eq!(view.rename_target.as_ref(), view.selected_id());
+    let original = view.selected_row().unwrap().display_title().to_owned();
+    assert_eq!(view.rename.text(), original);
+    view.handle_paste(" changed");
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(view.rename_target.is_none());
+    assert_eq!(view.selected_row().unwrap().display_title(), original);
+}
+
+#[test]
+fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut view = View::default();
+    let id = view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    assert_eq!(view.name_target, Some(id));
+    assert!(view.selector.is_none());
+    assert!(view.rename.is_empty());
+    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(view.name_target, Some(id));
+    view.handle_paste("甲乙");
+    for code in [
+        KeyCode::Home,
+        KeyCode::Right,
+        KeyCode::Delete,
+        KeyCode::Char('丙'),
+        KeyCode::End,
+    ] {
+        view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+    assert_eq!(view.rename.text(), "甲丙");
+    view.open_field(draft_controls::Field::Directory);
+    assert!(view.title_editor().is_none());
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(view.title_editor().unwrap().text(), "甲丙");
+    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(view.drafts[0].name.as_deref(), Some("甲丙"));
+    assert!(view.name_target.is_none());
+    assert!(view.input_box.focused);
+    view.handle_paste("prompt body");
+    assert_eq!(view.input_box.editor.text(), "prompt body");
+    view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(view.name_target.is_none());
+    assert!(view.drafts.is_empty());
+}
+
+#[test]
+fn failed_draft_drops_its_title_editor() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut view = View::default();
+    let id = view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    view.draft_created(id, Err(std::io::Error::other("failed")));
+    assert!(view.title_editor().is_none());
+}

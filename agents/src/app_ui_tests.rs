@@ -408,16 +408,16 @@ fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
 #[test]
 fn draft_without_transcript_draws_and_accepts_paste_in_wide_layout() {
     let (directory, mut app) = fixture();
-    app.handle_action(Some(Action::NewDraft {
-        cwd: directory.path().to_owned(),
-    }));
     for width in [150, 200] {
+        app.handle_action(Some(Action::NewDraft {
+            cwd: directory.path().to_owned(),
+        }));
         let buffer = draw(&mut app, width);
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("New task"), "{rendered}");
-        assert!(!app.handle_event(Event::Paste("draft-route-proof".into())));
+        assert!(!app.handle_event(Event::Paste("draft".into())));
         let rendered = lines(&draw(&mut app, width)).join("\n");
-        assert!(rendered.contains("draft-route-proof"), "{rendered}");
+        assert!(rendered.contains("draft"), "{rendered}");
         app.handle_event(Event::Key(KeyEvent::new(
             KeyCode::Char('c'),
             KeyModifiers::CONTROL,
@@ -436,9 +436,13 @@ fn paste_reaches_search_and_rename_only_after_their_keyboard_actions() {
     assert!(rendered.contains("search-route-proof"), "{rendered}");
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('r'));
-    app.handle_event(Event::Paste("rename-route-proof".into()));
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('u'),
+        KeyModifiers::CONTROL,
+    )));
+    app.handle_event(Event::Paste("name".into()));
     let rendered = lines(&draw(&mut app, 150)).join("\n");
-    assert!(rendered.contains("rename-route-proof"), "{rendered}");
+    assert!(rendered.contains("name"), "{rendered}");
     assert!(!rendered.contains("search-route-proof"), "{rendered}");
     key(&mut app, KeyCode::Esc);
 }

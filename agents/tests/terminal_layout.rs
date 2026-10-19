@@ -126,10 +126,35 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
 
 fn begin_named_draft(tmux: &Tmux, name: &str) {
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New task"));
+    assert_title_caret(tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "-l", name]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| capture.contains(&format!("{name} ❯")));
+}
+
+// The name editor shares the details rule with the repository and branch labels.
+fn title_rule_position(capture: &str, title: &str) -> Option<(usize, usize)> {
+    capture.lines().enumerate().find_map(|(row, line)| {
+        let byte = line.find(title)?;
+        (line.contains('─') && line.contains('╶')).then(|| (line[..byte].width(), row))
+    })
+}
+
+fn assert_title_caret(tmux: &Tmux, title: &str, offset: usize) -> String {
+    tmux.capture_when(|capture| {
+        assert!(!capture.contains("Rename ❯"), "{capture}");
+        let Some((column, row)) = title_rule_position(capture, title) else {
+            return false;
+        };
+        let cursor = tmux.run(&[
+            "display-message",
+            "-t",
+            "probe",
+            "-p",
+            "#{cursor_x},#{cursor_y}",
+        ]);
+        cursor.trim() == format!("{},{row}", column + offset)
+    })
 }
 
 #[test]
@@ -430,7 +455,7 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
     assert!(!cancelled.contains("unfinished task"), "{cancelled}");
     // Restarting must forget both the name and the prompt.
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    let naming = tmux.capture_when(|capture| capture.contains("New task"));
+    let naming = assert_title_caret(&tmux, "New task", 0);
     assert!(!naming.contains("Branch probe"), "{naming}");
     assert!(!naming.contains("unfinished task"), "{naming}");
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
@@ -521,9 +546,8 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
         assert_caret("Search ❯ Stop", 12);
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.run(&["send-keys", "-t", "probe", "r"]);
-        tmux.wait_for(|capture| capture.contains("Rename ❯ "));
         tmux.run(&["send-keys", "-t", "probe", "Home"]);
-        assert_caret("Rename ❯ ", 9);
+        assert_title_caret(&tmux, "Codex manager", 0);
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     }
     begin_named_draft(&tmux, "Prompt probe");

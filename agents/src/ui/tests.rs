@@ -2106,7 +2106,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     );
     assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
-    assert!(screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(view.rename.text(), "Needs an answer");
     key(&mut view, KeyCode::Esc);
 
@@ -2330,8 +2330,13 @@ fn details_name_a_missing_prompt() {
 fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
-    assert!(screen(&view, 88, 16).contains("Rename ❯ Current task"));
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 13)));
+    let rendered = screen(&view, 88, 16);
+    assert!(!rendered.contains("Rename ❯"));
+    let title = view.viewport.borrow().details_title;
+    assert_eq!(
+        view.cursor_pos(Rect::new(0, 0, 88, 16)),
+        Some((title.right() - 1, title.y))
+    );
     for c in " updated  ".chars() {
         key(&mut view, KeyCode::Char(c));
     }
@@ -2376,7 +2381,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
         key(&mut view, KeyCode::Char(c));
     }
     key(&mut view, KeyCode::Backspace);
-    assert!(screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     key(&mut view, KeyCode::Esc);
     assert_eq!(view.center_footer_hints().to_string(), hints);
@@ -2427,22 +2432,14 @@ fn live_center_rename_active() {
     let area = Rect::new(0, 0, 88, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
-    let input = view.center_layout(area).search;
-    assert_eq!(
-        input.bottom(),
-        view.center_layout(area).usage_chart.bottom()
-    );
-    assert_eq!(buf[(input.x, input.y)].fg, Color::Cyan);
-    assert!(
-        buf[(input.x, input.y)]
-            .modifier
-            .contains(ratatui::style::Modifier::BOLD)
-    );
-    assert_eq!(buf[(input.right() - 1, input.y)].bg, Color::Reset);
+    assert!(view.center_layout(area).search.is_empty());
+    let title = view.viewport.borrow().details_title;
+    assert_eq!(title.y, view.viewport.borrow().details.bottom());
+    assert_eq!(view.cursor_pos(area), Some((title.right() - 1, title.y)));
 }
 
 #[test]
-fn clicking_the_name_in_details_renames_at_the_panel_bottom() {
+fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
     let mut view = test_view(Grouping::Project, true);
     view.set_capabilities(HashMap::from([(
         ProviderId::Claude,
@@ -2451,65 +2448,43 @@ fn clicking_the_name_in_details_renames_at_the_panel_bottom() {
             ..Capabilities::default()
         },
     )]));
-    let row = session("42", "Task to find", SessionStatus::Ready, 120);
-    let id = row.id.clone();
-    view.set_sessions(vec![row], false);
-    let area = Rect::new(0, 0, 88, 16);
-    let mut buf = Buffer::empty(area);
-    view.render(area, &mut buf);
-    let title = view.viewport.borrow().details_title;
-    assert_eq!(title.y, view.viewport.borrow().details.bottom());
-    assert_eq!(
-        (title.x..title.right())
-            .map(|x| buf[(x, title.y)].symbol())
-            .collect::<String>(),
-        "Task to find"
+    view.set_sessions(
+        vec![session("42", "Task to find", SessionStatus::Ready, 120)],
+        false,
     );
+    let area = Rect::new(0, 0, 88, 16);
+    screen(&view, 88, 16);
+    let title = view.viewport.borrow().details_title;
     let press = mouse(
         MouseEventKind::Down(MouseButton::Left),
         title.x + 2,
         title.y,
     );
     assert_eq!(click_mouse(&mut view, press), None);
-    assert_eq!(view.rename_target, Some(id.clone()));
+    assert!(view.rename_target.is_none(), "single click must not rename");
+    assert_eq!(click_mouse(&mut view, press), None);
+    assert_eq!(view.rename_target, Some(session_key("42")));
     assert_eq!(view.rename.text(), "Task to find");
     let rendered = screen(&view, 88, 16);
-    let layout = view.center_layout(area);
-    // The input takes the details panel's bottom row and leaves the list whole.
-    assert!(layout.search.is_empty());
-    let input = view.viewport.borrow().details_input;
-    assert_eq!(input.y, view.viewport.borrow().details.bottom() - 1);
-    assert_eq!(input.x, layout.details.x);
-    let line = rendered.lines().nth(usize::from(input.y)).unwrap();
-    assert!(
-        line[line.find('│').unwrap()..].contains("Rename ❯ Task to find"),
-        "{rendered}"
-    );
-    assert!(!line.starts_with(" Rename"), "{rendered}");
-    let (_, caret) = view
-        .rename
-        .window(usize::from(input.width) - "Rename ❯ ".width());
-    assert_eq!(
-        view.cursor_pos(area),
-        Some((input.x + "Rename ❯ ".width() as u16 + caret, input.y))
-    );
-    assert!(view.center_footer_hints().to_string().contains("rename"));
+    assert!(!rendered.contains("Rename ❯"));
+    assert!(view.center_layout(area).search.is_empty());
+    let title = view.viewport.borrow().title_input;
+    assert_eq!(view.cursor_pos(area), Some((title.right() - 1, title.y)));
     view.handle_paste(" again");
     assert_eq!(
         key(&mut view, KeyCode::Enter),
         Some(Action::Rename {
-            id,
+            id: session_key("42"),
             name: "Task to find again".into()
         })
     );
-    assert_eq!(view.rename_target, None);
-    assert_eq!(click_mouse(&mut view, press), None);
-    assert!(view.rename_target.is_some());
+    key(&mut view, KeyCode::Char('r'));
+    view.handle_paste(" discarded");
     key(&mut view, KeyCode::Esc);
-    assert_eq!(view.rename_target, None);
-    assert!(screen(&view, 88, 16).contains("Task to find"));
-    // Without the rename capability the click reports it unsupported.
+    assert!(view.rename_target.is_none());
+    assert_eq!(view.selected_row().unwrap().display_title(), "Task to find");
     view.set_capabilities(HashMap::new());
+    assert_eq!(click_mouse(&mut view, press), None);
     assert_eq!(
         click_mouse(&mut view, press),
         Some(Action::Unsupported("Rename"))
@@ -9891,14 +9866,14 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         view.searching = false;
         key(&mut view, KeyCode::Char('r'));
         let rename = view.center_layout(area);
-        assert_eq!(rename.search, layout.search);
-        assert_eq!(rename.list, layout.list);
+        assert!(rename.search.is_empty());
+        assert_eq!(rename.list, baseline);
         assert_eq!(rename.usage_chart, layout.usage_chart);
         view.render_at(area, &mut after, now);
-        let input: String = (rename.search.x..rename.search.right())
-            .map(|x| after[(x, rename.search.y)].symbol())
-            .collect();
-        assert!(input.contains("Rename ❯"));
+        let title = view.viewport.borrow().title_input;
+        if !title.is_empty() {
+            assert_eq!(view.cursor_pos(area).unwrap().1, title.y);
+        }
     }
 }
 

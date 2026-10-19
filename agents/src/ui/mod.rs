@@ -128,9 +128,11 @@ struct Viewport {
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
-    /// The details panel's bottom input row: a new task's branch or name, or a rename.
+    /// The details panel's bottom input row for a new branch.
     details_input: Rect,
-    /// The selected task's name on the details panel's first row.
+    /// The shared task name editor on the details panel's lower rule.
+    title_input: Rect,
+    /// The selected task's name on the details panel's lower rule.
     details_title: Rect,
     confirm_options: Vec<(Rect, bool)>,
     /// Index of the first visible event in the chronological shown log.
@@ -264,6 +266,7 @@ pub struct View {
     search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<SessionKey>,
+    name_target: Option<crate::model::DraftId>,
     /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
     stopping_prompt: Option<(SessionKey, String)>,
     rename: line_edit::LineEdit,
@@ -402,6 +405,7 @@ impl View {
             search: line_edit::LineEdit::default(),
             searching: false,
             rename_target: None,
+            name_target: None,
             stopping_prompt: None,
             rename: line_edit::LineEdit::default(),
             confirm_dialog: None,
@@ -451,6 +455,14 @@ impl View {
         }
     }
 
+    fn title_editing(&self) -> bool {
+        self.rename_target.is_some() || self.name_target.is_some()
+    }
+
+    fn title_editor(&self) -> Option<&line_edit::LineEdit> {
+        (self.title_editing() && self.selector.is_none()).then_some(&self.rename)
+    }
+
     pub(crate) fn handle_paste(&mut self, text: &str) {
         if self.confirm_dialog.is_some() || self.help {
             return;
@@ -470,10 +482,10 @@ impl View {
         if self.question_paste(text) {
             return;
         }
-        if self.input_box.focused {
-            self.input_box.paste(text);
-        } else if self.rename_target.is_some() {
+        if self.title_editor().is_some() {
             self.rename.insert(text);
+        } else if self.input_box.focused {
+            self.input_box.paste(text);
         } else if self.log_detail_search.editing {
             self.log_detail_search.query.insert(text);
             self.jump_detail_match();

@@ -75,11 +75,7 @@ pub(super) struct CenterLayout {
 
 impl View {
     fn input(&self) -> (String, &line_edit::LineEdit) {
-        if self.rename_target.is_some() {
-            (format!("Rename {PROMPT_MARKER} "), &self.rename)
-        } else {
-            (format!("Search {PROMPT_MARKER} "), &self.search)
-        }
+        (format!("Search {PROMPT_MARKER} "), &self.search)
     }
 
     pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
@@ -188,7 +184,7 @@ impl View {
         };
         // Keep the chart's original canvas and scale when the input row takes list space.
         let usage_chart = list;
-        let (list, search) = if self.searching || self.renaming_in_list() {
+        let (list, search) = if self.searching {
             let input = log::search_input_rect(list);
             (
                 row(list, 0, list.height.saturating_sub(input.height)),
@@ -227,23 +223,27 @@ impl View {
         {
             return Some(cursor);
         }
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && let Some(editor) = self.title_editor()
+        {
+            let input = self.viewport.borrow().title_input;
+            if input.is_empty() {
+                return None;
+            }
+            let (_, caret) = editor.window(usize::from(input.width));
+            return Some((input.x + caret, input.y));
+        }
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
             && !self.input_box.focused
             && let Some(selector) = &self.selector
-            && let Some((editor, prompt)) = selector
-                .name_input()
-                .map(|(editor, _)| (editor, String::new()))
-                .or_else(|| {
-                    selector
-                        .branch_editor()
-                        .map(|editor| (editor, format!("New branch {PROMPT_MARKER} ")))
-                })
+            && let Some(editor) = selector.branch_editor()
         {
             let input = self.viewport.borrow().details_input;
             if !input.is_empty() {
-                let (_, caret) = input_row(&prompt, editor, input);
+                let (_, caret) = input_row(&format!("New branch {PROMPT_MARKER} "), editor, input);
                 return Some((input.x + caret, input.y));
             }
         }
@@ -278,19 +278,7 @@ impl View {
             let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
             return Some((input.x + caret, input.y));
         }
-        if self.renaming_in_details() && !self.help && self.confirm_dialog.is_none() {
-            let input = self.viewport.borrow().details_input;
-            if input.is_empty() {
-                return None;
-            }
-            let (prompt, edit) = self.input();
-            let (_, caret) = input_row(&prompt, edit, input);
-            return Some((input.x + caret, input.y));
-        }
-        if !(self.searching || self.rename_target.is_some())
-            || self.confirm_dialog.is_some()
-            || self.help
-            || layout.search.is_empty()
+        if !self.searching || self.confirm_dialog.is_some() || self.help || layout.search.is_empty()
         {
             return None;
         }
@@ -316,6 +304,9 @@ impl View {
             viewport.marker = None;
             viewport.field_targets.clear();
             viewport.details = Rect::default();
+            viewport.details_title = Rect::default();
+            viewport.title_input = Rect::default();
+            viewport.details_input = Rect::default();
             viewport.log = Rect::default();
             viewport.log_borders = [Rect::default(); 2];
             viewport.log_detail = Rect::default();
@@ -442,7 +433,7 @@ impl View {
         }
         self.render_center_rows(layout.list, buf, now);
         self.render_usage_chart(layout.usage_chart, buf, now);
-        if self.searching || self.renaming_in_list() {
+        if self.searching {
             let (prompt, edit) = self.input();
             Clear.render(layout.search, buf);
             render_input_row(&prompt, edit, layout.search, buf);
@@ -551,13 +542,6 @@ impl View {
         }
         join_separators(&separators, area, buf);
         self.render_controls(details, buf);
-        if self.renaming_in_details() && !details.is_empty() {
-            let input = log::search_input_rect(details);
-            let (prompt, edit) = self.input();
-            Clear.render(input, buf);
-            render_input_row(&prompt, edit, input, buf);
-            self.viewport.borrow_mut().details_input = input;
-        }
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.top, buf);
             self.viewport.borrow_mut().marker = None;
@@ -636,16 +620,6 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// A rename started by clicking the name in the details panel, or while that panel had the
-    /// keys, takes the panel's bottom row.
-    pub(super) fn renaming_in_details(&self) -> bool {
-        self.rename_target.is_some() && self.mouse_focus == Panel::Details
-    }
-
-    fn renaming_in_list(&self) -> bool {
-        self.rename_target.is_some() && self.mouse_focus != Panel::Details
-    }
-
     /// Centers the bold status on the rule row `rule`, whose end cells are its corners, a space
     /// apart from the rule on each side, with the elapsed time at its right end.
     fn render_status_rule(&self, rule: Rect, buf: &mut Buffer, now: chrono::DateTime<chrono::Utc>) {
@@ -683,7 +657,7 @@ impl View {
         line(header, label, buf);
     }
     /// Centers the selected task's name, or a new task's label, on the rule under the details
-    /// panel, a space apart on each side; a click on a task's name renames it. The pull request,
+    /// panel, a space apart on each side; a double click edits a task's name. The pull request,
     /// or a new task's branch, on the left and the project folder's name on the right flank it.
     fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
         let session = self.selected_row();
@@ -695,7 +669,7 @@ impl View {
                 &session.cwd,
             ),
             (None, Some(draft)) => (
-                "New task".to_owned(),
+                draft.name.clone().unwrap_or_else(|| "New task".to_owned()),
                 Style::default().bold(),
                 &draft.setup.cwd,
             ),
@@ -733,15 +707,38 @@ impl View {
             .map_or(0, |span| span.width())
             .max(folder.width());
         let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
-        let title = if width <= 1 {
-            Line::from(Span::styled("…", title_style))
+        let editor = self.title_editor();
+        let title = if let Some(editor) = editor {
+            let placeholder = self.name_target.is_some() && editor.is_empty();
+            let display_width = if placeholder {
+                "New task".width()
+            } else {
+                editor.text().width() + 1
+            };
+            let input_width = display_width.min(width);
+            let (text, _) = editor.window(input_width);
+            let (text, style) = if placeholder {
+                ("New task", Style::default().dim())
+            } else {
+                (text, Style::default())
+            };
+            let mut title = truncate_line_to_width(
+                Line::from(Span::styled(text.to_owned(), style)),
+                input_width,
+            );
+            title
+                .spans
+                .push(" ".repeat(input_width.saturating_sub(title.width())).into());
+            title
+        } else if width <= 1 {
+            truncate_line_to_width(Line::from(Span::styled("…", title_style)), width.max(1))
         } else {
             truncate_line_with_ellipsis_if_overflow(
                 Line::from(Span::styled(title, title_style)),
                 width,
             )
         };
-        let mut label = truncate_line_to_width(title, width.max(1));
+        let mut label = title;
         label.spans.insert(0, " ".into());
         label.spans.push(" ".into());
         let label_width = (label.width() as u16).min(rule.width);
@@ -753,11 +750,13 @@ impl View {
         );
         Clear.render(label_area, buf);
         line(label, label_area, buf);
-        self.viewport.borrow_mut().details_title = if session.is_some() {
-            label_area.inner(Margin::new(1, 0))
-        } else {
-            Rect::default()
-        };
+        let input = label_area.inner(Margin::new(1, 0));
+        if editor.is_some() {
+            self.viewport.borrow_mut().title_input = input;
+        }
+        if session.is_some() {
+            self.viewport.borrow_mut().details_title = input;
+        }
         let (left_area, folder_area) = render_rule_ends(
             rule,
             label_width,
@@ -873,6 +872,9 @@ impl View {
         {
             let mut viewport = self.viewport.borrow_mut();
             viewport.details = Rect::default();
+            viewport.details_title = Rect::default();
+            viewport.title_input = Rect::default();
+            viewport.details_input = Rect::default();
             viewport.details_copy.clear();
             viewport.details_background.clear();
             viewport.details_links.clear();
@@ -1838,6 +1840,54 @@ mod branch_input_tests {
                 for x in rect.x..rect.right() {
                     assert_eq!(buffer[(x, rect.y)], expected[(x, rect.y)]);
                     assert_eq!(buffer[(x, rect.y)].bg, Color::Reset);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod title_input_tests {
+    use super::*;
+
+    #[test]
+    fn title_editor_keeps_wide_caret_inside_the_rule_and_clears_side_labels() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("项目");
+        std::fs::create_dir(&cwd).unwrap();
+        let mut view = View::default();
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd,
+            model: None,
+            effort: None,
+            branch: "main".into(),
+        });
+        for width in [12, 20, 40, 80] {
+            for text in ["", "你好", "改 Claude Code 的颜色", &"你好".repeat(80)] {
+                view.rename.set_text(text);
+                for code in [KeyCode::Home, KeyCode::Right, KeyCode::End, KeyCode::Left] {
+                    view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+                    let rule = Rect::new(7, 3, width, 1);
+                    let mut buf = Buffer::empty(Rect::new(5, 2, width + 4, 3));
+                    view.viewport.borrow_mut().field_targets.clear();
+                    view.render_title_rule(rule, &mut buf);
+                    let input = view.viewport.borrow().title_input;
+                    assert!(input.x >= rule.x && input.right() <= rule.right());
+                    if !input.is_empty() {
+                        let (visible, caret) = view.rename.window(usize::from(input.width));
+                        assert!(caret < input.width);
+                        if !text.is_empty() {
+                            let mut expected = Buffer::empty(input);
+                            line(visible.to_owned(), input, &mut expected);
+                            for x in input.x..input.right() {
+                                assert_eq!(buf[(x, input.y)], expected[(x, input.y)]);
+                            }
+                        }
+                    }
+                    for (label, _) in &view.viewport.borrow().field_targets {
+                        assert!(label.right() < input.x || label.x > input.right());
+                    }
                 }
             }
         }

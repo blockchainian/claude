@@ -18,10 +18,14 @@ impl View {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
+        } else if self.title_editor().is_some() {
+            if self.name_target.is_some() {
+                hint_line(&[("esc", "cancel"), ("enter", "next")])
+            } else {
+                hint_line(&[("esc", "back"), ("enter", "rename")])
+            }
         } else if self.active_question().is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
-        } else if self.rename_target.is_some() {
-            hint_line(&[("esc", "back"), ("enter", "rename")])
         } else if let Some(step) = self.selected_draft().map(|draft| draft.step)
             && (self.input_box.focused || self.selector.is_some())
         {

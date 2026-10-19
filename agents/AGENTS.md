@@ -28,18 +28,18 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Panel inputs
 
-- Every one-line input in a panel (task search, rename, log search, log detail search, a new task's branch and name) takes its panel's bottom row and draws through `render_input_row`: a cyan label, the plain text and the terminal cursor, with no row highlight.
+- Every one-line input in a panel (task search, log search, log detail search and a new task's branch) takes its panel's bottom row and draws through `render_input_row`: a cyan label, the plain text and the terminal cursor, with no row highlight.
 
 ## Details panel
 
-- The status and elapsed time sit on the rule above the panel; the task's name sits centered on the rule below, between the pull request or a new task's branch on the left and the project folder on the right, and clicking it renames the task in the panel's bottom row.
+- The status and elapsed time sit on the rule above the panel; the task's name sits centered on the rule below, between the pull request or a new task's branch on the left and the project folder on the right, and double-clicking it edits the name in place on that rule. The task list's `r` key opens the same editor. Enter saves a nonempty name; Esc keeps the original name.
 - Sections run Last activity, Background, Update, Prompt and its queued prompts, Needs input, then Tasks.
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
 - The activity section is `Last activity`.
 
 ## New task
 
-- `n` starts with the task name in the details panel's bottom row (`New task` while empty); the project folder opens the repository browser. Enter keeps a nonempty name and focuses the prompt, labelled with that name. Submitting the prompt saves it and clears its box, then lists local branches with `Create new branch` selected. Click or Enter applies an existing branch immediately, or turns that button into the bottom-row `New branch ❯ ` editor. Enter on a nonempty branch name creates the task; Esc clears and closes that editor, and Esc in the branch list discards the draft. Outside Git, submitting the prompt creates the task directly.
+- `n` starts with the task name on the details panel's lower rule (a dim `New task` placeholder with the caret on its first character while empty); Esc discards the draft. The project folder opens the repository browser. Enter keeps a nonempty name and focuses the prompt, labelled with that name. Submitting the prompt saves it and clears its box, then lists local branches with `Create new branch` selected. Click or Enter applies an existing branch immediately, or turns that button into the bottom-row `New branch ❯ ` editor. Enter on a nonempty branch name creates the task; Esc clears and closes that editor, and Esc in the branch list discards the draft. Outside Git, submitting the prompt creates the task directly.
 
 ## Log panels
 

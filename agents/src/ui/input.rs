@@ -23,6 +23,7 @@ pub(super) enum ClickTarget {
     Heading(PathBuf),
     /// A row of the details panel's selector.
     Choice(usize),
+    Title(SessionKey),
 }
 
 pub(super) struct PendingClick {
@@ -72,7 +73,7 @@ impl View {
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
             ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
             ClickTarget::Choice(index) => self.single_choice(index),
-            ClickTarget::Background(_) => None,
+            ClickTarget::Background(_) | ClickTarget::Title(_) => None,
         }
     }
 
@@ -99,9 +100,15 @@ impl View {
         if self.confirm_dialog.take().is_some() {
             return;
         }
-        if self.rename_target.take().is_some() {
+        if self.title_editor().is_some() {
+            let draft = self.name_target.take();
+            self.rename_target = None;
             self.rename.clear();
-            self.reconcile_selection();
+            if draft.is_some() {
+                self.discard_selected_draft();
+            } else {
+                self.reconcile_selection();
+            }
             return;
         }
         if self.help {
@@ -257,8 +264,9 @@ impl View {
         }
         let next = self.handle_mouse_event(mouse);
         if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
-            self.input_box.focused =
-                self.mouse_focus == Panel::Prompt && self.input_disabled().is_none();
+            self.input_box.focused = self.mouse_focus == Panel::Prompt
+                && self.input_disabled().is_none()
+                && self.title_editor().is_none();
             self.log_list_focused = self.mouse_focus == Panel::LogList;
             self.log_detail_focused = self.mouse_focus == Panel::LogDetail;
         }
@@ -297,6 +305,11 @@ impl View {
 
     fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
         let viewport = self.viewport.borrow();
+        if viewport.details_title.contains(position)
+            && let Some(id) = self.selected_id()
+        {
+            return Some(ClickTarget::Title(id.clone()));
+        }
         if let Some((_, index)) = viewport
             .picker_rows
             .iter()
@@ -576,15 +589,10 @@ impl View {
                 && let Some(session) = self.selected_row()
             {
                 let id = session.id.clone();
-                let title = session.display_title().to_owned();
-                self.pending_click = None;
-                if !self.selected_capabilities().rename {
-                    return Some(Action::Unsupported("Rename"));
+                if !self.defer_click(ClickTarget::Title(id)) {
+                    return None;
                 }
-                self.mouse_focus = Panel::Details;
-                self.rename.set_text(&title);
-                self.rename_target = Some(id);
-                return None;
+                return self.begin_rename();
             }
             if let Some(cwd) = self.heading_at(position) {
                 if self.defer_click(ClickTarget::Heading(cwd.clone())) {
@@ -968,6 +976,23 @@ impl View {
             || self.selected_row().is_some_and(Session::is_live_background)
     }
 
+    fn begin_rename(&mut self) -> Option<Action> {
+        let session = self.selected_row()?;
+        if !self.selected_capabilities().rename {
+            return Some(Action::Unsupported("Rename"));
+        }
+        let id = session.id.clone();
+        let title = session.display_title().to_owned();
+        self.rename.set_text(&title);
+        self.rename_target = Some(id);
+        self.name_target = None;
+        self.input_box.focused = false;
+        self.mouse_focus = Panel::Details;
+        self.search.clear();
+        self.searching = false;
+        None
+    }
+
     fn selected_capabilities(&self) -> Capabilities {
         self.selected_id()
             .and_then(|key| self.capabilities.get(&key.provider))
@@ -989,6 +1014,46 @@ impl View {
         if let Some(action) = self.selector_key(key) {
             return action;
         }
+        if self.title_editing() && self.selector.is_none() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('c')
+                    if key.code == KeyCode::Esc
+                        || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let draft = self.name_target.take();
+                    self.rename_target = None;
+                    self.rename.clear();
+                    if draft.is_some() {
+                        self.discard_selected_draft();
+                    } else {
+                        self.reconcile_selection();
+                    }
+                }
+                KeyCode::Enter if !self.rename.text().trim().is_empty() => {
+                    let name = self.rename.text().trim().to_owned();
+                    self.rename.clear();
+                    if let Some(id) = self.name_target.take() {
+                        self.drafts
+                            .iter_mut()
+                            .find(|draft| draft.id == id)
+                            .expect("title draft is selected")
+                            .name = Some(name);
+                        self.close_selector();
+                    } else {
+                        let id = self
+                            .rename_target
+                            .take()
+                            .expect("title editor target is set");
+                        self.reconcile_selection();
+                        return Some(Action::Rename { id, name });
+                    }
+                }
+                _ => {
+                    self.rename.handle(key);
+                }
+            }
+            return None;
+        }
         if key.code == KeyCode::Char('/')
             && !key
                 .modifiers
@@ -998,6 +1063,7 @@ impl View {
                 Panel::TaskList | Panel::LogList | Panel::LogDetail
             )
             && !self.input_box.focused
+            && self.title_editor().is_none()
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
@@ -1005,6 +1071,7 @@ impl View {
             return None;
         }
         if self.input_box.focused
+            && self.title_editor().is_none()
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
@@ -1122,29 +1189,6 @@ impl View {
                 || (plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press)
             {
                 self.help = false;
-            }
-            return None;
-        }
-        if self.rename_target.is_some() {
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('c')
-                    if key.code == KeyCode::Esc
-                        || key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    self.rename_target = None;
-                    self.rename.clear();
-                    self.reconcile_selection();
-                }
-                KeyCode::Enter if !self.rename.text().trim().is_empty() => {
-                    let id = self.rename_target.take().expect("rename target is set");
-                    let name = self.rename.text().trim().to_owned();
-                    self.rename.clear();
-                    self.reconcile_selection();
-                    return Some(Action::Rename { id, name });
-                }
-                _ => {
-                    self.rename.handle(key);
-                }
             }
             return None;
         }
@@ -1339,19 +1383,7 @@ impl View {
                     .unwrap_or_else(|| self.startup_cwd.clone());
                 return Some(Action::NewDraft { cwd });
             }
-            KeyCode::Char('r') => {
-                if let Some(session) = self.selected_row() {
-                    if !self.selected_capabilities().rename {
-                        return Some(Action::Unsupported("Rename"));
-                    }
-                    let id = session.id.clone();
-                    let title = session.display_title().to_owned();
-                    self.rename.set_text(&title);
-                    self.rename_target = Some(id);
-                    self.search.clear();
-                    self.searching = false;
-                }
-            }
+            KeyCode::Char('r') => return self.begin_rename(),
             KeyCode::Char('a') => {
                 if let Some(session) = self.selected_row() {
                     if !self.selected_capabilities().archive {

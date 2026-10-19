@@ -21,7 +21,7 @@ pub(super) enum ControlTarget {
 }
 
 /// The list the details panel shows to choose a new task's repository or branch, or a task's
-/// model or effort, and the input naming a new task. Repository and branch clicks apply
+/// model or effort. Repository and branch clicks apply
 /// immediately; other lists apply on double click or Enter. A right click or Esc cancels.
 pub(super) struct Selector {
     pub kind: SelectorKind,
@@ -43,11 +43,6 @@ pub(super) enum SelectorKind {
         editor: line_edit::LineEdit,
         editing: bool,
     },
-    /// The input naming the new task before its prompt.
-    Name {
-        draft: DraftId,
-        editor: line_edit::LineEdit,
-    },
     Model {
         target: ControlTarget,
         values: Vec<String>,
@@ -60,7 +55,6 @@ pub(super) enum SelectorKind {
 }
 
 const NEW_BRANCH: &str = "Create new branch";
-const NEW_TASK: &str = "New task";
 
 impl Selector {
     pub(super) fn new(kind: SelectorKind, selected: usize) -> Self {
@@ -75,7 +69,6 @@ impl Selector {
         match &self.kind {
             SelectorKind::Repository { entries, .. } => entries.len(),
             SelectorKind::Branch { branches, .. } => branches.len() + 1,
-            SelectorKind::Name { .. } => 0,
             SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. } => {
                 values.len()
             }
@@ -86,17 +79,9 @@ impl Selector {
     pub(super) fn field(&self) -> Field {
         match &self.kind {
             SelectorKind::Repository { .. } => Field::Directory,
-            SelectorKind::Branch { .. } | SelectorKind::Name { .. } => Field::Branch,
+            SelectorKind::Branch { .. } => Field::Branch,
             SelectorKind::Model { .. } => Field::Model,
             SelectorKind::Effort { .. } => Field::Effort,
-        }
-    }
-
-    /// The task name uses a placeholder on the panel's bottom row.
-    pub(super) fn name_input(&self) -> Option<(&line_edit::LineEdit, &'static str)> {
-        match &self.kind {
-            SelectorKind::Name { editor, .. } => Some((editor, NEW_TASK)),
-            _ => None,
         }
     }
 
@@ -117,14 +102,13 @@ impl Selector {
                 editor,
                 editing: true,
                 ..
-            }
-            | SelectorKind::Name { editor, .. } => Some(editor),
+            } => Some(editor),
             _ => None,
         }
     }
 
     pub(super) fn input_active(&self) -> bool {
-        self.name_input().is_some() || self.branch_editor().is_some()
+        self.branch_editor().is_some()
     }
 
     /// The choice index of the new branch's input row.
@@ -137,9 +121,9 @@ impl Selector {
 
     fn draft(&self) -> Option<DraftId> {
         match &self.kind {
-            SelectorKind::Repository { draft, .. }
-            | SelectorKind::Branch { draft, .. }
-            | SelectorKind::Name { draft, .. } => Some(*draft),
+            SelectorKind::Repository { draft, .. } | SelectorKind::Branch { draft, .. } => {
+                Some(*draft)
+            }
             SelectorKind::Model { target, .. } | SelectorKind::Effort { target, .. } => {
                 match target {
                     ControlTarget::Draft(draft) => Some(*draft),
@@ -186,7 +170,6 @@ impl Selector {
                 }
                 rows
             }
-            SelectorKind::Name { .. } => Vec::new(),
             SelectorKind::Model { labels: values, .. } | SelectorKind::Effort { values, .. } => {
                 values
                     .iter()
@@ -298,13 +281,12 @@ impl View {
 
     pub(super) fn open_name(&mut self, id: DraftId) {
         self.set_step(id, Step::Name);
-        self.selector = Some(Selector::new(
-            SelectorKind::Name {
-                draft: id,
-                editor: line_edit::LineEdit::default(),
-            },
-            0,
-        ));
+        self.selector = None;
+        if self.name_target != Some(id) {
+            self.rename.clear();
+        }
+        self.rename_target = None;
+        self.name_target = Some(id);
         self.focus_selector();
     }
 
@@ -471,6 +453,10 @@ impl View {
     pub(super) fn close_selector(&mut self) {
         self.selector = None;
         if let Some(id) = self.selected_draft {
+            if self.name_target == Some(id) {
+                self.open_name(id);
+                return;
+            }
             self.set_step(id, Step::Prompt);
             self.mouse_focus = Panel::Prompt;
             self.input_box.focused = true;
@@ -479,6 +465,10 @@ impl View {
 
     /// Drops a selector that belongs to `draft`.
     pub(super) fn close_draft_selector(&mut self, draft: DraftId) {
+        if self.name_target == Some(draft) {
+            self.name_target = None;
+            self.rename.clear();
+        }
         if self
             .selector
             .as_ref()
@@ -562,16 +552,6 @@ impl View {
                 }
                 None
             }
-            SelectorKind::Name { draft, editor } => {
-                let name = editor.text().trim().to_owned();
-                let draft = *draft;
-                if name.is_empty() {
-                    return None;
-                }
-                self.drafts.iter_mut().find(|item| item.id == draft)?.name = Some(name);
-                self.close_selector();
-                None
-            }
             SelectorKind::Model { target, values, .. }
             | SelectorKind::Effort { target, values } => {
                 let value = values.get(index)?.clone();
@@ -633,9 +613,8 @@ impl View {
         };
         Clear.render(area, buf);
         // The input row takes the panel's bottom row, below the list.
-        let input = selector.name_input().filter(|_| area.height > 0);
         let branch = selector.branch_editor().filter(|_| area.height > 0);
-        let list = if input.is_some() || branch.is_some() {
+        let list = if branch.is_some() {
             render::row(area, 0, area.height - 1)
         } else {
             area
@@ -647,18 +626,6 @@ impl View {
             list,
             buf,
         );
-        if let Some((editor, placeholder)) = input {
-            let row = super::log::search_input_rect(area);
-            if editor.is_empty() {
-                render::line(Line::from(placeholder.dim()), row, buf);
-            } else {
-                render::render_input_row("", editor, row, buf);
-            }
-            if let Some(index) = selector.create_index() {
-                rows.push((row, index));
-            }
-            self.viewport.borrow_mut().details_input = row;
-        }
         if let Some(editor) = branch {
             let row = super::log::search_input_rect(area);
             render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
@@ -752,7 +719,8 @@ mod tests {
         assert_eq!(click(&mut view, sonnet), None);
         assert_eq!(click(&mut view, sonnet), None);
         assert!(view.selector.is_none());
-        assert!(view.input_box.focused);
+        assert!(!view.input_box.focused);
+        assert_eq!(view.name_target, view.selected_draft);
         assert_eq!(
             view.drafts[0].setup.model.as_deref(),
             Some("claude-sonnet-5-5")
@@ -980,10 +948,8 @@ mod tests {
         let mut view = draft_view(directory.path(), directory.path());
         view.drafts[0].setup.branch.clear();
         view.open_field(Field::Branch);
-        assert!(matches!(
-            view.selector.as_ref().unwrap().kind,
-            SelectorKind::Name { .. }
-        ));
+        assert!(view.selector.is_none());
+        assert_eq!(view.name_target, view.selected_draft);
         let area = Rect::new(0, 0, 120, 24);
         screen(&view, area);
         assert!(
