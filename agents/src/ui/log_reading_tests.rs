@@ -981,7 +981,7 @@ fn tool_list_rows_keep_shell_display_names_and_grouped_subjects() {
     block["name"] = "Bash".into();
     block["input"] = serde_json::json!({"command":"git status --short && git diff --name-only; sed -n '1,3p' file"});
     let event = events(&list_row_fixture(&[record.clone()])).remove(0);
-    assert_eq!(event.body, "Bash git {status, diff}, sed");
+    assert_eq!(event.body, "git {status, diff}, sed");
     record["message"]["content"][0]["input"]["description"] = "Inspect changes".into();
     assert_eq!(
         events(&list_row_fixture(&[record.clone()]))[0].body,

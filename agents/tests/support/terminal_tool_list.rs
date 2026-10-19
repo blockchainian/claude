@@ -182,3 +182,43 @@ fn terminal_codex_tool_list_shell_group() {
     assert!(!capture.contains("exec_command"), "{capture}");
     write_verdict("codex", &[capture]);
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_claude_shell_commands_without_description() {
+    let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let mut bash = include_str!("../fixtures/claude-tool-calls.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|record| record["message"]["content"][0]["name"] == "Bash")
+        .unwrap();
+    let command: serde_json::Value = serde_json::from_str(
+        include_str!("../fixtures/codex-inner/git-chain.jsonl")
+            .lines()
+            .nth(1)
+            .unwrap(),
+    )
+    .unwrap();
+    bash["message"]["content"][0]["input"] = serde_json::json!({
+        "command": command["payload"]["item"]["command"][2]
+    });
+    records.push(bash);
+    let transcript = records
+        .into_iter()
+        .map(|record| format!("{record}\n"))
+        .collect::<String>();
+    let (_directory, tmux, _transcript) =
+        start_probe_with_transcript("claude-shell-commands", &transcript);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "240", "-y", "70"]);
+    let capture =
+        tmux.capture_when(|capture| list_row(capture, "git {status, diff}, sed").is_some());
+    let (_, row) = list_row(&capture, "git {status, diff}, sed").unwrap();
+    assert!(
+        !row.rsplit_once('│').unwrap().1.contains("Bash"),
+        "{capture}"
+    );
+    write_verdict("claude-shell-commands", &[capture]);
+}

@@ -6,10 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) use crate::providers::tool::{tool_hidden, tool_kind};
-use crate::providers::tool::{self, Output, Subject};
 #[cfg(test)]
 use crate::providers::tool::code_section;
+use crate::providers::tool::{self, Output, Subject};
+pub(super) use crate::providers::tool::{tool_hidden, tool_kind};
 
 /// Reuses the backward log parser, including result lookup and merged tool rows.
 #[derive(Default)]
@@ -184,7 +184,17 @@ impl Reader {
     }
 
     fn replay(&mut self, start: u64) -> io::Result<usize> {
-        let start = self.entries.last().filter(|entry| entry.event.calls.first().and_then(|call| call.agent_message.as_ref()).is_some_and(|message| message.kind == "MESSAGE"))
+        let start = self
+            .entries
+            .last()
+            .filter(|entry| {
+                entry
+                    .event
+                    .calls
+                    .first()
+                    .and_then(|call| call.agent_message.as_ref())
+                    .is_some_and(|message| message.kind == "MESSAGE")
+            })
             .map_or(start, |entry| start.min(entry.offset));
         let retained = self.entries.partition_point(|entry| entry.offset < start);
         let replaced = self.entries.len() - retained;
@@ -422,12 +432,13 @@ impl Reader {
             .saturating_sub(appended);
         self.boundary.capture(&mut file, metadata.len())?;
         Ok(crate::log::Update {
-            events: crate::log::agent::merge(self
-                .entries
-                .iter()
-                .skip(self.entries.len() - self.shown)
-                .map(|entry| entry.event.clone())
-                .collect()),
+            events: crate::log::agent::merge(
+                self.entries
+                    .iter()
+                    .skip(self.entries.len() - self.shown)
+                    .map(|entry| entry.event.clone())
+                    .collect(),
+            ),
             prepended: if reset { 0 } else { prepended },
             appended: if reset { self.shown } else { appended },
             replaced: replaced.min(shown_before),
@@ -496,7 +507,10 @@ fn result_text(value: &serde_json::Value) -> String {
 fn result_content(value: &serde_json::Value) -> serde_json::Value {
     value
         .as_str()
-        .and_then(|text| text.strip_prefix("<tool_use_error>")?.strip_suffix("</tool_use_error>"))
+        .and_then(|text| {
+            text.strip_prefix("<tool_use_error>")?
+                .strip_suffix("</tool_use_error>")
+        })
         .map_or_else(|| value.clone(), Into::into)
 }
 
@@ -508,8 +522,7 @@ fn text_section(label: &str, text: &str) -> Section {
 }
 
 fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -> ToolCall {
-    let (_, mut subject, sections) =
-        crate::providers::tool::presentation(name, input);
+    let (_, mut subject, sections) = crate::providers::tool::presentation(name, input);
     let mode = tool::rule(name).output;
     if matches!(mode, Some(Output::Read))
         && let Some(result) = result
@@ -528,12 +541,21 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             ));
         }
     }
-    let state = result.map(|result| tool::result_state(&result.content, &serde_json::Value::Null, result.error));
+    let state = result
+        .map(|result| tool::result_state(&result.content, &serde_json::Value::Null, result.error));
     let exit_code = state.as_ref().and_then(|state| state.exit_code);
-    let output = result.map(|result| tool::output(mode, input, &tool::ToolResult {
-        content: &result.raw_content, value: &result.value, text: &result.content,
-        error: result.error,
-    }));
+    let output = result.map(|result| {
+        tool::output(
+            mode,
+            input,
+            &tool::ToolResult {
+                content: &result.raw_content,
+                value: &result.value,
+                text: &result.content,
+                error: result.error,
+            },
+        )
+    });
     subject = crate::providers::tool::result_subject(name, output.as_deref()).or(subject);
     let (detail_left, detail_title) = tool::detail_titles(name, subject.as_deref());
     let mut call = ToolCall {
@@ -684,10 +706,14 @@ impl Log {
                     )
                 });
                 let wrapped = text.as_deref().and_then(wrapped_message);
-                let is_peer = wrapped.as_ref().is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
+                let is_peer = wrapped
+                    .as_ref()
+                    .is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
                 if let Some(text) = text.filter(|text| !text.trim().is_empty())
                     && (record["isMeta"] != true || is_peer)
-                    && !text.trim_start().starts_with("<task-notification>")
+                    && !["<task-notification>", "<system-reminder>"]
+                        .iter()
+                        .any(|prefix| text.trim_start().starts_with(prefix))
                 {
                     if let Some((kind, sender, body)) = wrapped {
                         let (sender, body) = super::peer::origin_message(&record)
@@ -697,7 +723,9 @@ impl Log {
                         self.entries.last_mut().unwrap().event.source =
                             record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
-                        if is_peer { self.peer_message(); }
+                        if is_peer {
+                            self.peer_message();
+                        }
                     } else if is_prompt_text(&record, &text) {
                         let images = self.images.take(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
@@ -763,7 +791,9 @@ impl Log {
                         (Kind::QueuedUser, text)
                     };
                     let peer = wrapped_message(body);
-                    let is_peer = peer.as_ref().is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
+                    let is_peer = peer
+                        .as_ref()
+                        .is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
                     let (sender, body) = peer
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
@@ -773,7 +803,9 @@ impl Log {
                     self.entries.last_mut().unwrap().event.source =
                         record["uuid"].as_str().map(str::to_owned);
                     self.entries.last_mut().unwrap().event.sender = sender;
-                        if is_peer { self.peer_message(); }
+                    if is_peer {
+                        self.peer_message();
+                    }
                 }
             }
             _ => {}
@@ -895,18 +927,30 @@ impl Log {
     fn peer_message(&mut self) {
         let event = &mut self.entries.last_mut().unwrap().event;
         let message = crate::log::agent::Message {
-            author: event.sender.clone(), recipient: None,
+            author: event.sender.clone(),
+            recipient: None,
             direction: crate::log::agent::Direction::Incoming,
             kind: "MESSAGE".to_owned(),
             content: crate::log::agent::Content::Text(event.body.clone()),
         };
         let mut call = ToolCall {
             model_settings: None,
-            agent_message: Some(message), started_at: Some(event.started_at), hide_output: true,
-            agent_thread_id: None, agent_path: event.sender.clone(), detail_left: String::new(),
-            detail_title: String::new(), show_details: true, id: event.source.clone().unwrap_or_default(),
-            title: String::new(), name: "MESSAGE".to_owned(), input: Vec::new(), output: None,
-            exit_code: None, is_error: false, duration: None,
+            agent_message: Some(message),
+            started_at: Some(event.started_at),
+            hide_output: true,
+            agent_thread_id: None,
+            agent_path: event.sender.clone(),
+            detail_left: String::new(),
+            detail_title: String::new(),
+            show_details: true,
+            id: event.source.clone().unwrap_or_default(),
+            title: String::new(),
+            name: "MESSAGE".to_owned(),
+            input: Vec::new(),
+            output: None,
+            exit_code: None,
+            is_error: false,
+            duration: None,
         };
         crate::log::agent::present(&mut call);
         event.calls.push(call);
@@ -914,9 +958,13 @@ impl Log {
     }
 
     fn coalesce(&mut self) {
-        if self.entries.len() < 2 { return; }
+        if self.entries.len() < 2 {
+            return;
+        }
         let n = self.entries.len();
-        if !crate::log::agent::can_merge(&self.entries[n - 1].event, &self.entries[n - 2].event) { return; }
+        if !crate::log::agent::can_merge(&self.entries[n - 1].event, &self.entries[n - 2].event) {
+            return;
+        }
         let mut earlier = self.entries.pop().unwrap();
         let later = self.entries.pop().unwrap();
         earlier.event = crate::log::agent::merge(vec![earlier.event, later.event]).remove(0);
@@ -962,7 +1010,9 @@ impl Log {
         let detail_call = tool_call(name, input, result);
         if let Some(message) = &detail_call.agent_message {
             self.batch = None;
-            let records = result.map(|result| result.source_records.clone()).unwrap_or_default();
+            let records = result
+                .map(|result| result.source_records.clone())
+                .unwrap_or_default();
             let ended_at = result.map(|result| result.at);
             let denied = result.is_some_and(|result| result.denial.is_some());
             self.push(tool_kind(name), message.content.text().to_owned(), at);
@@ -973,8 +1023,11 @@ impl Log {
             call.started_at = Some(at);
             call.duration = ended_at.map(|end| end - at);
             event.ended_at = ended_at;
-            if denied { event.kind = Kind::Denied; }
-            else if call.is_error { event.kind = Kind::Error; }
+            if denied {
+                event.kind = Kind::Denied;
+            } else if call.is_error {
+                event.kind = Kind::Error;
+            }
             event.calls.push(call);
             self.coalesce();
             return;
@@ -1062,9 +1115,10 @@ impl Log {
             if result.denial.is_some() {
                 entry.event.kind = Kind::Denied;
             } else if entry.event.kind != Kind::Denied {
-                entry.event.kind = tool::result_kind(entry.event.kind.clone(), &tool::result_state(
-                    &result.content, &serde_json::Value::Null, result.error,
-                ));
+                entry.event.kind = tool::result_kind(
+                    entry.event.kind.clone(),
+                    &tool::result_state(&result.content, &serde_json::Value::Null, result.error),
+                );
             }
             if !entry.missing
                 && entry
@@ -1145,7 +1199,9 @@ pub(super) fn pasted_content(mut text: &str) -> Option<String> {
 
 /// Human-origin prompts can start with XML; system wrappers remain system records.
 pub(super) fn is_prompt_text(record: &serde_json::Value, text: &str) -> bool {
-    !["<task-notification>", "<system-reminder>"].iter().any(|prefix| text.trim_start().starts_with(prefix))
+    !["<task-notification>", "<system-reminder>"]
+        .iter()
+        .any(|prefix| text.trim_start().starts_with(prefix))
         && (record["origin"]["kind"] == "human" || !text.trim_start().starts_with('<'))
 }
 
@@ -1593,20 +1649,24 @@ pub(crate) mod tests {
                     let expected = input[subject].as_str().or_else(|| {
                         matches!(name, "Agent" | "Task").then(|| input["description"].as_str()).flatten()
                     }).unwrap_or(name);
-                    assert_eq!(call.detail_title, expected);
+                    assert_eq!(
+                        call.detail_title,
+                        expected
+                    );
                     if let Some(message) = &call.agent_message {
                         assert_eq!(call.detail_left, message.label());
-                    } else { assert_eq!(
-                        call.detail_left,
-                        if input[subject]
-                            .as_str()
-                            .is_some_and(|s| !s.trim().is_empty())
-                        {
-                            name
-                        } else {
-                            ""
-                        }
-                    );
+                    } else {
+                        assert_eq!(
+                            call.detail_left,
+                            if input[subject]
+                                .as_str()
+                                .is_some_and(|s| !s.trim().is_empty())
+                            {
+                                name
+                            } else {
+                                ""
+                            }
+                        );
                     }
                     let text = input[field].as_str().unwrap_or("").to_owned();
                     match name {
@@ -1910,10 +1970,20 @@ pub(crate) mod tests {
     #[test]
     fn captured_read_with_empty_file_content_has_no_output_sections() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
-            .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-        let call = records.iter().find(|record| record["message"]["content"][0]["name"] == "Read").unwrap().clone();
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let call = records
+            .iter()
+            .find(|record| record["message"]["content"][0]["name"] == "Read")
+            .unwrap()
+            .clone();
         let id = call["message"]["content"][0]["id"].as_str().unwrap();
-        let mut result = records.iter().find(|record| record["message"]["content"][0]["tool_use_id"] == id).unwrap().clone();
+        let mut result = records
+            .iter()
+            .find(|record| record["message"]["content"][0]["tool_use_id"] == id)
+            .unwrap()
+            .clone();
         result["toolUseResult"]["file"]["content"] = "".into();
         result["message"]["content"][0]["content"] = "".into();
         let events = events_from(vec![call, result]);
@@ -1922,10 +1992,21 @@ pub(crate) mod tests {
 
     #[test]
     fn captured_shell_failure_has_the_same_status_in_row_and_detail() {
-        let events = events_from(include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
-            .lines().map(|line| serde_json::from_str::<Value>(line).unwrap()).collect());
-        let event = events.iter().find(|event| event.calls.iter().any(|call| call.exit_code == Some(1))).unwrap();
-        let call = event.calls.iter().find(|call| call.exit_code == Some(1)).unwrap();
+        let events = events_from(
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect(),
+        );
+        let event = events
+            .iter()
+            .find(|event| event.calls.iter().any(|call| call.exit_code == Some(1)))
+            .unwrap();
+        let call = event
+            .calls
+            .iter()
+            .find(|call| call.exit_code == Some(1))
+            .unwrap();
         assert!(call.title.ends_with(" (1)"), "{}", call.title);
         assert!(event.body.contains(" (1)"), "{}", event.body);
         assert!(call.is_error);
@@ -2083,14 +2164,14 @@ pub(crate) mod tests {
             let record: Value = serde_json::from_str(line).unwrap();
             let block = &record["message"]["content"][0];
             let rows = [
-                "Bash mkdir, cd, ls, wc, head",
+                "mkdir, cd, ls, wc, head",
                 "找那个会话",
                 "hide-idle-teammates ← message",
                 "team-lead ← message",
                 "SubagentHandback",
                 "WebFetch https://code.claude.com/docs/en/hooks",
-                "Bash cd, ls, sed, wc",
-                "Bash cd, cat, wc, sed",
+                "cd, ls, sed, wc",
+                "cd, cat, wc, sed",
             ];
             let index = include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
                 .lines()
@@ -2154,10 +2235,7 @@ pub(crate) mod tests {
             } else {
                 expected
             };
-            assert_eq!(
-                events[0].summary(),
-                row_expected
-            );
+            assert_eq!(events[0].summary(), row_expected);
             let record: Value = serde_json::from_str(line).unwrap();
             if record["type"] == "assistant" {
                 let len = file.as_file().metadata().unwrap().len();
@@ -2185,7 +2263,14 @@ pub(crate) mod tests {
             let row_expected = record["message"]["content"][0]["input"]["description"]
                 .as_str()
                 .unwrap_or(tool_name);
-            assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), if tool_name == "Task" { "Spawn agent reviewer" } else { row_expected });
+            assert_eq!(
+                tail(file.path(), 1).unwrap()[0].summary(),
+                if tool_name == "Task" {
+                    "Spawn agent reviewer"
+                } else {
+                    row_expected
+                }
+            );
             let summary = super::super::transcript::read_subagent(
                 file.path(),
                 file.as_file().metadata().unwrap().len(),
@@ -2276,7 +2361,7 @@ pub(crate) mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
         let events = tail_session(file.path(), 8, true).unwrap();
-        assert_eq!(events[0].body, "Bash cd, ls, sed, wc");
+        assert_eq!(events[0].body, "cd, ls, sed, wc");
         let summary = super::super::transcript::read_subagent(
             file.path(),
             file.as_file().metadata().unwrap().len(),
@@ -2374,7 +2459,7 @@ pub(crate) mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash echo");
+        assert_eq!(events[0].body, "echo");
         assert!(
             matches!(&events[0].calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text.contains("Create Unsafe Agents"))
         );
@@ -2404,7 +2489,7 @@ pub(crate) mod tests {
         records.push(reply);
         let events = events_from(records);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash echo");
+        assert_eq!(events[0].body, "echo");
         assert_eq!(events[0].ended_at, Some(end));
         assert_eq!(events[1].previous_end, Some(end));
     }
@@ -2423,7 +2508,7 @@ pub(crate) mod tests {
             records[1]["permissionDecision"]["reasonType"] = reason.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Error);
-            assert_eq!(events[0].body, "Bash echo");
+            assert_eq!(events[0].body, "echo");
         }
     }
 
@@ -2436,7 +2521,7 @@ pub(crate) mod tests {
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert_eq!(events[0].body, "Bash echo");
+            assert_eq!(events[0].body, "echo");
         }
     }
 

@@ -229,7 +229,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         subject: Some(Subject::Shell { description: true }),
         input: Some((Input::Shell, Format::Text)),
         output: Some(Output::Shell),
-        list_subject: false,
+        list_subject: true,
         ..DEFAULT_RULE
     },
     ToolRule {
