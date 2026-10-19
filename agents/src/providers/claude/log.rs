@@ -106,6 +106,14 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     Some(subject.unwrap_or(name))
 }
 
+/// When an event stops occupying the session: a tool's or answered question's result, otherwise its start.
+fn end(event: &Event) -> Option<DateTime<Utc>> {
+    match event.kind {
+        Kind::Tool | Kind::Error | Kind::Denied => event.ended_at,
+        _ => event.ended_at.or(Some(event.started_at)),
+    }
+}
+
 #[cfg(test)]
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     tail_session(path, count, false)
@@ -142,10 +150,7 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
         if event.kind != Kind::Assistant || event.previous_end.is_none() {
             event.previous_end = previous_end;
         }
-        previous_end = match event.kind {
-            Kind::Tool | Kind::Error | Kind::Denied => event.ended_at,
-            _ => Some(event.started_at),
-        };
+        previous_end = end(event);
     }
     let skip = events.len().saturating_sub(count);
     Ok(events.into_iter().skip(skip).collect())
@@ -232,10 +237,7 @@ impl Reader {
             if event.kind != Kind::Assistant || event.previous_end.is_none() {
                 event.previous_end = previous_end;
             }
-            previous_end = match event.kind {
-                Kind::Tool | Kind::Error | Kind::Denied => event.ended_at,
-                _ => Some(event.started_at),
-            };
+            previous_end = end(event);
         }
         Ok(replaced)
     }
@@ -2444,6 +2446,26 @@ pub(crate) mod tests {
                 seconds
             );
         }
+    }
+
+    #[test]
+    fn tool_after_answered_question_starts_at_the_answer() {
+        let fixture = include_str!("../../../tests/fixtures/claude-questions-answered.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "{fixture}").unwrap();
+        let answered: DateTime<Utc> = "2026-10-13T17:45:49.705Z".parse().unwrap();
+        for (seconds, mut r) in [
+            (55, tool(0, "after", "b", "Bash", json!({"command":"ls"}))),
+            (56, result(0, "b", false)),
+        ] {
+            r["timestamp"] = (answered + chrono::Duration::seconds(seconds - 49))
+                .to_rfc3339()
+                .into();
+            writeln!(file, "{r}").unwrap();
+        }
+        let events = tail(file.path(), 2).unwrap();
+        assert_eq!(events[0].kind, Kind::Assistant);
+        assert_eq!(events[1].previous_end, Some(answered));
     }
 
     #[test]
