@@ -35,7 +35,7 @@ main
 New branch ❯ feature/probe
 ---
  ○ named task                                            New                now │
-                                                                                ├╴feature/probe ────────────────── named task ───────────────────── repository╶─
+                                                                                ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
  named task ❯ unfinished task
 ---
 Creation was interrupted

@@ -533,7 +533,7 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     assert_eq!(buffer[(x - 1, y)].bg, ratatui::style::Color::Reset);
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(rendered.contains("╴main "), "{rendered}");
+    assert!(rendered.contains(" main╶"), "{rendered}");
     assert!(rendered.contains("branch flow task ❯"), "{rendered}");
     assert!(rendered.contains("Create new branch"), "{rendered}");
     assert!(!rendered.contains("New branch ❯"), "{rendered}");
@@ -874,7 +874,7 @@ fn new_key_without_selection_prepares_the_startup_repository() {
     let rendered = lines(&buffer).join("\n");
     assert!(rendered.contains("New task"), "{rendered}");
     assert!(
-        rendered.contains(&format!("╴{} ", branch.trim())),
+        rendered.contains(&format!(" {}╶", branch.trim())),
         "startup repository was not prepared:\n{rendered}"
     );
 }

@@ -2859,7 +2859,7 @@ fn details_folder_and_pr_use_rule_styles_and_keep_links() {
             .unwrap();
         assert_eq!(folder.y, y);
         assert_eq!(pr.y, y);
-        assert!(pr.right() < folder.x);
+        assert!(folder.right() < pr.x);
         for (offset, symbol) in "project".chars().enumerate() {
             let cell = &buf[(folder.x + offset as u16, y)];
             assert_eq!(cell.symbol(), symbol.to_string());
@@ -3440,7 +3440,7 @@ mod details_header {
                         let header = label(&buf, rule);
                         assert!(!label(&buf, bottom).contains("Working"));
                         assert!(header.starts_with("Working"), "{header}");
-                        assert!(label(&buf, bottom).starts_with("Fix login bug"));
+                        assert!(label(&buf, bottom).ends_with("Fix login bug"));
                         assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
                             assert!(header.ends_with(expected), "{header}");
@@ -3462,8 +3462,8 @@ mod details_header {
             let (buf, rule) = rule_at_width(&view, Utc::now(), width);
             assert_eq!(label(&buf, rule), "Working");
             let bottom = label(&buf, name_row(&view, rule));
-            assert!(bottom.starts_with("Header task"), "{bottom}");
-            assert!(bottom.ends_with("project"), "{bottom}");
+            assert!(bottom.ends_with("Header task"), "{bottom}");
+            assert!(bottom.starts_with("project"), "{bottom}");
             assert!(name_row(&view, rule).y > rule.y + 1);
         }
     }
@@ -3483,9 +3483,9 @@ mod details_header {
         for width in [112, 200] {
             let (buf, rule) = rule_at_width(&view, now, width);
             let header = label(&buf, name_row(&view, rule));
-            assert!(header.starts_with('升'), "{header}");
-            assert!(header.contains("… ─"), "{header}");
-            assert!(header.ends_with("project"), "{header}");
+            assert!(header.contains('升'), "{header}");
+            assert!(header.contains("…"), "{header}");
+            assert!(header.starts_with("project"), "{header}");
             assert!(label(&buf, rule).starts_with("Working"));
         }
     }
@@ -3509,7 +3509,7 @@ mod details_header {
             let (buf, rule) = rule(&view, Utc::now());
             let name = name_row(&view, rule);
             let header = "Header task";
-            assert!(label(&buf, name).starts_with(header));
+            assert!(label(&buf, name).ends_with(header));
             let start = name.x - 2 + (name.width + 3 - (header.width() as u16 + 2)) / 2 + 1;
             let title = &buf[(start, name.y)];
             assert_eq!(title.symbol(), "H");
@@ -3543,7 +3543,7 @@ mod details_header {
         view.set_sessions(vec![row.clone()], false);
         let (buf, rule) = rule(&view, now);
         let header = label(&buf, name_row(&view, rule));
-        assert!(header.starts_with("A very long"), "{header}");
+        assert!(header.contains("A very long"), "{header}");
         assert!(header.contains("…"), "{header}");
         assert_eq!(
             details_at(row, 15, now),
@@ -3565,8 +3565,8 @@ mod details_header {
         let (buf, rule) = rule(&view, Utc::now());
         let header = label(&buf, name_row(&view, rule));
         let rendered = queued_details(row, 15);
-        assert!(header.contains("… ─"), "{header}");
-        assert!(header.ends_with("project"), "{header}");
+        assert!(header.contains("…"), "{header}");
+        assert!(header.starts_with("project"), "{header}");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
@@ -5195,6 +5195,8 @@ fn task_log_rules_match_header_and_footer_gap_is_empty() {
                     };
                     let expected = if y == middle && x == layout.gap.x + 1 {
                         "┴"
+                    } else if y == middle && x == layout.details.x - 1 {
+                        "╴"
                     } else if y == layout.log_detail.y && x == layout.gap.x + 1 {
                         "─"
                     } else {

@@ -89,7 +89,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                 "{width}: {row}"
             );
             assert!(!row.contains("hidden-branch"));
-            assert_eq!(folder.right(), details.right() - u16::from(width < 150));
+            assert_eq!(folder.x, details.x);
             assert_eq!(
                 (folder.x..folder.right())
                     .map(|x| visible(&buf[(x, folder.y)]))
@@ -103,7 +103,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             if pr {
                 let (rect, _) = &links[1];
                 assert_eq!(rect.y, folder.y);
-                assert_eq!(rect.x, details.x);
+                assert_eq!(rect.right(), details.right() - u16::from(width < 150));
                 assert_eq!(
                     (rect.x..rect.right())
                         .map(|x| visible(&buf[(x, rect.y)]))

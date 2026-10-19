@@ -109,12 +109,10 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
                 assert!(actual.ends_with(value), "{width}: {actual:?}");
                 assert!(!actual.contains("messages"));
             }
-            let pr_x = left;
-            let folder_x = (left..right)
-                .rfind(|&x| cell_text(buffer, x, status_y) == "p")
-                .unwrap();
-            let folder = row_text(buffer, status_y, folder_x, right);
-            let folder = folder.trim_end_matches(['╶', ' ']);
+            let pr_x = right - 3 - u16::from(width < 150);
+            let folder_x = left;
+            let folder = row_text(buffer, status_y, folder_x, pr_x);
+            let folder = folder.split_whitespace().next().unwrap();
             assert!("project".starts_with(folder.trim_end_matches('…')), "{width}: {folder}");
             assert_eq!(row_text(buffer, status_y, pr_x, pr_x + 3), "#13");
             assert!(

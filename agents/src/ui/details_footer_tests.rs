@@ -177,3 +177,45 @@ fn model_effort_border_groups_optional_values_and_right_aligns_new() {
         }
     }
 }
+
+#[test]
+fn draft_title_rule_places_directory_left_and_branch_right() {
+    for width in [80, 149, 150, 220] {
+        let mut view = fixture();
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            model: None,
+            effort: None,
+            branch: "feature/border".into(),
+        });
+        view.handle_paste("Border task");
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        view.close_selector();
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
+        view.render(buf.area, &mut buf);
+        let viewport = view.viewport.borrow();
+        let target = |field| {
+            viewport
+                .field_targets
+                .iter()
+                .find(|(_, value)| *value == field)
+                .unwrap()
+                .0
+        };
+        let directory = target(Field::Directory);
+        let branch = target(Field::Branch);
+        let title = viewport.details_title;
+        assert_eq!(directory.y, viewport.details.bottom());
+        assert_eq!(branch.y, directory.y);
+        assert!(directory.right() < title.x);
+        assert!(branch.x > title.right());
+        let text = |rect: Rect| {
+            (rect.x..rect.right())
+                .map(|x| buf[(x, rect.y)].symbol())
+                .collect::<String>()
+        };
+        assert_eq!(text(directory), "agents");
+        assert_eq!(text(branch), "feature/border");
+    }
+}

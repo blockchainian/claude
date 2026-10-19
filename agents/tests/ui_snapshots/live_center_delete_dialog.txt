@@ -11,6 +11,6 @@
     │   2. Permanently delete task and child agents                                │
     └──────────────────────────────────────────────────────────────────────────────┘
                                             │
-                                            ├───────────── Unloaded task ───── project╶─
+                                            ├╴project ──── Unloaded task ───────────────
  Unloaded task ❯
  ↑/↓ move  enter select  esc back

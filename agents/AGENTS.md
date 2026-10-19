@@ -32,7 +32,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Details panel
 
-- The status and elapsed time sit on the rule above the panel; the task's name sits centered on the rule below, between the pull request or a new task's branch on the left and the project folder on the right, and double-clicking it edits the name in place on that rule. The task list's `r` key opens the same editor. Enter saves a nonempty name; Esc keeps the original name.
+- The status and elapsed time sit on the rule above the panel; the task's name sits centered on the rule below, between the project folder on the left and the pull request or a new task's branch on the right, and double-clicking it edits the name in place on that rule. The task list's `r` key opens the same editor. Enter saves a nonempty name; Esc keeps the original name.
 - Sections run Last activity, Background, Update, Prompt and its queued prompts, Needs input, then Tasks.
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
 - The activity section is `Last activity`.

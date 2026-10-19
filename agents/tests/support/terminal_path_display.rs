@@ -104,3 +104,95 @@ fn terminal_path_suffixes_and_cwd_basename() {
     .unwrap();
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_details_directory_precedes_title_and_branch() {
+    let repository = tempfile::tempdir().unwrap();
+    let cwd = repository.path().join("repo");
+    std::fs::create_dir(&cwd).unwrap();
+    let output = Command::new("git")
+        .args(["init", "-b", "border-branch"])
+        .current_dir(&cwd)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Probe",
+            "-c",
+            "user.email=probe@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "probe",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let transcript: String = include_str!("../fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            record["cwd"] = cwd.to_str().unwrap().into();
+            format!("{record}\n")
+        })
+        .collect();
+    let (_directory, tmux, _transcript) = start_probe_with_transcript("border-order", &transcript);
+    let output = std::env::temp_dir().join("agents-border-order");
+    std::fs::create_dir_all(&output).unwrap();
+    let existing = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .any(|line| line.contains("╴repo "))
+    });
+    std::fs::write(output.join("existing.txt"), &existing).unwrap();
+    begin_named_draft(&tmux, "Border draft");
+    let draft = tmux.capture_when(|capture| {
+        capture.lines().any(|line| {
+            line.contains("╴repo ")
+                && line.contains("Border draft")
+                && line.contains(" border-branch╶")
+        })
+    });
+    let border = draft
+        .lines()
+        .find(|line| line.contains("╴repo ") && line.contains("Border draft"))
+        .unwrap();
+    assert!(border.find("repo").unwrap() < border.find("Border draft").unwrap());
+    assert!(border.find("Border draft").unwrap() < border.find("border-branch").unwrap());
+    std::fs::write(output.join("draft.txt"), &draft).unwrap();
+    let y = draft.lines().position(|line| line == border).unwrap();
+    let x = border[..border.find("repo").unwrap()]
+        .chars()
+        .count();
+    tmux.mouse(0, x, y, true);
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .any(|line| line.split('│').any(|part| part.trim() == ".."))
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let restored = tmux.capture_when(|capture| capture.contains("Border draft ❯"));
+    let (y, row) = restored
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("╴repo ") && line.contains(" border-branch╶"))
+        .unwrap();
+    let x = row[..row.find("border-branch╶").unwrap()].chars().count();
+    tmux.mouse(0, x, y, true);
+    tmux.wait_for(|capture| capture.contains("Create new branch"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| capture.contains("Border draft ❯"));
+    let verdict = serde_json::json!({"verdict":"pass",
+        "existing":"directory left", "draft":"directory left, branch right",
+        "directory_click":"pass", "branch_click":"pass", "captures":output});
+    std::fs::write(
+        output.join("verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}

@@ -687,8 +687,8 @@ impl View {
         line(header, label, buf);
     }
     /// Centers the selected task's name, or a new task's label, on the rule under the details
-    /// panel, a space apart on each side; a double click edits a task's name. The pull request,
-    /// or a new task's branch, on the left and the project folder's name on the right flank it.
+    /// panel, a space apart on each side; a double click edits a task's name. The project
+    /// folder on the left and the pull request, or a new task's branch, on the right flank it.
     fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
         let session = self
             .selected_row()
@@ -718,7 +718,7 @@ impl View {
         let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
         let folder_width = folder_width.min(usize::from(rule.width / 3));
         let folder = super::formatting::format_directory_display(cwd, Some(folder_width));
-        let left = match (session, draft) {
+        let right = match (session, draft) {
             (Some(session), _) => session
                 .pr
                 .as_ref()
@@ -730,7 +730,7 @@ impl View {
         };
         // The title stays centered on the whole rule, so the wider side label's width is kept
         // clear on both sides, plus the corner, one rule cell and a space on each side.
-        let side = left
+        let side = right
             .as_ref()
             .map_or(0, |span| span.width())
             .max(folder.width());
@@ -785,17 +785,17 @@ impl View {
         if session.is_some() || draft.is_some_and(|draft| draft.name.is_some()) {
             self.viewport.borrow_mut().details_title = input;
         }
-        let (left_area, folder_area) = render_rule_ends(
+        let (folder_area, right_area) = render_rule_ends(
             rule,
             label_width,
-            left.map(Line::from),
             Some(Line::from(Span::styled(folder, style::time_style()))),
+            right.map(Line::from),
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();
         let Some(session) = session else {
             // A new task's folder is still a choice, so it opens the repository browser, not the folder.
-            for (area, field) in [(left_area, Field::Branch), (folder_area, Field::Directory)] {
+            for (area, field) in [(folder_area, Field::Directory), (right_area, Field::Branch)] {
                 if let Some(area) = area {
                     viewport.field_targets.push((area, field));
                 }
@@ -805,7 +805,7 @@ impl View {
         if let Some(area) = folder_area {
             viewport.details_links.push((area, cwd.clone()));
         }
-        if let (Some(area), Some(pr)) = (left_area, &session.pr) {
+        if let (Some(area), Some(pr)) = (right_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
             super::hyperlink::hyperlink(buf, area, &url);
