@@ -1431,12 +1431,21 @@ impl View {
             let full = self
                 .log_selected
                 .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+            let background_full = self
+                .log_background_return
+                .as_ref()
+                .and_then(|saved| saved.event)
+                .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
             self.log_sort = match self.log_sort {
                 LogSort::Time => LogSort::Duration,
                 LogSort::Duration => LogSort::Time,
             };
             self.prepare_log_search();
             self.log_selected = full.and_then(|full| self.shown_position(full));
+            let background_event = background_full.and_then(|full| self.shown_position(full));
+            if let Some(saved) = &mut self.log_background_return {
+                saved.event = background_event;
+            }
             self.log_pending_older = 0;
             self.viewport.borrow_mut().log_unseen = 0;
             if following {
