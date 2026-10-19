@@ -272,16 +272,32 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            let viewport = self.viewport.borrow();
+            self.pressed_task = viewport
+                .list_rows
+                .contains(position)
+                .then(|| viewport.first_entry + usize::from(position.y - viewport.list_rows.y))
+                .and_then(|entry| {
+                    match self
+                        .center_rows(&self.selectable_indices(), self.grouping)
+                        .get(entry)
+                    {
+                        Some(super::navigation::CenterRow::Task(index)) => {
+                            Some(self.rows[*index].id.clone())
+                        }
+                        _ => None,
+                    }
+                });
+        }
         if self.name_target.is_some()
             && self.title_editor().is_some()
             && !self.rename.text().trim().is_empty()
-            && !middle
-            && matches!(mouse.kind, MouseEventKind::Down(_))
+            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && !self.viewport.borrow().title_input.contains(position)
         {
-            self.mouse_press = None;
-            self.pending_click = None;
-            return self.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            self.accept_draft_name();
+            self.close_selector();
         }
         let previous_focus = self.mouse_focus;
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
@@ -793,7 +809,7 @@ impl View {
                     .as_ref()
                     .is_some_and(|selector| selector.field() == field)
                 {
-                    self.cancel_selector();
+                    self.close_selector();
                 } else {
                     self.open_field(field);
                 }
@@ -977,13 +993,20 @@ impl View {
                     self.set_filter(idx);
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
-                    let task = match entries.get(entry) {
-                        Some(super::navigation::CenterRow::Task(index)) => *index,
-                        Some(super::navigation::CenterRow::ShowMore) => {
-                            self.select(usize::MAX);
-                            return self.activate();
+                    let task = if let Some(id) = self.pressed_task.take() {
+                        let Some(index) = self.rows.iter().position(|row| row.id == id) else {
+                            return None;
+                        };
+                        index
+                    } else {
+                        match entries.get(entry) {
+                            Some(super::navigation::CenterRow::Task(index)) => *index,
+                            Some(super::navigation::CenterRow::ShowMore) => {
+                                self.select(usize::MAX);
+                                return self.activate();
+                            }
+                            _ => return None,
                         }
-                        _ => return None,
                     };
                     let now = Instant::now();
                     let double = self.last_click.take().is_some_and(|(last, at)| {
@@ -1281,22 +1304,15 @@ impl View {
                     self.cancel_name();
                 }
                 KeyCode::Enter if !self.rename.text().trim().is_empty() => {
-                    let name = self.rename.text().trim().to_owned();
-                    self.rename.clear();
-                    if let Some(id) = self.name_target.take() {
-                        let draft = self
-                            .drafts
-                            .iter_mut()
-                            .find(|draft| draft.id == id)
-                            .expect("title draft is selected");
-                        let first_name = draft.name.is_none();
-                        draft.name = Some(name);
-                        self.draft_changed(id);
+                    if self.name_target.is_some() {
+                        let first_name = self.accept_draft_name();
                         if first_name {
                             return self.advance_draft(false);
                         }
                         self.close_selector();
                     } else {
+                        let name = self.rename.text().trim().to_owned();
+                        self.rename.clear();
                         let id = self
                             .rename_target
                             .take()

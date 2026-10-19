@@ -1150,24 +1150,25 @@ fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
                 );
                 continue;
             }
-            assert_eq!(
-                view.drafts
-                    .iter()
-                    .find(|d| d.id == id)
-                    .unwrap()
-                    .name
-                    .as_deref(),
-                Some("Saved on blur")
-            );
             assert!(view.name_target.is_none());
-            assert!(matches!(
-                view.selector.as_ref().map(|s| &s.kind),
-                Some(SelectorKind::Repository { .. })
-            ));
-            assert!(matches!(
-                view.take_drafts_action(),
-                Some(Action::PersistDrafts)
-            ));
+            assert!(view.selector.is_none());
+            if button == MouseButton::Right {
+                assert!(view.drafts.iter().all(|draft| draft.id != id));
+            } else {
+                assert_eq!(
+                    view.drafts
+                        .iter()
+                        .find(|d| d.id == id)
+                        .unwrap()
+                        .name
+                        .as_deref(),
+                    Some("Saved on blur")
+                );
+                assert!(matches!(
+                    view.take_drafts_action(),
+                    Some(Action::PersistDrafts)
+                ));
+            }
         }
     }
 }
@@ -1453,4 +1454,234 @@ fn named_drafts_keep_default_controls_without_overrides() {
                 .any(|(_, target)| *target == field)
         );
     }
+}
+
+#[test]
+fn draft_name_click_branch_opens_branch() {
+    assert_name_field_click(&[Field::Branch], false);
+}
+
+#[test]
+fn draft_name_click_model_or_effort_opens_clicked_field() {
+    assert_name_field_click(&[Field::Model, Field::Effort], false);
+}
+
+#[test]
+fn draft_name_click_directory_is_side_edit() {
+    assert_name_field_click(&[Field::Directory], false);
+}
+
+#[test]
+fn draft_rename_click_fields_opens_clicked_field() {
+    assert_name_field_click(
+        &[Field::Branch, Field::Model, Field::Effort, Field::Directory],
+        true,
+    );
+}
+
+fn assert_name_field_click(fields: &[Field], named: bool) {
+    for &field in fields {
+        let (directory, mut view) = git_draft();
+        let id = if named {
+            view.selected_draft.unwrap()
+        } else {
+            view.discard_selected_draft();
+            view.add_draft(setup(directory.path()))
+        };
+        view.open_name(id);
+        view.rename.set_text("Clicked name");
+        render(&view);
+        click_field(&mut view, field);
+        assert_eq!(
+            view.selected_draft().unwrap().name.as_deref(),
+            Some("Clicked name")
+        );
+        assert_eq!(view.selector.as_ref().unwrap().field(), field);
+        assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Border);
+        if field == Field::Directory {
+            let selected = view.selector.as_ref().unwrap().selected;
+            let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected)
+            else {
+                panic!("directory choice")
+            };
+            view.draft_directory_changed(draft_id, cwd, "main".into());
+            assert!(view.selector.is_none());
+        }
+    }
+}
+
+#[test]
+fn draft_name_click_prompt_focuses_prompt() {
+    assert_name_prompt_click("Typed name");
+}
+
+#[test]
+fn draft_empty_name_click_prompt_routes_keys_to_prompt() {
+    assert_name_prompt_click("");
+}
+
+fn assert_name_prompt_click(name: &str) {
+    let (directory, mut view) = fixture();
+    view.add_draft(setup(directory.path()));
+    view.handle_paste(name);
+    render(&view);
+    let prompt = view.viewport.borrow().prompt;
+    click(&mut view, prompt.x + 2, prompt.y);
+    assert!(view.input_box.focused);
+    assert!(view.name_target.is_none());
+    assert!(view.selector.is_none());
+    key(&mut view, KeyCode::Char('p'));
+    assert_eq!(view.input_box.editor.text(), "p");
+    assert_eq!(
+        view.selected_draft().unwrap().name.as_deref(),
+        (!name.is_empty()).then_some(name)
+    );
+    if name.is_empty() {
+        key(&mut view, KeyCode::Enter);
+        assert!(view.name_target.is_some());
+        assert!(!view.input_box.focused);
+    }
+}
+
+#[test]
+fn draft_name_click_other_task_keeps_click() {
+    let (directory, mut view) = fixture();
+    view.grouping = Grouping::Status;
+    let session = view.rows[0].id.clone();
+    let id = view.add_draft(setup(directory.path()));
+    view.handle_paste("Leave draft");
+    render(&view);
+    let viewport = view.viewport.borrow();
+    let entry = view.center_rows(&view.selectable_indices(), view.grouping).iter().position(|entry| matches!(entry, super::navigation::CenterRow::Task(index) if view.rows[*index].id == session)).unwrap();
+    let x = viewport.list_rows.x + 2;
+    let y = viewport.list_rows.y + (entry - viewport.first_entry) as u16;
+    drop(viewport);
+    click(&mut view, x, y);
+    assert_eq!(view.selected_id(), Some(&session));
+    assert_eq!(
+        view.drafts
+            .iter()
+            .find(|draft| draft.id == id)
+            .unwrap()
+            .name
+            .as_deref(),
+        Some("Leave draft")
+    );
+    assert!(view.selector.is_none());
+}
+
+#[test]
+fn draft_name_right_click_outside_cancels_rename() {
+    let (_directory, mut view) = git_draft();
+    let id = view.selected_draft.unwrap();
+    view.open_name(id);
+    view.rename.set_text("Discard rename");
+    render(&view);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Right),
+        MouseEventKind::Up(MouseButton::Right),
+    ] {
+        view.handle_mouse(MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    assert_eq!(
+        view.selected_draft().unwrap().name.as_deref(),
+        Some("probe")
+    );
+    assert!(view.name_target.is_none());
+    assert!(view.selector.is_none());
+    assert!(view.confirm_dialog.is_none());
+}
+
+fn type_pending_branch(view: &mut View) {
+    render(view);
+    click_field(view, Field::Branch);
+    let create = view.selector.as_ref().unwrap().len() - 1;
+    view.apply_choice(create);
+    view.handle_paste("feature/pending");
+    assert_eq!(
+        view.selector
+            .as_ref()
+            .unwrap()
+            .branch_editor()
+            .unwrap()
+            .text(),
+        "feature/pending"
+    );
+}
+
+fn assert_pending_branch(view: &View) {
+    assert_eq!(view.selected_draft().unwrap().branch, DraftBranch::Unchosen);
+    assert_eq!(
+        view.selector
+            .as_ref()
+            .unwrap()
+            .branch_editor()
+            .unwrap()
+            .text(),
+        "feature/pending"
+    );
+}
+
+#[test]
+fn draft_branch_edit_survives_field_switch() {
+    for field in [Field::Model, Field::Effort, Field::Directory] {
+        let (_directory, mut view) = git_draft();
+        type_pending_branch(&mut view);
+        render(&view);
+        click_field(&mut view, field);
+        assert_eq!(view.selector.as_ref().unwrap().field(), field);
+        render(&view);
+        click_field(&mut view, Field::Branch);
+        assert_pending_branch(&view);
+    }
+}
+
+#[test]
+fn draft_branch_edit_field_toggle_closes_once_and_keeps_text() {
+    let (_directory, mut view) = git_draft();
+    type_pending_branch(&mut view);
+    render(&view);
+    click_field(&mut view, Field::Branch);
+    assert!(view.selector.is_none());
+    render(&view);
+    click_field(&mut view, Field::Branch);
+    assert_pending_branch(&view);
+}
+
+#[test]
+fn draft_branch_edit_prompt_click_closes_and_enter_restores_text() {
+    let (_directory, mut view) = git_draft();
+    type_pending_branch(&mut view);
+    render(&view);
+    let prompt = view.viewport.borrow().prompt;
+    click(&mut view, prompt.x + 2, prompt.y);
+    assert!(view.selector.is_none());
+    assert!(view.input_box.focused);
+    view.handle_paste("Prompt kept");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_pending_branch(&view);
+    assert_eq!(view.input_box.editor.text(), "Prompt kept");
+}
+
+#[test]
+fn draft_branch_edit_survives_selecting_another_task() {
+    let (_directory, mut view) = git_draft();
+    let id = view.selected_draft.unwrap();
+    type_pending_branch(&mut view);
+    let session = view
+        .rows
+        .iter()
+        .position(|row| row.status != SessionStatus::New)
+        .unwrap();
+    view.select(session);
+    assert!(view.selector.is_none());
+    view.select_draft(id);
+    render(&view);
+    click_field(&mut view, Field::Branch);
+    assert_pending_branch(&view);
 }

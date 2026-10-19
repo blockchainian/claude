@@ -291,15 +291,19 @@ impl View {
             .position(|branch| select_current && branch == current)
             .unwrap_or(branches.len());
         let mut editor = line_edit::LineEdit::default();
-        if let DraftBranch::New(name) = &draft.branch {
+        if let Some(name) = &draft.pending_branch {
+            editor.set_text(name);
+        } else if let DraftBranch::New(name) = &draft.branch {
             editor.set_text(name);
         }
+        let editing = draft.pending_branch.is_some();
+        let selected = if editing { branches.len() } else { selected };
         self.selector = Some(Selector::new(
             SelectorKind::Branch {
                 draft: draft.id,
                 branches,
                 editor,
-                editing: false,
+                editing,
             },
             selected,
         ));
@@ -316,7 +320,7 @@ impl View {
         {
             return;
         }
-        self.selector = None;
+        self.dismiss_selector();
         if self.name_target != Some(id) {
             if let Some(name) = self
                 .drafts
@@ -348,6 +352,11 @@ impl View {
         };
         draft.repository_confirmed = true;
         self.close_selector();
+        self.drafts
+            .iter_mut()
+            .find(|draft| draft.id == id)
+            .unwrap()
+            .pending_branch = None;
         self.draft_changed(id);
         if origin == Origin::Wizard {
             self.advance_draft(false)
@@ -418,6 +427,7 @@ impl View {
     }
 
     pub(super) fn open_field(&mut self, field: Field) {
+        self.dismiss_selector();
         let (provider, target, model, effort) = if let Some(draft) = self.selected_draft() {
             if draft.working || draft.job.is_some() {
                 return;
@@ -521,9 +531,31 @@ impl View {
         self.input_box.focused = false;
     }
 
+    /// Keeps an unapplied branch name when leaving its selector.
+    pub(super) fn dismiss_selector(&mut self) {
+        if let Some(Selector {
+            kind:
+                SelectorKind::Branch {
+                    draft,
+                    editor,
+                    editing,
+                    ..
+                },
+            ..
+        }) = self.selector.take()
+        {
+            let draft = self
+                .drafts
+                .iter_mut()
+                .find(|item| item.id == draft)
+                .expect("branch selector draft exists");
+            draft.pending_branch = editing.then(|| editor.text().to_owned());
+        }
+    }
+
     /// Returns a side edit to its name editor or prompt home.
     pub(super) fn close_selector(&mut self) {
-        self.selector = None;
+        self.dismiss_selector();
         if let Some(id) = self.selected_draft {
             if self
                 .selected_draft()
@@ -550,7 +582,7 @@ impl View {
             .as_ref()
             .is_some_and(|selector| selector.draft() == Some(draft))
         {
-            self.selector = None;
+            self.dismiss_selector();
         }
     }
 

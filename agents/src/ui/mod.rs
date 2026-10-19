@@ -329,6 +329,7 @@ pub struct View {
     last_detail_click: Option<(SessionKey, Option<usize>, Instant)>,
     /// Button, origin and drag state of the held mouse press.
     mouse_press: Option<(MouseButton, u16, u16, bool)>,
+    pressed_task: Option<SessionKey>,
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
     /// The confirmation of the last copy, shown at the footer's right end until it expires.
@@ -462,6 +463,7 @@ impl View {
             pending_click: None,
             last_detail_click: None,
             mouse_press: None,
+            pressed_task: None,
             last_copy_click: None,
             copied: None,
             text_selection: RefCell::new(None),
@@ -586,6 +588,8 @@ impl View {
 
     pub(crate) fn focus_input(&mut self) {
         if self.input_disabled().is_none() {
+            self.dismiss_selector();
+            self.name_target = None;
             self.input_box.focused = true;
         }
     }

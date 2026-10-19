@@ -20,6 +20,7 @@ pub(super) struct Draft {
     pub input: prompt_box::PromptBox,
     pub name: Option<String>,
     pub branch: DraftBranch,
+    pub pending_branch: Option<String>,
     pub repository_confirmed: bool,
     pub continue_after_directory: bool,
     pub job: Option<String>,
@@ -206,6 +207,7 @@ impl View {
             input: prompt_box::PromptBox::default(),
             name: None,
             branch: DraftBranch::Unchosen,
+            pending_branch: None,
             repository_confirmed: false,
             continue_after_directory: false,
             job: None,
@@ -264,6 +266,7 @@ impl View {
             |cwd: &Path| crate::repository::repository_identity(cwd).map(|repo| repo.primary_root);
         if identity(&draft.setup.cwd) != identity(&cwd) {
             draft.branch = DraftBranch::Unchosen;
+            draft.pending_branch = None;
         }
         draft.setup.cwd = cwd;
         draft.setup.branch = branch;
@@ -370,6 +373,21 @@ impl View {
         } else {
             Some(Action::Delete(key))
         }
+    }
+
+    /// Saves a draft title without advancing the wizard.
+    pub(super) fn accept_draft_name(&mut self) -> bool {
+        let id = self.name_target.take().expect("draft title target is set");
+        let draft = self
+            .drafts
+            .iter_mut()
+            .find(|draft| draft.id == id)
+            .expect("title draft is selected");
+        let first_name = draft.name.is_none();
+        draft.name = Some(self.rename.text().trim().to_owned());
+        self.rename.clear();
+        self.draft_changed(id);
+        first_name
     }
 
     pub(super) fn cancel_name(&mut self) {
@@ -534,6 +552,7 @@ impl View {
                 input,
                 name: Some(value.name.clone()),
                 branch,
+                pending_branch: None,
                 repository_confirmed,
                 continue_after_directory: false,
                 working: false,
