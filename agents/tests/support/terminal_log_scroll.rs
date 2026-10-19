@@ -333,17 +333,53 @@ fn terminal_scrollbar_uses_right_edge_blocks_below_rule() {
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_log_scroll_footer_shows_scrolled_off_title() {
-    let (_directory, tmux, _) = start_probe_with_transcript("footer-title", &scroll_transcript());
-    let capture = tmux.capture_when(|text| text.contains("scroll after"));
-    let row = capture
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| line.contains("scroll after"))
-        .map(|(row, _)| row)
-        .max()
-        .unwrap();
-    tmux.mouse(64, 90, row, false);
-    let entered = tmux.capture_when(|text| text.contains("window row 60"));
-    let footer = entered.lines().last().unwrap();
-    assert!(footer.contains("Assistant"), "{footer}");
+    let mut evidence = Vec::new();
+    for width in [200, 120] {
+        let (_directory, tmux, _) =
+            start_probe_with_transcript(&format!("footer-title-{width}"), &scroll_transcript());
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        let capture =
+            tmux.capture_when(|text| text.contains("scroll after") && text.lines().count() == 50);
+        let row = capture
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.contains("scroll after"))
+            .map(|(row, _)| row)
+            .max()
+            .unwrap();
+        let column = 90;
+        tmux.mouse(64, column, row, false);
+        let entered = tmux.capture_when(|text| text.contains("window row 60"));
+        assert!(
+            entered.lines().last().unwrap().contains("Assistant"),
+            "{entered}"
+        );
+        evidence.push(serde_json::json!({"width":width, "direction":"up", "footer":entered.lines().last().unwrap(), "capture":entered}));
+        let mut top = entered;
+        for _ in 0..80 {
+            if !top.lines().last().unwrap().contains("Assistant") {
+                break;
+            }
+            tmux.mouse(64, column, row, false);
+            top = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        }
+        assert!(!top.lines().last().unwrap().contains("Assistant"), "{top}");
+        assert!(top.contains("window row 01"), "{top}");
+        tmux.mouse(65, column, row, false);
+        let down = tmux.capture_when(|text| text.lines().last().unwrap().contains("Assistant"));
+        evidence.push(serde_json::json!({"width":width, "direction":"down", "footer":down.lines().last().unwrap(), "capture":down}));
+    }
+    let verdict = serde_json::json!({"verdict":"pass", "evidence":evidence});
+    if let Some(path) = std::env::var_os("AGENTS_FOOTER_VERDICT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    }
+    println!("{verdict}");
 }

@@ -669,3 +669,77 @@ fn log_detail_footer_title_is_muted() {
         );
     }
 }
+
+fn recorded_tool_footer(forward: bool) {
+    for width in [200, 149, 120, 100] {
+        let (mut view, _) = fixture(false);
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+        let event = crate::providers::claude::log::tail(&path, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.calls.first().is_some_and(|call| call.name == "Bash"))
+            .unwrap();
+        let title = event.calls[0].detail_title.clone();
+        view.set_log(vec![event]);
+        view.select_log_event(Some(0));
+        let initial = screen_rows(&view, width, 30);
+        assert!(!initial.last().unwrap().contains(&title));
+        if !forward {
+            let path =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+            let after = crate::providers::claude::log::tail(&path, usize::MAX)
+                .unwrap()
+                .into_iter()
+                .find(|event| event.kind == crate::log::Kind::Assistant && event.calls.is_empty())
+                .unwrap();
+            let event = view.log[0].clone();
+            view.set_log(vec![event, after]);
+            view.select_log_event(Some(1));
+            screen_rows(&view, width, 30);
+        }
+        detail_wheel(&mut view, forward);
+        let rows = screen_rows(&view, width, 30);
+        let footer = rows.last().unwrap();
+        let viewport = view.viewport.borrow();
+        assert!(
+            viewport.log_detail_scroll > 0,
+            "title must be offscreen: {rows:?}"
+        );
+        let columns = viewport.log_detail_columns.unwrap();
+        let centered =
+            super::centering::centered_x(columns.panel, columns.text, title.width() as u16);
+        let start = 1 + view.center_footer_hints().width() as u16 + 2;
+        let expected = if width >= super::render::WIDE_LAYOUT_COLUMNS && centered >= start {
+            centered
+        } else {
+            columns.text.right() - title.width() as u16
+        };
+        let compact = footer.replace(' ', "");
+        assert!(compact.contains(&title.replace(' ', "")), "{footer}");
+        let first = title.chars().next().unwrap().to_string();
+        let x = column_of(footer, &first).unwrap();
+        assert_eq!(x, usize::from(expected), "{footer}");
+        assert!(
+            x + title.width() <= usize::from(columns.text.right()),
+            "{footer}"
+        );
+        assert!(
+            footer
+                .chars()
+                .skip(usize::from(columns.time.x))
+                .all(|c| c == ' '),
+            "{footer}"
+        );
+    }
+}
+
+#[test]
+fn log_detail_recorded_footer_scrolling_down() {
+    recorded_tool_footer(true);
+}
+
+#[test]
+fn log_detail_recorded_footer_scrolling_up() {
+    recorded_tool_footer(false);
+}
