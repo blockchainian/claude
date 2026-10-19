@@ -577,14 +577,18 @@ fn select_archive(app: &mut App) {
     assert!(app.view.selected_id().is_some());
 }
 
-// The idle-loop test covers receiving with real time; these flows advance the click deadline.
-fn finish_click(app: &mut App) {
-    let now = Instant::now();
-    if let Some(remaining) = app.view.pending_click_in(now) {
-        let deadline = now + remaining;
-        let action = app.view.flush_pending_click(deadline);
-        assert!(!app.handle_action(action));
-        assert!(app.view.pending_click_in(deadline).is_none());
+fn wait_for_click(app: &mut App) {
+    let mut schedule = RefreshSchedule::new(Instant::now(), Duration::from_secs(2));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while app.view.pending_click_in(Instant::now()).is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "event loop did not flush its click"
+        );
+        assert!(
+            !app.wait_for_input(&mut None, &mut schedule, Instant::now())
+                .unwrap()
+        );
     }
 }
 
@@ -624,7 +628,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         // Click the actual User event in the list, not the preview.
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        finish_click(&mut app);
+        wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
             detail(&buffer).contains("codex thread"),
@@ -649,7 +653,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         // Another list row replaces the pinned event through the same click deadline.
         let (x, y) = log_position(&buffer, "对");
         click(&mut app, x, y);
-        finish_click(&mut app);
+        wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
             detail(&buffer).contains("decision"),
@@ -715,7 +719,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let buffer = draw_size(&mut app, width, height);
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        finish_click(&mut app);
+        wait_for_click(&mut app);
         click(&mut app, 1, height - 3);
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("await".into()));
@@ -764,7 +768,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         assert!(detail(&buffer).contains("decision"));
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        finish_click(&mut app);
+        wait_for_click(&mut app);
         let opened = draw_size(&mut app, width, height);
         assert!(detail(&opened).contains("codex thread"));
         assert_eq!(
@@ -774,7 +778,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         );
         let (x, y) = log_position(&opened, "对");
         click(&mut app, x, y);
-        finish_click(&mut app);
+        wait_for_click(&mut app);
         let changed = draw_size(&mut app, width, height);
         assert!(detail(&changed).contains("decision"));
         assert!(log_position(&changed, "⏺").1 < list_end);
@@ -789,7 +793,7 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         let buffer = draw_size(&mut app, width, height);
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        finish_click(&mut app);
+        wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         let (text_x, text_y) = position(&buffer, "Stop hook error");
         for kind in [
