@@ -381,7 +381,10 @@ impl View {
                     .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
                 {
                     text.render(target, buf);
-                    self.viewport.borrow_mut().field_targets.push((target, Field::WeeklyUsage));
+                    self.viewport
+                        .borrow_mut()
+                        .field_targets
+                        .push((target, Field::WeeklyUsage));
                 }
             }
         }
@@ -892,17 +895,12 @@ impl View {
 
         let activity = session.activity.as_ref();
         if let Some(activity) = activity {
-            let label = super::text::summary(
-                &activity.label,
-                &session.cwd,
-                width,
-                &activity.kind,
-                None,
-            );
+            let label =
+                super::text::summary(&activity.label, &session.cwd, width, &activity.kind, None);
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
-                centered_header(
+                Item::Decoration(centered_header(
                     "Last activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
@@ -910,8 +908,7 @@ impl View {
                     )
                     .into(),
                     width,
-                )
-                .into(),
+                )),
                 truncate_line_with_ellipsis_if_overflow(
                     style::exit_code_line(
                         label.to_string(),
@@ -953,7 +950,11 @@ impl View {
         let subagents = self.subagents_for(session).collect::<Vec<_>>();
         if !boxes.is_empty() || !subagents.is_empty() {
             separate_section(&mut items);
-            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
+            items.push(Item::Decoration(centered_header(
+                "Background".dim().into(),
+                Line::default(),
+                width,
+            )));
             let start = items.len();
             items.extend(
                 boxes
@@ -978,7 +979,9 @@ impl View {
                         std::ffi::OsStr::new(&child.id.id),
                         Some(child.id.provider),
                     ),
-                    Item::Text(_) => unreachable!("Background contains only tasks and descendants"),
+                    Item::Text(_) | Item::Decoration(_) => {
+                        unreachable!("Background contains only tasks and descendants")
+                    }
                 };
                 (
                     item.height() == 1,
@@ -1000,7 +1003,11 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(centered_header("Update".dim().into(), header, width).into());
+            items.push(Item::Decoration(centered_header(
+                "Update".dim().into(),
+                header,
+                width,
+            )));
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
@@ -1032,7 +1039,7 @@ impl View {
                 centered_header("Prompt".dim().into(), Line::default(), width)
             };
             separate_section(&mut items);
-            items.push(prompt_header.into());
+            items.push(Item::Decoration(prompt_header));
             let prompt_text = match session.prompt.trim() {
                 "" => "No prompt available.",
                 prompt => prompt,
@@ -1076,14 +1083,11 @@ impl View {
         if session.status == SessionStatus::NeedsInput || needs.is_some() {
             separate_section(&mut items);
             let start = items.len();
-            items.push(
-                centered_header(
-                    Span::styled("Needs input", style::attention_title_style()).into(),
-                    Line::default(),
-                    width,
-                )
-                .into(),
-            );
+            items.push(Item::Decoration(centered_header(
+                Span::styled("Needs input", style::attention_title_style()).into(),
+                Line::default(),
+                width,
+            )));
             if let Some(needs) = needs {
                 items.extend(
                     super::text::lines(needs, &session.cwd, width, false)
@@ -1146,14 +1150,11 @@ impl View {
                 .iter()
                 .filter(|(_, status)| *status == SessionStatus::Working)
                 .count();
-            items.push(
-                centered_header(
-                    "Tasks".dim().into(),
-                    format!("{in_progress}/{}", tasks.len()).dim().into(),
-                    width,
-                )
-                .into(),
-            );
+            items.push(Item::Decoration(centered_header(
+                "Tasks".dim().into(),
+                format!("{in_progress}/{}", tasks.len()).dim().into(),
+                width,
+            )));
             let start = items.len();
             for (task, status) in tasks {
                 items.push(
@@ -1174,6 +1175,7 @@ impl View {
             item_links.resize(items.len(), Vec::new());
         }
 
+        let mut item_ids = (0..items.len()).collect::<Vec<_>>();
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();
         for (id, (body, copy)) in bodies.iter().zip(&copies).enumerate() {
@@ -1192,14 +1194,14 @@ impl View {
             for (index, cells) in body.clone().zip(maps) {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
                 text_rows[index] = Some(text_selection::DrawnRow {
-                    segment: id,
+                    segment: body.start,
                     x: area.x,
                     y: 0,
                     cells,
                 });
             }
             sources.push(text_selection::Source {
-                id,
+                id: body.start,
                 text: (*source).into(),
                 label: (*label).to_owned(),
             });
@@ -1239,7 +1241,7 @@ impl View {
                 available,
             );
             for &cut in &layout.cuts {
-                let Item::Text(last) = &mut items[cut] else {
+                let (Item::Text(last) | Item::Decoration(last)) = &mut items[cut] else {
                     unreachable!("details bodies contain text rows");
                 };
                 *last = truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
@@ -1255,6 +1257,8 @@ impl View {
             for &index in &layout.kept {
                 keep[index] = true;
             }
+            let mut rows = keep.iter();
+            item_ids.retain(|_| *rows.next().unwrap());
             let mut rows = keep.iter();
             items.retain(|_| *rows.next().unwrap());
             let mut rows = keep.iter();
@@ -1278,7 +1282,13 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for ((item, mapped), links) in items.into_iter().zip(text_rows).zip(item_links) {
+        for (((item, mapped), links), id) in items
+            .into_iter()
+            .zip(text_rows)
+            .zip(item_links)
+            .zip(item_ids)
+        {
+            let fallback = mapped.is_none() && !matches!(item, Item::Decoration(_));
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if let Some(mut mapped) = mapped {
@@ -1294,8 +1304,11 @@ impl View {
             }
             let height = item.height();
             let item_area = row(content_area, offset as u16, height as u16);
-            match item {
-                Item::Text(text) => line(text, item_area, &mut content),
+            let title_columns = match item {
+                Item::Text(text) | Item::Decoration(text) => {
+                    line(text, item_area, &mut content);
+                    None
+                }
                 Item::Background { task, output } => {
                     let start = offset.max(scroll);
                     let end = (offset + height).min(scroll + available);
@@ -1306,7 +1319,14 @@ impl View {
                             task.clone(),
                         ));
                     }
-                    render_background(task, output, &session.cwd, now, item_area, &mut content);
+                    Some(render_background(
+                        task,
+                        output,
+                        &session.cwd,
+                        now,
+                        item_area,
+                        &mut content,
+                    ))
                 }
                 Item::Subagent(child) => {
                     let (text, kind) = subagent_line(child);
@@ -1325,13 +1345,74 @@ impl View {
                             .started_at
                             .map(|at| format_duration((now - at).num_seconds().max(0)))
                     });
-                    render_background_box(
+                    Some(render_background_box(
                         child.display_title(),
                         elapsed.as_deref(),
                         body.into_iter().collect(),
                         item_area,
                         &mut content,
-                    );
+                    ))
+                }
+            };
+            if fallback {
+                let mut source = String::new();
+                let mut rows = Vec::new();
+                for dy in 0..height {
+                    let y = offset + dy;
+                    let mut cells = Vec::new();
+                    let mut x = 0;
+                    let mut pending_space = Vec::new();
+                    while x < area.width {
+                        let symbol = content[(x, y as u16)].symbol();
+                        let width = symbol.width().max(1) as u16;
+                        if dy == 0
+                            && title_columns.as_ref().is_some_and(|ranges| {
+                                !ranges.iter().any(|range| range.contains(&x))
+                            })
+                        {
+                            x += width;
+                            continue;
+                        }
+                        if symbol.trim().is_empty() {
+                            pending_space.push((x..x + width, symbol.to_owned()));
+                        } else {
+                            if !cells.is_empty() {
+                                for (columns, symbol) in &pending_space {
+                                    let start = source.len();
+                                    source.push_str(symbol);
+                                    cells.push((columns.clone(), start..source.len()));
+                                }
+                            }
+                            pending_space.clear();
+                            let start = source.len();
+                            source.push_str(symbol);
+                            cells.push((x..x + width, start..source.len()));
+                        }
+                        x += width;
+                    }
+                    if !cells.is_empty() {
+                        rows.push((y, cells));
+                        source.push('\n');
+                    }
+                }
+                if !source.is_empty() {
+                    source.pop();
+                    let mut viewport = self.viewport.borrow_mut();
+                    viewport.details_text.sources.push(text_selection::Source {
+                        id,
+                        text: source.into(),
+                        label: "Copied selection".into(),
+                    });
+                    for (y, cells) in rows {
+                        if y >= scroll && y < scroll + available {
+                            viewport.details_text.rows.push(text_selection::DrawnRow {
+                                segment: id,
+                                x: area.x,
+                                y: area.y + (y - scroll) as u16,
+                                cells,
+                            });
+                        }
+                    }
                 }
             }
             offset += height;
@@ -1356,6 +1437,11 @@ impl View {
                 .field_targets
                 .retain(|(rect, _)| !rect.intersects(last));
         }
+        self.viewport
+            .borrow_mut()
+            .details_text
+            .sources
+            .sort_by_key(|source| source.id);
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
     }
@@ -1374,7 +1460,7 @@ fn turn_elapsed(session: &Session, now: chrono::DateTime<chrono::Utc>) -> Option
 /// Puts a blank row between a section and the one above it.
 fn separate_section(items: &mut Vec<Item<'_>>) {
     if !items.is_empty() {
-        items.push(Line::default().into());
+        items.push(Item::Decoration(Line::default()));
     }
 }
 
@@ -1553,6 +1639,7 @@ fn render_rule_ends(
 /// One row-aligned piece of the details panel.
 enum Item<'a> {
     Text(Line<'static>),
+    Decoration(Line<'static>),
     Subagent(&'a Session),
     Background {
         task: &'a crate::model::BackgroundTask,
@@ -1563,7 +1650,7 @@ enum Item<'a> {
 impl Item<'_> {
     fn height(&self) -> usize {
         match self {
-            Self::Text(_) => 1,
+            Self::Text(_) | Self::Decoration(_) => 1,
             Self::Background { output, .. } => box_height(output.len()),
             Self::Subagent(child) => box_height(usize::from(!subagent_line(child).0.is_empty())),
         }
@@ -1587,10 +1674,7 @@ fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
     } else {
         (child.last_message.as_deref(), crate::log::Kind::Assistant)
     };
-    (
-        text.unwrap_or_default(),
-        kind,
-    )
+    (text.unwrap_or_default(), kind)
 }
 
 /// A running background command: its description and elapsed time on the top
@@ -1602,12 +1686,13 @@ fn render_background(
     now: chrono::DateTime<chrono::Utc>,
     box_area: Rect,
     buf: &mut Buffer,
-) {
+) -> Vec<std::ops::Range<u16>> {
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
     render_background_box(
         &task.description,
         Some(&elapsed),
-        output.into_iter()
+        output
+            .into_iter()
             .flat_map(|text| {
                 super::tool_detail::Part::text_parts(text, false)
                     .into_iter()
@@ -1618,7 +1703,7 @@ fn render_background(
             .collect(),
         box_area,
         buf,
-    );
+    )
 }
 
 fn render_background_box(
@@ -1627,18 +1712,30 @@ fn render_background_box(
     output: Vec<Line<'static>>,
     box_area: Rect,
     buf: &mut Buffer,
-) {
+) -> Vec<std::ops::Range<u16>> {
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().dim());
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    line(
-        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed),
-        row(box_area, 0, 1),
-        buf,
-    );
+    let title =
+        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed);
+    // The first and last spans draw rules; the middle spans contain the title.
+    let mut columns = Vec::new();
+    if title.spans.len() >= 4 {
+        let start = title.spans[0].width() as u16;
+        let end = (title.width() - title.spans.last().unwrap().width()).saturating_sub(1) as u16;
+        columns.push(start..end);
+        if let Some(elapsed) = elapsed {
+            let last = title.spans.last().unwrap();
+            if last.content.ends_with(elapsed) {
+                columns.push(box_area.width - elapsed.width() as u16..box_area.width);
+            }
+        }
+    }
+    line(title, row(box_area, 0, 1), buf);
     Paragraph::new(output).render(inner, buf);
+    columns
 }
 
 /// Rows a background task takes: its titled rule and the output lines below.

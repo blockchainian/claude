@@ -319,8 +319,13 @@ impl View {
                             }
                         })
                 };
-                let target = if can_scroll(selection.end.segment) {
-                    selection.end.segment
+                let body = state.bodies.iter().position(|rows| {
+                    rows.contains(
+                        &(usize::from(selection.pointer.1.saturating_sub(area.y)) + state.offset),
+                    )
+                });
+                let target = if let Some(body) = body.filter(|&body| can_scroll(body)) {
+                    body
                 } else if let Some(target) =
                     (0..state.reveal.len()).find(|&index| can_scroll(index))
                 {
@@ -354,7 +359,7 @@ impl View {
         else {
             return;
         };
-        if panel.is_list() {
+        if panel.is_list() || panel == Panel::Details {
             for source in &region.sources {
                 if let Some(cached) = selection
                     .sources

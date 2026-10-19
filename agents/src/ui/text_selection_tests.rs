@@ -996,3 +996,74 @@ fn task_click_uses_press_position_and_completed_click_time() {
     assert!(view.mouse_focus == Panel::TaskList);
     assert_eq!(view.selected_id(), Some(&id));
 }
+
+fn drag_text(view: &mut View, text: &str) -> Option<Action> {
+    let buf = details(view);
+    let (x, y) = position(&buf, text);
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        x + text.width() as u16,
+        y,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        x + text.width() as u16,
+        y,
+    ))
+}
+
+#[test]
+fn details_default_selection_needs_input_and_headers() {
+    let mut view = fixture();
+    view.rows[0].prompt = "Short prompt".into();
+    view.rows[0].status = SessionStatus::NeedsInput;
+    view.rows[0].pending_questions = vec!["Choose an option".into()];
+    assert!(
+        matches!(drag_text(&mut view, "Choose an option"), Some(Action::Copy { text, .. }) if text == "Choose an option")
+    );
+    assert_eq!(drag_text(&mut view, "Needs input"), None);
+    assert_eq!(drag_text(&mut view, "Prompt"), None);
+    view.rows[0].background_job = Some(crate::model::BackgroundJob {
+        id: "selection-job".into(),
+        needs: Some("Review changes".into()),
+        awaits_prompt: false,
+    });
+    assert!(
+        matches!(drag_text(&mut view, "Review changes"), Some(Action::Copy { text, .. }) if text == "Review changes")
+    );
+}
+
+#[test]
+fn details_default_selection_background_and_subagent() {
+    let mut view = fixture();
+    let mut parent = view.rows[0].clone();
+    parent.prompt = "Short prompt".into();
+    let output = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(output.path(), "Output line\n").unwrap();
+    parent.background.push(crate::model::BackgroundTask {
+        description: "Run checks".into(),
+        output: Some(output.path().into()),
+        started_at: Utc::now(),
+    });
+    let mut child = parent.clone();
+    child.id.id = "selection-child".into();
+    child.parent = Some(parent.id.clone());
+    child.title = "Check ─ files".into();
+    child.last_message = Some("Read files".into());
+    child.background.clear();
+    view.set_sessions(vec![parent, child], false);
+    view.selected = view
+        .rows
+        .iter()
+        .position(|row| row.id.id == "selection")
+        .unwrap();
+    for expected in ["Run checks", "Output line", "Check ─ files", "Read files"] {
+        let action = drag_text(&mut view, expected);
+        assert!(
+            matches!(&action, Some(Action::Copy { text, .. }) if text == expected),
+            "{expected}: {action:?}"
+        );
+    }
+    assert_eq!(drag_text(&mut view, "Background"), None);
+}
