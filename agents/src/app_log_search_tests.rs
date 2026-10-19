@@ -151,3 +151,80 @@ fn history_load_errors_clear_the_pending_request() {
     assert!(app.view.log.is_empty());
     assert!(app.view.log_session.is_none());
 }
+
+#[test]
+fn duration_sort_loads_history_off_the_ui_thread_and_time_keeps_it() {
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let expected = crate::providers::claude::log::tail(&path, usize::MAX).unwrap();
+    let parsed = app.log_parsed_bytes;
+    let loaded = app.view.log.clone();
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('t'),
+        KeyModifiers::NONE,
+    )));
+    app.refresh_log(8);
+    assert!(
+        app.pending_log.is_some(),
+        "duration sorting loads the whole history"
+    );
+    assert_eq!(
+        app.log_parsed_bytes, parsed,
+        "history loads off the UI thread"
+    );
+    assert_eq!(app.view.log, loaded, "the loaded tail stays available");
+    finish_search(&mut app);
+    assert_eq!(app.view.log, expected);
+    assert!(app.full_log_stamp.is_some());
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('t'),
+        KeyModifiers::NONE,
+    )));
+    app.refresh_log(1);
+    assert_eq!(
+        app.view.log, expected,
+        "returning to time keeps loaded history"
+    );
+    assert!(app.full_log_stamp.is_none());
+}
+
+#[test]
+fn duration_history_load_errors_keep_loaded_rows_and_retry() {
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let transcript = std::fs::read(&path).unwrap();
+    let loaded = app.view.log.clone();
+    let session = app.view.log_session.clone();
+    std::fs::remove_file(&path).unwrap();
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('t'),
+        KeyModifiers::NONE,
+    )));
+    app.refresh_log(8);
+    assert!(
+        app.pending_log.is_some(),
+        "duration sorting loads the whole history"
+    );
+    finish_search(&mut app);
+    assert!(app.pending_log.is_none());
+    assert_eq!(
+        app.view.log, loaded,
+        "failed history load keeps existing rows"
+    );
+    assert_eq!(app.view.log_session, session);
+    std::fs::write(&path, transcript).unwrap();
+    app.refresh_log(8);
+    assert!(
+        app.pending_log.is_some(),
+        "the next refresh retries history loading"
+    );
+    assert_eq!(
+        app.view.log, loaded,
+        "retry keeps existing rows while loading"
+    );
+    finish_search(&mut app);
+    assert_eq!(
+        app.view.log,
+        crate::providers::claude::log::tail(&path, usize::MAX).unwrap()
+    );
+}

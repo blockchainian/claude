@@ -567,7 +567,7 @@ impl App {
     }
 
     fn refresh_log(&mut self, visible: usize) {
-        let count = if self.view.log_start_requested || self.view.log_search.active() {
+        let count = if self.view.log_start_requested || self.view.log_fully_loaded() {
             usize::MAX
         } else {
             self.view
@@ -585,6 +585,7 @@ impl App {
             self.pending_log = None;
             self.log_oldest_offset = 0;
             self.view.log.clear();
+            self.view.prepare_log_search();
             self.view.log_session = None;
             return;
         };
@@ -618,7 +619,7 @@ impl App {
                 }
             }
         }
-        if self.view.log_search.active() && self.log_oldest_offset > 0 {
+        if self.view.log_fully_loaded() && self.log_oldest_offset > 0 {
             let (session, path, mut reader) = self.task_log.take().expect("reader checked");
             self.log_request += 1;
             let token = self.log_request;
@@ -717,7 +718,7 @@ impl App {
                 self.view.log_session = Some(stamp.session.clone());
                 self.view
                     .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
-                if self.view.log_search.active() {
+                if self.view.log_fully_loaded() {
                     self.full_log_stamp = Some(stamp);
                     self.log_stamp = None;
                 } else {
@@ -730,9 +731,11 @@ impl App {
                 self.log_oldest_offset = 0;
                 self.log_stamp = None;
                 self.full_log_stamp = None;
-                self.view.log.clear();
-                self.view.prepare_log_search();
-                self.view.log_session = None;
+                if self.view.log_sort != crate::ui::LogSort::Duration {
+                    self.view.log.clear();
+                    self.view.prepare_log_search();
+                    self.view.log_session = None;
+                }
                 self.view
                     .set_notice(Some(format!("Failed to read task log: {error}")));
             }
