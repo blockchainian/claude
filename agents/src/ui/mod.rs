@@ -153,6 +153,8 @@ struct Viewport {
     log_detail_max: usize,
     log_detail_state: DetailsScroll,
     log_detail_key: Option<u64>,
+    /// Wheel reports the selected entry has absorbed at its edge since it last scrolled.
+    log_detail_edge_wheels: usize,
     log_detail_saved: HashMap<u64, DetailsScroll>,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,

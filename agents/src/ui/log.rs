@@ -373,6 +373,7 @@ impl View {
         ));
         let switched = viewport.log_detail_key != Some(key);
         if switched {
+            viewport.log_detail_edge_wheels = 0;
             let mut left = std::mem::take(&mut viewport.log_detail_state);
             left.left_keys = Some(std::mem::take(&mut left.keys));
             if let Some(previous) = viewport.log_detail_key.replace(key) {

@@ -1,3 +1,4 @@
+use super::input::EDGE_RESISTANCE_WHEELS;
 use super::*;
 use crate::providers::Provider;
 
@@ -376,6 +377,11 @@ fn log_scroll_wheel_stops_at_title_before_changing_event() {
     );
     panel(&view, now);
     assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
+    for _ in 0..EDGE_RESISTANCE_WHEELS {
+        wheel(&mut view, false);
+        panel(&view, now);
+        assert_eq!(view.log_selected, Some(1), "the top edge resists leaving");
+    }
     wheel(&mut view, false);
     assert_eq!(view.log_selected, Some(0));
 }
@@ -431,6 +437,45 @@ fn log_scroll_wheel_stops_at_bottom_before_changing_event() {
     panel(&view, now);
     assert_eq!(view.log_selected, Some(1));
     assert_eq!(view.viewport.borrow().log_detail_scroll, max);
+    for _ in 0..EDGE_RESISTANCE_WHEELS {
+        wheel(&mut view, true);
+        panel(&view, now);
+        assert_eq!(
+            view.log_selected,
+            Some(1),
+            "the bottom edge resists leaving"
+        );
+    }
+    wheel(&mut view, true);
+    assert_eq!(view.log_selected, Some(2));
+}
+
+#[test]
+fn log_scroll_edge_resistance_restarts_after_scrolling_back() {
+    let (mut view, now) = fixture(true);
+    panel(&view, now);
+    let max = view.viewport.borrow().log_detail_max;
+    for _ in 0..max {
+        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        panel(&view, now);
+    }
+    for _ in 0..EDGE_RESISTANCE_WHEELS {
+        wheel(&mut view, true);
+        panel(&view, now);
+    }
+    wheel(&mut view, false);
+    panel(&view, now);
+    wheel(&mut view, true);
+    panel(&view, now);
+    for _ in 0..EDGE_RESISTANCE_WHEELS {
+        wheel(&mut view, true);
+        panel(&view, now);
+        assert_eq!(
+            view.log_selected,
+            Some(1),
+            "returning to the edge resists again"
+        );
+    }
     wheel(&mut view, true);
     assert_eq!(view.log_selected, Some(2));
 }
