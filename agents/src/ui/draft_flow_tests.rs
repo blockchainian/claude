@@ -99,6 +99,7 @@ fn acknowledged_job_refresh_drops_its_draft_and_selects_real_session() {
     arrived.background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
         needs: None,
+        awaits_prompt: false,
     });
     arrived.updated_at = Utc::now();
     view.add_draft(setup(directory.path()));
@@ -230,6 +231,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
         needs: None,
+        awaits_prompt: false,
     });
     view.rows[view.selected].process = Some(crate::model::Process {
         pid: std::process::id(),
@@ -321,6 +323,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
     row.background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
         needs: None,
+        awaits_prompt: false,
     });
     row.process = Some(crate::model::Process {
         pid: std::process::id(),
@@ -753,6 +756,7 @@ fn submitted_draft_returns_to_prior_task_and_selects_arriving_job_after_refresh(
     arrived.background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
         needs: None,
+        awaits_prompt: false,
     });
     let expected = arrived.id.clone();
     let mut sessions = view.rows.clone();

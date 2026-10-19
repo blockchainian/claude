@@ -252,6 +252,7 @@ mod tests {
         row.background_job = Some(crate::model::BackgroundJob {
             id: "probe".into(),
             needs: None,
+            awaits_prompt: false,
         });
         row.process = Some(crate::model::Process {
             pid: 1,

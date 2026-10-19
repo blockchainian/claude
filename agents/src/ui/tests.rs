@@ -9605,6 +9605,7 @@ fn log_border_fields_keep_click_actions_without_jumping() {
             view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
                 id: "e772d00b".into(),
                 needs: None,
+                awaits_prompt: false,
             });
             view.rows[view.selected].effort = Some("high".into());
             view.rows[view.selected].process.as_mut().unwrap().label = Some("bg".into());
@@ -9648,6 +9649,7 @@ fn log_border_shows_placeholders_for_missing_model_and_effort() {
     row.background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
         needs: None,
+        awaits_prompt: false,
     });
     row.process.as_mut().unwrap().label = Some("bg".into());
     row.model = None;

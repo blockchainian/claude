@@ -50,7 +50,8 @@ impl App {
     }
 
     /// Returns the selected background task once per wait on input the dashboard cannot answer,
-    /// such as a permission prompt, so the user replies in its terminal.
+    /// such as a permission prompt, so the user replies in its terminal, or once per wait for
+    /// a reply the user sends as a prompt.
     fn waiting_terminal(&mut self) -> Option<SessionKey> {
         let session = self
             .view
@@ -132,7 +133,19 @@ impl App {
             {
                 self.open_terminal(id);
             } else if let Some(id) = waiting {
-                self.open_terminal(id);
+                let awaits_prompt = self
+                    .session(&id)
+                    .is_some_and(|session| {
+                        session
+                            .background_job
+                            .as_ref()
+                            .is_some_and(|job| job.awaits_prompt)
+                    });
+                if awaits_prompt {
+                    self.view.focus_input();
+                } else {
+                    self.open_terminal(id);
+                }
             }
             return;
         };
@@ -406,6 +419,7 @@ mod tests {
         session.background_job = Some(BackgroundJob {
             id: "job-id".into(),
             needs: None,
+            awaits_prompt: false,
         });
         let TerminalCommand { command, detach } = app
             .hub
@@ -628,6 +642,7 @@ mod tests {
         session.background_job = Some(crate::model::BackgroundJob {
             id: "job".into(),
             needs: None,
+            awaits_prompt: false,
         });
         assert_eq!(app.waiting_terminal(), Some(id.clone()));
         assert!(
@@ -654,6 +669,28 @@ mod tests {
             app.waiting_terminal().is_none(),
             "questions have their own view"
         );
+    }
+
+    #[test]
+    fn waiting_for_a_prompt_focuses_the_input_instead_of_a_terminal() {
+        let (_directory, mut app, _id) = fixture();
+        draw(&mut app);
+        let session = &mut app.sessions[0];
+        session.status = SessionStatus::NeedsInput;
+        session.process = Some(crate::model::Process {
+            pid: 1,
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        session.background_job = Some(crate::model::BackgroundJob {
+            id: "job".into(),
+            needs: Some("Reply with your preference: red or blue".into()),
+            awaits_prompt: true,
+        });
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.sync_terminal();
+        assert!(app.terminal.is_none());
+        assert!(app.view.pasting_prompt());
     }
 
     #[test]

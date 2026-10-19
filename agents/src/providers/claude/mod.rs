@@ -446,7 +446,11 @@ impl ClaudeProvider {
                         .get(&session.id.id)
                         .filter(|job| job.id == id)
                         .and_then(|job| job.needs.clone());
-                    crate::model::BackgroundJob { id, needs }
+                    crate::model::BackgroundJob {
+                        id,
+                        needs,
+                        awaits_prompt: false,
+                    }
                 });
             }
             session.process = entry.pid.map(|pid| Process {
@@ -482,8 +486,10 @@ impl ClaudeProvider {
             // A background job that ended its turn on a request for the user
             // still shows idle in the session registry.
             if session.status == SessionStatus::Ready
-                && session.background_job.as_ref().is_some_and(|job| job.needs.is_some())
+                && let Some(job) = &mut session.background_job
+                && job.needs.is_some()
             {
+                job.awaits_prompt = true;
                 session.status = SessionStatus::NeedsInput;
             }
         }
@@ -1429,6 +1435,7 @@ mod tests {
         let mut provider = ClaudeProvider::new(dir.path().into());
         let session = provider.refresh(1).sessions.remove(0);
         assert_eq!(session.status, SessionStatus::NeedsInput);
+        assert!(session.background_job.unwrap().awaits_prompt);
     }
 
     #[test]
@@ -1947,6 +1954,7 @@ mod delete_live_tests {
             session.background_job = Some(crate::model::BackgroundJob {
                 id: "expected-job".into(),
                 needs: None,
+                awaits_prompt: false,
             });
 
             let result = stop_session(&session, &entry);

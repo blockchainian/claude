@@ -62,6 +62,8 @@ pub struct BackgroundTask {
 pub struct BackgroundJob {
     pub id: String,
     pub needs: Option<String>,
+    /// The job ended its turn waiting for a reply, which the user sends as a prompt.
+    pub awaits_prompt: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

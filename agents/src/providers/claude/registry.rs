@@ -55,6 +55,7 @@ pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::Ba
             crate::model::BackgroundJob {
                 id,
                 needs: state.needs,
+                awaits_prompt: false,
             },
         );
     }

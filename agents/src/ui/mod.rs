@@ -527,7 +527,7 @@ impl View {
         }
     }
 
-    fn focus_input(&mut self) {
+    pub(crate) fn focus_input(&mut self) {
         if self.input_disabled().is_none() {
             self.input_box.focused = true;
         }

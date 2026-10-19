@@ -194,6 +194,7 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
     session.background_job = Some(crate::model::BackgroundJob {
         id: "50517e58".into(),
         needs: None,
+        awaits_prompt: false,
     });
     let mut sessions = [session];
     tasks.refresh(&root, &mut sessions, &Processes).unwrap();
@@ -419,6 +420,7 @@ fn adoption_skips_unregistered_sessions_and_refreshes_registered_jobs_with_a_rea
     row.background_job = Some(crate::model::BackgroundJob {
         id: "distinct-job-id".into(),
         needs: None,
+        awaits_prompt: false,
     });
     let mut unregistered = row.clone();
     unregistered.background_job = None;
