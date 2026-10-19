@@ -21,7 +21,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     let capture = tmux.capture_when(|capture| capture.contains("Weekly "));
     let compact = capture.lines().next().unwrap().to_owned();
     assert!(
-        compact.contains("% left") && !compact.contains("until"),
+        compact.contains('%') && !compact.contains("left") && !compact.contains("until"),
         "{compact}"
     );
     let x = compact[..compact.find("Weekly ").unwrap()].width();
@@ -33,14 +33,18 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
             .is_some_and(|line| line.contains("Weekly ") && line.contains("resets"))
     });
     let detailed = capture.lines().next().unwrap().to_owned();
-    assert!(!detailed.contains("% left"), "{detailed}");
+    assert!(!detailed.contains('%'), "{detailed}");
     for (name, reset) in [
         ("Claude", "2026-10-23T16:00:00Z"),
         ("Codex", "2026-10-25T08:33:00Z"),
     ] {
         let reset = reset.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
         let time = reset.with_timezone(&chrono::Local).format("%a %H:%M");
-        let credits = if name == "Claude" { "1 credit" } else { "2 credits" };
+        let credits = if name == "Claude" {
+            "1 credit"
+        } else {
+            "2 credits"
+        };
         assert!(
             detailed.contains(&format!("{name} resets {time}, {credits}")),
             "{detailed}"

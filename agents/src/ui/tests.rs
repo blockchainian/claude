@@ -10080,7 +10080,7 @@ fn weekly_header(view: &View, width: u16) -> String {
 fn task_header_weekly_usage_both_providers() {
     let view = weekly_usage_view();
     let text = weekly_header(&view, 160);
-    let label = "Weekly Claude 79% left · Codex 95% left";
+    let label = "Weekly Claude 21% · Codex 5%";
     assert!(text.contains(label), "{text}");
     assert_eq!(text.find(label).unwrap(), (160 - label.width()) / 2);
     assert!(text.contains("Active 5"));
@@ -10110,16 +10110,50 @@ fn task_header_weekly_usage_styles() {
     for x in start..start + 6 {
         assert_eq!(buffer[(x, y)].style(), buffer[(inactive.x + 1, y)].style());
     }
-    for x in start + 7..start + 7 + "Claude 79% left · Codex 95% left".width() as u16 {
+    for x in start + 7..start + 7 + "Claude 21% · Codex 5%".width() as u16 {
         assert_eq!(buffer[(x, y)].style(), buffer[(0, y)].style());
+    }
+}
+
+#[test]
+fn task_header_weekly_usage_error_percentage_threshold() {
+    for used in [95.0, 96.0, 100.0] {
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            let mut view = weekly_usage_view();
+            view.weekly_usage.get_mut(&provider).unwrap().used_percent = used;
+            let area = Rect::new(0, 0, 160, 40);
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, Utc::now());
+            let text = weekly_header(&view, 160);
+            let name = if provider == ProviderId::Claude {
+                "Claude"
+            } else {
+                "Codex"
+            };
+            let label = format!("{name} {used:.0}%");
+            let start = text[..text.find(&label).unwrap()].width() as u16;
+            let y = view.viewport.borrow().tab_bar.y;
+            for offset in 0..label.len() as u16 {
+                let expected = if used > 95.0 && offset > name.len() as u16 {
+                    buffer[(0, y)].style().patch(style::error_style())
+                } else {
+                    buffer[(0, y)].style()
+                };
+                assert_eq!(
+                    buffer[(start + offset, y)].style(),
+                    expected,
+                    "{label}: {offset}"
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn task_header_weekly_usage_single_provider() {
     for (missing, label) in [
-        (ProviderId::Claude, "Weekly Codex 95% left"),
-        (ProviderId::Codex, "Weekly Claude 79% left"),
+        (ProviderId::Claude, "Weekly Codex 5%"),
+        (ProviderId::Codex, "Weekly Claude 21%"),
     ] {
         let mut view = weekly_usage_view();
         view.weekly_usage.remove(&missing);
@@ -10151,7 +10185,8 @@ fn task_header_weekly_usage_reset_threshold() {
                     "Codex"
                 };
                 let expected = format!(
-                    "{name} {left}% left until {}",
+                    "{name} {}% until {}",
+                    100 - left,
                     reset.with_timezone(&chrono::Local).format("%a %H:%M")
                 );
                 assert_eq!(
@@ -10235,7 +10270,7 @@ fn task_header_weekly_usage_click_targets_cover_the_whole_visible_label() {
 #[test]
 fn task_header_weekly_usage_absent_or_too_wide() {
     let mut view = weekly_usage_view();
-    for width in [30, 54, 58] {
+    for width in [30, 38, 40] {
         let text = weekly_header(&view, width);
         assert!(!text.contains("Weekly") && !text.contains('%'), "{text}");
         assert!(

@@ -358,14 +358,16 @@ impl View {
             .filter_map(|(provider, name)| {
                 self.weekly_usage
                     .get(provider)
-                    .map(|usage| super::weekly_usage::provider_text(name, usage, self.usage_view))
+                    .map(|usage| super::weekly_usage::provider_spans(name, usage, self.usage_view))
             })
             .collect::<Vec<_>>();
         if !usage.is_empty() && !tabs.is_empty() {
-            let text = Line::from(vec![
-                Span::styled("Weekly", style::inactive_tab_style()),
-                Span::raw(format!(" {}", usage.join(" · "))),
-            ]);
+            let mut spans = vec![Span::styled("Weekly", style::inactive_tab_style())];
+            for (index, provider) in usage.into_iter().enumerate() {
+                spans.push(Span::raw(if index == 0 { " " } else { " · " }));
+                spans.extend(provider);
+            }
+            let text = Line::from(spans);
             let width = text.width();
             if width <= usize::from(tabs.width) {
                 let target = Rect::new(

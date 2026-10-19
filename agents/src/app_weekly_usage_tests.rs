@@ -48,7 +48,7 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
     let mut app = app(directory.path());
     let first = draw(&mut app, 200);
     assert!(
-        first.contains("Weekly Claude 79% left · Codex 84% left"),
+        first.contains("Weekly Claude 21% · Codex 16%"),
         "{first}"
     );
     // Loading cached values does not schedule or throttle the first account requests.
@@ -116,7 +116,7 @@ fn weekly_usage_refresh_updates_display_and_only_its_provider_state() {
     let codex = crate::providers::WeeklyUsage::from_used_percent(16.0, None).unwrap();
     app.complete_weekly_usage(ProviderId::Claude, Ok(Some(claude.clone())));
     app.complete_weekly_usage(ProviderId::Codex, Ok(Some(codex.clone())));
-    assert!(draw(&mut app, 200).contains("Weekly Claude 79% left · Codex 84% left"));
+    assert!(draw(&mut app, 200).contains("Weekly Claude 21% · Codex 16%"));
     let saved = Preferences::load(directory.path());
     assert_eq!(saved.usage_view, crate::state::UsageView::Detailed);
     assert_eq!(saved.usage.get(&ProviderId::Claude), Some(&claude));

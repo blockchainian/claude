@@ -4,7 +4,7 @@ use crate::state::UsageView;
 pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) -> String {
     let left = usage.left_percent();
     let mut text = match view {
-        UsageView::Compact => format!("{name} {left}% left"),
+        UsageView::Compact => format!("{name} {}%", 100 - left),
         UsageView::Detailed => name.to_owned(),
     };
     let credits = usage.reset_credits.filter(|count| *count > 0);
@@ -33,6 +33,28 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
     text
 }
 
+pub(super) fn provider_spans(
+    name: &str,
+    usage: &WeeklyUsage,
+    view: UsageView,
+) -> Vec<ratatui::text::Span<'static>> {
+    use ratatui::text::Span;
+
+    let text = provider_text(name, usage, view);
+    let used = 100 - usage.left_percent();
+    if view != UsageView::Compact || used <= 95 {
+        return vec![Span::raw(text)];
+    }
+    let prefix = format!("{name} ");
+    let percentage = format!("{used}%");
+    let suffix = text[prefix.len() + percentage.len()..].to_owned();
+    vec![
+        Span::raw(prefix),
+        Span::styled(percentage, super::style::error_style()),
+        Span::raw(suffix),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,7 +80,7 @@ mod tests {
                     assert_eq!(
                         provider_text(name, &usage, view),
                         match view {
-                            UsageView::Compact => format!("{name} 3% left until {expected}"),
+                            UsageView::Compact => format!("{name} 97% until {expected}"),
                             UsageView::Detailed => format!("{name} resets {expected}"),
                         },
                         "{actual}, {view:?}"
@@ -89,7 +111,7 @@ mod tests {
                             reset_credits: credits,
                         };
                         let mut expected = match view {
-                            UsageView::Compact => format!("Claude {left}% left"),
+                            UsageView::Compact => format!("Claude {}%", 100 - left),
                             UsageView::Detailed => "Claude".to_owned(),
                         };
                         let has_credits = matches!(credits, Some(1 | 2));
