@@ -27,7 +27,7 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("Agent", Subject::Field("description")),
         ("Task", Subject::Field("description")),
         ("spawn_agent", Subject::Field("task_name")),
-        ("SendMessage", Subject::Field("to")),
+        ("SendMessage", Subject::Recipient),
         ("send_message", Subject::Field("target")),
         ("followup_task", Subject::Field("target")),
         ("WebFetch", Subject::Field("url")),

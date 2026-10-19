@@ -29,8 +29,8 @@ const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
         ("Agent", Subject::Field("description")),
         ("Task", Subject::Field("description")),
         ("spawn_agent", Subject::Field("description")),
-        ("SendMessage", Subject::Field("to")),
-        ("send_message", Subject::Field("to")),
+        ("SendMessage", Subject::Recipient),
+        ("send_message", Subject::Recipient),
         ("WebFetch", Subject::Field("url")),
         ("Skill", Subject::Field("skill")),
     ],
@@ -2221,6 +2221,29 @@ pub(crate) mod tests {
                 assert_eq!(summary.activity.unwrap().label, expected);
             }
         }
+    }
+
+    #[test]
+    fn send_message_to_a_session_address_names_no_recipient() {
+        let mut record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let block = &mut record["message"]["content"][0];
+        block["name"] = "SendMessage".into();
+        block["input"] = json!({"to": "uds:/tmp/cc-socks/29973.sock", "message": "No conflicts"});
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), record.to_string()).unwrap();
+        assert_eq!(tail(file.path(), 1).unwrap()[0].body, "SendMessage");
+        let summary = super::super::transcript::read_subagent(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+        )
+        .unwrap();
+        assert_eq!(summary.activity.unwrap().label, "To No conflicts");
     }
 
     #[test]

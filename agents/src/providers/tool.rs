@@ -96,6 +96,7 @@ pub(crate) enum Subject {
         input: &'static str,
     },
     QuestionHeaders,
+    Recipient,
     Shell {
         description: bool,
     },
@@ -174,6 +175,11 @@ fn text<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
     input[field].as_str().filter(|text| !text.trim().is_empty())
 }
 
+/// A message's named recipient; a peer session's socket address names nobody.
+fn recipient(input: &Value) -> Option<&str> {
+    text(input, "to").filter(|to| !to.starts_with("uds:"))
+}
+
 pub(crate) fn expanded(name: &str, rules: &Rules) -> bool {
     find(name, rules.expanded).unwrap_or(true)
 }
@@ -208,7 +214,7 @@ pub(crate) fn summary(name: &str, input: &Value, rules: &Rules) -> Option<String
             let message = text(input, "summary")
                 .or_else(|| text(input, "message").and_then(|text| text.lines().next()))
                 .unwrap_or("");
-            format!("To {}", participant("to", message))
+            format!("To {}", crate::log::participant_text(recipient(input), message))
                 .trim_end()
                 .to_owned()
         }
@@ -301,6 +307,13 @@ pub(crate) fn presentation(
                 let summary = shell_summary::summarize_shell_commands(shell_command(input)?);
                 (!summary.is_empty()).then_some(summary)
             }),
+        Some(Subject::Recipient) => {
+            let to = recipient(input).map(str::to_owned);
+            if let Some(object) = remaining.as_object_mut() {
+                object.remove("to");
+            }
+            to
+        }
         Some(Subject::QuestionHeaders) => Some(
             input["questions"]
                 .as_array()
