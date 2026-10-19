@@ -1464,7 +1464,9 @@ impl View {
             }
             self.log_pending_older = 0;
             self.viewport.borrow_mut().log_unseen = 0;
-            if following {
+            if self.log_sort == LogSort::Duration && self.log_background_return.is_none() {
+                self.show_newest_log();
+            } else if following {
                 self.viewport.borrow_mut().log_scroll = self.log_max_scroll();
             } else {
                 self.reveal_log_selection();

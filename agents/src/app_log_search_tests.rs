@@ -156,6 +156,15 @@ fn history_load_errors_clear_the_pending_request() {
 fn duration_sort_loads_history_off_the_ui_thread_and_time_keeps_it() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
+    std::fs::write(
+        &path,
+        include_str!("../tests/fixtures/claude-bg-metadata.jsonl").repeat(40),
+    )
+    .unwrap();
+    app.refresh_log(8);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 23)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    super::tests::click_log(&mut app);
     let expected = crate::providers::claude::log::tail(&path, usize::MAX).unwrap();
     let parsed = app.log_parsed_bytes;
     let loaded = app.view.log.clone();
@@ -163,7 +172,10 @@ fn duration_sort_loads_history_off_the_ui_thread_and_time_keeps_it() {
         KeyCode::Char('t'),
         KeyModifiers::NONE,
     )));
-    app.refresh_log(8);
+    assert!(app.view.log_max_scroll() > 0);
+    app.view.assert_log_tail();
+    app.draw(&mut terminal).unwrap();
+    app.view.assert_log_tail();
     assert!(
         app.pending_log.is_some(),
         "duration sorting loads the whole history"
@@ -174,6 +186,9 @@ fn duration_sort_loads_history_off_the_ui_thread_and_time_keeps_it() {
     );
     assert_eq!(app.view.log, loaded, "the loaded tail stays available");
     finish_search(&mut app);
+    app.view.assert_log_tail();
+    app.draw(&mut terminal).unwrap();
+    app.view.assert_log_tail();
     assert_eq!(app.view.log, expected);
     assert!(app.full_log_stamp.is_some());
     app.handle_event(Event::Key(KeyEvent::new(
