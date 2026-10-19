@@ -48,7 +48,7 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
     let mut app = app(directory.path());
     let first = draw(&mut app, 200);
     assert!(first.contains("21%") && first.contains("16%"), "{first}");
-    assert!(!first.contains('·'));
+    assert!(first.contains("21% Claude · Codex 16%"));
     // Loading cached values does not schedule or throttle the first account requests.
     assert_eq!(app.hub.weekly_usage_jobs(Instant::now()).len(), 2);
     let start = first[..first.find('⣿').unwrap()].width() as u16;

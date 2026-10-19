@@ -10105,11 +10105,8 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
                     .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
             );
             if mode == crate::state::UsageView::Compact {
-                assert!(!text.contains('·') && !text.contains('█'), "{text}");
-                assert!(
-                    text.contains("Claude ") && text.contains(" Codex"),
-                    "{text}"
-                );
+                assert!(text.contains("21% Claude · Codex 5%"), "{text}");
+                assert!(text.contains("Claude · Codex"), "{text}");
                 assert!(text.contains("21%") && text.contains("5%"), "{text}");
                 let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
                     width / 2
@@ -10173,13 +10170,18 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                 }
                 let half = (target.width - 1) / 2;
                 // Both bars grow toward the midline and stop before the percentage.
-                let bar = half - 6 - 1;
                 let number = format!("{used:.0}%");
-                let capacity = bar - number.len() as u16 - 1;
-                let dots = ((f64::from(bar * 2) * used / 100.0).round() as u16).min(capacity * 2);
+                let capacity = half - 1 - 6 - 1 - number.len() as u16 - 1;
+                let dots = (f64::from(capacity * 2) * used / 100.0).round() as u16;
+                let center = width / 2;
+                assert_eq!(buffer[(center, y)].symbol(), "·");
+                let left_number = center - 1 - 6 - 1 - number.len() as u16;
+                let right_number = center + 2 + 5 + 1;
+                let left_bar = left_number - 1 - capacity;
+                let right_bar_end = right_number + number.len() as u16 + 1 + capacity;
                 for dot in 0..capacity * 2 {
-                    let left_x = target.x + 7 + dot / 2;
-                    let right_x = target.right() - 8 - dot / 2;
+                    let left_x = left_bar + dot / 2;
+                    let right_x = right_bar_end - 1 - dot / 2;
                     let left_bit = if dot % 2 == 0 { 0x47 } else { 0xb8 };
                     let right_bit = if dot % 2 == 0 { 0xb8 } else { 0x47 };
                     for (x, bit) in [(left_x, left_bit), (right_x, right_bit)] {
@@ -10192,15 +10194,11 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                                 cell.style(),
                                 buffer[(0, y)].style().patch(style::timeline_style(colors))
                             );
+                        } else if dot / 2 >= dots.div_ceil(2) {
+                            assert_eq!(cell.symbol(), " ");
                         }
                     }
                 }
-                assert_eq!(buffer[(target.right() - 6, y)].symbol(), "C");
-                assert_eq!(buffer[(target.right() - 7, y)].symbol(), " ");
-                let filled = dots.div_ceil(2);
-                let number = format!("{used:.0}%");
-                let left_number = target.x + 7 + filled + 1;
-                let right_number = target.right() - 7 - filled - 1 - number.len() as u16;
                 for start in [left_number, right_number] {
                     for (i, c) in number.chars().enumerate() {
                         let cell = &buffer[(start + i as u16, y)];
@@ -10213,9 +10211,13 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                         assert_eq!(cell.style(), buffer[(0, y)].style().patch(expected));
                     }
                 }
-                for x in left_number + number.len() as u16..right_number {
-                    assert_eq!(buffer[(x, y)].symbol(), " ", "center gap {width}, {used}");
-                }
+                let text = (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>();
+                assert!(
+                    text.contains(&format!("{number} Claude · Codex {number}")),
+                    "{text}"
+                );
             }
         }
     }
@@ -10279,7 +10281,7 @@ fn task_header_weekly_usage_details_and_compact_reset() {
     for width in [160, 80] {
         let text = weekly_header(&view, width);
         assert_eq!(text.matches("97%").count(), 2, "{text}");
-        assert!(!text.contains('·'));
+        assert!(text.contains("97% Claude · Codex 97%"));
         assert!(!text.contains("credit") && !text.contains("until") && !text.contains("resets"));
         view.usage_view = crate::state::UsageView::Detailed;
         let text = weekly_header(&view, width);

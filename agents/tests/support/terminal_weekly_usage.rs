@@ -164,22 +164,13 @@ fn assert_centered(line: &str, width: usize) {
 }
 
 fn assert_compact(line: &str, width: usize) {
-    let cells = line.chars().collect::<Vec<_>>();
-    assert_eq!(cells[width / 2], ' ');
-    assert!(
-        line.contains("Claude ") && line.contains(" Codex"),
-        "{line}"
-    );
-    assert!(!line.contains("  Codex"), "{line}");
-    assert!(line.contains("21%") && line.contains("16%"), "{line}");
-    assert!(!line.contains('·') && !line.contains('█'), "{line}");
+    assert_centered(line, width);
+    assert!(line.contains("21% Claude · Codex 16%"), "{line}");
     assert!(
         !line.contains("reset") && !line.contains("credit"),
         "{line}"
     );
-    let start = line[..line.find("Claude").unwrap()].width();
-    let end = line[..line.find("Codex").unwrap()].width() + "Codex".width();
-    assert_eq!((start + end) / 2, width / 2, "{line}");
+    let cells = line.chars().collect::<Vec<_>>();
     assert!(
         cells[..width / 2].contains(&'⣿') && cells[width / 2 + 1..].contains(&'⣿'),
         "{line}"

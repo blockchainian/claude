@@ -28,23 +28,15 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
     text
 }
 
-/// Both sides reserve the longer label, a gap, `100%`, and another gap.
-const COMPACT_LABEL_WIDTH: u16 = 6;
-const COMPACT_TEXT_WIDTH: u16 = COMPACT_LABEL_WIDTH + 1 + 4 + 1;
-
 fn compact_provider(
     name: &str,
     usage: &WeeklyUsage,
-    half: u16,
+    bar_width: u16,
     left: bool,
     use_colors: bool,
 ) -> Line<'static> {
     let used = 100 - usage.left_percent();
-    let number = format!("{used}%");
-    let bar_width = half - COMPACT_LABEL_WIDTH - 1;
-    let capacity = usize::from(bar_width) - number.len() - 1;
-    let dots =
-        ((f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize).min(capacity * 2);
+    let dots = (f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize;
     // Fill all four dot rows, mirrored at half-cell precision.
     let full = "⣿".repeat(dots / 2);
     let partial = if dots.is_multiple_of(2) {
@@ -59,11 +51,9 @@ fn compact_provider(
     } else {
         format!("{partial}{full}")
     };
-    let empty = Span::raw(
-        " ".repeat(usize::from(half - COMPACT_LABEL_WIDTH - 2) - dots.div_ceil(2) - number.len()),
-    );
+    let empty = Span::raw(" ".repeat(usize::from(bar_width) - dots.div_ceil(2)));
     let number = Span::styled(
-        number,
+        format!("{used}%"),
         if used > 95 {
             super::style::error_style()
         } else {
@@ -71,27 +61,26 @@ fn compact_provider(
         },
     );
     let bar = Span::styled(bar, super::style::timeline_style(use_colors));
-    let label = Span::raw(format!(
-        "{name:<width$}",
-        width = usize::from(COMPACT_LABEL_WIDTH)
-    ));
+    let label = Span::raw(name.to_owned());
     if left {
         Line::from(vec![
-            label,
-            Span::raw(" "),
             bar,
+            empty,
             Span::raw(" "),
             number,
-            empty,
+            Span::raw(" "),
+            label,
+            Span::raw(" "),
         ])
     } else {
         Line::from(vec![
-            empty,
-            number,
-            Span::raw(" "),
-            bar,
             Span::raw(" "),
             label,
+            Span::raw(" "),
+            number,
+            Span::raw(" "),
+            empty,
+            bar,
         ])
     }
 }
@@ -125,23 +114,32 @@ pub(super) fn render(
         } else {
             (usize::from(area.width) * 3 / 4) as u16
         };
-        // Keep a blank center cell and shrink both sides together against tabs.
         let half = ((budget.saturating_sub(1)) / 2)
             .min(available[0].saturating_sub(1))
             .min(available[1].saturating_sub(1));
-        if half < COMPACT_TEXT_WIDTH {
+        let text_widths = std::array::from_fn::<_, 2, _>(|i| {
+            usage[i].map_or(0, |usage| {
+                names[i].len() as u16 + provider_text(names[i], usage, view).len() as u16 + 3
+            })
+        });
+        if text_widths.iter().any(|width| *width > half) {
             return None;
         }
+        let bar_width = half - text_widths.into_iter().max().unwrap();
         for i in 0..2 {
             if let Some(usage) = usage[i] {
+                let width = text_widths[i] + bar_width;
                 let side = Rect::new(
-                    if i == 0 { center - half } else { center + 1 },
+                    if i == 0 { center - width } else { center + 1 },
                     area.y,
-                    half,
+                    width,
                     1,
                 );
-                compact_provider(names[i], usage, half, i == 0, use_colors).render(side, buf);
+                compact_provider(names[i], usage, bar_width, i == 0, use_colors).render(side, buf);
             }
+        }
+        if usage.iter().all(Option::is_some) {
+            buf[(center, area.y)].set_symbol("·");
         }
         return Some(Rect::new(center - half, area.y, half * 2 + 1, 1));
     }
