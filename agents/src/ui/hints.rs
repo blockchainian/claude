@@ -60,6 +60,18 @@ impl View {
             ])
         }
     }
+    /// Whether the footer shows the task hints rather than a dialog's, an editor's or a search's.
+    pub(super) fn footer_shows_task_hints(&self) -> bool {
+        self.confirm_dialog.is_none()
+            && !self.help
+            && self.title_editor().is_none()
+            && self.active_question().is_none()
+            && !(self.selected_draft().is_some()
+                && (self.input_box.focused || self.selector.is_some()))
+            && !self.log_search.editing
+            && !self.log_detail_search.editing
+    }
+
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
         let group = |title, entries: &[(&str, &'static str)]| Group {
             title,

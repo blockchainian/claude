@@ -448,6 +448,19 @@ impl View {
             rule(row(layout.log_detail, 0, 1), buf);
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
+        let footer_title = self.viewport.borrow_mut().log_detail_footer_title.take();
+        if let Some((title, columns)) = footer_title
+            && self.copied.is_none()
+            && self.footer_shows_task_hints()
+        {
+            super::log::render_footer_title(
+                title,
+                columns,
+                inset(layout.footer),
+                self.center_footer_hints().width() as u16,
+                buf,
+            );
+        }
         if !layout.log.is_empty() {
             self.viewport.borrow_mut().log_borders = [
                 Rect::new(

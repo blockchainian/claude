@@ -518,3 +518,128 @@ fn log_detail_focus_toggles_log_sort() {
         Some(Action::PersistSorting(LogSort::Duration))
     ));
 }
+
+fn screen_rows(view: &View, width: u16, height: u16) -> Vec<String> {
+    let area = Rect::new(0, 0, width, height);
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer);
+    (0..height)
+        .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect()
+}
+
+fn detail_wheel(view: &mut View, forward: bool) {
+    let detail = view.viewport.borrow().log_detail;
+    view.handle_mouse(mouse(
+        if forward {
+            MouseEventKind::ScrollDown
+        } else {
+            MouseEventKind::ScrollUp
+        },
+        detail.x + 2,
+        detail.y + 2,
+    ));
+}
+
+/// The display column where `needle` starts in `row`.
+fn column_of(row: &str, needle: &str) -> Option<usize> {
+    row.find(needle).map(|byte| row[..byte].width())
+}
+
+#[test]
+fn log_detail_footer_shows_the_scrolled_off_title_aligned_with_it() {
+    for width in [100, 160] {
+        let (mut view, _) = fixture(true);
+        let rows = screen_rows(&view, width, 40);
+        let footer = rows.last().unwrap().clone();
+        let detail_y = usize::from(view.viewport.borrow().log_detail.y);
+        let title = rows[detail_y + 1]
+            .trim()
+            .split("  ")
+            .next()
+            .unwrap()
+            .to_owned();
+        assert!(!title.is_empty(), "{}", rows.join("\n"));
+        assert!(!footer.contains(&title), "title on screen: {footer}");
+        let title_x = column_of(&rows[detail_y + 1], &title).unwrap();
+        let time_x = view
+            .viewport
+            .borrow()
+            .log_detail_columns
+            .map(|columns| usize::from(columns.time.x))
+            .unwrap();
+
+        detail_wheel(&mut view, true);
+        let rows = screen_rows(&view, width, 40);
+        let scrolled = rows.last().unwrap();
+        assert!(!rows[detail_y + 1].contains(&title), "{}", rows.join("\n"));
+        assert!(
+            scrolled.starts_with(footer.trim_end()),
+            "hints stay: {scrolled}"
+        );
+        let x = column_of(scrolled, &title).unwrap_or_else(|| panic!("{scrolled}"));
+        if title_x > footer.trim_end().width() + 1 {
+            assert_eq!(
+                x, title_x,
+                "wide panels center the footer title: {scrolled}"
+            );
+        } else {
+            assert_eq!(
+                x + title.width() + 2,
+                time_x,
+                "narrow panels end it before the time column: {scrolled}"
+            );
+        }
+        assert!(scrolled[..].chars().skip(time_x).all(|c| c == ' '));
+
+        detail_wheel(&mut view, false);
+        let rows = screen_rows(&view, width, 40);
+        assert!(
+            !rows.last().unwrap().contains(&title),
+            "title back on screen"
+        );
+    }
+}
+
+#[test]
+fn log_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
+    let (mut view, _) = tool_fixture();
+    let mut events = view.log.clone();
+    events[0].calls[0].input = vec![crate::log::Section::Text {
+        label: String::new(),
+        text: "first body".into(),
+    }];
+    events[0].calls[1].input = vec![crate::log::Section::Text {
+        label: String::new(),
+        text: (1..=40)
+            .map(|i| format!("second body {i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }];
+    let first = events[0].calls[0].detail_title.replace(' ', "");
+    view.set_log(events);
+    view.select_log_event(Some(0));
+    screen_rows(&view, 100, 40);
+    let detail_y = usize::from(view.viewport.borrow().log_detail.y);
+    let mut footers = Vec::new();
+    for _ in 0..20 {
+        detail_wheel(&mut view, true);
+        let rows = screen_rows(&view, 100, 40);
+        let detail = rows[detail_y + 1..rows.len() - 1].join("\n");
+        let footer = rows.last().unwrap().clone();
+        if detail.contains("Second tool") {
+            assert!(!footer.contains("Second tool"), "{footer}");
+        } else {
+            assert!(footer.contains("Second tool"), "{detail}\n{footer}");
+        }
+        footers.push(footer);
+    }
+    // Wide glyphs read back with a blank continuation cell.
+    assert!(
+        footers
+            .iter()
+            .any(|footer| footer.replace(' ', "").contains(&first)),
+        "{first}"
+    );
+    assert!(footers.iter().any(|footer| footer.contains("Second tool")));
+}

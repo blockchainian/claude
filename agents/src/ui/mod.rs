@@ -160,6 +160,8 @@ struct Viewport {
     log_detail_entry: Option<bool>,
     /// The wheel direction the selected entry's title holds reports against, and how many remain.
     log_detail_title_hold: Option<(bool, usize)>,
+    /// The title of the section on the detail's top row once that title scrolls off.
+    log_detail_footer_title: Option<(Line<'static>, detail_model::DetailColumns)>,
     log_detail_saved: HashMap<u64, DetailsScroll>,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,

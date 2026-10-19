@@ -19,19 +19,7 @@ impl TitleRow {
         cwd: &std::path::Path,
     ) -> (Line<'static>, Vec<CellMap>) {
         let width = usize::from(columns.text.width);
-        let source = self.source();
-        let paths = super::paths::text_paths(&source, cwd);
-        let display = super::line_truncation::abbreviate_paths(&source, &paths, width, cwd);
-        let drawn = Line::from(Span::styled(
-            display.replace('\t', "    "),
-            self.title_style,
-        ));
-        let mut maps =
-            map_lines_in(&source, std::slice::from_ref(&drawn), false, Some(cwd)).remove(0);
-        let mut title = super::log::truncate_detail_line(drawn, &mut maps, width);
-        for span in &mut title.spans {
-            span.style = self.title_style;
-        }
+        let (title, mut maps) = self.title_in(width, cwd);
         let padding = usize::from(
             super::centering::centered_x(columns.panel, columns.text, title.width() as u16)
                 - columns.text.x,
@@ -57,6 +45,24 @@ impl TitleRow {
             self.meta_style,
         ));
         (Line::from(spans), maps)
+    }
+
+    /// The centered title alone, fitted to `width`; cell columns are relative to its start.
+    pub fn title_in(&self, width: usize, cwd: &std::path::Path) -> (Line<'static>, Vec<CellMap>) {
+        let source = self.source();
+        let paths = super::paths::text_paths(&source, cwd);
+        let display = super::line_truncation::abbreviate_paths(&source, &paths, width, cwd);
+        let drawn = Line::from(Span::styled(
+            display.replace('\t', "    "),
+            self.title_style,
+        ));
+        let mut maps =
+            map_lines_in(&source, std::slice::from_ref(&drawn), false, Some(cwd)).remove(0);
+        let mut title = super::log::truncate_detail_line(drawn, &mut maps, width);
+        for span in &mut title.spans {
+            span.style = self.title_style;
+        }
+        (title, maps)
     }
 
     /// The title's copy source, excluding metadata and generated padding.

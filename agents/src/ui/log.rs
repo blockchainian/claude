@@ -339,6 +339,16 @@ impl View {
             })
             .collect::<Vec<_>>();
         let times = layout.times.clone();
+        // The section on the top row keeps its title in the footer once the title scrolls off.
+        viewport.log_detail_footer_title = visible_rows.first().and_then(|&top| {
+            layout
+                .titles
+                .iter()
+                .rev()
+                .find(|(row, _)| *row <= top)
+                .filter(|(row, _)| *row < top)
+                .map(|(_, title)| (title.clone(), columns))
+        });
         layout.visible = visible_rows.clone();
         viewport.log_detail_layout = Some(layout);
         drop(viewport);
@@ -1083,6 +1093,8 @@ pub(super) struct DetailLayout {
     links: Vec<Vec<super::links::Link>>,
     /// Section title times, drawn separately in the time column.
     times: Vec<(usize, Span<'static>)>,
+    /// Each section's title row and its centered title.
+    titles: Vec<(usize, Line<'static>)>,
     bodies: Vec<std::ops::Range<usize>>,
     body_keys: Vec<u64>,
 }
@@ -1159,6 +1171,7 @@ fn detail_parts_layout(
         sources: Vec::new(),
         links: Vec::new(),
         times: Vec::new(),
+        titles: Vec::new(),
         bodies: Vec::new(),
         body_keys: Vec::new(),
     };
@@ -1176,6 +1189,9 @@ fn detail_parts_layout(
             let id = layout.sources.len();
             let source = title.source();
             let (line, cells) = title.line_in(columns, cwd);
+            layout
+                .titles
+                .push((layout.lines.len(), title.title_in(width, cwd).0));
             if let Some(time) = title.time {
                 layout
                     .times
@@ -1330,6 +1346,31 @@ pub(super) fn open_text(event: &Event) -> String {
         .skip_while(String::is_empty)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Draws a scrolled-off section title in the footer after the hints: on the detail's midline
+/// when that clears them, otherwise ending at the text column so the time column stays empty.
+pub(super) fn render_footer_title(
+    title: Line<'static>,
+    columns: DetailColumns,
+    footer: Rect,
+    hints_width: u16,
+    buf: &mut Buffer,
+) {
+    let start = footer.x.saturating_add(hints_width).saturating_add(2);
+    let end = columns.text.right().min(footer.right());
+    if end <= start {
+        return;
+    }
+    let title = truncate_line_with_ellipsis_if_overflow(title, usize::from(end - start));
+    let width = title.width() as u16;
+    let centered = super::centering::centered_x(columns.panel, columns.text, width);
+    let x = if centered >= start {
+        centered
+    } else {
+        end - width
+    };
+    title.render(Rect::new(x, footer.y, width, 1), buf);
 }
 
 /// The footer confirmation after copying an open log event, such as "Copied user message".
