@@ -45,13 +45,20 @@ fn lines(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
         .collect()
 }
 
+fn starts_at(
+    buffer: &ratatui::buffer::Buffer,
+    columns: std::ops::Range<u16>,
+    y: u16,
+    text: &str,
+) -> bool {
+    let mut chars = columns.flat_map(|x| buffer[(x, y)].symbol().chars());
+    text.chars().all(|expected| chars.next() == Some(expected))
+}
+
 fn position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     for y in (0..buffer.area.height).rev() {
         for x in 0..buffer.area.width {
-            let suffix: String = (x..buffer.area.width)
-                .map(|column| buffer[(column, y)].symbol())
-                .collect();
-            if suffix.starts_with(text) {
+            if starts_at(buffer, x..buffer.area.width, y, text) {
                 return (x, y);
             }
         }
@@ -63,12 +70,7 @@ fn position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
 fn row_ends(buffer: &ratatui::buffer::Buffer, text: &str) -> ((u16, u16), (u16, u16)) {
     let (_, y) = position(buffer, text);
     let starts: Vec<_> = (0..buffer.area.width)
-        .filter(|x| {
-            (*x..buffer.area.width)
-                .map(|column| buffer[(column, y)].symbol())
-                .collect::<String>()
-                .starts_with(text)
-        })
+        .filter(|&x| starts_at(buffer, x..buffer.area.width, y, text))
         .collect();
     ((starts[0], y), (*starts.last().unwrap(), y))
 }
@@ -85,10 +87,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     };
     for y in rows.rev() {
         for x in left..buffer.area.width - 1 {
-            let suffix: String = (x..buffer.area.width - 1)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect();
-            if suffix.starts_with(text) {
+            if starts_at(buffer, x..buffer.area.width - 1, y, text) {
                 return (x, y);
             }
         }
@@ -577,18 +576,14 @@ fn select_archive(app: &mut App) {
     assert!(app.view.selected_id().is_some());
 }
 
-fn wait_for_click(app: &mut App) {
-    let mut schedule = RefreshSchedule::new(Instant::now(), Duration::from_secs(2));
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while app.view.pending_click_in(Instant::now()).is_some() {
-        assert!(
-            Instant::now() < deadline,
-            "event loop did not flush its click"
-        );
-        assert!(
-            !app.wait_for_input(&mut None, &mut schedule, Instant::now())
-                .unwrap()
-        );
+// The idle-loop test covers receiving with real time; these flows advance the click deadline.
+fn finish_click(app: &mut App) {
+    let now = Instant::now();
+    if let Some(remaining) = app.view.pending_click_in(now) {
+        let deadline = now + remaining;
+        let action = app.view.flush_pending_click(deadline);
+        assert!(!app.handle_action(action));
+        assert!(app.view.pending_click_in(deadline).is_none());
     }
 }
 
@@ -628,7 +623,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         // Click the actual User event in the list, not the preview.
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        wait_for_click(&mut app);
+        finish_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
             detail(&buffer).contains("codex thread"),
@@ -653,7 +648,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         // Another list row replaces the pinned event through the same click deadline.
         let (x, y) = log_position(&buffer, "对");
         click(&mut app, x, y);
-        wait_for_click(&mut app);
+        finish_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
             detail(&buffer).contains("decision"),
@@ -719,7 +714,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let buffer = draw_size(&mut app, width, height);
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        wait_for_click(&mut app);
+        finish_click(&mut app);
         click(&mut app, 1, height - 3);
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("await".into()));
@@ -768,7 +763,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         assert!(detail(&buffer).contains("decision"));
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        wait_for_click(&mut app);
+        finish_click(&mut app);
         let opened = draw_size(&mut app, width, height);
         assert!(detail(&opened).contains("codex thread"));
         assert_eq!(
@@ -778,7 +773,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         );
         let (x, y) = log_position(&opened, "对");
         click(&mut app, x, y);
-        wait_for_click(&mut app);
+        finish_click(&mut app);
         let changed = draw_size(&mut app, width, height);
         assert!(detail(&changed).contains("decision"));
         assert!(log_position(&changed, "⏺").1 < list_end);
@@ -793,7 +788,7 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         let buffer = draw_size(&mut app, width, height);
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
-        wait_for_click(&mut app);
+        finish_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         let (text_x, text_y) = position(&buffer, "Stop hook error");
         for kind in [
