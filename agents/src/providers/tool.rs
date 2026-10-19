@@ -1,5 +1,5 @@
 pub(crate) mod groups;
-mod shell_summary;
+pub(crate) mod shell_summary;
 
 use crate::log::{Section, ToolCall};
 use serde_json::Value;

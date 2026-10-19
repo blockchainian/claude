@@ -61,8 +61,15 @@ impl Background {
                     .first_seen
                     .entry((thread.to_owned(), terminal.process_id.clone()))
                     .or_insert(now);
+                let summary = crate::providers::tool::shell_summary::summarize_shell_commands(
+                    &terminal.command,
+                );
                 BackgroundTask {
-                    description: terminal.command,
+                    description: if summary.is_empty() {
+                        terminal.command
+                    } else {
+                        summary
+                    },
                     output: None,
                     started_at: starts
                         .and_then(|times| times.get(&terminal.process_id))
@@ -181,12 +188,24 @@ mod tests {
             .tasks("thread", Some(file.path()), terminals(), now)
             .unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].description, "sleep 120 ; echo done");
+        assert_eq!(tasks[0].description, "sleep, echo");
         assert_eq!(tasks[0].output, None);
         assert_eq!(
             tasks[0].started_at,
             "2026-10-19T05:08:55.993Z".parse::<DateTime<Utc>>().unwrap()
         );
+    }
+
+    #[test]
+    fn background_terminal_titles_use_shell_command_summary() {
+        let now = "2026-10-19T06:00:00Z".parse().unwrap();
+        let mut terminals = terminals();
+        terminals[0].command =
+            "python3 - <<'PY'\np='src/ui/render.rs'\nprint(open(p).read())\nPY".into();
+        let tasks = Background::default()
+            .tasks("thread", None, terminals, now)
+            .unwrap();
+        assert_eq!(tasks[0].description, "python3");
     }
 
     #[test]
