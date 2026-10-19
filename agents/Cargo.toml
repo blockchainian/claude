@@ -46,6 +46,20 @@ sha2 = "0.10"
 [profile.dev]
 split-debuginfo = "off"
 
+# Grammar regexes compile lazily on first use. Keep their engine optimized in
+# development and tests, as syntect does in its own development profile.
+[profile.dev.package.aho-corasick]
+opt-level = 2
+
+[profile.dev.package.fancy-regex]
+opt-level = 2
+
+[profile.dev.package.regex-automata]
+opt-level = 2
+
+[profile.dev.package.regex-syntax]
+opt-level = 2
+
 [patch.crates-io]
 nucleo-matcher = { path = "vendor/nucleo-matcher" }
 crossterm = { git = "https://github.com/blockchainian/crossterm", rev = "03622784292936a1950cfae866c02f584c21b848" }
