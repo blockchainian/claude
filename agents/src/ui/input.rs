@@ -3,7 +3,7 @@ use super::*;
 /// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
 /// Wheel reports a scrollable log entry absorbs at its edge before the wheel leaves it.
-pub(super) const EDGE_RESISTANCE_WHEELS: usize = 3;
+pub(super) const EDGE_RESISTANCE_WHEELS: usize = 1;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
