@@ -88,8 +88,18 @@ impl View {
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
         let wide = area.width >= WIDE_LAYOUT_COLUMNS;
-        // The prompt or question grows with its content up to half the rows between the
-        // header and the footer, so the panels above and below keep the other half.
+        // The prompt or question grows with its content up to a share of the rows between
+        // the header and the footer: half in narrow mode, where the log list stacks below
+        // it, and two thirds in wide mode, where the log sits beside the panels.
+        let content_rows = area
+            .height
+            .saturating_sub(header_height + footer_height + 2)
+            .max(2);
+        let prompt_cap = if wide {
+            content_rows * 2 / 3
+        } else {
+            content_rows / 2
+        };
         let prompt_height = self
             .active_question()
             .map_or_else(
@@ -101,12 +111,7 @@ impl View {
                 },
                 |question| question.height(area.width.saturating_sub(2 * HORIZONTAL_PADDING)),
             )
-            .min(
-                area.height
-                    .saturating_sub(header_height + footer_height + 2)
-                    .max(2)
-                    / 2,
-            );
+            .min(prompt_cap);
         let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
         let log_height = bottom_height.saturating_sub(footer_height).max(10);
         let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6;

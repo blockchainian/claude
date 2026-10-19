@@ -12,7 +12,10 @@ fn task_double_click_keeps_task_focus_and_enter_opens() {
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(!view.input_box.focused);
     assert!(view.mouse_focus == Panel::TaskList);
-    assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::OpenTerminal(id)));
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::OpenTerminal(id))
+    );
 }
 
 #[test]
@@ -259,7 +262,7 @@ fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
 }
 
 #[test]
-fn prompt_grows_with_its_text_and_leaves_the_panels_half_the_rows() {
+fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
     let (mut view, now) = log_fixture();
     view.rows[view.selected].process = None;
     view.input_box.focused = true;
@@ -271,10 +274,16 @@ fn prompt_grows_with_its_text_and_leaves_the_panels_half_the_rows() {
     assert!(lines > 5 && lines < 17, "{lines}");
     assert_eq!(layout.prompt.height, lines);
     view.handle_paste(paragraph);
+    view.handle_paste(paragraph);
     let layout = view.center_layout(area);
     assert_eq!(layout.prompt.height, (40 - 3 - 2) / 2);
     assert!(layout.top.height >= 6, "{:?}", layout.top);
     assert!(layout.log_detail.height >= 6, "{:?}", layout.log_detail);
     let rendered = log_screen(&view, 120, 40, now);
     assert!(rendered.contains("No reply needed."), "{rendered}");
+    // Wide mode puts the log beside the panels, so the prompt may take two thirds.
+    let wide = view.center_layout(Rect::new(0, 0, 200, 40));
+    assert_eq!(wide.prompt.height, (40 - 3 - 2) * 2 / 3);
+    assert!(wide.top.height >= 4, "{:?}", wide.top);
+    assert!(wide.log_detail.height >= 4, "{:?}", wide.log_detail);
 }
