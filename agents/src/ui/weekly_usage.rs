@@ -11,26 +11,27 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
     if view == UsageView::Compact {
         return format!("{}%", 100 - usage.left_percent());
     }
-    let mut text = name.to_owned();
-    if let Some(reset) = usage.resets_at {
-        let reset = reset + chrono::Duration::seconds(30);
-        text.push_str(&format!(
-            " resets {}",
-            reset.with_timezone(&chrono::Local).format("%a %H:%M")
-        ));
-    }
-    if let Some(count) = usage.reset_credits.filter(|count| *count > 0) {
-        text.push_str(&format!(
-            ", {count} credit{}",
-            if count == 1 { "" } else { "s" }
-        ));
-    }
-    text
+    detailed_provider_text(name, usage, false)
 }
 
 fn detailed_provider_text(name: &str, usage: &WeeklyUsage, left: bool) -> String {
-    let text = provider_text(name, usage, UsageView::Detailed);
-    let details = text[name.len()..].trim_start_matches([' ', ',']);
+    let reset = usage.resets_at.map(|reset| {
+        let reset = reset + chrono::Duration::seconds(30);
+        format!(
+            "resets {}",
+            reset.with_timezone(&chrono::Local).format("%a %H:%M")
+        )
+    });
+    let credits = usage
+        .reset_credits
+        .filter(|count| *count > 0)
+        .map(|count| format!("{count} credit{}", if count == 1 { "" } else { "s" }));
+    let parts = if left {
+        [credits, reset]
+    } else {
+        [reset, credits]
+    };
+    let details = parts.into_iter().flatten().collect::<Vec<_>>().join(", ");
     if details.is_empty() {
         name.to_owned()
     } else if left {
@@ -44,6 +45,7 @@ fn compact_provider(
     name: &str,
     usage: &WeeklyUsage,
     bar_width: u16,
+    bar_limit: u16,
     available: u16,
     left: bool,
     use_colors: bool,
@@ -52,20 +54,20 @@ fn compact_provider(
     let number_width = format!("{used}%").len() as u16;
     let limit = available - name.len() as u16 - number_width - 3;
     let dots = ((f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize)
-        .min(usize::from(limit * 2));
+        .min(usize::from(bar_limit * 2));
     // Fill all four dot rows, mirrored at half-cell precision.
     let full = "⣿".repeat(dots / 2);
     let partial = if dots.is_multiple_of(2) {
         ""
     } else if left {
-        "⢸"
-    } else {
         "⡇"
+    } else {
+        "⢸"
     };
     let bar = if left {
-        format!("{partial}{full}")
-    } else {
         format!("{full}{partial}")
+    } else {
+        format!("{partial}{full}")
     };
     let empty = Span::raw(" ".repeat(usize::from(limit) - dots.div_ceil(2)));
     let number = Span::styled(
@@ -78,12 +80,18 @@ fn compact_provider(
     );
     let bar = Span::styled(bar, super::style::timeline_style(use_colors));
     let label = Span::raw(name.to_owned());
+    let gap = Span::raw(if dots == 0 { "" } else { " " });
+    let empty = if dots == 0 {
+        Span::raw(" ".repeat(usize::from(limit) + 1))
+    } else {
+        empty
+    };
     if left {
         Line::from(vec![
-            empty,
-            number,
-            Span::raw(" "),
             bar,
+            gap,
+            number,
+            empty,
             Span::raw(" "),
             label,
             Span::raw(" "),
@@ -93,10 +101,10 @@ fn compact_provider(
             Span::raw(" "),
             label,
             Span::raw(" "),
-            bar,
-            Span::raw(" "),
-            number,
             empty,
+            number,
+            gap,
+            bar,
         ])
     }
 }
@@ -149,6 +157,7 @@ pub(super) fn render(
                 .max()
                 .unwrap(),
         );
+        let bar_limit = half.saturating_sub(*text_widths.iter().max().unwrap());
         for i in 0..2 {
             if let Some(usage) = usage[i] {
                 let width = half;
@@ -158,8 +167,16 @@ pub(super) fn render(
                     width,
                     1,
                 );
-                compact_provider(names[i], usage, bar_width, half, i == 0, use_colors)
-                    .render(side, buf);
+                compact_provider(
+                    names[i],
+                    usage,
+                    bar_width,
+                    bar_limit,
+                    half,
+                    i == 0,
+                    use_colors,
+                )
+                .render(side, buf);
             }
         }
         if usage.iter().all(Option::is_some) {
@@ -228,20 +245,17 @@ mod tests {
                     resets_at,
                     reset_credits,
                 };
-                let mut extras = if resets_at.is_some() {
-                    format!("resets {time}")
-                } else {
-                    String::new()
-                };
+                let mut parts = Vec::new();
                 if let Some(count) = reset_credits.filter(|n| *n > 0) {
-                    if !extras.is_empty() {
-                        extras.push_str(", ");
-                    }
-                    extras.push_str(&format!(
+                    parts.push(format!(
                         "{count} credit{}",
                         if count == 1 { "" } else { "s" }
                     ));
                 }
+                if resets_at.is_some() {
+                    parts.push(format!("resets {time}"));
+                }
+                let extras = parts.join(", ");
                 let expected = if extras.is_empty() {
                     "Claude".to_owned()
                 } else {
@@ -315,10 +329,11 @@ mod tests {
                             });
                         }
                         if has_credits && view == UsageView::Detailed {
+                            expected.push_str(if reset_at.is_some() { ", " } else { " " });
                             expected.push_str(if credits == Some(1) {
-                                ", 1 credit"
+                                "1 credit"
                             } else {
-                                ", 2 credits"
+                                "2 credits"
                             });
                         }
                         for name in ["Claude", "Codex"] {

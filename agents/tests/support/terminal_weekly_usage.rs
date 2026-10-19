@@ -6,7 +6,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     let initial = serde_json::json!({
         "config": {"grouping":"project"},
         "state": {"usage_view":"compact", "usage":{"weekly":{
-            "claude":{"used_percent":21,"resets_at":"2026-10-23T15:59:59.837Z","reset_credits":1},
+            "claude":{"used_percent":23,"resets_at":"2026-10-23T15:59:59.837Z","reset_credits":1},
             "codex":{"used_percent":16,"resets_at":"2026-10-25T08:32:50Z","reset_credits":2}
         }}}
     });
@@ -22,7 +22,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("21%") && line.contains("16%"))
+            .is_some_and(|line| line.contains("23%") && line.contains("16%"))
     });
     let compact = capture.lines().next().unwrap().to_owned();
     assert!(
@@ -53,7 +53,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         };
         assert!(
             detailed.contains(&if name == "Claude" {
-                format!("resets {time}, {credits} {name}")
+                format!("{credits}, resets {time} {name}")
             } else {
                 format!("{name} resets {time}, {credits}")
             }),
@@ -87,7 +87,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     tmux.mouse(0, last, 0, true);
     tmux.wait_for(|capture| {
         capture.lines().next().is_some_and(|line| {
-            line.contains("21%") && line.contains("16%") && !line.contains("resets")
+            line.contains("23%") && line.contains("16%") && !line.contains("resets")
         })
     });
     let saved: serde_json::Value =
@@ -99,7 +99,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.width() <= 80 && line.contains("21%") && line.contains("16%"))
+            .is_some_and(|line| line.width() <= 80 && line.contains("23%") && line.contains("16%"))
     });
     let compact = capture.lines().next().unwrap().to_owned();
     assert_compact(&compact, 80);
@@ -137,14 +137,14 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("21%") && line.contains("16%"))
+            .is_some_and(|line| line.contains("23%") && line.contains("16%"))
     });
     tmux.run(&["resize-window", "-t", "probe", "-x", "80", "-y", "50"]);
     tmux.wait_for(|capture| {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.width() <= 80 && line.contains("21%") && line.contains("16%"))
+            .is_some_and(|line| line.width() <= 80 && line.contains("23%") && line.contains("16%"))
     });
     let saved: serde_json::Value = serde_json::from_slice(
         &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),

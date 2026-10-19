@@ -10106,7 +10106,6 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
                     .all(|(_, tab)| target.right() < tab.x || target.x > tab.right())
             );
             if mode == crate::state::UsageView::Compact {
-                assert!(text.contains("⣿ Claude · Codex ⣿"), "{text}");
                 assert!(text.contains("Claude · Codex"), "{text}");
                 assert!(text.contains("21%") && text.contains("5%"), "{text}");
                 let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
@@ -10146,6 +10145,9 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
         .get_mut(&ProviderId::Codex)
         .unwrap()
         .reset_credits = Some(2);
+    for usage in view.weekly_usage.values_mut() {
+        usage.resets_at = Some("2026-10-23T16:00:00Z".parse().unwrap());
+    }
     let snapshot = weekly_header(&view, 160).trim_end().to_owned() + "\n";
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/ui_snapshots/details_weekly_usage_detailed.txt");
@@ -10158,7 +10160,7 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
 #[test]
 fn task_header_weekly_usage_symmetric_bars_and_styles() {
     for width in [200, 160, 150, 149, 80] {
-        for used in [0.0, 5.0, 21.0, 50.0, 95.0, 96.0, 99.0, 100.0] {
+        for used in [0.0, 5.0, 23.0, 50.0, 95.0, 96.0, 99.0, 100.0] {
             for colors in [false, true] {
                 let mut view = weekly_usage_view();
                 view.use_colors = colors;
@@ -10193,23 +10195,27 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                 let center = width / 2;
                 assert_eq!(buffer[(center, y)].symbol(), "·");
                 let mut starts = [0; 2];
-                for (side, label_width) in [(0, 6), (1, 5)] {
-                    let limit = half - label_width - 3 - number.len() as u16;
+                for (side, start) in starts.iter_mut().enumerate() {
+                    let limit = half - 6 - 3 - number.len() as u16;
                     let visible = dots.min(limit * 2);
                     let cells = visible.div_ceil(2);
-                    let anchor = if side == 0 { center - 9 } else { center + 8 };
-                    starts[side] = if side == 0 {
-                        anchor + 1 - cells - 1 - number.len() as u16
+                    let anchor = if side == 0 {
+                        target.x
                     } else {
-                        anchor + cells + 1
+                        target.right() - 1
+                    };
+                    *start = if side == 0 {
+                        anchor + cells + u16::from(cells > 0)
+                    } else {
+                        anchor + 1 - cells - u16::from(cells > 0) - number.len() as u16
                     };
                     for dot in 0..visible {
                         let x = if side == 0 {
-                            anchor - dot / 2
-                        } else {
                             anchor + dot / 2
+                        } else {
+                            anchor - dot / 2
                         };
-                        let bit = if (dot % 2 == 0) == (side == 0) {
+                        let bit = if (dot % 2 == 0) == (side == 1) {
                             0xb8
                         } else {
                             0x47
@@ -10225,16 +10231,16 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                     }
                     if visible % 2 == 1 {
                         let x = if side == 0 {
-                            anchor + 1 - cells
-                        } else {
                             anchor + cells - 1
+                        } else {
+                            anchor + 1 - cells
                         };
-                        assert_eq!(buffer[(x, y)].symbol(), if side == 0 { "⢸" } else { "⡇" });
+                        assert_eq!(buffer[(x, y)].symbol(), if side == 0 { "⡇" } else { "⢸" });
                     }
                     let outside = if side == 0 {
-                        target.x..starts[side]
+                        *start + number.len() as u16..center - 8
                     } else {
-                        starts[side] + number.len() as u16..target.right()
+                        center + 7..*start
                     };
                     for x in outside {
                         assert_eq!(buffer[(x, y)].symbol(), " ");
@@ -10325,7 +10331,10 @@ fn task_header_weekly_usage_details_and_compact_reset() {
         view.usage_view = crate::state::UsageView::Detailed;
         let text = weekly_header(&view, width);
         if width == 160 {
-            assert!(text.contains("1 credit Claude · Codex resets"), "{text}");
+            assert!(
+                text.contains("1 credit, resets ") && text.contains("Claude · Codex resets"),
+                "{text}"
+            );
             assert!(text.contains("2 credits"));
             assert_eq!(text.chars().nth(usize::from(width / 2)), Some('·'));
         } else {
