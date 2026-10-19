@@ -84,3 +84,45 @@ ui/highlight.rs 的 `THEME: Mutex<HighlightTheme>` 同时保存主题和 generat
 首次 host 批次误用了共享 target，第三次 cargo 和三次 nextest 混入主线程尚未修复的新增回归。该批次全部排除出正式复现率，完整保留在 watcher/contaminated/。其中另一个颜色快照测试 claude_write_content_uses_path_syntax_and_preserves_unknown_text 也出现颜色差异（Dockerfile 的 Indexed(30) 对 Indexed(23)），没有修改该测试；干净 HEAD 六轮均通过。正式验证改用独立 COW target，强制从 archive 重编译，并保存实际二进制的 --list 确认未混入新增回归。
 
 本次不安装，不修改时钟、时限或 watcher 测试，不覆盖或提交他人改动。临时调度探针只存在独占 archive 副本。最终只提交自己的源码和报告；推送目标 origin agents-panel。
+
+## 4. 更正：使用现有 TEST_LOCK，保留正式主题存储
+
+2482af22 的线程局部方案让测试与正式构建使用不同的主题存储，不符合要求。已通过 `git revert --no-edit 2482af22` 单独撤销，撤销提交为 08981ec4。该提交及其 test_themes_do_not_cross_threads 不再作为最终修复。以下结果替代前面关于线程局部修复的结论；前面的原始日志与 watcher 本机对照仍保留。
+
+highlight.rs 与 2482af22 的父提交逐字一致：测试与正式构建继续共用全局 `Mutex<HighlightTheme>`，没有新增测试专用主题存储或主题机制测试。
+
+### 最终改动
+
+只在以下五个测试的函数入口加 `theme::TEST_LOCK`，guard 覆盖设置、绘制、参考颜色读取和所有断言。manager 和固定配色快照在持锁后显式设置默认深色主题。
+
+| 文件 | 测试 | 需要隔离的共享状态 |
+| --- | --- | --- |
+| ui/tool_detail.rs | manager_await_json_displays_multiline_strings_and_copies_drawn_text | 绘制与 JSON 参考样式之间的全局语法主题 |
+| ui/tool_detail.rs | json_sections_use_multiline_highlighting_and_placeholders_are_dim | 两次 Vec<Line> 比较中的样式 |
+| ui/log_detail_regression_tests.rs | tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting | 先绘制，后生成 Rust/JSON 参考颜色 |
+| ui/log_detail_regression_tests.rs | claude_write_content_uses_path_syntax_and_preserves_unknown_text | 固定快照中的语法配色 |
+| ui/details_group_tests.rs | status_rule_keeps_github_pr_hyperlink_and_visible_click_target | 绘制与参考 thread_color 之间的全局 ACCENTS |
+
+其余直接主题调用、颜色比较、快照及 helper 的审计见 lock-audit/report.md。已有 assert_script_styles 等 helper 自己持锁，不重复套锁；使用显式局部 Theme、固定语义色、仅检查文本/颜色存在性，以及现有线程局部 text accent 的比较没有加入这把共享锁。没有修改这些既有产品实现。
+
+### 同一交错的红绿验证
+
+独立 archive 基线为撤销后的 08981ec4，使用独占 COW target。临时探针只有测试调度代码，真实写者同样遵守现有 TEST_LOCK；没有改产品代码、颜色、时间或依赖，没有 sleep、重试或 mock。
+
+- 读者绘制前设置浅色，生成参考颜色前通过 channel 放行写者。
+- 写者先 try_lock 报告是否被挡住；拿不到锁就报告后正常阻塞 lock，最终切换深色。
+- 未补锁：writer_blocked_before_reference=false，写者切深色后原断言失败，left Indexed(124)、right Indexed(29)。见 lock-fix/red.log。
+- 补锁后：writer_blocked_before_reference=true，原测试全部断言通过；guard 释放后 writer_completed=true，并再次检查全局字符串颜色已变为深色 Indexed(29)。见 lock-fix/green.log。
+
+这验证了现有全局存储的互斥：写者在整个读取和断言期间不能插入，读者结束后仍正常完成。受控探针只在独立副本；工作树仅新增五个 guard 和两处主题设置，共七行测试代码。调度脚本为 lock-fix/schedule.py，拥有的源码补丁为 lock-fix/owned.patch。
+
+### 验证、提交和所有权
+
+- 指定命令 `cargo nextest run -E 'test(/^ui::/)'`：891 通过、0 失败；754 跳过包含过滤掉的其他命名空间和原有忽略，并非新增 ignore。
+- cargo test 默认多线程全量：1536 通过、0 失败；20 个单元测试、89 个集成测试为原有忽略。
+- cargo clippy --all-targets、cargo build --release：退出 0，有既有警告；没有安装。
+- 三个修改文件的 rustfmt --check、暂存补丁 diff --check：通过。
+
+检查使用共享工作树和独占 target，先清理该 target 的 agents 包产物，避免副本与工作树复用错误的测试二进制。命令和退出码见 lock-fix/validation.json，完整日志为 lock-fix/nextest-ui.log、cargo-test.log、clippy.log、release.log；计数解析为 lock-fix/validation-summary.json。
+
+最终修复提交：b5b05a3f72e81c25bb064944798434bd9d98ee63（test(agents): guard theme-dependent assertions with shared lock）。通过 git apply --cached 仅暂存 lock-fix/owned.patch 中自己的 hunk；提交为三个测试文件、七行新增。去掉这七行后，三个文件与编辑前保存的工作树内容逐字相同，tool_detail.rs 中其他会话的格式调整完整保留在未暂存区；校验结果为 lock-fix/ownership.json。没有提交其他会话的 hunk。
