@@ -39,7 +39,7 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
         r#"{
         "config":{"grouping":"project"},
         "state":{"usage_view":"compact","usage":{"weekly":{
-            "claude":{"used_percent":21,"resets_at":"2026-10-23T15:59:59Z","reset_credits":1},
+            "claude":{"used_percent":21,"resets_at":"2026-10-23T15:59:59.837Z","reset_credits":1},
             "codex":{"used_percent":16,"resets_at":"2026-10-25T08:32:50Z","reset_credits":2}
         }}}
     }"#,
@@ -71,8 +71,8 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
         crate::state::UsageView::Detailed
     );
     let detailed = draw(&mut app, 200);
-    let claude_reset: chrono::DateTime<chrono::Utc> = "2026-10-23T15:59:59Z".parse().unwrap();
-    let codex_reset: chrono::DateTime<chrono::Utc> = "2026-10-25T08:32:50Z".parse().unwrap();
+    let claude_reset: chrono::DateTime<chrono::Utc> = "2026-10-23T16:00:00Z".parse().unwrap();
+    let codex_reset: chrono::DateTime<chrono::Utc> = "2026-10-25T08:33:00Z".parse().unwrap();
     let expected = format!(
         "Weekly Claude 79% left until {}, 1 reset · Codex 84% left until {}, 2 resets",
         claude_reset

@@ -6,7 +6,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     let initial = serde_json::json!({
         "config": {"grouping":"project"},
         "state": {"usage_view":"compact", "usage":{"weekly":{
-            "claude":{"used_percent":21,"resets_at":"2026-10-23T15:59:59Z","reset_credits":1},
+            "claude":{"used_percent":21,"resets_at":"2026-10-23T15:59:59.837Z","reset_credits":1},
             "codex":{"used_percent":16,"resets_at":"2026-10-25T08:32:50Z","reset_credits":2}
         }}}
     });
@@ -33,6 +33,19 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
             .is_some_and(|line| line.contains("Weekly ") && line.contains("until"))
     });
     let detailed = capture.lines().next().unwrap().to_owned();
+    for (name, reset) in [
+        ("Claude", "2026-10-23T16:00:00Z"),
+        ("Codex", "2026-10-25T08:33:00Z"),
+    ] {
+        let reset = reset.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+        let time = reset.with_timezone(&chrono::Local).format("%a %H:%M");
+        let percent = if name == "Claude" { 79 } else { 84 };
+        assert!(
+            detailed.contains(&format!("{name} {percent}% left until {time}")),
+            "{detailed}"
+        );
+    }
+
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
     assert_eq!(saved["state"]["usage_view"], "detailed");
