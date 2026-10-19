@@ -53,7 +53,7 @@ fn fixture(long: bool) -> (View, DateTime<Utc>) {
     }
     view.set_log(events);
     view.select_log_event(Some(1));
-    view.active_panel = Panel::LogDetail;
+    view.active_panel = Panel::Output;
     (view, now)
 }
 
@@ -146,10 +146,11 @@ fn log_scroll_keyboard_uses_list_bindings_inside_detail() {
     view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
     assert_eq!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    assert_eq!(view.log_selected, Some(0));
-    panel(&view, now);
+    assert_eq!(view.log_selected, Some(1));
+    assert_eq!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
     assert_eq!(view.log_selected, Some(1));
+    assert_ne!(panel(&view, now), initial);
 }
 
 fn tool_fixture() -> (View, DateTime<Utc>) {
@@ -506,15 +507,17 @@ fn log_scroll_wheel_reversing_at_title_does_not_pause() {
 }
 
 #[test]
-fn log_detail_focus_toggles_log_sort() {
+fn log_sort_key_only_changes_the_active_log_list() {
     let (mut view, _) = fixture(false);
-    assert!(view.active_panel == Panel::LogDetail);
+    assert!(view.active_panel == Panel::Output);
     let action = view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-    assert_eq!(view.log_sort, LogSort::Duration);
-    assert!(matches!(
-        action,
+    assert_eq!(action, None);
+    assert_eq!(view.log_sort, LogSort::Time);
+    view.set_active_panel(Panel::LogList);
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)),
         Some(Action::PersistSorting(LogSort::Duration))
-    ));
+    );
 }
 
 fn screen_rows(view: &View, width: u16, height: u16) -> Vec<String> {

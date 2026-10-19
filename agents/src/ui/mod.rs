@@ -243,13 +243,12 @@ enum ConfirmAction {
     },
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Panel {
     #[default]
     TaskList,
     LogList,
-    LogDetail,
-    Terminal,
+    Output,
     Details,
     Prompt,
 }
@@ -523,30 +522,29 @@ impl View {
         if self.confirm_dialog.is_some() || self.help {
             return;
         }
-        let prompt_focused = self.prompt_focused();
+        let details_active = self.active_panel == Panel::Details;
         if let Some(editor) = self
             .selector
             .as_mut()
-            .filter(|_| !prompt_focused)
+            .filter(|_| details_active)
             .and_then(Selector::active_editor)
         {
             editor.insert(text);
             return;
         }
-        if self.selector.is_some() && !self.prompt_focused() {
+        if self.selector.is_some() && details_active {
             return;
         }
         if !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
-            && self.title_editor().is_none()
             && self.question_paste(text)
         {
             return;
         }
-        if self.title_editor().is_some() {
+        if details_active && self.title_editor().is_some() {
             self.rename.insert(text);
-        } else if self.prompt_focused() {
+        } else if self.prompt_focused() && self.input_disabled().is_none() {
             self.input_box.paste(text);
         } else if self.log_detail_search.editing {
             self.log_detail_search.query.insert(text);
@@ -586,9 +584,7 @@ impl View {
     }
 
     fn prompt_focused(&self) -> bool {
-        self.active_panel == Panel::Prompt
-            && self.title_editor().is_none()
-            && self.confirm_dialog.is_none()
+        self.active_panel == Panel::Prompt && self.confirm_dialog.is_none()
     }
 
     pub(crate) fn prepare_prompt(&mut self) {

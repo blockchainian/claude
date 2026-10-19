@@ -195,7 +195,10 @@ mod tests {
                     });
                 }
                 2 => view.help = true,
-                3 => view.rename_target = Some(id),
+                3 => {
+                    view.rename_target = Some(id);
+                    view.set_active_panel(Panel::Details);
+                }
                 4 => view.log_search.editing = true,
                 5 => view.log_detail_search.editing = true,
                 6 => view.searching = true,

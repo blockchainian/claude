@@ -15,9 +15,9 @@ impl View {
     pub(super) fn move_panel(&mut self, direction: char) {
         let v = self.viewport.borrow();
         let bottom = if self.shown_terminal().is_some() {
-            (Panel::Terminal, v.terminal)
+            (Panel::Output, v.terminal)
         } else {
-            (Panel::LogDetail, v.log_detail)
+            (Panel::Output, v.log_detail)
         };
         let panels = [
             (Panel::TaskList, v.list),

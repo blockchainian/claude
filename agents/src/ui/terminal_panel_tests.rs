@@ -21,7 +21,7 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
         .unwrap()
         .check_ready(std::time::Instant::now(), |_| false);
     view.show_terminal(session_key("log"), screen.clone());
-    view.set_active_panel(Panel::Terminal);
+    view.set_active_panel(Panel::Output);
     log_screen(&view, 100, 45, now);
     (view, now, screen)
 }
@@ -33,8 +33,7 @@ fn showing_and_hiding_terminal_preserves_the_active_panel() {
         Panel::Details,
         Panel::LogList,
         Panel::Prompt,
-        Panel::LogDetail,
-        Panel::Terminal,
+        Panel::Output,
     ] {
         let (mut view, _) = log_fixture();
         view.set_active_panel(panel);
@@ -218,7 +217,7 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             terminal.y + 1,
         );
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.active_panel == Panel::Terminal);
+        assert!(view.active_panel == Panel::Output);
         assert_eq!(
             view.terminal_paste("text"),
             Some(Action::TerminalPaste("text".into()))
@@ -231,9 +230,9 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
         );
         log_screen(&view, 100, 45, now);
         let focus = view.active_panel;
-        assert!(focus != Panel::Terminal);
+        assert!(focus != Panel::Output);
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.active_panel == Panel::Terminal);
+        assert!(view.active_panel == Panel::Output);
         assert_eq!(
             view.terminal_paste("text"),
             Some(Action::TerminalPaste("text".into()))
@@ -246,7 +245,7 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             )),
             release
         );
-        assert!(view.active_panel == Panel::Terminal);
+        assert!(view.active_panel == Panel::Output);
     }
 }
 

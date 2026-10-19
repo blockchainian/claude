@@ -72,7 +72,7 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
     for panel in [
         Panel::TaskList,
         Panel::LogList,
-        Panel::LogDetail,
+        Panel::Output,
         Panel::Details,
     ] {
         let mut view = tasks();
@@ -186,7 +186,10 @@ fn escape_closes_overlays_without_consuming_history() {
         let second = view.selected_id().cloned();
         match mode {
             0 => view.help = true,
-            1 => view.rename_target = second.clone(),
+            1 => {
+                view.rename_target = second.clone();
+                view.set_active_panel(Panel::Details);
+            }
             2 => {
                 view.confirm_dialog = Some(ConfirmDialog {
                     action: ConfirmAction::Delete(second.clone().unwrap()),
@@ -202,6 +205,7 @@ fn escape_closes_overlays_without_consuming_history() {
         assert_eq!(view.selected_id(), second.as_ref());
         assert!(!view.help && view.rename_target.is_none() && view.confirm_dialog.is_none());
         assert!(!view.log_search.editing && !view.log_detail_search.editing);
+        view.set_active_panel(Panel::TaskList);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());
     }

@@ -425,6 +425,16 @@ fn draft_without_transcript_draws_and_accepts_paste_in_wide_layout() {
         let buffer = draw(&mut app, width);
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("New task"), "{rendered}");
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+        )));
+        key(&mut app, KeyCode::Char('h'));
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+        )));
+        key(&mut app, KeyCode::Char('l'));
         assert!(!app.handle_event(Event::Paste("draft".into())));
         let rendered = lines(&draw(&mut app, width)).join("\n");
         assert!(rendered.contains("draft"), "{rendered}");
@@ -753,6 +763,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let buffer = draw_size(&mut app, width, height);
         assert!(!lines(&buffer).join("\n").contains("must-not-enter-help"));
         key(&mut app, KeyCode::Esc);
+        click(&mut app, 1, 2);
         key(&mut app, KeyCode::Backspace);
         app.handle_event(Event::Paste("must-not-enter-confirmation".into()));
         let buffer = draw_size(&mut app, width, height);

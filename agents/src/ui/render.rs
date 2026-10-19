@@ -224,6 +224,7 @@ impl View {
         }
         if !self.help
             && self.confirm_dialog.is_none()
+            && self.active_panel == Panel::Details
             && let Some(editor) = self.title_editor()
         {
             let input = self.viewport.borrow().title_input;
@@ -236,7 +237,7 @@ impl View {
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
-            && !self.prompt_focused()
+            && self.active_panel == Panel::Details
             && let Some(selector) = &self.selector
             && let Some(editor) = selector.branch_editor()
         {
@@ -248,11 +249,16 @@ impl View {
         }
         if !self.help
             && self.confirm_dialog.is_none()
+            && self.active_panel == Panel::Prompt
             && let Some(question) = self.active_question()
         {
             return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
         }
-        if self.prompt_focused() && !self.help && self.confirm_dialog.is_none() {
+        if self.prompt_focused()
+            && self.input_disabled().is_none()
+            && !self.help
+            && self.active_question().is_none()
+        {
             return self.input_box.cursor(
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
                 &self.input_label(),
@@ -2105,6 +2111,7 @@ mod branch_input_tests {
             for text in ["", "feature/你好", "feature/".repeat(30).as_str()] {
                 let area = Rect::new(4, 2, width, 40);
                 let mut view = View::default();
+                view.set_active_panel(Panel::Details);
                 let mut editor = line_edit::LineEdit::default();
                 editor.insert(text);
                 view.selector = Some(Selector::new(
@@ -2149,6 +2156,7 @@ mod title_input_tests {
         let cwd = directory.path().join("项目");
         std::fs::create_dir(&cwd).unwrap();
         let mut view = View::default();
+        view.set_active_panel(Panel::Details);
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
             cwd,

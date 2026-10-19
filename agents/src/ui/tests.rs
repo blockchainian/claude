@@ -225,6 +225,7 @@ fn mouse_tabs_ignore_overlays() {
             }
             2 => {
                 key(&mut view, KeyCode::Char('r'));
+                view.set_active_panel(Panel::Details);
             }
             3 => {
                 key(&mut view, KeyCode::Backspace);
@@ -1299,6 +1300,7 @@ fn refresh_keeps_active_when_selected_task_becomes_inactive() {
                 view.select(view.rows.iter().position(|row| row.id == task.id).unwrap());
                 if renaming {
                     key(&mut view, KeyCode::Char('r'));
+                    view.set_active_panel(Panel::Details);
                     assert_eq!(view.rename_target.as_ref(), Some(&task.id));
                 }
                 task.status = SessionStatus::Inactive;
@@ -2163,9 +2165,11 @@ fn actions_and_hide_move_to_next_visible_row() {
     );
     assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
+    view.set_active_panel(Panel::Details);
     assert!(!screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(view.rename.text(), "Needs an answer");
     key(&mut view, KeyCode::Esc);
+    view.set_active_panel(Panel::TaskList);
 
     assert_eq!(
         key(&mut view, KeyCode::Char('g')),
@@ -2387,6 +2391,7 @@ fn details_name_a_missing_prompt() {
 fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
+    view.set_active_panel(Panel::Details);
     let rendered = screen(&view, 88, 16);
     assert!(!rendered.contains("Rename ❯"));
     let title = view.viewport.borrow().details_title;
@@ -2412,6 +2417,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
     let mut view = fixture();
     let hints = view.center_footer_hints().to_string();
     key(&mut view, KeyCode::Char('r'));
+    view.set_active_panel(Panel::Details);
     assert_eq!(
         view.center_footer_hints().to_string(),
         "esc back  enter rename"
@@ -2454,6 +2460,7 @@ fn rename_drops_inactive_removed_or_hidden_target() {
         .position(|(label, _)| *label == "Active")
         .unwrap();
     key(&mut view, KeyCode::Char('r'));
+    view.set_active_panel(Panel::Details);
     let mut rows = view.rows.clone();
     rows.iter_mut()
         .find(|s| s.id == session_key("42"))
@@ -2464,13 +2471,16 @@ fn rename_drops_inactive_removed_or_hidden_target() {
     assert!(!screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
     key(&mut view, KeyCode::Char('r'));
+    view.set_active_panel(Panel::Details);
     view.hide(&session_key("46"));
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
     let mut view = fixture();
     key(&mut view, KeyCode::Char('r'));
+    view.set_active_panel(Panel::Details);
     view.set_sessions(vec![], true);
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
+    view.set_active_panel(Panel::Details);
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
 }
 
@@ -2482,6 +2492,7 @@ fn live_center_rename_active() {
         false,
     );
     key(&mut view, KeyCode::Char('r'));
+    view.set_active_panel(Panel::Details);
     assert_eq!(
         screen(&view, 88, 16),
         include_str!("../../tests/ui_snapshots/live_center_rename_active.txt")
@@ -2536,6 +2547,7 @@ fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
         })
     );
     key(&mut view, KeyCode::Char('r'));
+    view.set_active_panel(Panel::Details);
     view.handle_paste(" discarded");
     key(&mut view, KeyCode::Esc);
     assert!(view.rename_target.is_none());
@@ -4838,7 +4850,8 @@ fn dashboard_screen_padding_is_one_cell() {
         let (mut view, now) = column_padding_fixture();
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
-        view.active_panel = Panel::Prompt;
+        view.rows[view.selected].process = None;
+        view.set_active_panel(Panel::Prompt);
         view.render_at(area, &mut buf, now);
         let layout = view.center_layout(area);
         assert_eq!(layout.list.x, 1);
@@ -6131,7 +6144,7 @@ mod log_search {
                 );
             } else {
                 key(&mut view, KeyCode::Esc);
-                view.active_panel = Panel::LogDetail;
+                view.active_panel = Panel::Output;
             }
             assert!(!view.log_search.active());
             assert_eq!(view.visible_log_event(), Some(&selected));
@@ -6360,6 +6373,7 @@ mod line_edit {
     fn rename_inserts_in_the_middle() {
         let mut view = fixture();
         key(&mut view, KeyCode::Char('r'));
+        view.set_active_panel(Panel::Details);
         let title = view.rename.text().to_owned();
         key(&mut view, KeyCode::Left);
         key(&mut view, KeyCode::Char('X'));
@@ -10189,6 +10203,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         );
         view.searching = false;
         key(&mut view, KeyCode::Char('r'));
+        view.set_active_panel(Panel::Details);
         let rename = view.center_layout(area);
         assert!(rename.search.is_empty());
         assert_eq!(rename.list, baseline);
@@ -10954,3 +10969,6 @@ mod overlay_tests;
 
 #[path = "window_navigation_tests.rs"]
 mod window_navigation_tests;
+
+#[path = "active_panel_tests.rs"]
+mod active_panel_tests;

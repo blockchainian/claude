@@ -13,7 +13,7 @@ fn window_navigation_all_directions_in_both_layouts() {
     use Panel::*;
     for width in [100, 200] {
         for terminal in [false, true] {
-            let bottom = if terminal { Terminal } else { LogDetail };
+            let bottom = Output;
             let expected = if width == 200 {
                 vec![
                     (TaskList, [TaskList, Prompt, TaskList, Details]),
@@ -52,7 +52,7 @@ fn window_navigation_all_directions_in_both_layouts() {
                     );
                     assert_eq!(view.prompt_focused(), target == Prompt);
                     assert_eq!((view.active_panel == Panel::LogList), target == LogList);
-                    assert_eq!((view.active_panel == Panel::LogDetail), target == LogDetail);
+                    assert_eq!((view.active_panel == Panel::Output), target == Output);
                 }
             }
         }
@@ -69,6 +69,7 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
                 key(&mut view, KeyCode::Char(c));
             }
         } else {
+            view.rows[view.selected].process = None;
             view.set_active_panel(Panel::Prompt);
             view.input_box.editor.insert("one two");
         }
@@ -93,7 +94,7 @@ fn window_navigation_terminal_ctrl_w_l_is_not_forwarded() {
             crate::session_terminal::TerminalScreen::new(10, 40),
         )),
     );
-    view.set_active_panel(Panel::Terminal);
+    view.set_active_panel(Panel::Output);
     // A horizontal arrangement checks that terminal input cannot consume navigation.
     {
         let v = &mut *view.viewport.borrow_mut();
@@ -113,7 +114,7 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
             crate::session_terminal::TerminalScreen::new(10, 40),
         )),
     );
-    view.set_active_panel(Panel::Terminal);
+    view.set_active_panel(Panel::Output);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
         None
@@ -130,6 +131,7 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
 #[test]
 fn window_navigation_release_and_second_ctrl_w_preserve_input() {
     let (mut view, _) = log_fixture();
+    view.rows[view.selected].process = None;
     view.set_active_panel(Panel::Prompt);
     view.input_box.editor.insert("one two three");
     let prefix = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
@@ -196,10 +198,10 @@ fn window_navigation_real_terminal_probe() {
         let (mut view, now) = log_fixture();
         view.rows[0].process = None;
         view.show_terminal(session_key("log"), terminal.screen.clone());
-        view.set_active_panel(Panel::Terminal);
+        view.set_active_panel(Panel::Output);
         log_screen(&view, width, 45, now);
         assert_eq!(chord(&mut view, 'l'), None);
-        assert!(view.active_panel == Panel::Terminal); // no panel to the right
+        assert!(view.active_panel == Panel::Output); // no panel to the right
         assert_eq!(chord(&mut view, 'k'), None);
         assert!(
             view.active_panel
@@ -210,7 +212,7 @@ fn window_navigation_real_terminal_probe() {
                 }
         );
         view.show_terminal(session_key("log"), terminal.screen.clone());
-        view.set_active_panel(Panel::Terminal);
+        view.set_active_panel(Panel::Output);
         // A real readline Ctrl-W deletes the last word before the following key.
         let command = format!("echo one{width} two");
         terminal.write(command.as_bytes()).unwrap();
@@ -258,4 +260,37 @@ fn task_and_editor_updates_preserve_the_active_panel() {
     assert!(view.active_panel == Panel::Details);
     view.close_selector();
     assert!(view.active_panel == Panel::Details);
+}
+
+#[test]
+fn output_panel_keeps_activation_when_terminal_contents_change() {
+    for width in [100, 200] {
+        let (mut view, now) = log_fixture();
+        view.set_active_panel(Panel::Output);
+        view.show_terminal(
+            session_key("log"),
+            std::sync::Arc::new(std::sync::Mutex::new(
+                crate::session_terminal::TerminalScreen::new(10, 40),
+            )),
+        );
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)),
+            Some(Action::TerminalInput(vec![6]))
+        );
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Some(Action::TerminalInput(vec![2]))
+        );
+        view.hide_terminal();
+        log_screen(&view, width, 45, now);
+        chord(&mut view, 'k');
+        assert_eq!(
+            view.active_panel,
+            if width == 200 {
+                Panel::Prompt
+            } else {
+                Panel::LogList
+            }
+        );
+    }
 }

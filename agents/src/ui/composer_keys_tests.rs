@@ -177,7 +177,21 @@ fn enhanced_control_codes_keep_clear_and_history_bindings() {
 #[test]
 fn history_search_receives_slash_before_panel_search_routing() {
     let mut view = View::new(Grouping::Project, false);
-    view.active_panel = Panel::Prompt;
+    let directory = tempfile::tempdir().unwrap();
+    let id = view.add_draft(DraftSetup {
+        provider: crate::providers::ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    view.drafts
+        .iter_mut()
+        .find(|draft| draft.id == id)
+        .unwrap()
+        .name = Some("History".into());
+    view.close_selector();
+    view.set_active_panel(Panel::Prompt);
     let mut entry = LineEdit::default();
     entry.set_text("path/to/file");
     view.prompt_history.borrow_mut().push(entry);

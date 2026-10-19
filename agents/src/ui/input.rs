@@ -288,10 +288,8 @@ impl View {
                         .any(|rect| rect.contains(position))
                 {
                     Panel::LogList
-                } else if viewport.terminal.contains(position) && self.terminal.is_some() {
-                    Panel::Terminal
                 } else if viewport.log_detail.contains(position) {
-                    Panel::LogDetail
+                    Panel::Output
                 } else if viewport.details.contains(position) {
                     Panel::Details
                 } else if viewport.prompt.contains(position) {
@@ -1109,6 +1107,7 @@ impl View {
     }
 
     /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
+    #[cfg(test)]
     pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) -> bool {
         self.scroll_content_rows(forward, over_log, row, 1, false)
     }
@@ -1172,6 +1171,65 @@ impl View {
                 consumed = true;
             }
             consumed
+        }
+    }
+
+    fn navigate_active_panel(&mut self, code: KeyCode) {
+        match self.active_panel {
+            Panel::TaskList => match code {
+                KeyCode::Up => self.move_selection(false),
+                KeyCode::Down => self.move_selection(true),
+                KeyCode::PageUp => self.page_selection(false),
+                KeyCode::PageDown => self.page_selection(true),
+                KeyCode::Home | KeyCode::End => {
+                    let indices = self.selectable_indices();
+                    let selected = if code == KeyCode::Home {
+                        indices.first()
+                    } else {
+                        indices.last()
+                    };
+                    self.select(selected.copied().unwrap_or(usize::MAX));
+                }
+                _ => unreachable!("list navigation code"),
+            },
+            Panel::LogList => self.navigate_log(code),
+            panel @ (Panel::Details | Panel::Output) => self.navigate_detail(panel, code),
+            Panel::Prompt => {}
+        }
+    }
+
+    fn navigate_detail(&mut self, panel: Panel, code: KeyCode) {
+        if panel == Panel::Output {
+            if self.shown_terminal().is_some() {
+                return;
+            }
+            self.prepare_log_detail_scroll();
+        }
+        let viewport = &mut *self.viewport.borrow_mut();
+        let page = if panel == Panel::Details {
+            viewport.details.height
+        } else {
+            viewport.log_text.area.height
+        };
+        let state = if panel == Panel::Details {
+            &mut viewport.details_scroll
+        } else {
+            &mut viewport.log_detail_state
+        };
+        let forward = matches!(code, KeyCode::Down | KeyCode::PageDown | KeyCode::End);
+        let row = state.content_top;
+        if matches!(code, KeyCode::Home | KeyCode::End) {
+            while state.scroll_window(forward, row) {}
+        } else {
+            let rows = if matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
+                usize::from(page.max(1))
+            } else {
+                1
+            };
+            state.scroll_rows(forward, row, rows);
+        }
+        if panel == Panel::Output {
+            viewport.log_detail_scroll = viewport.log_detail_state.position();
         }
     }
 
@@ -1319,7 +1377,7 @@ impl View {
         {
             return Some(Action::Quit);
         }
-        if self.title_editing() && self.selector.is_none() {
+        if self.active_panel == Panel::Details && self.title_editing() && self.selector.is_none() {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('c')
                     if key.code == KeyCode::Esc
@@ -1357,7 +1415,7 @@ impl View {
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
             && !matches!(
                 self.active_panel,
-                Panel::TaskList | Panel::LogList | Panel::LogDetail
+                Panel::TaskList | Panel::LogList | Panel::Output
             )
             && !self.prompt_focused()
             && self.title_editor().is_none()
@@ -1368,7 +1426,7 @@ impl View {
             return None;
         }
         if self.prompt_focused()
-            && self.title_editor().is_none()
+            && self.input_disabled().is_none()
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
@@ -1413,7 +1471,8 @@ impl View {
         let plain = !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
-        if self.confirm_dialog.is_none()
+        if self.active_panel == Panel::TaskList
+            && self.confirm_dialog.is_none()
             && !self.help
             && self.rename_target.is_none()
             && !self.log_search.editing
@@ -1587,7 +1646,7 @@ impl View {
 
                     self.prepare_log_search();
                 }
-                Panel::LogDetail => {
+                Panel::Output => {
                     self.log_detail_search.editing = true;
                     self.jump_detail_match();
                 }
@@ -1599,53 +1658,32 @@ impl View {
             self.jump_log_agent();
             return None;
         }
-        let navigation = super::navigation::list_navigation(key);
-        if let Some(code) = navigation
-            && !self.searching
-            && self.active_panel == Panel::LogDetail
-        {
-            match code {
-                KeyCode::Home | KeyCode::End => self.navigate_log(code),
-                _ => {
-                    let viewport = self.viewport.borrow();
-                    let row = viewport.log_detail.y + super::log::LOG_TOP;
-                    let steps = if matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
-                        viewport.log_text.area.height.max(1)
-                    } else {
-                        1
-                    };
-                    drop(viewport);
-                    let forward = matches!(code, KeyCode::Down | KeyCode::PageDown);
-                    if steps == 1 {
-                        self.scroll_content_row(forward, true, row);
-                    } else {
-                        self.scroll_content_rows(forward, true, row, usize::from(steps), false);
-                    }
-                }
-            }
+        if let Some(code) = super::navigation::list_navigation(key) {
+            self.navigate_active_panel(code);
             return None;
         }
-        if let Some(code) = navigation
-            && !self.searching
-            && (self.active_panel == Panel::LogList)
-        {
-            self.navigate_log(code);
+        if plain && key.code == KeyCode::Char('t') && self.active_panel == Panel::LogList {
+            self.set_log_sort(match self.log_sort {
+                LogSort::Time => LogSort::Duration,
+                LogSort::Duration => LogSort::Time,
+            });
+            return Some(Action::PersistSorting(self.log_sort));
+        }
+        // A panel that did not handle a key never borrows the task list's bindings.
+        if self.active_panel != Panel::TaskList {
             return None;
         }
-        if navigation.is_none() {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                return if key.code == KeyCode::Char('l') {
-                    self.activate()
-                } else {
-                    None
-                };
-            }
-            if !plain {
-                return None;
-            }
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return if key.code == KeyCode::Char('l') {
+                self.activate()
+            } else {
+                None
+            };
+        }
+        if !plain {
+            return None;
         }
         if self.selected_draft.is_some()
-            && plain
             && matches!(key.code, KeyCode::Char('o' | 'f' | 'a' | 'x' | 'r' | 'h'))
         {
             return Some(Action::Unsupported(match key.code {
@@ -1661,40 +1699,9 @@ impl View {
             self.confirm_draft_delete();
             return None;
         }
-        if plain
-            && key.code == KeyCode::Char('t')
-            && (matches!(self.active_panel, Panel::LogList | Panel::LogDetail)
-                || (self.active_panel == Panel::LogList))
-        {
-            self.set_log_sort(match self.log_sort {
-                LogSort::Time => LogSort::Duration,
-                LogSort::Duration => LogSort::Time,
-            });
-            return Some(Action::PersistSorting(self.log_sort));
-        }
-        match navigation.unwrap_or(key.code) {
-            KeyCode::Up => self.move_selection(false),
-            KeyCode::Down => self.move_selection(true),
-            KeyCode::PageUp => self.page_selection(false),
-            KeyCode::PageDown => self.page_selection(true),
-            KeyCode::Home => {
-                let selected = self
-                    .selectable_indices()
-                    .first()
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                self.select(selected);
-            }
-            KeyCode::End => {
-                let selected = self
-                    .selectable_indices()
-                    .last()
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                self.select(selected);
-            }
+        match key.code {
             KeyCode::Enter | KeyCode::Right => return self.activate(),
-            KeyCode::Esc if self.active_panel == Panel::TaskList => self.select_previous_task(),
+            KeyCode::Esc => self.select_previous_task(),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();
                 self.viewport.borrow_mut().scroll = 0;

@@ -203,6 +203,7 @@ fn draft_title_rule_places_directory_left_and_branch_right() {
             effort: None,
             branch: "feature/border".into(),
         });
+        view.set_active_panel(Panel::Details);
         view.handle_paste("Border task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();

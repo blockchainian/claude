@@ -96,7 +96,7 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
     assert_eq!(view.rename.text(), "剪贴板贴🦀后");
     assert_eq!(view.rename.cursor(), "剪贴板贴🦀".len());
 
-    for panel in [Panel::TaskList, Panel::LogList, Panel::LogDetail] {
+    for panel in [Panel::TaskList, Panel::LogList, Panel::Output] {
         let mut view = fixture();
         view.active_panel = panel;
         if view.active_panel == Panel::Prompt {

@@ -83,7 +83,7 @@ fn log_enter_selects_incoming_child_by_path() {
 
 #[test]
 fn log_agent_jump_requires_list_focus() {
-    for focus in [Panel::TaskList, Panel::LogDetail, Panel::Prompt] {
+    for focus in [Panel::TaskList, Panel::Output, Panel::Prompt] {
         let (_dir, mut view) = collaboration_view();
         let event = view
             .log

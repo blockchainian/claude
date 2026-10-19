@@ -91,11 +91,10 @@ impl View {
     }
 
     pub(super) fn question_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
-        if self.help
+        if self.active_panel != Panel::Prompt
+            || self.help
             || self.confirm_dialog.is_some()
-            || self.selector.is_some()
             || self.searching
-            || self.rename_target.is_some()
             || self.log_search.editing
             || self.log_detail_search.editing
         {
@@ -178,6 +177,9 @@ impl View {
     }
 
     pub(super) fn question_paste(&mut self, text: &str) -> bool {
+        if self.active_panel != Panel::Prompt {
+            return false;
+        }
         let Some(id) = self.selected_id().cloned() else {
             return false;
         };
@@ -308,6 +310,7 @@ mod tests {
         });
         let mut view = View::default();
         view.set_sessions(vec![row], false);
+        view.set_active_panel(Panel::Prompt);
         view
     }
 
@@ -371,9 +374,7 @@ mod tests {
         assert!(view.active_question().is_some());
         view.rename_target = view.selected_id().cloned();
         view.rename.set_text("你好");
-        if view.active_panel == Panel::Prompt {
-            view.active_panel = Panel::TaskList;
-        }
+        view.set_active_panel(Panel::Details);
         let area = Rect::new(0, 0, 160, 40);
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer);
@@ -384,6 +385,26 @@ mod tests {
                 .to_string()
                 .contains("enter rename")
         );
+    }
+
+    #[test]
+    fn inactive_title_does_not_block_the_active_question() {
+        let mut view = fixture();
+        view.rename_target = view.selected_id().cloned();
+        view.rename.set_text("pending title");
+        view.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
+        let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+        view.handle_paste(text);
+        let Some(Action::AnswerQuestions { answer, .. }) =
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        else {
+            panic!("active question did not receive the answer");
+        };
+        assert_eq!(
+            answer.answers["Probe single choice?"].other.as_deref(),
+            Some(text)
+        );
+        assert_eq!(view.rename.text(), "pending title");
     }
 
     #[test]

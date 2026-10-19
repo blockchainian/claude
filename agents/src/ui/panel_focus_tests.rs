@@ -104,6 +104,7 @@ fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
 fn panel_focus_slash_does_not_type_into_other_editors() {
     for panel in 1..5 {
         let (mut view, _) = log_fixture();
+        view.rows[view.selected].process = None;
         view.active_panel = Panel::Prompt;
         click_panel(&mut view, panel);
         key(&mut view, KeyCode::Char('/'));
@@ -138,7 +139,7 @@ fn panel_click_log_list_takes_prompt_focus_and_opens_search() {
     key(&mut view, KeyCode::Char('/'));
     assert!(view.log_search.editing);
     assert!(view.active_panel == Panel::LogList);
-    assert!(!(view.active_panel == Panel::LogDetail));
+    assert!(!(view.active_panel == Panel::Output));
     assert!(!view.prompt_focused());
     assert!(view.input_box.editor.is_empty());
 }
@@ -150,7 +151,7 @@ fn panel_click_log_detail_takes_prompt_focus_and_opens_search() {
     click_panel(&mut view, 2);
     key(&mut view, KeyCode::Char('/'));
     assert!(view.log_detail_search.editing);
-    assert!(view.active_panel == Panel::LogDetail);
+    assert!(view.active_panel == Panel::Output);
     assert!(!(view.active_panel == Panel::LogList));
     assert!(!view.prompt_focused());
     assert!(view.input_box.editor.is_empty());
@@ -161,11 +162,11 @@ fn panel_click_non_input_takes_prompt_focus() {
     for panel in [0, 3] {
         let (mut view, _) = log_fixture();
         view.active_panel = Panel::LogList;
-        view.active_panel = Panel::LogDetail;
+        view.active_panel = Panel::Output;
         click_panel(&mut view, panel);
         assert!(!view.prompt_focused(), "panel {panel}");
         assert!(!(view.active_panel == Panel::LogList), "panel {panel}");
-        assert!(!(view.active_panel == Panel::LogDetail), "panel {panel}");
+        assert!(!(view.active_panel == Panel::Output), "panel {panel}");
     }
 }
 
@@ -177,7 +178,7 @@ fn panel_click_prompt_regains_focus_and_types_slash() {
     click_panel(&mut view, 4);
     assert!(view.prompt_focused());
     assert!(!(view.active_panel == Panel::LogList));
-    assert!(!(view.active_panel == Panel::LogDetail));
+    assert!(!(view.active_panel == Panel::Output));
     key(&mut view, KeyCode::Char('/'));
     assert_eq!(view.input_box.editor.text(), "/");
     assert_eq!(editing(&view), [false; 3]);

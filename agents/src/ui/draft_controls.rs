@@ -726,7 +726,7 @@ impl View {
     /// Handles typing, navigation and choice in the details selector.
     pub(super) fn selector_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
         // The selector has the keys only after a click in the details panel or on a border field.
-        if self.prompt_focused() || self.active_panel != Panel::Details {
+        if self.active_panel != Panel::Details {
             return None;
         }
         let selector = self.selector.as_mut()?;
@@ -981,6 +981,7 @@ mod tests {
 
     fn prompt_step(view: &mut View) {
         let id = view.selected_draft.unwrap();
+        view.set_active_panel(Panel::Details);
         view.open_name(id);
         assert!(view.name_target.is_some());
         assert_eq!(
@@ -1051,6 +1052,7 @@ mod tests {
         assert_eq!(view.drafts.len(), 1);
         assert!(view.selector.is_none());
         assert_eq!(view.input_box.editor.text(), "unfinished task");
+        view.set_active_panel(Panel::Prompt);
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(view.confirm_dialog.is_some());
     }
@@ -1147,6 +1149,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let repository = repository(directory.path());
         let mut view = draft_view(&repository, directory.path());
+        view.set_active_panel(Panel::Details);
         let area = Rect::new(0, 0, 160, 16);
         let mut states = Vec::new();
         states.push(panel_rows(&view, area).join("\n"));

@@ -590,6 +590,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
+        view.set_active_panel(Panel::Details);
         view.handle_paste("probe");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
@@ -640,6 +641,7 @@ mod persistence_flow_tests {
             effort: None,
             branch: String::new(),
         });
+        view.set_active_panel(Panel::Details);
         view.handle_paste("Persistent task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view
@@ -712,6 +714,7 @@ mod recovery_tests {
             effort: None,
             branch: String::new(),
         });
+        view.set_active_panel(Panel::Details);
         view.handle_paste(name);
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
@@ -801,10 +804,7 @@ mod recovery_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut view = View::default();
         named(&mut view, dir.path(), "Delete me");
-        if view.active_panel == Panel::Prompt {
-            view.active_panel = Panel::TaskList;
-        }
-        view.active_panel = Panel::TaskList;
+        view.set_active_panel(Panel::TaskList);
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
             None
@@ -912,6 +912,7 @@ mod confirmation_attention_tests {
             effort: None,
             branch: String::new(),
         });
+        view.set_active_panel(Panel::Details);
         view.handle_paste("Keep this draft");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
@@ -947,6 +948,7 @@ mod confirmation_attention_tests {
             effort: None,
             branch: String::new(),
         });
+        view.set_active_panel(Panel::Details);
         view.handle_paste("Delete this draft");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();

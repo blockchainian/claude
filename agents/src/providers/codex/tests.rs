@@ -280,6 +280,10 @@ fn capabilities_gate_codex_actions_in_the_view() {
         view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
         None
     );
+    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    view.render(area, &mut ratatui::buffer::Buffer::empty(area));
+    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         Some(Action::Rename {
@@ -287,6 +291,8 @@ fn capabilities_gate_codex_actions_in_the_view() {
             name: session.display_title().into()
         })
     );
+    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
         None

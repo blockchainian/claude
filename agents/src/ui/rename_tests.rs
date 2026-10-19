@@ -59,6 +59,7 @@ fn manager_child_rename_opens_dialog_and_emits_action() {
         None
     );
     assert_eq!(view.rename_target.as_ref(), Some(&id));
+    view.set_active_panel(Panel::Details);
     view.rename.set_text("  Manager child renamed  ");
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -242,6 +243,7 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
         effort: None,
         branch: String::new(),
     });
+    view.set_active_panel(Panel::Details);
     assert_eq!(view.name_target, Some(id));
     assert!(view.selector.is_none());
     assert!(view.rename.is_empty());
@@ -279,6 +281,7 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
         effort: None,
         branch: String::new(),
     });
+    view.set_active_panel(Panel::Details);
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(view.name_target.is_none());
     assert_eq!(view.drafts.len(), 1);
@@ -305,8 +308,10 @@ fn failed_draft_keeps_its_title_editor() {
 fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
     let (_directory, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
     assert!(view.active_panel == Panel::TaskList);
-    for code in [KeyCode::Char('r'), KeyCode::Esc, KeyCode::Char('/')] {
-        view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
-    }
+    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    view.set_active_panel(Panel::Details);
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    view.set_active_panel(Panel::TaskList);
+    view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
     assert!(view.searching);
 }

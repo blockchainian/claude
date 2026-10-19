@@ -91,6 +91,7 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
 /// Starts after repository selection, names the task and focuses its prompt.
 fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::model::DraftId {
     let id = view.add_draft(setup(cwd));
+    view.set_active_panel(Panel::Details);
     view.open_name(id);
     view.set_active_panel(Panel::Details);
     view.handle_paste(name);
@@ -125,7 +126,9 @@ fn acknowledged_job_refresh_drops_its_draft_and_selects_real_session() {
     });
     arrived.updated_at = Utc::now();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     let selected = view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     assert_eq!(view.drafts.len(), 1);
     view.draft_created(selected, Ok("e772d00b".into()));
     let mut older = arrived.clone();
@@ -211,6 +214,7 @@ fn prompt_model_label_does_not_become_a_metadata_picker_target() {
 fn rendered_draft_model_click_opens_and_single_click_applies_provider_choice() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     let area = Rect::new(0, 0, 180, 52);
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
@@ -525,6 +529,7 @@ fn assert_field_click_cancels(field: Field) {
                     .unwrap()
                     .name = None;
                 view.open_name(id);
+                view.set_active_panel(Panel::Details);
             }
             let draft = view.selected_draft().unwrap();
             let choices = (
@@ -617,6 +622,7 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
             let (directory, mut view) = git_draft();
             view.discard_selected_draft();
             view.add_draft(setup(directory.path()));
+            view.set_active_panel(Panel::Details);
             view.handle_paste("branch task");
             assert_eq!(key(&mut view, KeyCode::Enter), None);
             assert!(!view.selected_draft().unwrap().repository_confirmed);
@@ -814,6 +820,7 @@ fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
     let id = named_draft(&mut view, directory.path(), "original");
     for right_click in [false, true] {
         view.open_name(id);
+        view.set_active_panel(Panel::Details);
         assert_eq!(view.rename.text(), "original");
         view.handle_paste(" changed");
         if right_click {
@@ -838,14 +845,7 @@ fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
             Some("original")
         );
         assert!(view.name_target.is_none());
-        assert!(
-            view.active_panel
-                == if right_click {
-                    Panel::Details
-                } else {
-                    Panel::Prompt
-                }
-        );
+        assert!(view.active_panel == Panel::Details);
     }
 }
 
@@ -855,6 +855,7 @@ fn saving_existing_name_is_a_side_edit_and_does_not_create() {
     view.handle_paste("half prompt");
     let id = view.selected_draft.unwrap();
     view.open_name(id);
+    view.set_active_panel(Panel::Details);
     view.rename.set_text("renamed");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(
@@ -862,6 +863,7 @@ fn saving_existing_name_is_a_side_edit_and_does_not_create() {
         Some("renamed")
     );
     assert!(view.selector.is_none());
+    view.set_active_panel(Panel::Prompt);
     assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
 }
@@ -902,6 +904,7 @@ fn frozen_draft_ignores_second_submit_and_controls() {
 fn unnamed_repository_side_edit_keeps_typed_name_and_non_git_branch_is_noop() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.handle_paste("half name");
     view.open_field(Field::Branch);
     assert!(view.selector.is_none());
@@ -1112,6 +1115,7 @@ fn repository_pick_before_naming_skips_repository_wizard_after_name() {
     let (directory, mut view) = git_draft();
     view.discard_selected_draft();
     let id = view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.handle_paste("name in progress");
     view.open_field(Field::Directory);
     let selected = view.selector.as_ref().unwrap().selected;
@@ -1150,6 +1154,7 @@ fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
         for (x, y) in [(0, 0), (2, 5), (80, 5), (158, 38)] {
             let (directory, mut view) = fixture();
             let id = view.add_draft(setup(directory.path()));
+            view.set_active_panel(Panel::Details);
             view.handle_paste("  Saved on blur  ");
             render(&view);
             assert!(!view.viewport.borrow().title_input.contains((x, y).into()));
@@ -1207,6 +1212,7 @@ fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
 fn draft_name_click_inside_and_empty_blur_do_not_accept_name() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.handle_paste("   ");
     render(&view);
     click(&mut view, 0, 0);
@@ -1225,6 +1231,7 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
         let (directory, mut view) = fixture();
         let mut arrived = view.rows[0].clone();
         let id = view.add_draft(setup(directory.path()));
+        view.set_active_panel(Panel::Details);
         assert!(view.stored_drafts().is_empty());
         view.handle_paste("Persistent name");
         render(&view);
@@ -1271,6 +1278,7 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
 fn draft_effort_choices_are_unique_and_select_the_effective_value() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     for effort in [None, Some("high")] {
         view.drafts[0].setup.effort = effort.map(str::to_owned);
         view.open_field(Field::Effort);
@@ -1295,6 +1303,7 @@ fn draft_model_choices_are_unique_and_select_the_effective_value() {
     .unwrap();
     let provider = crate::providers::claude::ClaudeProvider::new(config);
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.set_draft_defaults(
         directory.path(),
         provider.task_defaults(directory.path()).unwrap().unwrap(),
@@ -1333,6 +1342,7 @@ fn draft_model_choices_are_unique_and_select_the_effective_value() {
 fn selecting_draft_default_values_clears_overrides() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.drafts[0].setup.model = Some("claude-sonnet-5-5".into());
     view.drafts[0].setup.effort = Some("high".into());
     for (field, default) in [(Field::Model, "claude-opus-5-5"), (Field::Effort, "medium")] {
@@ -1398,6 +1408,7 @@ fn session_choices_select_reported_values_and_dispatch_only_changes() {
 fn draft_defaults_are_visible_clickable_and_can_be_selected_without_an_override() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     let area = Rect::new(0, 0, 180, 52);
     for (field, expected) in [(Field::Model, "Opus 5.5"), (Field::Effort, "medium")] {
         let mut buffer = Buffer::empty(area);
@@ -1444,6 +1455,7 @@ fn draft_configured_defaults_survive_clearing_overrides() {
     setup.model = Some("claude-fable-5-1".into());
     setup.effort = Some("xhigh".into());
     view.add_draft(setup);
+    view.set_active_panel(Panel::Details);
     for field in [Field::Model, Field::Effort] {
         view.open_field(field);
         view.set_active_panel(Panel::Details);
@@ -1525,6 +1537,7 @@ fn assert_name_field_click(fields: &[Field], named: bool) {
             view.add_draft(setup(directory.path()))
         };
         view.open_name(id);
+        view.set_active_panel(Panel::Details);
         view.rename.set_text("Clicked name");
         render(&view);
         click_field(&mut view, field);
@@ -1559,6 +1572,7 @@ fn draft_empty_name_click_prompt_routes_keys_to_prompt() {
 fn assert_name_prompt_click(name: &str) {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.handle_paste(name);
     render(&view);
     let prompt = view.viewport.borrow().prompt;
@@ -1575,7 +1589,7 @@ fn assert_name_prompt_click(name: &str) {
     if name.is_empty() {
         key(&mut view, KeyCode::Enter);
         assert!(view.name_target.is_some());
-        assert!(!view.prompt_focused());
+        assert!(view.active_panel == Panel::Prompt);
     }
 }
 
@@ -1585,6 +1599,7 @@ fn draft_name_click_other_task_keeps_click() {
     view.grouping = Grouping::Status;
     let session = view.rows[0].id.clone();
     let id = view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.handle_paste("Leave draft");
     render(&view);
     let viewport = view.viewport.borrow();
@@ -1611,6 +1626,7 @@ fn draft_name_right_click_outside_cancels_rename() {
     let (_directory, mut view) = git_draft();
     let id = view.selected_draft.unwrap();
     view.open_name(id);
+    view.set_active_panel(Panel::Details);
     view.rename.set_text("Discard rename");
     render(&view);
     for kind in [

@@ -44,7 +44,7 @@ impl View {
 
     fn terminal_focused(&self) -> bool {
         self.confirm_dialog.is_none()
-            && self.active_panel == Panel::Terminal
+            && self.active_panel == Panel::Output
             && self.shown_terminal().is_some()
     }
 
@@ -85,7 +85,7 @@ impl View {
             mouse.kind,
             MouseEventKind::Down(MouseButton::Left | MouseButton::Middle)
         ) {
-            self.set_active_panel(Panel::Terminal);
+            self.set_active_panel(Panel::Output);
         }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();
