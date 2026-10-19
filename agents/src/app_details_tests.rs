@@ -110,9 +110,11 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
             }
             let pr_x = left;
             let folder_x = (left..right)
-                .find(|&x| cell_text(buffer, x, status_y) == "/")
+                .rfind(|&x| cell_text(buffer, x, status_y) == "p")
                 .unwrap();
-            assert!(row_text(buffer, status_y, folder_x, right).contains('/'));
+            let folder = row_text(buffer, status_y, folder_x, right);
+            let folder = folder.trim_end_matches(['╶', ' ']);
+            assert!("project".starts_with(folder.trim_end_matches('…')), "{width}: {folder}");
             assert_eq!(row_text(buffer, status_y, pr_x, pr_x + 3), "#13");
             assert!(
                 buffer[(folder_x, status_y)]

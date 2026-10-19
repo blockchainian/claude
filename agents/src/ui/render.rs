@@ -355,9 +355,9 @@ impl View {
             .provider_names
             .iter()
             .filter_map(|(provider, name)| {
-                self.weekly_usage.get(provider).map(|usage| {
-                    super::weekly_usage::provider_text(name, usage, self.usage_view)
-                })
+                self.weekly_usage
+                    .get(provider)
+                    .map(|usage| super::weekly_usage::provider_text(name, usage, self.usage_view))
             })
             .collect::<Vec<_>>();
         if !usage.is_empty() && !tabs.is_empty() {
@@ -1673,7 +1673,7 @@ mod wrapped_path_tests {
             20,
             true,
         );
-        assert_eq!(lines[0].to_string(), "/p…/w…/r…/report.md");
+        assert_eq!(lines[0].to_string(), "/…/reports/report.md");
         assert!(lines[0].spans.iter().all(|span| {
             span.style
                 .add_modifier
@@ -1732,7 +1732,7 @@ mod wrapped_path_tests {
             .collect();
         assert_eq!(
             rows.iter()
-                .filter(|row| row.contains("/p…/t…/c…/-…/0…/s…/b…/report.md"))
+                .filter(|row| row.contains("/…/background-research/report.md"))
                 .count(),
             2
         );
@@ -1748,7 +1748,7 @@ mod wrapped_path_tests {
             plain,
             [
                 "报告已写到",
-                "/p…/t…/c…/-…/0…/s…/b…/report.md，并已发",
+                "/…/background-research/report.md，并已发",
                 "给 team-lead。",
             ]
         );

@@ -1,3 +1,6 @@
+#[path = "support/terminal_path_display.rs"]
+mod terminal_path_display;
+
 #[path = "support/terminal_weekly_usage.rs"]
 mod terminal_weekly_usage;
 

@@ -55,7 +55,13 @@ impl View {
                     .directory()
                     .map_or_else(
                         || format_directory_display(Path::new(""), None),
-                        |path| format_directory_display(path, None),
+                        |path| {
+                            super::line_truncation::abbreviate_path(
+                                &path.to_string_lossy(),
+                                usize::MAX,
+                                None,
+                            )
+                        },
                     ),
                 Grouping::Status => self.rows[self.group_index(index).unwrap()]
                     .status

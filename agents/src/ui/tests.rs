@@ -2857,7 +2857,7 @@ fn details_folder_and_pr_use_rule_styles_and_keep_links() {
         assert_eq!(folder.y, y);
         assert_eq!(pr.y, y);
         assert!(pr.right() < folder.x);
-        for (offset, symbol) in "/tmp/project".chars().enumerate() {
+        for (offset, symbol) in "project".chars().enumerate() {
             let cell = &buf[(folder.x + offset as u16, y)];
             assert_eq!(cell.symbol(), symbol.to_string());
             assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
@@ -5884,7 +5884,7 @@ fn details_status_uses_the_shared_home_directory_display() {
     assert_eq!(rect.y, viewport.details.bottom());
     assert_eq!(path, &directory);
     let rule = rendered.lines().nth(rect.y as usize).unwrap();
-    assert!(rule.contains("~/Code/task"), "{rule}");
+    assert!(rule.contains("task"), "{rule}");
     assert!(!rule.contains("/Users/"));
 }
 
@@ -5909,7 +5909,7 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
         })
         .find(|row| row.trim_start().starts_with('/'))
         .unwrap();
-    assert_eq!(heading.trim(), "/U…/v…/C…/.w…/agents-panel");
+    assert_eq!(heading.trim(), "/…/.worktrees/agents-panel");
 }
 
 mod log_path_abbrev {
@@ -5936,7 +5936,7 @@ mod log_path_abbrev {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(row.contains("Read ~/U…/w…/project/main.rs"), "{row}");
+        assert!(row.contains("Read ~/…/project/main.rs"), "{row}");
     }
 }
 

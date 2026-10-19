@@ -11,6 +11,6 @@
                                             │
                                             │
                                             │
-                                            ├────────────── ask to find  ─ /t…/project╶─
+                                            ├───────────── Task to find  ───── project╶─
  Task to find ❯
  esc back  enter rename

@@ -44,11 +44,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                 (folder.x..folder.right())
                     .map(|x| visible(&buf[(x, folder.y)]))
                     .collect::<String>(),
-                match width {
-                    80 => "/t…/proj…",
-                    150 => "/t…/pro…",
-                    _ => "/tmp/project",
-                }
+                "project"
             );
             let mut reference = ratatui::buffer::Cell::default();
             reference.set_style(style::time_style());

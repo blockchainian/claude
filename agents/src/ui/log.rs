@@ -1285,10 +1285,8 @@ fn display_paths(event: &Event, cwd: &std::path::Path) -> (String, Vec<std::ops:
     let mut end = 0;
     for range in &tool_paths(event, cwd) {
         text.push_str(&collapse_whitespace(&event.body[end..range.start]));
-        let path = super::formatting::format_directory_display(
-            std::path::Path::new(&event.body[range.clone()]),
-            None,
-        );
+        let path =
+            super::line_truncation::abbreviate_path(&event.body[range.clone()], usize::MAX, None);
         ranges.push(text.len()..text.len() + path.len());
         text.push_str(&path);
         end = range.end;
@@ -1803,7 +1801,7 @@ pub(super) mod log_markdown {
                 "Report: /private/tmp/claude-501/report.md 1. done",
                 35,
             );
-            assert_eq!(body_text(&buffer), "Report: /p…/t…/c…/report.md 1. done");
+            assert_eq!(body_text(&buffer), "       Report: /…/report.md 1. done");
         }
     }
 
@@ -1833,7 +1831,7 @@ pub(super) mod log_markdown {
                 images: Vec::new(),
                 calls: Vec::new(),
             };
-            let fitted = fitted_body_line(&event, 30, dir.path());
+            let fitted = fitted_body_line(&event, 40, dir.path());
             let links = if is_prose(&kind) {
                 super::super::links::text_links(&fitted.source, dir.path(), &[])
             } else {
@@ -1896,18 +1894,18 @@ pub(super) mod log_markdown {
     }
 
     #[test]
-    fn merged_tool_row_abbreviates_every_path() {
+    fn merged_tool_row_preserves_the_left_path_first() {
         assert_eq!(
             merged_tool_row(70),
-            "Edit /o…/w…/a…/s…/ui/tests.rs, Read /o…/w…/a…/s…/p…/codex/tests.rs"
+            "Edit /opt/work/agents/src/ui/tests.rs, Read /…/codex/tests.rs"
         );
     }
 
     #[test]
-    fn merged_tool_row_keeps_every_file_name_whole() {
+    fn merged_tool_row_shrinks_the_right_name_before_the_left_path() {
         assert_eq!(
             merged_tool_row(40),
-            "Edit /o…/w…/a…/s…/ui/tests.rs, Read /o…/w…/a…/s…/p…/c…/tests.rs"
+            "Edit /…/agents/src/ui/tests.rs, Read …"
         );
     }
 
@@ -2013,7 +2011,9 @@ mod panel_detail_tests {
                     .rows
                     .iter()
                     .enumerate()
-                    .position(|(row, (source, _))| *source == id && !layout.lines[row].to_string().trim().is_empty())
+                    .position(|(row, (source, _))| {
+                        *source == id && !layout.lines[row].to_string().trim().is_empty()
+                    })
                     .unwrap();
                 assert_eq!(layout.lines[row + 1].to_string(), "");
                 assert!(layout.rows[row + 1].1.is_empty());

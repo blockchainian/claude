@@ -68,30 +68,16 @@ pub(super) fn tail_lines(path: &Path, count: usize) -> Vec<String> {
 pub(super) fn format_directory_display(path: &Path, width: Option<usize>) -> String {
     let directory = if path.as_os_str().is_empty() {
         "No directory".to_owned()
-    } else if let Some(home) = std::env::var_os("HOME")
-        && let Ok(relative) = path.strip_prefix(Path::new(&home))
-    {
-        if relative.as_os_str().is_empty() {
-            "~".to_owned()
-        } else {
-            format!("~/{}", relative.display())
-        }
     } else {
-        path.display().to_string()
+        path.file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned()
     };
     let Some(width) = width else {
         return directory;
     };
-    let abbreviated = super::line_truncation::abbreviate_path(&directory, width, None);
-    if abbreviated.width() <= width {
-        return abbreviated;
-    }
-    // If even shortened parents do not fit, keep the folder recognizable.
-    let tail = path
-        .file_name()
-        .map(|name| format!("…/{}", name.to_string_lossy()))
-        .unwrap_or(directory);
-    super::line_truncation::truncate_line_with_ellipsis_if_overflow(Line::from(tail), width)
+    super::line_truncation::truncate_line_with_ellipsis_if_overflow(Line::from(directory), width)
         .to_string()
 }
 pub(super) fn format_relative_time(reference: DateTime<Utc>, ts: Option<DateTime<Utc>>) -> String {
@@ -142,6 +128,37 @@ pub(super) fn format_log_duration(duration: chrono::Duration) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn recorded_directory() -> std::path::PathBuf {
+        include_str!("../../tests/fixtures/claude-start.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find_map(|record| record["cwd"].as_str().map(std::path::PathBuf::from))
+            .unwrap()
+    }
+
+    #[test]
+    fn directory_display_uses_only_the_recorded_cwd_basename() {
+        let path = recorded_directory();
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert_eq!(format_directory_display(&path, None), name);
+        assert_eq!(format_directory_display(&path, Some(80)), name);
+        assert_eq!(format_directory_display(&path, Some(name.width())), name);
+    }
+
+    #[test]
+    fn directory_display_truncates_the_basename_on_the_right() {
+        let path = recorded_directory();
+        assert_eq!(format_directory_display(&path, Some(5)), "clau…");
+        assert_eq!(format_directory_display(&path, Some(2)), "c…");
+        assert_eq!(format_directory_display(&path, Some(1)), "…");
+        assert_eq!(format_directory_display(&path, Some(0)), "");
+        assert_eq!(format_directory_display(Path::new("/"), None), "/");
+        assert_eq!(
+            format_directory_display(Path::new(""), None),
+            "No directory"
+        );
+    }
 
     #[test]
     fn output_tail_returns_only_the_requested_lines() {

@@ -573,7 +573,7 @@ fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay(
     let directory = (folder.x..folder.right())
         .map(|x| buffer[(x, folder.y)].symbol())
         .collect::<String>();
-    assert!(directory.ends_with("/b"), "{directory}");
+    assert_eq!(directory, "b");
     assert!(view.viewport.borrow().details_links.is_empty());
     assert_eq!(click(&mut view, folder.x, folder.y), None);
     let selector = view.selector.as_ref().unwrap();

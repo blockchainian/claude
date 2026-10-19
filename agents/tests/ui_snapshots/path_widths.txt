@@ -1,0 +1,8 @@
+100: ~/Code/blockchainian/dot/.claude/plugins/cache/blockchainian/codex/0.18.5/codex-manager/manager.mjs
+60: ~/…/blockchainian/codex/0.18.5/codex-manager/manager.mjs
+40: ~/…/0.18.5/codex-manager/manager.mjs
+25: ~/…/manager.mjs
+15: ~/…/manager.mjs
+8: manager…
+1: …
+0:
