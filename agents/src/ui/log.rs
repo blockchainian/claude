@@ -109,7 +109,16 @@ impl View {
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(log_index, event)) in matching[start..end].iter().enumerate() {
-            let last = start + index + 1 == matching.len();
+            let last = if self.log_sort == LogSort::Duration {
+                log_index + 1 == self.log.len()
+            } else {
+                start + index + 1 == matching.len()
+            };
+            let now = if self.log_sort == LogSort::Duration {
+                self.last_update
+            } else {
+                now
+            };
             let time = event_time(event, session, last, now);
             let links = render_event(
                 event,
@@ -171,7 +180,7 @@ impl View {
     pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_jump = Rect::default();
-        if self.following_log() {
+        if self.log_sort == LogSort::Duration || self.following_log() {
             viewport.log_unseen = 0;
             return;
         }
@@ -515,9 +524,7 @@ impl View {
                     self.prepare_log_search();
                     self.log.len() - 1
                 });
-            self.shown_log_events()
-                .position(|(index, _)| index == full)
-                .expect("fixture is shown")
+            self.shown_position(full).expect("fixture is shown")
         });
         self.select_log_event(index);
     }
@@ -529,7 +536,7 @@ impl View {
     }
 
     /// Keeps the cursor in view without moving a list being dragged for text selection.
-    fn reveal_log_selection(&self) {
+    pub(super) fn reveal_log_selection(&self) {
         if self.mouse_press.is_some()
             || (self.selecting_list(text_selection::Panel::LogList)
                 && self.text_selection_dragging())
@@ -597,7 +604,7 @@ impl View {
             return;
         };
         if !forward && index == 0 {
-            if self.log_search.active() {
+            if self.log_fully_loaded() {
                 return;
             }
             self.log_pending_older += 1;
@@ -636,6 +643,7 @@ impl View {
             .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
         let old_len = self.log.len();
         let appended_start = update.events.len().saturating_sub(update.appended);
+        self.last_update = Utc::now();
         self.log = update.events;
         // Rematching below uses the explicitly shifted full-list position.
         self.log_selected = None;
@@ -644,7 +652,7 @@ impl View {
             .shown_log_events()
             .filter(|(full, _)| *full >= appended_start)
             .count();
-        let prepended = self
+        let mut prepended = self
             .shown_log_events()
             .filter(|(full, _)| *full < update.prepended)
             .count();
@@ -653,14 +661,30 @@ impl View {
             len.checked_sub(1)
         } else {
             selected_full.and_then(|full| {
-                let full = full
-                    .saturating_add(update.prepended)
-                    .min(self.log.len().saturating_sub(1));
-                self.shown_log_events()
-                    .position(|(index, _)| index >= full)
+                let full = full.saturating_add(update.prepended);
+                let full = if self.log_sort == LogSort::Time {
+                    full.min(self.log.len().saturating_sub(1))
+                } else {
+                    full
+                };
+                self.shown_position(full)
+                    .or_else(|| {
+                        (self.log_sort == LogSort::Time)
+                            .then(|| self.shown_log_events().position(|(index, _)| index >= full))
+                            .flatten()
+                    })
                     .or_else(|| len.checked_sub(1))
             })
         };
+        let shift = if self.log_sort == LogSort::Duration {
+            self.log_selected.unwrap_or(0) as isize - selected_index.unwrap_or(0) as isize
+        } else {
+            prepended as isize
+        };
+        if self.log_sort == LogSort::Duration {
+            prepended = shift.max(0) as usize;
+            self.viewport.borrow_mut().log_unseen = 0;
+        }
         if let Some(previous) = &mut self.log_background_return {
             // Background details retain a list index, independent of their synthetic event.
             previous.event = self.log_selected;
@@ -675,8 +699,10 @@ impl View {
             viewport.log_detail_scroll = 0;
         } else if !following || self.mouse_press.is_some() {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log_scroll += prepended;
-            viewport.log_unseen += added;
+            viewport.log_scroll = viewport.log_scroll.saturating_add_signed(shift);
+            if self.log_sort == LogSort::Time {
+                viewport.log_unseen += added;
+            }
             drop(viewport);
             self.shift_list_selection(text_selection::Panel::LogList, prepended);
         } else {
@@ -722,6 +748,9 @@ impl View {
 
     /// How long until the newest visible row's time changes, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
+        if self.log_sort == LogSort::Duration {
+            return None;
+        }
         let session = self.selected_row()?;
         if self.log_session.as_ref() != Some(&session.id) {
             return None;
@@ -735,16 +764,30 @@ impl View {
 
     fn is_newest_shown(&self) -> bool {
         self.log_background_event.is_none()
-            && self.log_selected.is_some()
-            && self.log_selected == self.matching_log_count().checked_sub(1)
+            && if self.log_sort == LogSort::Duration {
+                self.log_selected
+                    .and_then(|index| self.shown_log_events().nth(index))
+                    .is_some_and(|(full, _)| full + 1 == self.log.len())
+            } else {
+                self.log_selected.is_some()
+                    && self.log_selected == self.matching_log_count().checked_sub(1)
+            }
+    }
+
+    pub(super) fn shown_position(&self, full: usize) -> Option<usize> {
+        self.shown_log_events().position(|(index, _)| index == full)
     }
 
     /// The log events the search lets through, with their index in the log.
     pub(super) fn shown_log_events(&self) -> impl Iterator<Item = (usize, &Event)> {
-        self.log
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| self.log_matches(*index))
+        let order: Box<dyn Iterator<Item = usize> + '_> = if self.log_sort == LogSort::Duration {
+            Box::new(self.log_order.iter().copied())
+        } else {
+            Box::new(0..self.log.len())
+        };
+        order
+            .filter(|&index| self.log_matches(index))
+            .map(|index| (index, &self.log[index]))
     }
 }
 
@@ -759,6 +802,24 @@ enum RowTime {
     Running(DateTime<Utc>),
     /// The time elapsed since the given moment, as "12s ago".
     Ago(DateTime<Utc>),
+}
+
+pub(super) fn sort_duration(
+    event: &Event,
+    session: &Session,
+    last_update: DateTime<Utc>,
+    last: bool,
+) -> Option<chrono::Duration> {
+    if matches!(event.kind, Kind::User | Kind::Assistant) {
+        return event
+            .previous_end
+            .map(|previous| event.started_at - previous);
+    }
+    match row_time(event, session, last) {
+        RowTime::Settled(duration) => Some(duration),
+        RowTime::Running(start) => Some(last_update - start),
+        RowTime::Clock(_) | RowTime::Ago(_) => None,
+    }
 }
 
 fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {

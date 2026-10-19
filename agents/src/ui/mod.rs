@@ -223,6 +223,13 @@ enum Panel {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum LogSort {
+    #[default]
+    Time,
+    Duration,
+}
+
 pub struct View {
     mouse_focus: Panel,
     /// The session whose program runs in the log detail panel, and its screen.
@@ -241,6 +248,9 @@ pub struct View {
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_search: log_search::LogSearch,
+    log_order: Vec<usize>,
+    pub(crate) log_sort: LogSort,
+    last_update: DateTime<Utc>,
     /// The selected event, shared by the list cursor and detail panel.
     log_selected: Option<usize>,
     log_background_event: Option<crate::log::Event>,
@@ -386,6 +396,9 @@ impl View {
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
+            log_order: Vec::new(),
+            log_sort: LogSort::Time,
+            last_update: Utc::now(),
             drafts: Vec::new(),
             selected_draft: None,
             next_draft: 1,

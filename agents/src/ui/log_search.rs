@@ -71,7 +71,27 @@ impl LogSearch {
 }
 
 impl View {
+    pub(crate) fn log_fully_loaded(&self) -> bool {
+        self.log_search.active() || self.log_sort == LogSort::Duration
+    }
+
     pub(crate) fn prepare_log_search(&mut self) {
+        self.log_order = if self.log_sort == LogSort::Duration {
+            let mut order: Vec<_> = (0..self.log.len()).collect();
+            if let Some(session) = self.selected_row() {
+                order.sort_by_key(|&index| {
+                    super::log::sort_duration(
+                        &self.log[index],
+                        session,
+                        self.last_update,
+                        index + 1 == self.log.len(),
+                    )
+                });
+            }
+            order
+        } else {
+            Vec::new()
+        };
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.clone())
@@ -100,7 +120,7 @@ impl View {
     pub(crate) fn rematch_log(&mut self) {
         let full = self
             .log_selected
-            .and_then(|index| self.log_search.matches.get(index).copied());
+            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
         self.rematch_log_at(full);
     }
 
@@ -118,16 +138,16 @@ impl View {
         drop(matcher);
         self.log_selected = selected_full
             .and_then(|full| {
-                self.log_search
-                    .matches
-                    .iter()
-                    .position(|index| *index >= full)
-                    .or_else(|| self.log_search.matches.len().checked_sub(1))
+                self.shown_position(full).or_else(|| {
+                    (self.log_sort == LogSort::Time)
+                        .then(|| self.shown_log_events().position(|(index, _)| index >= full))
+                        .flatten()
+                })
             })
-            .or_else(|| self.log_search.matches.len().checked_sub(1));
+            .or_else(|| self.matching_log_count().checked_sub(1));
         let selected = self
             .log_selected
-            .and_then(|index| self.log_search.matches.get(index).copied());
+            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
         if selected != selected_full {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_detail_layout = None;
