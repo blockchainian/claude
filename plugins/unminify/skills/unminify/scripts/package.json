@@ -1,0 +1,11 @@
+{
+  "name": "unminify-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@babel/generator": "7.28.5",
+    "@babel/parser": "7.28.5",
+    "@babel/traverse": "7.28.5",
+    "ignore": "7.0.13"
+  }
+}
