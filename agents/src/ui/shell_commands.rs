@@ -284,13 +284,18 @@ fn heredoc_body(
     }
 }
 
-/// An interpreter argument or stdin body, excluding the shell's quotes and delimiter.
+pub(super) enum SyntaxSource<'a> {
+    Interpreter(&'a str),
+    Extension(&'a str),
+}
+
+/// Embedded code, excluding the shell's quotes and delimiter.
 pub(super) struct Script<'a> {
-    pub interpreter: &'a str,
+    pub syntax: SyntaxSource<'a>,
     pub range: Range<usize>,
 }
 
-/// Recognizes simple interpreter invocations without changing any source bytes.
+/// Recognizes interpreter invocations and cat file heredocs without changing source bytes.
 /// Compounds that `split` cannot safely group keep their shell highlighting.
 pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
     let Some(commands) = split(source) else {
@@ -303,6 +308,12 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
             continue;
         };
         let interpreter = &source[interpreter];
+        if interpreter == "cat" {
+            if let Some(script) = cat_heredoc(source, index, command.range.end) {
+                scripts.push(script);
+            }
+            continue;
+        }
         while index < command.range.end {
             while matches!(source.as_bytes().get(index), Some(b' ' | b'\t')) {
                 index += 1;
@@ -317,7 +328,10 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
                 if let Some(newline) = source[end..].find('\n') {
                     let start = end + newline + 1;
                     if let Some((range, _)) = heredoc_body(source, start, &delimiter, tabs) {
-                        scripts.push(Script { interpreter, range });
+                        scripts.push(Script {
+                            syntax: SyntaxSource::Interpreter(interpreter),
+                            range,
+                        });
                     }
                 }
                 break;
@@ -328,7 +342,10 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
             let option = &source[option];
             if matches!(option, "-c" | "-e" | "--eval") {
                 if let Some(range) = argument(source, &mut index) {
-                    scripts.push(Script { interpreter, range });
+                    scripts.push(Script {
+                        syntax: SyntaxSource::Interpreter(interpreter),
+                        range,
+                    });
                 }
                 break;
             }
@@ -338,6 +355,47 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
         }
     }
     scripts
+}
+
+fn cat_heredoc(source: &str, mut index: usize, end: usize) -> Option<Script<'_>> {
+    let bytes = source.as_bytes();
+    let mut extension = None;
+    let mut heredoc = None;
+    while index < end {
+        while matches!(bytes.get(index), Some(b' ' | b'\t')) {
+            index += 1;
+        }
+        match bytes.get(index) {
+            Some(b'>') if extension.is_none() => {
+                index += 1;
+                let path = argument(source, &mut index)?;
+                let literal = &source[path.clone()];
+                let quote = path.start.checked_sub(1).map(|i| bytes[i]);
+                if quote != Some(b'\'')
+                    && (literal.contains(['$', '`'])
+                        || (quote != Some(b'"') && literal.contains(['*', '?', '[', '~'])))
+                {
+                    return None;
+                }
+                extension = Some(std::path::Path::new(literal).extension()?.to_str()?);
+            }
+            Some(b'<') if heredoc.is_none() && bytes.get(index + 1) == Some(&b'<') => {
+                let (next, delimiter, tabs) = heredoc_delimiter(source, index + 2)?;
+                index = next;
+                heredoc = Some((delimiter, tabs));
+            }
+            Some(b'\n') => {
+                let (delimiter, tabs) = heredoc?;
+                let (range, _) = heredoc_body(source, index + 1, &delimiter, tabs)?;
+                return Some(Script {
+                    syntax: SyntaxSource::Extension(extension?),
+                    range,
+                });
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// A literal shell word's content range; surrounding quotes stay shell syntax.

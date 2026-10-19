@@ -306,8 +306,14 @@ fn code_lines_uncached(text: &str, lang: &str) -> Vec<Line<'static>> {
         == find_syntax("bash").map(|syntax| syntax.scope)
     {
         for script in super::shell_commands::scripts(text) {
-            let shebang = format!("#!/usr/bin/env {}", script.interpreter);
-            if let Some(syntax) = syntax_set().find_syntax_by_first_line(&shebang)
+            let syntax = match script.syntax {
+                super::shell_commands::SyntaxSource::Interpreter(interpreter) => {
+                    let shebang = format!("#!/usr/bin/env {interpreter}");
+                    syntax_set().find_syntax_by_first_line(&shebang)
+                }
+                super::shell_commands::SyntaxSource::Extension(extension) => find_syntax(extension),
+            };
+            if let Some(syntax) = syntax
                 && let Some(embedded) = highlighted(&text[script.range.clone()], &syntax.name)
             {
                 overlay(&mut lines, text, script.range, embedded);
@@ -712,6 +718,25 @@ mod tests {
     }
 
     #[test]
+    fn shell_script_cat_heredoc_by_extension() {
+        for (source, script, lang) in [
+            (
+                "cat > foo.py <<'EOF'\nimport json\nEOF",
+                "import json\n",
+                "py",
+            ),
+            ("cat <<EOF > a.rs\nlet x = 42;\nEOF", "let x = 42;\n", "rs"),
+            (
+                "cat > 'some file.py' <<EOF\nimport json\nEOF",
+                "import json\n",
+                "py",
+            ),
+        ] {
+            assert_script_styles(source, script, lang);
+        }
+    }
+
+    #[test]
     fn shell_scripts_leave_non_interpreter_arguments_alone() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         for source in [
@@ -719,6 +744,13 @@ mod tests {
             "python3 script.py -c 'import json'",
             "python3 script.py <<EOF\nimport json\nEOF",
             "cat <<EOF\nimport json\nEOF",
+            "cat >> foo.py <<EOF\nimport json\nEOF",
+            "cat > foo.unknownext <<EOF\nimport json\nEOF",
+            "tee foo.py <<EOF\nimport json\nEOF",
+            "cat > $file.py <<EOF\nimport json\nEOF",
+            "cat > \"$file.py\" <<EOF\nimport json\nEOF",
+            "cat > foo.py > bar.rs <<EOF\nimport json\nEOF",
+            "cat > foo.py <<EOF <<END\nimport json\nEOF\nlet x = 42;\nEND",
             "echo \"python3 -c 'import json'\"",
             "python3 -c 'import json'\"suffix\"",
             "python3 -c \"unterminated",
