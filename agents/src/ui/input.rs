@@ -261,6 +261,11 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        let action = self.handle_panel_mouse(mouse);
+        self.finish_panel_action(action)
+    }
+
+    fn handle_panel_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
         if self.frozen_draft() {
             return None;
         }
@@ -284,17 +289,6 @@ impl View {
             }
             _ => self.mouse_panel_at(position),
         };
-        if let Some(panel) = panel {
-            self.set_active_panel(panel);
-        }
-        if let Some(action) = self.overlay_mouse(mouse) {
-            return action;
-        }
-        let middle = mouse.kind == MouseEventKind::Down(MouseButton::Middle);
-        let paste_target = middle.then(|| self.paste_target(mouse)).flatten();
-        if middle && paste_target.is_none() {
-            return None;
-        }
         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
             let viewport = self.viewport.borrow();
             self.pressed_task = viewport
@@ -313,14 +307,24 @@ impl View {
                     }
                 });
         }
+        if let Some(panel) = panel {
+            self.set_active_panel(panel);
+        }
+        if let Some(action) = self.overlay_mouse(mouse) {
+            return action;
+        }
+        let middle = mouse.kind == MouseEventKind::Down(MouseButton::Middle);
+        let paste_target = middle.then(|| self.paste_target(mouse)).flatten();
+        if middle && paste_target.is_none() {
+            return None;
+        }
         if self.name_target.is_some()
             && self.title_editor().is_some()
             && !self.rename.text().trim().is_empty()
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && !self.viewport.borrow().title_input.contains(position)
         {
-            self.accept_draft_name();
-            self.close_selector();
+            self.save_title();
         }
         let previous = if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && let Some((MouseButton::Left, x, y, false)) = self.mouse_press
@@ -1382,6 +1386,11 @@ impl View {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let action = self.handle_key_event(key);
+        self.finish_panel_action(action)
+    }
+
+    fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
         let key = line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
@@ -1441,22 +1450,16 @@ impl View {
                     self.cancel_name();
                 }
                 KeyCode::Enter if !self.rename.text().trim().is_empty() => {
-                    if self.name_target.is_some() {
-                        let first_name = self.accept_draft_name();
-                        if first_name {
-                            return self.advance_draft(false);
-                        }
-                        self.close_selector();
+                    let first_name = self.name_target.is_some()
+                        && self
+                            .selected_draft()
+                            .is_some_and(|draft| draft.name.is_none());
+                    let action = self.save_title();
+                    return if first_name {
+                        self.advance_draft(false)
                     } else {
-                        let name = self.rename.text().trim().to_owned();
-                        self.rename.clear();
-                        let id = self
-                            .rename_target
-                            .take()
-                            .expect("title editor target is set");
-                        self.reconcile_selection();
-                        return Some(Action::Rename { id, name });
-                    }
+                        action
+                    };
                 }
                 _ => {
                     self.rename.handle(key);

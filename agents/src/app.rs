@@ -340,6 +340,10 @@ impl App {
             }
             self.view.set_cell_aspect(cell_aspect());
             self.sync_terminal();
+            let action = self.view.take_pending_action();
+            if self.handle_action(action) {
+                return Ok(());
+            }
             self.draw(terminal)?;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
                 return Ok(());

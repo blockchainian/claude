@@ -316,3 +316,6 @@ fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
     view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
     assert!(view.searching);
 }
+
+#[path = "title_save_tests.rs"]
+mod title_save_tests;

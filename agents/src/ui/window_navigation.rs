@@ -1,15 +1,64 @@
-use super::{Panel, View};
+use super::{Action, Panel, View};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl View {
     /// Panel interactions, editors and attention requests share this activation entry point.
     pub(super) fn set_active_panel(&mut self, panel: Panel) {
         if panel != self.active_panel
-            && (self.searching || self.log_search.editing || self.log_detail_search.editing)
+            && self.active_panel == Panel::Details
+            && self.title_editor().is_some()
+            && let Some(action) = self.save_title()
         {
-            self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+            self.pending_actions.push(action);
+        }
+        if panel != self.active_panel
+            && (self.searching || self.log_search.editing || self.log_detail_search.editing)
+            && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        {
+            self.pending_actions.push(action);
         }
         self.active_panel = panel;
+    }
+
+    /// Saves the title and closes its editor; unchanged session names stay local.
+    pub(super) fn save_title(&mut self) -> Option<Action> {
+        let name = self.rename.text().trim().to_owned();
+        if self.name_target.is_some() {
+            if name.is_empty() {
+                self.name_target = None;
+                self.rename.clear();
+            } else {
+                self.accept_draft_name();
+                self.close_selector();
+            }
+            return None;
+        }
+        let id = self.rename_target.take()?;
+        let unchanged = self
+            .rows
+            .iter()
+            .find(|row| row.id == id)
+            .expect("title editor session exists")
+            .display_title()
+            == name;
+        self.rename.clear();
+        self.reconcile_selection();
+        (!name.is_empty() && !unchanged).then_some(Action::Rename { id, name })
+    }
+
+    pub(crate) fn take_pending_action(&mut self) -> Option<Action> {
+        match self.pending_actions.len() {
+            0 => None,
+            1 => self.pending_actions.pop(),
+            _ => Some(Action::Batch(std::mem::take(&mut self.pending_actions))),
+        }
+    }
+
+    pub(super) fn finish_panel_action(&mut self, action: Option<Action>) -> Option<Action> {
+        if let Some(action) = action {
+            self.pending_actions.push(action);
+        }
+        self.take_pending_action()
     }
 
     pub(super) fn move_panel(&mut self, direction: char) {

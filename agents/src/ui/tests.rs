@@ -211,7 +211,7 @@ fn mouse_click_outside_tabs_changes_nothing() {
 }
 
 #[test]
-fn mouse_tabs_ignore_overlays() {
+fn mouse_tabs_ignore_modals_but_save_title_on_blur() {
     for overlay in 0..4 {
         let mut view = fixture();
         screen(&view, 120, 40);
@@ -242,6 +242,11 @@ fn mouse_tabs_ignore_overlays() {
             )
             .is_none()
         );
+        if overlay == 2 {
+            assert!(view.rename_target.is_none());
+            assert_eq!(view.status_filter, 1);
+            continue;
+        }
         assert_eq!(view.status_filter, 0);
         assert_eq!(view.selected, selected);
         assert_eq!(view.viewport.borrow().scroll, 7);
@@ -1064,7 +1069,7 @@ fn mouse_list_click_uses_last_render_scroll_offset() {
 }
 
 #[test]
-fn mouse_list_ignores_overlays() {
+fn mouse_list_ignores_modals_but_saves_title_on_blur() {
     for overlay in [
         KeyCode::Char('?'),
         KeyCode::Char('/'),
@@ -1085,6 +1090,15 @@ fn mouse_list_ignores_overlays() {
         key(&mut view, overlay);
         screen(&view, 160, 40);
         let selected = view.selected;
+        if overlay == KeyCode::Char('r') {
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+            );
+            assert!(view.rename_target.is_none());
+            assert_eq!(view.selected, second);
+            continue;
+        }
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
             MouseEventKind::ScrollDown,

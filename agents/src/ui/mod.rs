@@ -259,6 +259,8 @@ pub(crate) use crate::model::LogSort;
 pub struct View {
     /// The single keyboard destination; selection and scroll positions do not own focus.
     active_panel: Panel,
+    /// Actions created by panel changes outside keyboard and mouse handlers.
+    pending_actions: Vec<Action>,
     window_prefix: Option<KeyEvent>,
     /// The session whose program runs in the log detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
@@ -402,6 +404,7 @@ impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             active_panel: Panel::TaskList,
+            pending_actions: Vec::new(),
             window_prefix: None,
             terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
@@ -594,8 +597,8 @@ impl View {
     pub(crate) fn prepare_prompt(&mut self) {
         if self.input_disabled().is_none() {
             self.dismiss_selector();
-            self.name_target = None;
             self.set_active_panel(Panel::Prompt);
+            self.name_target = None;
         }
     }
 

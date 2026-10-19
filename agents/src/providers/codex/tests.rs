@@ -284,10 +284,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
     view.render(area, &mut ratatui::buffer::Buffer::empty(area));
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        Some(Action::Rename {
-            id: session.id.clone(),
-            name: session.display_title().into()
-        })
+        None
     );
     view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
     view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));

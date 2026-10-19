@@ -245,6 +245,7 @@ fn terminal_task_names_edit_on_details_rule() {
     save_title_capture(&tmux, "03-new-task-prompt");
     delete_named_draft(&tmux);
     tmux.wait_for(|capture| !capture.contains("就地任务 ❯"));
+    tmux.mouse(0, 2, 2, true);
     tmux.run(&["send-keys", "-t", "probe", "n"]);
     tmux.run(&["send-keys", "-t", "probe", "C-w"]);
     tmux.run(&["send-keys", "-t", "probe", "k"]);
@@ -634,4 +635,45 @@ fn terminal_picker_bottom_layout() {
     );
     println!("MODEL CAPTURE\n{}", lines[bottom - 5..=bottom].join("\n"));
     println!("{{\"picker_bottom\":\"pass\",\"branch_gap\":\"pass\"}}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_title_blur_saves_and_unchanged_enter_closes() {
+    let (_directory, tmux, _transcript) = start_probe("title-blur-save");
+    tmux.run(&["send-keys", "-t", "probe", "r"]);
+    tmux.run(&["send-keys", "-t", "probe", "End", "C-u"]);
+    tmux.run(&["send-keys", "-t", "probe", "-l", "Saved on title blur"]);
+    assert_title_caret(&tmux, "Saved on title blur", 19);
+    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+    tmux.run(&["send-keys", "-t", "probe", "h"]);
+    let saved = tmux.capture_when(|capture| {
+        title_rule_position(capture, "Saved on title blur").is_some()
+            && capture
+                .lines()
+                .any(|line| line.contains("Saved on title blur") && !line.contains('─'))
+    });
+    assert!(!saved.contains("Rename ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "r"]);
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    assert_title_caret(&tmux, "Saved on title blur", 0);
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.capture_when(|capture| {
+        title_rule_position(capture, "Saved on title blur").is_some()
+            && tmux
+                .run(&["display-message", "-t", "probe", "-p", "#{cursor_flag}"])
+                .trim()
+                == "0"
+    });
+    let verdict = serde_json::json!({
+        "verdict": "pass",
+        "title_blur_saved": true,
+        "unchanged_enter_closed": true,
+    });
+    std::fs::write(
+        std::env::temp_dir().join("agents-title-blur-verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
 }

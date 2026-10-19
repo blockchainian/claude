@@ -1156,7 +1156,7 @@ fn control_enter_uses_the_draft_rule_instead_of_sending_to_a_provider_session() 
 }
 
 #[test]
-fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
+fn draft_name_saves_when_mouse_activates_another_panel() {
     for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
         for (x, y) in [(0, 0), (2, 5), (80, 5), (158, 38)] {
             let (directory, mut view) = fixture();
@@ -1177,7 +1177,7 @@ fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
                 row: y,
                 modifiers: KeyModifiers::NONE,
             });
-            if button == MouseButton::Middle {
+            if button == MouseButton::Middle && view.active_panel == Panel::Details {
                 assert_eq!(action, None);
                 assert_eq!(view.name_target, Some(id));
                 assert!(view.selector.is_none());
@@ -1194,7 +1194,7 @@ fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
             }
             assert!(view.name_target.is_none());
             assert!(view.selector.is_none());
-            if button == MouseButton::Right {
+            if button == MouseButton::Right && view.active_panel == Panel::Details {
                 assert!(view.drafts.iter().all(|draft| draft.id != id));
             } else {
                 assert_eq!(
