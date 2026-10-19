@@ -1022,7 +1022,10 @@ fn tool_list_rows_choose_descriptions_by_data() {
                         format!("{} {}", call.detail_left, call.detail_title)
                     }
                 });
-            let expected = call.agent_message.as_ref().map(|message| message.summary(1)).unwrap_or(expected);
+            let mut expected = call.agent_message.as_ref().map(|message| message.summary(1)).unwrap_or(expected);
+            if let Some(code) = call.exit_code.filter(|code| *code != 0) {
+                expected.push_str(&format!(" ({code})"));
+            }
             assert_eq!(call.title, expected, "{}", call.name);
         }
     }
