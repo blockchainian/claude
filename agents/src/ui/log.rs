@@ -774,7 +774,6 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         };
     }
     if event.completed_time
-        && event.kind == Kind::Tool
         && let Some(end) = event.ended_at
     {
         return match event.duration {

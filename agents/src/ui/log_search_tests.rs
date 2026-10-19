@@ -54,7 +54,7 @@ fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
         view.prepare_log_search();
         assert_eq!(
             view.log_search.bodies[0].to_string(),
-            format!("Tool {body} exec_command")
+            format!("Error {body} exec_command")
         );
         view.log_search.query.set_text("exec_command");
         view.rematch_log();

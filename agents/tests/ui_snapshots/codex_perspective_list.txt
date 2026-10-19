@@ -30,7 +30,7 @@ beta
 root → new task
 root → message
 alpha → message
-wait
+Wait
 root ← 2 messages
 
 alpha_kid
