@@ -2110,7 +2110,7 @@ pub(crate) mod tests {
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
             let row_expected = if expected == "reviewer · Review files" {
-                "reviewer · Spawn agent"
+                "Spawn agent reviewer"
             } else {
                 expected
             };
@@ -2145,7 +2145,7 @@ pub(crate) mod tests {
             let row_expected = record["message"]["content"][0]["input"]["description"]
                 .as_str()
                 .unwrap_or(tool_name);
-            assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), if tool_name == "Task" { "reviewer · Spawn agent" } else { row_expected });
+            assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), if tool_name == "Task" { "Spawn agent reviewer" } else { row_expected });
             let summary = super::super::transcript::read_subagent(
                 file.path(),
                 file.as_file().metadata().unwrap().len(),
@@ -2177,7 +2177,7 @@ pub(crate) mod tests {
                 let file = tempfile::NamedTempFile::new().unwrap();
                 std::fs::write(file.path(), record.to_string()).unwrap();
                 let row_expected = match (name, participant.trim().is_empty()) {
-                    ("Agent" | "Task", false) => "reviewer · Spawn agent".to_owned(),
+                    ("Agent" | "Task", false) => "Spawn agent reviewer".to_owned(),
                     ("Agent" | "Task", true) => "Spawn agent".to_owned(),
                     ("SendMessage", false) => "reviewer ← message".to_owned(),
                     ("SendMessage", true) => "message".to_owned(),

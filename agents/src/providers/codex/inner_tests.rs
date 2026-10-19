@@ -760,7 +760,7 @@ fn interaction_functions_win_over_completed_items() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/parent.jsonl");
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0].summary(), "demo_sub · Spawn agent");
+    assert_eq!(rows[0].summary(), "Spawn agent demo_sub");
     assert_eq!(rows[0].calls[0].detail_left, "Spawn agent");
     assert_eq!(
         rows[0].calls[0].input,

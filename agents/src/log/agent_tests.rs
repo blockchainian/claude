@@ -12,7 +12,7 @@ fn claude_agent_exchange_uses_perspective_titles() {
         .flat_map(|e| &e.calls)
         .find(|c| c.name == "Agent")
         .unwrap();
-    assert_eq!(spawn.title, "reviewer · Spawn agent");
+    assert_eq!(spawn.title, "Spawn agent reviewer");
     assert_eq!(spawn.detail_left, "Spawn agent");
 }
 

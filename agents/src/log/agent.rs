@@ -143,7 +143,7 @@ impl Message {
             return self
                 .recipient
                 .as_deref()
-                .map(|p| format!("{} · Spawn agent", name(p)))
+                .map(|p| format!("Spawn agent {}", name(p)))
                 .unwrap_or_else(|| "Spawn agent".to_owned());
         }
         self.perspective(match self.kind.as_str() {
@@ -263,7 +263,7 @@ mod tests {
         .unwrap();
         let block = &claude["message"]["content"][0];
         let message = tool_message(block["name"].as_str().unwrap(), &block["input"]).unwrap();
-        assert_eq!(message.summary(1), "reviewer · Spawn agent");
+        assert_eq!(message.summary(1), "Spawn agent reviewer");
         assert_eq!(message.label(), "Spawn agent");
         assert_eq!(message.author, None);
         assert_eq!(
@@ -271,7 +271,11 @@ mod tests {
             block["input"]["prompt"].as_str().unwrap()
         );
         let records = include_str!("../../tests/fixtures/codex-agent-names.jsonl");
-        for line in records.lines() {
+        for (line, expected) in records.lines().zip([
+            "Spawn agent real_scan",
+            "root ← message",
+            "ux_probe ← Followup task",
+        ]) {
             let record: Value = serde_json::from_str(line).unwrap();
             let payload = &record["payload"];
             let input: Value =
@@ -279,6 +283,7 @@ mod tests {
             let message = tool_message(payload["name"].as_str().unwrap(), &input).unwrap();
             assert_eq!(message.author, None);
             assert_eq!(message.direction, Direction::Outgoing);
+            assert_eq!(message.summary(1), expected);
         }
     }
 }

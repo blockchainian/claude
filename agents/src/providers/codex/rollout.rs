@@ -2221,7 +2221,7 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "claude_calls · Spawn agent");
+        assert_eq!(call.title, "Spawn agent claude_calls");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2608,7 +2608,7 @@ mod tests {
                     let name =
                         crate::providers::tool::display_tool_name(payload["name"].as_str().unwrap());
                     if tool == "spawn_agent" {
-                        format!("{subject} · {name}")
+                        format!("{name} {subject}")
                     } else {
                         format!("{subject} ← {name}")
                     }
@@ -2821,7 +2821,7 @@ mod tests {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
-                "real_scan · Spawn agent",
+                "Spawn agent real_scan",
                 "root ← message",
                 "ux_probe ← Followup task",
             ])
@@ -3051,7 +3051,7 @@ mod perspective_tests {
     fn perspective_assignments_use_function_names() {
         let events = fixture("root");
         for (name, title) in [
-            ("spawn_agent", "alpha · Spawn agent"),
+            ("spawn_agent", "Spawn agent alpha"),
             ("followup_task", "alpha ← Followup task"),
         ] {
             assert!(
@@ -3086,7 +3086,7 @@ mod perspective_tests {
             2
         );
         for title in [
-            "alpha_kid · Spawn agent",
+            "Spawn agent alpha_kid",
             "alpha_kid → 孙子完成",
             "beta ← message",
             "root ← message",

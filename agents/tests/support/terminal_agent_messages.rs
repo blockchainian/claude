@@ -92,7 +92,7 @@ fn terminal_codex_agent_message_bodies() {
     let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
     for (fixture, subject) in collaboration {
         let label = match subject {
-            "demo_sub" => format!("{subject} · Spawn agent"),
+            "demo_sub" => format!("Spawn agent {subject}"),
             "ux_probe" => format!("{subject} ← Followup task"),
             _ => format!("{subject} ← message"),
         };
@@ -122,6 +122,15 @@ fn terminal_codex_agent_message_bodies() {
         assert!(!capture.contains(&token[..32]), "{capture}");
         captures.push_str(&format!("\n\n{capture}"));
     }
+    std::fs::write(
+        &transcript,
+        include_str!("../fixtures/codex-collaboration/spawn_agent.jsonl"),
+    )
+    .unwrap();
+    let activity_capture = tmux.capture_when(|capture| {
+        capture.contains("Last activity") && capture.matches("Spawn agent demo_sub").count() >= 2
+    });
+    captures.push_str(&format!("\n\n{activity_capture}"));
     let capture = std::env::temp_dir().join("agents-message-tmux.txt");
     std::fs::write(&capture, captures).unwrap();
     let verdict =
@@ -227,7 +236,7 @@ fn terminal_codex_collaboration_navigation() {
     let (column, row) = find(&capture, "Collaboration parent");
     tmux.mouse(0, column, row, true);
     let capture = tmux.capture_when(|capture| capture.contains("demo_sub → 演示完成"));
-    let (column, row) = find(&capture, "demo_sub · Spawn agent");
+    let (column, row) = find(&capture, "Spawn agent demo_sub");
     tmux.mouse(0, column, row, true);
     let spawn = tmux.capture_when(|capture| {
         capture.contains("Spawn agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")
@@ -283,13 +292,13 @@ fn terminal_claude_agent_exchange() {
     let (_directory, tmux, _) = start_probe_with_transcript("claude-agent-exchange", &records);
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "70"]);
     let capture = tmux.capture_when(|capture| {
-        capture.contains("reviewer · Spawn agent")
+        capture.contains("Spawn agent reviewer")
             && capture.contains("hide-idle-teammates ← message")
             && capture.contains("translate-pdf → 2 messages")
     });
     let mut captures = capture.clone();
     for (label, body) in [
-        ("reviewer · Spawn agent", "Review files"),
+        ("Spawn agent reviewer", "Review files"),
         ("hide-idle-teammates ← message", "Is the uncommitted edit"),
         ("translate-pdf → 2 messages", "translate-pdf:"),
     ] {
