@@ -3,7 +3,9 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+#[cfg(not(test))]
+use std::sync::Mutex;
+use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Highlighter, Theme, ThemeSet};
 use syntect::parsing::{Scope, SyntaxReference, SyntaxSet};
@@ -22,6 +24,7 @@ thread_local! {
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 /// The theme for the current terminal background; `None` until a background is applied.
+#[cfg(not(test))]
 static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
     theme: None,
     generation: 0,
@@ -30,6 +33,14 @@ static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
 struct HighlightTheme {
     theme: Option<Theme>,
     generation: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    // Each test renders its own terminal background and theme generation.
+    static THEME: std::cell::RefCell<HighlightTheme> = const {
+        std::cell::RefCell::new(HighlightTheme { theme: None, generation: 0 })
+    };
 }
 
 fn syntax_set() -> &'static SyntaxSet {
@@ -51,15 +62,16 @@ fn bundled_theme(light_background: bool) -> Theme {
 /// background; returns the reason when the file cannot be used, keeping the bundled theme.
 pub fn use_theme(light_background: bool, path: Option<&Path>) -> Result<(), String> {
     let (theme, result) = theme_for(light_background, path);
-    let mut current = locked_theme();
-    current.theme = Some(theme);
-    current.generation += 1;
+    with_theme_state(|current| {
+        current.theme = Some(theme);
+        current.generation += 1;
+    });
     result
 }
 
 /// Identifies the highlight theme used by cached styled lines.
 pub(super) fn theme_generation() -> u64 {
-    locked_theme().generation
+    with_theme_state(|current| current.generation)
 }
 
 fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), String>) {
@@ -73,16 +85,21 @@ fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), 
     }
 }
 
-fn locked_theme() -> MutexGuard<'static, HighlightTheme> {
-    THEME
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn with_theme_state<T>(f: impl FnOnce(&mut HighlightTheme) -> T) -> T {
+    #[cfg(not(test))]
+    {
+        let mut current = THEME
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut current)
+    }
+    #[cfg(test)]
+    THEME.with_borrow_mut(f)
 }
 
 /// Runs `f` with the current theme, the dark bundled theme before any background is applied.
 fn with_theme<T>(f: impl FnOnce(&Theme) -> T) -> T {
-    let mut theme = locked_theme();
-    f(theme.theme.get_or_insert_with(|| bundled_theme(false)))
+    with_theme_state(|current| f(current.theme.get_or_insert_with(|| bundled_theme(false))))
 }
 
 /// Token kinds emitted by the JSON pretty-printer, in the order returned by `json_styles`.
@@ -352,6 +369,27 @@ mod tests {
 
     fn text(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn test_themes_do_not_cross_threads() {
+        use_theme(false, None).unwrap();
+        let expected = json_styles();
+        let changed = std::sync::Barrier::new(2);
+        let observed = std::sync::Barrier::new(2);
+        let actual = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                use_theme(true, None).unwrap();
+                changed.wait();
+                observed.wait();
+            });
+            changed.wait();
+            let actual = json_styles();
+            observed.wait();
+            worker.join().unwrap();
+            actual
+        });
+        assert_eq!(actual, expected);
     }
 
     #[test]
