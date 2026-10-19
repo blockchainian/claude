@@ -284,19 +284,21 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
 #[test]
 fn task_log_wheel_reverses_across_reloaded_windows() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let payload = include_str!("../../../tests/fixtures/transcript.jsonl");
+    let transcript = format!(
+        "{}{}{}",
+        transcript_copies(payload, 20, 0),
+        include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
+        transcript_copies(payload, 20, 20)
+    );
     for navigation in [None, Some(KeyCode::Down), Some(KeyCode::Char('j'))] {
         let (_dir, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
-        let payload = std::fs::read_to_string(&path).unwrap();
-        let transcript = format!(
-            "{}{}{}",
-            transcript_copies(&payload, 20, 0),
-            include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
-            transcript_copies(&payload, 20, 20)
-        );
-        std::fs::write(&path, transcript).unwrap();
-        let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+        std::fs::write(&path, &transcript).unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 150, 19);
         let visible = app.view.log_event_count(area);
+        // List navigation uses the last frame's panel bounds. Refresh each step;
+        // draw again when checking details or clicking a rendered row.
         let wheel = |app: &mut App, kind| {
             app.handle_event(Event::Mouse(MouseEvent {
                 kind,
@@ -305,8 +307,6 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
                 modifiers: KeyModifiers::NONE,
             }));
             app.refresh_log(visible);
-            app.view
-                .render(area, &mut ratatui::buffer::Buffer::empty(area));
         };
         app.refresh_log(visible);
         app.view
@@ -331,8 +331,6 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
             for _ in 0..6 {
                 app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
                 app.refresh_log(visible);
-                app.view
-                    .render(area, &mut ratatui::buffer::Buffer::empty(area));
             }
         } else {
             for _ in 0..6 {
@@ -353,8 +351,6 @@ fn task_log_wheel_reverses_across_reloaded_windows() {
                 };
                 app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
                 app.refresh_log(visible);
-                app.view
-                    .render(area, &mut ratatui::buffer::Buffer::empty(area));
             } else {
                 wheel(&mut app, MouseEventKind::ScrollUp);
             }
@@ -372,11 +368,9 @@ fn top_border_loads_first_event_of_whole_log() {
     replace_transcript(&path, transcript_copies(&payload, 200, 0));
     app.refresh_log(8);
     assert_eq!(app.view.log.len(), 8);
-    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let visible = app.view.log_event_count(area);
     let scroll = |app: &mut App, kind| {
-        app.view
-            .render(area, &mut ratatui::buffer::Buffer::empty(area));
         app.handle_event(Event::Mouse(MouseEvent {
             kind,
             column: 134,
@@ -399,9 +393,9 @@ fn top_border_loads_first_event_of_whole_log() {
     };
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let bottom = (0..45)
+    let bottom = (0..area.height)
         .find(|&y| {
-            (100..200)
+            (area.width / 2..area.width)
                 .map(|x| buffer[(x, y)].symbol())
                 .collect::<String>()
                 .contains("claude-opus")
@@ -409,8 +403,8 @@ fn top_border_loads_first_event_of_whole_log() {
         .unwrap_or_else(|| {
             panic!(
                 "{}",
-                (0..45)
-                    .map(|y| (0..200)
+                (0..area.height)
+                    .map(|y| (0..area.width)
                         .map(|x| buffer[(x, y)].symbol())
                         .collect::<String>())
                     .collect::<Vec<_>>()
@@ -431,8 +425,6 @@ fn top_border_loads_first_event_of_whole_log() {
         scroll(&mut app, MouseEventKind::ScrollUp);
         app.refresh_log(visible);
         assert!(log_detail_at(&app, area).contains("Transcript copy 0"));
-        app.view
-            .render(area, &mut ratatui::buffer::Buffer::empty(area));
         if latest {
             click(&mut app, bottom);
             click(&mut app, bottom);
@@ -447,15 +439,15 @@ fn top_border_loads_first_event_of_whole_log() {
             app.refresh_log(visible);
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.view.render(area, &mut buffer);
-            let row = (0..45)
+            let row = (0..area.height)
                 .find(|&y| {
-                    (130..200)
+                    (area.width / 2..area.width)
                         .map(|x| buffer[(x, y)].symbol())
                         .collect::<String>()
                         .contains(" New ")
                 })
                 .unwrap();
-            let line = (0..200)
+            let line = (0..area.width)
                 .map(|x| buffer[(x, row)].symbol())
                 .collect::<String>();
             let column = line.chars().position(|c| c == '↓').unwrap() as u16;
@@ -474,8 +466,6 @@ fn top_border_loads_first_event_of_whole_log() {
         app.refresh_log(visible);
         assert!(log_detail_at(&app, area).contains("Transcript copy 200"));
         assert_eq!(app.view.log_scroll(), app.view.log_max_scroll());
-        app.view
-            .render(area, &mut ratatui::buffer::Buffer::empty(area));
     }
 }
 
