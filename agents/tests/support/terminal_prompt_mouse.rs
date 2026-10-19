@@ -26,7 +26,9 @@ fn terminal_prompt_mouse_click_places_caret() {
     tmux.mouse(0, x + 3, row, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "查"]);
     tmux.wait_for(|capture| capture.contains("写查工具详情计划"));
-    tmux.mouse(0, x + 3, row + 1, true);
+    // Rows after the first start at the box's left edge, not after the label.
+    let edge = line[..line.find("New task").unwrap()].width();
+    tmux.mouse(0, edge + 3, row + 1, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "x"]);
     tmux.wait_for(|capture| capture.contains("No xreply needed."));
     tmux.run(&["send-keys", "-t", "probe", "C-c"]);
@@ -66,8 +68,9 @@ fn terminal_prompt_mouse_click_places_caret() {
         "-t",
         "probe",
         "-l",
+        // Two copies outgrow the box, which takes at most half the rows, so the wheel scrolls.
         &format!(
-            "\x1b[200~{}\x1b[201~",
+            "\x1b[200~{0}\n{0}\x1b[201~",
             include_str!("../fixtures/claude-peer-message.txt")
         ),
     ]);
@@ -75,12 +78,12 @@ fn terminal_prompt_mouse_click_places_caret() {
     let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let row = before
         .lines()
-        .position(|line| line.contains("New task ❯"))
+        .position(|line| line.contains("No reply needed."))
         .unwrap();
     tmux.mouse(64, x, row, false);
-    tmux.wait_for(|capture| !capture.contains("No reply needed."));
+    tmux.wait_for(|capture| capture != before);
     tmux.mouse(65, x, row, false);
-    tmux.wait_for(|capture| capture.contains("No reply needed."));
+    tmux.wait_for(|capture| capture == before);
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let path = std::env::temp_dir().join("agents-prompt-mouse-tmux.txt");
     std::fs::write(&path, capture).unwrap();
