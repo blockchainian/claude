@@ -1868,8 +1868,17 @@ fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
     key(&mut view, KeyCode::Tab);
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
     key(&mut view, KeyCode::Home);
+    let max_steps = view.rows.len();
+    let mut steps = 0;
     while view.selected_id() != Some(&session_key("45")) {
+        assert!(
+            steps < max_steps,
+            "task 45 not reached after {steps} Down events: selected index {}, selected id {:?}",
+            view.selected,
+            view.selected_id()
+        );
         key(&mut view, KeyCode::Down);
+        steps += 1;
     }
     key(&mut view, KeyCode::Tab);
     assert_eq!(view.selected_id(), None);

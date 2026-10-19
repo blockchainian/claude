@@ -516,11 +516,8 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     assert!(rendered.contains("Create new branch"), "{rendered}");
     let (x, y) = position(&buffer, "Create new branch");
     click(&mut app, x, y);
-    assert!(
-        app.view
-            .flush_pending_click(Instant::now() + Duration::from_secs(1))
-            .is_none()
-    );
+    wait_for_click(&mut app);
+    assert!(app.view.pending_click_in(Instant::now()).is_none());
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "New branch ❯ ");
     app.handle_event(Event::Paste("feature/paste-route-proof".into()));
@@ -1112,8 +1109,7 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 Some(width - 2)
             );
             click(&mut app, if edge { width - 2 } else { left }, y);
-            app.view
-                .flush_pending_click(Instant::now() + Duration::from_secs(1));
+            wait_for_click(&mut app);
             let buffer = draw(&mut app, width);
             let (detail_x, detail_y) = position(&buffer, "User      ");
             let (_, prompt_y) = position(&buffer, "❯");
