@@ -372,6 +372,7 @@ fn log_selection_switching_tasks_resets_following_through_app() {
         let (x, y) = log_position(&buffer, "对");
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         assert!(detail(&draw(&mut app, width)).contains("codex thread"));
+        click(&mut app, 0, 2);
         key(&mut app, KeyCode::Down);
         let buffer = draw(&mut app, width);
         assert_ne!(app.view.selected_id(), Some(&first));

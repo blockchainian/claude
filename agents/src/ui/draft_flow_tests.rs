@@ -1060,13 +1060,14 @@ fn frozen_repository_results_and_double_click_title_use_draft_identity() {
 }
 
 #[test]
-fn right_click_cancels_delete_confirmation_and_keeps_clicked_panel() {
+fn right_click_outside_cancels_delete_confirmation_and_preserves_panel() {
     let (directory, mut view) = fixture();
     named_draft(&mut view, directory.path(), "keep me");
     view.handle_paste("keep prompt");
     key(&mut view, KeyCode::Esc);
     assert!(view.confirm_dialog.is_some());
     render(&view);
+    let panel = view.active_panel;
     for kind in [
         MouseEventKind::Down(MouseButton::Right),
         MouseEventKind::Up(MouseButton::Right),
@@ -1079,7 +1080,7 @@ fn right_click_cancels_delete_confirmation_and_keeps_clicked_panel() {
         });
     }
     assert!(view.confirm_dialog.is_none());
-    assert!(view.active_panel == Panel::TaskList);
+    assert_eq!(view.active_panel, panel);
     assert_eq!(view.input_box.editor.text(), "keep prompt");
 }
 

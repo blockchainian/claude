@@ -81,12 +81,6 @@ impl View {
         {
             return None;
         }
-        if matches!(
-            mouse.kind,
-            MouseEventKind::Down(MouseButton::Left | MouseButton::Middle)
-        ) {
-            self.set_active_panel(Panel::Output);
-        }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();
         if mouse.kind == MouseEventKind::Down(MouseButton::Middle)

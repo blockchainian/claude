@@ -239,9 +239,10 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
                 .unwrap_or_else(|| panic!("selected task missing: {capture}"))
                 .to_owned()
         };
-        // Clicking either details pane must keep paging out of both lists.
+        // Wheel activation in either details pane must keep paging out of both lists.
         for (name, region) in [("task_details", task_detail), ("log_details", log_detail)] {
-            tmux.mouse(0, region.0 + 2, region.2 + 2, true);
+            tmux.mouse(0, task_list.0 + 2, task_list.2 + 2, true);
+            tmux.mouse(65, region.0 + 2, region.2 + 2, false);
             let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             tmux.run(&["send-keys", "-t", "probe", "C-f"]);
             let forward =
@@ -279,7 +280,7 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
                 slice(&backward, log_list),
                 "{name}: log list moved back: {backward}"
             );
-            evidence.push(serde_json::json!({"width":width, "panel":name, "forward":true, "backward":true, "lists_unchanged":true}));
+            evidence.push(serde_json::json!({"width":width, "panel":name, "wheel_activation":true, "forward":true, "backward":true, "lists_unchanged":true}));
         }
         // Ctrl-W uses the same focus state as the click route above.
         window_key(&tmux, "k");

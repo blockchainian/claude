@@ -728,6 +728,7 @@ fn details_scroll_returns_with_its_task() {
     let scrolled = details_reveal(&view);
     assert_eq!(scrolled.iter().sum::<usize>(), 3);
     let before = details_panel(&view);
+    view.set_active_panel(Panel::TaskList);
     key(&mut view, KeyCode::Down);
     details_panel(&view);
     assert_eq!(details_reveal(&view).iter().sum::<usize>(), 0);
@@ -755,6 +756,7 @@ fn details_body_changed_while_away_opens_folded() {
     let prompt = 1;
     assert!(scrolled[prompt] > 0 && scrolled[0] > 0, "{scrolled:?}");
     let index = view.selected;
+    view.set_active_panel(Panel::TaskList);
     key(&mut view, KeyCode::Down);
     details_panel(&view);
     view.rows[index].prompt = "A changed prompt that wraps across several rows. ".repeat(8);

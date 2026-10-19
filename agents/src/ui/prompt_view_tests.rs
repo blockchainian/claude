@@ -53,18 +53,18 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
 }
 
 #[test]
-fn right_click_leaves_input_on_press_and_shows_newest_on_release() {
+fn right_click_outside_preserves_input_focus_and_log_selection() {
     let (mut view, now) = log_fixture();
     view.select_fixture_event(Some(view.log[0].clone()));
     let expected = view.log_selected;
     log_screen(&view, 120, 40, now);
     view.active_panel = Panel::Prompt;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
-    assert!(!view.prompt_focused());
+    assert!(view.prompt_focused());
     assert_eq!(view.log_selected, expected);
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
-    assert!(!view.prompt_focused());
-    assert_eq!(view.visible_log_event(), view.log.last());
+    assert!(view.prompt_focused());
+    assert_eq!(view.log_selected, expected);
 }
 
 #[test]

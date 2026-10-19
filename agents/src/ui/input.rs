@@ -1,3 +1,4 @@
+use super::render::HORIZONTAL_PADDING;
 use super::*;
 
 /// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
@@ -264,46 +265,26 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
-        if matches!(mouse.kind, MouseEventKind::Down(_)) {
-            let panel = {
-                let viewport = self.viewport.borrow();
-                if viewport.list.contains(position)
-                    || viewport.tab_bar.contains(position)
-                    || viewport.search.contains(position)
-                {
-                    Panel::TaskList
-                } else if viewport.title_input.contains(position)
-                    || viewport.details_title.contains(position)
-                    || viewport.details_input.contains(position)
-                    || viewport
-                        .field_targets
-                        .iter()
-                        .any(|(rect, _)| rect.contains(position))
-                {
-                    Panel::Details
-                } else if viewport
-                    .output_borders
-                    .iter()
-                    .any(|rect| rect.contains(position))
-                {
-                    Panel::Output
-                } else if viewport.log.contains(position)
-                    || viewport
-                        .log_borders
-                        .iter()
-                        .any(|rect| rect.contains(position))
-                {
-                    Panel::LogList
-                } else if viewport.log_detail.contains(position) {
-                    Panel::Output
-                } else if viewport.details.contains(position) {
-                    Panel::Details
-                } else if viewport.prompt.contains(position) {
-                    Panel::Prompt
-                } else {
-                    Panel::TaskList
+        let panel = match mouse.kind {
+            MouseEventKind::Moved => None,
+            MouseEventKind::Down(button) => {
+                let panel = self.mouse_panel_at(position);
+                self.mouse_panel = Some((button, panel));
+                panel
+            }
+            MouseEventKind::Drag(button) | MouseEventKind::Up(button) => {
+                let panel = match self.mouse_panel {
+                    Some((held, panel)) if held == button => panel,
+                    _ => self.mouse_panel_at(position),
+                };
+                if matches!(mouse.kind, MouseEventKind::Up(_)) {
+                    self.mouse_panel = None;
                 }
-            };
+                panel
+            }
+            _ => self.mouse_panel_at(position),
+        };
+        if let Some(panel) = panel {
             self.set_active_panel(panel);
         }
         if let Some(action) = self.overlay_mouse(mouse) {
@@ -364,6 +345,56 @@ impl View {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
         }
+    }
+
+    fn mouse_panel_at(&self, position: ratatui::layout::Position) -> Option<Panel> {
+        let viewport = self.viewport.borrow();
+        if viewport.list.contains(position)
+            || viewport.tab_bar.contains(position)
+            || viewport.search.contains(position)
+        {
+            return Some(Panel::TaskList);
+        }
+        if viewport.title_input.contains(position)
+            || viewport.details_title.contains(position)
+            || viewport.details_input.contains(position)
+            || viewport
+                .field_targets
+                .iter()
+                .any(|(rect, _)| rect.contains(position))
+        {
+            return Some(Panel::Details);
+        }
+        for (panel, content, borders) in [
+            (Panel::Output, viewport.log_detail, viewport.output_borders),
+            (Panel::LogList, viewport.log, viewport.log_borders),
+        ] {
+            let within_content = !content.is_empty()
+                && position.x >= content.x.saturating_sub(HORIZONTAL_PADDING + 1)
+                && position.x <= content.right()
+                && position.y >= content.y
+                && position.y < content.bottom();
+            if within_content || borders.iter().any(|rect| rect.contains(position)) {
+                return Some(panel);
+            }
+        }
+        if viewport.terminal.contains(position) {
+            return Some(Panel::Output);
+        }
+        for (panel, content) in [
+            (Panel::TaskList, viewport.list),
+            (Panel::Details, viewport.details),
+        ] {
+            if !content.is_empty()
+                && position.x >= content.x.saturating_sub(HORIZONTAL_PADDING + 1)
+                && position.x <= content.right()
+                && position.y >= content.y.saturating_sub(1)
+                && position.y <= content.bottom()
+            {
+                return Some(panel);
+            }
+        }
+        viewport.prompt.contains(position).then_some(Panel::Prompt)
     }
 
     fn paste_target(&self, mouse: MouseEvent) -> Option<PasteTarget> {

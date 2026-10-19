@@ -25,7 +25,7 @@ fn editing(view: &View) -> [bool; 3] {
 }
 
 #[test]
-fn panel_focus_slash_tracks_last_click_despite_hover_and_wheel() {
+fn panel_focus_slash_tracks_wheel_but_ignores_hover() {
     for kind in [
         MouseEventKind::ScrollDown,
         MouseEventKind::ScrollUp,
@@ -35,10 +35,15 @@ fn panel_focus_slash_tracks_last_click_despite_hover_and_wheel() {
             let (mut view, _) = log_fixture();
             click_panel(&mut view, panel);
             at(&mut view, (panel + 1) % 5, kind);
+            let active = if kind == MouseEventKind::Moved {
+                panel
+            } else {
+                (panel + 1) % 5
+            };
             key(&mut view, KeyCode::Char('/'));
             assert_eq!(
                 editing(&view),
-                [panel == 0, panel == 1, panel == 2],
+                [active == 0, active == 1, active == 2],
                 "{kind:?}, {panel}"
             );
         }

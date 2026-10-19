@@ -370,3 +370,295 @@ fn active_panel_prompt_moves_its_caret_without_moving_other_panels() {
         assert_eq!(details_position(&view, Panel::Output), output);
     }
 }
+
+fn mouse_panel_area(view: &View, panel: Panel) -> Rect {
+    let viewport = view.viewport.borrow();
+    match panel {
+        Panel::TaskList => viewport.list,
+        Panel::Details => viewport.details,
+        Panel::LogList => viewport.log,
+        Panel::Output => viewport.log_detail,
+        Panel::Prompt => viewport.prompt,
+    }
+}
+
+fn assert_mouse_panel_paging(view: &mut View, panel: Panel) {
+    assert_eq!(view.active_panel, panel);
+    key(view, KeyCode::Home);
+    let before = (
+        view.selected,
+        view.log_selected,
+        details_position(view, Panel::Details),
+        details_position(view, Panel::Output),
+    );
+    view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    let after = (
+        view.selected,
+        view.log_selected,
+        details_position(view, Panel::Details),
+        details_position(view, Panel::Output),
+    );
+    match panel {
+        Panel::TaskList => assert_ne!(after.0, before.0),
+        Panel::LogList => {
+            assert_ne!(after.1, before.1);
+            assert_eq!(after.0, before.0);
+        }
+        Panel::Details | Panel::Output => {
+            assert_eq!((after.0, after.1), (before.0, before.1));
+            if panel == Panel::Details {
+                assert!(after.2 > before.2);
+                assert_eq!(after.3, before.3);
+            } else {
+                assert!(after.3 > before.3);
+                assert_eq!(after.2, before.2);
+            }
+        }
+        Panel::Prompt => assert_eq!(after, before),
+    }
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging() {
+    for width in [100, 200] {
+        for panel in [
+            Panel::TaskList,
+            Panel::Details,
+            Panel::LogList,
+            Panel::Output,
+            Panel::Prompt,
+        ] {
+            for kind in [
+                MouseEventKind::ScrollUp,
+                MouseEventKind::ScrollDown,
+                MouseEventKind::ScrollLeft,
+                MouseEventKind::ScrollRight,
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+                MouseEventKind::Down(MouseButton::Right),
+                MouseEventKind::Up(MouseButton::Right),
+                MouseEventKind::Down(MouseButton::Middle),
+                MouseEventKind::Up(MouseButton::Middle),
+                MouseEventKind::Drag(MouseButton::Left),
+                MouseEventKind::Drag(MouseButton::Right),
+                MouseEventKind::Drag(MouseButton::Middle),
+            ] {
+                let (mut view, _) = panel_fixture(width);
+                let area = mouse_panel_area(&view, panel);
+                assert!(!area.is_empty());
+                view.set_active_panel(if panel == Panel::TaskList {
+                    Panel::Output
+                } else {
+                    Panel::TaskList
+                });
+                view.handle_mouse(mouse(kind, area.x, area.y + (area.height - 1).min(1)));
+                assert_eq!(view.active_panel, panel, "width={width} kind={kind:?}");
+                assert_mouse_panel_paging(&mut view, panel);
+            }
+        }
+    }
+}
+
+#[test]
+fn mouse_activation_double_click_and_drag_keep_the_pressed_panel() {
+    for width in [100, 200] {
+        for panel in [
+            Panel::TaskList,
+            Panel::Details,
+            Panel::LogList,
+            Panel::Output,
+            Panel::Prompt,
+        ] {
+            for double in [false, true] {
+                let (mut view, _) = panel_fixture(width);
+                let area = mouse_panel_area(&view, panel);
+                view.set_active_panel(if panel == Panel::TaskList {
+                    Panel::Output
+                } else {
+                    Panel::TaskList
+                });
+                view.handle_mouse(mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    area.x,
+                    area.y + (area.height - 1).min(1),
+                ));
+                assert_eq!(view.active_panel, panel);
+                if double {
+                    view.handle_mouse(mouse(
+                        MouseEventKind::Up(MouseButton::Left),
+                        area.x,
+                        area.y + (area.height - 1).min(1),
+                    ));
+                    view.handle_mouse(mouse(
+                        MouseEventKind::Down(MouseButton::Left),
+                        area.x,
+                        area.y + (area.height - 1).min(1),
+                    ));
+                    view.handle_mouse(mouse(
+                        MouseEventKind::Up(MouseButton::Left),
+                        area.x,
+                        area.y + (area.height - 1).min(1),
+                    ));
+                } else {
+                    let other = mouse_panel_area(
+                        &view,
+                        if panel == Panel::TaskList {
+                            Panel::Details
+                        } else {
+                            Panel::TaskList
+                        },
+                    );
+                    view.handle_mouse(mouse(
+                        MouseEventKind::Drag(MouseButton::Left),
+                        other.x,
+                        other.y + 1,
+                    ));
+                    assert_eq!(view.active_panel, panel);
+                    view.handle_mouse(mouse(
+                        MouseEventKind::Up(MouseButton::Left),
+                        other.x,
+                        other.y + 1,
+                    ));
+                }
+                assert_mouse_panel_paging(&mut view, panel);
+            }
+        }
+    }
+}
+
+#[test]
+fn mouse_activation_outside_and_hover_preserve_focus() {
+    for width in [100, 200] {
+        let (mut view, _) = panel_fixture(width);
+        view.set_active_panel(Panel::Output);
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::ScrollDown,
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Middle),
+        ] {
+            view.handle_mouse(mouse(kind, width - 1, 44));
+            assert_eq!(view.active_panel, Panel::Output, "outside: {kind:?}");
+        }
+        let area = mouse_panel_area(&view, Panel::Details);
+        view.handle_mouse(mouse(MouseEventKind::Moved, area.x, area.y));
+        assert_eq!(view.active_panel, Panel::Output);
+        // A press outside a panel cannot acquire one by dragging into it.
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            width - 1,
+            44,
+        ));
+        view.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            area.x,
+            area.y,
+        ));
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), area.x, area.y));
+        assert_eq!(view.active_panel, Panel::Output);
+    }
+}
+
+#[test]
+fn mouse_activation_terminal_events_activate_before_forwarding() {
+    for width in [100, 200] {
+        for kind in [
+            MouseEventKind::ScrollUp,
+            MouseEventKind::ScrollDown,
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Middle),
+        ] {
+            let (mut view, now) = panel_fixture(width);
+            let mut screen = crate::session_terminal::TerminalScreen::new(10, 80);
+            screen.process(b"\x1b[?1002h\x1b[?1006h");
+            view.show_terminal(
+                view.selected_id().unwrap().clone(),
+                std::sync::Arc::new(std::sync::Mutex::new(screen)),
+            );
+            log_screen(&view, width, 45, now);
+            view.set_active_panel(Panel::Details);
+            let area = view.viewport.borrow().terminal;
+            assert!(!area.is_empty());
+            assert!(
+                matches!(
+                    view.handle_mouse(mouse(kind, area.x, area.y)),
+                    Some(Action::TerminalInput(_))
+                ),
+                "{kind:?}"
+            );
+            assert_eq!(view.active_panel, Panel::Output, "{kind:?}");
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)),
+                Some(Action::TerminalInput(vec![6]))
+            );
+        }
+    }
+}
+
+#[test]
+fn mouse_activation_includes_output_and_log_borders() {
+    for width in [100, 200] {
+        let (mut view, _) = panel_fixture(width);
+        let borders = {
+            let viewport = view.viewport.borrow();
+            [
+                (Panel::Output, viewport.output_borders),
+                (Panel::LogList, viewport.log_borders),
+            ]
+        };
+        for (panel, borders) in borders {
+            for border in borders {
+                view.set_active_panel(Panel::TaskList);
+                view.handle_mouse(mouse(
+                    MouseEventKind::ScrollRight,
+                    border.right() - 1,
+                    border.y,
+                ));
+                let expected = if view
+                    .viewport
+                    .borrow()
+                    .output_borders
+                    .iter()
+                    .any(|output| output.contains((border.right() - 1, border.y).into()))
+                {
+                    Panel::Output
+                } else {
+                    panel
+                };
+                assert_eq!(
+                    view.active_panel, expected,
+                    "width={width}, border={border:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn mouse_activation_covers_panel_rules_and_side_padding() {
+    for width in [100, 200] {
+        let (mut view, _) = panel_fixture(width);
+        for panel in [
+            Panel::TaskList,
+            Panel::Details,
+            Panel::LogList,
+            Panel::Output,
+        ] {
+            let area = mouse_panel_area(&view, panel);
+            let mut positions = vec![(area.x - 1, area.y + 1), (area.right(), area.y + 1)];
+            if matches!(panel, Panel::TaskList | Panel::Details) {
+                positions.extend([(area.x, area.y - 1), (area.x, area.bottom())]);
+            }
+            if panel == Panel::Details || (panel == Panel::LogList && width == 200) {
+                positions.push((area.x - 2, area.y + 1));
+            }
+            for (x, y) in positions {
+                view.set_active_panel(Panel::Prompt);
+                view.handle_mouse(mouse(MouseEventKind::ScrollLeft, x, y));
+                assert_eq!(view.active_panel, panel, "width={width}, x={x}, y={y}");
+            }
+        }
+    }
+}

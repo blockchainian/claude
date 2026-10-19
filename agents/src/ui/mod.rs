@@ -328,6 +328,8 @@ pub struct View {
     last_detail_click: Option<(SessionKey, Option<usize>, Instant)>,
     /// Button, origin and drag state of the held mouse press.
     mouse_press: Option<(MouseButton, u16, u16, bool)>,
+    /// The pressed panel owns the drag and release, including presses outside panels.
+    mouse_panel: Option<(MouseButton, Option<Panel>)>,
     pressed_task: Option<SessionKey>,
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
@@ -461,6 +463,7 @@ impl View {
             pending_click: None,
             last_detail_click: None,
             mouse_press: None,
+            mouse_panel: None,
             pressed_task: None,
             last_copy_click: None,
             copied: None,
