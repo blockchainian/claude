@@ -181,6 +181,42 @@ fn terminal_shell_multi_file_read_colors() {
         "print(\"python-output\")",
         "name = \"toml-output\"",
     ];
+    probe_shell_output_colors(
+        "multi-file-read",
+        command,
+        &lines,
+        &[
+            (0, "answer", "rust-output"),
+            (2, "print", "python-output"),
+            (3, "name", "toml-output"),
+        ],
+        &[],
+    );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_shell_reads_before_other_commands_colors() {
+    probe_shell_output_colors(
+        "read-tail",
+        "sed -n '1p' a.rs; sed -n '2p' a.rs; rg foo src",
+        &[
+            "let first = \"first-output\";",
+            "let second = \"second-output\";",
+            "src/main.rs: let plain = \"plain-output\";",
+        ],
+        &[(0, "first", "first-output"), (1, "second", "second-output")],
+        &[(2, "plain =", "plain-output")],
+    );
+}
+
+fn probe_shell_output_colors(
+    name: &str,
+    command: &str,
+    lines: &[&str],
+    highlighted: &[(usize, &str, &str)],
+    plain: &[(usize, &str, &str)],
+) {
     let body = lines.join("\n");
     let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
         .lines()
@@ -200,11 +236,11 @@ fn terminal_shell_multi_file_read_colors() {
         .iter()
         .map(|record| format!("{record}\n"))
         .collect::<String>();
-    let (_directory, tmux, _) = start_probe_with_transcript("multi-file-read", &transcript);
+    let (_directory, tmux, _) = start_probe_with_transcript(name, &transcript);
     tmux.run(&["send-keys", "-t", "probe", "End"]);
-    let capture = tmux.capture_when(|capture| capture.contains(lines[3]));
+    let capture = tmux.capture_when(|capture| capture.contains(lines.last().unwrap()));
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-    let path = std::env::temp_dir().join("agents-multi-file-read.ansi");
+    let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
     std::fs::write(&path, &colored).unwrap();
     let parser = captured_screen(&colored, 200, 50);
     let output_start = capture
@@ -240,12 +276,11 @@ fn terminal_shell_multi_file_read_colors() {
             .unwrap()
             .fgcolor()
     };
-    for (index, identifier, string) in [
-        (0, "answer", "rust-output"),
-        (2, "print", "python-output"),
-        (3, "name", "toml-output"),
-    ] {
+    for &(index, identifier, string) in highlighted {
         assert_ne!(color(index, identifier), color(index, string), "{capture}");
+    }
+    for &(index, identifier, string) in plain {
+        assert_eq!(color(index, identifier), color(index, string), "{capture}");
     }
     let verdict =
         serde_json::json!({"verdict": "pass", "continuous_rows": rows.len(), "capture": path});

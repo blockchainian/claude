@@ -2108,6 +2108,29 @@ mod tests {
     }
 
     #[test]
+    fn shell_file_reads_before_other_commands_highlight_stdout() {
+        let mut record = tool_records()
+            .into_iter()
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        record["payload"]["item"]["command"][2] = "sed -n '1p' src/main.rs; rg foo src".into();
+        record["payload"]["item"]["aggregated_output"] = "let foo = 1;\nsrc/main.rs:foo\n".into();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file.as_file(), "{record}").unwrap();
+        let events = tail(file.path(), 20).unwrap();
+        assert_eq!(
+            events[0].calls[0].output.as_ref().unwrap(),
+            &vec![
+                tool::code_section("output", "rs", "let foo = 1;\n"),
+                Section::Text {
+                    label: "output".into(),
+                    text: "src/main.rs:foo\n".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn shell_response_titles_use_command_subject_and_shell_detail() {
         let record = tool_records()
             .into_iter()

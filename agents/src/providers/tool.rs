@@ -1112,8 +1112,13 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
     let commands = crate::ui::shell_commands::split(command)?;
     let reads = commands
         .iter()
-        .map(|command_range| shell_read(&command[command_range.range.clone()]))
+        .map(|command_range| {
+            let command = &command[command_range.range.clone()];
+            shell_summary::single_words(command)?;
+            Some(shell_read(command))
+        })
         .collect::<Option<Vec<_>>>()?;
+    reads.first()?.as_ref()?;
     let file_section = |path: Option<&str>, text: &str| {
         if let Some(path) = path {
             let section = file_code_section(label, path, text);
@@ -1137,19 +1142,30 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
         let mut line = 0usize;
         let mut sections = Vec::new();
         for (index, read) in reads.iter().enumerate() {
-            let end = match read.lines {
+            let read = read.as_ref();
+            let remainder = read.is_none_or(|read| read.lines.is_none() && index + 1 < reads.len());
+            let end = match read.and_then(|read| read.lines) {
                 Some(count) => line.checked_add(count)?,
-                None if index + 1 == reads.len() => ends.len() - 1,
-                None => return None,
+                None => ends.len() - 1,
             };
             let start = *ends.get(line)?;
             let end_byte = *ends.get(end)?;
             // A following command cannot start halfway through a stdout line.
-            if index + 1 < reads.len() && end_byte > start && !text[..end_byte].ends_with('\n') {
+            if !remainder
+                && index + 1 < reads.len()
+                && end_byte > start
+                && !text[..end_byte].ends_with('\n')
+            {
                 return None;
             }
-            sections.push(file_section(read.path.as_deref(), &text[start..end_byte]));
+            let path = read
+                .filter(|_| !remainder)
+                .and_then(|read| read.path.as_deref());
+            sections.push(file_section(path, &text[start..end_byte]));
             line = end;
+            if remainder {
+                break;
+            }
         }
         (line == ends.len() - 1).then_some(sections)
     };
@@ -1158,7 +1174,7 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
     }
     let paths: Vec<_> = reads
         .iter()
-        .filter_map(|read| read.path.as_deref())
+        .filter_map(|read| read.as_ref()?.path.as_deref())
         .collect();
     let path = *paths.first()?;
     let Section::Code { lang, .. } = file_section(Some(path), text) else {
@@ -1278,16 +1294,78 @@ mod tests {
     }
 
     #[test]
+    fn shell_output_splits_reads_before_other_commands() {
+        use crate::log::Section;
+        let first = "let first = 1;\n".repeat(341);
+        let second = "let second = 2;\n".repeat(181);
+        let tail = "12345 agents/tests/fixtures/claude-tool-calls.jsonl\n678 agents/tests/fixtures/claude-tool-calls.jsonl\n";
+        let command = "sed -n '60,400p' agents/src/ui/log.rs\nsed -n '1080,1260p' agents/src/ui/log.rs\nwc -c agents/tests/fixtures/claude-tool-calls.jsonl\nwc -l agents/tests/fixtures/claude-tool-calls.jsonl";
+        assert_eq!(
+            shell_output(command, &format!("{first}{second}{tail}")),
+            vec![
+                super::code_section("stdout", "rs", &first),
+                super::code_section("stdout", "rs", &second),
+                Section::Text {
+                    label: "stdout".into(),
+                    text: tail.into()
+                },
+            ]
+        );
+        assert_eq!(
+            shell_output(
+                "sed -n '1p' a.rs; rg foo src",
+                "let foo = 1;\nsrc/main.rs:foo\n"
+            ),
+            vec![
+                super::code_section("stdout", "rs", "let foo = 1;\n"),
+                Section::Text {
+                    label: "stdout".into(),
+                    text: "src/main.rs:foo\n".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_output_stops_at_unknown_counts() {
+        use crate::log::Section;
+        for command in [
+            "sed -n '1p' a.rs; cat b.py; head -n 1 c.rs",
+            "sed -n '1p' a.rs; sed -n '2,$p' b.py; head -n 1 c.rs",
+            "sed -n '1p' a.rs; ls; head -n 1 c.rs",
+            "sed -n '1p' a.rs; pwd; head -n 1 c.rs",
+        ] {
+            assert_eq!(
+                shell_output(command, "one\ntwo\nthree"),
+                vec![
+                    super::code_section("stdout", "rs", "one\n"),
+                    Section::Text {
+                        label: "stdout".into(),
+                        text: "two\nthree".into()
+                    },
+                ],
+                "{command}"
+            );
+        }
+        assert!(
+            super::shell_output_sections("rg foo src; sed -n '1p' a.rs", "stdout", "one\ntwo")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn shell_output_validates_counts_before_splitting() {
         use crate::log::Section;
         for command in [
             "head -n 2 a.rs; head -n 2 b.py",
+            "head -n 1 a.rs; head -n 1 b.py",
+            "head -n 2 a.rs; head -n 2 b.py; rg foo src",
             "cat a.rs; cat b.py",
             "sed -n '1,$p' a.rs; cat b.py",
         ] {
             assert!(
                 matches!(
-                    shell_output(command, "one\ntwo").as_slice(),
+                    shell_output(command, "one\ntwo\nthree").as_slice(),
                     [Section::Text { .. }]
                 ),
                 "{command}"
@@ -1299,7 +1377,10 @@ mod tests {
         );
         assert_eq!(
             shell_output("cat a.rs; cat b.rs", "one\ntwo"),
-            vec![super::code_section("stdout", "rs", "one\ntwo")]
+            vec![Section::Text {
+                label: "stdout".into(),
+                text: "one\ntwo".into()
+            }]
         );
         assert_eq!(
             shell_output("head -n 1 a.rs; cat b.py", "one\n"),
@@ -1319,7 +1400,8 @@ mod tests {
             "head -n 1 $FILE; cat b.rs",
             "head -n 1 *.rs; cat b.rs",
             "head -n 1 a.rs; echo \"$X\"; cat b.rs",
-            "head -n 1 a.rs; pwd; cat b.rs",
+            "head -n 1 a.rs; rg foo src | cat",
+            "head -n 1 a.rs; ls > out",
         ] {
             assert!(
                 matches!(
