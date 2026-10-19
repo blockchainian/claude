@@ -227,7 +227,7 @@ pub struct View {
     mouse_focus: Panel,
     /// The session whose program runs in the log detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
-    startup_cwd: PathBuf,
+    pub(crate) startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
     selected_draft: Option<crate::model::DraftId>,
     next_draft: u64,

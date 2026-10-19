@@ -717,14 +717,22 @@ impl View {
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
-        // The title stays centered on the whole rule, so the wider side label's width is kept
-        // clear on both sides, plus the corner, one rule cell and a space on each side.
+        // Reserve the title before fitting the side labels into the remaining equal margins.
+        let editor = self.title_editor();
+        let title_width = editor.map_or(title.width(), |editor| {
+            if self.name_target.is_some() && editor.is_empty() {
+                "New task".width()
+            } else {
+                editor.text().width() + 1
+            }
+        });
+        let side_limit = usize::from(rule.width).saturating_sub(title_width + 10) / 2;
         let side = right
             .as_ref()
             .map_or(0, |span| span.width())
-            .max(folder.width());
+            .max(folder.width())
+            .min(side_limit);
         let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
-        let editor = self.title_editor();
         let title = if let Some(editor) = editor {
             let placeholder = self.name_target.is_some() && editor.is_empty();
             let display_width = if placeholder {

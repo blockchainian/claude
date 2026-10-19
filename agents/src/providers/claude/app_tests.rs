@@ -1156,7 +1156,7 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
     use crate::providers::{Provider, codex::CodexProvider};
     let (dir, mut app) = fixture();
     for args in [
-        vec!["init", "-b", "main"],
+        vec!["init", "-b", "workstream/branch-name-tests"],
         vec![
             "-c",
             "user.name=Fixture",
@@ -1194,6 +1194,7 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
     let claude = app.sessions[0].clone();
     for rows in [vec![claude], vec![thread], vec![]] {
         app.view = crate::ui::View::default();
+        app.view.startup_cwd = dir.path().to_owned();
         app.view.set_capabilities(app.hub.capabilities());
         app.view.set_input_choices(app.hub.input_choices());
         let inactive = rows
