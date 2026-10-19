@@ -750,7 +750,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
             arguments.as_ref().unwrap_or(&Value::Null),
             None,
         ),
-        name,
+        name: raw_name.clone(),
         started_at: None,
         hide_output: false,
         agent_thread_id: None,
@@ -832,7 +832,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                 });
             (
                 format!(
-                    "{}.{}",
+                    "mcp__{}__{}",
                     item["server"].as_str().unwrap(),
                     item["tool"].as_str().unwrap()
                 ),
@@ -864,7 +864,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             &arguments,
             exit_code,
         ),
-        name,
+        name: raw_name.clone(),
         started_at: None,
         hide_output: false,
         agent_thread_id: None,
@@ -2566,7 +2566,7 @@ mod tests {
             );
             match &call.output.as_ref().unwrap()[1] {
                 Section::Placeholder(text) => {
-                    let mime = if call.name == "cua_repl js" {
+                    let mime = if record["payload"]["item"]["server"] == "cua_repl" {
                         "[image image/png]"
                     } else {
                         "[resource text/html]"
@@ -2592,7 +2592,7 @@ mod tests {
                 .unwrap();
         let call = response_tool_call(&record["payload"], None);
         assert!(call.input.is_empty());
-        assert_eq!(call.name, "chrome_devtools list_pages");
+        assert_eq!(call.name, "mcp__chrome_devtools__list_pages");
     }
 
     #[test]
@@ -3055,7 +3055,7 @@ mod tests {
         call["payload"]["name"] = "functions.request_user_input".into();
         assert_eq!(
             tool_body(&call["payload"]).unwrap(),
-            "Functions request user input Color · Color"
+            "Request user input Color · Color"
         );
         records.push(call);
         assert_eq!(

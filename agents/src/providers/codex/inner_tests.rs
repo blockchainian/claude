@@ -122,7 +122,7 @@ fn image_view_retains_image_path_for_rendering() {
     let entries = events("image-view");
     assert_eq!(entries.len(), 1);
     let records = records("image-view");
-    assert_eq!(entries[0].body, "Imageview");
+    assert_eq!(entries[0].body, "ImageView");
     assert!(entries[0].paths.is_empty());
     let crate::log::Section::Structured { text, .. } = &entries[0].calls[0].input[0] else {
         panic!("image arguments require JSON");
@@ -819,7 +819,7 @@ fn interaction_message_group_survives_small_tail_page() {
 
 #[test]
 fn protocol_titles_use_sentence_case() {
-    assert_eq!(crate::providers::tool::title_name("ImageView"), "Imageview");
+    assert_eq!(crate::providers::tool::title_name("ImageView"), "ImageView");
     assert_eq!(
         crate::providers::tool::title_name("FINAL_ANSWER"),
         "Final answer"

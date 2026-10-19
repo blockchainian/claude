@@ -19,10 +19,14 @@ pub(crate) fn json_input(value: &Value) -> Vec<Section> {
 /// Decode MCP and Anthropic content blocks without exposing binary payloads.
 pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
     if let Some(text) = content.as_str() {
-        return vec![Section::Text {
-            label: "output".into(),
-            text: text.into(),
-        }];
+        return if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![Section::Text {
+                label: "output".into(),
+                text: text.into(),
+            }]
+        };
     }
     content
         .as_array()
@@ -45,10 +49,11 @@ pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
                 None => format!("[{kind}]"),
             })
         })
+        .filter(|section| !matches!(section, Section::Text { text, .. } if text.is_empty()))
         .collect()
 }
 
-pub(crate) fn display_tool_name(name: &str) -> String {
+fn tool_name(name: &str) -> String {
     let Some((server, tool)) = name
         .strip_prefix("mcp__")
         .and_then(|rest| rest.split_once("__"))
@@ -56,7 +61,14 @@ pub(crate) fn display_tool_name(name: &str) -> String {
         return name
             .split_once('.')
             .filter(|(server, tool)| !server.is_empty() && !tool.is_empty())
-            .map(|(server, tool)| format!("{server} {tool}"))
+            .map(|(server, tool)| {
+                let mcp = format!("{server} {tool}");
+                if MCP_RULES.subjects.iter().any(|(name, _)| *name == mcp) {
+                    mcp
+                } else {
+                    tool.to_owned()
+                }
+            })
             .unwrap_or_else(|| name.to_owned());
     };
     let server = if let Some(rest) = server.strip_prefix("plugin_") {
@@ -74,14 +86,27 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     }
 }
 
-/// Display protocol identifiers without maintaining a per-tool name table.
+/// One display-name rule for both providers; protocol namespaces are not tool names.
+pub(crate) fn display_tool_name(name: &str) -> String {
+    let name = tool_name(name);
+    if name.starts_with("mcp__") {
+        return name;
+    }
+    title_name(&name)
+}
+
+/// Underscore identifiers use sentence case; camel-case identifiers retain their spelling.
 pub(crate) fn title_name(name: &str) -> String {
-    let text = name
-        .split(['_', '.', ' '])
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
+    let name = tool_name(name);
+    let text = if name.contains('_') || name.chars().all(|c| !c.is_lowercase()) {
+        name.split('_')
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    } else {
+        name.to_owned()
+    };
     let mut chars = text.chars();
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().collect::<String>() + chars.as_str()
@@ -198,7 +223,7 @@ pub(crate) fn list_title(name: &str, subject: Option<&str>, input: &Value) -> St
 }
 
 fn subject_rule(name: &str, rules: &Rules) -> Option<Subject> {
-    find(name, rules.subjects).or_else(|| find(&display_tool_name(name), MCP_RULES.subjects))
+    find(name, rules.subjects).or_else(|| find(&tool_name(name), MCP_RULES.subjects))
 }
 
 /// Read a declared subject from JSON output, leaving the input subject as fallback.
@@ -274,7 +299,8 @@ pub(crate) fn presentation(
             .iter()
             .find_map(|(tool, input, format)| find(name, &[(*tool, (*input, *format))]))
     };
-    let rule = input_rule(raw_name, rules.inputs).or_else(|| input_rule(&name, MCP_RULES.inputs));
+    let rule = input_rule(raw_name, rules.inputs)
+        .or_else(|| input_rule(&tool_name(raw_name), MCP_RULES.inputs));
     let sections = match rule {
         Some((Input::Field(""), _)) => Vec::new(),
         Some((method, format)) => {
@@ -488,6 +514,45 @@ fn label_section(section: Section) -> Vec<Section> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn captured_tool_names_share_one_display_rule() {
+        let record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/codex-agent-names.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let name = record["payload"]["name"].as_str().unwrap();
+        assert_eq!(super::display_tool_name(name), "Send message");
+        assert_eq!(
+            super::display_tool_name(&format!("collaboration.{name}")),
+            "Send message"
+        );
+        for line in include_str!("../../tests/fixtures/claude-tool-calls.jsonl").lines() {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            if let Some(name @ ("WebFetch" | "Bash" | "Read" | "Skill")) =
+                record["message"]["content"][0]["name"].as_str()
+            {
+                assert_eq!(super::display_tool_name(name), name);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_captured_output_has_no_sections() {
+        let record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let mut content = record["message"]["content"][0]["content"].clone();
+        content = serde_json::Value::String(content.as_str().unwrap().chars().take(0).collect());
+        assert!(super::mcp_content(&content).is_empty());
+    }
+
+    #[test]
     fn result_subject_follows_the_declared_fields() {
         let records: Vec<serde_json::Value> =
             include_str!("../../tests/fixtures/claude-manager-detach-name.jsonl")
@@ -573,7 +638,7 @@ mod tests {
         };
         for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
             let (name, subject, input) = super::presentation(name, &call["input"], &rules);
-            assert_eq!(name, "codex-manager start");
+            assert_eq!(name, "Codex-manager start");
             assert_eq!(subject.as_deref(), Some("tool-calls"));
             assert_eq!(
                 input,
@@ -590,17 +655,17 @@ mod tests {
         for (name, expected) in [
             (
                 "mcp__plugin_codex_codex-manager__send",
-                "codex-manager send",
+                "Codex-manager send",
             ),
             (
                 "mcp__plugin_codex_codex-manager__start",
-                "codex-manager start",
+                "Codex-manager start",
             ),
             (
                 "mcp__claude-in-chrome__navigate",
-                "claude-in-chrome navigate",
+                "Claude-in-chrome navigate",
             ),
-            ("mcp__context7__query-docs", "context7 query-docs"),
+            ("mcp__context7__query-docs", "Context7 query-docs"),
             ("mcp__tool", "mcp__tool"),
             ("mcp____send", "mcp____send"),
             ("mcp__server__", "mcp__server__"),

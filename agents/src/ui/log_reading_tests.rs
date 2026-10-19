@@ -159,7 +159,7 @@ fn mcp_inputs_keep_only_declared_prompt_in_body() {
     event.calls = vec![call.clone()];
     let parts = body_parts(&event);
     assert_eq!(event.calls[0].detail_title, "tool-calls");
-    assert_eq!(event.calls[0].detail_left, "codex-manager start");
+    assert_eq!(event.calls[0].detail_left, "Codex-manager start");
     let input = parts
         .iter()
         .find(|part| part.source.starts_with("Goal:"))
