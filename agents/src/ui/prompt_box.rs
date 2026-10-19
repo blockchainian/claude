@@ -40,13 +40,17 @@ pub(super) struct PromptBox {
     pub(super) history: composer_history::History,
     recall: composer_history::Recall,
     search: Option<composer_history::Search>,
-    text_width: std::cell::Cell<usize>,
+    /// The box width and label inset the editor last wrapped at.
+    text_width: std::cell::Cell<(usize, usize)>,
 }
 
+/// The prompt's rows: the label prefix, then the text wrapped so that only the first row
+/// starts after the prefix and every later row starts at the box's left edge.
 struct PromptLayout {
     prefix: String,
     inset: u16,
     lines: Vec<String>,
+    /// The caret's column within the box and its row.
     caret: (u16, usize),
 }
 
@@ -81,9 +85,10 @@ impl PromptBox {
         let heading = format!("{label} {PROMPT_MARKER} ");
         let prefix = clip(&heading, prefix_budget);
         let inset = prefix.width() as u16;
-        let available = usize::from(width.saturating_sub(inset).max(1));
-        self.text_width.set(available);
-        let positions = self.editor.visual_positions(available);
+        self.text_width.set((usize::from(width), usize::from(inset)));
+        let positions = self
+            .editor
+            .visual_positions(usize::from(width), usize::from(inset));
         let row_count = positions.last().expect("end caret").2 + 1;
         let mut lines = vec![String::new(); row_count];
         let mut caret = (0, 0);
@@ -106,8 +111,12 @@ impl PromptBox {
         }
     }
 
+    /// The rows the whole prompt takes; the layout bounds it.
     pub(super) fn height(&self, width: u16, label: &str) -> u16 {
-        self.layout(width, label).lines.len().clamp(1, 5) as u16
+        self.layout(width, label)
+            .lines
+            .len()
+            .clamp(1, usize::from(u16::MAX)) as u16
     }
 
     pub(super) fn render(&self, area: Rect, buf: &mut Buffer, label: &str, disabled: Option<&str>) {
@@ -131,30 +140,33 @@ impl PromptBox {
             return;
         }
         let layout = self.layout(area.width, label);
-        let height = usize::from(area.height.min(5));
+        let height = usize::from(area.height);
         let start = self.mouse_scroll_start(&layout, height);
         let style = if self.focused {
             Style::default().cyan()
         } else {
             Style::default().dim()
         };
-        buf.set_stringn(
-            area.x,
-            area.y,
-            &layout.prefix,
-            usize::from(area.width),
-            style,
-        );
-        for (row, text) in layout.lines.iter().skip(start).take(height).enumerate() {
+        if start == 0 {
             buf.set_stringn(
-                area.x + layout.inset,
+                area.x,
+                area.y,
+                &layout.prefix,
+                usize::from(area.width),
+                style,
+            );
+        }
+        for (row, text) in layout.lines.iter().skip(start).take(height).enumerate() {
+            let inset = if start + row == 0 { layout.inset } else { 0 };
+            buf.set_stringn(
+                area.x + inset,
                 area.y + row as u16,
                 text,
-                usize::from(area.width - layout.inset),
+                usize::from(area.width - inset),
                 Style::default(),
             );
         }
-        self.highlight_mouse_selection(area, buf, &layout, start);
+        self.highlight_mouse_selection(area, buf, start);
     }
 
     pub(super) fn cursor(&self, area: Rect, label: &str) -> Option<(u16, u16)> {
@@ -162,14 +174,14 @@ impl PromptBox {
             return None;
         }
         let layout = self.layout(area.width, label);
-        let height = usize::from(area.height.min(5));
+        let height = usize::from(area.height);
         let start = self.mouse_scroll_start(&layout, height);
         let row = layout.caret.1.checked_sub(start)?;
         if row >= height {
             return None;
         }
         Some((
-            area.x + (layout.inset + layout.caret.0).min(area.width - 1),
+            area.x + layout.caret.0.min(area.width - 1),
             area.y + row as u16,
         ))
     }
@@ -214,7 +226,8 @@ impl PromptBox {
             _ => None,
         };
         if let Some(down) = vertical {
-            if !self.editor.move_vertical(self.text_width.get(), down) {
+            let (width, inset) = self.text_width.get();
+            if !self.editor.move_vertical(width, inset, down) {
                 self.recall_history(down);
             }
             return None;
@@ -303,7 +316,9 @@ mod tests {
         editor.focused = true;
         editor.paste(REAL_TEXT);
         assert_eq!(editor.editor.text(), REAL_TEXT);
-        assert_eq!(editor.height(70, "Task"), 5);
+        let height = editor.height(70, "Task");
+        assert!(height > 5, "{height}");
+        assert_eq!(height, editor.layout(70, "Task").lines.len() as u16);
         assert!(rendered(&editor, 70, None).contains("No reply needed."));
     }
 
@@ -439,14 +454,14 @@ mod tests {
         let mut editor = focused();
         assert_eq!(editor.height(80, "Task"), 1);
         for width in [0, 1, 2, 8] {
-            assert!((1..=5).contains(&editor.height(width, "Long task target")));
+            assert_eq!(editor.height(width, "Long task target"), 1);
             let area = Rect::new(0, 0, width, 1);
             if let Some(cursor) = editor.cursor(area, "Long task target") {
                 assert!(area.contains(cursor.into()));
             }
         }
         editor.paste("写工具详情计划");
-        assert!((1..=5).contains(&editor.height(2, "Task")));
+        assert!(editor.height(2, "Task") >= 1);
     }
 
     #[test]
@@ -480,6 +495,81 @@ mod tests {
         release.code = KeyCode::Backspace;
         editor.handle_key(release);
         assert_eq!(editor.editor.text(), REAL_TEXT);
+    }
+
+    const CJK_PARAGRAPHS: &str = "同样，它是用已有的这个任务的名字做那个 placeholder。然后当用户开始打字的时候，这个 placeholder 就消失了，用户输入的东西会替换掉原来的名字。这个和现在的搜索框的行为是一样的，所以可以复用同一个组件，不需要再写一遍。\n\n然后它也支持 line editing，就是重命名。重命名的时候也是在同一个输入框里面做，按回车确认，按 Esc 取消。这个和搜索框的行为也是一样的，所以也可以复用。\n\n最后还有一个问题，就是这个输入框的高度。现在是固定五行，但是长的提示会被截掉。";
+
+    fn screen_rows(editor: &PromptBox, width: u16, height: u16) -> Vec<String> {
+        use unicode_width::UnicodeWidthStr;
+        let area = Rect::new(0, 0, width, height);
+        let mut buffer = Buffer::empty(area);
+        editor.render(area, &mut buffer, "New prompt", None);
+        buffer
+            .content
+            .chunks(usize::from(width))
+            .map(|row| {
+                let mut text = String::new();
+                let mut skip = 0;
+                for cell in row {
+                    if skip > 0 {
+                        skip -= 1;
+                        continue;
+                    }
+                    text.push_str(cell.symbol());
+                    skip = cell.symbol().width().saturating_sub(1);
+                }
+                text.trim_end().to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn newline_after_a_full_row_adds_no_blank_row() {
+        let mut editor = focused();
+        editor.paste("AAAA\nB");
+        // "Task ❯ " takes seven cells, so eleven columns leave four for the first row.
+        let layout = editor.layout(11, "Task");
+        assert_eq!(layout.lines, ["AAAA", "B"]);
+        assert_eq!(layout.caret, (1, 1));
+    }
+
+    #[test]
+    fn continuation_rows_flow_from_the_left_edge() {
+        let mut editor = focused();
+        editor.paste(CJK_PARAGRAPHS);
+        let rows = screen_rows(&editor, 138, editor.height(138, "New prompt"));
+        assert!(rows[0].starts_with("New prompt ❯ 同样"), "{}", rows[0]);
+        let flowed = format!("{}{}", &rows[0]["New prompt ❯ ".len()..], rows[1]);
+        assert!(CJK_PARAGRAPHS.starts_with(&flowed), "{flowed}");
+        assert!(rows[rows.len() - 1].starts_with("最后"), "{:?}", rows);
+        let area = Rect::new(0, 0, 138, rows.len() as u16);
+        let caret = editor.cursor(area, "New prompt").unwrap();
+        assert_eq!(caret.1, area.bottom() - 1);
+        key(&mut editor, KeyCode::Home);
+        assert_eq!(editor.cursor(area, "New prompt"), Some((13, 0)));
+        key(&mut editor, KeyCode::Down);
+        assert_eq!(editor.cursor(area, "New prompt"), Some((0, 1)));
+    }
+
+    #[test]
+    fn box_grows_to_the_whole_prompt_and_shows_its_tail_when_clipped() {
+        let mut editor = focused();
+        editor.paste(CJK_PARAGRAPHS);
+        let height = editor.height(138, "New prompt");
+        assert_eq!(height, editor.layout(138, "New prompt").lines.len() as u16);
+        assert!(height > 5, "{height}");
+        let rows = screen_rows(&editor, 138, height);
+        assert!(rows.iter().filter(|row| row.is_empty()).count() == 2, "{rows:?}");
+        let clipped = screen_rows(&editor, 138, 3);
+        assert_eq!(clipped, rows[rows.len() - 3..]);
+        let area = Rect::new(0, 0, 138, 3);
+        assert_eq!(editor.cursor(area, "New prompt").map(|c| c.1), Some(2));
+        for _ in 0..4 {
+            key(&mut editor, KeyCode::Up);
+        }
+        let caret = editor.cursor(area, "New prompt").unwrap();
+        assert_eq!(caret.1, 0);
+        assert_eq!(screen_rows(&editor, 138, 3), rows[rows.len() - 5..rows.len() - 2]);
     }
 }
 

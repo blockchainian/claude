@@ -23,11 +23,12 @@ impl PromptBox {
             return None;
         }
         let layout = self.layout(area.width, label);
-        let start = self.mouse_scroll_start(&layout, usize::from(area.height.min(5)));
-        let positions = self.editor.visual_positions(self.text_width.get());
+        let start = self.mouse_scroll_start(&layout, usize::from(area.height));
+        let (width, inset) = self.text_width.get();
+        let positions = self.editor.visual_positions(width, inset);
         let row = (start + usize::from(mouse.row.saturating_sub(area.y)))
             .min(positions.last().expect("end caret").2);
-        let column = usize::from(mouse.column.saturating_sub(area.x + layout.inset));
+        let column = usize::from(mouse.column.saturating_sub(area.x));
         let offset = positions
             .iter()
             .rfind(|p| p.2 == row && p.1 <= column)
@@ -60,18 +61,13 @@ impl PromptBox {
         None
     }
 
-    pub(super) fn highlight_mouse_selection(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        layout: &PromptLayout,
-        start: usize,
-    ) {
+    pub(super) fn highlight_mouse_selection(&self, area: Rect, buf: &mut Buffer, start: usize) {
         use unicode_segmentation::UnicodeSegmentation;
         let Some(range) = self.editor.selection_range() else {
             return;
         };
-        for (byte, column, row) in self.editor.visual_positions(self.text_width.get()) {
+        let (width, inset) = self.text_width.get();
+        for (byte, column, row) in self.editor.visual_positions(width, inset) {
             if !range.contains(&byte) || row < start || row >= start + usize::from(area.height) {
                 continue;
             }
@@ -79,7 +75,7 @@ impl PromptBox {
                 .graphemes(true)
                 .next()
                 .expect("selected grapheme");
-            let x = area.x + layout.inset + column as u16;
+            let x = area.x + column as u16;
             for x in x..(x + grapheme.width().max(1) as u16).min(area.right()) {
                 buf[(x, area.y + (row - start) as u16)]
                     .modifier
@@ -97,11 +93,8 @@ impl PromptBox {
             return start.min(maximum);
         }
         self.mouse.scroll.set(None);
-        layout
-            .caret
-            .1
-            .saturating_sub(height.saturating_sub(1))
-            .min(maximum)
+        // The tail of the prompt shows unless the caret sits above it.
+        layout.caret.1.min(maximum)
     }
 
     pub(in crate::ui) fn scroll_mouse(&self, area: Rect, label: &str, down: bool) {
@@ -109,7 +102,7 @@ impl PromptBox {
             return;
         }
         let layout = self.layout(area.width, label);
-        let height = usize::from(area.height.min(5));
+        let height = usize::from(area.height);
         let start = self.mouse_scroll_start(&layout, height);
         let start = if down {
             start

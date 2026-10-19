@@ -257,3 +257,24 @@ fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
         ));
     }
 }
+
+#[test]
+fn prompt_grows_with_its_text_and_leaves_the_panels_half_the_rows() {
+    let (mut view, now) = log_fixture();
+    view.rows[view.selected].process = None;
+    view.input_box.focused = true;
+    let paragraph = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.handle_paste(&paragraph.lines().take(7).collect::<Vec<_>>().join("\n"));
+    let area = Rect::new(0, 0, 120, 40);
+    let layout = view.center_layout(area);
+    let lines = view.input_box.height(area.width - 2, &view.input_label());
+    assert!(lines > 5 && lines < 17, "{lines}");
+    assert_eq!(layout.prompt.height, lines);
+    view.handle_paste(paragraph);
+    let layout = view.center_layout(area);
+    assert_eq!(layout.prompt.height, (40 - 3 - 2) / 2);
+    assert!(layout.top.height >= 6, "{:?}", layout.top);
+    assert!(layout.log_detail.height >= 6, "{:?}", layout.log_detail);
+    let rendered = log_screen(&view, 120, 40, now);
+    assert!(rendered.contains("No reply needed."), "{rendered}");
+}

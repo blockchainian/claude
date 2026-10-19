@@ -84,7 +84,7 @@ fn wrapped_vertical_movement_never_places_the_caret_inside_an_image() {
     editor.insert_image(image());
     editor.insert("\nz");
     for down in [false, false, true, true] {
-        editor.move_vertical(6, down);
+        editor.move_vertical(6, 0, down);
         assert!(!(3..12).contains(&editor.cursor()), "{}", editor.cursor());
     }
 }
@@ -182,7 +182,7 @@ fn image_caret_stays_on_grapheme_boundaries_with_combining_text() {
     assert_eq!(editor.cursor(), editor.text().len());
     assert!(
         editor
-            .visual_positions(80)
+            .visual_positions(80, 0)
             .iter()
             .any(|p| p.0 == editor.cursor())
     );

@@ -28,21 +28,30 @@ pub(super) struct LineEdit {
 }
 
 impl LineEdit {
-    /// Caret stops as (byte offset, display column, visual row).
-    pub(super) fn visual_positions(&self, width: usize) -> Vec<(usize, usize, usize)> {
+    /// Caret stops as (byte offset, display column, visual row). The first row starts
+    /// after `inset` columns of label; later rows wrap at the full width. A newline never
+    /// wraps, so a row filled to the width adds no blank row before the next line.
+    pub(super) fn visual_positions(
+        &self,
+        width: usize,
+        inset: usize,
+    ) -> Vec<(usize, usize, usize)> {
         let width = width.max(1);
         let mut positions = Vec::new();
-        let (mut column, mut row) = (0, 0);
+        let (mut column, mut row, mut row_start) = (inset.min(width - 1), 0, inset.min(width - 1));
         for (index, grapheme) in self.text.grapheme_indices(true) {
             let columns = grapheme.width();
-            if column > 0 && column + columns.max(1) > width {
+            let newline = grapheme == "\n" || grapheme == "\r\n";
+            if !newline && column > row_start && column + columns.max(1) > width {
                 row += 1;
                 column = 0;
+                row_start = 0;
             }
             positions.push((index, column, row));
-            if grapheme == "\n" || grapheme == "\r\n" {
+            if newline {
                 row += 1;
                 column = 0;
+                row_start = 0;
             } else {
                 column += columns.min(width);
             }
@@ -56,8 +65,15 @@ impl LineEdit {
     }
 
     /// Returns false when the caret is already on the requested boundary row.
-    pub(super) fn move_vertical(&mut self, width: usize, down: bool) -> bool {
-        let positions = self.visual_positions(width);
+    pub(super) fn move_vertical(&mut self, width: usize, inset: usize, down: bool) -> bool {
+        // Columns count from the text's start on every row, so the label's inset on the
+        // first row does not shift the column the caret keeps.
+        let inset = inset.min(width.max(1) - 1);
+        let positions: Vec<_> = self
+            .visual_positions(width, inset)
+            .into_iter()
+            .map(|(index, column, row)| (index, column - if row == 0 { inset } else { 0 }, row))
+            .collect();
         let &(_, column, row) = positions
             .iter()
             .find(|p| p.0 == self.cursor)

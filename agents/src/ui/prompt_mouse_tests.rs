@@ -25,7 +25,7 @@ fn prompt_mouse_click_places_caret_on_wide_multiline_and_wrapped_cells() {
     assert_eq!(view.input_box.editor.cursor(), "写".len());
     click_mouse(
         &mut view,
-        mouse(MouseEventKind::Down(MouseButton::Left), x + 3, area.y + 1),
+        mouse(MouseEventKind::Down(MouseButton::Left), area.x + 3, area.y + 1),
     );
     assert_eq!(view.input_box.editor.cursor(), "写工具详情计划\nNo ".len());
     click_mouse(
@@ -35,12 +35,13 @@ fn prompt_mouse_click_places_caret_on_wide_multiline_and_wrapped_cells() {
     assert_eq!(view.input_box.editor.cursor(), 0);
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
     let (area, x) = prompt(&mut view, text, 60);
-    // Scroll to the beginning before checking a soft-wrapped row.
+    // Scroll to the beginning before checking a soft-wrapped row, which starts at the
+    // box's left edge.
     view.input_box.editor.home();
     screen(&view, 60, 40);
     click_mouse(
         &mut view,
-        mouse(MouseEventKind::Down(MouseButton::Left), x + 2, area.y + 1),
+        mouse(MouseEventKind::Down(MouseButton::Left), area.x + 2, area.y + 1),
     );
     let columns = usize::from(area.right() - x);
     assert_eq!(view.input_box.editor.cursor(), columns + 2);
@@ -92,7 +93,7 @@ fn prompt_mouse_reverse_multiline_selection_survives_release_and_paste_replaces_
     let (area, x) = prompt(&mut view, "写工具详情计划\nNo reply needed.", 120);
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
-        x + 3,
+        area.x + 3,
         area.y + 1,
     ));
     view.handle_mouse(mouse(
