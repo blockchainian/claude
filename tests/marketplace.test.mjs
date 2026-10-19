@@ -8,7 +8,7 @@ test("the marketplace lists every plugin in the repository", async () => {
   const marketplace = JSON.parse(await readFile(".claude-plugin/marketplace.json", "utf8"));
 
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map((entry) => entry.name).sort(), ["cloudflare", "codex", "computer-use", "creator", "feature", "intel", "mobile", "proxy", "render", "secrets", "web"]);
+  assert.deepEqual(marketplace.plugins.map((entry) => entry.name).sort(), ["cloudflare", "codex", "computer-use", "creator", "feature", "intel", "mobile", "proxy", "render", "secrets", "unminify", "web"]);
 
   for (const entry of marketplace.plugins) {
     const plugin = JSON.parse(await readFile(`${entry.source}/.claude-plugin/plugin.json`, "utf8"));
@@ -20,7 +20,7 @@ test("the marketplace lists every plugin in the repository", async () => {
 test("the Codex marketplace exposes the selected plugins and Claude client", async () => {
   const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude"]);
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude", "unminify"]);
 
   for (const entry of marketplace.plugins) {
     assert.equal(entry.source.source, "local");
