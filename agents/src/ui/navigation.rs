@@ -46,11 +46,10 @@ pub(super) fn step(selected: usize, len: usize, page: usize, code: KeyCode) -> u
     }
 }
 
-/// One row of a choice list: plain text, a choice, or an unhighlighted input.
+/// One row of a choice list: plain text or a choice.
 pub(super) enum ListRow {
     Text(Line<'static>),
     Choice(usize, Line<'static>),
-    Input(usize),
 }
 
 /// Draws `rows` from `scroll`, moved so the selected choice stays visible, highlighting it like
@@ -65,7 +64,7 @@ pub(super) fn render_list(
     let height = usize::from(area.height);
     let position = rows
         .iter()
-        .position(|row| matches!(row, ListRow::Choice(index, _) | ListRow::Input(index) if *index == selected))
+        .position(|row| matches!(row, ListRow::Choice(index, _) if *index == selected))
         .unwrap_or_default();
     let mut start = scroll.get().min(rows.len().saturating_sub(height));
     if position < start {
@@ -79,7 +78,6 @@ pub(super) fn render_list(
         let rect = render::row(area, offset as u16, 1);
         match row {
             ListRow::Text(text) => render::line(text.clone(), rect, buf),
-            ListRow::Input(index) => drawn.push((rect, *index)),
             ListRow::Choice(index, text) => {
                 let mut text = text.clone();
                 if *index == selected {

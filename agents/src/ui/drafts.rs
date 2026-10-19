@@ -12,11 +12,18 @@ pub(crate) struct DraftSetup {
     pub branch: String,
 }
 
+/// The step of a new task's flow: its prompt, then its branch, then its name.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Step {
+    Prompt,
+    Branch,
+    Name,
+}
+
 pub(super) struct Draft {
     pub id: DraftId,
     pub setup: DraftSetup,
-    /// The task's name, typed before its first prompt.
-    pub name: Option<String>,
+    pub step: Step,
     pub input: prompt_box::PromptBox,
     /// The branch the task runs on instead of the repository's checked-out one.
     pub branch_choice: Option<crate::tasks::BranchChoice>,
@@ -50,7 +57,7 @@ impl View {
         self.drafts.push(Draft {
             id,
             setup,
-            name: None,
+            step: Step::Prompt,
             input: prompt_box::PromptBox::default(),
             branch_choice: None,
             job: None,

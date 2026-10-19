@@ -508,7 +508,7 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     let (x, y) = position(&buffer, "╴main ");
     click(&mut app, x + 1, y);
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "Create new branch");
+    let (x, y) = position(&buffer, "New branch");
     click(&mut app, x, y);
     assert!(
         app.view

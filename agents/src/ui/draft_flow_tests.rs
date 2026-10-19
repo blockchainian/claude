@@ -1,3 +1,4 @@
+use super::drafts::Step;
 use super::*;
 use crate::providers::Provider;
 use std::process::Command;
@@ -68,6 +69,14 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
         ..event
     })
 }
+/// Takes the draft from its typed prompt through its name to creation; outside a repository the
+/// branch step is skipped.
+fn create(view: &mut View, name: &str) -> Option<Action> {
+    assert_eq!(key(view, KeyCode::Enter), None);
+    assert_eq!(view.selected_draft().unwrap().step, Step::Name);
+    view.handle_paste(name);
+    key(view, KeyCode::Enter)
+}
 fn render(view: &View) -> Buffer {
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render_at(buffer.area, &mut buffer, Utc::now());
@@ -132,9 +141,8 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
 fn pending_job_survives_leaving_until_its_session_arrives() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
-    view.drafts[0].name = Some("probe".into());
     view.handle_paste("typed prompt");
-    key(&mut view, KeyCode::Enter);
+    create(&mut view, "probe");
     view.draft_created(id, Ok("e772d00b".into()));
     assert_eq!(view.selected_draft, None);
     key(&mut view, KeyCode::Esc);
@@ -407,7 +415,6 @@ fn draft_first_message_accepts_images_and_reports_background_failure() {
     for text in ["describe this", ""] {
         let (directory, mut view) = fixture();
         let id = view.add_draft(setup(directory.path()));
-        view.drafts[0].name = Some("probe".into());
         view.handle_paste(text);
         view.attach_image(
             crate::images::ImageAttachment::from_image(
@@ -416,7 +423,7 @@ fn draft_first_message_accepts_images_and_reports_background_failure() {
             .unwrap(),
         );
         let paths = view.input_box.editor.image_paths();
-        let action = key(&mut view, KeyCode::Enter);
+        let action = create(&mut view, "probe");
         assert!(
             matches!(action, Some(Action::CreateTask { draft_id, .. }) if draft_id == id),
             "{action:?}"
@@ -468,10 +475,9 @@ fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
 fn chosen_branch_rides_with_the_first_prompt() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
-    view.drafts[0].name = Some("probe".into());
     view.drafts[0].branch_choice = Some(crate::tasks::BranchChoice::New("feature/probe".into()));
     view.handle_paste("start the work");
-    let action = key(&mut view, KeyCode::Enter);
+    let action = create(&mut view, "probe");
     let Some(Action::CreateTask {
         draft_id, branch, ..
     }) = action
@@ -560,27 +566,57 @@ fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay(
 }
 
 #[test]
-fn new_task_takes_its_name_then_its_prompt() {
+fn new_task_takes_its_prompt_then_its_name_at_the_details_bottom() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
     assert_eq!(view.input_label(), "New task");
+    // An empty prompt stays on the prompt step.
     assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(view.input_label(), "New task");
-    view.handle_paste("改 Claude Code 的颜色");
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(
-        view.drafts[0].name.as_deref(),
-        Some("改 Claude Code 的颜色")
-    );
-    assert!(view.input_box.editor.is_empty());
-    assert_eq!(view.input_label(), "New prompt");
-    let text = render(&view)
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(text.contains(" Claude Code "), "{text}");
+    assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
+    assert!(view.input_box.focused);
     view.handle_paste("make it blue");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    // Outside a repository the name comes right after the prompt, which stays in its box.
+    assert_eq!(view.selected_draft().unwrap().step, Step::Name);
+    assert!(!view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "make it blue");
+    let buffer = render(&view);
+    let input = view.viewport.borrow().details_input;
+    let details = view.viewport.borrow().details;
+    assert_eq!(input.y, details.bottom() - 1);
+    // Wide characters own the cell after them.
+    let row = |buffer: &Buffer, rect: Rect| {
+        (rect.x..rect.right())
+            .filter(|&x| x == rect.x || buffer[(x - 1, rect.y)].symbol().width() < 2)
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    assert_eq!(row(&buffer, input), "New task");
+    assert!(
+        buffer[(input.x, input.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    assert_eq!(view.cursor_pos(buffer.area), Some((input.x, input.y)));
+    assert!(
+        view.center_footer_hints().to_string().contains("create"),
+        "{}",
+        view.center_footer_hints()
+    );
+    // An empty name is a no-op; typing replaces the placeholder.
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(view.selected_draft().unwrap().step, Step::Name);
+    view.handle_paste("改 Claude Code 的颜色");
+    let buffer = render(&view);
+    assert_eq!(row(&buffer, input), "改 Claude Code 的颜色");
+    assert!(
+        !buffer[(input.x, input.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    assert_eq!(view.input_box.editor.text(), "make it blue");
     let action = key(&mut view, KeyCode::Enter);
     let Some(Action::CreateTask {
         draft_id, request, ..
@@ -600,10 +636,25 @@ fn new_task_takes_its_name_then_its_prompt() {
         .collect::<String>();
     assert!(!screen.contains("Creating"), "{screen}");
     assert!(!screen.contains("waiting for session"), "{screen}");
-    assert!(!screen.contains("New prompt ❯"), "{screen}");
+    assert!(!screen.contains("New task ❯"), "{screen}");
     view.input_box.history.borrow().iter().for_each(|entry| {
         assert_ne!(entry.text(), "改 Claude Code 的颜色");
     });
+}
+
+#[test]
+fn name_step_escape_returns_to_the_prompt_outside_a_repository() {
+    let (directory, mut view) = fixture();
+    view.add_draft(setup(directory.path()));
+    view.handle_paste("make it blue");
+    key(&mut view, KeyCode::Enter);
+    view.handle_paste("half a name");
+    key(&mut view, KeyCode::Esc);
+    assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
+    assert!(view.selector.is_none());
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "make it blue");
+    assert_eq!(view.drafts.len(), 1);
 }
 
 #[test]
@@ -613,12 +664,11 @@ fn submitted_draft_returns_to_prior_task_and_selects_arriving_job_after_refresh(
     view.focus_input();
     view.handle_paste("prior input");
     let id = view.add_draft(setup(directory.path()));
-    view.drafts[0].name = Some("background task".into());
     view.drafts[0].branch_choice =
         Some(crate::tasks::BranchChoice::New("feature/background".into()));
     view.handle_paste("background prompt");
     assert!(matches!(
-        key(&mut view, KeyCode::Enter),
+        create(&mut view, "background task"),
         Some(Action::CreateTask { .. })
     ));
     assert_eq!(view.selected_draft, None);
@@ -657,10 +707,9 @@ fn submitted_drafts_without_a_prior_selection_stay_hidden_and_fail_with_notice()
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let id = view.add_draft(setup(directory.path()));
-        view.drafts[0].name = Some("background task".into());
         view.handle_paste("background prompt");
         assert!(matches!(
-            key(&mut view, KeyCode::Enter),
+            create(&mut view, "background task"),
             Some(Action::CreateTask { .. })
         ));
         assert_eq!(view.selected_draft, None);

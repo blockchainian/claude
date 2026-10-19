@@ -225,17 +225,16 @@ impl View {
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
+            && !self.input_box.focused
             && let Some(selector) = &self.selector
-            && let Some(editor) = selector.branch_editor()
-            && let Some((rect, _)) = self
-                .viewport
-                .borrow()
-                .picker_rows
-                .iter()
-                .find(|(_, index)| Some(*index) == selector.create_index())
+            && selector.input_active()
+            && let Some((editor, _)) = selector.input()
         {
-            let (_, cursor) = editor.window(usize::from(rect.width));
-            return Some((rect.x + cursor, rect.y));
+            let input = self.viewport.borrow().details_input;
+            if !input.is_empty() {
+                let (_, cursor) = editor.window(usize::from(input.width));
+                return Some((input.x + cursor, input.y));
+            }
         }
         if !self.help
             && self.confirm_dialog.is_none()
@@ -599,12 +598,7 @@ impl View {
                 session.display_title().to_owned(),
                 self.title_style(&session.id).bold(),
             ),
-            None => (
-                self.selected_draft()
-                    .and_then(|draft| draft.name.clone())
-                    .unwrap_or_else(|| "New task".to_owned()),
-                Style::default().bold(),
-            ),
+            None => ("New task".to_owned(), Style::default().bold()),
         };
         let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))
@@ -1734,7 +1728,7 @@ mod branch_input_tests {
                     SelectorKind::Branch {
                         draft: 1,
                         branches: vec!["main".into()],
-                        editor: Some(editor),
+                        editor,
                     },
                     1,
                 ));
@@ -1747,22 +1741,34 @@ mod branch_input_tests {
                 view.render(area, &mut buffer);
                 let rows = &view.viewport.borrow().picker_rows;
                 let rect = rows[1].0;
+                assert_eq!(rect, view.viewport.borrow().details_input);
                 assert_eq!(rect.x, layout.details.x);
                 assert_eq!(buffer[(rect.x, rows[0].0.y)].symbol(), "m");
                 for x in rect.x - HORIZONTAL_PADDING..rect.right() + HORIZONTAL_PADDING {
                     let cell = &buffer[(x, rect.y)];
                     assert_ne!(cell.symbol(), "❯");
                     assert_eq!(cell.bg, Color::Reset, "{text:?} column {x}");
-                    assert!(cell.modifier.is_empty(), "{text:?} column {x}");
+                    // The empty input shows its placeholder dimmed.
+                    let placeholder = text.is_empty()
+                        && (rect.x..rect.x + "New branch".len() as u16).contains(&x);
+                    assert_eq!(
+                        cell.modifier.is_empty(),
+                        !placeholder,
+                        "{text:?} column {x}"
+                    );
                     if x < rect.x || x >= rect.right() {
                         assert_eq!(cell.symbol(), " ", "padding column {x}");
                     }
                 }
-                let editor = view.selector.as_ref().unwrap().branch_editor().unwrap();
+                let (editor, placeholder) = view.selector.as_ref().unwrap().input().unwrap();
                 let (visible, caret) = editor.window(usize::from(rect.width));
                 let mut expected = Buffer::empty(rect);
                 Clear.render(rect, &mut expected);
-                line(Line::from(visible.to_owned()), rect, &mut expected);
+                if text.is_empty() {
+                    line(Line::from(placeholder.dim()), rect, &mut expected);
+                } else {
+                    line(Line::from(visible.to_owned()), rect, &mut expected);
+                }
                 for x in rect.x..rect.right() {
                     assert_eq!(buffer[(x, rect.y)], expected[(x, rect.y)]);
                 }

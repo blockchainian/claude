@@ -22,6 +22,20 @@ impl View {
             hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])
+        } else if let Some(step) = self.selected_draft().map(|draft| draft.step)
+            && (self.input_box.focused || self.selector.is_some())
+        {
+            // The prompt's keys lead the flow; the selector's keys finish each later step.
+            match step {
+                _ if self.input_box.focused => hint_line(&[("esc", "cancel"), ("enter", "next")]),
+                super::drafts::Step::Branch => {
+                    hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "next")])
+                }
+                super::drafts::Step::Name => hint_line(&[("esc", "back"), ("enter", "create")]),
+                super::drafts::Step::Prompt => {
+                    hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
+                }
+            }
         } else if self.log_search.editing || self.log_detail_search.editing {
             hint_line(&[("esc", "back"), ("enter", "keep")])
         } else if self
@@ -128,7 +142,8 @@ mod tests {
                 text.contains("g") && text.contains("Group")
             }));
             assert!(
-                !view.center_footer_hints()
+                !view
+                    .center_footer_hints()
                     .to_string()
                     .contains("g group by")
             );

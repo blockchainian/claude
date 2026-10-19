@@ -392,7 +392,7 @@ impl View {
                         .contains((mouse.column, mouse.row).into())
                 {
                     self.pending_click = None;
-                    self.close_selector();
+                    self.cancel_selector();
                 } else {
                     self.right_click();
                 }
@@ -542,10 +542,6 @@ impl View {
             if let Some(index) = choice
                 && let Some(selector) = self.selector.as_mut()
             {
-                if selector.editing() && Some(index) == selector.create_index() {
-                    self.mouse_focus = Panel::Details;
-                    return None;
-                }
                 selector.selected = index;
                 self.input_box.focused = false;
                 if matches!(
@@ -999,29 +995,14 @@ impl View {
                 self.discard_selected_draft();
                 return None;
             }
-            // A new task's first Enter names it; the name stays out of the prompt history.
+            // A new task's prompt stays in its box: Enter moves on to its branch and name.
             if key.code == KeyCode::Enter
                 && key.modifiers.is_empty()
-                && let Some(id) = self.selected_draft
-                && self
-                    .selected_draft()
-                    .is_some_and(|draft| draft.name.is_none())
+                && let Some(draft) = self.selected_draft()
             {
-                let name = self.input_box.editor.text().trim().to_owned();
-                if !name.is_empty() {
-                    self.input_box.editor.clear();
-                    if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
-                        draft.name = Some(name);
-                    }
+                if !draft.working && draft.job.is_none() && !self.input_box.editor.is_empty() {
+                    self.start_branch_step();
                 }
-                return None;
-            }
-            if self
-                .selected_draft()
-                .is_some_and(|draft| draft.working || draft.job.is_some())
-                && key.code == KeyCode::Enter
-                && key.modifiers.is_empty()
-            {
                 return None;
             }
             self.input_box.history = self.prompt_history.clone();
@@ -1031,38 +1012,16 @@ impl View {
                 Some(prompt_box::PromptAction::Stop) => self.stop_from_input(),
                 Some(prompt_box::PromptAction::Submit(text)) => {
                     let images = self.input_box.editor.image_paths();
-                    if !images.is_empty() && self.selected_draft.is_none() {
+                    if !images.is_empty() {
                         return self.selected_id().cloned().map(|id| Action::SendImages {
                             id,
                             text,
                             images,
                         });
                     }
-                    if let Some(id) = self.selected_draft {
-                        let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
-                        if draft.working || draft.job.is_some() {
-                            return None;
-                        }
-                        let action = Action::CreateTask {
-                            draft_id: id,
-                            provider: draft.setup.provider,
-                            branch: draft.branch_choice.clone(),
-                            request: crate::tasks::NewTask {
-                                cwd: draft.setup.cwd.clone(),
-                                name: draft.name.clone(),
-                                model: draft.setup.model.clone(),
-                                effort: draft.setup.effort.clone(),
-                                prompt: text,
-                                images,
-                            },
-                        };
-                        self.submit_draft(id);
-                        Some(action)
-                    } else {
-                        self.selected_id()
-                            .cloned()
-                            .map(|id| Action::SendPrompt { id, text })
-                    }
+                    self.selected_id()
+                        .cloned()
+                        .map(|id| Action::SendPrompt { id, text })
                 }
                 None => None,
             };
