@@ -93,7 +93,17 @@ impl Event {
     }
 
     pub fn activity(&self) -> crate::model::Activity {
+        let offset = if agent::summary(self).is_some() {
+            0
+        } else {
+            self.sender.as_deref().map_or(0, |sender| {
+                participant_text(Some(sender), "").len() + 1
+            })
+        };
         crate::model::Activity {
+            paths: self.paths.iter()
+                .map(|range| range.start + offset..range.end + offset)
+                .collect(),
             exit_code: match self.calls.as_slice() {
                 [call] => call.exit_code,
                 _ => None,

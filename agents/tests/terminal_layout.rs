@@ -2965,3 +2965,6 @@ fn terminal_context_usage_on_details_border() {
     }
     println!("{result}");
 }
+
+#[path = "support/terminal_summary.rs"]
+mod terminal_summary;

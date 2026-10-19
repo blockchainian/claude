@@ -191,6 +191,7 @@ fn command_exit_titles_use_error_colored_digits_for_both_providers() {
 fn command_exit_activity_colors_only_status_digits() {
     let (mut view, now) = log_fixture();
     view.rows[0].activity = Some(crate::model::Activity {
+        paths: Vec::new(),
         exit_code: Some(101),
         kind: Kind::Tool,
         label: "false (101)".into(),

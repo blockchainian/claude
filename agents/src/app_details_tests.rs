@@ -50,6 +50,7 @@ fn setup(activity: bool) -> (tempfile::TempDir, App) {
     session.last_message = Some("Done".into());
     session.last_message_at = Some(now - Age::minutes(2));
     session.activity = activity.then(|| Activity {
+        paths: Vec::new(),
         exit_code: None,
         kind: crate::log::Kind::Tool,
         label: "Read files".into(),

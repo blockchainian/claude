@@ -18,6 +18,7 @@ fn details_section_order_preserves_clicks_and_copies() {
         selected.last_message = Some("Moved reply".into());
         selected.last_message_at = Some(selected.updated_at);
         selected.activity = activity.then(|| crate::model::Activity {
+            paths: Vec::new(),
             exit_code: None,
             kind: crate::log::Kind::Tool,
             label: "Moved activity".into(),

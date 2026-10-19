@@ -1003,8 +1003,14 @@ impl View {
 
         let activity = session.activity.as_ref();
         if let Some(activity) = activity {
-            let label =
-                super::text::summary(&activity.label, &session.cwd, width, &activity.kind, None);
+            let label = super::log::summary_line(
+                &activity.label,
+                &activity.kind,
+                activity.exit_code,
+                &activity.paths,
+                width,
+                &session.cwd,
+            ).line;
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
@@ -1018,11 +1024,7 @@ impl View {
                     width,
                 )),
                 truncate_line_with_ellipsis_if_overflow(
-                    style::exit_code_line(
-                        label.to_string(),
-                        activity.exit_code,
-                        style::log_body_style(&activity.kind, activity.exit_code),
-                    ),
+                    label,
                     width,
                 )
                 .into(),
@@ -1030,7 +1032,15 @@ impl View {
             bodies.push(start..items.len());
             keys.push(body_key("Last activity", &activity.label));
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
+            body_links.push(if super::text::is_prose(&activity.kind) {
+                super::links::text_links(&activity.label, &session.cwd, &[])
+            } else {
+                super::links::path_links(
+                    &activity.label,
+                    &super::log::summary_paths(&activity.label, &activity.paths, &session.cwd),
+                    &session.cwd,
+                )
+            });
         }
 
         item_links.resize(items.len(), Vec::new());
@@ -1232,7 +1242,11 @@ impl View {
                     _ => unreachable!("copyable bodies contain text rows"),
                 })
                 .collect::<Vec<_>>();
-            let markdown = !matches!(*label, "Copied latest activity" | "Copied tasks");
+            let markdown = match *label {
+                "Copied latest activity" => activity.is_some_and(|activity| super::text::is_prose(&activity.kind)),
+                "Copied tasks" => false,
+                _ => true,
+            };
             let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
             for (index, cells) in body.clone().zip(maps) {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
@@ -1372,16 +1386,12 @@ impl View {
                     ))
                 }
                 Item::Subagent(child) => {
-                    let (text, kind) = subagent_line(child);
+                    let (text, kind, exit_code, paths) = subagent_line(child);
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
-                            super::text::summary(
-                                text,
-                                &child.cwd,
-                                usize::from(item_area.width),
-                                &kind,
-                                None,
-                            ),
+                            super::log::summary_line(
+                                text, &kind, exit_code, paths, usize::from(item_area.width), &child.cwd,
+                            ).line,
                             usize::from(item_area.width),
                         )
                     });
@@ -1707,16 +1717,15 @@ impl<T: Into<Line<'static>>> From<T> for Item<'_> {
 
 /// A working subagent's current tool call, or its last message between calls,
 /// with the log kind that styles it.
-fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
+fn subagent_line(child: &Session) -> (&str, crate::log::Kind, Option<i64>, &[std::ops::Range<usize>]) {
     let activity = child
         .latest_activity()
         .filter(|_| child.status == SessionStatus::Working);
-    let (text, kind) = if let Some(activity) = activity {
-        (Some(activity.label.as_str()), activity.kind.clone())
+    if let Some(activity) = activity {
+        (&activity.label, activity.kind.clone(), activity.exit_code, &activity.paths)
     } else {
-        (child.last_message.as_deref(), crate::log::Kind::Assistant)
-    };
-    (text.unwrap_or_default(), kind)
+        (child.last_message.as_deref().unwrap_or_default(), crate::log::Kind::Assistant, None, &[])
+    }
 }
 
 /// A running background command: its description and elapsed time on the top

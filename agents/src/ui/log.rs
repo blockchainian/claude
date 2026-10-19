@@ -1226,8 +1226,8 @@ pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path)
 }
 
 /// An event's body as one log row, with paths shortened to fit the row.
-struct FittedBody {
-    line: Line<'static>,
+pub(super) struct FittedBody {
+    pub(super) line: Line<'static>,
     /// The text the row was drawn from, before any shortening: the event's prose,
     /// or its tool text with home paths shown as `~`.
     source: String,
@@ -1236,41 +1236,40 @@ struct FittedBody {
 }
 
 fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
-    let listed = Event {
-        body: event.summary(),
-        sender: None,
-        paths: event.paths.iter().map(|range| {
-            let offset = if crate::log::agent::summary(event).is_some() {
-                0
-            } else {
-                event.sender.as_deref().map_or(0, |sender| {
-                    crate::log::participant_text(Some(sender), "").len() + 1
-                })
-            };
-            range.start + offset..range.end + offset
-        }).collect(),
-        ..event.clone()
-    };
-    let event = &listed;
-    let exit_code = match event.calls.as_slice() { [call] => call.exit_code, _ => None };
-    let body_style = super::style::log_body_style(&event.kind, exit_code);
-    if is_prose(&event.kind) {
-        let body = event.body.clone();
-        let line = super::text::summary(&body, cwd, body_width, &event.kind, None);
+    let activity = event.activity();
+    summary_line(
+        &activity.label,
+        &activity.kind,
+        activity.exit_code,
+        &activity.paths,
+        body_width,
+        cwd,
+    )
+}
+
+/// One summary layout for log rows, latest activity and subagent boxes.
+pub(super) fn summary_line(
+    label: &str,
+    kind: &Kind,
+    exit_code: Option<i64>,
+    paths: &[std::ops::Range<usize>],
+    body_width: usize,
+    cwd: &std::path::Path,
+) -> FittedBody {
+    let body_style = super::style::log_body_style(kind, exit_code);
+    if is_prose(kind) {
+        let body = label.to_owned();
+        let line = super::text::summary(&body, cwd, body_width, kind, None);
         FittedBody {
             line,
             source: body,
             paths: Vec::new(),
         }
     } else {
-        let (text, paths) = display_paths(event, cwd);
-        let shortened = super::text::summary(&text, cwd, body_width, &event.kind, Some(&paths));
+        let (text, paths) = display_paths(label, paths, cwd);
+        let shortened = super::text::summary(&text, cwd, body_width, kind, Some(&paths));
         FittedBody {
-            line: super::style::exit_code_line(
-                shortened.to_string(),
-                exit_code,
-                body_style,
-            ),
+            line: super::style::exit_code_line(shortened.to_string(), exit_code, body_style),
             source: text,
             paths,
         }
@@ -1279,19 +1278,22 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
 
 /// An event's body with whitespace runs collapsed and home paths shown as
 /// `~`, and the byte ranges of its paths in that text.
-fn display_paths(event: &Event, cwd: &std::path::Path) -> (String, Vec<std::ops::Range<usize>>) {
+fn display_paths(
+    label: &str,
+    paths: &[std::ops::Range<usize>],
+    cwd: &std::path::Path,
+) -> (String, Vec<std::ops::Range<usize>>) {
     let mut text = String::new();
     let mut ranges = Vec::new();
     let mut end = 0;
-    for range in &tool_paths(event, cwd) {
-        text.push_str(&collapse_whitespace(&event.body[end..range.start]));
-        let path =
-            super::line_truncation::abbreviate_path(&event.body[range.clone()], usize::MAX, None);
+    for range in &summary_paths(label, paths, cwd) {
+        text.push_str(&collapse_whitespace(&label[end..range.start]));
+        let path = super::line_truncation::abbreviate_path(&label[range.clone()], usize::MAX, None);
         ranges.push(text.len()..text.len() + path.len());
         text.push_str(&path);
         end = range.end;
     }
-    text.push_str(&collapse_whitespace(&event.body[end..]));
+    text.push_str(&collapse_whitespace(&label[end..]));
     let trimmed = text.len() - text.trim_start().len();
     for range in &mut ranges {
         *range = range.start - trimmed..range.end - trimmed;
@@ -1302,8 +1304,16 @@ fn display_paths(event: &Event, cwd: &std::path::Path) -> (String, Vec<std::ops:
 /// The paths in a tool event's body: the ones its provider marked, and any
 /// other path its free text mentions.
 fn tool_paths(event: &Event, cwd: &std::path::Path) -> Vec<std::ops::Range<usize>> {
-    let mut paths = event.paths.clone();
-    for range in super::paths::text_paths(&event.body, cwd) {
+    summary_paths(&event.body, &event.paths, cwd)
+}
+
+pub(super) fn summary_paths(
+    label: &str,
+    paths: &[std::ops::Range<usize>],
+    cwd: &std::path::Path,
+) -> Vec<std::ops::Range<usize>> {
+    let mut paths = paths.to_vec();
+    for range in super::paths::text_paths(label, cwd) {
         if !paths
             .iter()
             .any(|known| known.start < range.end && range.start < known.end)
