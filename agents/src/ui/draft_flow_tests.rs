@@ -1316,7 +1316,7 @@ fn selecting_draft_default_values_clears_overrides() {
 }
 
 #[test]
-fn session_choices_select_reported_values_and_keep_explicit_actions() {
+fn session_choices_select_reported_values_and_dispatch_only_changes() {
     let (_directory, mut view) = fixture();
     let session = &mut view.rows[view.selected];
     session.model = Some("claude-sonnet-5-5".into());
@@ -1341,18 +1341,22 @@ fn session_choices_select_reported_values_and_keep_explicit_actions() {
         };
         assert_eq!(values[selector.selected], expected);
         let selected = selector.selected;
+        let other = usize::from(selected == 0);
+        let value = values[other].clone();
+        assert_eq!(view.apply_choice(selected), None);
+        view.open_field(field);
         let action = if field == Field::Model {
             Action::SetModel {
                 id: id.clone(),
-                model: expected.into(),
+                model: value,
             }
         } else {
             Action::SetEffort {
                 id: id.clone(),
-                effort: expected.into(),
+                effort: value,
             }
         };
-        assert_eq!(view.apply_choice(selected), Some(action));
+        assert_eq!(view.apply_choice(other), Some(action));
     }
 }
 
@@ -1684,7 +1688,7 @@ fn draft_branch_edit_survives_selecting_another_task() {
 }
 
 #[test]
-fn resumable_session_settings_open_and_dispatch_immediately() {
+fn resumable_session_settings_dispatch_only_a_changed_value() {
     for provider in [ProviderId::Claude, ProviderId::Codex] {
         for status in [
             SessionStatus::Inactive,
@@ -1735,19 +1739,31 @@ fn resumable_session_settings_open_and_dispatch_immediately() {
                     .selector
                     .as_ref()
                     .expect("resumable session selector opens");
-                let selected = selector.selected;
+                let current = selector.selected;
+                let (SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. }) =
+                    &selector.kind
+                else {
+                    unreachable!()
+                };
+                assert_eq!(values[current], if field == Field::Model { model } else { "high" });
+                let other = usize::from(current == 0);
+                let value = values[other].clone();
+                // Choosing the current value closes the selector without touching the session.
+                assert_eq!(view.apply_choice(current), None);
+                assert!(view.selector.is_none());
+                assert_eq!(click(&mut view, rect.x, rect.y), None);
                 let expected = if field == Field::Model {
                     Action::SetModel {
                         id: id.clone(),
-                        model: model.into(),
+                        model: value,
                     }
                 } else {
                     Action::SetEffort {
                         id: id.clone(),
-                        effort: "high".into(),
+                        effort: value,
                     }
                 };
-                assert_eq!(view.apply_choice(selected), Some(expected));
+                assert_eq!(view.apply_choice(other), Some(expected));
             }
         }
     }

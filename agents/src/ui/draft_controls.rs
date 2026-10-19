@@ -33,6 +33,8 @@ pub(super) struct Selector {
     pub origin: Origin,
     pub kind: SelectorKind,
     pub selected: usize,
+    /// The choice already in effect; choosing it again leaves a session alone.
+    pub current: Option<usize>,
     pub scroll: Cell<usize>,
 }
 
@@ -71,6 +73,7 @@ impl Selector {
             origin: Origin::Border,
             kind,
             selected,
+            current: None,
             scroll: Cell::new(0),
         }
     }
@@ -517,9 +520,7 @@ impl View {
         if values.is_empty() {
             return;
         }
-        let selected = current
-            .and_then(|current| values.iter().position(|value| *value == current))
-            .unwrap_or_default();
+        let current = current.and_then(|current| values.iter().position(|value| *value == current));
         let labels = values
             .iter()
             .map(|value| {
@@ -544,7 +545,9 @@ impl View {
                 labels,
             }
         };
-        self.selector = Some(Selector::new(kind, selected));
+        let mut selector = Selector::new(kind, current.unwrap_or_default());
+        selector.current = current;
+        self.selector = Some(selector);
         self.focus_selector();
     }
 
@@ -697,6 +700,11 @@ impl View {
             SelectorKind::Model { target, values, .. }
             | SelectorKind::Effort { target, values, .. } => {
                 let value = values.get(index)?.clone();
+                // A session already running with the chosen value has nothing to change.
+                if matches!(target, ControlTarget::Session(_)) && selector.current == Some(index) {
+                    self.close_selector();
+                    return None;
+                }
                 let target = target.clone();
                 let model = matches!(selector.kind, SelectorKind::Model { .. });
                 self.close_selector();
