@@ -35,6 +35,7 @@ tungstenite = { version = "0.28", default-features = false, features = ["handsha
 unicode-segmentation = "1"
 unicode-width = "0.2"
 url = "2"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 vt100 = "0.16"
 sha2 = "0.10"
 

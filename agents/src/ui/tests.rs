@@ -10023,3 +10023,165 @@ fn update_log_snapshot_body(path: &Path, rendered: &str) {
         std::fs::write(path, format!("{body}{footer}\n")).unwrap();
     }
 }
+
+#[test]
+fn details_model_has_no_prefix() {
+    let mut row = session("weekly", "Weekly task", SessionStatus::Ready, 0);
+    row.model = Some("claude-opus".into());
+    row.effort = Some("high".into());
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 100, 20);
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, Utc::now());
+    let lines = buffer
+        .content
+        .chunks(100)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>();
+    assert!(
+        lines.iter().any(|line| line.contains("claude-opus · high")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn details_weekly_usage_text_and_targets() {
+    use crate::providers::WeeklyUsage;
+    let mut row = session("weekly", "Weekly task", SessionStatus::Ready, 0);
+    row.model = Some("claude-opus".into());
+    row.effort = Some("high".into());
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let reset = chrono::DateTime::parse_from_rfc3339("2026-10-23T15:59:59.800627+00:00")
+        .unwrap()
+        .with_timezone(&Utc);
+    let render = |view: &View| {
+        let area = Rect::new(5, 3, 100, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let y = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0
+            .y;
+        (area.x..area.right())
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    assert!(!render(&view).contains("weekly"));
+    for (left, suffix) in [
+        (82, "".to_owned()),
+        (20, "".to_owned()),
+        (
+            2,
+            format!(
+                " · resets {}",
+                reset.with_timezone(&chrono::Local).format("%a %H:%M")
+            ),
+        ),
+    ] {
+        view.weekly_usage.insert(
+            ProviderId::Claude,
+            WeeklyUsage {
+                left_percent: left,
+                resets_at: Some(reset),
+            },
+        );
+        let text = render(&view);
+        assert!(
+            text.contains(&format!("claude-opus · high · weekly {left}% left{suffix}")),
+            "{text}"
+        );
+        assert_eq!(text.contains("resets"), left < 20);
+        if left == 82 {
+            let snapshot = text.trim_end().to_owned() + "\n";
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/ui_snapshots/details_weekly_usage.txt");
+            if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+                std::fs::write(path, &snapshot).unwrap();
+            }
+            assert_eq!(
+                snapshot,
+                include_str!("../../tests/ui_snapshots/details_weekly_usage.txt")
+            );
+        }
+        let targets = &view.viewport.borrow().field_targets;
+        let model = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0;
+        let effort = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Effort)
+            .unwrap()
+            .0;
+        assert_eq!((model.x, model.width), (7, 11));
+        assert_eq!((effort.x, effort.width), (21, 4));
+    }
+    view.weekly_usage
+        .get_mut(&ProviderId::Claude)
+        .unwrap()
+        .resets_at = None;
+    assert!(!render(&view).contains("resets"));
+    view.rows[0].effort = None;
+    assert!(render(&view).contains("claude-opus · weekly 2% left"));
+    view.rows[0].id.provider = ProviderId::Codex;
+    assert!(!render(&view).contains("weekly"));
+}
+
+#[test]
+#[ignore = "reads local credentials and live provider usage; requires the running Codex daemon"]
+fn details_weekly_usage_live_accounts() {
+    let (mut hub, _) = crate::providers::configured().unwrap();
+    let sessions = hub.refresh().sessions;
+    let jobs = hub.weekly_usage_jobs(std::time::Instant::now());
+    let workers = jobs
+        .into_iter()
+        .map(|(provider, job)| (provider, std::thread::spawn(job)))
+        .collect::<Vec<_>>();
+    for (provider, worker) in workers {
+        hub.weekly_usage_complete(provider, worker.join().unwrap());
+    }
+    let mut lines = Vec::new();
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        assert!(
+            hub.weekly_usage().contains_key(&provider),
+            "{provider}: live weekly usage unavailable"
+        );
+        let row = sessions
+            .iter()
+            .find(|row| row.id.provider == provider && row.model.is_some())
+            .expect("real session with model")
+            .clone();
+        let mut view = test_view(Grouping::Project, false);
+        view.weekly_usage = hub.weekly_usage().clone();
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, 160, 80);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let text = buffer
+            .content
+            .chunks(160)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .find(|line| line.contains(" · weekly "))
+            .expect("rendered live usage line");
+        assert!(!text.contains("Model: "));
+        println!("{provider}: {}", text.trim());
+        lines.push(text.trim().to_owned());
+    }
+    if let Some(path) = std::env::var_os("AGENTS_USAGE_PROBE_RESULT") {
+        std::fs::write(
+            path,
+            serde_json::to_vec(&serde_json::json!({"verdict":"passed","lines":lines})).unwrap(),
+        )
+        .unwrap();
+    }
+}

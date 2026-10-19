@@ -14,6 +14,7 @@ mod tests;
 
 use super::{
     Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, TerminalCommand,
+    WeeklyUsageJob,
 };
 #[cfg(test)]
 use crate::log;
@@ -575,6 +576,13 @@ impl Provider for CodexProvider {
         models.choices.clone()
     }
 
+    fn weekly_usage(&self) -> Option<WeeklyUsageJob> {
+        let home = self.home.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::account::weekly_usage(&mut client)
+        }))
+    }
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume: true,
