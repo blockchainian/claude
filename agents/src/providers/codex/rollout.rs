@@ -2034,6 +2034,30 @@ mod tests {
     }
 
     #[test]
+    fn captured_shell_truncated_reads_keep_known_code_sections() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!("../../../tests/fixtures/codex-shell-truncated.jsonl"))
+            .unwrap();
+        let events = tail(file.path(), 20).unwrap();
+        let output = events[0].calls[0].output.as_ref().unwrap();
+        assert!(output.iter().any(|section| matches!(section,
+            Section::Code { lang, text, .. }
+                if lang == "rs" && text.starts_with("//! Asks the terminal"))));
+        assert!(output.iter().any(|section| matches!(section,
+            Section::Text { text, .. } if text.contains("…133 tokens truncated…"))));
+    }
+
+    #[test]
+    fn captured_shell_diff_uses_diff_section() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!("../../../tests/fixtures/codex-shell-diff.jsonl"))
+            .unwrap();
+        let events = tail(file.path(), 20).unwrap();
+        assert!(matches!(&events[0].calls[0].output.as_ref().unwrap()[0],
+            Section::Diff { text, .. } if text.starts_with("diff --git ") && text.contains("@@ -35,7 +35,11 @@")));
+    }
+
+    #[test]
     fn shell_file_reads_highlight_stdout() {
         let record = tool_records()
             .into_iter()

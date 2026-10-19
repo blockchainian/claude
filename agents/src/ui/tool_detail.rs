@@ -237,7 +237,12 @@ impl Part {
         let paths = super::paths::text_paths(&text, cwd);
         let display =
             super::line_truncation::abbreviate_paths_in_text(&text, &paths, usize::MAX, cwd);
-        let drawn = display.replace('\t', "    ");
+        let numbered = matches!(&self.body, Body::Code(lang) if lang.starts_with("numbered:"));
+        let drawn = if numbered {
+            display
+        } else {
+            display.replace('\t', "    ")
+        };
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let kind = self.body.content_kind();
@@ -299,7 +304,17 @@ impl Part {
                 running_frame(now),
                 Style::new().dim(),
             ))],
-            Body::Code(lang) => highlight::code_lines(source, lang),
+            Body::Code(lang) => {
+                let mut lines = highlight::code_lines(source, lang);
+                if lang.starts_with("numbered:") {
+                    for line in &mut lines {
+                        for span in &mut line.spans {
+                            span.content = span.content.replace('\t', "    ").into();
+                        }
+                    }
+                }
+                lines
+            }
             Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Structured(document) => document.highlighted(),
             Body::Diff => highlight::diff_lines(source),
@@ -1513,6 +1528,40 @@ mod tests {
                 .iter()
                 .any(|line| line.to_string() == part.source)
         );
+    }
+
+    #[test]
+    fn numbered_code_keeps_selection_and_logical_lines() {
+        let source = "     1\tlet answer = \"ready\";\n     2\tprintln!(\"done\");";
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Code {
+                label: String::new(),
+                lang: "numbered:rs".into(),
+                text: source.into(),
+            },
+            Style::default(),
+            true,
+        );
+        let part = &parts[0];
+        assert_eq!(part.source, source);
+        let lines = part.lines(10, Style::default(), chrono::DateTime::UNIX_EPOCH);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].to_string(), "     1    let answer = \"ready\";");
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
+        let maps = part.maps(&lines);
+        for (row, expected) in source.lines().enumerate() {
+            let cells = &maps[row];
+            let first = cells.first().unwrap().1.start;
+            let last = cells.last().unwrap().1.end;
+            assert_eq!(&part.source[first..last], expected);
+        }
     }
 
     #[test]

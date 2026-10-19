@@ -262,17 +262,34 @@ fn simple(words: &[String], out: &mut Groups, depth: usize) -> Option<()> {
     Some(())
 }
 
-pub(super) fn single_words(input: &str) -> Option<Vec<String>> {
-    scan(input, &mut Groups::default(), 0, true)?;
-    shlex::split(input)
-}
-
 // Scan shell words, preserving quoted scripts and separating only shell operators.
 fn shell(input: &str, out: &mut Groups, depth: usize) -> Option<()> {
-    scan(input, out, depth, false)
+    scan(input, out, depth, false, &mut Vec::new())
 }
 
-fn scan(input: &str, out: &mut Groups, depth: usize, single: bool) -> Option<()> {
+pub(super) fn pipeline_words(input: &str) -> Option<Vec<Vec<String>>> {
+    let mut pipes = Vec::new();
+    scan(input, &mut Groups::default(), 0, true, &mut pipes)?;
+    let mut start = 0;
+    let mut commands = Vec::new();
+    for end in pipes.into_iter().chain(std::iter::once(input.len())) {
+        let words = shlex::split(&input[start..end])?;
+        if words.is_empty() {
+            return None;
+        }
+        commands.push(words);
+        start = end + 1;
+    }
+    Some(commands)
+}
+
+fn scan(
+    input: &str,
+    out: &mut Groups,
+    depth: usize,
+    single: bool,
+    pipes: &mut Vec<usize>,
+) -> Option<()> {
     if depth > 64 {
         return None;
     }
@@ -286,6 +303,16 @@ fn scan(input: &str, out: &mut Groups, depth: usize, single: bool) -> Option<()>
     let mut heredocs: Vec<(String, bool)> = Vec::new();
     while i < chars.len() {
         let c = chars[i];
+        if single && quote.is_none() && c == '|' {
+            if chars.get(i + 1).is_some_and(|c| matches!(c, '|' | '&')) {
+                return None;
+            }
+            pipes.push(chars[..i].iter().map(|c| c.len_utf8()).sum());
+            word.clear();
+            words.clear();
+            i += 1;
+            continue;
+        }
         if single
             && ((quote.is_none()
                 && matches!(

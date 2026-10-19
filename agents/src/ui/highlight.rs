@@ -208,6 +208,38 @@ fn exceeds_limits(text: &str) -> bool {
 /// `text` as one line per source line, highlighted as `lang` when the language is known
 /// and the text is within the size limits, plain otherwise.
 pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
+    if let Some(lang) = lang.strip_prefix("numbered:") {
+        if exceeds_limits(text) {
+            return plain_lines(text);
+        }
+        let gutters: Vec<_> = text
+            .lines()
+            .map(|line| {
+                line.split_once('\t')
+                    .filter(|(prefix, _)| {
+                        let number = prefix.trim_start_matches(char::is_whitespace);
+                        !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    .map_or("", |(prefix, _)| &line[..prefix.len() + 1])
+            })
+            .collect();
+        let code = text
+            .split_inclusive('\n')
+            .zip(&gutters)
+            .map(|(line, gutter)| &line[gutter.len()..])
+            .collect::<String>();
+        let mut lines = code_lines(&code, lang);
+        lines.resize_with(gutters.len(), Line::default);
+        for (line, gutter) in lines.iter_mut().zip(gutters) {
+            if !gutter.is_empty() {
+                line.spans.insert(
+                    0,
+                    Span::styled(gutter.to_owned(), Style::new().add_modifier(Modifier::DIM)),
+                );
+            }
+        }
+        return lines;
+    }
     let Some(mut lines) = highlighted(text, lang) else {
         return plain_lines(text);
     };
@@ -394,6 +426,20 @@ mod tests {
                 assert_eq!(styles[token as usize], convert(*style), "{light}: {needle}");
             }
         }
+    }
+
+    #[test]
+    fn numbered_code_keeps_gutters_dim_and_code_highlighted() {
+        let source = "     1\tlet answer = \"ready\";\n     2\t// next\nplain text";
+        let lines = code_lines(source, "numbered:rs");
+        assert_eq!(text(&lines), source.lines().collect::<Vec<_>>());
+        assert_eq!(lines[0].spans[0].content, "     1\t");
+        assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(lines[0].spans[0].style.fg, None);
+        assert!(lines[0].spans.len() > 2);
+        assert_eq!(lines[1].spans[0].content, "     2\t");
+        assert!(!lines[2].spans[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(text(&code_lines("     1\t", "numbered:rs")), ["     1\t"]);
     }
 
     #[test]

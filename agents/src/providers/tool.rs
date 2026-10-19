@@ -1005,20 +1005,101 @@ fn question_sections(input: &Value) -> Vec<Section> {
 struct ShellOutput {
     path: Option<String>,
     lines: Option<usize>,
+    numbered: bool,
+    diff: bool,
 }
 
 fn shell_read(command: &str) -> Option<ShellOutput> {
-    let words = shell_summary::single_words(command)?;
+    let pipeline = shell_summary::pipeline_words(command)?;
+    let mut stages = pipeline.iter();
+    let words = stages.next()?;
     let words: Vec<_> = words.iter().map(String::as_str).collect();
+    let mut read = shell_read_words(&words)?;
+    for stage in stages {
+        let stage: Vec<_> = stage.iter().map(String::as_str).collect();
+        if read.diff && !matches!(stage.first(), Some(&"head" | &"sed")) {
+            return None;
+        }
+        let mut words = stage.clone();
+        words.push("stdout");
+        let filter = shell_read_words(&words)?;
+        if filter.numbered
+            || filter.diff
+            || !matches!(stage.first(), Some(&"head" | &"tail" | &"sed"))
+        {
+            return None;
+        }
+        read.lines = if read.diff { None } else { filter.lines };
+    }
+    Some(read)
+}
+
+fn shell_read_words(words: &[&str]) -> Option<ShellOutput> {
     let number = |value: &str| {
         (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
             .then(|| value.parse::<usize>().ok())
             .flatten()
     };
-    let (path, lines) = match words.as_slice() {
-        ["cat", path] => (*path, None),
+    let mut numbered = false;
+    let (path, lines) = match words {
+        ["git", "diff" | "show", ..] | ["diff", "-u", ..] => {
+            return Some(ShellOutput {
+                path: None,
+                lines: None,
+                numbered: false,
+                diff: true,
+            });
+        }
+        ["git", "log", args @ ..] if args.iter().any(|arg| matches!(*arg, "-p" | "--patch")) => {
+            return Some(ShellOutput {
+                path: None,
+                lines: None,
+                numbered: false,
+                diff: true,
+            });
+        }
+        ["cat", "-n", path] | ["nl", "-ba", path] => {
+            numbered = true;
+            (*path, None)
+        }
+        ["cat", paths @ ..] if !paths.is_empty() => {
+            let path = *paths.first()?;
+            if paths
+                .iter()
+                .any(|path| path.is_empty() || path.starts_with('-'))
+            {
+                return None;
+            }
+            let language = |path: &str| {
+                let Section::Code { lang, .. } = file_code_section("", path, "") else {
+                    return None;
+                };
+                crate::ui::highlight::find_syntax(&lang).map(|syntax| syntax.scope)
+            };
+            if paths.len() > 1
+                && (language(path).is_none()
+                    || !paths.iter().all(|other| language(other) == language(path)))
+            {
+                return None;
+            }
+            (path, None)
+        }
         ["head" | "tail", path] => (*path, Some(10)),
-        ["head" | "tail", "-n", count, path] => (*path, Some(number(count)?)),
+        [tool @ ("head" | "tail"), "-n", count, path] => {
+            let lines = if *tool == "tail" && count.starts_with('+') {
+                number(&count[1..])?;
+                None
+            } else {
+                Some(number(count)?)
+            };
+            (*path, lines)
+        }
+        ["head" | "tail", count, path] => {
+            let count = count
+                .strip_prefix("-n")
+                .or_else(|| count.strip_prefix('-'))?;
+            (*path, Some(number(count)?))
+        }
         ["sed", "-n", range, path] => {
             let range = range.strip_suffix('p')?;
             let lines = if let Some((start, end)) = range.split_once(',') {
@@ -1053,6 +1134,8 @@ fn shell_read(command: &str) -> Option<ShellOutput> {
                     args.join(" ").lines().count().max(1)
                         + usize::from(args.last().is_some_and(|arg| arg.ends_with('\n'))),
                 ),
+                numbered: false,
+                diff: false,
             });
         }
         ["printf", format, args @ ..] => {
@@ -1063,6 +1146,8 @@ fn shell_read(command: &str) -> Option<ShellOutput> {
             return Some(ShellOutput {
                 path: None,
                 lines: Some(output.lines().count()),
+                numbered: false,
+                diff: false,
             });
         }
         _ => return None,
@@ -1070,6 +1155,8 @@ fn shell_read(command: &str) -> Option<ShellOutput> {
     (!path.is_empty() && !path.starts_with('-')).then(|| ShellOutput {
         path: Some(path.to_owned()),
         lines,
+        numbered,
+        diff: false,
     })
 }
 
@@ -1109,23 +1196,59 @@ fn printf_separator(format: &str, args: &[&str]) -> Option<String> {
 }
 
 fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<Section>> {
+    let mut prefix_len = 0;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with("Warning: truncated output (original token count: ")
+            || line
+                .strip_prefix("Total output lines: ")
+                .is_some_and(|count| count.trim().parse::<usize>().is_ok())
+            || (prefix_len > 0 && line.trim().is_empty())
+        {
+            prefix_len += line.len();
+        } else {
+            break;
+        }
+    }
+    if prefix_len > 0 {
+        let mut sections = vec![Section::Text {
+            label: label.into(),
+            text: text[..prefix_len].into(),
+        }];
+        sections.extend(shell_output_sections(command, label, &text[prefix_len..])?);
+        return Some(sections);
+    }
     let commands = crate::ui::shell_commands::split(command)?;
     let reads = commands
         .iter()
-        .map(|command_range| {
-            let command = &command[command_range.range.clone()];
-            shell_summary::single_words(command)?;
-            Some(shell_read(command))
+        .map(|range| {
+            let command = &command[range.range.clone()];
+            let pipeline = shell_summary::pipeline_words(command)?;
+            let read = shell_read(command);
+            if pipeline.len() > 1 && read.is_none() {
+                return None;
+            }
+            Some(read)
         })
         .collect::<Option<Vec<_>>>()?;
     reads.first()?.as_ref()?;
-    let file_section = |path: Option<&str>, text: &str| {
-        if let Some(path) = path {
-            let section = file_code_section(label, path, text);
-            if let Section::Code { lang, .. } = &section
-                && crate::ui::highlight::find_syntax(lang).is_some()
-            {
-                return section;
+    let section = |read: Option<&ShellOutput>, text: &str| {
+        if let Some(read) = read {
+            if read.diff {
+                return Section::Diff {
+                    label: String::new(),
+                    text: text.into(),
+                };
+            }
+            if let Some(path) = &read.path {
+                let mut section = file_code_section(label, path, text);
+                if let Section::Code { lang, .. } = &mut section
+                    && crate::ui::highlight::find_syntax(lang).is_some()
+                {
+                    if read.numbered {
+                        *lang = format!("numbered:{lang}");
+                    }
+                    return section;
+                }
             }
         }
         Section::Text {
@@ -1133,22 +1256,67 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
             text: text.into(),
         }
     };
+    let truncated = |line: &str| {
+        line.contains("[... omitted end of long line]")
+            || line
+                .split_once(" tokens truncated")
+                .is_some_and(|(prefix, _)| {
+                    prefix
+                        .trim_end_matches(|ch: char| ch.is_ascii_digit())
+                        .ends_with('…')
+                        && prefix.ends_with(|ch: char| ch.is_ascii_digit())
+                })
+    };
     let mut ends = vec![0];
     ends.extend(text.split_inclusive('\n').scan(0, |offset, line| {
         *offset += line.len();
         Some(*offset)
     }));
+    let marker = text.lines().position(truncated);
     let split = || {
         let mut line = 0usize;
         let mut sections = Vec::new();
         for (index, read) in reads.iter().enumerate() {
             let read = read.as_ref();
-            let remainder = read.is_none_or(|read| read.lines.is_none() && index + 1 < reads.len());
+            let remainder = read
+                .is_none_or(|read| (read.lines.is_none() || read.diff) && index + 1 < reads.len());
             let end = match read.and_then(|read| read.lines) {
                 Some(count) => line.checked_add(count)?,
                 None => ends.len() - 1,
             };
             let start = *ends.get(line)?;
+            if let Some(marker) = marker.filter(|marker| *marker >= line && *marker < end) {
+                let marker_byte = ends[marker];
+                if marker_byte > start {
+                    sections.push(section(
+                        read.filter(|_| !remainder),
+                        &text[start..marker_byte],
+                    ));
+                }
+                if !remainder && index + 1 == reads.len() {
+                    let tail = &text[marker_byte..];
+                    let mut start = 0;
+                    for (offset, row) in tail.split_inclusive('\n').scan(0, |offset, row| {
+                        let start = *offset;
+                        *offset += row.len();
+                        Some((start, row))
+                    }) {
+                        if truncated(row) {
+                            if start < offset {
+                                sections.push(section(read, &tail[start..offset]));
+                            }
+                            sections.push(section(None, row));
+                            start = offset + row.len();
+                        }
+                    }
+                    if start < tail.len() {
+                        sections.push(section(read, &tail[start..]));
+                    }
+                } else {
+                    sections.push(section(None, &text[marker_byte..]));
+                }
+                return Some(sections);
+            }
             let end_byte = *ends.get(end)?;
             // A following command cannot start halfway through a stdout line.
             if !remainder
@@ -1158,10 +1326,7 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
             {
                 return None;
             }
-            let path = read
-                .filter(|_| !remainder)
-                .and_then(|read| read.path.as_deref());
-            sections.push(file_section(path, &text[start..end_byte]));
+            sections.push(section(read.filter(|_| !remainder), &text[start..end_byte]));
             line = end;
             if remainder {
                 break;
@@ -1172,19 +1337,19 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
     if let Some(sections) = split() {
         return Some(sections);
     }
-    let paths: Vec<_> = reads
+    let paths = reads
         .iter()
-        .filter_map(|read| read.as_ref()?.path.as_deref())
-        .collect();
+        .map(|read| read.as_ref()?.path.as_deref())
+        .collect::<Option<Vec<_>>>()?;
     let path = *paths.first()?;
-    let Section::Code { lang, .. } = file_section(Some(path), text) else {
+    let Section::Code { lang, .. } = file_code_section(label, path, text) else {
         return None;
     };
     let syntax = crate::ui::highlight::find_syntax(&lang)?;
     paths.iter().all(|path| {
-        matches!(file_section(Some(path), ""), Section::Code { lang, .. }
+        matches!(file_code_section(label, path, ""), Section::Code { lang, .. }
             if crate::ui::highlight::find_syntax(&lang).is_some_and(|other| other.scope == syntax.scope))
-    }).then(|| vec![file_section(Some(path), text)])
+    }).then(|| vec![section(reads.first().and_then(Option::as_ref), text)])
 }
 
 fn highlight_shell_output(call: &mut ToolCall) {
@@ -1259,6 +1424,140 @@ mod tests {
                 text: text.into(),
             }]
         })
+    }
+
+    #[test]
+    fn shell_output_short_counts_and_pipes() {
+        for command in [
+            "head -1 a.rs",
+            "tail -1 a.rs",
+            "head -n1 a.rs",
+            "tail -n1 a.rs",
+            "cat a.rs | head -1",
+            "cat a.rs | tail -1",
+            "cat a.rs | sed -n '2p'",
+        ] {
+            assert_eq!(
+                shell_output(&format!("{command}; cat b.py"), "let a = 1;\nprint(1)"),
+                vec![
+                    super::code_section("stdout", "rs", "let a = 1;\n"),
+                    super::code_section("stdout", "py", "print(1)")
+                ],
+                "{command}"
+            );
+        }
+        assert_eq!(
+            shell_output("tail -n +2 a.rs", "let a = 1;"),
+            vec![super::code_section("stdout", "rs", "let a = 1;")]
+        );
+        assert!(matches!(
+            shell_output("tail -n +2 a.rs; cat b.py", "one\ntwo").as_slice(),
+            [crate::log::Section::Text { .. }]
+        ));
+    }
+
+    #[test]
+    fn shell_output_numbered_and_multiple_files() {
+        for command in ["nl -ba a.rs", "cat -n a.rs", "nl -ba a.rs | sed -n '1,2p'"] {
+            assert_eq!(
+                shell_output(command, "     1\tfn main() {}"),
+                vec![super::code_section(
+                    "stdout",
+                    "numbered:rs",
+                    "     1\tfn main() {}"
+                )],
+                "{command}"
+            );
+        }
+        assert_eq!(
+            shell_output("cat a.rs b.rs", "fn a() {}\nfn b() {}"),
+            vec![super::code_section("stdout", "rs", "fn a() {}\nfn b() {}")]
+        );
+        assert!(matches!(
+            shell_output("cat a.rs b.py", "one\ntwo").as_slice(),
+            [crate::log::Section::Text { .. }]
+        ));
+    }
+
+    #[test]
+    fn shell_output_diff_and_search() {
+        use crate::log::Section;
+        let diff = "@@ -1 +1 @@\n-old\n+new";
+        for command in [
+            "git diff -- a.rs",
+            "git show HEAD",
+            "git log -p -1",
+            "diff -u a.rs b.rs",
+            "git diff | head -2",
+            "git diff | sed -n '1,3p'",
+        ] {
+            assert!(
+                matches!(
+                    shell_output(command, diff).as_slice(),
+                    [Section::Diff { .. }]
+                ),
+                "{command}"
+            );
+            let sections = shell_output(
+                &format!("sed -n '1p' a.rs; {command}"),
+                &format!("fn main() {{}}\n{diff}"),
+            );
+            assert!(
+                matches!(
+                    sections.as_slice(),
+                    [Section::Code { .. }, Section::Diff { .. }]
+                ),
+                "{command}"
+            );
+        }
+        for command in [
+            "rg -n foo src",
+            "grep -n foo a.rs",
+            "git diff | grep foo",
+            "git diff; cat a.rs",
+            "git show HEAD | tail -1",
+        ] {
+            assert!(
+                matches!(
+                    shell_output(command, diff).as_slice(),
+                    [Section::Text { .. }]
+                ),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_output_truncation_keeps_known_prefix() {
+        use crate::log::Section;
+        let output = shell_output(
+            "sed -n '1p' a.rs; sed -n '1,4p' b.py",
+            "Total output lines: 5\n\nfn main() {}\nprint(1)\n…238 tokens truncated…\nprint(4)",
+        );
+        assert!(matches!(output.as_slice(),
+            [Section::Text { .. }, Section::Code { lang: a, .. }, Section::Code { lang: b, .. },
+             Section::Text { text: marker, .. }, Section::Code { lang: c, .. }]
+            if a == "rs" && b == "py" && c == "py" && marker.contains("tokens truncated")));
+        let output = shell_output(
+            "sed -n '1,4p' a.rs; cat b.py",
+            "fn main() {}\n…238 tokens truncated…\nprint(4)",
+        );
+        assert!(matches!(
+            output.as_slice(),
+            [Section::Code { .. }, Section::Text { .. }]
+        ));
+        let output = shell_output(
+            "cat a.rs",
+            "fn main() {}\n[... omitted end of long line]\nfn last() {}",
+        );
+        assert!(matches!(
+            output.as_slice(),
+            [
+                Section::Code { .. },
+                Section::Text { .. },
+                Section::Code { .. }
+            ]
+        ));
     }
 
     #[test]
@@ -1459,8 +1758,6 @@ mod tests {
             "cat < a.rs",
             "cat a.rs &",
             "cat a.rs\npwd",
-            "cat a.rs b.rs",
-            "cat -n a.rs",
             "cat *.rs",
             "cat $FILE.rs",
             "cat $(pwd)/a.rs",

@@ -1916,6 +1916,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn captured_shell_diff_pipeline_uses_diff_section() {
+        let records = include_str!("../../../tests/fixtures/claude-shell-diff.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let events = events_from(records);
+        assert!(matches!(&events[0].calls[0].output.as_ref().unwrap()[0],
+            Section::Diff { text, .. } if text.starts_with("diff --git ") && text.contains("@@")));
+    }
+
+    #[test]
     fn shell_file_reads_highlight_stdout() {
         for (command, highlighted) in [
             ("sed -n '10,80p' src/foo.rs", true),
