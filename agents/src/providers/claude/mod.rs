@@ -518,7 +518,7 @@ impl ClaudeProvider {
         let mut paths: HashSet<PathBuf> =
             self.index.values().map(|file| file.path.clone()).collect();
         let mut children = Vec::new();
-        for parent in sessions.iter().filter(|session| session.process.is_some()) {
+        for parent in &sessions {
             children.extend(self.subagents(parent, &mut paths));
         }
         self.summaries.retain(|path, _| paths.contains(path));
@@ -702,13 +702,11 @@ impl ClaudeProvider {
             let Some(meta) = subagents::Metadata::read(&path.with_extension("meta.json")) else {
                 continue;
             };
-            let Some(status) = meta.status(
+            let status = meta.status(
                 &summary,
                 &self.config_dir,
                 parent.process.is_some() || parent.status != SessionStatus::Inactive,
-            ) else {
-                continue;
-            };
+            );
             let mut child = session(file.id, summary, Some(path), modified.into());
             child.parent = Some(parent.id.clone());
             child.title = meta.title();

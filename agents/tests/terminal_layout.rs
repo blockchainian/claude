@@ -3093,3 +3093,55 @@ mod terminal_link_overlays;
 
 #[path = "support/terminal_model_families.rs"]
 mod terminal_model_families;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_finished_claude_subagents_remain_under_inactive_parent() {
+    let (_directory, tmux, transcript) = start_probe("claude-inactive-subagents");
+    let children = transcript.with_extension("").join("subagents");
+    std::fs::create_dir_all(&children).unwrap();
+    let records = include_str!("fixtures/subagent.jsonl");
+    std::fs::write(children.join("agent-done.jsonl"), records).unwrap();
+    std::fs::write(
+        children.join("agent-done.meta.json"),
+        r#"{"description":"Completed review"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        children.join("agent-pending.jsonl"),
+        records.lines().next().unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        children.join("agent-pending.meta.json"),
+        r#"{"description":"Pending check"}"#,
+    )
+    .unwrap();
+    let inactive = tmux.capture_when(|capture| {
+        capture.contains("Inactive 3")
+            && capture.contains("Completed review")
+            && capture.contains("Pending check")
+    });
+    for title in ["Completed review", "Pending check"] {
+        let row = inactive.lines().find(|line| line.contains(title)).unwrap();
+        assert!(row.contains('├') || row.contains('└'), "{inactive}");
+    }
+    tmux.run(&["send-keys", "-t", "probe", "BTab"]);
+    let active = tmux.capture_when(|capture| {
+        !capture.contains("Completed review") && !capture.contains("Pending check")
+    });
+    assert!(!active.contains("Completed review"), "{active}");
+    assert!(!active.contains("Pending check"), "{active}");
+    let verdict = serde_json::json!({
+        "passed": true,
+        "inactive": inactive,
+        "active": active,
+        "finished_child_nested": true,
+        "dead_parent_pending_child_nested": true,
+        "active_excludes_children": true,
+    });
+    if let Some(path) = std::env::var_os("AGENTS_SUBAGENTS_VERDICT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    }
+    println!("{verdict}");
+}
