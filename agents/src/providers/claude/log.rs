@@ -169,6 +169,7 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
         }
         previous_end = end(event);
     }
+    let events = crate::log::agent::merge(events);
     let skip = events.len().saturating_sub(count);
     Ok(events.into_iter().skip(skip).collect())
 }
@@ -224,6 +225,8 @@ impl Reader {
     }
 
     fn replay(&mut self, start: u64) -> io::Result<usize> {
+        let start = self.entries.last().filter(|entry| entry.event.calls.first().and_then(|call| call.agent_message.as_ref()).is_some_and(|message| message.kind == "MESSAGE"))
+            .map_or(start, |entry| start.min(entry.offset));
         let retained = self.entries.partition_point(|entry| entry.offset < start);
         let replaced = self.entries.len() - retained;
         self.entries.truncate(retained);
@@ -460,12 +463,12 @@ impl Reader {
             .saturating_sub(appended);
         self.boundary.capture(&mut file, metadata.len())?;
         Ok(crate::log::Update {
-            events: self
+            events: crate::log::agent::merge(self
                 .entries
                 .iter()
                 .skip(self.entries.len() - self.shown)
                 .map(|entry| entry.event.clone())
-                .collect(),
+                .collect()),
             prepended: if reset { 0 } else { prepended },
             appended: if reset { self.shown } else { appended },
             replaced: replaced.min(shown_before),
@@ -734,6 +737,8 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         is_error: result.is_some_and(|result| result.error),
         duration: None,
     };
+    call.agent_message = crate::log::agent::tool_message(name, input);
+    crate::log::agent::present(&mut call);
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -850,15 +855,20 @@ impl Log {
                             .join("\n"),
                     )
                 });
-                if record["isMeta"] != true
-                    && let Some(text) = text.filter(|text| !text.trim().is_empty())
+                let peer = text.as_deref().and_then(wrapped_message);
+                if let Some(text) = text.filter(|text| !text.trim().is_empty())
+                    && (record["isMeta"] != true || peer.is_some())
                     && !text.trim_start().starts_with("<task-notification>")
                 {
-                    if let Some((kind, sender, body)) = wrapped_message(&text) {
+                    if let Some((kind, sender, body)) = peer {
+                        let (sender, body) = super::peer::origin_message(&record)
+                            .map(|(name, body)| (name.map(str::to_owned), body.to_owned()))
+                            .unwrap_or((sender, body));
                         self.push(kind, body, at);
                         self.entries.last_mut().unwrap().event.source =
                             record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
+                        self.peer_message();
                     } else if !text.trim_start().starts_with('<') {
                         let images = self.images.take(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
@@ -923,7 +933,9 @@ impl Log {
                     } else {
                         (Kind::QueuedUser, text)
                     };
-                    let (sender, body) = wrapped_message(body)
+                    let peer = wrapped_message(body);
+                    let is_peer = peer.is_some();
+                    let (sender, body) = peer
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
                     let images = self.images.take(&record, &body)?;
@@ -932,6 +944,7 @@ impl Log {
                     self.entries.last_mut().unwrap().event.source =
                         record["uuid"].as_str().map(str::to_owned);
                     self.entries.last_mut().unwrap().event.sender = sender;
+                        if is_peer { self.peer_message(); }
                 }
             }
             _ => {}
@@ -1050,6 +1063,37 @@ impl Log {
         true
     }
 
+    fn peer_message(&mut self) {
+        let event = &mut self.entries.last_mut().unwrap().event;
+        let message = crate::log::agent::Message {
+            author: event.sender.clone(), recipient: None,
+            direction: crate::log::agent::Direction::Incoming,
+            kind: "MESSAGE".to_owned(),
+            content: crate::log::agent::Content::Text(event.body.clone()),
+        };
+        let mut call = ToolCall {
+            model_settings: None,
+            agent_message: Some(message), started_at: Some(event.started_at), hide_output: true,
+            agent_thread_id: None, agent_path: event.sender.clone(), detail_left: String::new(),
+            detail_title: String::new(), show_details: true, id: event.source.clone().unwrap_or_default(),
+            title: String::new(), name: "MESSAGE".to_owned(), input: Vec::new(), output: None,
+            exit_code: None, is_error: false, duration: None,
+        };
+        crate::log::agent::present(&mut call);
+        event.calls.push(call);
+        self.coalesce();
+    }
+
+    fn coalesce(&mut self) {
+        if self.entries.len() < 2 { return; }
+        let n = self.entries.len();
+        if !crate::log::agent::can_merge(&self.entries[n - 1].event, &self.entries[n - 2].event) { return; }
+        let mut earlier = self.entries.pop().unwrap();
+        let later = self.entries.pop().unwrap();
+        earlier.event = crate::log::agent::merge(vec![earlier.event, later.event]).remove(0);
+        self.entries.push(earlier);
+    }
+
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
         self.entries.push(Entry {
@@ -1087,6 +1131,25 @@ impl Log {
         let input = &block["input"];
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
         let detail_call = tool_call(name, input, result);
+        if detail_call.agent_message.is_some() {
+            self.batch = None;
+            let records = result.map(|result| result.source_records.clone()).unwrap_or_default();
+            let ended_at = result.map(|result| result.at);
+            let denied = result.is_some_and(|result| result.denial.is_some());
+            self.push(tool_kind(name), detail_call.agent_message.as_ref().unwrap().content.text().to_owned(), at);
+            let event = &mut self.entries.last_mut().unwrap().event;
+            event.source_records.extend(records);
+            let mut call = detail_call;
+            call.id = block["id"].as_str().unwrap_or("").to_owned();
+            call.started_at = Some(at);
+            call.duration = ended_at.map(|end| end - at);
+            event.ended_at = ended_at;
+            if denied { event.kind = Kind::Denied; }
+            else if call.is_error { event.kind = Kind::Error; }
+            event.calls.push(call);
+            self.coalesce();
+            return;
+        }
         let subject =
             (!detail_call.detail_left.is_empty()).then_some(detail_call.detail_title.as_str());
         let display_name = if subject.is_some() {

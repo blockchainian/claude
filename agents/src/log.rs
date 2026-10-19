@@ -217,3 +217,7 @@ pub struct Image {
     pub label: String,
     pub path: std::path::PathBuf,
 }
+
+#[cfg(test)]
+#[path = "log/agent_tests.rs"]
+mod agent_tests;

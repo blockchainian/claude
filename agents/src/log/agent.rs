@@ -232,6 +232,7 @@ pub fn merge(events: Vec<Event>) -> Vec<Event> {
         {
             previous.calls.extend(event.calls);
             previous.source_records.extend(event.source_records);
+            previous.started_at = event.started_at;
             previous.ended_at = event.ended_at;
             previous.duration = previous.ended_at.map(|end| end - previous.started_at);
         } else {

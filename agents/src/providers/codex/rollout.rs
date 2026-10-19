@@ -72,42 +72,6 @@ const OUTPUTS: &[(&str, Output)] = &[
 ];
 
 #[derive(Clone, Copy)]
-enum AgentTitle {
-    Target,
-    Route,
-}
-
-#[derive(Clone, Copy)]
-struct AgentRoute {
-    assignment: bool,
-    title: AgentTitle,
-}
-
-const AGENT_ROUTES: &[(&str, AgentRoute)] = &[
-    (
-        "spawn_agent",
-        AgentRoute {
-            assignment: true,
-            title: AgentTitle::Target,
-        },
-    ),
-    (
-        "send_message",
-        AgentRoute {
-            assignment: false,
-            title: AgentTitle::Route,
-        },
-    ),
-    (
-        "followup_task",
-        AgentRoute {
-            assignment: true,
-            title: AgentTitle::Route,
-        },
-    ),
-];
-
-#[derive(Clone, Copy)]
 enum ListTitle {
     Subject,
 }
@@ -624,8 +588,8 @@ fn tool_body(payload: &Value) -> Option<String> {
     let raw_name = response_tool_name(payload);
     let (name, subject, _) =
         crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
-    if let Some((_, _, title)) = agent_route(&raw_name, subject.as_deref(), "/root") {
-        return Some(title);
+    if let Some(message) = crate::log::agent::tool_message(&raw_name, &arguments) {
+        return Some(message.content.text().to_owned());
     }
     Some(list_title(
         &raw_name,
@@ -663,54 +627,8 @@ fn text_section(label: &str, text: &str) -> Section {
     }
 }
 
-fn agent_name(path: &str) -> &str {
-    path.rsplit('/')
-        .find(|part| !part.is_empty())
-        .unwrap_or(path)
-}
-
-fn message_title(author: &str, recipient: &str, viewer: &str, content: &str) -> String {
-    if author == viewer {
-        format!("{} ← {content}", agent_name(recipient))
-    } else if recipient == viewer {
-        format!("{} → {content}", agent_name(author))
-    } else {
-        format!(
-            "{} → {} · {content}",
-            agent_name(author),
-            agent_name(recipient)
-        )
-    }
-}
-
-fn agent_route(
-    name: &str,
-    subject: Option<&str>,
-    sender: &str,
-) -> Option<(String, String, String)> {
-    let rule = rule(name, AGENT_ROUTES)?;
-    let target = subject?;
-    let route = format!("{} → {}", agent_name(sender), agent_name(target));
-    let title = if rule.assignment && matches!(rule.title, AgentTitle::Target) {
-        format!(
-            "{} · {}",
-            agent_name(target),
-            crate::providers::tool::title_name(name)
-        )
-    } else {
-        let content = if rule.assignment {
-            crate::providers::tool::title_name(name)
-        } else {
-            "message".to_owned()
-        };
-        message_title(sender, target, sender, &content)
-    };
-    let detail = match rule.title {
-        AgentTitle::Target => agent_name(target).to_owned(),
-        AgentTitle::Route => route,
-    };
-    Some((target.to_owned(), detail, title))
-}
+#[cfg(test)]
+fn agent_name(path: &str) -> &str { crate::log::agent::name(path) }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let raw = payload["arguments"].as_str().unwrap_or("");
@@ -758,11 +676,12 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         is_error: false,
         duration: None,
     };
-    if let Some((target, detail, title)) = agent_route(&raw_name, subject.as_deref(), "/root") {
-        call.agent_path = Some(target);
-        call.detail_title = detail;
-        call.title = title;
-    }
+    call.agent_message = arguments.as_ref().and_then(|input| crate::log::agent::tool_message(&raw_name, input));
+    if let Some(message) = &mut call.agent_message
+        && serde_json::from_str::<Value>(raw).ok().and_then(|args| args["message"].as_str().map(is_fernet_token)) == Some(true)
+    { message.content = crate::log::agent::Content::Encrypted; }
+    call.agent_path = call.agent_message.as_ref().and_then(|message| message.recipient.clone());
+    crate::log::agent::present(&mut call);
     apply_output_rule(&raw_name, &mut call);
     crate::providers::tool::annotate(&mut call);
     call
@@ -1240,10 +1159,10 @@ impl Reader {
             && (payload["type"] == "agent_message"
                 || payload["name"]
                     .as_str()
-                    .and_then(|name| rule(name, AGENT_ROUTES))
-                    .is_some_and(|rule| !rule.assignment))
+                    .and_then(|name| crate::log::agent::tool_message(name, &tool_arguments(payload).unwrap_or(Value::Null)))
+                    .is_some_and(|message| message.kind == "MESSAGE"))
             && let Some((previous_offset, previous)) = self.entries.last()
-            && previous.calls.first().is_some_and(message_call)
+            && previous.calls.first().is_some_and(|call| call.agent_message.as_ref().is_some_and(|message| message.kind == "MESSAGE"))
         {
             affected = affected.min(*previous_offset);
         }
@@ -1489,10 +1408,6 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
         .collect())
 }
 
-fn message_call(call: &ToolCall) -> bool {
-    call.name == "MESSAGE" || rule(&call.name, AGENT_ROUTES).is_some_and(|rule| !rule.assignment)
-}
-
 fn memory_notes(item: &Value) -> io::Result<Vec<crate::log::Note>> {
     let Some(citation) = item.get("memory_citation").filter(|value| !value.is_null()) else {
         return Ok(Vec::new());
@@ -1579,7 +1494,6 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
     let mut completed_prompt = None;
     let mut completed_messages = HashMap::new();
     let mut collaboration = HashMap::new();
-    let mut message_routes = HashMap::new();
     for (offset, record) in records {
         let item = &record["payload"]["item"];
         if matches!(
@@ -1669,21 +1583,11 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     .and_then(|id| results.remove(id));
                 let mut call =
                     response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
-                let mut body = call.title.clone();
-                if let Some((_, detail, title)) = agent_route(
-                    &response_tool_name(payload),
-                    call.agent_path.as_deref(),
-                    sender,
-                ) {
-                    body = title;
-                    call.title = body.clone();
-                    call.detail_title = detail;
+                if let Some(message) = &mut call.agent_message {
+                    message.author = metadata.as_ref().and_then(|record| record["payload"]["agent_path"].as_str()).map(str::to_owned);
                 }
-                if message_call(&call)
-                    && let Some(target) = &call.agent_path
-                {
-                    message_routes.insert(call.id.clone(), (sender.to_owned(), target.clone()));
-                }
+                crate::log::agent::present(&mut call);
+                let body = call.agent_message.as_ref().map(|m| m.content.text().to_owned()).unwrap_or_else(|| call.title.clone());
                 call.started_at = call.agent_path.as_ref().map(|_| at);
                 let mut completed_at = ended.as_ref().map(|(at, _, _)| *at);
                 if let Some((offset, record)) = payload["call_id"]
@@ -1762,22 +1666,21 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 let message_type = field("Message Type: ")?;
                 let author = required_text(payload, "author")?;
                 let recipient = required_text(payload, "recipient")?;
-                let route = format!("{} → {}", agent_name(author), agent_name(recipient));
                 let text = detail_body.take().unwrap();
-                let content = match message_type {
-                    "NEW_TASK" => "new task",
-                    "FINAL_ANSWER" if text != ENCRYPTED_CONTENT => &text,
-                    _ => "message",
+                let message = crate::log::agent::Message {
+                    author: Some(author.to_owned()), recipient: Some(recipient.to_owned()),
+                    direction: if author == sender { crate::log::agent::Direction::Outgoing }
+                        else if recipient == sender { crate::log::agent::Direction::Incoming }
+                        else { crate::log::agent::Direction::Between },
+                    kind: message_type.to_owned(),
+                    content: if text == ENCRYPTED_CONTENT { crate::log::agent::Content::Encrypted }
+                        else { crate::log::agent::Content::Text(text.clone()) },
                 };
-                let body = message_title(author, recipient, sender, content);
-                message_routes.insert(
-                    required_text(payload, "id")?.to_owned(),
-                    (author.to_owned(), recipient.to_owned()),
-                );
+                let body = text.clone();
                 calls.push(ToolCall {
-                    agent_message: None,
-                    detail_left: crate::providers::tool::title_name(message_type),
-                    detail_title: route,
+                    agent_message: Some(message),
+                    detail_left: String::new(),
+                    detail_title: String::new(),
                     show_details: true,
                     id: required_text(payload, "id")?.to_owned(),
                     title: body.clone(),
@@ -1796,6 +1699,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     is_error: false,
                     duration: None,
                 });
+                crate::log::agent::present(calls.last_mut().unwrap());
                 (Kind::Agent, body, None)
             }
 
@@ -1890,32 +1794,9 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         }
     }
     entries.reverse();
-    let mut merged: Vec<(u64, Event)> = Vec::new();
-    for (offset, entry) in entries {
-        if entry.calls.first().is_some_and(message_call)
-            && let Some((_, previous)) = merged.last_mut()
-            && previous.calls.first().is_some_and(|call| {
-                message_call(call)
-                    && message_routes
-                        .get(&call.id)
-                        .is_some_and(|route| Some(route) == message_routes.get(&entry.calls[0].id))
-            })
-        {
-            previous.calls.extend(entry.calls);
-            previous.source_records.extend(entry.source_records);
-            previous.started_at = entry.started_at;
-            let (author, recipient) = &message_routes[&previous.calls[0].id];
-            previous.body = message_title(
-                author,
-                recipient,
-                sender,
-                &format!("{} messages", previous.calls.len()),
-            );
-            continue;
-        }
-        merged.push((offset, entry));
-    }
-    let mut entries = merged;
+    let offsets: HashMap<_, _> = entries.iter().map(|(offset, event)| (event.source.clone(), *offset)).collect();
+    let mut entries: Vec<_> = crate::log::agent::merge(entries.into_iter().map(|(_, event)| event).collect())
+        .into_iter().map(|event| (offsets[&event.source], event)).collect();
     let mut previous_end = None;
     for (_, entry) in &mut entries {
         entry.source_records.sort_by_key(|record| record.offset);
@@ -3411,4 +3292,48 @@ mod perspective_tests {
             "alpha → beta · message"
         );
     }
+}
+
+#[cfg(test)]
+mod exchange_tests {
+use super::*;
+#[test]
+fn codex_agent_exchange_keeps_routes_out_of_body() {
+    let events = tail(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-agent-exchange.jsonl"), 100).unwrap();
+    let incoming = events.iter().find(|e| e.kind == Kind::Agent).unwrap();
+    assert!(!incoming.body.contains(" → "), "{}", incoming.body);
+    assert_eq!(incoming.calls[0].input, vec![Section::Markdown {label: String::new(), text: incoming.body.clone()}]);
+}
+
+#[test]
+fn codex_agent_exchange_records_route_type_and_encryption() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-agent-exchange.jsonl");
+    let events = tail(&path, 100).unwrap();
+    let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+    assert_eq!(calls.len(), 10);
+    for line in include_str!("../../../tests/fixtures/codex-agent-exchange.jsonl").lines() {
+        let record: Value = serde_json::from_str(line).unwrap();
+        let payload = &record["payload"];
+        if payload["type"] == "agent_message" {
+            let call = calls.iter().find(|call| Some(call.id.as_str()) == payload["id"].as_str()).unwrap();
+            let message = call.agent_message.as_ref().unwrap();
+            assert_eq!(message.author.as_deref(), payload["author"].as_str());
+            assert_eq!(message.recipient.as_deref(), payload["recipient"].as_str());
+            let text = payload["content"][0]["text"].as_str().unwrap();
+            let (header, body) = text.split_once("\nPayload:\n").unwrap();
+            assert_eq!(message.kind, header.lines().next().unwrap().strip_prefix("Message Type: ").unwrap());
+            if payload["content"].as_array().unwrap().iter().any(|block| block["type"] == "encrypted_content") {
+                assert_eq!(message.content, crate::log::agent::Content::Encrypted);
+            } else { assert_eq!(message.content.text(), body); }
+        } else if payload["type"] == "function_call" {
+            let call = calls.iter().find(|call| Some(call.id.as_str()) == payload["call_id"].as_str()).unwrap();
+            assert_eq!(call.agent_message.as_ref().unwrap().author, None);
+        }
+    }
+    let merged = events.iter().find(|event| event.calls.len() == 2).unwrap();
+    assert_eq!(merged.summary(), "beta → 2 messages");
+    assert_eq!(merged.calls.len(), 2);
+    assert_ne!(merged.calls[0].id, merged.calls[1].id);
+    assert_eq!(merged.started_at, merged.calls[1].started_at.unwrap());
+}
 }
