@@ -40,7 +40,7 @@ struct RateLimits {
 #[serde(rename_all = "camelCase")]
 struct Window {
     used_percent: f64,
-    window_duration_mins: u64,
+    window_duration_mins: Option<u64>,
     resets_at: Option<i64>,
 }
 
@@ -57,7 +57,7 @@ impl RateLimitsResponse {
             .collect();
         let weekly = windows
             .iter()
-            .find(|window| window.window_duration_mins == 10080)
+            .find(|window| window.window_duration_mins == Some(10080))
             .map(|window| {
                 if !window.used_percent.is_finite() || window.used_percent < 0.0 {
                     return Err(io::Error::new(
@@ -97,16 +97,13 @@ impl RateLimitsResponse {
                 let expires_at = credit.expires_at.map(timestamp).transpose()?;
                 for window in windows.iter().filter(|window| window.used_percent >= 100.0) {
                     let kind = match window.window_duration_mins {
-                        10080 => UsageWindow::Weekly,
-                        300 => UsageWindow::FiveHour,
+                        Some(10080) => UsageWindow::Weekly,
+                        Some(300) => UsageWindow::FiveHour,
                         _ => continue,
                     };
-                    let resets_at = window.resets_at.ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Missing Codex limited window reset time",
-                        )
-                    })?;
+                    let Some(resets_at) = window.resets_at else {
+                        continue;
+                    };
                     reset_offers.push(ResetCreditOffer {
                         window: kind,
                         resets_at: timestamp(resets_at)?,
@@ -273,6 +270,77 @@ mod tests {
             .account_usage()
     }
 
+    fn check_unknown_duration(missing: bool) {
+        for known_duration in [10080, 300] {
+            let mut response = payload();
+            response["rateLimits"]["primary"]["usedPercent"] = json!(100);
+            response["rateLimits"]["secondary"] = response["rateLimits"]["primary"].clone();
+            response["rateLimits"]["secondary"]["windowDurationMins"] = json!(known_duration);
+            if missing {
+                response["rateLimits"]["primary"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("windowDurationMins");
+            } else {
+                response["rateLimits"]["primary"]["windowDurationMins"] = Value::Null;
+            }
+            let usage = parse_account(response.clone()).unwrap();
+            assert_eq!(usage.weekly.is_some(), known_duration == 10080);
+            if let Some(weekly) = usage.weekly {
+                assert_eq!(weekly.reset_credits, Some(2));
+                assert_eq!(weekly.used_percent, 100.0);
+            }
+            assert_eq!(usage.reset_offers.len(), 1);
+            assert_eq!(
+                usage.reset_offers[0].window,
+                if known_duration == 10080 {
+                    UsageWindow::Weekly
+                } else {
+                    UsageWindow::FiveHour
+                }
+            );
+            assert_eq!(usage.reset_offers[0].credit_id, "fixture-credit");
+            response["rateLimits"]["secondary"] = Value::Null;
+            let usage = parse_account(response).unwrap();
+            assert!(usage.weekly.is_none());
+            assert!(usage.reset_offers.is_empty());
+        }
+    }
+
+    #[test]
+    fn account_usage_ignores_null_duration() {
+        check_unknown_duration(false);
+    }
+
+    #[test]
+    fn account_usage_ignores_missing_duration() {
+        check_unknown_duration(true);
+    }
+
+    #[test]
+    fn account_usage_allows_unknown_reset_time() {
+        for missing in [false, true] {
+            let mut response = payload();
+            response["rateLimits"]["primary"]["usedPercent"] = json!(100);
+            response["rateLimits"]["secondary"] = response["rateLimits"]["primary"].clone();
+            response["rateLimits"]["secondary"]["windowDurationMins"] = json!(300);
+            if missing {
+                response["rateLimits"]["primary"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("resetsAt");
+            } else {
+                response["rateLimits"]["primary"]["resetsAt"] = Value::Null;
+            }
+            let usage = parse_account(response).unwrap();
+            let weekly = usage.weekly.unwrap();
+            assert!(weekly.resets_at.is_none());
+            assert_eq!(weekly.reset_credits, Some(2));
+            assert_eq!(usage.reset_offers.len(), 1);
+            assert_eq!(usage.reset_offers[0].window, UsageWindow::FiveHour);
+        }
+    }
+
     #[test]
     fn reset_offers_require_a_limited_window_and_available_credit() {
         assert!(parse_account(payload()).unwrap().reset_offers.is_empty());
@@ -350,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_offers_keep_both_windows_and_require_reset_time() {
+    fn reset_offers_keep_both_windows_and_skip_unknown_reset_time() {
         let mut response = payload();
         response["rateLimits"]["primary"]["usedPercent"] = json!(100);
         response["rateLimits"]["secondary"] = json!({
@@ -361,7 +429,9 @@ mod tests {
             2
         );
         response["rateLimits"]["primary"]["resetsAt"] = Value::Null;
-        assert!(parse_account(response).is_err());
+        let usage = parse_account(response).unwrap();
+        assert_eq!(usage.reset_offers.len(), 1);
+        assert_eq!(usage.reset_offers[0].window, UsageWindow::FiveHour);
     }
 
     #[test]
