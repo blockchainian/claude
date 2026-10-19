@@ -253,6 +253,8 @@ mod tests {
     use std::process::Command;
     use std::time::{Duration, Instant};
 
+    const DETACH_TIMEOUT: Duration = Duration::from_millis(500);
+
     fn fixture() -> (tempfile::TempDir, App, SessionKey) {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path().join("projects/probe");
@@ -300,7 +302,8 @@ mod tests {
             SessionTerminal::spawn(id.clone(), command, Some(b"\x1a"), (20, 80), move || {
                 let _ = sender.send(Input::TerminalOutput);
             })
-            .unwrap();
+            .unwrap()
+            .with_detach_timeout(DETACH_TIMEOUT);
         let deadline = Instant::now() + Duration::from_secs(5);
         while !terminal
             .screen
@@ -616,6 +619,7 @@ mod tests {
             assert!(Instant::now() < deadline, "client never exited");
             let _ = app.receiver.recv_timeout(Duration::from_millis(100));
         }
+        assert!(start.elapsed() >= DETACH_TIMEOUT);
         assert!(
             screen
                 .lock()
@@ -698,6 +702,7 @@ mod tests {
         let (directory, mut app, id) = fixture();
         draw(&mut app);
         let pid = attach(&mut app, id.clone(), &directory.path().join("pid"));
+        let close_started = Instant::now();
         app.close_terminal();
         let start = Instant::now();
         app.open_terminal(id.clone());
@@ -708,6 +713,7 @@ mod tests {
         assert!(app.terminal.is_none());
         assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0);
         finish_close(&mut app);
+        assert!(close_started.elapsed() >= DETACH_TIMEOUT);
         assert_reaped(pid);
         assert!(app.closing_terminals.is_empty());
         // The real provider must never be launched by this unit test.
@@ -744,8 +750,10 @@ mod tests {
     fn app_shutdown_reaps_a_client_that_is_still_detaching() {
         let (directory, mut app, id) = fixture();
         let pid = attach(&mut app, id, &directory.path().join("pid"));
+        let start = Instant::now();
         app.close_terminal();
         drop(app);
+        assert!(start.elapsed() >= DETACH_TIMEOUT);
         assert_reaped(pid);
     }
 }

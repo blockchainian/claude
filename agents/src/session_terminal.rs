@@ -95,6 +95,7 @@ pub struct SessionTerminal {
     pty: Pty,
     /// Bytes that detach the program instead of ending it; without them closing kills it.
     detach: Option<&'static [u8]>,
+    detach_timeout: Duration,
     size: (u16, u16),
     /// Set by the reader when output arrives; cleared once the dashboard redraws.
     dirty: Arc<AtomicBool>,
@@ -148,6 +149,7 @@ impl SessionTerminal {
             screen,
             pty,
             detach,
+            detach_timeout: DETACH_TIMEOUT,
             size: (rows, cols),
             dirty,
             closed,
@@ -197,7 +199,13 @@ impl SessionTerminal {
 
     /// Detaches or ends the program.
     pub fn close(mut self) -> io::Result<()> {
-        self.pty.close(self.detach, DETACH_TIMEOUT)
+        self.pty.close(self.detach, self.detach_timeout)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_detach_timeout(mut self, timeout: Duration) -> Self {
+        self.detach_timeout = timeout;
+        self
     }
 }
 
