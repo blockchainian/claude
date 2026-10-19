@@ -352,3 +352,46 @@ fn terminal_new_task_status_is_capitalized_in_list_and_details() {
         serde_json::json!({"verdict":"pass", "task_list":"New", "details":"New"})
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_draft_name_blur_persists_without_enter() {
+    for blur in [false, true] {
+        let (directory, tmux, _transcript) =
+            start_probe(if blur { "name-blur" } else { "name-enter" });
+        tmux.run(&["send-keys", "-t", "probe", "n"]);
+        assert_title_caret(&tmux, "New task", 0);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "Persistent terminal name"]);
+        assert_title_caret(&tmux, "Persistent terminal name", 24);
+        if blur {
+            tmux.mouse(0, 0, 0, true);
+        } else {
+            tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+        }
+        tmux.wait_for(|capture| {
+            capture
+                .lines()
+                .any(|line| line.split('│').any(|part| part.trim() == ".."))
+        });
+        let path = directory.path().join("claude/agents.json");
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            document["state"]["drafts"][0]["name"],
+            "Persistent terminal name"
+        );
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| capture.contains("Persistent terminal name ❯"));
+        save_title_capture(&tmux, if blur { "blur-saved" } else { "enter-saved" });
+        tmux.run(&["send-keys", "-t", "probe", "C-c"]);
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            document["state"]["drafts"][0]["name"],
+            "Persistent terminal name"
+        );
+    }
+    println!(
+        r#"{{"verdict":"pass","blur_save":"pass","enter_save":"pass","immediate_json":"pass"}}"#
+    );
+}

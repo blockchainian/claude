@@ -576,7 +576,7 @@ fn wizard_selector_escape_only_closes_one_layer_and_then_confirms_delete() {
 }
 
 #[test]
-fn title_edit_prefills_and_escape_or_right_click_keeps_original_name() {
+fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
     let (directory, mut view) = fixture();
     let id = named_draft(&mut view, directory.path(), "original");
     for right_click in [false, true] {
@@ -584,14 +584,16 @@ fn title_edit_prefills_and_escape_or_right_click_keeps_original_name() {
         assert_eq!(view.rename.text(), "original");
         view.handle_paste(" changed");
         if right_click {
+            render(&view);
+            let input = view.viewport.borrow().title_input;
             for kind in [
                 MouseEventKind::Down(MouseButton::Right),
                 MouseEventKind::Up(MouseButton::Right),
             ] {
                 view.handle_mouse(MouseEvent {
                     kind,
-                    column: 100,
-                    row: 10,
+                    column: input.x,
+                    row: input.y,
                     modifiers: KeyModifiers::NONE,
                 });
             }
@@ -899,4 +901,111 @@ fn control_enter_uses_the_draft_rule_instead_of_sending_to_a_provider_session() 
         Some(SelectorKind::Repository { .. })
     ));
     assert_eq!(view.input_box.editor.text(), "kept prompt");
+}
+
+#[test]
+fn draft_name_blur_saves_like_enter_outside_every_panel() {
+    for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+        for (x, y) in [(0, 0), (2, 5), (80, 5), (158, 38)] {
+            let (directory, mut view) = fixture();
+            let id = view.add_draft(setup(directory.path()));
+            view.handle_paste("  Saved on blur  ");
+            render(&view);
+            assert!(!view.viewport.borrow().title_input.contains((x, y).into()));
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(button),
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            });
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Up(button),
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            });
+            assert_eq!(
+                view.drafts
+                    .iter()
+                    .find(|d| d.id == id)
+                    .unwrap()
+                    .name
+                    .as_deref(),
+                Some("Saved on blur")
+            );
+            assert!(view.name_target.is_none());
+            assert!(matches!(
+                view.selector.as_ref().map(|s| &s.kind),
+                Some(SelectorKind::Repository { .. })
+            ));
+            assert!(matches!(
+                view.take_drafts_action(),
+                Some(Action::PersistDrafts)
+            ));
+        }
+    }
+}
+
+#[test]
+fn draft_name_click_inside_and_empty_blur_do_not_accept_name() {
+    let (directory, mut view) = fixture();
+    view.add_draft(setup(directory.path()));
+    view.handle_paste("   ");
+    render(&view);
+    click(&mut view, 0, 0);
+    assert!(view.drafts[0].name.is_none());
+    view.handle_paste("Still editing");
+    render(&view);
+    let input = view.viewport.borrow().title_input;
+    click(&mut view, input.x, input.y);
+    assert!(view.drafts[0].name.is_none());
+    assert!(view.name_target.is_some());
+}
+
+#[test]
+fn named_draft_json_lives_until_the_real_session_arrives() {
+    for blur in [false, true] {
+        let (directory, mut view) = fixture();
+        let mut arrived = view.rows[0].clone();
+        let id = view.add_draft(setup(directory.path()));
+        assert!(view.stored_drafts().is_empty());
+        view.handle_paste("Persistent name");
+        render(&view);
+        if blur {
+            click(&mut view, 0, 0);
+        } else {
+            key(&mut view, KeyCode::Enter);
+        }
+        let save = |view: &mut View| {
+            assert!(matches!(
+                view.take_drafts_action(),
+                Some(Action::PersistDrafts)
+            ));
+            let preferences = crate::state::Preferences {
+                drafts: view.stored_drafts(),
+                ..Default::default()
+            };
+            preferences.save_drafts(directory.path()).unwrap();
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(directory.path().join("agents.json")).unwrap(),
+            )
+            .unwrap()["state"]["drafts"]
+                .clone()
+        };
+        assert_eq!(save(&mut view)[0]["name"], "Persistent name");
+        view.submit_draft(id);
+        assert_eq!(save(&mut view)[0]["name"], "Persistent name");
+        view.draft_created(id, Err(std::io::Error::other("creation failed")));
+        assert_eq!(save(&mut view)[0]["error"], "creation failed");
+        view.submit_draft(id);
+        view.draft_created(id, Ok("e772d00b".into()));
+        assert_eq!(save(&mut view)[0]["job"], "e772d00b");
+        arrived.background_job = Some(crate::model::BackgroundJob {
+            id: "e772d00b".into(),
+            needs: None,
+            awaits_prompt: false,
+        });
+        view.set_sessions(vec![arrived], false);
+        assert_eq!(save(&mut view), serde_json::json!([]));
+    }
 }

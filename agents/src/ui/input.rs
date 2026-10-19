@@ -228,6 +228,16 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
+        if self.name_target.is_some()
+            && self.title_editor().is_some()
+            && !self.rename.text().trim().is_empty()
+            && matches!(mouse.kind, MouseEventKind::Down(_))
+            && !self.viewport.borrow().title_input.contains(position)
+        {
+            self.mouse_press = None;
+            self.pending_click = None;
+            return self.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
         let previous_focus = self.mouse_focus;
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
             self.mouse_focus = {
