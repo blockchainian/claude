@@ -187,6 +187,7 @@ pub(crate) struct ToolRule {
     pub wrapper: bool,
     pub task: Option<TaskAction>,
     pub list_subject: bool,
+    pub list_input: bool,
 }
 
 const DEFAULT_RULE: ToolRule = ToolRule {
@@ -200,6 +201,7 @@ const DEFAULT_RULE: ToolRule = ToolRule {
     wrapper: false,
     task: None,
     list_subject: false,
+    list_input: false,
 };
 
 pub(crate) const TOOL_RULES: &[ToolRule] = &[
@@ -384,13 +386,13 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
         name: "claude-client ask_claude",
         input: Some((Input::Field("text"), Format::Markdown)),
-        list_subject: true,
+        list_input: true,
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "claude-client notify_claude",
         input: Some((Input::Field("text"), Format::Markdown)),
-        list_subject: true,
+        list_input: true,
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -457,25 +459,21 @@ pub(crate) fn list_label(
     exit_code: Option<i64>,
 ) -> (String, Option<String>) {
     let display = display_tool_name(name);
+    let rule = rule(name);
+    let subject = subject.filter(|subject| !subject.trim().is_empty());
+    let input_text = match rule.input {
+        Some((Input::Field(field), _)) => text(input, field),
+        _ => None,
+    };
     let mut label = if let Some(description) = text(input, "description") {
         (description.to_owned(), None)
-    } else if rule(name).list_subject {
-        (
-            subject
-                .filter(|subject| !subject.is_empty())
-                .or_else(|| match rule(name).input {
-                    Some((Input::Field(field), _)) => text(input, field),
-                    _ => None,
-                })
-                .unwrap_or(&display)
-                .to_owned(),
-            None,
-        )
+    } else if rule.list_subject {
+        (subject.or(input_text).unwrap_or(&display).to_owned(), None)
     } else {
         (
             display,
             subject
-                .filter(|subject| !subject.is_empty())
+                .or_else(|| rule.list_input.then_some(input_text).flatten())
                 .map(str::to_owned),
         )
     };
@@ -502,10 +500,11 @@ pub(crate) fn list_title(
 }
 
 pub(crate) fn detail_titles(name: &str, subject: Option<&str>) -> (String, String) {
-    (
-        display_tool_name(name),
-        subject.unwrap_or_default().to_owned(),
-    )
+    let display = display_tool_name(name);
+    match subject.filter(|subject| !subject.trim().is_empty()) {
+        Some(subject) => (display, subject.to_owned()),
+        None => (String::new(), display),
+    }
 }
 
 /// Read a declared subject from JSON output, leaving the input subject as fallback.
@@ -1037,7 +1036,7 @@ fn label_section(section: Section) -> Vec<Section> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn claude_client_text_is_markdown_and_the_list_summary() {
+    fn claude_client_text_is_markdown_and_follows_the_list_tool_name() {
         for source in [
             include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
             include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
@@ -1062,9 +1061,36 @@ mod tests {
                 );
                 assert_eq!(
                     super::list_title(&name, subject.as_deref(), input, None),
-                    text
+                    format!("{} {text}", super::display_tool_name(&name))
                 );
             }
+        }
+    }
+
+    #[test]
+    fn tool_detail_titles_center_the_tool_name_without_a_subject() {
+        for source in [
+            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
+            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
+            include_str!("../../tests/fixtures/tool-list/claude.jsonl"),
+        ] {
+            let record: serde_json::Value =
+                serde_json::from_str(source.lines().next().unwrap()).unwrap();
+            let name = record["payload"]["item"]["tool"]
+                .as_str()
+                .or_else(|| record["message"]["content"][0]["name"].as_str())
+                .unwrap();
+            let display = super::display_tool_name(name);
+            for subject in [None, Some(""), Some(" \t ")] {
+                assert_eq!(
+                    super::detail_titles(name, subject),
+                    (String::new(), display.clone())
+                );
+            }
+            assert_eq!(
+                super::detail_titles(name, Some("Inspect source")),
+                (display, "Inspect source".into())
+            );
         }
     }
 

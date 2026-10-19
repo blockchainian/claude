@@ -3141,20 +3141,19 @@ mod perspective_tests {
     #[test]
     fn perspective_sentence_names_from_real_records() {
         let records = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl");
-        for (name, expected) in [
-            ("spawn_agent", "Spawn agent"),
-            ("wait_agent", "Wait agent"),
-            ("followup_task", "Followup task"),
+        for (name, expected_left, expected_title) in [
+            ("spawn_agent", "Spawn agent", "alpha"),
+            ("wait_agent", "", "Wait agent"),
+            ("followup_task", "Followup task", "alpha"),
         ] {
             let record: Value = records
                 .lines()
                 .map(|line| serde_json::from_str::<Value>(line).unwrap())
                 .find(|r| r["payload"]["name"] == name)
                 .unwrap();
-            assert_eq!(
-                response_tool_call(&record["payload"], None).detail_left,
-                expected
-            );
+            let call = response_tool_call(&record["payload"], None);
+            assert_eq!(call.detail_left, expected_left);
+            assert_eq!(call.detail_title, expected_title);
         }
         assert_eq!(
             crate::providers::tool::title_name("FINAL_ANSWER"),

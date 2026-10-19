@@ -1,6 +1,6 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │ 状 态 线 程 正 在  agents/tests/support/terminal_drafts.rs 尾 部 添 加  ter…        9s
+              /tmp/project              │                 Prompt                 │ claude-client ask claude 状 态 线 程 正 在  agents/tests/support/termin…        9s
  ● Task log example         Working     │ Task log example                       │
                                         │                                        │
                                         │                                        │
@@ -39,7 +39,7 @@
 ────────────────────────────────────────┴╴project ── Task log example ───────────┴╴Unknown · Default ───────────────────────────────────────────────────────────
  Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- claude-client ask claude                                                                                                                                    9s
+                                                                    claude-client ask claude                                                                 9s
 
                                                状 态 线 程 正 在  agents/tests/support/terminal_drafts.rs 尾 部 添 加
                                                terminal_new_task_status_is_capitalized_in_list_and_details， 和 我

@@ -35,7 +35,11 @@ fn claude_client_recorded_input_and_reply_snapshot() {
             .as_str()
             .unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, input);
+        let call = &events[0].calls[0];
+        let display_name = crate::providers::tool::display_tool_name(&call.name);
+        assert_eq!(events[0].body, format!("{display_name} {input}"));
+        assert_eq!(call.detail_left, "");
+        assert_eq!(call.detail_title, display_name);
         let now = events[0].ended_at.unwrap();
         let (mut view, _) = log_fixture();
         view.set_log(events);

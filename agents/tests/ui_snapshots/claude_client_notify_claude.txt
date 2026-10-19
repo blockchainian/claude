@@ -1,6 +1,6 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │ Step 4 provider/App/UI分 发 已 完 成 。 共 享 树 刚 出 现 非 我 改 动  src/ui/lin…       1ms
+              /tmp/project              │                 Prompt                 │ claude-client notify claude Step 4 provider/App/UI分 发 已 完 成 。 共 …        1ms
  ● Task log example         Working     │ Task log example                       │
                                         │                                        │
                                         │                                        │
@@ -39,7 +39,7 @@
 ────────────────────────────────────────┴╴project ── Task log example ───────────┴╴Unknown · Default ───────────────────────────────────────────────────────────
  Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- claude-client notify claude                                                                                                                                1ms
+                                                                   claude-client notify claude                                                              1ms
 
                                                Step 4 provider/App/UI分 发 已 完 成 。 共 享 树 刚 出 现 非 我 改 动
                                                src/ui/line_truncation.rs（ 路 径 截 断 ） ， 它 当 前 未 格 式 化 导 致  cargo
