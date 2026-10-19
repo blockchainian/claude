@@ -32,6 +32,40 @@ test('keeps external import specifiers while permitting local aliases', () => {
   passes('import e from "a"; e();', 'import execute from "a"; execute();');
 });
 
+test('accepts splitting direct exported declarations while preserving their bindings', () => {
+  for (const [before, after] of [
+    ['export const e=1;', 'const entry=1;\nexport { entry as e };'],
+    ['export let e=1; e++;', 'let entry=1;\nexport { entry as e }; entry++;'],
+    ['export var e=1;', 'var entry=1;\nexport { entry as e };'],
+    ['export function e(){return e}', 'function entry(){return entry}\nexport { entry as e };'],
+    ['export class e { static get(){return e} }', 'class Entry { static get(){return Entry} }\nexport { Entry as e };'],
+    ['export const e=1,t=e; use(t);', 'const entry=1,t=entry;\nexport { entry as e, t }; use(t);'],
+    ['export const {x:e,...t}=source;', 'const {x:entry,...rest}=source;\nexport { entry as e, rest as t };'],
+    ['export /*keep*/ const e=1', '/*keep*/ const entry=1\nexport { entry as e };'],
+    ['// license\n\n// source\nexport const e=1;', '// license\n\n// source\nconst entry=1;\nexport { entry as e };'],
+    ['export const e=1; export function f(){return e}', 'const entry=1;\nexport { entry as e }; function read(){return entry}\nexport { read as f };'],
+  ]) passes(before, after);
+});
+
+test('splitting exports still rejects changed text, structure and binding targets', () => {
+  const before = 'export const e=1,t=2; use(e,t);';
+  rejects(before, 'const entry=1,item=2;\nexport { item as e, entry as t }; use(entry,item);', /binding/i);
+  rejects(before, 'const entry=1,item=3;\nexport { entry as e, item as t }; use(entry,item);', /structure|text/i);
+  rejects(before, 'const entry =1,item=2;\nexport { entry as e, item as t }; use(entry,item);', /structure|text/i);
+  rejects(before, 'const entry=1,item=2;;\nexport { entry as e, item as t }; use(entry,item);', /structure|text/i);
+  rejects(before, 'const entry=1,item=2; export { entry as e, item as t }; use(entry,item);', /structure|text/i);
+  rejects(before, 'const entry=1,item=2; use(entry,item);\nexport { entry as e, item as t };', /structure|text/i);
+  rejects('export /*keep*/ const e=1;', 'const entry=1;\nexport { entry as e };', /structure|text/i);
+});
+
+test('header checks only the initial line comment run, not the first code offset', () => {
+  rejects('const e=1;', ' const entry=1;', /^STRUCTURE_OR_TEXT_CHANGED$/);
+  rejects('/* license */\nconst e=1;', '/* changed */\nconst entry=1;', /^STRUCTURE_OR_TEXT_CHANGED$/);
+  rejects('// license\n\n// source\nconst e=1;', '// license\n// source\nconst entry=1;', /^HEADER_CHANGED$/);
+  rejects('// license\nconst e=1;', 'const entry=1;', /^HEADER_CHANGED$/);
+  passes('// license\r\n\r\n// source\r\nconst e=1;', '// license\r\n\r\n// source\r\nconst entry=1;');
+});
+
 test('keeps module loading order, including reexports', () => {
   rejects('import "a"; import "b";', 'import "b"; import "a";', /load.order/i);
   rejects('export * from "a"; export * from "b";', 'export * from "b"; export * from "a";', /load.order/i);
@@ -56,9 +90,9 @@ test('rejects early lexical reads but excludes export declarations and closures'
   passes('function f() { let e = 1; return e; }', 'function read() { let value = 1; return value; }');
 });
 
-test('preserves exact leading comments, including block comments', () => {
+test('preserves exact leading line comments and block comment text', () => {
   rejects('// copyright\nlet e = 1;', '// changed\nlet count = 1;', /header/i);
-  rejects('/* license */\n\nlet e = 1;', '/* license */\nlet count = 1;', /header/i);
+  rejects('/* license */\n\nlet e = 1;', '/* license */\nlet count = 1;', /structure|text/i);
   passes('/* license */\n// source\nlet e = 1;', '/* license */\n// source\nlet count = 1;');
 });
 
