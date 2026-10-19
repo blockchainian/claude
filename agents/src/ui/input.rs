@@ -97,18 +97,16 @@ impl View {
 
     fn right_click(&mut self) {
         self.pending_click = None;
-        if self.confirm_dialog.take().is_some() {
+        if self.selector.is_some() {
+            self.cancel_selector();
+            return;
+        }
+        if self.confirm_dialog.is_some() {
+            self.cancel_confirmation();
             return;
         }
         if self.title_editor().is_some() {
-            let draft = self.name_target.take();
-            self.rename_target = None;
-            self.rename.clear();
-            if draft.is_some() {
-                self.discard_selected_draft();
-            } else {
-                self.reconcile_selection();
-            }
+            self.cancel_name();
             return;
         }
         if self.help {
@@ -119,6 +117,10 @@ impl View {
             self.searching = false;
             self.search.clear();
             self.reconcile_selection();
+            return;
+        }
+        if self.selected_draft.is_some() {
+            self.confirm_draft_delete();
             return;
         }
         if self.input_box.focused {
@@ -222,6 +224,9 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        if self.frozen_draft() {
+            return None;
+        }
         let position = (mouse.column, mouse.row).into();
         let previous_focus = self.mouse_focus;
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
@@ -390,6 +395,10 @@ impl View {
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
                 self.last_detail_click = None;
+                if self.selected_draft.is_some() {
+                    self.right_click();
+                    return None;
+                }
                 if self
                     .viewport
                     .borrow()
@@ -447,7 +456,12 @@ impl View {
                     drop(viewport);
                     if let Some(confirm) = choice {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
-                        return confirm.then_some(Action::Delete(dialog.id));
+                        return if confirm {
+                            self.confirm_delete(dialog.id)
+                        } else {
+                            self.cancel_confirmation();
+                            None
+                        };
                     }
                 }
                 _ => self.mouse_press = None,
@@ -605,6 +619,10 @@ impl View {
                     return None;
                 }
                 self.mouse_focus = Panel::Details;
+                if let Some(draft) = self.selected_draft() {
+                    self.open_name(draft.id);
+                    return None;
+                }
                 return self.begin_rename();
             }
             if let Some(cwd) = self.heading_at(position) {
@@ -939,8 +957,7 @@ impl View {
     }
     fn activate(&mut self) -> Option<Action> {
         if self.selected_draft.is_some() {
-            self.focus_input();
-            return None;
+            return Some(Action::Unsupported("Terminal"));
         }
         if self.selected == usize::MAX
             && self.has_more
@@ -990,6 +1007,9 @@ impl View {
     }
 
     fn begin_rename(&mut self) -> Option<Action> {
+        if self.selected_draft.is_some() {
+            return Some(Action::Unsupported("Rename"));
+        }
         let session = self.selected_row()?;
         if !self.selected_capabilities().rename {
             return Some(Action::Unsupported("Rename"));
@@ -1017,6 +1037,15 @@ impl View {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if self.frozen_draft() {
+            return if key.code == KeyCode::Char('c')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                Some(Action::Quit)
+            } else {
+                None
+            };
+        }
         if let Some(action) = self.terminal_key(key) {
             return action;
         }
@@ -1026,30 +1055,35 @@ impl View {
         if let Some(action) = self.selector_key(key) {
             return action;
         }
+        if self.selected_draft.is_some()
+            && key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            return Some(Action::Quit);
+        }
         if self.title_editing() && self.selector.is_none() {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('c')
                     if key.code == KeyCode::Esc
                         || key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    let draft = self.name_target.take();
-                    self.rename_target = None;
-                    self.rename.clear();
-                    if draft.is_some() {
-                        self.discard_selected_draft();
-                    } else {
-                        self.reconcile_selection();
-                    }
+                    self.cancel_name();
                 }
                 KeyCode::Enter if !self.rename.text().trim().is_empty() => {
                     let name = self.rename.text().trim().to_owned();
                     self.rename.clear();
                     if let Some(id) = self.name_target.take() {
-                        self.drafts
+                        let draft = self
+                            .drafts
                             .iter_mut()
                             .find(|draft| draft.id == id)
-                            .expect("title draft is selected")
-                            .name = Some(name);
+                            .expect("title draft is selected");
+                        let first_name = draft.name.is_none();
+                        draft.name = Some(name);
+                        self.draft_changed(id);
+                        if first_name {
+                            return self.advance_draft(false);
+                        }
                         self.close_selector();
                     } else {
                         let id = self
@@ -1089,12 +1123,14 @@ impl View {
             && !self.log_detail_search.editing
         {
             if key.code == KeyCode::Esc && self.selected_draft.is_some() {
-                self.discard_selected_draft();
+                self.confirm_draft_delete();
                 return None;
             }
-            // A new task saves its first prompt before choosing its branch.
+            // A draft Enter opens its first missing field or submits the prompt.
             if key.code == KeyCode::Enter
-                && key.modifiers.is_empty()
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
                 && let Some(draft) = self.selected_draft()
             {
                 if !draft.working && draft.job.is_none() && !self.input_box.editor.is_empty() {
@@ -1166,21 +1202,26 @@ impl View {
         if let Some(dialog) = &mut self.confirm_dialog {
             if plain {
                 match key.code {
-                    KeyCode::Esc => self.confirm_dialog = None,
+                    KeyCode::Esc => {
+                        self.cancel_confirmation();
+                    }
                     KeyCode::Enter => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         if dialog.confirm {
-                            return Some(Action::Delete(dialog.id));
+                            return self.confirm_delete(dialog.id);
                         }
+                        self.cancel_confirmation();
                     }
                     KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
                         dialog.confirm = !dialog.confirm;
                     }
                     // Each item's number accepts it at once.
-                    KeyCode::Char('1') => self.confirm_dialog = None,
+                    KeyCode::Char('1') => {
+                        self.cancel_confirmation();
+                    }
                     KeyCode::Char('2') => {
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
-                        return Some(Action::Delete(dialog.id));
+                        return self.confirm_delete(dialog.id);
                     }
                     KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
                     KeyCode::End | KeyCode::PageDown => dialog.confirm = true,
@@ -1352,6 +1393,23 @@ impl View {
                 return None;
             }
         }
+        if self.selected_draft.is_some()
+            && plain
+            && matches!(key.code, KeyCode::Char('o' | 'f' | 'a' | 'x' | 'r' | 'h'))
+        {
+            return Some(Action::Unsupported(match key.code {
+                KeyCode::Char('o') => "Terminal",
+                KeyCode::Char('f') => "Fork",
+                KeyCode::Char('a') => "Archive",
+                KeyCode::Char('x') => "Stop",
+                KeyCode::Char('r') => "Rename",
+                _ => "Hide",
+            }));
+        }
+        if key.code == KeyCode::Esc && self.selected_draft.is_some() {
+            self.confirm_draft_delete();
+            return None;
+        }
         match navigation.unwrap_or(key.code) {
             KeyCode::Up => self.move_selection(false),
             KeyCode::Down => self.move_selection(true),
@@ -1406,7 +1464,7 @@ impl View {
             }
             KeyCode::Backspace => {
                 if self.selected_draft.is_some() {
-                    self.discard_selected_draft();
+                    self.confirm_draft_delete();
                     return None;
                 }
                 if let Some(session) = self.selected_row() {

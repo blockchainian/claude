@@ -124,7 +124,7 @@ impl View {
         let selected = entries
             .iter()
             .position(|row| match row {
-                CenterRow::Task(index) => self.selected_draft.is_none() && *index == self.selected,
+                CenterRow::Task(index) => *index == self.selected,
                 CenterRow::ShowMore => self.selected == usize::MAX,
                 _ => false,
             })
@@ -196,7 +196,7 @@ impl View {
                 continue;
             }
             let header = matches!(entry, CenterRow::Parent(_));
-            let selected = !header && self.selected_draft.is_none() && index == self.selected;
+            let selected = !header && index == self.selected;
             let style = if header {
                 Style::default().dim()
             } else {

@@ -1,6 +1,7 @@
-use super::drafts::Step;
+use super::draft_controls::{Origin, SelectorKind};
 use super::*;
 use crate::providers::Provider;
+use crate::state::DraftBranch;
 use std::process::Command;
 
 fn git(directory: &std::path::Path, arguments: &[&str]) {
@@ -77,11 +78,14 @@ fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::mod
     view.open_name(id);
     view.handle_paste(name);
     assert_eq!(key(view, KeyCode::Enter), None);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
+    assert!(view.selected_draft().unwrap().name.is_some());
     assert_eq!(view.input_label(), name);
+    let draft = view.drafts.iter_mut().find(|draft| draft.id == id).unwrap();
+    draft.repository_confirmed = true;
+    view.close_selector();
     id
 }
-/// Submits the first prompt; outside a repository the branch step is skipped.
+/// Submits the current prompt through the field rule.
 fn create(view: &mut View, name: &str) -> Option<Action> {
     assert_eq!(view.input_label(), name);
     key(view, KeyCode::Enter)
@@ -154,11 +158,13 @@ fn pending_job_survives_leaving_until_its_session_arrives() {
     view.handle_paste("typed prompt");
     create(&mut view, "probe");
     view.draft_created(id, Ok("e772d00b".into()));
-    assert_eq!(view.selected_draft, None);
+    assert_eq!(view.selected_draft, Some(id));
+    assert_eq!(
+        view.selected_draft().unwrap().job.as_deref(),
+        Some("e772d00b")
+    );
     key(&mut view, KeyCode::Esc);
-    view.input_box.focused = false;
-    key(&mut view, KeyCode::Tab);
-    assert_eq!(view.selected_draft, None);
+    assert_eq!(view.selected_draft, Some(id));
     assert_eq!(view.drafts.len(), 1);
 }
 #[test]
@@ -431,252 +437,20 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
 }
 
 #[test]
-fn draft_first_message_accepts_images_and_reports_background_failure() {
-    for text in ["describe this", ""] {
-        let (directory, mut view) = fixture();
-        let id = named_draft(&mut view, directory.path(), "probe");
-        view.handle_paste(text);
-        view.attach_image(
-            crate::images::ImageAttachment::from_image(
-                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
-            )
-            .unwrap(),
-        );
-        let paths = view.input_box.editor.image_paths();
-        let action = create(&mut view, "probe");
-        assert!(
-            matches!(action, Some(Action::CreateTask { draft_id, .. }) if draft_id == id),
-            "{action:?}"
-        );
-        let Some(Action::CreateTask { request, .. }) = action else {
-            unreachable!()
-        };
-        assert_eq!(request.prompt, text);
-        assert_eq!(request.images, paths);
-        assert!(view.drafts[0].working);
-        view.draft_created(id, Err(std::io::Error::other("delivery failed")));
-        assert_eq!(view.selected_draft, None);
-        assert!(view.drafts.is_empty());
-        assert_eq!(view.notice.as_ref().unwrap().0, "delivery failed");
-    }
-}
-
-#[test]
-fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
+fn wizard_name_opens_repository_before_prompt() {
     let (directory, mut view) = fixture();
-    let session = view.rows[0].id.clone();
-    named_draft(&mut view, directory.path(), "probe");
-    view.handle_paste("typed prompt");
-    let buffer = render(&view);
-    let list = view.center_layout(buffer.area).list;
-    let list = (list.top()..list.bottom())
-        .map(|y| {
-            (list.left()..list.right())
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!list.contains("New task"), "{list}");
-    key(&mut view, KeyCode::Esc);
-    assert!(view.drafts.is_empty());
-    assert_eq!(view.selected_draft, None);
-    assert_eq!(view.selected_id(), Some(&session));
-    named_draft(&mut view, directory.path(), "probe");
-    view.handle_paste("typed prompt");
-    view.input_box.focused = false;
-    key(&mut view, KeyCode::Down);
-    assert!(view.drafts.is_empty());
-    assert_eq!(view.selected_id(), Some(&session));
-    assert!(!view.input_box.editor.text().contains("typed prompt"));
-}
-
-#[test]
-fn chosen_branch_rides_with_the_first_prompt() {
-    let (directory, mut view) = fixture();
-    let id = named_draft(&mut view, directory.path(), "probe");
-    view.drafts[0].branch_choice = Some(crate::tasks::BranchChoice::New("feature/probe".into()));
-    view.handle_paste("start the work");
-    let action = create(&mut view, "probe");
-    let Some(Action::CreateTask {
-        draft_id, branch, ..
-    }) = action
-    else {
-        panic!("{action:?}");
-    };
-    assert_eq!(draft_id, id);
-    assert_eq!(
-        branch,
-        Some(crate::tasks::BranchChoice::New("feature/probe".into()))
-    );
-}
-
-#[test]
-fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay() {
-    let (directory, mut view) = fixture();
-    let parent = std::fs::canonicalize(directory.path())
-        .unwrap()
-        .join("code");
-    for (name, branch) in [("a", "main"), ("b", "work")] {
-        let repository = parent.join(name);
-        std::fs::create_dir_all(&repository).unwrap();
-        git(&repository, &["init", "-b", branch]);
-    }
-    let nested = parent.join("z/nested");
-    std::fs::create_dir_all(&nested).unwrap();
-    git(&nested, &["init", "-b", "main"]);
-    view.startup_cwd = parent.join("a");
-    let id = view.add_draft(setup(&parent.join("a")));
+    view.add_draft(setup(directory.path()));
+    view.handle_paste("wizard task");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(matches!(
+        view.selector.as_ref().map(|s| &s.kind),
+        Some(SelectorKind::Repository { .. })
+    ));
+    assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
     assert!(!view.input_box.focused);
-    view.open_field(Field::Directory);
-    let area = Rect::new(0, 0, 160, 40);
-    let row_with = |view: &mut View, text: &str| {
-        let mut buffer = Buffer::empty(area);
-        view.render_at(area, &mut buffer, Utc::now());
-        let details = view.center_layout(area).details;
-        (details.top()..details.bottom())
-            .find(|y| {
-                (details.left()..details.right())
-                    .map(|x| buffer[(x, *y)].symbol())
-                    .collect::<String>()
-                    .trim_end()
-                    == text
-            })
-            .map(|y| (details.x, y))
-            .unwrap_or_else(|| panic!("missing {text:?}"))
-    };
-    let (x, y) = row_with(&mut view, "z");
-    assert_eq!(click(&mut view, x, y), None);
-    assert!(view.pending_click_in(Instant::now()).is_none());
-    row_with(&mut view, "nested");
-    let (x, y) = row_with(&mut view, "..");
-    assert_eq!(click(&mut view, x, y), None);
-    assert!(view.pending_click_in(Instant::now()).is_none());
-    let (x, y) = row_with(&mut view, "b");
-    let action = click(&mut view, x, y);
-    assert!(view.pending_click_in(Instant::now()).is_none());
-    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = action else {
-        panic!("{action:?}");
-    };
-    assert_eq!((draft_id, &cwd), (id, &parent.join("b")));
-    view.draft_directory_changed(id, cwd, "work".into());
-    assert_eq!(view.selected_draft().unwrap().step, Step::Name);
-    assert!(!view.input_box.focused);
-    assert!(view.input_box.editor.is_empty());
-    let mut buffer = Buffer::empty(area);
-    view.render_at(area, &mut buffer, Utc::now());
-    let folder = view
-        .viewport
-        .borrow()
-        .field_targets
-        .iter()
-        .find(|(_, field)| *field == Field::Directory)
-        .unwrap()
-        .0;
-    let directory = (folder.x..folder.right())
-        .map(|x| buffer[(x, folder.y)].symbol())
-        .collect::<String>();
-    assert_eq!(directory, "b");
-    assert!(view.viewport.borrow().details_links.is_empty());
-    assert_eq!(click(&mut view, folder.x, folder.y), None);
-    let selector = view.selector.as_ref().unwrap();
-    assert_eq!(selector.field(), Field::Directory);
-    assert_eq!(selector.selected, 2);
 }
 
-#[test]
-fn new_task_takes_its_name_on_the_rule_then_its_prompt() {
-    let (directory, mut view) = fixture();
-    let id = view.add_draft(setup(directory.path()));
-    view.open_name(id);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Name);
-    assert!(!view.input_box.focused);
-    let buffer = render(&view);
-    let input = view.viewport.borrow().title_input;
-    let details = view.viewport.borrow().details;
-    assert_eq!(input.y, details.bottom());
-    // Wide characters own the cell after them.
-    let row = |buffer: &Buffer, rect: Rect| {
-        (rect.x..rect.right())
-            .filter(|&x| x == rect.x || buffer[(x - 1, rect.y)].symbol().width() < 2)
-            .map(|x| buffer[(x, rect.y)].symbol())
-            .collect::<String>()
-            .trim_end()
-            .to_owned()
-    };
-    assert_eq!(row(&buffer, input), "New task");
-    assert!(
-        buffer[(input.x, input.y)]
-            .modifier
-            .contains(ratatui::style::Modifier::DIM)
-    );
-    assert_eq!(view.cursor_pos(buffer.area), Some((input.x, input.y)));
-    // An empty name is a no-op; typing replaces the placeholder.
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Name);
-    view.handle_paste("改 Claude Code 的颜色");
-    let buffer = render(&view);
-    let input = view.viewport.borrow().title_input;
-    let (visible, caret) = view.rename.window(usize::from(input.width));
-    assert_eq!(row(&buffer, input), visible.trim_end());
-    assert_eq!(
-        view.cursor_pos(buffer.area),
-        Some((input.x + caret, input.y))
-    );
-    assert!(
-        !buffer[(input.x, input.y)]
-            .modifier
-            .contains(ratatui::style::Modifier::DIM)
-    );
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
-    assert!(view.selector.is_none());
-    assert!(view.input_box.focused);
-    assert_eq!(view.input_label(), "改 Claude Code 的颜色");
-    assert!(view.input_box.editor.is_empty());
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
-    view.handle_paste("make it blue");
-    let action = key(&mut view, KeyCode::Enter);
-    let Some(Action::CreateTask {
-        draft_id, request, ..
-    }) = action
-    else {
-        panic!("{action:?}");
-    };
-    assert_eq!(draft_id, id);
-    assert_eq!(request.name.as_deref(), Some("改 Claude Code 的颜色"));
-    assert_eq!(request.prompt, "make it blue");
-    assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    let screen = render(&view)
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(!screen.contains("Creating"), "{screen}");
-    assert!(!screen.contains("waiting for session"), "{screen}");
-    assert!(!screen.contains("New prompt ❯"), "{screen}");
-    view.input_box.history.borrow().iter().for_each(|entry| {
-        assert_ne!(entry.text(), "改 Claude Code 的颜色");
-    });
-}
-
-#[test]
-fn name_step_escape_cancels_the_entire_draft() {
-    let (directory, mut view) = fixture();
-    let id = view.add_draft(setup(directory.path()));
-    view.open_name(id);
-    view.handle_paste("half a name");
-    key(&mut view, KeyCode::Esc);
-    assert!(view.selected_draft().is_none());
-    assert!(view.selector.is_none());
-    assert!(view.input_box.editor.is_empty());
-    assert!(view.drafts.is_empty());
-}
-
-#[test]
-fn prompt_submission_clears_input_keeps_task_label_and_branch_escape_cancels() {
+fn git_draft() -> (tempfile::TempDir, View) {
     let (directory, mut view) = fixture();
     git(directory.path(), &["init", "-b", "main"]);
     git(
@@ -692,112 +466,437 @@ fn prompt_submission_clears_input_keeps_task_label_and_branch_escape_cancels() {
             "probe",
         ],
     );
-    let id = named_draft(&mut view, directory.path(), "named task");
-    view.handle_paste("make it blue");
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_eq!(view.selected_draft().unwrap().step, Step::Branch);
-    assert!(view.input_box.editor.is_empty());
-    assert_eq!(view.input_label(), "named task");
-    assert!(!view.selector.as_ref().unwrap().input_active());
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert!(view.selector.as_ref().unwrap().input_active());
-    view.handle_paste("discarded branch");
-    assert_eq!(key(&mut view, KeyCode::Esc), None);
-    assert_eq!(view.selected_draft().unwrap().id, id);
-    assert!(!view.selector.as_ref().unwrap().input_active());
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert!(
-        view.selector
-            .as_mut()
-            .unwrap()
-            .active_editor()
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(key(&mut view, KeyCode::Esc), None);
-    assert_eq!(key(&mut view, KeyCode::Esc), None);
-    assert!(view.drafts.is_empty());
-    assert!(view.selected_draft.is_none());
-    assert!(view.input_box.editor.is_empty());
+    git(directory.path(), &["branch", "feature/x"]);
+    named_draft(&mut view, directory.path(), "probe");
+    (directory, view)
 }
 
 #[test]
-fn submitted_draft_returns_to_prior_task_and_selects_arriving_job_after_refresh() {
-    let (directory, mut view) = fixture();
-    let original = view.selected_id().unwrap().clone();
-    view.focus_input();
-    view.handle_paste("prior input");
-    let id = named_draft(&mut view, directory.path(), "background task");
-    view.drafts[0].branch_choice =
-        Some(crate::tasks::BranchChoice::New("feature/background".into()));
-    view.handle_paste("background prompt");
+fn prompt_enter_opens_missing_branch_and_wizard_pick_only_focuses_prompt() {
+    let (_directory, mut view) = git_draft();
+    view.handle_paste("half prompt");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(
+        view.selected_draft().unwrap().branch,
+        DraftBranch::Existing("main".into())
+    );
+    assert!(view.selector.is_none());
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(matches!(
-        create(&mut view, "background task"),
+        key(&mut view, KeyCode::Enter),
+        Some(Action::CreateTask { branch: None, .. })
+    ));
+}
+
+#[test]
+fn border_branch_and_model_picks_never_create_with_everything_filled() {
+    let (_directory, mut view) = git_draft();
+    view.handle_paste("half prompt");
+    view.open_field(Field::Branch);
+    assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Border);
+    assert_eq!(view.apply_choice(0), None);
+    assert_eq!(
+        view.selected_draft().unwrap().branch,
+        DraftBranch::Existing("feature/x".into())
+    );
+    view.open_field(Field::Model);
+    assert_eq!(view.apply_choice(0), None);
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "half prompt");
+    assert!(!view.selected_draft().unwrap().working);
+}
+
+#[test]
+fn border_repository_keeps_prompt_and_same_repository_keeps_branch() {
+    let (directory, mut view) = git_draft();
+    view.open_field(Field::Branch);
+    assert_eq!(view.apply_choice(0), None);
+    view.handle_paste("half prompt");
+    view.open_field(Field::Directory);
+    let selected = view.selector.as_ref().unwrap().selected;
+    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected) else {
+        panic!("repository pick");
+    };
+    assert!(view.name_target.is_none());
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "half prompt");
+    let subdirectory = cwd.join("subdir");
+    std::fs::create_dir(&subdirectory).unwrap();
+    view.draft_directory_changed(draft_id, subdirectory, "main".into());
+    assert_eq!(
+        view.selected_draft().unwrap().branch,
+        DraftBranch::Existing("feature/x".into())
+    );
+    let action = key(&mut view, KeyCode::Enter);
+    assert!(
+        matches!(action, Some(Action::CreateTask { branch: Some(crate::tasks::BranchChoice::Existing(ref name)), .. }) if name == "feature/x")
+    );
+    drop(directory);
+}
+
+#[test]
+fn changing_repository_resets_branch_and_next_prompt_enter_opens_branch_list() {
+    let (directory, mut view) = git_draft();
+    view.open_field(Field::Branch);
+    view.apply_choice(0);
+    view.handle_paste("half prompt");
+    let other = directory.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    git(&other, &["init", "-b", "other-main"]);
+    let id = view.selected_draft.unwrap();
+    view.draft_directory_changed(id, other, "other-main".into());
+    assert_eq!(view.selected_draft().unwrap().branch, DraftBranch::Unchosen);
+    assert_eq!(view.selected_draft().unwrap().setup.branch, "other-main");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(matches!(
+        view.selector.as_ref().map(|s| &s.kind),
+        Some(SelectorKind::Branch { .. })
+    ));
+    assert_eq!(view.input_box.editor.text(), "half prompt");
+}
+
+#[test]
+fn wizard_selector_escape_only_closes_one_layer_and_then_confirms_delete() {
+    let (_directory, mut view) = git_draft();
+    view.handle_paste("half prompt");
+    for field in [Field::Directory, Field::Branch] {
+        view.open_field(field);
+        view.selector.as_mut().unwrap().origin = Origin::Wizard;
+        assert_eq!(key(&mut view, KeyCode::Esc), None);
+        assert!(view.selector.is_none());
+        assert!(view.input_box.focused);
+        assert_eq!(view.input_box.editor.text(), "half prompt");
+        assert_eq!(key(&mut view, KeyCode::Esc), None);
+        assert!(view.confirm_dialog.is_some());
+        key(&mut view, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn title_edit_prefills_and_escape_or_right_click_keeps_original_name() {
+    let (directory, mut view) = fixture();
+    let id = named_draft(&mut view, directory.path(), "original");
+    for right_click in [false, true] {
+        view.open_name(id);
+        assert_eq!(view.rename.text(), "original");
+        view.handle_paste(" changed");
+        if right_click {
+            for kind in [
+                MouseEventKind::Down(MouseButton::Right),
+                MouseEventKind::Up(MouseButton::Right),
+            ] {
+                view.handle_mouse(MouseEvent {
+                    kind,
+                    column: 100,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                });
+            }
+        } else {
+            key(&mut view, KeyCode::Esc);
+        }
+        assert_eq!(
+            view.selected_draft().unwrap().name.as_deref(),
+            Some("original")
+        );
+        assert!(view.name_target.is_none());
+        assert!(view.input_box.focused);
+    }
+}
+
+#[test]
+fn saving_existing_name_is_a_side_edit_and_does_not_create() {
+    let (_directory, mut view) = git_draft();
+    view.handle_paste("half prompt");
+    let id = view.selected_draft.unwrap();
+    view.open_name(id);
+    view.rename.set_text("renamed");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(
+        view.selected_draft().unwrap().name.as_deref(),
+        Some("renamed")
+    );
+    assert!(view.selector.is_none());
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "half prompt");
+}
+
+#[test]
+fn non_git_prompt_enter_requires_repository_even_if_marked_confirmed() {
+    let (directory, mut view) = fixture();
+    named_draft(&mut view, directory.path(), "choose a repository");
+    view.handle_paste("kept prompt");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(matches!(
+        view.selector.as_ref().map(|s| &s.kind),
+        Some(SelectorKind::Repository { .. })
+    ));
+    assert!(!view.drafts[0].repository_confirmed);
+    assert!(!view.drafts[0].working);
+    assert_eq!(view.input_box.editor.text(), "kept prompt");
+}
+
+#[test]
+fn frozen_draft_ignores_second_submit_and_controls() {
+    let (directory, mut view) = git_draft();
+    view.discard_selected_draft();
+    named_draft(&mut view, directory.path(), "plain");
+    view.drafts[0].branch = DraftBranch::Existing("main".into());
+    view.handle_paste("plain prompt");
+    assert!(matches!(
+        key(&mut view, KeyCode::Enter),
         Some(Action::CreateTask { .. })
     ));
-    assert_eq!(view.selected_draft, None);
-    assert_eq!(view.selected_id(), Some(&original));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    view.open_field(Field::Model);
     assert!(view.selector.is_none());
-    assert_eq!(view.input_box.editor.text(), "prior input");
-    view.handle_paste(" continued");
-    assert_eq!(view.input_box.editor.text(), "prior input continued");
-    view.set_sessions(view.rows.clone(), false);
-    assert_eq!(view.drafts.len(), 1);
-    view.draft_worktree_created(
-        id,
-        Ok((
-            directory.path().join("worktree"),
-            "feature/background".into(),
-        )),
-    );
-    view.draft_created(id, Ok("e772d00b".into()));
-    let mut arrived = view.rows[0].clone();
-    arrived.id.id = "d6e5280c-6bcd-42c4-8bb9-6ff96d1b0744".into();
-    arrived.background_job = Some(crate::model::BackgroundJob {
-        id: "e772d00b".into(),
-        needs: None,
-        awaits_prompt: false,
-    });
-    let expected = arrived.id.clone();
-    let mut sessions = view.rows.clone();
-    sessions.push(arrived);
-    view.set_sessions(sessions, false);
-    assert_eq!(view.selected_id(), Some(&expected));
-    assert!(view.drafts.is_empty());
+    assert!(view.selected_draft().unwrap().working);
 }
 
 #[test]
-fn submitted_drafts_without_a_prior_selection_stay_hidden_and_fail_with_notice() {
-    for worktree in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
-        let mut view = View::default();
-        let id = named_draft(&mut view, directory.path(), "background task");
-        view.handle_paste("background prompt");
-        assert!(matches!(
-            create(&mut view, "background task"),
-            Some(Action::CreateTask { .. })
-        ));
-        assert_eq!(view.selected_draft, None);
-        assert_eq!(view.selected_id(), None);
-        assert_eq!(view.input_label(), "No task");
-        assert!(view.selector.is_none());
-        let next = named_draft(&mut view, directory.path(), "next task name");
-        view.handle_paste("next task");
-        assert_eq!(view.drafts.len(), 2);
-        let error = std::io::Error::other("background creation failed");
-        if worktree {
-            view.draft_worktree_created(id, Err(error));
-        } else {
-            view.draft_created(id, Err(error));
+fn unnamed_repository_side_edit_keeps_typed_name_and_non_git_branch_is_noop() {
+    let (directory, mut view) = fixture();
+    let id = view.add_draft(setup(directory.path()));
+    view.handle_paste("half name");
+    view.open_field(Field::Branch);
+    assert!(view.selector.is_none());
+    view.open_field(Field::Directory);
+    view.cancel_selector();
+    assert_eq!(view.name_target, Some(id));
+    assert_eq!(view.rename.text(), "half name");
+}
+
+#[test]
+fn draft_first_message_accepts_images_and_keeps_input_after_background_failure() {
+    for text in ["describe this", ""] {
+        let (directory, mut view) = git_draft();
+        view.discard_selected_draft();
+        let id = named_draft(&mut view, directory.path(), "probe");
+        view.drafts[0].branch = DraftBranch::Existing("main".into());
+        view.handle_paste(text);
+        view.attach_image(
+            crate::images::ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap(),
+        );
+        let paths = view.input_box.editor.image_paths();
+        let action = create(&mut view, "probe");
+        if text.is_empty() {
+            assert_eq!(action, None, "images alone do not submit a draft");
+            continue;
         }
-        assert_eq!(view.selected_draft, Some(next));
-        assert_eq!(view.input_box.editor.text(), "next task");
-        assert_eq!(view.drafts.len(), 1);
-        let text = render(&view)
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(text.contains("background creation failed"), "{text}");
+        let Some(Action::CreateTask { request, .. }) = action else {
+            panic!("{action:?}");
+        };
+        assert_eq!(request.prompt, text);
+        assert_eq!(request.images, paths);
+        view.draft_created(id, Err(std::io::Error::other("delivery failed")));
+        assert_eq!(view.selected_draft, Some(id));
+        assert!(!view.selected_draft().unwrap().working);
+        assert_eq!(
+            view.selected_draft().unwrap().error.as_deref(),
+            Some("delivery failed")
+        );
+        assert_eq!(view.input_box.editor.prompt_text(), text);
+        assert_eq!(view.input_box.editor.image_paths(), paths);
     }
+}
+
+#[test]
+fn wizard_repository_pick_confirms_then_result_opens_branch_without_creating() {
+    let (directory, mut view) = git_draft();
+    let id = view.selected_draft.unwrap();
+    view.drafts
+        .iter_mut()
+        .find(|draft| draft.id == id)
+        .unwrap()
+        .repository_confirmed = false;
+    assert_eq!(view.advance_draft(false), None);
+    let selector = view.selector.as_ref().unwrap();
+    assert_eq!(selector.origin, Origin::Wizard);
+    let selected = selector.selected;
+    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected) else {
+        panic!("repository not preselected");
+    };
+    assert_eq!(
+        std::fs::canonicalize(cwd).unwrap(),
+        std::fs::canonicalize(directory.path()).unwrap()
+    );
+    assert!(view.selected_draft().unwrap().repository_confirmed);
+    assert!(view.selected_draft().unwrap().continue_after_directory);
+    view.draft_directory_changed(draft_id, directory.path().into(), "main".into());
+    assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
+    assert!(matches!(
+        view.selector.as_ref().map(|s| &s.kind),
+        Some(SelectorKind::Branch { .. })
+    ));
+    assert!(!view.selected_draft().unwrap().working);
+}
+
+#[test]
+fn checked_out_branch_is_an_explicit_choice_without_a_worktree_request() {
+    let (_directory, mut view) = git_draft();
+    view.open_field(Field::Branch);
+    let index = match &view.selector.as_ref().unwrap().kind {
+        SelectorKind::Branch { branches, .. } => {
+            branches.iter().position(|name| name == "main").unwrap()
+        }
+        _ => unreachable!(),
+    };
+    assert_eq!(view.apply_choice(index), None);
+    assert_eq!(
+        view.selected_draft().unwrap().branch,
+        DraftBranch::Existing("main".into())
+    );
+    view.handle_paste("run here");
+    assert!(matches!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::CreateTask { branch: None, .. })
+    ));
+}
+
+#[test]
+fn wizard_same_root_repository_pick_keeps_side_branch_from_a_subdirectory() {
+    let (directory, mut view) = git_draft();
+    view.open_field(Field::Branch);
+    view.apply_choice(0);
+    let subdirectory = directory.path().join("subdirectory");
+    std::fs::create_dir(&subdirectory).unwrap();
+    let draft = &mut view.drafts[0];
+    draft.setup.cwd = subdirectory;
+    draft.repository_confirmed = false;
+    view.handle_paste("kept prompt");
+    key(&mut view, KeyCode::Enter);
+    assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
+    let selected = view.selector.as_ref().unwrap().selected;
+    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected) else {
+        panic!("repository choice");
+    };
+    view.draft_directory_changed(draft_id, cwd, "main".into());
+    assert!(view.selector.is_none());
+    assert_eq!(
+        view.drafts[0].branch,
+        DraftBranch::Existing("feature/x".into())
+    );
+    assert!(!view.drafts[0].working);
+    assert!(matches!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::CreateTask { .. })
+    ));
+}
+
+#[test]
+fn frozen_repository_results_and_double_click_title_use_draft_identity() {
+    let (directory, mut view) = git_draft();
+    view.discard_selected_draft();
+    let id = named_draft(&mut view, directory.path(), "original");
+    render(&view);
+    let title = view.viewport.borrow().details_title;
+    click(&mut view, title.x, title.y);
+    click(&mut view, title.x, title.y);
+    assert_eq!(view.name_target, Some(id));
+    assert_eq!(view.rename.text(), "original");
+    key(&mut view, KeyCode::Esc);
+    view.drafts[0].branch = DraftBranch::Existing("main".into());
+    view.handle_paste("prompt");
+    assert!(matches!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::CreateTask { .. })
+    ));
+    let cwd = view.drafts[0].setup.cwd.clone();
+    view.draft_directory_changed(id, cwd.join("ignored"), "ignored".into());
+    assert_eq!(view.drafts[0].setup.cwd, cwd);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+}
+
+#[test]
+fn right_click_cancels_delete_confirmation_and_returns_prompt_focus() {
+    let (directory, mut view) = fixture();
+    named_draft(&mut view, directory.path(), "keep me");
+    view.handle_paste("keep prompt");
+    key(&mut view, KeyCode::Esc);
+    assert!(view.confirm_dialog.is_some());
+    render(&view);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Right),
+        MouseEventKind::Up(MouseButton::Right),
+    ] {
+        view.handle_mouse(MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    assert!(view.confirm_dialog.is_none());
+    assert!(view.input_box.focused);
+    assert_eq!(view.input_box.editor.text(), "keep prompt");
+}
+
+#[test]
+fn non_git_repository_result_is_rejected_without_changing_fields() {
+    let (_directory, mut view) = git_draft();
+    let id = view.drafts[0].id;
+    let cwd = view.drafts[0].setup.cwd.clone();
+    let outside = tempfile::tempdir().unwrap();
+    view.draft_directory_changed(id, outside.path().into(), String::new());
+    assert_eq!(view.drafts[0].setup.cwd, cwd);
+    assert!(view.drafts[0].error.is_some());
+    assert!(!view.drafts[0].continue_after_directory);
+}
+
+#[test]
+fn loading_a_directory_that_lost_git_requires_repository_selection() {
+    let (_directory, view) = git_draft();
+    let mut stored = view.stored_drafts();
+    let plain = tempfile::tempdir().unwrap();
+    stored[0].cwd = plain.path().into();
+    stored[0].repository_confirmed = true;
+    stored[0].branch = DraftBranch::Existing("main".into());
+    let mut restored = View::default();
+    restored.set_drafts(&stored);
+    assert!(!restored.drafts[0].repository_confirmed);
+    assert_eq!(restored.drafts[0].branch, DraftBranch::Unchosen);
+    assert!(restored.drafts[0].error.is_some());
+}
+
+#[test]
+fn repository_pick_before_naming_skips_repository_wizard_after_name() {
+    let (directory, mut view) = git_draft();
+    view.discard_selected_draft();
+    let id = view.add_draft(setup(directory.path()));
+    view.handle_paste("name in progress");
+    view.open_field(Field::Directory);
+    let selected = view.selector.as_ref().unwrap().selected;
+    let Some(Action::ChangeDraftDirectory { cwd, .. }) = view.apply_choice(selected) else {
+        panic!("repository choice");
+    };
+    view.draft_directory_changed(id, cwd, "main".into());
+    assert_eq!(view.rename.text(), "name in progress");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(matches!(
+        view.selector.as_ref().map(|s| &s.kind),
+        Some(SelectorKind::Branch { .. })
+    ));
+    assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
+}
+
+#[test]
+fn control_enter_uses_the_draft_rule_instead_of_sending_to_a_provider_session() {
+    let (directory, mut view) = fixture();
+    named_draft(&mut view, directory.path(), "Unconfirmed");
+    view.handle_paste("kept prompt");
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(matches!(
+        view.selector.as_ref().map(|s| &s.kind),
+        Some(SelectorKind::Repository { .. })
+    ));
+    assert_eq!(view.input_box.editor.text(), "kept prompt");
 }

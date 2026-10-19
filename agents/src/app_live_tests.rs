@@ -182,7 +182,10 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
     action(
         app,
         Action::CreateTask {
-            draft_id: 1,
+            draft_id: DraftId {
+                millis: 0,
+                counter: 1,
+            },
             provider: ProviderId::Claude,
             request,
             branch: None,

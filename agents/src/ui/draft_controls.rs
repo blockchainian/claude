@@ -1,8 +1,8 @@
-use super::drafts::Step;
 use super::navigation::ListRow;
 use super::*;
 use crate::model::DraftId;
 use crate::repository::{BrowseEntry, browse_entries};
+use crate::state::DraftBranch;
 use crate::tasks::BranchChoice;
 use std::cell::Cell;
 use std::fs;
@@ -24,7 +24,14 @@ pub(super) enum ControlTarget {
 /// The list the details panel shows to choose a new task's repository or branch, or a task's
 /// model or effort. Repository and branch clicks apply
 /// immediately; other lists apply on double click or Enter. A right click or Esc cancels.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Origin {
+    Wizard,
+    Border,
+}
+
 pub(super) struct Selector {
+    pub origin: Origin,
     pub kind: SelectorKind,
     pub selected: usize,
     pub scroll: Cell<usize>,
@@ -60,6 +67,7 @@ const NEW_BRANCH: &str = "Create new branch";
 impl Selector {
     pub(super) fn new(kind: SelectorKind, selected: usize) -> Self {
         Self {
+            origin: Origin::Border,
             kind,
             selected,
             scroll: Cell::new(0),
@@ -188,8 +196,14 @@ impl View {
         let Some(draft) = self.selected_draft else {
             return;
         };
-        let entries = browse_entries(&dir);
+        let mut entries = browse_entries(&dir);
         let current = current.and_then(|current| fs::canonicalize(current).ok());
+        if let Some(path) = &current
+            && path.join(".git").is_dir()
+            && !entries.iter().any(|entry| matches!(entry, BrowseEntry::Repository(entry) if fs::canonicalize(entry).ok().as_ref() == Some(path)))
+        {
+            entries.push(BrowseEntry::Repository(path.clone()));
+        }
         let selected = entries
             .iter()
             .position(|entry| {
@@ -207,37 +221,60 @@ impl View {
         ));
     }
 
-    /// Saves the submitted prompt and clears its box before choosing a branch.
-    pub(super) fn start_branch_step(&mut self) -> Option<Action> {
-        let id = self.selected_draft?;
-        if self.selected_draft()?.name.is_none() {
+    /// Runs the field rule only for a wizard transition.
+    pub(super) fn advance_draft(&mut self, prompt_enter: bool) -> Option<Action> {
+        let draft = self.selected_draft()?;
+        if draft.working || draft.job.is_some() {
+            return None;
+        }
+        let id = draft.id;
+        if self
+            .drafts
+            .iter_mut()
+            .find(|draft| draft.id == id)?
+            .error
+            .take()
+            .is_some()
+        {
+            self.drafts_dirty = true;
+        }
+        let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
+        if draft.setup.branch.is_empty() {
+            draft.repository_confirmed = false;
+        }
+        let draft = self.selected_draft()?;
+        if draft.name.is_none() {
             self.open_name(id);
-            return None;
-        }
-        self.input_box.history = self.prompt_history.clone();
-        let Some(prompt_box::PromptAction::Submit(_)) = self
-            .input_box
-            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        else {
-            return None;
-        };
-        let prompt = std::mem::take(&mut self.input_box.editor);
-        self.input_box.submitting = false;
-        self.drafts.iter_mut().find(|draft| draft.id == id)?.prompt = Some(prompt);
-        self.set_step(id, Step::Branch);
-        if self.open_branches(false) {
-            None
-        } else if self.selected_draft()?.setup.branch.is_empty() {
-            self.create_task(id)
+        } else if !draft.repository_confirmed {
+            let repository = crate::repository::repository_identity(&draft.setup.cwd)
+                .map_or_else(|| draft.setup.cwd.clone(), |identity| identity.primary_root);
+            let dir = repository
+                .parent()
+                .map_or_else(|| repository.clone(), Path::to_path_buf);
+            self.name_target = None;
+            self.open_repositories(dir, Some(&repository));
+            self.selector.as_mut()?.origin = Origin::Wizard;
+            self.focus_selector();
+        } else if draft.branch == DraftBranch::Unchosen {
+            self.name_target = None;
+            self.open_branches(true);
+            if let Some(selector) = &mut self.selector {
+                selector.origin = Origin::Wizard;
+            }
+        } else if prompt_enter {
+            return self.create_task(id);
         } else {
-            None
+            self.close_selector();
         }
+        None
     }
 
-    fn set_step(&mut self, id: DraftId, step: Step) {
-        if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
-            draft.step = step;
+    /// Enter in a nonempty prompt is the only task creation entry point.
+    pub(super) fn start_branch_step(&mut self) -> Option<Action> {
+        if self.input_box.editor.prompt_text().trim().is_empty() {
+            return None;
         }
+        self.advance_draft(true)
     }
 
     /// Lists local branches, selecting the current branch or the create button.
@@ -255,16 +292,16 @@ impl View {
                 return false;
             }
         };
-        let current = draft
-            .branch_choice
-            .as_ref()
-            .map_or(draft.setup.branch.as_str(), BranchChoice::name);
+        let current = match &draft.branch {
+            DraftBranch::Unchosen => draft.setup.branch.as_str(),
+            DraftBranch::Existing(name) | DraftBranch::New(name) => name.as_str(),
+        };
         let selected = branches
             .iter()
             .position(|branch| select_current && branch == current)
             .unwrap_or(branches.len());
         let mut editor = line_edit::LineEdit::default();
-        if let Some(BranchChoice::New(name)) = &draft.branch_choice {
+        if let DraftBranch::New(name) = &draft.branch {
             editor.set_text(name);
         }
         self.selector = Some(Selector::new(
@@ -281,72 +318,109 @@ impl View {
     }
 
     pub(super) fn open_name(&mut self, id: DraftId) {
-        self.set_step(id, Step::Name);
+        if self
+            .drafts
+            .iter()
+            .find(|draft| draft.id == id)
+            .is_none_or(|draft| draft.working || draft.job.is_some())
+        {
+            return;
+        }
         self.selector = None;
         if self.name_target != Some(id) {
-            self.rename.clear();
+            if let Some(name) = self
+                .drafts
+                .iter()
+                .find(|draft| draft.id == id)
+                .and_then(|draft| draft.name.as_deref())
+            {
+                self.rename.set_text(name);
+            } else {
+                self.rename.clear();
+            }
         }
         self.rename_target = None;
         self.name_target = Some(id);
         self.focus_selector();
     }
 
-    /// Records the chosen branch and creates a task once its prompt is saved.
+    /// Branch picks finish their selector; only wizard picks advance the rule.
     fn choose_branch(&mut self, id: DraftId, branch: String, new: bool) -> Option<Action> {
+        let origin = self.selector.as_ref()?.origin;
         let draft = self.drafts.iter_mut().find(|item| item.id == id)?;
-        draft.branch_choice = if new {
-            Some(BranchChoice::New(branch))
+        if draft.working || draft.job.is_some() {
+            return None;
+        }
+        draft.branch = if new {
+            DraftBranch::New(branch)
         } else {
-            (branch != draft.setup.branch).then_some(BranchChoice::Existing(branch))
+            DraftBranch::Existing(branch)
         };
-        if draft.step == Step::Branch {
-            self.create_task(id)
+        self.close_selector();
+        self.draft_changed(id);
+        if origin == Origin::Wizard {
+            self.advance_draft(false)
         } else {
-            self.close_selector();
             None
         }
     }
 
-    /// Creates the task from its saved name, prompt and chosen branch.
+    /// Creates directly from the prompt box, keeping its contents until hand-off.
     fn create_task(&mut self, id: DraftId) -> Option<Action> {
         let draft = self.drafts.iter().find(|draft| draft.id == id)?;
         if draft.working || draft.job.is_some() {
             return None;
         }
         let name = draft.name.as_ref().expect("task name before creation");
-        let prompt = draft.prompt.as_ref().expect("task prompt before creation");
+        let branch = match &draft.branch {
+            DraftBranch::Unchosen => None,
+            DraftBranch::Existing(name) if name == &draft.setup.branch => None,
+            DraftBranch::Existing(name) => Some(BranchChoice::Existing(name.clone())),
+            DraftBranch::New(name) => Some(BranchChoice::New(name.clone())),
+        };
         let action = Action::CreateTask {
             draft_id: id,
             provider: draft.setup.provider,
-            branch: draft.branch_choice.clone(),
+            branch,
             request: crate::tasks::NewTask {
                 cwd: draft.setup.cwd.clone(),
                 name: Some(name.clone()),
                 model: draft.setup.model.clone(),
                 effort: draft.setup.effort.clone(),
-                prompt: prompt.prompt_text(),
-                images: prompt.image_paths(),
+                prompt: self.input_box.editor.prompt_text(),
+                images: self.input_box.editor.image_paths(),
             },
         };
         self.submit_draft(id);
         Some(action)
     }
 
-    /// Esc leaves branch editing first; the branch list cancels the draft.
+    /// Esc clears a branch editor first, then closes only the selector.
     pub(super) fn cancel_selector(&mut self) {
+        if self
+            .selected_draft()
+            .is_some_and(|draft| draft.working || draft.job.is_some())
+        {
+            return;
+        }
         if let Some(Selector {
-            kind: SelectorKind::Branch {
-                editor, editing, ..
-            },
+            kind:
+                SelectorKind::Branch {
+                    editor,
+                    editing: true,
+                    ..
+                },
             ..
         }) = &mut self.selector
         {
-            if *editing {
-                editor.clear();
+            editor.clear();
+            if let Some(Selector {
+                kind: SelectorKind::Branch { editing, .. },
+                ..
+            }) = &mut self.selector
+            {
                 *editing = false;
-                return;
             }
-            self.discard_selected_draft();
             return;
         }
         self.close_selector();
@@ -451,15 +525,19 @@ impl View {
         self.input_box.focused = false;
     }
 
-    /// Closes the selector; a draft's keys go back to its prompt, restarting its flow there.
+    /// Returns a side edit to its name editor or prompt home.
     pub(super) fn close_selector(&mut self) {
         self.selector = None;
         if let Some(id) = self.selected_draft {
-            if self.name_target == Some(id) {
+            if self
+                .selected_draft()
+                .is_some_and(|draft| draft.name.is_none())
+            {
                 self.open_name(id);
                 return;
             }
-            self.set_step(id, Step::Prompt);
+            self.name_target = None;
+            self.rename.clear();
             self.mouse_focus = Panel::Prompt;
             self.input_box.focused = true;
         }
@@ -490,6 +568,7 @@ impl View {
                 },
             selected,
             scroll,
+            ..
         }) = &mut self.selector
         {
             *entries = browse_entries(&dir);
@@ -516,6 +595,12 @@ impl View {
 
     /// Applies the choice at `index`: a double click, or Enter.
     pub(super) fn apply_choice(&mut self, index: usize) -> Option<Action> {
+        if self
+            .selected_draft()
+            .is_some_and(|draft| draft.working || draft.job.is_some())
+        {
+            return None;
+        }
         let selector = self.selector.as_ref()?;
         match &selector.kind {
             SelectorKind::Repository { draft, entries, .. } => match entries.get(index)? {
@@ -525,8 +610,12 @@ impl View {
                         draft_id: *draft,
                         cwd: cwd.clone(),
                     };
-                    let draft = *draft;
-                    self.open_name(draft);
+                    let id = *draft;
+                    let wizard = selector.origin == Origin::Wizard;
+                    let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
+                    draft.repository_confirmed = true;
+                    draft.continue_after_directory = wizard;
+                    self.close_selector();
                     Some(action)
                 }
             },
@@ -568,6 +657,7 @@ impl View {
                         } else {
                             draft.setup.effort = Some(value);
                         }
+                        self.draft_changed(id);
                         None
                     }
                     ControlTarget::Session(id) => Some(if model {
@@ -808,18 +898,20 @@ mod tests {
     fn prompt_step(view: &mut View) {
         let id = view.selected_draft.unwrap();
         view.open_name(id);
-        assert_eq!(view.drafts[0].step, Step::Name);
+        assert!(view.name_target.is_some());
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             None
         );
-        assert_eq!(view.drafts[0].step, Step::Name);
+        assert!(view.name_target.is_some());
         view.handle_paste("named task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(view.input_label(), "named task");
-        assert!(view.input_box.focused);
+        view.close_selector();
+        view.drafts[0].repository_confirmed = true;
         view.handle_paste("unfinished task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        view.selector.as_mut().unwrap().selected = 2;
     }
 
     #[test]
@@ -828,7 +920,7 @@ mod tests {
         let repository = repository(directory.path());
         let mut view = draft_view(&repository, directory.path());
         prompt_step(&mut view);
-        assert!(view.input_box.editor.is_empty());
+        assert_eq!(view.input_box.editor.text(), "unfinished task");
         assert_eq!(view.input_label(), "named task");
         let area = Rect::new(0, 0, 160, 40);
         let rows = panel_rows(&view, area);
@@ -867,9 +959,11 @@ mod tests {
         assert!(panel_rows(&view, area).last().unwrap().trim_end() == "New branch ❯");
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(view.drafts.is_empty());
+        assert_eq!(view.drafts.len(), 1);
         assert!(view.selector.is_none());
-        assert!(view.input_box.editor.is_empty());
+        assert_eq!(view.input_box.editor.text(), "unfinished task");
+        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(view.confirm_dialog.is_some());
     }
 
     #[test]
@@ -956,7 +1050,7 @@ mod tests {
         let input = view.viewport.borrow().details_input;
         assert_eq!(click(&mut view, input), None);
         assert!(view.selector.as_ref().unwrap().input_active());
-        assert_eq!(view.drafts[0].step, Step::Branch);
+        assert!(view.selector.is_some());
     }
 
     #[test]
@@ -972,7 +1066,22 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.handle_paste("feature/probe");
         states.push(panel_rows(&view, area).join("\n"));
-        let actual = states.join("\n---\n") + "\n";
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(view.selector.is_none());
+        states.push(
+            screen(&view, area)
+                .lines()
+                .filter(|line| line.contains("named task"))
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        view.draft_created(
+            view.selected_draft.unwrap(),
+            Err(std::io::Error::other("Creation was interrupted")),
+        );
+        states.push(panel_rows(&view, area).join("\n"));
+        let actual = states.join("\n---\n").trim_end().to_owned() + "\n";
         if std::env::var_os("UPDATE_DRAFT_SNAPSHOT").is_some() {
             std::fs::write("tests/ui_snapshots/new_task_steps.txt", &actual).unwrap();
         } else {
@@ -1010,6 +1119,9 @@ mod tests {
                     view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
                     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
                 };
+                assert_eq!(action, None);
+                assert!(view.input_box.focused);
+                let action = view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
                 let Some(Action::CreateTask {
                     request, branch, ..
                 }) = action

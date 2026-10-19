@@ -265,6 +265,8 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(view.drafts[0].name.as_deref(), Some("甲丙"));
     assert!(view.name_target.is_none());
+    assert!(view.selector.is_some());
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(view.input_box.focused);
     view.handle_paste("prompt body");
     assert_eq!(view.input_box.editor.text(), "prompt body");
@@ -277,11 +279,12 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
     });
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(view.name_target.is_none());
-    assert!(view.drafts.is_empty());
+    assert_eq!(view.drafts.len(), 1);
+    assert_eq!(view.drafts[0].input.editor.text(), "prompt body");
 }
 
 #[test]
-fn failed_draft_drops_its_title_editor() {
+fn failed_draft_keeps_its_title_editor() {
     let directory = tempfile::tempdir().unwrap();
     let mut view = View::default();
     let id = view.add_draft(DraftSetup {
@@ -292,7 +295,8 @@ fn failed_draft_drops_its_title_editor() {
         branch: String::new(),
     });
     view.draft_created(id, Err(std::io::Error::other("failed")));
-    assert!(view.title_editor().is_none());
+    assert!(view.title_editor().is_some());
+    assert_eq!(view.drafts[0].error.as_deref(), Some("failed"));
 }
 
 #[test]

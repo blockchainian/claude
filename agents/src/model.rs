@@ -10,6 +10,8 @@ use std::path::PathBuf;
 pub enum SessionStatus {
     /// The session waits for the user: a permission prompt or a question.
     NeedsInput,
+    /// A named task draft.
+    New,
     /// A turn is running (registry status `busy` or `shell`).
     Working,
     /// A live session with no running turn (registry status `idle`).
@@ -22,6 +24,7 @@ impl SessionStatus {
     pub fn label(self) -> &'static str {
         match self {
             Self::NeedsInput => "Needs input",
+            Self::New => "new",
             Self::Working => "Working",
             Self::Ready => "Ready",
             Self::Inactive => "Inactive",
@@ -102,6 +105,8 @@ pub struct Session {
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
     pub last_record_at: Option<DateTime<Utc>>,
+    /// Estimated prompt cache expiry, recorded while parsing the transcript.
+    pub cache_expires_at: Option<DateTime<Utc>>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub git_branch: Option<String>,
@@ -179,7 +184,31 @@ impl Session {
     }
 }
 
-pub type DraftId = u64;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DraftId {
+    pub millis: u64,
+    pub counter: u64,
+}
+
+impl std::fmt::Display for DraftId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "draft-{}-{}", self.millis, self.counter)
+    }
+}
+
+impl std::str::FromStr for DraftId {
+    type Err = &'static str;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (millis, counter) = value
+            .strip_prefix("draft-")
+            .and_then(|s| s.split_once('-'))
+            .ok_or("Invalid draft id")?;
+        Ok(Self {
+            millis: millis.parse().map_err(|_| "Invalid draft timestamp")?,
+            counter: counter.parse().map_err(|_| "Invalid draft counter")?,
+        })
+    }
+}
 
 /// What the view asks the app to do; the view never touches processes or files itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -248,6 +277,7 @@ pub enum Action {
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     PersistUsageView(crate::state::UsageView),
+    PersistDrafts,
     /// `r`: set the session display name.
     Rename {
         id: SessionKey,

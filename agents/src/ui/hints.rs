@@ -26,23 +26,15 @@ impl View {
             }
         } else if self.active_question().is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
-        } else if let Some(step) = self.selected_draft().map(|draft| draft.step)
+        } else if self.selected_draft().is_some()
             && (self.input_box.focused || self.selector.is_some())
         {
-            // Each step advertises the keys its focused input consumes.
-            match step {
-                _ if self.input_box.focused => hint_line(&[("esc", "cancel"), ("enter", "next")]),
-                super::drafts::Step::Branch => {
-                    if self.selector.as_ref().is_some_and(Selector::input_active) {
-                        hint_line(&[("esc", "back"), ("enter", "create")])
-                    } else {
-                        hint_line(&[("↑/↓", "move"), ("esc", "cancel"), ("enter", "select")])
-                    }
-                }
-                super::drafts::Step::Name => hint_line(&[("esc", "back"), ("enter", "next")]),
-                super::drafts::Step::Prompt => {
-                    hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
-                }
+            if self.input_box.focused {
+                hint_line(&[("esc", "cancel"), ("enter", "next")])
+            } else if self.selector.as_ref().is_some_and(Selector::input_active) {
+                hint_line(&[("esc", "back"), ("enter", "select")])
+            } else {
+                hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
             }
         } else if self.log_search.editing || self.log_detail_search.editing {
             hint_line(&[("esc", "back"), ("enter", "keep")])
