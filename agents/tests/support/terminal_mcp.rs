@@ -183,3 +183,30 @@ fn terminal_codex_mcp_generic_details() {
     assert!(capture.contains("Action completed."));
     drop(directory);
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_codex_claude_client_text() {
+    for (tool, fixture, input_marker, reply_marker) in [
+        (
+            "ask_claude",
+            include_str!("../fixtures/claude-client/ask_claude.jsonl"),
+            "状态线程正在",
+            "按函数拆补丁",
+        ),
+        (
+            "notify_claude",
+            include_str!("../fixtures/claude-client/notify_claude.jsonl"),
+            "Step 4 provider/App/UI",
+            "Delivered to Claude.",
+        ),
+    ] {
+        let (_directory, tmux) = start_codex_mcp_probe(fixture);
+        let capture = tmux.capture_when(|capture| {
+            capture.contains(input_marker) && capture.contains(reply_marker)
+        });
+        assert!(!capture.contains("\"text\":"), "{capture}");
+        assert!(capture.matches(input_marker).count() >= 2, "list and detail: {capture}");
+        save_mcp_capture(&tmux, "codex", tool);
+    }
+}

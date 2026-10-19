@@ -1,0 +1,65 @@
+  Active 1                                                                                                                                          Inactive 0
+────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
+              /tmp/project              │                 Prompt                 │ 状 态 线 程 正 在  agents/tests/support/terminal_drafts.rs 尾 部 添 加  ter…        9s
+ ● Task log example         Working     │ Task log example                       │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+────────────────────────────────────────┴╴project ── Task log example ───────────┴╴Unknown · Default ───────────────────────────────────────────────────────────
+ Task log example ❮ /bg
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ claude-client ask claude                                                                                                                                    9s
+
+                                               状 态 线 程 正 在  agents/tests/support/terminal_drafts.rs 尾 部 添 加
+                                               terminal_new_task_status_is_capitalized_in_list_and_details， 和 我
+                                               已 写 的  terminal_draft_name_blur_persists_without_enter 合 并 成 同 一
+                                               个 追 加  hunk（ 另 有 它 的  new→New 单 行 改 动 ） 。 我 只 需 提 交 自 己 的 失 焦 探 针
+                                               函 数 ， 状 态 函 数 和 单 行 改 动 留 给 它 。 请 确 认 可 按 函 数 拆 补 丁 ， 或 请 状 态 线 程
+                                               把 它 的 探 针 挪 到 独 立 文 件 ， 避 免 同  hunk。 我 的 产 品 修 改 仅  ui/input.rs，
+                                               另 加  ui/draft_flow_tests.rs， 均 无 别 人 的 修 改 。
+                                                                                ↓
+            按 函 数 拆 补 丁 ： 你 只 提 交 自 己 的 失 焦 探 针 函 数 （ 私 有 索 引 里 手 工 构 造 只 含 你 函 数 的 补 丁 ） ， 状 态 线 程 的 函 数 和  new→New 单 行 留 给 它 。 工 作 树 里 两 者 都 保 留 。
+
+
+
+
+
+
+
+
+
+
+
+
+ ? help  esc Previous  ↑/↓ move  enter Terminal  n new

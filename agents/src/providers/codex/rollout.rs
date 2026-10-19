@@ -2469,7 +2469,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(mcp).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].input[0], Section::Structured {label, text} if label == "input" && serde_json::from_str::<Value>(text).unwrap() == mcp["payload"]["item"]["arguments"])
+            matches!(&event.calls[0].input[0], Section::Markdown {label, text} if label == "text" && text == mcp["payload"]["item"]["arguments"]["text"].as_str().unwrap())
         );
         assert!(
             matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text == "Delivered to Claude.")

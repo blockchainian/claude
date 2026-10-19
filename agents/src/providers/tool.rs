@@ -382,6 +382,18 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "claude-client ask_claude",
+        input: Some((Input::Field("text"), Format::Markdown)),
+        list_subject: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "claude-client notify_claude",
+        input: Some((Input::Field("text"), Format::Markdown)),
+        list_subject: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "codex-manager start",
         subject: Some(Subject::Field("name")),
         input: Some((Input::Field("prompt"), Format::Markdown)),
@@ -451,6 +463,10 @@ pub(crate) fn list_label(
         (
             subject
                 .filter(|subject| !subject.is_empty())
+                .or_else(|| match rule(name).input {
+                    Some((Input::Field(field), _)) => text(input, field),
+                    _ => None,
+                })
                 .unwrap_or(&display)
                 .to_owned(),
             None,
@@ -1020,6 +1036,38 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claude_client_text_is_markdown_and_the_list_summary() {
+        for source in [
+            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
+            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
+        ] {
+            let record: serde_json::Value = serde_json::from_str(source).unwrap();
+            let item = &record["payload"]["item"];
+            let input = &item["arguments"];
+            let text = input["text"].as_str().unwrap();
+            let tool = item["tool"].as_str().unwrap();
+            for name in [
+                format!("claude-client {tool}"),
+                format!("mcp__claude-client__{tool}"),
+                format!("mcp__plugin_claude_claude-client__{tool}"),
+            ] {
+                let (_, subject, sections) = super::presentation(&name, input);
+                assert_eq!(
+                    sections,
+                    vec![crate::log::Section::Markdown {
+                        label: "text".into(),
+                        text: text.into(),
+                    }]
+                );
+                assert_eq!(
+                    super::list_title(&name, subject.as_deref(), input, None),
+                    text
+                );
+            }
+        }
+    }
+
     #[test]
     fn agent_and_task_share_the_spawn_rule() {
         assert!(std::ptr::eq(super::rule("Agent"), super::rule("Task")));

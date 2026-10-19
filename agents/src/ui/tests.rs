@@ -1,3 +1,6 @@
+#[path = "claude_client_tests.rs"]
+mod claude_client_tests;
+
 #[path = "spawn_agent_tests.rs"]
 mod spawn_agent_tests;
 #[path = "task_navigation_tests.rs"]
