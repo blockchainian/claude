@@ -1,10 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { run, parseArgs } from '../scripts/cli.mjs';
+
+test('CLI runs through a symlink to the scripts directory', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'unminify-entry-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const scripts = join(root, 'scripts');
+  await symlink(fileURLToPath(new URL('../scripts', import.meta.url)), scripts, 'dir');
+  const result = spawnSync(process.execPath, [join(scripts, 'cli.mjs'), '--help'], { encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /unminify <dir>/);
+});
 
 async function workspace(t, files = { 'a.js': 'a b c' }) {
   const root = await mkdtemp(join(tmpdir(), 'unminify-cli-'));

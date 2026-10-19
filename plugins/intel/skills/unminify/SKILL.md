@@ -17,7 +17,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Run
 
-Install dependencies with `npm ci --prefix "$SKILL_DIR/scripts"` if needed. Use the target
+Install dependencies with `(cd "$SKILL_DIR/scripts" && npm ci)` if needed. Use the target
 directory supplied by the user; it must be inside a Git repository. Check its Git status
 before rewriting so existing work is visible.
 
