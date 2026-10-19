@@ -2901,7 +2901,7 @@ fn terminal_manager_detach_result_name() {
 #[ignore = "requires tmux and local Claude account authentication; reads live weekly usage"]
 fn terminal_weekly_usage_on_task_header() {
     let (_directory, tmux, _transcript) = start_probe("weekly-usage");
-    for width in [120, 200] {
+    for width in [80, 200] {
         tmux.run(&[
             "resize-window",
             "-t",
@@ -2914,14 +2914,20 @@ fn terminal_weekly_usage_on_task_header() {
         let capture = tmux.capture_when(|capture| {
             capture.lines().any(|line| line.width() == width as usize)
                 && capture.lines().any(|line| {
-                    line.contains("Claude ") && line.contains('%') && line.contains("Weekly  ")
+                    line.contains('%') && line.contains("Active ") && line.contains("Inactive ")
                 })
         });
         let row = capture
             .lines()
-            .find(|line| line.contains("Weekly  "))
+            .find(|line| line.contains('%') && line.contains("Active ") && line.contains("Inactive "))
             .unwrap();
-        assert!(!row.contains("Model:"), "{row}");
+        assert!(
+            !row.contains("Model:")
+                && !row.contains("Weekly")
+                && !row.contains("Claude")
+                && !row.contains("Codex"),
+            "{row}"
+        );
         assert!(
             row.contains("Active ") && row.contains("Inactive "),
             "{row}"

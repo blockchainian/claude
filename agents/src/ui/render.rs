@@ -352,44 +352,21 @@ impl View {
             tabs,
             buf,
         );
-        let usage = self
-            .provider_names
-            .iter()
-            .filter_map(|(provider, name)| {
-                self.weekly_usage
-                    .get(provider)
-                    .map(|usage| super::weekly_usage::provider_spans(name, usage, self.usage_view))
-            })
-            .collect::<Vec<_>>();
-        if !usage.is_empty() && !tabs.is_empty() {
-            let mut spans = vec![Span::styled("Weekly", style::inactive_tab_style())];
-            for (index, provider) in usage.into_iter().enumerate() {
-                spans.push(Span::raw(if index == 0 { " " } else { " · " }));
-                spans.extend(provider);
-            }
-            let text = Line::from(spans);
-            let width = text.width();
-            if width <= usize::from(tabs.width) {
-                let target = Rect::new(
-                    tabs.x + (tabs.width - width as u16) / 2,
-                    tabs.y,
-                    width as u16,
-                    1,
-                );
-                if self
-                    .viewport
-                    .borrow()
-                    .tabs
-                    .iter()
-                    .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
-                {
-                    text.render(target, buf);
-                    self.viewport
-                        .borrow_mut()
-                        .field_targets
-                        .push((target, Field::WeeklyUsage));
-                }
-            }
+        let weekly_target = super::weekly_usage::render(
+            row(layout.header, 0, 1),
+            &self.viewport.borrow().tabs,
+            [
+                self.weekly_usage.get(&ProviderId::Claude),
+                self.weekly_usage.get(&ProviderId::Codex),
+            ],
+            self.usage_view,
+            buf,
+        );
+        if let Some(target) = weekly_target {
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .push((target, Field::WeeklyUsage));
         }
         rule(row(layout.header, 1, 1), buf);
 

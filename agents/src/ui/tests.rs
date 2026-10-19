@@ -10077,73 +10077,126 @@ fn weekly_header(view: &View, width: u16) -> String {
 }
 
 #[test]
-fn task_header_weekly_usage_both_providers() {
+fn task_header_weekly_usage_mirrored_modes_and_widths() {
+    for width in [160, 150, 149, 80, 39, 40] {
+        for mode in [
+            crate::state::UsageView::Compact,
+            crate::state::UsageView::Detailed,
+        ] {
+            let mut view = weekly_usage_view();
+            view.usage_view = mode;
+            let text = weekly_header(&view, width);
+            let cells = text.chars().collect::<Vec<_>>();
+            let center = usize::from(width / 2);
+            assert!(!text.contains("Weekly"), "{text}");
+            assert_eq!(cells[center], '·', "{width}: {text}");
+            assert_eq!(cells[center - 1], ' ');
+            assert_eq!(cells[center + 1], ' ');
+            let viewport = view.viewport.borrow();
+            let target = viewport
+                .field_targets
+                .iter()
+                .find(|(_, f)| *f == Field::WeeklyUsage)
+                .unwrap()
+                .0;
+            assert!(
+                viewport
+                    .tabs
+                    .iter()
+                    .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
+            );
+            if mode == crate::state::UsageView::Compact {
+                assert!(!text.contains("Claude") && !text.contains("Codex"));
+                assert!(text.contains("21% · 5%"), "{text}");
+                let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
+                    width / 2
+                } else {
+                    width * 3 / 4
+                };
+                assert!(target.width <= budget);
+                if width >= 149 {
+                    assert_eq!(target.width, (budget - 1) / 2 * 2 + 1);
+                }
+                if width == 80 {
+                    assert!(target.width > width / 2);
+                }
+                let half = usize::from((target.width - 1) / 2);
+                let bar = half - 1 - 3 - 1;
+                let left = cells[usize::from(target.x)..center]
+                    .iter()
+                    .filter(|c| **c == '█')
+                    .count();
+                let right = cells[center + 1..usize::from(target.right())]
+                    .iter()
+                    .filter(|c| **c == '█')
+                    .count();
+                assert_eq!(left, (bar as f64 * 0.21).round() as usize);
+                assert_eq!(right, (bar as f64 * 0.05).round() as usize);
+            } else {
+                assert!(text.contains("Claude · Codex"), "{text}");
+            }
+        }
+    }
     let view = weekly_usage_view();
-    let text = weekly_header(&view, 160);
-    let label = "Weekly Claude 21% · Codex 5%";
-    assert!(text.contains(label), "{text}");
-    assert_eq!(text.find(label).unwrap(), (160 - label.width()) / 2);
-    assert!(text.contains("Active 5"));
-    assert!(text.contains("Inactive 1"));
-    let snapshot = text.trim_end().to_owned() + "\n";
+    let snapshot = weekly_header(&view, 160).trim_end().to_owned() + "\n";
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/details_weekly_usage.txt");
     if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
-        std::fs::write(path, &snapshot).unwrap();
+        std::fs::write(&path, &snapshot).unwrap();
     }
-    assert_eq!(
-        snapshot,
-        include_str!("../../tests/ui_snapshots/details_weekly_usage.txt")
-    );
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }
 
 #[test]
-fn task_header_weekly_usage_styles() {
-    let view = weekly_usage_view();
-    let area = Rect::new(0, 0, 160, 40);
-    let mut buffer = Buffer::empty(area);
-    view.render_at(area, &mut buffer, Utc::now());
-    let text = weekly_header(&view, 160);
-    let start = text.find("Weekly ").expect("weekly label") as u16;
-    let y = view.viewport.borrow().tab_bar.y;
-    let inactive = view.viewport.borrow().tabs[1].1;
-    for x in start..start + 6 {
-        assert_eq!(buffer[(x, y)].style(), buffer[(inactive.x + 1, y)].style());
-    }
-    for x in start + 7..start + 7 + "Claude 21% · Codex 5%".width() as u16 {
-        assert_eq!(buffer[(x, y)].style(), buffer[(0, y)].style());
-    }
-}
-
-#[test]
-fn task_header_weekly_usage_error_percentage_threshold() {
-    for used in [95.0, 96.0, 100.0] {
-        for provider in [ProviderId::Claude, ProviderId::Codex] {
+fn task_header_weekly_usage_symmetric_bars_and_styles() {
+    for width in [160, 150, 149, 80, 39, 40] {
+        for used in [0.0, 5.0, 21.0, 50.0, 95.0, 96.0, 100.0] {
             let mut view = weekly_usage_view();
-            view.weekly_usage.get_mut(&provider).unwrap().used_percent = used;
-            let area = Rect::new(0, 0, 160, 40);
+            for usage in view.weekly_usage.values_mut() {
+                usage.used_percent = used;
+            }
+            let area = Rect::new(0, 0, width, 40);
             let mut buffer = Buffer::empty(area);
             view.render_at(area, &mut buffer, Utc::now());
-            let text = weekly_header(&view, 160);
-            let name = if provider == ProviderId::Claude {
-                "Claude"
-            } else {
-                "Codex"
-            };
-            let label = format!("{name} {used:.0}%");
-            let start = text[..text.find(&label).unwrap()].width() as u16;
             let y = view.viewport.borrow().tab_bar.y;
-            for offset in 0..label.len() as u16 {
-                let expected = if used > 95.0 && offset > name.len() as u16 {
-                    buffer[(0, y)].style().patch(style::error_style())
-                } else {
-                    buffer[(0, y)].style()
-                };
+            let center = width / 2;
+            let target = view
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .find(|(_, f)| *f == Field::WeeklyUsage)
+                .unwrap()
+                .0;
+            let half = (target.width - 1) / 2;
+            let number = format!("{used:.0}%");
+            let bar = half - 2 - number.len() as u16;
+            let filled = (f64::from(bar) * used / 100.0).round() as u16;
+            let expected = buffer[(0, y)].style().patch(if used > 95.0 {
+                style::error_style()
+            } else {
+                ratatui::style::Style::default()
+            });
+            for i in 0..half {
+                let left = &buffer[(center - 1 - i, y)];
+                let right = &buffer[(center + 1 + i, y)];
                 assert_eq!(
-                    buffer[(start + offset, y)].style(),
-                    expected,
-                    "{label}: {offset}"
+                    left.symbol() == "█",
+                    right.symbol() == "█",
+                    "{width}, {used}, {i}"
                 );
+                if i >= half - filled {
+                    assert_eq!(left.symbol(), "█");
+                    assert_eq!(left.style(), expected);
+                    assert_eq!(right.style(), expected);
+                }
+            }
+            for i in 0..number.len() as u16 {
+                assert_eq!(
+                    buffer[(center - 1 - number.len() as u16 + i, y)].style(),
+                    expected
+                );
+                assert_eq!(buffer[(center + 2 + i, y)].style(), expected);
             }
         }
     }
@@ -10151,53 +10204,111 @@ fn task_header_weekly_usage_error_percentage_threshold() {
 
 #[test]
 fn task_header_weekly_usage_single_provider() {
-    for (missing, label) in [
-        (ProviderId::Claude, "Weekly Codex 5%"),
-        (ProviderId::Codex, "Weekly Claude 21%"),
-    ] {
-        let mut view = weekly_usage_view();
-        view.weekly_usage.remove(&missing);
-        assert!(weekly_header(&view, 160).contains(label));
+    for width in [160, 80] {
+        for mode in [
+            crate::state::UsageView::Compact,
+            crate::state::UsageView::Detailed,
+        ] {
+            for missing in [ProviderId::Claude, ProviderId::Codex] {
+                let mut view = weekly_usage_view();
+                view.usage_view = mode;
+                view.weekly_usage.remove(&missing);
+                let text = weekly_header(&view, width);
+                assert!(!text.contains('·') && !text.contains("Weekly"), "{text}");
+                let cells = text.chars().collect::<Vec<_>>();
+                let center = usize::from(width / 2);
+                if missing == ProviderId::Codex {
+                    assert_eq!(
+                        cells[center - 2],
+                        if mode == crate::state::UsageView::Compact {
+                            '%'
+                        } else {
+                            'e'
+                        }
+                    );
+                } else {
+                    assert_eq!(
+                        cells[center + 2],
+                        if mode == crate::state::UsageView::Compact {
+                            '5'
+                        } else {
+                            'C'
+                        }
+                    );
+                }
+            }
+        }
     }
 }
 
 #[test]
-fn task_header_weekly_usage_reset_threshold() {
-    let reset = chrono::DateTime::parse_from_rfc3339("2026-10-22T23:00:00+00:00")
-        .unwrap()
-        .with_timezone(&Utc);
-    for provider in [ProviderId::Claude, ProviderId::Codex] {
-        for left in [0, 3, 4, 5, 19, 20] {
-            for resets_at in [Some(reset), None] {
-                let mut view = weekly_usage_view();
-                view.weekly_usage.insert(
-                    provider,
-                    crate::providers::WeeklyUsage {
-                        used_percent: 100.0 - f64::from(left),
-                        reset_credits: None,
-                        resets_at,
-                    },
-                );
-                let text = weekly_header(&view, 160);
-                let name = if provider == ProviderId::Claude {
-                    "Claude"
-                } else {
-                    "Codex"
-                };
-                let expected = format!(
-                    "{name} {}% until {}",
-                    100 - left,
-                    reset.with_timezone(&chrono::Local).format("%a %H:%M")
-                );
+fn task_header_weekly_usage_details_and_compact_reset() {
+    let mut view = weekly_usage_view();
+    for (provider, count) in [(ProviderId::Claude, 1), (ProviderId::Codex, 2)] {
+        let usage = view.weekly_usage.get_mut(&provider).unwrap();
+        usage.used_percent = 97.0;
+        usage.resets_at = Some("2026-10-23T16:00:00Z".parse().unwrap());
+        usage.reset_credits = Some(count);
+    }
+    for width in [160, 80] {
+        let text = weekly_header(&view, width);
+        assert!(text.contains("97% · 97%"), "{text}");
+        assert!(!text.contains("credit") && !text.contains("until") && !text.contains("resets"));
+        view.usage_view = crate::state::UsageView::Detailed;
+        let text = weekly_header(&view, width);
+        if width == 160 {
+            assert!(text.contains("1 credit · Codex resets"), "{text}");
+            assert!(text.contains("2 credits"));
+            assert_eq!(text.chars().nth(usize::from(width / 2)), Some('·'));
+        } else {
+            assert!(!text.contains("resets"), "{text}");
+        }
+        view.usage_view = crate::state::UsageView::Compact;
+    }
+}
+
+#[test]
+fn task_header_weekly_usage_click_targets_cover_the_whole_visible_label() {
+    for width in [160, 80] {
+        for mode in [
+            crate::state::UsageView::Compact,
+            crate::state::UsageView::Detailed,
+        ] {
+            let mut view = weekly_usage_view();
+            view.usage_view = mode;
+            weekly_header(&view, width);
+            let target = view
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .find(|(_, f)| *f == Field::WeeklyUsage)
+                .unwrap()
+                .0;
+            for x in target.x..target.right() {
+                view.usage_view = mode;
+                view.handle_mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: x,
+                    row: target.y,
+                    modifiers: KeyModifiers::NONE,
+                });
+                let action = view.handle_mouse(MouseEvent {
+                    kind: MouseEventKind::Up(MouseButton::Left),
+                    column: x,
+                    row: target.y,
+                    modifiers: KeyModifiers::NONE,
+                });
                 assert_eq!(
-                    text.contains(&expected),
-                    left < 5 && resets_at.is_some(),
-                    "{text}"
-                );
-                assert_eq!(
-                    text.contains("until"),
-                    left < 5 && resets_at.is_some(),
-                    "{text}"
+                    action,
+                    Some(Action::PersistUsageView(
+                        if mode == crate::state::UsageView::Compact {
+                            crate::state::UsageView::Detailed
+                        } else {
+                            crate::state::UsageView::Compact
+                        }
+                    )),
+                    "x={x}"
                 );
             }
         }
@@ -10205,83 +10316,23 @@ fn task_header_weekly_usage_reset_threshold() {
 }
 
 #[test]
-fn task_header_weekly_usage_click_targets_cover_the_whole_visible_label() {
-    for mode in [
-        crate::state::UsageView::Compact,
-        crate::state::UsageView::Detailed,
-    ] {
-        let mut view = weekly_usage_view();
-        view.usage_view = mode;
-        let rendered = weekly_header(&view, 200);
-        let target = view
-            .viewport
-            .borrow()
-            .field_targets
-            .iter()
-            .find(|(_, field)| *field == Field::WeeklyUsage)
-            .unwrap()
-            .0;
-        assert_eq!(target.x as usize, rendered.find("Weekly ").unwrap());
-        for x in target.x..target.right() {
-            let mut view = weekly_usage_view();
-            view.usage_view = mode;
-            weekly_header(&view, 200);
-            view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: x,
-                row: target.y,
-                modifiers: KeyModifiers::NONE,
-            });
-            let action = view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Up(MouseButton::Left),
-                column: x,
-                row: target.y,
-                modifiers: KeyModifiers::NONE,
-            });
-            let expected = if mode == crate::state::UsageView::Compact {
-                crate::state::UsageView::Detailed
-            } else {
-                crate::state::UsageView::Compact
-            };
-            assert_eq!(action, Some(Action::PersistUsageView(expected)), "x={x}");
-        }
-        weekly_header(&view, 30);
-        assert!(
-            !view
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .any(|(_, field)| *field == Field::WeeklyUsage)
-        );
-        view.weekly_usage.clear();
-        assert!(!weekly_header(&view, 200).contains("Weekly "));
-        assert!(
-            !view
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .any(|(_, field)| *field == Field::WeeklyUsage)
-        );
-    }
-}
-
-#[test]
 fn task_header_weekly_usage_absent_or_too_wide() {
     let mut view = weekly_usage_view();
-    for width in [30, 38, 40] {
+    for width in [25, 28, 30] {
         let text = weekly_header(&view, width);
-        assert!(!text.contains("Weekly") && !text.contains('%'), "{text}");
+        assert!(!text.contains('%') && !text.contains('·'), "{text}");
         assert!(
-            text.contains("Active 5") && text.contains("Inactive 1"),
-            "{text}"
+            !view
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .any(|(_, f)| *f == Field::WeeklyUsage)
         );
     }
     view.weekly_usage.clear();
-    assert!(!weekly_header(&view, 160).contains("Weekly"));
+    assert!(!weekly_header(&view, 160).contains('%'));
 }
-
 #[test]
 fn details_weekly_usage_keeps_model_and_effort_targets() {
     let mut view = weekly_usage_view();
@@ -10352,7 +10403,7 @@ fn task_header_weekly_usage_live_accounts() {
             .content
             .chunks(160)
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
-            .find(|line| line.contains("Weekly "))
+            .find(|line| line.contains("% · "))
             .expect("rendered live usage line");
         assert!(!text.contains("Model: "));
         println!("{provider}: {}", text.trim());
