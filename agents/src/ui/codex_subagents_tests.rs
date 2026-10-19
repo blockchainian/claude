@@ -30,7 +30,7 @@ fn ids(view: &View) -> Vec<&str> {
 }
 
 #[test]
-fn nested_tree_follows_root_filter_search_group_and_pin() {
+fn nested_tree_filters_status_and_follows_root_search_group_and_pin() {
     let mut view = tree();
     for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
         view.grouping = grouping;
@@ -46,7 +46,7 @@ fn nested_tree_follows_root_filter_search_group_and_pin() {
     assert!(ids(&view).is_empty());
     view.search.clear();
     view.status_filter = 1;
-    assert!(ids(&view).is_empty());
+    assert_eq!(ids(&view), ["root", "child"]);
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn nested_connectors_continue_through_ancestors_with_visible_siblings() {
         .find(|s| s.id.id == "root")
         .unwrap()
         .status = SessionStatus::Inactive;
-    view.status_filter = 1;
+    view.status_filter = 0;
     assert_eq!(
         connector_row(&view, "Deep worker", 12)[..9].concat(),
         "│  │  └─ "

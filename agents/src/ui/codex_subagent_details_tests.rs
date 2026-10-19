@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn nested_selection_is_remembered_in_its_root_tab() {
+fn nested_selection_is_remembered_in_its_current_tab() {
     let mut view = tree();
     let child = view
         .rows
@@ -19,11 +19,11 @@ fn nested_selection_is_remembered_in_its_root_tab() {
 }
 
 #[test]
-fn nested_tabs_count_rows_using_root_status() {
+fn nested_tabs_count_matching_rows_and_ancestors() {
     let view = tree();
     let rendered = screen(&view, 160, 35);
     assert!(rendered.contains("Active 4"), "{rendered}");
-    assert!(rendered.contains("Inactive 0"), "{rendered}");
+    assert!(rendered.contains("Inactive 2"), "{rendered}");
 }
 
 #[test]

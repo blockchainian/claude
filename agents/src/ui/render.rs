@@ -355,19 +355,9 @@ impl View {
         let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
         let labels = TASK_FILTERS
             .iter()
-            .map(|(label, group)| {
-                let count = self
-                    .rows
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, s)| {
-                        !self.hidden.contains(&s.id)
-                            && self.group_index(*index).is_some_and(|parent| {
-                                !self.hidden.contains(&self.rows[parent].id)
-                                    && group.contains(&self.rows[parent].status)
-                            })
-                    })
-                    .count();
+            .enumerate()
+            .map(|(tab, (label, _))| {
+                let count = self.visible_indices_for_filter(tab).len();
                 format!("{label} {count}")
             })
             .collect::<Vec<_>>();

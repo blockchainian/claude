@@ -53,6 +53,7 @@ fn log_enter_selects_spawned_child_by_thread_id() {
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         None
     );
+    assert_eq!(view.status_filter, 1);
     assert_eq!(
         view.selected_row().unwrap().id.id,
         "01a14ff0-1c14-74c0-8f40-4d7f85ae6ecc"
@@ -75,6 +76,7 @@ fn log_enter_selects_incoming_child_by_path() {
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         None
     );
+    assert_eq!(view.status_filter, 1);
     assert_eq!(
         view.selected_row().unwrap().id.id,
         "01a14ff0-1c14-74c0-8f40-4d7f85ae6ecc"

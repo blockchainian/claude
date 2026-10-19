@@ -1696,9 +1696,7 @@ fn refresh_child_leaving_tab_selects_visible_parent_or_falls_back() {
                     if !parent_visible {
                         parent.status = other_status;
                     }
-                    let expected = if parent_visible && !removed {
-                        child.id.clone()
-                    } else if parent_visible {
+                    let expected = if parent_visible {
                         parent.id.clone()
                     } else {
                         other.id.clone()
@@ -6617,6 +6615,121 @@ mod subagent_rows {
     }
 
     #[test]
+    fn status_tabs_filter_each_child_and_count_visible_ancestors() {
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            let mut parent = session("parent", "Parent task", SessionStatus::Working, 120);
+            parent.id.provider = provider;
+            let mut working = session("working-child", "Working child", SessionStatus::Working, 60);
+            working.id.provider = provider;
+            working.parent = Some(parent.id.clone());
+            let mut inactive = session(
+                "inactive-child",
+                "Inactive child",
+                SessionStatus::Inactive,
+                0,
+            );
+            inactive.id.provider = provider;
+            inactive.parent = Some(parent.id.clone());
+            let mut view = test_view(Grouping::Project, false);
+            view.set_sessions(
+                vec![parent.clone(), working.clone(), inactive.clone()],
+                false,
+            );
+            for (tab, child) in [(0, &working), (1, &inactive)] {
+                set_filter(&mut view, tab);
+                assert_eq!(ids(&view), ["parent", child.id.id.as_str()]);
+                let rendered = screen(&view, 160, 30);
+                assert!(rendered.contains("Active 2"), "{rendered}");
+                assert!(rendered.contains("Inactive 2"), "{rendered}");
+                for selected in [&parent, child] {
+                    let index = view
+                        .rows
+                        .iter()
+                        .position(|row| row.id == selected.id)
+                        .unwrap();
+                    view.select(index);
+                    assert_eq!(view.status_filter, tab);
+                    view.set_sessions(view.rows.clone(), false);
+                    assert_eq!(view.status_filter, tab);
+                    assert_eq!(view.selected_id(), Some(&selected.id));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn status_tabs_keep_inactive_ancestors_of_working_grandchildren() {
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            let mut parent = session("parent", "Parent", SessionStatus::Inactive, 120);
+            parent.id.provider = provider;
+            let mut middle = session("middle", "Middle", SessionStatus::Inactive, 60);
+            middle.id.provider = provider;
+            middle.parent = Some(parent.id.clone());
+            let mut grandchild = session("grandchild", "Grandchild", SessionStatus::Working, 0);
+            grandchild.id.provider = provider;
+            grandchild.parent = Some(middle.id.clone());
+            let mut view = test_view(Grouping::Project, false);
+            view.set_sessions(vec![parent, middle, grandchild], false);
+            assert_eq!(ids(&view), ["parent", "middle", "grandchild"]);
+            let rendered = screen(&view, 160, 30);
+            assert!(rendered.contains("Active 3"), "{rendered}");
+            assert!(rendered.contains("Inactive 2"), "{rendered}");
+            set_filter(&mut view, 1);
+            assert_eq!(ids(&view), ["parent", "middle"]);
+        }
+    }
+
+    #[test]
+    fn inactive_status_column_omits_non_inactive_ancestor_labels() {
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            for status in [SessionStatus::Working, SessionStatus::Ready] {
+                let mut parent = session("parent", "Parent task", status, 120);
+                parent.id.provider = provider;
+                let mut child = session("child", "Finished child", SessionStatus::Inactive, 60);
+                child.id.provider = provider;
+                child.parent = Some(parent.id.clone());
+                let mut view = test_view(Grouping::Project, false);
+                view.set_sessions(vec![parent, child], false);
+                let active = screen(&view, 200, 30);
+                let parent_line = active
+                    .lines()
+                    .find(|line| line.contains("Parent task"))
+                    .unwrap();
+                assert!(
+                    parent_line
+                        .split('│')
+                        .next()
+                        .unwrap()
+                        .contains(status.label()),
+                    "{active}"
+                );
+                set_filter(&mut view, 1);
+                let inactive = screen(&view, 200, 30);
+                let parent_line = inactive
+                    .lines()
+                    .find(|line| line.contains("Parent task"))
+                    .unwrap();
+                assert!(
+                    !parent_line
+                        .split('│')
+                        .next()
+                        .unwrap()
+                        .contains(status.label()),
+                    "{inactive}"
+                );
+                let child_line = inactive
+                    .lines()
+                    .find(|line| line.contains("Finished child"))
+                    .unwrap();
+                assert!(
+                    child_line.split('│').next().unwrap().contains("Inactive"),
+                    "{inactive}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn tab_counts_use_each_rows_status() {
         let view = fixture();
         let rendered = screen(&view, 160, 30);
@@ -6649,7 +6762,7 @@ mod subagent_rows {
     }
 
     #[test]
-    fn inactive_root_hides_children_in_active_tab() {
+    fn inactive_root_keeps_matching_children_in_active_tab() {
         let mut view = fixture();
         let mut rows = view.rows.clone();
         rows.iter_mut()
@@ -6659,12 +6772,15 @@ mod subagent_rows {
         rows.push(session("other", "Other task", SessionStatus::Working, 0));
         view.set_sessions(rows, false);
         set_filter(&mut view, 0);
-        assert_eq!(ids(&view), ["other"]);
+        assert_eq!(
+            ids(&view),
+            ["other", "parent", "agent-newer", "agent-older"]
+        );
         key(&mut view, KeyCode::Home);
         assert_eq!(view.selected_id(), Some(&session_key("other")));
-        assert!(!screen(&view, 120, 30).contains("Parent task"));
+        assert!(screen(&view, 120, 30).contains("Parent task"));
         set_filter(&mut view, 1);
-        assert_eq!(ids(&view), ["parent", "agent-newer", "agent-older"]);
+        assert_eq!(ids(&view), ["parent"]);
     }
 
     #[test]
@@ -6749,16 +6865,23 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         for grouping in [Grouping::Project, Grouping::Model] {
             view.grouping = grouping;
+            view.set_pinned(&[]);
             set_filter(&mut view, 0);
-            assert_eq!(ids(&view), ["other"]);
+            assert_eq!(
+                ids(&view),
+                ["other", "parent", "agent-newer", "agent-older"]
+            );
             view.set_pinned(&[session_key("parent")]);
-            assert_eq!(ids(&view), ["other"]);
+            assert_eq!(
+                ids(&view),
+                ["parent", "agent-newer", "agent-older", "other"]
+            );
             set_filter(&mut view, 1);
-            assert_eq!(ids(&view), ["parent", "agent-newer", "agent-older"]);
+            assert_eq!(ids(&view), ["parent"]);
             assert!(screen(&view, 120, 30).contains("Pinned"));
         }
         view.hide(&session_key("agent-older"));
-        assert_eq!(ids(&view), ["parent", "agent-newer"]);
+        assert_eq!(ids(&view), ["parent"]);
     }
 
     #[test]

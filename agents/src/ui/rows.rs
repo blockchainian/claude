@@ -259,7 +259,11 @@ impl View {
             } else {
                 style
             };
-            line(Line::from(status).style(status_style), status_area, buf);
+            if self.status_filter != tab_for_status(SessionStatus::Inactive)
+                || task.status == SessionStatus::Inactive
+            {
+                line(Line::from(status).style(status_style), status_area, buf);
+            }
             if !updated.is_empty() {
                 let age = format_relative_time(reference, Some(task.updated_at));
                 Line::from(age)

@@ -979,7 +979,24 @@ impl View {
             .contains(&search)
     }
     fn visible_indices(&self) -> Vec<usize> {
-        let filter = TASK_FILTERS[self.status_filter].1;
+        self.visible_indices_for_filter(self.status_filter)
+    }
+    fn visible_indices_for_filter(&self, tab: usize) -> Vec<usize> {
+        let filter = TASK_FILTERS[tab].1;
+        let sessions: HashMap<_, _> = self.rows.iter().map(|s| (&s.id, s)).collect();
+        let mut matching = HashSet::new();
+        for session in self.rows.iter().filter(|s| filter.contains(&s.status)) {
+            let mut current = Some(session);
+            while let Some(session) = current {
+                if self.hidden.contains(&session.id) || !matching.insert(&session.id) {
+                    break;
+                }
+                current = session
+                    .parent
+                    .as_ref()
+                    .and_then(|id| sessions.get(id).copied());
+            }
+        }
         let mut children = std::collections::HashMap::<&SessionKey, Vec<usize>>::new();
         for (index, session) in self.rows.iter().enumerate() {
             if let Some(parent) = session.parent.as_ref()
@@ -998,7 +1015,7 @@ impl View {
             .filter(|(_, session)| {
                 session.parent.is_none()
                     && !self.hidden.contains(&session.id)
-                    && filter.contains(&session.status)
+                    && matching.contains(&session.id)
                     && self.matches_search(session)
             })
             .map(|(index, _)| index)
@@ -1027,6 +1044,9 @@ impl View {
         let mut rows = Vec::new();
         let mut pending: Vec<_> = pinned.into_iter().rev().collect();
         while let Some(index) = pending.pop() {
+            if !matching.contains(&self.rows[index].id) {
+                continue;
+            }
             rows.push(index);
             if let Some(siblings) = children.get(&self.rows[index].id) {
                 pending.extend(siblings.iter().rev().copied());
@@ -1161,6 +1181,14 @@ impl View {
     fn select(&mut self, selected: usize) {
         if self.selected_draft.is_some() || self.selected != selected {
             self.remember_previous_task();
+        }
+        if let Some(row) = self.rows.get(selected)
+            && !self.visible_indices().contains(&selected)
+        {
+            let tab = tab_for_status(row.status);
+            if self.visible_indices_for_filter(tab).contains(&selected) {
+                self.status_filter = tab;
+            }
         }
         self.set_selected(selected);
         self.remember_selection();

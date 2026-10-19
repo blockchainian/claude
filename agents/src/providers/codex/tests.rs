@@ -302,7 +302,10 @@ fn capabilities_gate_codex_actions_in_the_view() {
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
-    for (code, name) in [(KeyCode::Enter, "Terminal"), (KeyCode::Char('o'), "Terminal")] {
+    for (code, name) in [
+        (KeyCode::Enter, "Terminal"),
+        (KeyCode::Char('o'), "Terminal"),
+    ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(Action::Unsupported(name))
@@ -493,7 +496,9 @@ fn archived_manager_threads_still_need_detach() {
         .unwrap();
     assert!(session.archived && session.parent.is_some());
     assert_eq!(
-        provider.archive(session).unwrap()().unwrap_err().to_string(),
+        provider.archive(session).unwrap()()
+            .unwrap_err()
+            .to_string(),
         "Codex's app-server daemon isn't running"
     );
 }
@@ -644,9 +649,8 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     let mut view = View::new(Grouping::Project, false);
     view.set_capabilities(hub.capabilities());
     view.set_sessions(snapshot.sessions, snapshot.has_more);
-    // Descendants follow their inactive root into the Inactive tab.
-    assert_eq!(view.selected_id(), None);
-    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    // A waiting child keeps its inactive root visible in Active.
+    assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     view.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
@@ -669,8 +673,14 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     );
     assert!(lines[parent_row + 1].contains("Managed worker"));
     for (code, expected) in [
-        (KeyCode::Enter, Action::OpenTerminal(key("thread-12".into()))),
-        (KeyCode::Right, Action::OpenTerminal(key("thread-12".into()))),
+        (
+            KeyCode::Enter,
+            Action::OpenTerminal(key("thread-12".into())),
+        ),
+        (
+            KeyCode::Right,
+            Action::OpenTerminal(key("thread-12".into())),
+        ),
         (
             KeyCode::Char('o'),
             Action::OpenTerminal(key("thread-12".into())),
@@ -793,7 +803,10 @@ fn spawn_children_cannot_resume_in_the_view() {
     )]));
     view.set_sessions(vec![parent, child], false);
     assert_eq!(view.selected_id(), Some(&id));
-    for (code, name) in [(KeyCode::Enter, "Terminal"), (KeyCode::Char('o'), "Terminal")] {
+    for (code, name) in [
+        (KeyCode::Enter, "Terminal"),
+        (KeyCode::Char('o'), "Terminal"),
+    ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(Action::Unsupported(name))
@@ -1037,7 +1050,11 @@ fn input_choices_list_cached_models_by_priority_with_their_efforts() {
 fn collaboration_and_session_models_share_cached_display_names() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("models_cache.json");
-    std::fs::write(&path, include_str!("../../../tests/fixtures/codex-models-cache.json")).unwrap();
+    std::fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/codex-models-cache.json"),
+    )
+    .unwrap();
     let mut catalog = ModelCatalog::default();
     catalog.refresh(&path).unwrap();
     assert_eq!(catalog.choices.label("gpt-6.1-sol"), Some("GPT-6.1-Sol"));

@@ -216,3 +216,100 @@ fn terminal_task_follow_only_returns_to_active() {
         })
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
+    let listed = |capture: &str, title: &str| {
+        capture
+            .lines()
+            .skip(2)
+            .take(26)
+            .any(|line| line.split('│').next().unwrap().contains(title))
+    };
+    let (directory, tmux, transcript) = start_probe("status-tabs");
+    let children = transcript.with_extension("").join("subagents");
+    std::fs::create_dir_all(&children).unwrap();
+    let records = include_str!("../fixtures/subagent.jsonl");
+    for (id, title, contents) in [
+        ("done", "Finished child", records),
+        ("working", "Working child", records.lines().next().unwrap()),
+    ] {
+        std::fs::write(children.join(format!("agent-{id}.jsonl")), contents).unwrap();
+        std::fs::write(
+            children.join(format!("agent-{id}.meta.json")),
+            serde_json::json!({"description": title}).to_string(),
+        )
+        .unwrap();
+    }
+    let registry = directory.path().join("claude/sessions");
+    std::fs::create_dir_all(&registry).unwrap();
+    let id = transcript.file_stem().unwrap().to_str().unwrap();
+    let mut entry = registry_entry(id, "Live parent", directory.path());
+    entry["status"] = "busy".into();
+    let path = registry.join(format!("{id}.json"));
+    write_entry(&path, &entry);
+    let inactive = tmux.capture_when(|capture| {
+        capture.contains("Live parent")
+            && listed(capture, "Finished child")
+            && !listed(capture, "Working child")
+            && capture.contains("Inactive 2")
+            && capture.contains("Active 2")
+    });
+    let parent_row = inactive
+        .lines()
+        .find(|line| line.contains("Live parent") && line.contains('●'))
+        .unwrap();
+    assert!(
+        !parent_row.split('│').next().unwrap().contains("Working"),
+        "{inactive}"
+    );
+    let child_row = inactive
+        .lines()
+        .find(|line| line.contains("Finished child"))
+        .unwrap();
+    assert!(
+        child_row.split('│').next().unwrap().contains("Inactive"),
+        "{inactive}"
+    );
+    tmux.run(&["send-keys", "-t", "probe", "BTab"]);
+    let active = tmux.capture_when(|capture| {
+        listed(capture, "Working child") && !listed(capture, "Finished child")
+    });
+    let parent_row = active
+        .lines()
+        .find(|line| line.contains("Live parent") && line.contains('●'))
+        .unwrap();
+    assert!(
+        parent_row.split('│').next().unwrap().contains("Working"),
+        "{active}"
+    );
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    tmux.wait_for(|capture| listed(capture, "Finished child"));
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.wait_for(|capture| selected(capture, "Live parent") && listed(capture, "Finished child"));
+    entry["status"] = "idle".into();
+    write_entry(&path, &entry);
+    let refreshed = tmux.capture_when(|capture| {
+        selected(capture, "Live parent")
+            && listed(capture, "Finished child")
+            && capture
+                .lines()
+                .nth(1)
+                .is_some_and(|line| line.contains("Ready"))
+    });
+    let parent_row = refreshed
+        .lines()
+        .find(|line| line.contains("Live parent") && line.contains('○'))
+        .unwrap();
+    assert!(
+        !parent_row.split('│').next().unwrap().contains("Ready"),
+        "{refreshed}"
+    );
+    let verdict = serde_json::json!({"passed": true, "active": active, "inactive": inactive, "refreshed": refreshed});
+    if let Some(path) = std::env::var_os("AGENTS_STATUS_TABS_VERDICT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    }
+    println!("{verdict}");
+}
