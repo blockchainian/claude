@@ -31,6 +31,13 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 - `cargo install --path . --locked` — builds and installs the current source
 
+### Coverage
+
+> Coverage is not part of the checks; run it only when you want to see what the tests cover.
+
+- `cargo llvm-cov nextest --no-fail-fast --html` — runs the tests with coverage and writes the report to `target/llvm-cov/html/index.html`
+- `cargo llvm-cov report --summary-only` — prints each file's coverage from the last coverage run
+
 ## Checks
 
 The gate every change passes:
