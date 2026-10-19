@@ -10147,15 +10147,20 @@ fn details_weekly_usage_live_accounts() {
         .into_iter()
         .map(|(provider, job)| (provider, std::thread::spawn(job)))
         .collect::<Vec<_>>();
+    let mut errors = Vec::new();
     for (provider, worker) in workers {
-        hub.weekly_usage_complete(provider, worker.join().unwrap());
+        let result = worker.join().unwrap();
+        if let Err(error) = &result {
+            errors.push(format!("{provider}: {error}"));
+        }
+        hub.weekly_usage_complete(provider, result);
     }
     let mut lines = Vec::new();
     for provider in [ProviderId::Claude, ProviderId::Codex] {
-        assert!(
-            hub.weekly_usage().contains_key(&provider),
-            "{provider}: live weekly usage unavailable"
-        );
+        if !hub.weekly_usage().contains_key(&provider) {
+            errors.push(format!("{provider}: live weekly usage unavailable"));
+            continue;
+        }
         let row = sessions
             .iter()
             .find(|row| row.id.provider == provider && row.model.is_some())
@@ -10163,6 +10168,7 @@ fn details_weekly_usage_live_accounts() {
             .clone();
         let mut view = test_view(Grouping::Project, false);
         view.weekly_usage = hub.weekly_usage().clone();
+        view.status_filter = usize::from(row.status == SessionStatus::Inactive);
         view.set_sessions(vec![row], false);
         let area = Rect::new(0, 0, 160, 80);
         let mut buffer = Buffer::empty(area);
@@ -10180,8 +10186,14 @@ fn details_weekly_usage_live_accounts() {
     if let Some(path) = std::env::var_os("AGENTS_USAGE_PROBE_RESULT") {
         std::fs::write(
             path,
-            serde_json::to_vec(&serde_json::json!({"verdict":"passed","lines":lines})).unwrap(),
+            serde_json::to_vec(&serde_json::json!({
+                "verdict": if errors.is_empty() { "passed" } else { "failed" },
+                "lines": lines,
+                "errors": errors,
+            }))
+            .unwrap(),
         )
         .unwrap();
     }
+    assert!(errors.is_empty(), "{}", errors.join("; "));
 }
