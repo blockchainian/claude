@@ -484,9 +484,10 @@ mod tests {
             .contents()
             .contains('❯')
         {
-            app.receiver
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .unwrap();
+            // Output wakes the dashboard again only after it draws the last frame.
+            terminal.drawn();
+            assert!(Instant::now() < deadline, "terminal never drew Claude's input");
+            let _ = app.receiver.recv_timeout(Duration::from_millis(50));
         }
         app.view.show_terminal(id.clone(), terminal.screen.clone());
         app.terminal = Some(terminal);
