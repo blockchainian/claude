@@ -2,8 +2,6 @@ use super::*;
 
 /// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
-/// Wheel reports a scrollable log entry absorbs at its edge before the wheel leaves it.
-pub(super) const EDGE_RESISTANCE_WHEELS: usize = 1;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
@@ -910,13 +908,7 @@ impl View {
                     selector.selected =
                         super::navigation::step(selector.selected, selector.len(), 1, code);
                 } else if over_log || over_details {
-                    self.scroll_content_rows(
-                        forward,
-                        over_log,
-                        mouse.row,
-                        WHEEL_ROWS,
-                        EDGE_RESISTANCE_WHEELS,
-                    );
+                    self.scroll_content_rows(forward, over_log, mouse.row, WHEEL_ROWS, true);
                 }
             }
             _ => {}
@@ -940,17 +932,17 @@ impl View {
 
     /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
     pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) -> bool {
-        self.scroll_content_rows(forward, over_log, row, 1, 0)
+        self.scroll_content_rows(forward, over_log, row, 1, false)
     }
 
-    /// A scrollable log entry absorbs `edge_resistance` calls at its edge before the selection moves.
+    /// With `wheel`, a scrollable log entry holds one report at its title in the direction of travel.
     fn scroll_content_rows(
         &mut self,
         forward: bool,
         over_log: bool,
         row: u16,
         rows: usize,
-        edge_resistance: usize,
+        wheel: bool,
     ) -> bool {
         let over_log_detail = {
             let viewport = self.viewport.borrow();
@@ -961,18 +953,24 @@ impl View {
         }
         let mut viewport = self.viewport.borrow_mut();
         if over_log && over_log_detail {
-            if viewport.log_detail_state.scroll_rows(forward, row, rows) {
-                viewport.log_detail_scroll = viewport.log_detail_state.position();
-                viewport.log_detail_edge_wheels = 0;
+            let title_hold = viewport.log_detail_title_hold.take();
+            if wheel && title_hold == Some(forward) && viewport.log_detail_max > 0 {
                 true
-            } else if viewport.log_detail_max > 0
-                && viewport.log_detail_edge_wheels < edge_resistance
-            {
-                viewport.log_detail_edge_wheels += 1;
+            } else if viewport.log_detail_state.scroll_rows(forward, row, rows) {
+                viewport.log_detail_scroll = viewport.log_detail_state.position();
+                if wheel && !forward && viewport.log_detail_scroll == 0 {
+                    viewport.log_detail_title_hold = Some(false);
+                }
                 true
             } else {
                 drop(viewport);
+                let selected = self.log_selected;
                 self.move_log_selection(forward);
+                if wheel && self.log_selected != selected {
+                    let mut viewport = self.viewport.borrow_mut();
+                    viewport.log_detail_entry = Some(forward);
+                    viewport.log_detail_title_hold = forward.then_some(true);
+                }
                 false
             }
         } else if over_log {
@@ -1425,7 +1423,7 @@ impl View {
                     if steps == 1 {
                         self.scroll_content_row(forward, true, row);
                     } else {
-                        self.scroll_content_rows(forward, true, row, usize::from(steps), 0);
+                        self.scroll_content_rows(forward, true, row, usize::from(steps), false);
                     }
                 }
             }

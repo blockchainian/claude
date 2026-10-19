@@ -378,14 +378,16 @@ impl View {
             (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
         ));
         let switched = viewport.log_detail_key != Some(key);
+        let entry = viewport.log_detail_entry.take().filter(|_| switched);
         if switched {
-            viewport.log_detail_edge_wheels = 0;
             let mut left = std::mem::take(&mut viewport.log_detail_state);
             left.left_keys = Some(std::mem::take(&mut left.keys));
             if let Some(previous) = viewport.log_detail_key.replace(key) {
                 viewport.log_detail_saved.insert(previous, left);
             }
-            viewport.log_detail_state = viewport.log_detail_saved.remove(&key).unwrap_or_default();
+            let saved = viewport.log_detail_saved.remove(&key);
+            // Entering by wheel starts at the end the wheel came from.
+            viewport.log_detail_state = saved.filter(|_| entry.is_none()).unwrap_or_default();
         }
         let height = usize::from(body_area.height);
         let requested_scroll = viewport.log_detail_scroll;
@@ -415,13 +417,27 @@ impl View {
             };
             None
         };
-        let rows = state.layout(
+        let mut rows = state.layout(
             &vec![1; layout.lines.len()],
             &layout.bodies,
             allocations.as_deref(),
             0..0,
             height,
         );
+        if entry == Some(false) {
+            if allocations.is_some() {
+                state.reveal = state.hidden.clone();
+            } else {
+                state.offset = rows.max;
+            }
+            rows = state.layout(
+                &vec![1; layout.lines.len()],
+                &layout.bodies,
+                allocations.as_deref(),
+                0..0,
+                height,
+            );
+        }
         viewport.log_detail_max = rows.max;
         viewport.log_detail_scroll = rows.scroll;
         rows
@@ -513,6 +529,8 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_detail_layout = None;
             viewport.log_detail_scroll = 0;
+            viewport.log_detail_entry = None;
+            viewport.log_detail_title_hold = None;
         }
         if self.following_log() {
             self.viewport.borrow_mut().log_unseen = 0;

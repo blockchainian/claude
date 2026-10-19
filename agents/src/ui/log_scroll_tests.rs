@@ -1,4 +1,3 @@
-use super::input::EDGE_RESISTANCE_WHEELS;
 use super::*;
 use crate::providers::Provider;
 
@@ -363,7 +362,7 @@ fn log_scroll_new_rows_do_not_consume_short_entry_navigation() {
 }
 
 #[test]
-fn log_scroll_wheel_stops_at_title_before_changing_event() {
+fn log_scroll_wheel_pauses_at_title_before_changing_event() {
     let (mut view, now) = fixture(true);
     panel(&view, now);
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -377,11 +376,9 @@ fn log_scroll_wheel_stops_at_title_before_changing_event() {
     );
     panel(&view, now);
     assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
-    for _ in 0..EDGE_RESISTANCE_WHEELS {
-        wheel(&mut view, false);
-        panel(&view, now);
-        assert_eq!(view.log_selected, Some(1), "the top edge resists leaving");
-    }
+    wheel(&mut view, false);
+    panel(&view, now);
+    assert_eq!(view.log_selected, Some(1), "the title holds one wheel");
     wheel(&mut view, false);
     assert_eq!(view.log_selected, Some(0));
 }
@@ -437,45 +434,69 @@ fn log_scroll_wheel_stops_at_bottom_before_changing_event() {
     panel(&view, now);
     assert_eq!(view.log_selected, Some(1));
     assert_eq!(view.viewport.borrow().log_detail_scroll, max);
-    for _ in 0..EDGE_RESISTANCE_WHEELS {
-        wheel(&mut view, true);
-        panel(&view, now);
-        assert_eq!(
-            view.log_selected,
-            Some(1),
-            "the bottom edge resists leaving"
-        );
-    }
     wheel(&mut view, true);
     assert_eq!(view.log_selected, Some(2));
 }
 
 #[test]
-fn log_scroll_edge_resistance_restarts_after_scrolling_back() {
+fn log_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_once() {
     let (mut view, now) = fixture(true);
-    panel(&view, now);
-    let max = view.viewport.borrow().log_detail_max;
-    for _ in 0..max {
-        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    for _ in 0..2 {
+        view.select_log_event(Some(0));
         panel(&view, now);
-    }
-    for _ in 0..EDGE_RESISTANCE_WHEELS {
         wheel(&mut view, true);
         panel(&view, now);
-    }
-    wheel(&mut view, false);
-    panel(&view, now);
-    wheel(&mut view, true);
-    panel(&view, now);
-    for _ in 0..EDGE_RESISTANCE_WHEELS {
+        assert_eq!(view.log_selected, Some(1));
+        assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
         wheel(&mut view, true);
         panel(&view, now);
         assert_eq!(
-            view.log_selected,
-            Some(1),
-            "returning to the edge resists again"
+            view.viewport.borrow().log_detail_scroll,
+            0,
+            "the title holds one wheel"
         );
+        let max = view.viewport.borrow().log_detail_max;
+        while view.viewport.borrow().log_detail_scroll < max {
+            wheel(&mut view, true);
+            panel(&view, now);
+            assert_eq!(view.log_selected, Some(1));
+        }
+        // Reentering an entry left at its bottom starts at its title again.
+        wheel(&mut view, true);
+        assert_eq!(view.log_selected, Some(2));
     }
+}
+
+#[test]
+fn log_scroll_wheel_entering_from_below_starts_at_bottom() {
+    let (mut view, now) = fixture(true);
+    view.select_log_event(Some(2));
+    panel(&view, now);
+    wheel(&mut view, false);
+    panel(&view, now);
+    assert_eq!(view.log_selected, Some(1));
+    let max = view.viewport.borrow().log_detail_max;
+    assert!(max > 0);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, max);
+    while view.viewport.borrow().log_detail_scroll > 0 {
+        wheel(&mut view, false);
+        panel(&view, now);
+        assert_eq!(view.log_selected, Some(1));
+    }
+    wheel(&mut view, false);
+    panel(&view, now);
+    assert_eq!(view.log_selected, Some(1), "the title holds one wheel");
+    wheel(&mut view, false);
+    assert_eq!(view.log_selected, Some(0));
+}
+
+#[test]
+fn log_scroll_wheel_reversing_at_title_does_not_pause() {
+    let (mut view, now) = fixture(true);
+    view.select_log_event(Some(0));
+    panel(&view, now);
     wheel(&mut view, true);
-    assert_eq!(view.log_selected, Some(2));
+    panel(&view, now);
+    wheel(&mut view, false);
+    assert_eq!(view.log_selected, Some(0));
 }
