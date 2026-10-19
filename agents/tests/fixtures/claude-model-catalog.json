@@ -21,7 +21,8 @@
               "max"
             ],
             "default_effort": "medium"
-          }
+          },
+          "short_name": "Opus"
         },
         {
           "id": "claude-fable-5-1",
@@ -37,7 +38,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Fable"
         },
         {
           "id": "claude-sonnet-5-5",
@@ -52,7 +54,8 @@
               "max"
             ],
             "default_effort": "medium"
-          }
+          },
+          "short_name": "Sonnet"
         },
         {
           "id": "claude-haiku-5-5",
@@ -67,13 +70,15 @@
               "max"
             ],
             "default_effort": "medium"
-          }
+          },
+          "short_name": "Haiku"
         },
         {
           "id": "claude-haiku-4-5-20251001",
           "name": "Haiku 4.5",
           "section": "overflow",
-          "runtime": {}
+          "runtime": {},
+          "short_name": "Haiku"
         },
         {
           "id": "claude-sonnet-5",
@@ -88,7 +93,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Sonnet"
         },
         {
           "id": "claude-opus-5",
@@ -103,7 +109,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Opus"
         },
         {
           "id": "claude-fable-5",
@@ -118,7 +125,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Fable"
         },
         {
           "id": "claude-opus-4-8",
@@ -133,7 +141,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Opus"
         },
         {
           "id": "claude-opus-4-7",
@@ -148,7 +157,8 @@
               "max"
             ],
             "default_effort": "xhigh"
-          }
+          },
+          "short_name": "Opus"
         },
         {
           "id": "claude-opus-4-6",
@@ -162,7 +172,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Opus"
         },
         {
           "id": "claude-sonnet-4-6",
@@ -176,7 +187,8 @@
               "max"
             ],
             "default_effort": "high"
-          }
+          },
+          "short_name": "Sonnet"
         }
       ],
       "provider_alias_targets": {

@@ -99,6 +99,7 @@ pub struct ModelChoice {
     pub id: String,
     /// The provider's own name for the model, such as `Opus 5.5`.
     pub label: String,
+    pub family: String,
     pub efforts: Vec<String>,
     pub default_effort: Option<String>,
 }

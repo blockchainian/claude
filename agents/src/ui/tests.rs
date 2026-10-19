@@ -4534,6 +4534,7 @@ fn list_row_highlights_include_column_padding() {
                             ),
                             values: vec!["claude-sonnet-5-5".into(), "claude-haiku-5-5".into()],
                             labels: vec!["claude-sonnet-5-5".into(), "claude-haiku-5-5".into()],
+                            families: vec!["Sonnet".into(), "Haiku".into()],
                         },
                         0,
                     ));

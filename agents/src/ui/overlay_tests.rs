@@ -125,6 +125,7 @@ fn picker(kind: &str, check_underlines: bool) {
                 target,
                 values: vec!["recorded".into()],
                 labels: vec!["Recorded model".into()],
+                families: vec!["Recorded".into()],
             },
             "effort" => SelectorKind::Effort {
                 target,

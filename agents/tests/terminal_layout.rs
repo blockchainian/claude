@@ -3090,3 +3090,6 @@ fn terminal_duration_sort_jump_position() {
 
 #[path = "support/terminal_link_overlays.rs"]
 mod terminal_link_overlays;
+
+#[path = "support/terminal_model_families.rs"]
+mod terminal_model_families;
