@@ -255,3 +255,109 @@ fn overlay_notice_covers_links_and_clicks() {
 fn overlay_picker_blank_click_does_not_open_or_copy() {
     picker("model", false);
 }
+
+#[test]
+fn overlay_confirmation_emits_left_border_after_wide_text() {
+    use ratatui::{backend::Backend, prelude::CrosstermBackend};
+    let (_directory, view) = recorded_view();
+    for area in [Rect::new(0, 0, 120, 30), Rect::new(5, 3, 120, 30)] {
+        let dialog = ConfirmDialog {
+            action: ConfirmAction::Delete(view.selected_id().unwrap().clone()),
+            title: "Recorded task".into(),
+            confirm: false,
+        };
+        let mut probe = Buffer::empty(area);
+        view.render_confirm_dialog(&dialog, area, &mut probe);
+        let cover = view.viewport.borrow().overlays.last().unwrap().area;
+        for (text, linked) in [("中", false), ("a", false), ("中", true), ("a", true)] {
+            let mut before = Buffer::empty(area);
+            for y in cover.y..cover.bottom() {
+                before.set_string(cover.x - 1, y, text, Style::default());
+                if linked {
+                    super::super::links::underline(
+                        &mut before,
+                        &[(
+                            Rect::new(cover.x - 1, y, text.width() as u16, 1),
+                            _directory.path().into(),
+                        )],
+                    );
+                }
+            }
+            let mut after = before.clone();
+            view.render_confirm_dialog(&dialog, area, &mut after);
+            let updates = before.diff(&after);
+            for y in cover.y..cover.bottom() {
+                let border = if y == cover.y {
+                    "┌"
+                } else if y + 1 == cover.bottom() {
+                    "└"
+                } else {
+                    "│"
+                };
+                assert!(
+                    updates.iter().any(|(x, row, cell)| *x == cover.x
+                        && *row == y
+                        && cell.symbol() == border),
+                    "{border} at {},{y} was skipped after {text}",
+                    cover.x
+                );
+            }
+            let mut bytes = Vec::new();
+            CrosstermBackend::new(&mut bytes)
+                .draw(updates.into_iter())
+                .unwrap();
+            let mut terminal = vt100::Parser::new(area.bottom(), area.right(), 0);
+            terminal.process(&bytes);
+            assert_eq!(
+                terminal.screen().cell(cover.y, cover.x).unwrap().contents(),
+                "┌"
+            );
+            for y in cover.y..cover.bottom() {
+                if text == "中" {
+                    assert_eq!(after[(cover.x - 1, y)], ratatui::buffer::Cell::default());
+                } else {
+                    assert_eq!(after[(cover.x - 1, y)], before[(cover.x - 1, y)]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn overlay_confirmation_clears_cut_right_half_and_keeps_whole_neighbor() {
+    let (_directory, view) = recorded_view();
+    let area = Rect::new(0, 0, 120, 30);
+    let dialog = ConfirmDialog {
+        action: ConfirmAction::Delete(view.selected_id().unwrap().clone()),
+        title: "Recorded task".into(),
+        confirm: false,
+    };
+    let mut probe = Buffer::empty(area);
+    view.render_confirm_dialog(&dialog, area, &mut probe);
+    let cover = view.viewport.borrow().overlays.last().unwrap().area;
+    for cut in [true, false] {
+        let mut before = Buffer::empty(area);
+        for y in cover.y..cover.bottom() {
+            before.set_string(cover.right() - u16::from(cut), y, "中", Style::default());
+            // The panel background also covers a wide character's trailing cell.
+            before[(cover.right(), y)].set_bg(ratatui::style::Color::Red);
+        }
+        let mut after = before.clone();
+        view.render_confirm_dialog(&dialog, area, &mut after);
+        for y in cover.y..cover.bottom() {
+            if cut {
+                assert_eq!(
+                    after[(cover.right(), y)],
+                    ratatui::buffer::Cell::default(),
+                    "cut right half at {y}"
+                );
+            } else {
+                assert_eq!(
+                    after[(cover.right(), y)],
+                    before[(cover.right(), y)],
+                    "whole neighbor at {y}"
+                );
+            }
+        }
+    }
+}

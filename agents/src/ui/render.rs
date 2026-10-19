@@ -290,6 +290,29 @@ impl View {
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }
+    pub(super) fn clear_overlay(&self, area: Rect, modal: bool, buf: &mut Buffer) {
+        use ratatui::buffer::CellWidth;
+
+        self.viewport
+            .borrow_mut()
+            .overlays
+            .push(Overlay { area, modal });
+        let area = area.intersection(buf.area);
+        if area.is_empty() {
+            return;
+        }
+        // Clear the outside half of any wide character split by an overlay edge.
+        for y in area.y..area.bottom() {
+            if area.x > buf.area.x && buf[(area.x - 1, y)].cell_width() > 1 {
+                buf[(area.x - 1, y)].reset();
+            }
+            if area.right() < buf.area.right() && buf[(area.right() - 1, y)].cell_width() > 1 {
+                buf[(area.right(), y)].reset();
+            }
+        }
+        Clear.render(area, buf);
+    }
+
     pub(crate) fn render_at(
         &self,
         area: Rect,
@@ -387,11 +410,7 @@ impl View {
                 layout.header.height,
                 layout.footer.y.saturating_sub(layout.header.bottom()),
             ));
-            self.viewport.borrow_mut().overlays.push(Overlay {
-                area: body,
-                modal: true,
-            });
-            Clear.render(body, buf);
+            self.clear_overlay(body, true, buf);
             let mut lines = self.center_help_lines(body.width);
             if lines.len() > usize::from(body.height) {
                 lines.truncate(usize::from(body.height.saturating_sub(1)));
@@ -425,11 +444,7 @@ impl View {
             && !layout.list.is_empty()
         {
             let bottom = row(layout.list, layout.list.height - 1, 1);
-            self.viewport.borrow_mut().overlays.push(Overlay {
-                area: bottom,
-                modal: false,
-            });
-            Clear.render(bottom, buf);
+            self.clear_overlay(bottom, false, buf);
             line(notice.clone().dim(), bottom, buf);
         }
         // Activity and task status share the rule immediately above the prompt.
@@ -616,12 +631,8 @@ impl View {
             width,
             height,
         );
-        Clear.render(dialog, buf);
+        self.clear_overlay(dialog, true, buf);
         let viewport = &mut *self.viewport.borrow_mut();
-        viewport.overlays.push(Overlay {
-            area: dialog,
-            modal: true,
-        });
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
         viewport.confirm_options = [false, true]

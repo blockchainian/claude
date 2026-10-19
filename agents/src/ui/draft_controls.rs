@@ -706,11 +706,7 @@ impl View {
         let Some(selector) = &self.selector else {
             return;
         };
-        self.viewport
-            .borrow_mut()
-            .overlays
-            .push(Overlay { area, modal: false });
-        Clear.render(area, buf);
+        self.clear_overlay(area, false, buf);
         // Both branch controls take the bottom row, below the scrolling branches.
         let create = selector.create_index().filter(|_| area.height > 0);
         let list = if create.is_some() {

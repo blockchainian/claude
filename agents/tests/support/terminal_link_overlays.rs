@@ -187,3 +187,94 @@ fn terminal_link_overlays_cover_underlines_and_blank_clicks() {
     .unwrap();
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_confirmation_border_covers_wide_text() {
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/overlay-wide");
+    std::fs::create_dir_all(&output).unwrap();
+    let body = format!("{}\n\n", "中".repeat(100)).repeat(20);
+    let records = include_str!("../fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            match record["type"].as_str() {
+                Some("user") => record["message"]["content"] = body.clone().into(),
+                Some("assistant") => record["message"]["content"][0]["text"] = body.clone().into(),
+                _ => {}
+            }
+            record.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (_directory, tmux, _) = start_probe_with_transcript("wide-overlay", &records);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "202", "-y", "50"]);
+    tmux.wait_for(|text| text.lines().any(|line| line.width() == 202));
+    for _ in 0..12 {
+        tmux.mouse(65, 80, 5, false);
+    }
+    let baseline = capture(&tmux);
+    std::fs::write(output.join("before.ansi"), &baseline).unwrap();
+    let before = captured_screen(&baseline, 202, 50);
+    tmux.mouse(0, 5, 3, true);
+    tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
+    let dialog = tmux.capture_when(|text| text.contains("Permanently delete “"));
+    std::fs::write(output.join("dialog.txt"), &dialog).unwrap();
+    let ansi = capture(&tmux);
+    std::fs::write(output.join("dialog.ansi"), &ansi).unwrap();
+    let screen = captured_screen(&ansi, 202, 50);
+    let top = dialog.lines().position(|line| line.contains('┐')).unwrap();
+    let bottom = dialog.lines().position(|line| line.contains('┘')).unwrap();
+    let left = 61;
+    let mut crossings = 0;
+    for y in top..=bottom {
+        if before.screen().cell(y as u16, left - 1).unwrap().is_wide() {
+            assert!(
+                before
+                    .screen()
+                    .cell(y as u16, left)
+                    .unwrap()
+                    .is_wide_continuation()
+            );
+            crossings += 1;
+            let border = if y == top {
+                "┌"
+            } else if y == bottom {
+                "└"
+            } else {
+                "│"
+            };
+            assert_eq!(
+                screen.screen().cell(y as u16, left).unwrap().contents(),
+                border,
+                "border at {left},{y}"
+            );
+        }
+    }
+    assert!(
+        crossings > 0,
+        "Chinese must cross the dialog's left edge: {baseline}"
+    );
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|text| !text.contains("Permanently delete “"));
+    let restored = captured_screen(&capture(&tmux), 202, 50);
+    for y in top..=bottom {
+        if before.screen().cell(y as u16, left - 1).unwrap().is_wide() {
+            assert_eq!(
+                restored
+                    .screen()
+                    .cell(y as u16, left - 1)
+                    .unwrap()
+                    .contents(),
+                "中"
+            );
+        }
+    }
+    let verdict = serde_json::json!({"verdict":"pass", "wide_crossings":crossings, "border_visible":true, "background_restored":true});
+    std::fs::write(
+        output.join("verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}
