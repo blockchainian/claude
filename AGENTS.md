@@ -30,7 +30,20 @@ The per-plugin gate a plan's `Checks` command composes:
 
 ## Tests
 
-- Run the relevant tests.
+> Run the relevant tests.
+
+- `npm test` — every suite
+- `npm run test:marketplace` — the marketplace manifest and shared-engine checks
+- `npm run test:codex` — codex-manager against a fake app-server daemon
+- `npm run test:feature` — the feature plugin's plan checkers, workstream.sh, watch-ci and retro
+- `npm run test:proxy` — the capture logic and WireGuard key derivation
+- `npm run test:intel` — the intel skills; the render suites need Chrome and uv
+- `npm run test:web` — the heap-snapshot diff and the design check; needs uv
+- `npm run test:mobile` — the phone-session hook, simulator claim, frame diff, stitch and design check; needs uv
+- `npm run test:secrets` — the local secrets engine and adapter contract
+- `npm run test:creator` — account pick, args, stats and sound rows
+- `npm run test:computer-use` — the window capture
+- `npm run test:agents` — the `agents` dashboard
 
 ## Version control
 
