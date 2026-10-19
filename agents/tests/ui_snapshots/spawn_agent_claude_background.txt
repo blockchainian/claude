@@ -12,8 +12,4 @@ Spawn agent                                                                     
                                                                   first convert it into a background job, then claude attach it, so the panel can detach freely.
 
                                                                   Answer with evidence (command output, help text, docs text quoted verbatim, files under ~/.claude such as
-                                                                  jobs/ or session registries). Never quote a WebSearch/WebFetch summary as fact; quote raw text. Mark
-                                                                  anything unverified as "not checked".
-                                                                  1. Is there a supported way to turn an already-running foreground interactive session into a background
-                                                                     job? From inside (slash command, keybinding like /bg) and, importantly, from OUTSIDE the process (CLI
-                                                                     subcommand, signal, IPC, registry file). Check claude --help, claude <sub> --help for every subcommand,…
+                                                                  jobs/ or session registries). Never quote a WebSearch/WebFetch summary as fact; quote raw text. Mark…
