@@ -307,21 +307,13 @@ impl QuestionView {
         None
     }
 
-    /// Moves the focus to a row without answering.
-    pub(super) fn focus(&mut self, index: usize) {
-        if self.reviewing() {
-            self.review_focus = index.min(REVIEW_ROWS.len() - 1);
-        } else if index < self.rows() {
-            self.set_focus(index);
-        }
-    }
-
     pub(super) fn show_page(&mut self, page: usize) {
         if page < self.tabs() {
             self.page = page;
         }
     }
 
+    #[cfg(test)]
     pub(super) fn page(&self) -> usize {
         self.page
     }

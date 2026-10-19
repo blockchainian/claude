@@ -8,8 +8,8 @@ pub(super) struct Questions {
     views: HashMap<SessionKey, QuestionView>,
     closed: HashMap<SessionKey, crate::ask::Ask>,
     pub(super) sending: HashSet<SessionKey>,
-    /// The last clicked option, as session, question and row, for double-click detection.
-    last_click: Option<(SessionKey, usize, usize, Instant)>,
+    /// The last activated position, for suppressing the second release of a double click.
+    last_click: Option<(SessionKey, u16, u16, Instant)>,
 }
 
 impl Questions {
@@ -122,8 +122,7 @@ impl View {
         }
     }
 
-    /// Wheel steps options, or questions over the tab row; a click focuses an option or
-    /// shows a question, and a double click answers with the option.
+    /// Wheel steps options or question tabs; a click chooses an option or shows a tab.
     pub(super) fn question_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
         let prompt = self.viewport.borrow().prompt;
         if !prompt.contains((mouse.column, mouse.row).into()) {
@@ -149,19 +148,18 @@ impl View {
                 Some(Target::Tabs(Some(page))) => view.show_page(page),
                 Some(Target::Option(row)) => {
                     let now = Instant::now();
-                    let page = view.page();
                     let double = self.questions.last_click.take().is_some_and(
-                        |(session, last_page, last_row, at)| {
-                            (session, last_page, last_row) == (id.clone(), page, row)
+                        |(session, column, row, at)| {
+                            (session, column, row) == (id.clone(), mouse.column, mouse.row)
                                 && now.duration_since(at) < interval
                         },
                     );
-                    if double {
+                    if !double {
+                        self.questions.last_click =
+                            Some((id.clone(), mouse.column, mouse.row, now));
                         let outcome = view.choose(row);
                         return Some(self.question_outcome(id, outcome));
                     }
-                    view.focus(row);
-                    self.questions.last_click = Some((id, page, row, now));
                 }
                 _ => {}
             },
@@ -456,14 +454,12 @@ mod tests {
     }
 
     #[test]
-    fn ask_flow_click_focuses_and_double_click_answers() {
+    fn ask_flow_single_click_answers() {
         let mut view = fixture();
         let before = screen(&view, 100, 40);
         let green = row_of(&before, "2. Green");
-        assert_eq!(click(&mut view, 10, green), None);
-        assert!(screen(&view, 100, 40).contains("› 2. Green"));
         let Some(Action::AnswerQuestions { answer, .. }) = click(&mut view, 10, green) else {
-            panic!("double click did not answer")
+            panic!("single click did not answer")
         };
         assert_eq!(answer.answers["Probe single choice?"].answers, ["Green"]);
 
@@ -480,6 +476,49 @@ mod tests {
             answer.answers["Probe single choice?"].other.as_deref(),
             Some("x")
         );
+    }
+
+    fn multi_fixture() -> View {
+        let mut view = fixture();
+        let mut rows = view.rows.clone();
+        let crate::ask::AskKind::Questions { questions, .. } =
+            &mut rows[0].ask.as_mut().unwrap().kind;
+        questions[0].multi = true;
+        view.set_sessions(rows, false);
+        view
+    }
+
+    fn selected_answers(view: &mut View) -> Vec<String> {
+        view.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        let Some(Action::AnswerQuestions { answer, .. }) =
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        else {
+            panic!("review did not submit")
+        };
+        answer.answers["Probe single choice?"].answers.clone()
+    }
+
+    #[test]
+    fn ask_flow_multi_single_click_toggles() {
+        let mut view = multi_fixture();
+        let green = row_of(&screen(&view, 100, 40), "2. [ ] Green");
+        assert_eq!(click(&mut view, 10, green), None);
+        assert_eq!(selected_answers(&mut view), ["Green"]);
+        view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        view.questions.last_click = None;
+        screen(&view, 100, 40);
+        assert_eq!(click(&mut view, 10, green), None);
+        assert!(selected_answers(&mut view).is_empty());
+    }
+
+    #[test]
+    fn ask_flow_multi_double_click_toggles_only_once() {
+        let mut view = multi_fixture();
+        let green = row_of(&screen(&view, 100, 40), "2. [ ] Green");
+        assert_eq!(click(&mut view, 10, green), None);
+        assert!(screen(&view, 100, 40).contains("2. [x] Green"));
+        assert_eq!(click(&mut view, 10, green), None);
+        assert_eq!(selected_answers(&mut view), ["Green"]);
     }
 
     #[test]
