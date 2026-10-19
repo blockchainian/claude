@@ -10,7 +10,7 @@
                                                                          │ Project
                                                                          │ /tmp/project
                                                                          │
-                                                                         │ Model: parent-model
+                                                                         │ parent-model
                                                                          │
                                                                          │
                                                                          │

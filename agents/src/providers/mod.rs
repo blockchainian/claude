@@ -87,6 +87,32 @@ pub struct InputChoices {
     pub efforts: Vec<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WeeklyUsage {
+    pub left_percent: u8,
+    pub resets_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl WeeklyUsage {
+    pub fn from_used_percent(
+        used: f64,
+        resets_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> io::Result<Self> {
+        if !used.is_finite() || !(0.0..=100.0).contains(&used) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid usage percentage",
+            ));
+        }
+        Ok(Self {
+            left_percent: (100.0 - used).round() as u8,
+            resets_at,
+        })
+    }
+}
+
+pub type WeeklyUsageJob = Box<dyn FnOnce() -> io::Result<Option<WeeklyUsage>> + Send>;
+
 pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
 
 pub trait Provider {
@@ -98,6 +124,10 @@ pub trait Provider {
         None
     }
     fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<Command>> {
+        None
+    }
+    /// Builds a background request without performing network or credential I/O.
+    fn weekly_usage(&self) -> Option<WeeklyUsageJob> {
         None
     }
     fn input_choices(&self) -> InputChoices {

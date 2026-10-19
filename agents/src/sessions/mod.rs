@@ -1,6 +1,7 @@
 //! Merged session snapshots and filesystem notifications.
 
 mod watcher;
+mod weekly_usage;
 
 use crate::model::SessionStatus;
 use crate::providers::{Capabilities, Provider, ProviderId, Snapshot};
@@ -12,6 +13,7 @@ pub use watcher::watch;
 pub struct Hub {
     providers: Vec<Box<dyn Provider>>,
     pages: usize,
+    weekly_usage: weekly_usage::WeeklyUsageCache,
 }
 
 impl Hub {
@@ -19,6 +21,7 @@ impl Hub {
         Self {
             providers,
             pages: 1,
+            weekly_usage: weekly_usage::WeeklyUsageCache::default(),
         }
     }
 
@@ -42,6 +45,33 @@ impl Hub {
             .iter()
             .map(|provider| (provider.id(), provider.input_choices()))
             .collect()
+    }
+
+    pub fn weekly_usage_jobs(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Vec<(ProviderId, crate::providers::WeeklyUsageJob)> {
+        self.providers
+            .iter()
+            .filter_map(|provider| {
+                let job = provider.weekly_usage()?;
+                self.weekly_usage
+                    .start(provider.id(), now)
+                    .then_some((provider.id(), job))
+            })
+            .collect()
+    }
+
+    pub fn weekly_usage_complete(
+        &mut self,
+        provider: ProviderId,
+        result: io::Result<Option<crate::providers::WeeklyUsage>>,
+    ) {
+        self.weekly_usage.complete(provider, result);
+    }
+
+    pub fn weekly_usage(&self) -> &HashMap<ProviderId, crate::providers::WeeklyUsage> {
+        &self.weekly_usage.values
     }
 
     pub fn task_defaults(&self) -> Option<(ProviderId, io::Result<crate::tasks::TaskDefaults>)> {

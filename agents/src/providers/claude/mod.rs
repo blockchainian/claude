@@ -13,6 +13,7 @@ mod registry;
 mod settings;
 mod subagents;
 mod transcript;
+mod weekly_usage;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
@@ -649,6 +650,10 @@ impl Provider for ClaudeProvider {
                 .map(str::to_owned)
                 .into(),
         }
+    }
+
+    fn weekly_usage(&self) -> Option<crate::providers::WeeklyUsageJob> {
+        Some(Box::new(weekly_usage::read))
     }
 
     fn task_defaults(&self) -> Option<io::Result<crate::tasks::TaskDefaults>> {

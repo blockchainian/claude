@@ -7,7 +7,7 @@
     └ ○ Review results                           Ready              now  │ Project
   › └ ● Check files                              Working         1m ago  │ /tmp/child-project
                                                                          │
-                                                                         │ Model: child-model
+                                                                         │ child-model
                                                                          │
                                                                          │
                                                                          │

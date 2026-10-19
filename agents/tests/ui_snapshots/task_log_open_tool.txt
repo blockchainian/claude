@@ -7,7 +7,7 @@
                                                             │ Project
                                                             │ /tmp/project
                                                             │
-                                                            │ Model: Unknown
+                                                            │ Unknown
                                                             │
                                                             │
                                                             │
