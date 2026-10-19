@@ -17,8 +17,24 @@ fn git(directory: &std::path::Path, arguments: &[&str]) {
     );
 }
 
-fn fixture() -> (tempfile::TempDir, View) {
-    let directory = tempfile::tempdir().unwrap();
+struct FixtureDirectory {
+    directory: tempfile::TempDir,
+    _parent: tempfile::TempDir,
+}
+
+impl FixtureDirectory {
+    fn path(&self) -> &std::path::Path {
+        self.directory.path()
+    }
+}
+
+fn fixture() -> (FixtureDirectory, View) {
+    // Repository selectors browse the cwd's parent; keep that scan inside this fixture.
+    let parent = tempfile::tempdir().unwrap();
+    let directory = FixtureDirectory {
+        directory: tempfile::tempdir_in(parent.path()).unwrap(),
+        _parent: parent,
+    };
     let project = directory.path().join("config/projects/probe");
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
@@ -450,7 +466,7 @@ fn wizard_name_opens_repository_before_prompt() {
     assert!(!view.input_box.focused);
 }
 
-fn git_draft() -> (tempfile::TempDir, View) {
+fn git_draft() -> (FixtureDirectory, View) {
     let (directory, mut view) = fixture();
     git(directory.path(), &["init", "-b", "main"]);
     git(
