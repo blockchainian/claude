@@ -206,7 +206,7 @@ fn prompt_model_label_does_not_become_a_metadata_picker_target() {
 }
 
 #[test]
-fn rendered_draft_model_click_opens_and_double_click_applies_provider_choice() {
+fn rendered_draft_model_click_opens_and_single_click_applies_provider_choice() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
     let area = Rect::new(0, 0, 180, 52);
@@ -238,7 +238,6 @@ fn rendered_draft_model_click_opens_and_double_click_applies_provider_choice() {
         })
         .copied()
         .unwrap();
-    assert_eq!(click(&mut view, rect.x + 2, rect.y), None);
     assert_eq!(click(&mut view, rect.x + 2, rect.y), None);
     assert!(view.selector.is_none());
     assert_eq!(
@@ -1036,6 +1035,128 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
 }
 
 #[test]
+fn draft_effort_choices_are_unique_and_select_the_effective_value() {
+    let (directory, mut view) = fixture();
+    view.add_draft(setup(directory.path()));
+    for effort in [None, Some("high")] {
+        view.drafts[0].setup.effort = effort.map(str::to_owned);
+        view.open_field(Field::Effort);
+        let selector = view.selector.as_ref().unwrap();
+        let SelectorKind::Effort { values, labels, .. } = &selector.kind else {
+            panic!("expected effort choices");
+        };
+        assert_eq!(values, &["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(labels, values);
+        assert_eq!(values[selector.selected], effort.unwrap_or("medium"));
+    }
+}
+
+#[test]
+fn draft_model_choices_are_unique_and_select_the_effective_value() {
+    let (directory, mut view) = fixture();
+    let config = directory.path().join("config");
+    std::fs::write(
+        config.join("settings.json"),
+        r#"{"model":"claude-fable-5-1"}"#,
+    )
+    .unwrap();
+    let provider = crate::providers::claude::ClaudeProvider::new(config);
+    view.add_draft(setup(directory.path()));
+    view.set_draft_defaults(
+        directory.path(),
+        provider.task_defaults(directory.path()).unwrap().unwrap(),
+    );
+    for model in [None, Some("claude-sonnet-5-5")] {
+        view.drafts[0].setup.model = model.map(str::to_owned);
+        view.open_field(Field::Model);
+        let selector = view.selector.as_ref().unwrap();
+        let SelectorKind::Model { values, labels, .. } = &selector.kind else {
+            panic!("expected model choices");
+        };
+        let choices = &view.input_choices[&ProviderId::Claude].models;
+        assert_eq!(
+            values,
+            &choices
+                .iter()
+                .map(|model| model.id.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            labels,
+            &choices
+                .iter()
+                .map(|model| model.label.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            values[selector.selected],
+            model.unwrap_or("claude-fable-5-1")
+        );
+    }
+}
+
+#[test]
+fn selecting_draft_default_values_clears_overrides() {
+    let (directory, mut view) = fixture();
+    view.add_draft(setup(directory.path()));
+    view.drafts[0].setup.model = Some("claude-sonnet-5-5".into());
+    view.drafts[0].setup.effort = Some("high".into());
+    for (field, default) in [(Field::Model, "claude-opus-5-5"), (Field::Effort, "medium")] {
+        view.open_field(field);
+        let selector = view.selector.as_ref().unwrap();
+        let values = match &selector.kind {
+            SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. } => values,
+            _ => panic!("expected model or effort choices"),
+        };
+        let index = values.iter().position(|value| value == default).unwrap();
+        assert_eq!(view.apply_choice(index), None);
+    }
+    assert!(view.drafts[0].setup.model.is_none());
+    assert!(view.drafts[0].setup.effort.is_none());
+}
+
+#[test]
+fn session_choices_select_reported_values_and_keep_explicit_actions() {
+    let (_directory, mut view) = fixture();
+    let session = &mut view.rows[view.selected];
+    session.model = Some("claude-sonnet-5-5".into());
+    session.effort = Some("high".into());
+    session.background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+        awaits_prompt: false,
+    });
+    session.process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    let id = session.id.clone();
+    for (field, expected) in [(Field::Model, "claude-sonnet-5-5"), (Field::Effort, "high")] {
+        view.open_field(field);
+        let selector = view.selector.as_ref().unwrap();
+        let values = match &selector.kind {
+            SelectorKind::Model { values, .. } | SelectorKind::Effort { values, .. } => values,
+            _ => panic!("expected model or effort choices"),
+        };
+        assert_eq!(values[selector.selected], expected);
+        let selected = selector.selected;
+        let action = if field == Field::Model {
+            Action::SetModel {
+                id: id.clone(),
+                model: expected.into(),
+            }
+        } else {
+            Action::SetEffort {
+                id: id.clone(),
+                effort: expected.into(),
+            }
+        };
+        assert_eq!(view.apply_choice(selected), Some(action));
+    }
+}
+
+#[test]
 fn draft_defaults_are_visible_clickable_and_can_be_selected_without_an_override() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
@@ -1057,20 +1178,20 @@ fn draft_defaults_are_visible_clickable_and_can_be_selected_without_an_override(
         assert_eq!(text, expected);
         assert_eq!(click(&mut view, rect.x, rect.y), None);
         assert_eq!(view.selector.as_ref().unwrap().field(), field);
+        let selected = view.selector.as_ref().unwrap().selected;
         view.render_at(area, &mut buffer, Utc::now());
         let rect = view
             .viewport
             .borrow()
             .picker_rows
             .iter()
-            .find(|(_, index)| *index == 0)
+            .find(|(_, index)| *index == selected)
             .unwrap()
             .0;
         let text = (rect.x..rect.right())
             .map(|x| buffer[(x, rect.y)].symbol())
             .collect::<String>();
         assert_eq!(text.trim(), expected);
-        key(&mut view, KeyCode::Home);
         key(&mut view, KeyCode::Enter);
         let draft = view.selected_draft().unwrap();
         assert!(draft.setup.model.is_none());
@@ -1087,7 +1208,6 @@ fn draft_configured_defaults_survive_clearing_overrides() {
     view.add_draft(setup);
     for field in [Field::Model, Field::Effort] {
         view.open_field(field);
-        key(&mut view, KeyCode::Home);
         key(&mut view, KeyCode::Enter);
     }
     let buffer = render(&view);

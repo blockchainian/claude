@@ -476,7 +476,14 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     });
                     assert!(!picker.contains("Unknown"), "{picker}");
                     assert!(!picker.contains("Default"), "{picker}");
-                    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+                    assert_eq!(
+                        picker
+                            .lines()
+                            .filter(|line| line.split('│').any(|part| part.trim() == value))
+                            .count(),
+                        1,
+                        "{picker}"
+                    );
                     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
                     tmux.wait_for(|capture| {
                         capture.contains(title)

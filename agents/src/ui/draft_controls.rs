@@ -22,8 +22,7 @@ pub(super) enum ControlTarget {
 }
 
 /// The list the details panel shows to choose a new task's repository or branch, or a task's
-/// model or effort. Repository and branch clicks apply
-/// immediately; other lists apply on double click or Enter. A right click or Esc cancels.
+/// model or effort. Clicks and Enter apply immediately. A right click or Esc cancels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Origin {
     Wizard,
@@ -419,7 +418,7 @@ impl View {
     }
 
     pub(super) fn open_field(&mut self, field: Field) {
-        let (provider, target, model) = if let Some(draft) = self.selected_draft() {
+        let (provider, target, model, effort) = if let Some(draft) = self.selected_draft() {
             if draft.working || draft.job.is_some() {
                 return;
             }
@@ -444,7 +443,8 @@ impl View {
             (
                 draft.setup.provider,
                 ControlTarget::Draft(draft.id),
-                draft.setup.model.clone(),
+                self.draft_model(draft).map(str::to_owned),
+                self.draft_effort(draft).map(str::to_owned),
             )
         } else if let Some(session) = self.selected_row() {
             if matches!(field, Field::Branch | Field::Directory)
@@ -457,6 +457,7 @@ impl View {
                 session.id.provider,
                 ControlTarget::Session(session.id.clone()),
                 session.model.clone(),
+                session.effort.clone(),
             )
         } else {
             return;
@@ -464,48 +465,23 @@ impl View {
         let Some(choices) = self.input_choices.get(&provider) else {
             return;
         };
-        let effective_model = self
-            .selected_draft()
-            .and_then(|draft| self.draft_model(draft))
-            .or(model.as_deref());
-        let current_model = effective_model.and_then(|model| choices.model(model));
-        let (mut values, current) = match field {
+        let current_model = model.as_deref().and_then(|model| choices.model(model));
+        let (values, current) = match field {
             Field::Model => (
                 choices
                     .models
                     .iter()
                     .map(|model| model.id.clone())
                     .collect::<Vec<_>>(),
-                model
-                    .as_deref()
-                    .and_then(|model| choices.model(model))
-                    .map(|model| model.id.clone()),
+                current_model.map(|model| model.id.clone()),
             ),
             _ => (
                 current_model
                     .map(|model| model.efforts.clone())
                     .unwrap_or_default(),
-                match &target {
-                    ControlTarget::Draft(_) => self
-                        .selected_draft()
-                        .and_then(|draft| draft.setup.effort.clone()),
-                    ControlTarget::Session(_) => self
-                        .selected_row()
-                        .and_then(|session| session.effort.clone()),
-                },
+                effort,
             ),
         };
-        let default_label = self.selected_draft().and_then(|draft| match field {
-            Field::Model => draft
-                .defaults
-                .model
-                .as_deref()
-                .map(|model| self.model_text(provider, model)),
-            _ => self.draft_default_effort(draft).map(str::to_owned),
-        });
-        if default_label.is_some() {
-            values.insert(0, String::new());
-        }
         if values.is_empty() {
             return;
         }
@@ -515,9 +491,7 @@ impl View {
         let labels = values
             .iter()
             .map(|value| {
-                if value.is_empty() {
-                    default_label.clone().expect("draft default label")
-                } else if field == Field::Model {
+                if field == Field::Model {
                     self.model_text(provider, value)
                 } else {
                     value.clone()
@@ -600,7 +574,7 @@ impl View {
         }
     }
 
-    /// A single click's effect once no second click followed: folders open.
+    /// Opens the folder at the chosen repository row.
     pub(super) fn single_choice(&mut self, index: usize) -> Option<Action> {
         let selector = self.selector.as_mut()?;
         if let SelectorKind::Repository { entries, .. } = &mut selector.kind {
@@ -615,7 +589,7 @@ impl View {
         None
     }
 
-    /// Applies the choice at `index`: a double click, or Enter.
+    /// Applies the choice at `index`: a click, or Enter.
     pub(super) fn apply_choice(&mut self, index: usize) -> Option<Action> {
         if self
             .selected_draft()
@@ -673,11 +647,18 @@ impl View {
                 self.close_selector();
                 match target {
                     ControlTarget::Draft(id) => {
+                        let draft = self.drafts.iter().find(|draft| draft.id == id)?;
+                        let default = if model {
+                            draft.defaults.model.as_deref()
+                        } else {
+                            self.draft_default_effort(draft)
+                        };
+                        let value = (default != Some(value.as_str())).then_some(value);
                         let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
                         if model {
-                            draft.setup.model = (!value.is_empty()).then_some(value);
+                            draft.setup.model = value;
                         } else {
-                            draft.setup.effort = (!value.is_empty()).then_some(value);
+                            draft.setup.effort = value;
                         }
                         self.draft_changed(id);
                         None
@@ -823,24 +804,23 @@ mod tests {
     }
 
     #[test]
-    fn model_choices_select_on_click_apply_on_double_click_or_enter_and_cancel() {
+    fn model_and_effort_choices_apply_on_click_or_enter_and_cancel() {
         let directory = tempfile::tempdir().unwrap();
         let mut view = draft_view(directory.path(), directory.path());
         let area = Rect::new(3, 2, 160, 40);
         view.open_field(Field::Model);
         assert!(!view.input_box.focused);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 1);
+        let selector = view.selector.as_ref().unwrap();
+        let SelectorKind::Model { values, .. } = &selector.kind else {
+            panic!("expected model choices");
+        };
+        assert_eq!(values[selector.selected], "claude-opus-5-5");
+        let sonnet_index = values
+            .iter()
+            .position(|value| value == "claude-sonnet-5-5")
+            .unwrap();
         screen(&view, area);
-        let sonnet = row_of(&view, 3);
-        assert_eq!(click(&mut view, sonnet), None);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 3);
-        let later = Instant::now() + Duration::from_secs(1);
-        assert_eq!(view.flush_pending_click(later), None);
-        assert_eq!(
-            view.drafts[0].setup.model.as_deref(),
-            Some("claude-opus-5-5")
-        );
-        assert_eq!(click(&mut view, sonnet), None);
+        let sonnet = row_of(&view, sonnet_index);
         assert_eq!(click(&mut view, sonnet), None);
         assert!(view.selector.is_none());
         assert!(!view.input_box.focused);
@@ -849,9 +829,26 @@ mod tests {
             view.drafts[0].setup.model.as_deref(),
             Some("claude-sonnet-5-5")
         );
+        assert!(view.pending_click.is_none());
         view.open_field(Field::Effort);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        for code in [KeyCode::Char('j'), KeyCode::Down] {
+        let selector = view.selector.as_ref().unwrap();
+        let SelectorKind::Effort { values, .. } = &selector.kind else {
+            panic!("expected effort choices");
+        };
+        let low_index = values.iter().position(|value| value == "low").unwrap();
+        screen(&view, area);
+        let low = row_of(&view, low_index);
+        assert_eq!(click(&mut view, low), None);
+        assert!(view.selector.is_none());
+        assert!(view.pending_click.is_none());
+        assert_eq!(view.drafts[0].setup.effort.as_deref(), Some("low"));
+        view.open_field(Field::Effort);
+        let selector = view.selector.as_ref().unwrap();
+        let SelectorKind::Effort { values, .. } = &selector.kind else {
+            panic!("expected effort choices");
+        };
+        assert_eq!(values[selector.selected], "low");
+        for code in [KeyCode::Char('j'), KeyCode::Down, KeyCode::Down] {
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         }
         view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));

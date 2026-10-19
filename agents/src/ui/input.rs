@@ -23,8 +23,6 @@ pub(super) enum ClickTarget {
     Background(crate::model::BackgroundTask),
     Link(PathBuf),
     Heading(PathBuf),
-    /// A row of the details panel's selector.
-    Choice(usize),
     Title(SessionKey),
 }
 
@@ -114,7 +112,6 @@ impl View {
             }
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
             ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
-            ClickTarget::Choice(index) => self.single_choice(index),
             ClickTarget::Background(_) | ClickTarget::Title(_) => None,
         }
     }
@@ -469,13 +466,6 @@ impl View {
         {
             return Some(ClickTarget::Title(id.clone()));
         }
-        if let Some((_, index)) = viewport
-            .picker_rows
-            .iter()
-            .find(|(rect, _)| rect.contains(position))
-        {
-            return Some(ClickTarget::Choice(*index));
-        }
         if let Some(cwd) = self.heading_at(position) {
             return Some(ClickTarget::Heading(cwd));
         }
@@ -729,18 +719,8 @@ impl View {
                 if selector.branch_editor().is_some() && index + 1 == selector.len() {
                     return None;
                 }
-                if matches!(
-                    selector.kind,
-                    draft_controls::SelectorKind::Repository { .. }
-                        | draft_controls::SelectorKind::Branch { .. }
-                ) {
-                    self.pending_click = None;
-                    return self.apply_choice(index);
-                }
-                if self.defer_click(ClickTarget::Choice(index)) {
-                    return self.apply_choice(index);
-                }
-                return None;
+                self.pending_click = None;
+                return self.apply_choice(index);
             }
             let field = self
                 .viewport
