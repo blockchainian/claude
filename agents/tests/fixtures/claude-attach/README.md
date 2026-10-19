@@ -7,5 +7,7 @@ Claude Code 2.1.299, real temporary trusted git repositories, Haiku background s
 - `attach.raw`: unmodified tmux terminal output across the capture attempts.
 - `queued.screen.txt`: actual busy submission screen, including the input hint `Press up to edit queued messages`.
 - `queued-command.json`: one actual transcript attachment delivered at a tool boundary after Enter accepted input while busy. Its attachment type is `queued_command`; its prompt and session ID identify the delivered input.
+- `model-command.raw`: Claude Code 2.1.302 attach output from a temporary Haiku session after `/model claude-opus-5-5`. The header changes to Opus 5.5 and the editor clears without a `Switch model?` dialog. Only working directories are replaced with `/project` or `~/project`.
+- `model-footer.screen.txt`: the editor and status rows from a read-only attach to session `c2345efd-183f-414b-a67a-98e0fd4587ad`, Claude Code 2.1.302. Its long transcript has scrolled the header off screen; the status row shows `Opus 5.5 medium`.
 
 The ignored `real_attach_prompt_paste_busy_steer_interrupt_model` test exercises multiline bracketed paste, busy input acceptance, queued-command delivery in the same session, interrupt, and model changes with global defaults restored. Every background job it starts is removed; both global configuration files are restored byte-for-byte, including original absence.

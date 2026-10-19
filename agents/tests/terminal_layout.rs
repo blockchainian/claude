@@ -7,6 +7,9 @@ mod terminal_path_display;
 #[path = "support/terminal_prompt_cache.rs"]
 mod terminal_prompt_cache;
 
+#[path = "support/terminal_model_command.rs"]
+mod terminal_model_command;
+
 #[path = "support/terminal_weekly_usage.rs"]
 mod terminal_weekly_usage;
 

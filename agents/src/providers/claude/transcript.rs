@@ -1,6 +1,6 @@
-use crate::providers::text::printable;
 use crate::ask::{AskKind, Question, QuestionOption};
 use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
+use crate::providers::text::printable;
 #[cfg(test)]
 use crate::providers::tool::question_texts;
 use chrono::{DateTime, Utc};
@@ -16,6 +16,7 @@ const CHUNK: u64 = 64 * 1024;
 pub(super) struct Summary {
     pub tasks: Vec<SessionTask>,
     task_replay: TaskReplay,
+    model_history: ModelHistory,
     prompt_cache: PromptCache,
     pub detail_sources: [Option<String>; 3],
     pub started_at: Option<DateTime<Utc>>,
@@ -158,7 +159,10 @@ impl TaskReplay {
         for block in blocks {
             if record["type"] == "assistant" && block["type"] == "tool_use" {
                 let input = &block["input"];
-                match block["name"].as_str().and_then(|name| crate::providers::tool::rule(name).task) {
+                match block["name"]
+                    .as_str()
+                    .and_then(|name| crate::providers::tool::rule(name).task)
+                {
                     Some(crate::providers::tool::TaskAction::Create) => {
                         if let Some(id) = block["id"].as_str() {
                             self.creates.insert(id.to_owned());
@@ -224,6 +228,7 @@ fn read_history(
             .extend(previous.model_identities.clone());
         summary.tasks = previous.tasks.clone();
         summary.task_replay = previous.task_replay.clone();
+        summary.model_history = previous.model_history.clone();
         summary.prompt_cache = previous.prompt_cache.clone();
         summary.cache_expires_at = previous.cache_expires_at;
     }
@@ -257,6 +262,9 @@ fn read_history(
         {
             summary.task_replay.record(&record, &mut summary.tasks);
             summary
+                .model_history
+                .record(&record, &mut summary.model_identities);
+            summary
                 .prompt_cache
                 .record(&record, &mut summary.cache_expires_at);
             if let Some((id, name)) = model_identity(&record) {
@@ -264,7 +272,51 @@ fn read_history(
             }
         }
     }
+    summary.model = summary.model_history.model.clone();
     Ok(())
+}
+
+/// Local commands change the selected model before another assistant reply exists.
+#[derive(Clone, Debug, Default)]
+struct ModelHistory {
+    model: Option<String>,
+    command: Option<(String, String)>,
+}
+
+impl ModelHistory {
+    fn record(&mut self, record: &Value, identities: &mut HashMap<String, String>) {
+        if record["type"] == "assistant" {
+            if let Some(model) = assistant_model(record) {
+                self.model = Some(model);
+            }
+            return;
+        }
+        if record["type"] != "user" {
+            return;
+        }
+        let Some(content) = record["message"]["content"].as_str() else {
+            return;
+        };
+        if let Some(args) = content
+            .strip_prefix("<command-name>/model</command-name>")
+            .and_then(|content| content.split_once("<command-args>"))
+            .and_then(|(_, args)| args.strip_suffix("</command-args>"))
+            .filter(|args| !args.is_empty() && !args.chars().any(char::is_whitespace))
+        {
+            self.command = text(record, "uuid").map(|id| (id, args.to_owned()));
+        } else if let Some(name) = content
+            .strip_prefix("<local-command-stdout>Set model to `")
+            .and_then(|output| output.strip_suffix("</local-command-stdout>"))
+            .and_then(|output| output.split_once('`'))
+            .map(|(name, _)| name)
+            && let Some((id, model)) = &self.command
+            && record["parentUuid"].as_str() == Some(id)
+        {
+            self.model = Some(model.clone());
+            identities.insert(model.clone(), name.to_owned());
+            self.command = None;
+        }
+    }
 }
 
 /// Reads only through the first timestamped record, including sidechains.
@@ -359,7 +411,6 @@ impl Summary {
         }
     }
 }
-
 
 /// The model id and human-readable name of a model attachment, such as "Opus 5.5".
 fn model_identity(record: &Value) -> Option<(String, String)> {
@@ -567,7 +618,10 @@ impl Background {
 
             if record["type"] == "assistant"
                 && block["type"] == "tool_use"
-                && block["name"].as_str().is_some_and(|name| crate::providers::tool::rule(name).output == Some(crate::providers::tool::Output::Shell))
+                && block["name"].as_str().is_some_and(|name| {
+                    crate::providers::tool::rule(name).output
+                        == Some(crate::providers::tool::Output::Shell)
+                })
                 && let Some(id) = block["id"].as_str()
                 && let Some((task, output)) = self.pending.remove(id)
                 && let Some(started_at) = at
@@ -727,7 +781,9 @@ fn read_messages(
                 }
                 if record["type"] == "assistant"
                     && block["type"] == "tool_use"
-                    && block["name"].as_str().is_some_and(|name| crate::providers::tool::rule(name).question)
+                    && block["name"]
+                        .as_str()
+                        .is_some_and(|name| crate::providers::tool::rule(name).question)
                     && let Some(id) = block["id"].as_str()
                 {
                     questions_found = true;
@@ -1133,6 +1189,56 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn successful_model_command_updates_before_another_assistant_reply() {
+        let fixture = include_str!("../../../tests/fixtures/claude-model-command.jsonl");
+        let rows: Vec<_> = fixture.lines().collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", rows[0]).unwrap();
+        let mut previous = summary(&file);
+        assert_eq!(previous.model.as_deref(), Some("claude-fable-5-1"));
+        for (index, row) in rows.iter().enumerate().skip(1) {
+            writeln!(file, "{row}").unwrap();
+            previous = read_cached(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                Some(&previous),
+            )
+            .unwrap();
+            if index < 3 {
+                assert_eq!(previous.model.as_deref(), Some("claude-fable-5-1"));
+            }
+        }
+        assert_eq!(previous.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(previous.model_identities["claude-opus-5-5"], "Opus 5.5");
+        assert_eq!(summary(&file).model, previous.model);
+        // Neither the command nor its success need remain in the bounded tail.
+        writeln!(file, "{}", " ".repeat(CHUNK as usize * 3)).unwrap();
+        assert_eq!(summary(&file).model, previous.model);
+    }
+
+    #[test]
+    fn model_command_requires_its_own_success_and_yields_to_later_replies() {
+        let fixture = include_str!("../../../tests/fixtures/claude-model-command.jsonl");
+        let rows: Vec<Value> = fixture
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for row in &rows[..3] {
+            writeln!(file, "{row}").unwrap();
+        }
+        let mut unrelated = rows[3].clone();
+        unrelated["parentUuid"] = "another-command".into();
+        writeln!(file, "{unrelated}").unwrap();
+        assert_eq!(summary(&file).model.as_deref(), Some("claude-fable-5-1"));
+        writeln!(file, "{}", rows[3]).unwrap();
+        assert_eq!(summary(&file).model.as_deref(), Some("claude-opus-5-5"));
+        // A later assistant request is newer evidence of the active model.
+        writeln!(file, "{}", rows[0]).unwrap();
+        assert_eq!(summary(&file).model.as_deref(), Some("claude-fable-5-1"));
+    }
+
+    #[test]
     fn model_identity_survives_bounded_reads_and_cached_appends() {
         for (fixture, subagent, label) in [
             (
@@ -1398,13 +1504,19 @@ pub(super) mod tests {
         let event = super::super::log::tail(file.path(), 1).unwrap().remove(0);
         assert_eq!(event.body, expected);
         assert_eq!(summary(&file).prompt, expected);
-        assert_eq!(queued_prompts(vec![QueueOperation::Enqueue(raw.into())]), [expected]);
+        assert_eq!(
+            queued_prompts(vec![QueueOperation::Enqueue(raw.into())]),
+            [expected]
+        );
     }
 
     #[test]
     fn xml_prompt_keeps_the_document_in_summary_and_log() {
         let xml = include_str!("../../../tests/fixtures/structured_text/real-theme.plist");
-        assert_eq!(queued_prompts(vec![QueueOperation::Enqueue(xml.into())]), [xml]);
+        assert_eq!(
+            queued_prompts(vec![QueueOperation::Enqueue(xml.into())]),
+            [xml]
+        );
         let mut record: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
         record["message"]["content"] = xml.into();
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -1803,13 +1915,22 @@ pub(super) mod tests {
         );
         queue(&mut file, "enqueue", "A");
         queue(&mut file, "enqueue", "<other-session>hello</other-session>");
-        assert_eq!(summary(&file).queued, ["A", "<other-session>hello</other-session>"]);
+        assert_eq!(
+            summary(&file).queued,
+            ["A", "<other-session>hello</other-session>"]
+        );
         queue(&mut file, "dequeue", "");
         user(&mut file, "  <task-notification>done</task-notification>");
-        assert_eq!(summary(&file).queued, ["A", "<other-session>hello</other-session>"]);
+        assert_eq!(
+            summary(&file).queued,
+            ["A", "<other-session>hello</other-session>"]
+        );
         queue(&mut file, "dequeue", "");
         user(&mut file, "A");
-        assert_eq!(summary(&file).queued, ["<other-session>hello</other-session>"]);
+        assert_eq!(
+            summary(&file).queued,
+            ["<other-session>hello</other-session>"]
+        );
     }
 
     #[test]
@@ -1835,7 +1956,10 @@ pub(super) mod tests {
         queue(&mut file, "enqueue", &format!("{prefix}B"));
         queue(&mut file, "remove", &format!("{prefix}B"));
         queue(&mut file, "enqueue", "A\n\tB\0C");
-        assert_eq!(summary(&file).queued, [format!("{prefix}A"), "A\n\tBC".into()]);
+        assert_eq!(
+            summary(&file).queued,
+            [format!("{prefix}A"), "A\n\tBC".into()]
+        );
     }
 
     #[test]

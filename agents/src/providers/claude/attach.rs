@@ -419,14 +419,25 @@ impl Terminal {
             )),
             SessionInput::Interrupt => self.write(b"\x1b"),
             SessionInput::SetModel(model) => {
+                let choices = super::models::input_choices(&super::config_dir(), None);
+                let label = choices
+                    .model(&model)
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "Unknown Claude model")
+                    })?
+                    .label
+                    .clone();
                 self.submit(&format!("/model {model}"))?;
                 self.wait_at("model-confirmation", |screen| {
-                    screen.contains("Switch model?")
+                    screen.contains("Switch model?") || model_selected(screen, &label)
                 })?;
+                if !self.screen().contains("Switch model?") {
+                    return Ok(());
+                }
                 self.write(b"\r")?;
                 // The parsed confirmation remains visible until Claude redraws after Enter.
                 self.wait_allowing(
-                    |screen| !screen.contains("Switch model?") && actual_empty(screen),
+                    |screen| !screen.contains("Switch model?") && model_selected(screen, &label),
                     Some("Switch model?"),
                 )
                 .map_err(|error| self.diagnostic("model-confirmation-cleared", error))
@@ -518,6 +529,27 @@ fn left_input(screen: &str) -> bool {
     matches!(input_box(screen), Some(PromptState::Editing(_)))
 }
 
+fn model_selected(screen: &str, label: &str) -> bool {
+    if input_box(screen) != Some(PromptState::Empty) {
+        return false;
+    }
+    let header = screen.lines().take(5).any(|line| {
+        line.split_once(" · ").is_some_and(|(model, _)| {
+            model.trim_start_matches(|ch: char| !ch.is_alphanumeric()) == label
+        })
+    });
+    // Long transcripts scroll the header away; their status line is below the editor.
+    let row = prompt(screen).expect("empty input box has a prompt").0;
+    let footer = screen.lines().skip(row + 2).any(|line| {
+        let model = line.trim().split(" · ").next().unwrap_or("");
+        model == label
+            || model
+                .rsplit_once(' ')
+                .is_some_and(|(model, _effort)| model == label)
+    });
+    header || footer
+}
+
 fn actual_empty(screen: &str) -> bool {
     prompt_state(screen) == Some(PromptState::Empty)
 }
@@ -555,6 +587,100 @@ fn known_dialog(screen: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "starts a real Claude background session and restores global model defaults"]
+    fn real_model_command_without_confirmation() {
+        let cwd = std::env::current_dir().unwrap();
+        let output = Command::new("claude")
+            .args([
+                "--bg",
+                "--model",
+                "haiku",
+                "--setting-sources",
+                "",
+                "--strict-mcp-config",
+                "--mcp-config",
+                "{\"mcpServers\":{}}",
+                "--",
+                "Reply exactly READY. Do not use tools.",
+            ])
+            .current_dir(&cwd)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        let job = text
+            .lines()
+            .find_map(|line| line.split("backgrounded · ").nth(1))
+            .expect("background job id")
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_owned();
+        let result = std::panic::catch_unwind(|| {
+            let settings = super::super::config_dir().join("settings.json");
+            super::super::settings::with_restored_defaults(&settings, || {
+                let mut terminal = Terminal::spawn(&job, &cwd)?;
+                let invalid = terminal
+                    .deliver(SessionInput::SetModel("agents-nonexistent-model".into()))
+                    .unwrap_err();
+                assert_eq!(invalid.kind(), io::ErrorKind::InvalidInput);
+                let result = terminal.deliver(SessionInput::SetModel("claude-opus-5-5".into()));
+                let directory = cwd.join("scratchpad/model-confirmation");
+                std::fs::create_dir_all(&directory)?;
+                std::fs::write(directory.join("model.raw"), &terminal.raw)?;
+                std::fs::write(directory.join("model.screen.txt"), terminal.screen())?;
+                terminal.detach()?;
+                drop(terminal);
+                result?;
+                let screen = inspect(&job, &cwd)?;
+                std::fs::write(directory.join("reattached.screen.txt"), &screen)?;
+                assert!(screen.contains("Opus 5.5"), "{screen}");
+                Ok(())
+            })
+            .unwrap();
+        });
+        for command in ["stop", "rm"] {
+            let output = Command::new("claude")
+                .args([command, &job])
+                .current_dir(&cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "cleanup {command}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
+    fn captured_long_session_confirms_the_model_below_the_editor() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/model-footer.screen.txt");
+        assert!(model_selected(screen, "Opus 5.5"));
+        assert!(!model_selected(screen, "Fable 5.1"));
+        assert!(!model_selected(screen, "Opus 5"));
+    }
+
+    #[test]
+    fn captured_model_command_completes_without_a_confirmation_dialog() {
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/model-command.raw");
+        let mut screen = OutputScreen::new();
+        screen.process(raw);
+        let screen = screen.complete().expect("completed model command redraw");
+        assert!(screen.contains("Opus 5.5"), "{screen}");
+        assert!(!screen.contains("Switch model?"), "{screen}");
+        assert!(model_selected(&screen, "Opus 5.5"), "{screen}");
+        assert!(!model_selected(&screen, "Fable 5.1"), "{screen}");
+    }
 
     #[test]
     fn captured_question_redraw_waits_for_synchronized_output_end() {
