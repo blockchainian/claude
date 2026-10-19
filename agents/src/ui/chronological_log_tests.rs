@@ -529,9 +529,10 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
         label: None,
         started_at: None,
     });
+    // Keep a real single-call event without shell highlighting in every detail render.
     let template = events
         .iter()
-        .find(|event| event.calls.len() == 1)
+        .find(|event| event.calls.len() == 1 && event.calls[0].name == "WebFetch")
         .unwrap()
         .clone();
     for kind in [
