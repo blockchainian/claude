@@ -283,3 +283,30 @@ mod image_tests {
         );
     }
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackgroundParams<'a> {
+    thread_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cursor: Option<String>,
+}
+
+pub(in crate::providers::codex) fn background_terminals(
+    client: &mut Client,
+    thread_id: &str,
+) -> io::Result<Vec<super::super::background::Terminal>> {
+    let mut terminals = Vec::new();
+    let mut cursor = None;
+    loop {
+        let response: super::super::background::Terminals = client.request(
+            "thread/backgroundTerminals/list",
+            BackgroundParams { thread_id, cursor },
+        )?;
+        terminals.extend(response.data);
+        cursor = response.next_cursor;
+        if cursor.is_none() {
+            return Ok(terminals);
+        }
+    }
+}

@@ -49,8 +49,8 @@ mod title_row;
 mod title_rule;
 mod tool_detail;
 mod usage_chart;
-mod weekly_usage;
 pub(crate) mod vscode;
+mod weekly_usage;
 pub use highlight::use_theme as use_highlight_theme;
 pub use style::light_background;
 pub use style::set_light_background;
@@ -811,8 +811,24 @@ impl View {
     }
     pub fn has_background(&self) -> bool {
         self.selected_row().is_some_and(|session| {
-            !session.background.is_empty() || self.subagents_for(session).next().is_some()
+            self.background_for(session).next().is_some()
+                || self.subagents_for(session).next().is_some()
         })
+    }
+    fn background_for<'a>(
+        &'a self,
+        session: &'a Session,
+    ) -> impl Iterator<Item = &'a crate::model::BackgroundTask> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(move |(index, row)| {
+                row.id == session.id
+                    || self
+                        .ancestors(*index)
+                        .any(|ancestor| self.rows[ancestor].id == session.id)
+            })
+            .flat_map(|(_, row)| &row.background)
     }
     fn subagents_for<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a Session> {
         let mut children: Vec<_> = self

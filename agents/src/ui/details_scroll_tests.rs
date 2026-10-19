@@ -46,7 +46,7 @@ mod details_budget {
         for i in 0..8 {
             row.background.push(crate::model::BackgroundTask {
                 description: format!("Check {i}"),
-                output: output.path().into(),
+                output: Some(output.path().into()),
                 started_at: row.updated_at,
             });
         }
@@ -317,7 +317,7 @@ mod details_curtain {
         for i in 0..8 {
             row.background.push(crate::model::BackgroundTask {
                 description: format!("Check {i}"),
-                output: output.path().into(),
+                output: Some(output.path().into()),
                 started_at: row.updated_at,
             });
         }

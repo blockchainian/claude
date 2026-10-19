@@ -764,7 +764,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
     let selected = &mut view.rows[view.selected];
     selected.background.push(crate::model::BackgroundTask {
         description: "Run checks".into(),
-        output: output.path().into(),
+        output: Some(output.path().into()),
         started_at: selected.updated_at,
     });
     selected.pr = Some(crate::model::PullRequest {
@@ -3903,7 +3903,7 @@ fn details_sections_run_activity_background_update_prompt_tasks() {
     row.last_message = Some("Checking the project".into());
     row.background = vec![crate::model::BackgroundTask {
         description: "Waiting for output".into(),
-        output: std::path::PathBuf::from("/nonexistent/output"),
+        output: Some(std::path::PathBuf::from("/nonexistent/output")),
         started_at: Utc::now(),
     }];
     row.tasks = vec![crate::model::SessionTask {
@@ -3933,12 +3933,12 @@ fn details_background_boxes_tail_and_clip_output() {
     row.background = vec![
         crate::model::BackgroundTask {
             description: "Waiting for output".into(),
-            output: output.path().with_extension("missing"),
+            output: Some(output.path().with_extension("missing")),
             started_at: Utc::now(),
         },
         crate::model::BackgroundTask {
             description: "Run checks".into(),
-            output: output.path().into(),
+            output: Some(output.path().into()),
             started_at: Utc::now(),
         },
     ];
@@ -3978,7 +3978,7 @@ fn details_background_includes_only_working_subagents() {
     let output = tempfile::NamedTempFile::new().unwrap();
     parent.background.push(crate::model::BackgroundTask {
         description: "Run checks".into(),
-        output: output.path().into(),
+        output: Some(output.path().into()),
         started_at: now - Duration::seconds(10),
     });
     let mut worker = session("agent-worker", "Check files", SessionStatus::Working, 0);
@@ -4055,7 +4055,7 @@ fn details_background_includes_only_working_subagents() {
         .background
         .push(crate::model::BackgroundTask {
             description: "Worker command".into(),
-            output: output.path().into(),
+            output: Some(output.path().into()),
             started_at: now,
         });
     assert!(view.has_background());
@@ -4080,7 +4080,7 @@ fn background_box_dims_title_rule_but_not_output() {
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
     row.background.push(crate::model::BackgroundTask {
         description: "Run checks".into(),
-        output: output.path().into(),
+        output: Some(output.path().into()),
         started_at: Utc::now(),
     });
     let mut view = test_view(Grouping::Project, false);
@@ -4123,7 +4123,7 @@ fn background_task_whose_output_ended_is_hidden() {
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
     row.background.push(crate::model::BackgroundTask {
         description: "Run checks".into(),
-        output: output.path().into(),
+        output: Some(output.path().into()),
         started_at: Utc::now(),
     });
     let rendered = queued_details(row, 19);
@@ -4136,7 +4136,7 @@ fn background_redraw_follows_selection() {
     let mut first = session("first", "First", SessionStatus::Ready, 0);
     first.background.push(crate::model::BackgroundTask {
         description: "Running".into(),
-        output: "/tmp/unused.output".into(),
+        output: Some("/tmp/unused.output".into()),
         started_at: Utc::now(),
     });
     let mut view = test_view(Grouping::Project, true);
@@ -4348,7 +4348,7 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
     });
     row.background.push(crate::model::BackgroundTask {
         description: "Run checks".into(),
-        output: path,
+        output: Some(path),
         started_at: now - Duration::seconds(25),
     });
     (view, now)
@@ -10352,3 +10352,6 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
             .any(|call| call.detail_title.contains("GPT-6.1-Sol · Default"))
     );
 }
+
+#[path = "codex_background_tests.rs"]
+mod codex_background_tests;

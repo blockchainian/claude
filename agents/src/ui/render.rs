@@ -932,10 +932,17 @@ impl View {
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
-            .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
+        let boxes = self
+            .background_for(session)
+            .map(|task| {
+                (
+                    task,
+                    task.output
+                        .as_deref()
+                        .map(|path| tail_lines(path, 1))
+                        .unwrap_or_default(),
+                )
+            })
             .filter(|(_, lines)| {
                 !lines
                     .last()
@@ -958,9 +965,14 @@ impl View {
             // unknown starts last, with identity/path breaking ties regardless of depth or kind.
             items[start..].sort_by_key(|item| {
                 let (started_at, identity, provider) = match item {
-                    Item::Background { task, .. } => {
-                        (Some(task.started_at), task.output.as_os_str(), None)
-                    }
+                    Item::Background { task, .. } => (
+                        Some(task.started_at),
+                        task.output
+                            .as_deref()
+                            .map(std::path::Path::as_os_str)
+                            .unwrap_or_else(|| std::ffi::OsStr::new(&task.description)),
+                        None,
+                    ),
                     Item::Subagent(child) => (
                         child.started_at,
                         std::ffi::OsStr::new(&child.id.id),
@@ -1287,7 +1299,7 @@ impl View {
                 Item::Background { task, output } => {
                     let start = offset.max(scroll);
                     let end = (offset + height).min(scroll + available);
-                    if start < end {
+                    if start < end && task.output.is_some() {
                         self.viewport.borrow_mut().details_background.push((
                             content_top + (start - scroll) as u16
                                 ..content_top + (end - scroll) as u16,

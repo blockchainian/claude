@@ -530,7 +530,7 @@ impl Background {
                     task,
                     BackgroundTask {
                         description: description.to_owned(),
-                        output,
+                        output: Some(output),
                         started_at,
                     },
                 ));
@@ -1376,7 +1376,7 @@ pub(super) mod tests {
         let tasks = summary(&file).background;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].description, "Wait five seconds");
-        assert_eq!(tasks[0].output, PathBuf::from("/tmp/x/b1.output"));
+        assert_eq!(tasks[0].output, Some(PathBuf::from("/tmp/x/b1.output")));
         assert_eq!(
             tasks[0].started_at,
             "2026-10-12T12:00:00Z".parse::<DateTime<Utc>>().unwrap()

@@ -25,7 +25,7 @@ fn details_section_order_preserves_clicks_and_copies() {
         });
         selected.background.push(crate::model::BackgroundTask {
             description: "Moved background".into(),
-            output: output.path().into(),
+            output: Some(output.path().into()),
             started_at: selected.updated_at,
         });
         let now = selected.updated_at;

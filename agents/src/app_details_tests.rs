@@ -62,7 +62,7 @@ fn setup(activity: bool) -> (tempfile::TempDir, App) {
     });
     session.background = vec![BackgroundTask {
         description: "Check files".into(),
-        output: directory.path().join("missing-output"),
+        output: Some(directory.path().join("missing-output")),
         started_at: now - Age::hours(1),
     }];
     app.view.set_sessions(app.sessions.clone(), false);

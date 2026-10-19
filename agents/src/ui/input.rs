@@ -144,7 +144,10 @@ impl View {
     }
 
     fn open_background(&mut self, task: crate::model::BackgroundTask) {
-        let body = match std::fs::read_to_string(&task.output) {
+        let Some(output) = task.output.as_deref() else {
+            return;
+        };
+        let body = match std::fs::read_to_string(output) {
             Ok(body) => body,
             Err(error) => {
                 self.set_notice(Some(format!("Cannot read background log: {error}")));

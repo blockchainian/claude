@@ -34,7 +34,7 @@ fn section_labels_stay_centered_before_right_values() {
     let output = tempfile::NamedTempFile::new().unwrap();
     row.background.push(crate::model::BackgroundTask {
         description: "Background work".into(),
-        output: output.path().into(),
+        output: Some(output.path().into()),
         started_at: now,
     });
     let mut view = test_view(Grouping::Project, true);

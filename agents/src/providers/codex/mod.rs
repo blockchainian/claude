@@ -1,4 +1,5 @@
 mod app_server;
+mod background;
 #[cfg(test)]
 mod inner_tests;
 mod manager;
@@ -38,6 +39,7 @@ pub struct CodexProvider {
     manager_home: PathBuf,
     tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
     models: Mutex<ModelCatalog>,
+    background: Mutex<background::Background>,
 }
 
 impl CodexProvider {
@@ -47,6 +49,7 @@ impl CodexProvider {
             home,
             tasks: Mutex::new(HashMap::new()),
             models: Mutex::new(ModelCatalog::default()),
+            background: Mutex::new(background::Background::default()),
         }
     }
 
@@ -207,7 +210,65 @@ impl CodexProvider {
                 session.status = SessionStatus::NeedsInput;
             }
         }
+        self.background(&mut sessions)?;
         Ok(Snapshot { sessions, has_more })
+    }
+
+    fn background(&self, sessions: &mut [Session]) -> io::Result<()> {
+        if !sessions
+            .iter()
+            .any(|session| session.status != SessionStatus::Inactive)
+        {
+            return Ok(());
+        }
+        // Check before connecting: offline homes may exceed the Unix socket path limit.
+        if !self
+            .home
+            .join("app-server-control/app-server-control.sock")
+            .try_exists()?
+        {
+            return Ok(());
+        }
+        // Offline session browsing remains available without a running daemon.
+        let mut client = match app_server::Client::connect(&self.home) {
+            Ok(client) => client,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        let mut background = self
+            .background
+            .lock()
+            .map_err(|_| io::Error::other("Codex background cache lock poisoned"))?;
+        for session in sessions
+            .iter_mut()
+            .filter(|session| session.status != SessionStatus::Inactive)
+        {
+            let terminals =
+                match app_server::thread::background_terminals(&mut client, &session.id.id) {
+                    Ok(terminals) => terminals,
+                    // The daemon has no live terminals for an unloaded thread.
+                    Err(error)
+                        if error.to_string() == format!("thread not found: {}", session.id.id) =>
+                    {
+                        vec![]
+                    }
+                    Err(error) => return Err(error),
+                };
+            session.background = background.tasks(
+                &session.id.id,
+                session.transcript.as_deref(),
+                terminals,
+                Utc::now(),
+            )?;
+        }
+        Ok(())
     }
 }
 

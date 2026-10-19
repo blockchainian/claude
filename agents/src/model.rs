@@ -54,7 +54,7 @@ pub struct Activity {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BackgroundTask {
     pub description: String,
-    pub output: PathBuf,
+    pub output: Option<PathBuf>,
     pub started_at: DateTime<Utc>,
 }
 

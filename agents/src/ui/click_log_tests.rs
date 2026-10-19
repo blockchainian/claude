@@ -405,7 +405,7 @@ fn with_background() -> (View, chrono::DateTime<Utc>, tempfile::NamedTempFile) {
         .background
         .push(crate::model::BackgroundTask {
             description: "Real background output".into(),
-            output: output.path().into(),
+            output: Some(output.path().into()),
             started_at: now,
         });
     (view, now, output)

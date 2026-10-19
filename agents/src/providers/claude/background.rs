@@ -283,7 +283,7 @@ impl Tasks {
                 })?;
                 session.background.push(BackgroundTask {
                     description: shell.description,
-                    output: shell.output_path,
+                    output: Some(shell.output_path),
                     started_at,
                 });
             }

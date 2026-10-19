@@ -68,7 +68,7 @@ fn background_mixes_tasks_and_descendants_by_height_start_and_identity() {
         write!(file, "{output}").unwrap();
         parent.background.push(crate::model::BackgroundTask {
             description: title.into(),
-            output: path,
+            output: Some(path),
             started_at: now - Duration::minutes(minutes),
         });
     }

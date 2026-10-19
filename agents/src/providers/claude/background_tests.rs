@@ -132,7 +132,7 @@ fn files_control_liveness_and_descriptions_survive_transcript_changes() {
     let mut writer = HoldingProcess::start(&running, &foreground);
     tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert_eq!(sessions[0].background.len(), 1);
-    assert_eq!(sessions[0].background[0].output, running);
+    assert_eq!(sessions[0].background[0].output, Some(running.clone()));
     let first = sessions[0].background[0].clone();
     let cost = tasks.transcript_bytes;
     assert!(cost > 0);
@@ -430,7 +430,7 @@ fn adoption_skips_unregistered_sessions_and_refreshes_registered_jobs_with_a_rea
         .unwrap();
     assert!(rows[0].background.is_empty());
     assert_eq!(rows[1].background.len(), 1);
-    assert_eq!(rows[1].background[0].output, output);
+    assert_eq!(rows[1].background[0].output, Some(output));
 }
 
 #[test]
@@ -483,7 +483,7 @@ fn background_await_start_times_survive_cached_and_chunked_refreshes() {
                 .as_str()
                 .unwrap()
                 .into(),
-            output,
+            output: Some(output),
             started_at: DateTime::parse_from_rfc3339(pair[0]["timestamp"].as_str().unwrap())
                 .unwrap()
                 .with_timezone(&Utc),

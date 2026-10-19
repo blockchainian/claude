@@ -18,6 +18,13 @@ pub(super) struct Client {
 #[serde(rename_all = "camelCase")]
 struct InitializeParams {
     client_info: ClientInfo,
+    capabilities: Capabilities,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Capabilities {
+    experimental_api: bool,
 }
 
 #[derive(Serialize)]
@@ -46,6 +53,9 @@ impl Client {
         let _: InitializeResponse = client.request(
             "initialize",
             InitializeParams {
+                capabilities: Capabilities {
+                    experimental_api: true,
+                },
                 client_info: ClientInfo {
                     name: "agents",
                     version: env!("CARGO_PKG_VERSION"),
