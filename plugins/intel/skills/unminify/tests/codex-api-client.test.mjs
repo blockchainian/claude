@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer } from 'node:http2';
 import { mkdtemp, writeFile, readFile, readdir, stat, rm, rename, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,6 +37,12 @@ async function fixture(t, handler, { expired = false } = {}) {
       await handler(req, res, text ? JSON.parse(text) : null);
     } catch (error) { res.destroy(error); }
   });
+  const sessions = new Set();
+  server.on('session', session => {
+    sessions.add(session);
+    session.on('error', () => {});
+    session.on('close', () => sessions.delete(session));
+  });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const logs = [];
@@ -46,7 +52,7 @@ async function fixture(t, handler, { expired = false } = {}) {
   const client = extra => { const c = createCodexClient({ ...options, ...extra }); clients.push(c); return c; };
   t.after(async () => {
     await Promise.all(clients.map(c => c.close()));
-    server.closeAllConnections();
+    for (const session of sessions) session.destroy();
     await new Promise(resolve => server.close(resolve));
     await rm(codexHome, { recursive: true, force: true });
   });
@@ -69,6 +75,87 @@ function clientArgs(f) {
     refreshUrl: f.options.refreshUrl, timeoutMs: 2000 });
   return ['--input-type=module', '-e', code, options];
 }
+
+test('HTTP/2 multiplexes concurrent requests and refresh on one origin session; close releases it', async t => {
+  const sessions = new Set();
+  let active = 0, peak = 0, refreshes = 0;
+  const f = await fixture(t, async (req, res) => {
+    assert.equal(req.httpVersion, '2.0');
+    sessions.add(req.stream.session);
+    if (req.url === '/oauth/token') {
+      refreshes++;
+      res.end(JSON.stringify({ access_token: fresh() }));
+    } else {
+      active++; peak = Math.max(peak, active);
+      await delay(20); active--; send(res);
+    }
+  }, { expired: true });
+  const c = f.client();
+  await Promise.all(Array.from({ length: 20 }, () => c.respond(request)));
+  assert.equal(refreshes, 1);
+  assert.equal(peak, 20);
+  assert.equal(sessions.size, 1);
+  const [session] = sessions;
+  const closed = once(session, 'close');
+  await c.close();
+  await closed;
+  await c.close();
+});
+
+test('GOAWAY and disconnected sessions are replaced for subsequent requests', { timeout: 3000 }, async t => {
+  const sessions = new Set();
+  let current;
+  const f = await fixture(t, (req, res) => {
+    current = req.stream.session;
+    sessions.add(current);
+    send(res);
+  });
+  const c = f.client();
+  await c.respond(request);
+  current.goaway();
+  // The following request starts after the peer has received GOAWAY.
+  await delay(20);
+  await c.respond(request);
+  assert.equal(sessions.size, 2);
+  const closed = once(current, 'close');
+  current.destroy();
+  await closed;
+  await c.respond(request);
+  assert.equal(sessions.size, 3);
+});
+
+test('refresh on another origin uses a separate HTTP/2 session', async t => {
+  let refreshSession, modelSession;
+  const authServer = await fixture(t, (req, res) => {
+    assert.equal(req.httpVersion, '2.0');
+    refreshSession = req.stream.session;
+    res.end(JSON.stringify({ access_token: fresh() }));
+  });
+  const f = await fixture(t, (req, res) => { modelSession = req.stream.session; send(res); }, { expired: true });
+  await f.client({ refreshUrl: authServer.options.refreshUrl }).respond(request);
+  assert(refreshSession);
+  assert(modelSession);
+  assert.notEqual(refreshSession, modelSession);
+});
+
+test('a timed out stream leaves concurrent requests and its shared session usable', async t => {
+  const sessions = new Set();
+  const f = await fixture(t, (req, res, body) => {
+    sessions.add(req.stream.session);
+    if (body.instructions === 'stall') {
+      res.writeHead(200); res.write(': heartbeat\n\n');
+    } else send(res);
+  });
+  const c = f.client({ timeoutMs: 30 });
+  const results = await Promise.allSettled([c.respond({ ...request, instructions: 'stall' }), c.respond(request)]);
+  assert.equal(results[0].status, 'rejected');
+  assert.equal(results[1].status, 'fulfilled');
+  assert.deepEqual(await c.respond(request), { output: 'hello', usage });
+  assert.equal(sessions.size, 1);
+  const attempts = f.logs.filter(event => event.usage === null);
+  assert.equal(attempts.length, 4);
+  assert(attempts.every(event => event.status === 200 && event.duration_ms >= 20));
+});
 
 test('SSE completion, usage, request shape and safe per-attempt metrics', async t => {
   const f = await fixture(t, (req, res, body) => {
@@ -101,6 +188,18 @@ test('SSE item events, multiline data and split UTF-8 bytes', async t => {
     res.write(bytes.subarray(0, split)); await delay(5); res.end(bytes.subarray(split));
   });
   assert.deepEqual(await f.client().respond(request), { output: '你好', usage });
+});
+
+test('redirects are refused and retried as transport failures without following them', async t => {
+  let calls = 0;
+  const f = await fixture(t, (req, res) => {
+    assert.equal(req.url, '/responses');
+    calls++;
+    res.writeHead(307, { location: '/redirected' }); res.end();
+  });
+  await assert.rejects(f.client().respond(request), /network or stream failure/);
+  assert.equal(calls, 4);
+  assert(f.logs.every(event => event.status === null));
 });
 
 test('temporary rate limits retry rather than terminally exhausting the client', async t => {
@@ -294,7 +393,7 @@ test('concurrency remains bounded through full SSE consumption; close drains cal
 });
 
 test('network errors, 5xx, broken streams and timeouts retry three times then fail safely', async t => {
-  for (const mode of ['network', 'http', 'stream', 'timeout']) {
+  for (const mode of ['network', 'http', 'stream', 'timeout', 'headers-timeout']) {
     let calls = 0;
     const f = await fixture(t, (req, res) => {
       calls++;

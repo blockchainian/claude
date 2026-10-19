@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer } from 'node:http2';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +22,7 @@ async function fixture(t, outputs) {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const namer = createNamer({ codexHome, concurrency: 2, baseUrl: `http://127.0.0.1:${server.address().port}`, retryDelayMs: 1 });
-  t.after(async () => { await namer.close(); server.closeAllConnections();
+  t.after(async () => { await namer.close();
     await new Promise(resolve => server.close(resolve)); await rm(codexHome, { recursive: true, force: true }); });
   return { namer, bodies };
 }
