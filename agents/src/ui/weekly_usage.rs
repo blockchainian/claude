@@ -46,7 +46,7 @@ fn provider_details(usage: &WeeklyUsage, left: bool) -> String {
     parts.into_iter().flatten().collect::<Vec<_>>().join(", ")
 }
 
-/// The style of a provider's name and number: the error color once more than 95% is used.
+/// The style of a provider's text: the error color once more than 95% is used.
 fn text_style(usage: &WeeklyUsage) -> Style {
     if 100 - usage.left_percent() > 95 {
         super::style::error_style()
@@ -224,13 +224,12 @@ pub(super) fn render(
         target = Some(target.map_or(side, |target| target.union(side)));
         let details = texts[i].as_ref().unwrap();
         let gap = " ".repeat(usize::from(half - widths[i] - names[i].len() as u16 - 2));
-        let name = Span::styled(names[i], text_style(usage[i].unwrap()));
-        let spans = if i == 0 {
-            vec![Span::raw(format!(" {details}{gap}")), name, Span::raw(" ")]
+        let text = if i == 0 {
+            format!(" {details}{gap}{} ", names[i])
         } else {
-            vec![Span::raw(" "), name, Span::raw(format!("{gap}{details} "))]
+            format!(" {}{gap}{details} ", names[i])
         };
-        Line::from(spans).render(side, buf);
+        Line::styled(text, text_style(usage[i].unwrap())).render(side, buf);
     }
     if usage.iter().all(Option::is_some) {
         Line::from("·").render(Rect::new(center, area.y, 1, 1), buf);
@@ -340,10 +339,15 @@ mod tests {
     }
 
     #[test]
-    fn provider_names_use_error_color_above_95_percent() {
+    fn provider_text_uses_error_color_above_95_percent() {
         for view in [UsageView::Compact, UsageView::Detailed] {
             for (used, red) in [(95.0, false), (96.0, true)] {
-                let usage = WeeklyUsage::from_used_percent(used, None).unwrap();
+                let mut usage = WeeklyUsage::from_used_percent(
+                    used,
+                    Some("2026-10-23T16:00:00Z".parse().unwrap()),
+                )
+                .unwrap();
+                usage.reset_credits = Some(2);
                 let area = Rect::new(0, 0, 200, 1);
                 let mut buf = Buffer::empty(area);
                 render(area, &[], [Some(&usage); 2], view, true, &mut buf).unwrap();
@@ -352,7 +356,11 @@ mod tests {
                     .iter()
                     .map(|cell| cell.symbol())
                     .collect::<String>();
-                for name in ["Claude", "Codex"] {
+                let texts = match view {
+                    UsageView::Compact => vec!["Claude", "Codex"],
+                    UsageView::Detailed => vec!["Claude", "Codex", "resets", "2 credits"],
+                };
+                for name in texts {
                     let start = row.find(name).unwrap();
                     let start = row[..start].chars().count();
                     for cell in &buf.content[start..start + name.len()] {
