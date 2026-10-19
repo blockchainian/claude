@@ -1512,7 +1512,11 @@ impl View {
                 return Some(Action::Hide(id));
             }
             KeyCode::Char('p') => {
+                self.selected_id()?;
                 let group = self.group_index(self.selected)?;
+                if self.rows[group].status == SessionStatus::Inactive {
+                    return Some(Action::Unsupported("Pin"));
+                }
                 let id = self.rows[group].id.clone();
                 let pinned = !self.is_pinned(self.selected);
                 return Some(Action::TogglePin { id, pinned });

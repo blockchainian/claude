@@ -709,13 +709,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     for (code, expected) in [
         (KeyCode::Char('f'), Action::Fork(key("thread-12".into()))),
         (KeyCode::Char('x'), Action::Stop(key("thread-12".into()))),
-        (
-            KeyCode::Char('p'),
-            Action::TogglePin {
-                id: parent_key.clone(),
-                pinned: true,
-            },
-        ),
+        (KeyCode::Char('p'), Action::Unsupported("Pin")),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),

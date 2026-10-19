@@ -247,6 +247,33 @@ fn pinning_puts_the_session_first() {
 }
 
 #[test]
+fn inactive_sessions_lose_their_pin() {
+    let (directory, mut app, registry, _) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    app.handle_action(Some(Action::TogglePin {
+        id: id.clone(),
+        pinned: true,
+    }));
+    fs::remove_file(registry).unwrap();
+    fs::remove_file(directory.path().join("jobs/e772d00b/state.json")).unwrap();
+    app.refresh();
+    assert_eq!(
+        app.session(&id).unwrap().status,
+        crate::model::SessionStatus::Inactive
+    );
+    assert!(Preferences::load(directory.path()).pinned.is_empty());
+    assert!(!screen(&mut app).contains("Pinned"));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+    assert_eq!(app.view.selected_id(), Some(&id));
+    assert_eq!(
+        app.view
+            .handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
+        Some(Action::Unsupported("Pin"))
+    );
+}
+
+#[test]
 fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("state_5.sqlite");

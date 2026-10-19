@@ -1,7 +1,7 @@
 //! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
 use crate::model::Action;
-use crate::model::{DraftId, Session};
+use crate::model::{DraftId, Session, SessionStatus};
 use crate::providers::Snapshot;
 use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
@@ -819,9 +819,25 @@ impl App {
 
     fn refresh(&mut self) {
         let Snapshot { sessions, has_more } = self.hub.refresh();
+        self.unpin_inactive(&sessions);
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
+    }
+
+    /// Finished tasks leave the Pinned group: a pin only orders active work.
+    fn unpin_inactive(&mut self, sessions: &[Session]) {
+        let pinned = self.preferences.pinned.len();
+        self.preferences.pinned.retain(|id| {
+            !sessions
+                .iter()
+                .any(|session| &session.id == id && session.status == SessionStatus::Inactive)
+        });
+        if self.preferences.pinned.len() != pinned {
+            let saved = self.preferences.save_pinned(&self.config_dir);
+            self.report_save(saved);
+            self.view.set_pinned(&self.preferences.pinned);
+        }
     }
 
     /// Returns true when the dashboard should close.
