@@ -533,17 +533,21 @@ impl View {
                 bottom: border == 1,
             });
         }
-        let list = viewport.list;
-        if !list.is_empty()
-            && position.x >= list.x
-            && position.x < list.right()
-            && (position.y == list.y.saturating_sub(1) || position.y == list.bottom())
-        {
-            return Some(ClickTarget::ListBorder {
-                panel: Panel::TaskList,
-                row: position.y,
-                bottom: position.y == list.bottom(),
-            });
+        for (panel, content) in [
+            (Panel::TaskList, viewport.list),
+            (Panel::Details, viewport.details),
+        ] {
+            if !content.is_empty()
+                && position.x >= content.x
+                && position.x < content.right()
+                && (position.y == content.y.saturating_sub(1) || position.y == content.bottom())
+            {
+                return Some(ClickTarget::ListBorder {
+                    panel,
+                    row: position.y,
+                    bottom: position.y == content.bottom(),
+                });
+            }
         }
         if viewport.log.contains(position)
             && let Some(&index) = viewport
@@ -872,7 +876,12 @@ impl View {
                 self.click_target_at(position)
         {
             if self.defer_click(target) {
-                if panel == Panel::TaskList {
+                if panel == Panel::Details {
+                    let mut viewport = self.viewport.borrow_mut();
+                    let state = &mut viewport.details_scroll;
+                    let row = if bottom { state.content_top } else { u16::MAX };
+                    while state.scroll_window(bottom, row) {}
+                } else if panel == Panel::TaskList {
                     let indices = self.visible_indices();
                     let selected = if bottom {
                         indices.last()

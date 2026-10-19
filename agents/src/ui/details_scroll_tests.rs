@@ -469,3 +469,124 @@ mod details_curtain {
         assert_eq!(panel(&view), before);
     }
 }
+
+#[test]
+fn details_border_double_clicks_scroll_both_ends_in_both_layouts() {
+    for width in [100, 149, 150, 200] {
+        for height in [12, 30] {
+            for bottom in [false, true] {
+                let mut view = simple_fixture();
+                let row = &mut view.rows[view.selected];
+                row.prompt = (0..80).map(|i| format!("Prompt row {i}  \n")).collect();
+                row.last_message = Some(row.prompt.clone());
+                screen(&view, width, height);
+                let details = view.viewport.borrow().details;
+                assert!(!details.is_empty());
+                let pointer = details.y;
+                // Start between the boundaries, in both curtain and plain-offset layouts.
+                assert!(
+                    view.viewport
+                        .borrow_mut()
+                        .details_scroll
+                        .scroll_window(true, pointer)
+                );
+                screen(&view, width, height);
+                let before = view.viewport.borrow().details_scroll.position();
+                let max = {
+                    let viewport = view.viewport.borrow();
+                    let state = &viewport.details_scroll;
+                    state
+                        .fallback_max
+                        .unwrap_or_else(|| state.hidden.iter().sum())
+                };
+                assert!(before > 0 && before < max, "{width}x{height}");
+                let click = mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    (details.x..details.right())
+                        .find(|&x| {
+                            let position = (
+                                x,
+                                if bottom {
+                                    details.bottom()
+                                } else {
+                                    details.y - 1
+                                },
+                            )
+                                .into();
+                            let viewport = view.viewport.borrow();
+                            !viewport.details_title.contains(position)
+                                && !viewport
+                                    .field_targets
+                                    .iter()
+                                    .any(|(rect, _)| rect.contains(position))
+                                && !viewport
+                                    .details_links
+                                    .iter()
+                                    .any(|(rect, _)| rect.contains(position))
+                        })
+                        .expect("plain border cell"),
+                    if bottom {
+                        details.bottom()
+                    } else {
+                        details.y - 1
+                    },
+                );
+                assert_eq!(click_mouse(&mut view, click), None);
+                assert_eq!(view.viewport.borrow().details_scroll.position(), before);
+                assert_eq!(click_mouse(&mut view, click), None);
+                screen(&view, width, height);
+                assert_eq!(
+                    view.viewport.borrow().details_scroll.position(),
+                    if bottom { max } else { 0 },
+                    "{width}x{height}, bottom {bottom}"
+                );
+                assert!(
+                    !view
+                        .viewport
+                        .borrow_mut()
+                        .details_scroll
+                        .scroll_window(bottom, pointer)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn details_border_links_and_title_keep_actions_without_scrolling() {
+    for width in [100, 149, 150, 200] {
+        let mut view = simple_fixture();
+        view.rows[view.selected].prompt = "Long prompt row  \n".repeat(80);
+        screen(&view, width, 30);
+        let pointer = view.viewport.borrow().details.y;
+        assert!(
+            view.viewport
+                .borrow_mut()
+                .details_scroll
+                .scroll_window(true, pointer)
+        );
+        screen(&view, width, 30);
+        let before = view.viewport.borrow().details_scroll.position();
+        let links = view.viewport.borrow().details_links.clone();
+        assert!(!links.is_empty());
+        for (rect, target) in links {
+            assert_eq!(rect.y, view.viewport.borrow().details.bottom());
+            let click = mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y);
+            for _ in 0..2 {
+                assert_eq!(
+                    click_mouse(&mut view, click),
+                    Some(Action::OpenPath(target.clone()))
+                );
+                assert_eq!(view.viewport.borrow().details_scroll.position(), before);
+            }
+        }
+        let title = view.viewport.borrow().details_title;
+        assert!(!title.is_empty());
+        let click = mouse(MouseEventKind::Down(MouseButton::Left), title.x, title.y);
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert!(view.rename_target.is_none());
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(view.rename_target.as_ref(), view.selected_id());
+        assert_eq!(view.viewport.borrow().details_scroll.position(), before);
+    }
+}

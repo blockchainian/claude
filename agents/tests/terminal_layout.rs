@@ -1,3 +1,6 @@
+#[path = "support/terminal_details_borders.rs"]
+mod terminal_details_borders;
+
 #[path = "support/terminal_golden_layout.rs"]
 mod terminal_golden_layout;
 
