@@ -216,6 +216,7 @@ fn duration_toggle_selects_slowest_and_keeps_search_order() {
         .into();
     }
     view.set_log(events);
+    view.viewport.borrow_mut().log = Rect::new(0, 0, 100, 2);
     view.select_log_event(Some(1));
     let slowest = view.log[0].clone();
     key(&mut view, KeyCode::Char('t'));
@@ -242,9 +243,9 @@ fn duration_toggle_selects_slowest_and_keeps_search_order() {
         view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
         [0, 1, 2, 3]
     );
-    assert_eq!(view.visible_log_event(), Some(&slowest));
-    assert_eq!(view.log_selected, Some(0));
-    assert!(!view.following_log());
+    assert_eq!(view.visible_log_event(), view.log.last());
+    assert!(view.log_max_scroll() > 0);
+    view.assert_log_tail();
 }
 
 #[test]

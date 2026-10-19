@@ -51,6 +51,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - Esc in the prompt input clears its text; on an empty input it stops the task's running turn, the same as `x`, and once the stop lands returns that turn's prompt to the input. In a new task, Esc follows the draft cancellation rules above.
 
 - The log list selects one event, oldest first, newest at the bottom; the detail shows that event.
+- `t` switches time/duration sorting; `agents.json` remembers it in `config.sorting` (`time` by default).
 - Selected rows use the task cursor style across the column, including both padding cells.
 - A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. In the detail panel, wheel and navigation keys scroll and unfold sections before moving the log selection at a directional boundary; returning to an unchanged event restores its scroll state.
 - Selecting the newest event follows arriving events. Older selections stay on their event and show the border's New button only when new events arrive; clicking it selects newest and follows again.

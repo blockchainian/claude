@@ -208,6 +208,7 @@ impl App {
     pub fn new(mut hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
+        view.set_log_sort(preferences.sorting);
         hub.set_weekly_usage(preferences.usage.clone());
         view.weekly_usage = preferences.usage.clone();
         view.usage_view = preferences.usage_view;
@@ -1355,6 +1356,11 @@ impl App {
             Action::PersistUsageView(view) => {
                 self.preferences.usage_view = view;
                 let saved = self.preferences.save_usage_view(&self.config_dir);
+                self.report_save(saved);
+            }
+            Action::PersistSorting(sorting) => {
+                self.preferences.sorting = sorting;
+                let saved = self.preferences.save_sorting(&self.config_dir);
                 self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {

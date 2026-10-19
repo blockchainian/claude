@@ -243,3 +243,65 @@ fn duration_history_load_errors_keep_loaded_rows_and_retry() {
         crate::providers::claude::log::tail(&path, usize::MAX).unwrap()
     );
 }
+
+#[test]
+fn sorting_key_persists_both_modes() {
+    let (_dir, mut app) = fixture();
+    for sorting in ["duration", "time"] {
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('t'),
+            KeyModifiers::NONE,
+        )));
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(app.config_dir.join("agents.json")).unwrap())
+                .unwrap();
+        assert_eq!(stored["config"]["sorting"], sorting);
+    }
+}
+
+#[test]
+fn saved_duration_loads_full_history_on_first_refresh() {
+    let (_dir, fixture) = fixture();
+    std::fs::write(
+        fixture.config_dir.join("agents.json"),
+        r#"{"config":{"sorting":"duration"},"state":{}}"#,
+    )
+    .unwrap();
+    let mut app = App::new(fixture.hub, fixture.config_dir);
+    app.sessions = fixture.sessions;
+    app.view.set_sessions(app.sessions.clone(), false);
+    assert!(app.view.log_fully_loaded());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 23)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    assert!(
+        app.pending_log.is_some(),
+        "first load requests full history"
+    );
+    assert_eq!(app.log_parsed_bytes, 0);
+    finish_search(&mut app);
+    app.draw(&mut terminal).unwrap();
+    app.view.assert_log_tail();
+    assert!(app.view.log_max_scroll() > 0);
+    let path = app.sessions[0].transcript.as_ref().unwrap();
+    assert_eq!(
+        app.view.log,
+        crate::providers::claude::log::tail(path, usize::MAX).unwrap()
+    );
+    app.view.apply_log_update(crate::log::Update {
+        events: app.view.log.clone(),
+        reset: true,
+        ..Default::default()
+    });
+    assert!(app.view.log_fully_loaded());
+    app.view.assert_log_tail();
+    let mut second = app.sessions[0].clone();
+    second.id.id = "second-duration".into();
+    app.sessions = vec![second];
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.refresh_log(1);
+    assert!(app.pending_log.is_some());
+    finish_search(&mut app);
+    app.draw(&mut terminal).unwrap();
+    app.view.assert_log_tail();
+    assert!(app.view.log_fully_loaded());
+}
