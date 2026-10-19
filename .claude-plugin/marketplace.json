@@ -94,14 +94,6 @@
         "name": "blockchainian"
       },
       "source": "./plugins/computer-use"
-    },
-    {
-      "name": "unminify",
-      "description": "Rename short JavaScript bindings with batched model suggestions, scope checks, durable journals and resumable atomic writes.",
-      "author": {
-        "name": "blockchainian"
-      },
-      "source": "./plugins/unminify"
     }
   ]
 }
