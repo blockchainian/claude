@@ -1224,7 +1224,7 @@ fn task_tabs_ignore_saved_removed_filter() {
         assert!(app.view.selected_id().is_none());
         key(&mut app, KeyCode::Tab);
         assert!(app.view.selected_id().is_some());
-        app.save_preferences();
+        app.preferences.save_grouping(&app.config_dir).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(directory.path().join("agents.json")).unwrap())
                 .unwrap();

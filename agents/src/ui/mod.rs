@@ -48,6 +48,7 @@ mod title_row;
 mod title_rule;
 mod tool_detail;
 mod usage_chart;
+mod weekly_usage;
 pub(crate) mod vscode;
 pub use highlight::use_theme as use_highlight_theme;
 pub use style::light_background;
@@ -231,6 +232,7 @@ pub struct View {
     input_choices: HashMap<ProviderId, crate::providers::InputChoices>,
     pub(crate) provider_names: Vec<(ProviderId, &'static str)>,
     pub(crate) weekly_usage: HashMap<ProviderId, crate::providers::WeeklyUsage>,
+    pub(crate) usage_view: crate::state::UsageView,
     selector: Option<Selector>,
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
@@ -384,6 +386,7 @@ impl View {
             input_choices: HashMap::new(),
             provider_names: Vec::new(),
             weekly_usage: HashMap::new(),
+            usage_view: crate::state::UsageView::default(),
             selector: None,
             input_box: prompt_box::PromptBox::default(),
             prompt_history: Default::default(),

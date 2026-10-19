@@ -584,6 +584,13 @@ impl View {
                 .map(|(_, field)| *field);
             if let Some(field) = field {
                 self.pending_click = None;
+                if field == Field::WeeklyUsage {
+                    self.usage_view = match self.usage_view {
+                        crate::state::UsageView::Compact => crate::state::UsageView::Detailed,
+                        crate::state::UsageView::Detailed => crate::state::UsageView::Compact,
+                    };
+                    return Some(Action::PersistUsageView(self.usage_view));
+                }
                 self.open_field(field);
                 return None;
             }

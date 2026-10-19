@@ -178,9 +178,12 @@ fn draft_location(cwd: PathBuf) -> io::Result<(PathBuf, String)> {
 }
 
 impl App {
-    pub fn new(hub: Hub, config_dir: PathBuf) -> Self {
+    pub fn new(mut hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
+        hub.set_weekly_usage(preferences.usage.clone());
+        view.weekly_usage = preferences.usage.clone();
+        view.usage_view = preferences.usage_view;
         view.set_pinned(&preferences.pinned);
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
@@ -414,8 +417,7 @@ impl App {
         while let Some(input) = next.take().or_else(|| self.receiver.try_recv().ok()) {
             match input {
                 Input::WeeklyUsage { provider, result } => {
-                    self.hub.weekly_usage_complete(provider, result);
-                    self.view.weekly_usage = self.hub.weekly_usage().clone();
+                    self.complete_weekly_usage(provider, result);
                 }
                 Input::Terminal(event) => {
                     if self.handle_event(event?) {
@@ -756,6 +758,19 @@ impl App {
         if changed || self.view.usage_session() != Some(&session.id) {
             self.view.set_usage(&session.id, series.bins.clone());
         }
+    }
+
+    fn complete_weekly_usage(
+        &mut self,
+        provider: ProviderId,
+        result: io::Result<Option<crate::providers::WeeklyUsage>>,
+    ) {
+        if let Ok(Some(usage)) = &result {
+            let saved = self.preferences.save_usage(&self.config_dir, provider, usage);
+            self.report_save(saved);
+        }
+        self.hub.weekly_usage_complete(provider, result);
+        self.view.weekly_usage = self.hub.weekly_usage().clone();
     }
 
     fn refresh_weekly_usage(&mut self) {
@@ -1185,12 +1200,19 @@ impl App {
                 if pinned {
                     self.preferences.pinned.push(id);
                 }
-                self.save_preferences();
+                let saved = self.preferences.save_pinned(&self.config_dir);
+                self.report_save(saved);
                 self.view.set_pinned(&self.preferences.pinned);
+            }
+            Action::PersistUsageView(view) => {
+                self.preferences.usage_view = view;
+                let saved = self.preferences.save_usage_view(&self.config_dir);
+                self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {
                 self.preferences.grouping = grouping;
-                self.save_preferences();
+                let saved = self.preferences.save_grouping(&self.config_dir);
+                self.report_save(saved);
             }
             Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
@@ -1240,8 +1262,8 @@ impl App {
             .cloned()
     }
 
-    fn save_preferences(&mut self) {
-        if let Err(error) = self.preferences.save(&self.config_dir) {
+    fn report_save(&mut self, result: io::Result<()>) {
+        if let Err(error) = result {
             self.view
                 .set_notice(Some(format!("Failed to save preferences: {error}")));
         }
@@ -1374,3 +1396,7 @@ mod project_tests;
 #[cfg(test)]
 #[path = "app_log_search_tests.rs"]
 mod log_search_tests;
+
+#[cfg(test)]
+#[path = "app_weekly_usage_tests.rs"]
+mod weekly_usage_tests;

@@ -9,6 +9,13 @@ use std::io;
 #[serde(rename_all = "camelCase")]
 struct RateLimitsResponse {
     rate_limits: RateLimits,
+    rate_limit_reset_credits: Option<ResetCredits>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetCredits {
+    available_count: u64,
 }
 
 #[derive(Deserialize)]
@@ -45,7 +52,11 @@ impl RateLimitsResponse {
                 })
             })
             .transpose()?;
-        WeeklyUsage::from_used_percent(window.used_percent, resets_at).map(Some)
+        let mut usage = WeeklyUsage::from_used_percent(window.used_percent, resets_at)?;
+        usage.reset_credits = self
+            .rate_limit_reset_credits
+            .map(|credits| credits.available_count);
+        Ok(Some(usage))
     }
 }
 
@@ -78,8 +89,10 @@ mod tests {
     #[test]
     fn weekly_usage_reads_primary_fixture() {
         let usage = parse(payload()).unwrap().unwrap();
-        assert_eq!(usage.left_percent, 2);
-        assert_eq!(usage.resets_at, DateTime::from_timestamp(1792874440, 0));
+        assert_eq!(usage.left_percent(), 84);
+        assert_eq!(usage.used_percent, 16.0);
+        assert_eq!(usage.reset_credits, Some(2));
+        assert_eq!(usage.resets_at, DateTime::from_timestamp(1792979570, 0));
     }
 
     #[test]
@@ -91,8 +104,8 @@ mod tests {
         });
         response["rateLimits"]["secondary"]["usedPercent"] = json!(17.6);
         let usage = parse(response).unwrap().unwrap();
-        assert_eq!(usage.left_percent, 82);
-        assert_eq!(usage.resets_at, DateTime::from_timestamp(1792874440, 0));
+        assert_eq!(usage.left_percent(), 82);
+        assert_eq!(usage.resets_at, DateTime::from_timestamp(1792979570, 0));
     }
 
     #[test]
@@ -103,6 +116,26 @@ mod tests {
         response["rateLimits"]["primary"]["windowDurationMins"] = json!(10080);
         response["rateLimits"]["primary"]["resetsAt"] = Value::Null;
         assert!(parse(response).unwrap().unwrap().resets_at.is_none());
+    }
+
+    #[test]
+    fn weekly_usage_allows_absent_reset_credits_and_preserves_zero() {
+        let mut response = payload();
+        response
+            .as_object_mut()
+            .unwrap()
+            .remove("rateLimitResetCredits");
+        assert_eq!(
+            parse(response.clone()).unwrap().unwrap().reset_credits,
+            None
+        );
+        response["rateLimitResetCredits"] = Value::Null;
+        assert_eq!(
+            parse(response.clone()).unwrap().unwrap().reset_credits,
+            None
+        );
+        response["rateLimitResetCredits"] = json!({ "availableCount": 0, "credits": [] });
+        assert_eq!(parse(response).unwrap().unwrap().reset_credits, Some(0));
     }
 
     #[test]
@@ -124,7 +157,8 @@ mod tests {
         let usage = provider.weekly_usage().unwrap()().unwrap().unwrap();
         println!(
             "codex: weekly {}% left; resets_at={:?}",
-            usage.left_percent, usage.resets_at
+            usage.left_percent(),
+            usage.resets_at
         );
     }
 }

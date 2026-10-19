@@ -1,14 +1,22 @@
-//! Persisted command-center preferences.
+//! Persisted command-center configuration and runtime state.
 
 use crate::model::Grouping;
-use crate::providers::SessionKey;
+use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageView {
+    #[default]
+    Compact,
+    Detailed,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
@@ -20,25 +28,75 @@ pub struct Preferences {
     pub light_theme: Option<PathBuf>,
     /// A `.tmTheme` file that highlights code on a dark background instead of the bundled `dark`.
     pub dark_theme: Option<PathBuf>,
+    pub usage_view: UsageView,
+    pub usage: HashMap<ProviderId, WeeklyUsage>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct StoredPreferences {
+    config: StoredConfig,
+    state: StoredState,
 }
 
 #[derive(Deserialize, Serialize)]
-struct StoredPreferences {
-    #[serde(
-        default = "default_worktree_root",
-        skip_serializing_if = "Option::is_none"
-    )]
+#[serde(default)]
+struct StoredConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     worktree_root: Option<PathBuf>,
-    #[serde(default = "default_double_click_ms")]
     double_click_ms: u64,
     grouping: String,
-    pinned: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     theme: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     light_theme: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     dark_theme: Option<PathBuf>,
+}
+
+impl Default for StoredConfig {
+    fn default() -> Self {
+        Self {
+            worktree_root: default_worktree_root(),
+            double_click_ms: default_double_click_ms(),
+            grouping: Grouping::default().as_str().into(),
+            theme: None,
+            light_theme: None,
+            dark_theme: None,
+        }
+    }
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(default)]
+struct StoredState {
+    pinned: Vec<String>,
+    usage_view: UsageView,
+    usage: StoredUsage,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(default)]
+struct StoredUsage {
+    weekly: HashMap<String, StoredWeeklyUsage>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct StoredWeeklyUsage {
+    used_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resets_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reset_credits: Option<u64>,
+}
+
+impl From<&WeeklyUsage> for StoredWeeklyUsage {
+    fn from(usage: &WeeklyUsage) -> Self {
+        Self {
+            used_percent: usage.used_percent,
+            resets_at: usage.resets_at.map(|time| time.to_rfc3339()),
+            reset_credits: usage.reset_credits,
+        }
+    }
 }
 
 /// New worktrees go under `~/.agents/worktrees` unless `agents.json` names another root.
@@ -65,6 +123,8 @@ impl Default for Preferences {
             theme: None,
             light_theme: None,
             dark_theme: None,
+            usage_view: UsageView::default(),
+            usage: HashMap::new(),
         }
     }
 }
@@ -77,139 +137,164 @@ impl Preferences {
         else {
             return Self::default();
         };
-        let Some(grouping) = Grouping::parse(&stored.grouping) else {
-            return Self::default();
-        };
-        Self {
-            worktree_root: stored.worktree_root,
-            double_click_ms: stored.double_click_ms,
+        Self::from_stored(stored).unwrap_or_default()
+    }
+
+    fn from_stored(stored: StoredPreferences) -> Option<Self> {
+        let grouping = Grouping::parse(&stored.config.grouping)?;
+        let mut usage = HashMap::new();
+        for (name, value) in stored.state.usage.weekly {
+            let provider = match name.as_str() {
+                "claude" => ProviderId::Claude,
+                "codex" => ProviderId::Codex,
+                _ => continue,
+            };
+            let resets_at = value
+                .resets_at
+                .map(|time| time.parse::<chrono::DateTime<chrono::Utc>>())
+                .transpose()
+                .ok()?;
+            let mut weekly = WeeklyUsage::from_used_percent(value.used_percent, resets_at).ok()?;
+            weekly.reset_credits = value.reset_credits;
+            usage.insert(provider, weekly);
+        }
+        Some(Self {
+            worktree_root: stored.config.worktree_root,
+            double_click_ms: stored.config.double_click_ms,
             grouping,
             pinned: stored
+                .state
                 .pinned
                 .into_iter()
                 .filter_map(|value| value.parse().ok())
                 .collect(),
-            theme: stored.theme,
-            light_theme: stored.light_theme,
-            dark_theme: stored.dark_theme,
-        }
+            theme: stored.config.theme,
+            light_theme: stored.config.light_theme,
+            dark_theme: stored.config.dark_theme,
+            usage_view: stored.state.usage_view,
+            usage,
+        })
     }
 
+    pub fn save_pinned(&self, config_dir: &Path) -> io::Result<()> {
+        update(config_dir, |document| {
+            document["state"]["pinned"] = serde_json::to_value(
+                self.pinned
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn save_usage_view(&self, config_dir: &Path) -> io::Result<()> {
+        update(config_dir, |document| {
+            document["state"]["usage_view"] = serde_json::to_value(self.usage_view)?;
+            Ok(())
+        })
+    }
+
+    pub fn save_usage(
+        &self,
+        config_dir: &Path,
+        provider: ProviderId,
+        usage: &WeeklyUsage,
+    ) -> io::Result<()> {
+        update(config_dir, |document| {
+            document["state"]["usage"]["weekly"][provider.to_string()] =
+                serde_json::to_value(StoredWeeklyUsage::from(usage))?;
+            Ok(())
+        })
+    }
+
+    pub fn save_grouping(&self, config_dir: &Path) -> io::Result<()> {
+        update(config_dir, |document| {
+            document["config"]["grouping"] = self.grouping.as_str().into();
+            Ok(())
+        })
+    }
+
+    #[cfg(test)]
     pub fn save(&self, config_dir: &Path) -> io::Result<()> {
-        fs::create_dir_all(config_dir)?;
-        let destination = config_dir.join("agents.json");
-        let temporary = config_dir.join(format!(".agents-{}.tmp", std::process::id()));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        let result = (|| {
-            serde_json::to_writer(
-                &mut file,
-                &StoredPreferences {
+        update(config_dir, |document| {
+            *document = serde_json::to_value(StoredPreferences {
+                config: StoredConfig {
                     worktree_root: self.worktree_root.clone(),
                     double_click_ms: self.double_click_ms,
                     grouping: self.grouping.as_str().into(),
-                    pinned: self.pinned.iter().map(ToString::to_string).collect(),
                     theme: self.theme.clone(),
                     light_theme: self.light_theme.clone(),
                     dark_theme: self.dark_theme.clone(),
                 },
-            )?;
-            file.write_all(b"\n")?;
-            file.sync_all()?;
-            fs::rename(&temporary, destination)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        result
+                state: StoredState {
+                    pinned: self.pinned.iter().map(ToString::to_string).collect(),
+                    usage_view: self.usage_view,
+                    usage: StoredUsage {
+                        weekly: self
+                            .usage
+                            .iter()
+                            .map(|(provider, usage)| {
+                                (provider.to_string(), StoredWeeklyUsage::from(usage))
+                            })
+                            .collect(),
+                    },
+                },
+            })?;
+            Ok(())
+        })
     }
+}
+
+fn update(
+    config_dir: &Path,
+    change: impl FnOnce(&mut serde_json::Value) -> io::Result<()>,
+) -> io::Result<()> {
+    fs::create_dir_all(config_dir)?;
+    // Lock a stable inode: the preferences file itself is replaced by rename.
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(config_dir.join(".agents.lock"))?;
+    lock.lock()?;
+    let destination = config_dir.join("agents.json");
+    let mut document = match fs::read(&destination) {
+        Ok(bytes) => {
+            let value = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+            value
+                .filter(|value| {
+                    serde_json::from_value::<StoredPreferences>(value.clone())
+                        .ok()
+                        .and_then(Preferences::from_stored)
+                        .is_some()
+                })
+                .unwrap_or(serde_json::to_value(StoredPreferences::default())?)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            serde_json::to_value(StoredPreferences::default())?
+        }
+        Err(error) => return Err(error),
+    };
+    change(&mut document)?;
+    let temporary = config_dir.join(format!(".agents-{}.tmp", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    let result = (|| {
+        serde_json::to_writer(&mut file, &document)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        fs::rename(&temporary, destination)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn worktree_root_defaults_and_round_trips() {
-        assert_eq!(
-            worktree_root(Some("/Users/probe".into())),
-            Some(PathBuf::from("/Users/probe/.agents/worktrees"))
-        );
-        assert_eq!(worktree_root(Some("".into())), None);
-        assert_eq!(worktree_root(None), None);
-        let directory = tempfile::tempdir().unwrap();
-        let preferences = Preferences {
-            worktree_root: Some(directory.path().join("trees")),
-            ..Preferences::default()
-        };
-        preferences.save(directory.path()).unwrap();
-        assert_eq!(Preferences::load(directory.path()), preferences);
-    }
-
-    #[test]
-    fn double_click_interval_defaults_and_round_trips() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(Preferences::load(dir.path()).double_click_ms, 300);
-        fs::write(
-            dir.path().join("agents.json"),
-            r#"{"grouping":"project","pinned":[],"double_click_ms":450}"#,
-        )
-        .unwrap();
-        let preferences = Preferences::load(dir.path());
-        assert_eq!(preferences.double_click_ms, 450);
-        preferences.save(dir.path()).unwrap();
-        assert_eq!(Preferences::load(dir.path()), preferences);
-    }
-
-    #[test]
-    fn unprefixed_pins_are_dropped() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("agents.json"),
-            r#"{"grouping":"model","pinned":["old-id","claude:kept","codex:kept","unknown:id","claude:"]}"#,
-        )
-        .unwrap();
-        let preferences = Preferences::load(dir.path());
-        assert_eq!(preferences.grouping, Grouping::Model);
-        assert_eq!(
-            preferences
-                .pinned
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            ["claude:kept", "codex:kept"]
-        );
-        preferences.save(dir.path()).unwrap();
-        let stored: serde_json::Value =
-            serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
-        assert_eq!(
-            stored["pinned"],
-            serde_json::json!(["claude:kept", "codex:kept"])
-        );
-    }
-
-    #[test]
-    fn preferences_round_trip_and_corrupt_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(Preferences::load(dir.path()), Preferences::default());
-        let preferences = Preferences {
-            worktree_root: Some(dir.path().join("trees")),
-            double_click_ms: 300,
-            grouping: Grouping::Model,
-            pinned: vec![
-                "claude:second".parse().unwrap(),
-                "claude:first".parse().unwrap(),
-            ],
-            theme: Some(PathBuf::from("custom.tmTheme")),
-            light_theme: Some(PathBuf::from("light.tmTheme")),
-            dark_theme: Some(PathBuf::from("dark.tmTheme")),
-        };
-        preferences.save(dir.path()).unwrap();
-        assert_eq!(Preferences::load(dir.path()), preferences);
-        preferences.save(dir.path()).unwrap();
-        fs::write(dir.path().join("agents.json"), b"broken").unwrap();
-        assert_eq!(Preferences::load(dir.path()), Preferences::default());
-    }
-}
+#[path = "state_tests.rs"]
+mod tests;

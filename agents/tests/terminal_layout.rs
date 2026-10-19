@@ -1,3 +1,6 @@
+#[path = "support/terminal_weekly_usage.rs"]
+mod terminal_weekly_usage;
+
 #[path = "support/terminal_structured.rs"]
 mod terminal_structured;
 

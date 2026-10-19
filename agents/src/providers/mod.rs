@@ -125,13 +125,18 @@ impl InputChoices {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WeeklyUsage {
-    pub left_percent: u8,
+    pub used_percent: f64,
+    pub reset_credits: Option<u64>,
     pub resets_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl WeeklyUsage {
+    pub fn left_percent(&self) -> u8 {
+        (100.0 - self.used_percent).round() as u8
+    }
+
     pub fn from_used_percent(
         used: f64,
         resets_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -143,7 +148,8 @@ impl WeeklyUsage {
             ));
         }
         Ok(Self {
-            left_percent: (100.0 - used).round() as u8,
+            used_percent: used,
+            reset_credits: None,
             resets_at,
         })
     }

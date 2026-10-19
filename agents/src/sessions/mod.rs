@@ -60,6 +60,10 @@ impl Hub {
             .collect()
     }
 
+    pub fn set_weekly_usage(&mut self, values: HashMap<ProviderId, crate::providers::WeeklyUsage>) {
+        self.weekly_usage.values = values;
+    }
+
     pub fn weekly_usage_jobs(
         &mut self,
         now: std::time::Instant,

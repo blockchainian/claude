@@ -357,23 +357,15 @@ impl View {
             .provider_names
             .iter()
             .filter_map(|(provider, name)| {
-                let usage = self.weekly_usage.get(provider)?;
-                let mut text = format!("{name} {}% left", usage.left_percent);
-                if usage.left_percent < 5
-                    && let Some(resets_at) = usage.resets_at
-                {
-                    text.push_str(&format!(
-                        ", resets {}",
-                        resets_at.with_timezone(&chrono::Local).format("%a %H:%M")
-                    ));
-                }
-                Some(text)
+                self.weekly_usage.get(provider).map(|usage| {
+                    super::weekly_usage::provider_text(name, usage, self.usage_view)
+                })
             })
             .collect::<Vec<_>>();
         if !usage.is_empty() && !tabs.is_empty() {
             let text = Line::from(vec![
                 Span::styled("Weekly", style::inactive_tab_style()),
-                Span::raw(format!("  {}", usage.join(" · "))),
+                Span::raw(format!(" {}", usage.join(" · "))),
             ]);
             let width = text.width();
             if width <= usize::from(tabs.width) {
@@ -391,6 +383,7 @@ impl View {
                     .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
                 {
                     text.render(target, buf);
+                    self.viewport.borrow_mut().field_targets.push((target, Field::WeeklyUsage));
                 }
             }
         }

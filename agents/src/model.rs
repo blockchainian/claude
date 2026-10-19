@@ -254,6 +254,7 @@ pub enum Action {
     },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
+    PersistUsageView(crate::state::UsageView),
     /// `r`: set the session display name.
     Rename {
         id: SessionKey,

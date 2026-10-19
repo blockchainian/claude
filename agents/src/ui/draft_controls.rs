@@ -9,6 +9,7 @@ use std::fs;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Field {
+    WeeklyUsage,
     Model,
     Effort,
     Branch,
@@ -364,6 +365,7 @@ impl View {
                     return;
                 }
                 Field::Model | Field::Effort => {}
+                Field::WeeklyUsage => return,
             }
             (
                 draft.setup.provider,
