@@ -98,3 +98,91 @@ fn terminal_task_navigation_and_opening_keys() {
         serde_json::json!({"task_list_boundaries": "passed", "task_history": "passed", "opening_keys": "passed", "search_escape": "passed", "help": "passed"})
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_task_border_double_clicks() {
+    let (directory, tmux, transcript) = start_probe("task-borders");
+    let project = transcript.parent().unwrap();
+    for index in 0..9 {
+        let id = if index == 0 {
+            "4165651d-b9e3-458d-8612-f8114e312363".to_owned()
+        } else {
+            format!("00000000-0000-0000-0000-000000000{index:03}")
+        };
+        let records = include_str!("../fixtures/transcript.jsonl")
+            .lines()
+            .map(|line| {
+                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+                record["sessionId"] = id.clone().into();
+                if record["type"] == "ai-title" {
+                    record["aiTitle"] = format!("Border task {index:02}").into();
+                }
+                record.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(project.join(format!("{id}.jsonl")), records + "\n").unwrap();
+    }
+    tmux.wait_for(|capture| capture.contains("Inactive 9"));
+    let selected = |capture: &str| {
+        (0..9)
+            .map(|index| format!("Border task {index:02}"))
+            .find(|name| {
+                ['❯', '❮']
+                    .iter()
+                    .any(|marker| capture.contains(&format!("{name} {marker}")))
+            })
+            .unwrap_or_else(|| panic!("selected task missing: {capture}"))
+    };
+    for width in [100, 149, 150, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "20",
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == 20 && capture.lines().nth(1).unwrap().width() == width
+        });
+        // Establish both ends through the existing keyboard navigation.
+        tmux.mouse(0, 4, 3, true);
+        tmux.run(&["send-keys", "-t", "probe", "Home"]);
+        let top = tmux.capture_when(|capture| capture.lines().nth(2).unwrap().contains("/claude"));
+        let first = selected(&top);
+        tmux.run(&["send-keys", "-t", "probe", "End"]);
+        let bottom =
+            tmux.capture_when(|capture| !capture.lines().nth(2).unwrap().contains("/claude"));
+        let last = selected(&bottom);
+        assert_ne!(first, last);
+        let border = bottom
+            .lines()
+            .enumerate()
+            .skip(2)
+            .find(|(_, line)| line.chars().filter(|c| *c == '─').count() > width / 2)
+            .unwrap()
+            .0;
+        let double_click = |row: usize| {
+            let sequence = format!("\x1b[<0;5;{}M\x1b[<0;5;{}m", row + 1, row + 1).repeat(2);
+            tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
+        };
+        double_click(1);
+        let top = tmux.capture_when(|capture| {
+            selected(capture) == first && capture.lines().nth(2).unwrap().contains("/claude")
+        });
+        std::fs::write(directory.path().join(format!("top-{width}.txt")), top).unwrap();
+        double_click(border);
+        let bottom = tmux.capture_when(|capture| {
+            selected(capture) == last && !capture.lines().nth(2).unwrap().contains("/claude")
+        });
+        std::fs::write(directory.path().join(format!("bottom-{width}.txt")), bottom).unwrap();
+    }
+    let verdict = serde_json::json!({"task_border_double_clicks":"pass", "widths":[100,149,150,200], "ends":["top","bottom"]});
+    if let Some(path) = std::env::var_os("AGENTS_PROBE_VERDICT") {
+        std::fs::write(path, verdict.to_string()).unwrap();
+    }
+    println!("{verdict}");
+}

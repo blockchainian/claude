@@ -9760,6 +9760,71 @@ mod log_navigation {
 }
 
 #[test]
+fn task_border_double_clicks_select_both_ends_in_both_layouts() {
+    for width in [100, 149, 150, 200] {
+        for bottom in [false, true] {
+            for tab in [0, 1] {
+                let mut view = simple_fixture();
+                view.set_sessions(
+                    (0..80)
+                        .map(|i| {
+                            session(
+                                &format!("border-{i}"),
+                                &format!("Task {i}"),
+                                if i % 2 == 0 {
+                                    SessionStatus::Ready
+                                } else {
+                                    SessionStatus::Inactive
+                                },
+                                i,
+                            )
+                        })
+                        .collect(),
+                    false,
+                );
+                if tab == 1 {
+                    key(&mut view, KeyCode::Tab);
+                }
+                // Loading more is not a task row at the bottom of the inactive tab.
+                view.has_more = true;
+                let indices = view.visible_indices();
+                view.select(indices[indices.len() / 2]);
+                screen(&view, width, 30);
+                let list = view.viewport.borrow().list;
+                assert!(view.viewport.borrow().scroll > 0);
+                assert!(view.viewport.borrow().scroll < view.viewport.borrow().task_scroll_max);
+                let click = mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    list.x + list.width / 3,
+                    if bottom { list.bottom() } else { list.y - 1 },
+                );
+                let before = view.selected;
+                assert_eq!(click_mouse(&mut view, click), None);
+                assert_eq!(view.selected, before, "single click, width {width}");
+                assert_eq!(click_mouse(&mut view, click), None);
+                let expected = if bottom {
+                    *indices.last().unwrap()
+                } else {
+                    indices[0]
+                };
+                assert_eq!(
+                    view.selected, expected,
+                    "width {width}, bottom {bottom}, tab {tab}"
+                );
+                screen(&view, width, 30);
+                let viewport = view.viewport.borrow();
+                assert_eq!(
+                    viewport.scroll,
+                    if bottom { viewport.task_scroll_max } else { 0 }
+                );
+                assert_eq!(view.status_filter, tab);
+                assert!(!view.input_box.focused);
+            }
+        }
+    }
+}
+
+#[test]
 fn log_border_double_clicks_select_both_ends_in_both_layouts() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = log_fixture();

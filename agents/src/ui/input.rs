@@ -7,9 +7,10 @@ const TITLE_HOLD_WHEELS: usize = 2;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
-    LogBorder {
+    ListBorder {
+        panel: Panel,
         row: u16,
-        latest: bool,
+        bottom: bool,
     },
     Log {
         index: usize,
@@ -93,7 +94,7 @@ impl View {
         }
         let click = self.pending_click.take().expect("click is due");
         match click.target {
-            ClickTarget::Log { .. } | ClickTarget::LogBorder { .. } => None,
+            ClickTarget::Log { .. } | ClickTarget::ListBorder { .. } => None,
             ClickTarget::Details {
                 session, source, ..
             } => {
@@ -526,9 +527,22 @@ impl View {
                 .iter()
                 .position(|rect| rect.contains(position))
         {
-            return Some(ClickTarget::LogBorder {
+            return Some(ClickTarget::ListBorder {
+                panel: Panel::LogList,
                 row: position.y,
-                latest: border == 1,
+                bottom: border == 1,
+            });
+        }
+        let list = viewport.list;
+        if !list.is_empty()
+            && position.x >= list.x
+            && position.x < list.right()
+            && (position.y == list.y.saturating_sub(1) || position.y == list.bottom())
+        {
+            return Some(ClickTarget::ListBorder {
+                panel: Panel::TaskList,
+                row: position.y,
+                bottom: position.y == list.bottom(),
             });
         }
         if viewport.log.contains(position)
@@ -854,11 +868,22 @@ impl View {
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
-            && let Some(target @ ClickTarget::LogBorder { latest, .. }) =
+            && let Some(target @ ClickTarget::ListBorder { panel, bottom, .. }) =
                 self.click_target_at(position)
         {
             if self.defer_click(target) {
-                if latest {
+                if panel == Panel::TaskList {
+                    let indices = self.visible_indices();
+                    let selected = if bottom {
+                        indices.last()
+                    } else {
+                        indices.first()
+                    };
+                    if let Some(&selected) = selected {
+                        self.select(selected);
+                        self.viewport.borrow_mut().scroll = if bottom { usize::MAX } else { 0 };
+                    }
+                } else if bottom {
                     self.show_newest_log();
                 } else {
                     self.log_background_return = None;
