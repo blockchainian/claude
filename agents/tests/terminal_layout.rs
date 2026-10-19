@@ -595,10 +595,15 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
 fn terminal_last_activity_heading_stays_centered() {
     let (_directory, tmux, transcript) = start_probe("activity-heading");
     // Append a recorded tool call so the provider supplies a real activity section.
-    let call = include_str!("fixtures/claude-tool-calls.jsonl")
-        .lines()
-        .next()
-        .unwrap();
+    let mut call: serde_json::Value = serde_json::from_str(
+        include_str!("fixtures/claude-tool-details.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    // Exercise the recorded subagent call in this foreground session.
+    call["isSidechain"] = false.into();
     let original = std::fs::read_to_string(&transcript).unwrap();
     std::fs::write(&transcript, format!("{original}\n{call}\n")).unwrap();
     tmux.wait_for(|capture| capture.contains("Last activity"));
@@ -643,6 +648,13 @@ fn terminal_last_activity_heading_stays_centered() {
             "{capture}"
         );
         assert!(!capture.contains("Latest activity"), "{capture}");
+        if width >= 150 {
+            let summary = "Bash mkdir, cd, ls, wc, head";
+            assert!(
+                capture.matches(summary).count() >= 2,
+                "activity and log must share the summary: {capture}"
+            );
+        }
         let path = std::env::temp_dir().join(format!("agents-activity-heading-{width}.txt"));
         std::fs::write(&path, &capture).unwrap();
         println!(

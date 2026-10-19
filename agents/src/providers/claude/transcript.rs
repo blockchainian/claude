@@ -653,7 +653,7 @@ fn read_messages(
     let mut ask_error = None;
     let mut activity = super::log::ActivityLog::default();
     walk_records(file, start, bytes, sidechains, |record| {
-        if !descriptions_only {
+        if !descriptions_only && !activity.ready() {
             activity.record(record.clone());
         }
         if record["type"] == "assistant" {
@@ -792,15 +792,7 @@ fn read_messages(
     }
     if let Some(event) = activity.finish()? {
         summary.detail_sources[0] = event.calls.first().map(|call| call.id.clone());
-        summary.activity = Some(Activity {
-            exit_code: match event.calls.as_slice() {
-                [call] => call.exit_code,
-                _ => None,
-            },
-            kind: event.kind,
-            label: event.body,
-            at: event.started_at,
-        });
+        summary.activity = Some(event.activity());
     }
     summary.completed_background = background.completed.clone();
     summary.queued = queued_prompts(operations);

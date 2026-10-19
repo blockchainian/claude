@@ -98,12 +98,40 @@ impl ActivityLog {
             return;
         }
         self.log.record(record, usize::MAX);
-        self.ready = self
+        if let Some(index) = self
             .log
             .entries
             .iter()
             .position(|entry| !entry.event.calls.is_empty())
-            .is_some_and(|index| self.log.batch != Some(index));
+        {
+            let event = &self.log.entries[index].event;
+            let message = event
+                .calls
+                .first()
+                .and_then(|call| call.agent_message.as_ref());
+            if let Some(message) = message.filter(|message| message.mergeable(message)) {
+                let end = self.log.entries[index..]
+                    .iter()
+                    .take_while(|entry| {
+                        entry.event.kind == event.kind
+                            && !entry.event.calls.is_empty()
+                            && entry.event.calls.iter().all(|call| {
+                                call.agent_message
+                                    .as_ref()
+                                    .is_some_and(|other| message.mergeable(other))
+                            })
+                    })
+                    .count()
+                    + index;
+                self.ready = end < self.log.entries.len()
+                    && self
+                        .log
+                        .batch
+                        .is_none_or(|batch| batch < index || batch >= end);
+            } else {
+                self.ready = self.log.batch != Some(index);
+            }
+        }
     }
 
     pub fn ready(&self) -> bool {
@@ -114,12 +142,17 @@ impl ActivityLog {
         if let Some(error) = self.log.error {
             return Err(error);
         }
-        Ok(self
-            .log
-            .entries
-            .into_iter()
-            .find(|entry| !entry.event.calls.is_empty())
-            .map(|entry| entry.event))
+        Ok(crate::log::agent::merge(
+            self.log
+                .entries
+                .into_iter()
+                .rev()
+                .map(|entry| entry.event)
+                .collect(),
+        )
+        .into_iter()
+        .rev()
+        .find(|event| !event.calls.is_empty()))
     }
 }
 
@@ -2097,6 +2130,41 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn real_merged_peer_activity_uses_the_log_row() {
+        let peer = include_str!("../../../tests/fixtures/claude-peer-prompts.jsonl")
+            .lines()
+            .next()
+            .unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // A different real event bounds the consecutive peer deliveries.
+        writeln!(
+            file,
+            "{}",
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+                .lines()
+                .next()
+                .unwrap()
+        )
+        .unwrap();
+        for count in 1..=3 {
+            writeln!(file, "{peer}").unwrap();
+            let events = tail_session(file.path(), usize::MAX, true).unwrap();
+            let event = events.last().unwrap();
+            assert_eq!(event.calls.len(), count);
+            let summary = super::super::transcript::read_subagent(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+            )
+            .unwrap();
+            let session = super::super::session("peer-activity".into(), summary, None, Utc::now());
+            let activity = session.latest_activity().unwrap();
+            assert_eq!(activity.label, event.summary());
+            assert_eq!(activity.kind, event.kind);
+            assert_eq!(activity.at, event.started_at);
+        }
+    }
+
+    #[test]
     fn real_activity_uses_the_latest_log_event() {
         for fixture in [
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl"),
@@ -2117,7 +2185,7 @@ pub(crate) mod tests {
                 )
                 .unwrap();
                 let activity = summary.activity.unwrap();
-                assert_eq!(activity.label, event.body);
+                assert_eq!(activity.label, event.summary());
                 assert_eq!(activity.kind, event.kind);
                 assert_eq!(activity.at, event.started_at);
                 assert_eq!(
@@ -2157,7 +2225,7 @@ pub(crate) mod tests {
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, events[0].body);
+            assert_eq!(activity.label, events[0].summary());
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
@@ -2189,7 +2257,7 @@ pub(crate) mod tests {
             assert_eq!(events[0].calls[0].name, block["name"].as_str().unwrap());
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
-            assert_eq!(summary.activity.unwrap().label, events[0].body);
+            assert_eq!(summary.activity.unwrap().label, events[0].summary());
         }
     }
 
@@ -2223,7 +2291,7 @@ pub(crate) mod tests {
             if record["type"] == "assistant" {
                 let len = file.as_file().metadata().unwrap().len();
                 let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
-                assert_eq!(summary.activity.unwrap().label, events[0].body);
+                assert_eq!(summary.activity.unwrap().label, events[0].summary());
             }
         }
     }
@@ -2234,9 +2302,9 @@ pub(crate) mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        for (mut record, tool_name, expected) in [
-            (records[0].clone(), "Task", "Review files"),
-            (records[1].clone(), "SubagentHandback", "SubagentHandback"),
+        for (mut record, tool_name) in [
+            (records[0].clone(), "Task"),
+            (records[1].clone(), "SubagentHandback"),
         ] {
             let block = &mut record["message"]["content"][0];
             block["name"] = tool_name.into();
@@ -2252,7 +2320,10 @@ pub(crate) mod tests {
                 file.as_file().metadata().unwrap().len(),
             )
             .unwrap();
-            assert_eq!(summary.activity.unwrap().label, expected);
+            assert_eq!(
+                summary.activity.unwrap().label,
+                tail(file.path(), 1).unwrap()[0].summary()
+            );
         }
     }
 
@@ -2285,7 +2356,10 @@ pub(crate) mod tests {
                     file.as_file().metadata().unwrap().len(),
                 )
                 .unwrap();
-                assert_eq!(summary.activity.unwrap().label, row_expected);
+                assert_eq!(
+                    summary.activity.unwrap().label,
+                    tail(file.path(), 1).unwrap()[0].summary()
+                );
             }
         }
     }
@@ -2310,7 +2384,10 @@ pub(crate) mod tests {
             file.as_file().metadata().unwrap().len(),
         )
         .unwrap();
-        assert_eq!(summary.activity.unwrap().label, "SendMessage");
+        assert_eq!(
+            summary.activity.unwrap().label,
+            tail(file.path(), 1).unwrap()[0].summary()
+        );
     }
 
     #[test]
@@ -2332,7 +2409,7 @@ pub(crate) mod tests {
             file.as_file().metadata().unwrap().len(),
         )
         .unwrap();
-        assert_eq!(summary.activity.unwrap().label, events[0].body);
+        assert_eq!(summary.activity.unwrap().label, events[0].summary());
     }
 
     #[test]

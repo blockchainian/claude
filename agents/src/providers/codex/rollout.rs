@@ -997,8 +997,35 @@ pub(super) fn first_prompt(
     Ok((Vec::new(), None))
 }
 
+/// Read the same parsed rows as the log, including call/result and message pairing.
+fn latest_activity(path: &Path) -> io::Result<Option<Event>> {
+    let mut reader = Reader::new(path.to_path_buf(), false);
+    let mut requested = 16;
+    loop {
+        reader.refresh(requested)?;
+        if let Some((index, (_, event))) = reader
+            .entries
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, (_, event))| !event.calls.is_empty())
+            && (index > 0 || reader.oldest == 0)
+        {
+            return Ok(Some(event.clone()));
+        }
+        if reader.oldest == 0 {
+            return Ok(None);
+        }
+        requested = reader.entries.len().saturating_add(16);
+    }
+}
+
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
+    if let Some(event) = latest_activity(path)? {
+        summary.detail_sources[0] = event.source.clone();
+        summary.activity = Some(event.activity());
+    }
     let mut boundary = false;
     let mut message_source_closed = false;
     let mut message_pending_completion = false;
@@ -1072,34 +1099,6 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         // the identity of the latest message record in that turn instead.
         if summary.detail_sources[1].is_none() && !message_source_closed && message.is_some() {
             summary.detail_sources[1] = assistant_source(&record, offset);
-        }
-        if summary.activity.is_none()
-            && let Some(event) = completed_tool(&record)?
-        {
-            summary.detail_sources[0] = Some(source(&record, offset));
-            summary.activity = Some(Activity {
-                exit_code: event.calls.first().and_then(|call| call.exit_code),
-                kind: event.kind,
-                label: event.body,
-                at,
-            });
-        }
-        if summary.activity.is_none() && record["type"] == "response_item" {
-            let activity = match payload["type"].as_str() {
-                Some("function_call" | "custom_tool_call") => tool_body(payload)
-                    .map(|label| (tool_kind(payload["name"].as_str().unwrap()), label)),
-                Some("reasoning") => Some((Kind::Tool, "Thinking".to_owned())),
-                _ => None,
-            };
-            if let Some((kind, label)) = activity {
-                summary.detail_sources[0] = Some(source(&record, offset));
-                summary.activity = Some(Activity {
-                    exit_code: None,
-                    kind,
-                    label,
-                    at,
-                });
-            }
         }
         Ok(!(boundary
             && summary.prompt_at.is_some()
@@ -1809,6 +1808,28 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn real_activity_uses_the_latest_log_event() {
+        let fixture = include_str!("../../../tests/fixtures/codex-latest-activity.jsonl");
+        for count in [11, 12, 28, 142, 143, 144, 145, 148, 149, 156] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            let prefix = fixture.lines().take(count).collect::<Vec<_>>().join("\n");
+            std::fs::write(file.path(), format!("{prefix}\n")).unwrap();
+            let events = tail(file.path(), usize::MAX).unwrap();
+            let event = events
+                .iter()
+                .rev()
+                .find(|event| !event.calls.is_empty())
+                .unwrap();
+            let result = summary(file.path()).unwrap();
+            let activity = result.activity.unwrap();
+            assert_eq!(activity.label, event.summary(), "prefix {count}");
+            assert_eq!(activity.kind, event.kind, "prefix {count}");
+            assert_eq!(activity.at, event.started_at, "prefix {count}");
+            assert_eq!(result.detail_sources[0], event.source, "prefix {count}");
+        }
+    }
+
     #[test]
     fn detach_subject_uses_json_output_with_input_fallback() {
         let records: Vec<Value> =
