@@ -169,12 +169,21 @@ struct PendingLog {
 }
 
 /// A new task's directory and branch: the repository's current branch, or none outside git.
-fn draft_location(cwd: PathBuf) -> io::Result<(PathBuf, String)> {
+pub(crate) fn draft_location(cwd: PathBuf) -> io::Result<(PathBuf, String)> {
     let cwd = std::fs::canonicalize(cwd)?;
-    Ok(match crate::tasks::repository_if_present(&cwd)? {
-        Some(repository) => (repository.directory, repository.branch),
-        None => (cwd, String::new()),
-    })
+    let output = Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(&cwd).output()?;
+    if !output.status.success() {
+        if cwd.ancestors().any(|path| path.join(".git").exists()) {
+            return Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
+        }
+        return Ok((cwd, String::new()));
+    }
+    let output = Command::new("git").args(["symbolic-ref", "--short", "HEAD"]).current_dir(&cwd).output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
+    }
+    let branch = String::from_utf8(output.stdout).map_err(io::Error::other)?.trim().to_owned();
+    Ok((cwd, branch))
 }
 
 impl App {
@@ -185,6 +194,8 @@ impl App {
         view.weekly_usage = preferences.usage.clone();
         view.usage_view = preferences.usage_view;
         view.set_pinned(&preferences.pinned);
+        view.set_drafts(&preferences.drafts);
+        if !preferences.draft_notices.is_empty() { view.set_notice(Some(preferences.draft_notices.join("; "))); }
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
@@ -288,6 +299,8 @@ impl App {
         self.refresh();
         let mut selection_tick = Instant::now();
         loop {
+            let persist = self.view.take_drafts_action();
+            self.handle_action(persist);
             if selection_tick.elapsed() >= Duration::from_millis(50) {
                 self.view.tick_text_selection();
                 selection_tick = Instant::now();
@@ -928,12 +941,16 @@ impl App {
         }
     }
 
+    fn persist_drafts(&mut self) {
+        self.preferences.drafts = self.view.stored_drafts();
+        let saved = self.preferences.save_drafts(&self.config_dir);
+        self.report_save(saved);
+    }
+
     fn change_draft_directory(&mut self, draft_id: DraftId, cwd: PathBuf) {
         match draft_location(cwd) {
             Ok((cwd, branch)) => self.view.draft_directory_changed(draft_id, cwd, branch),
-            Err(error) => self
-                .view
-                .set_notice(Some(format!("Cannot use that repository: {error}"))),
+            Err(error) => self.view.draft_directory_failed(draft_id, error),
         }
     }
 
@@ -1084,7 +1101,11 @@ impl App {
                     }
                 }
             }
-            Action::Quit => return true,
+            Action::Quit => {
+                self.persist_drafts();
+                return true;
+            }
+            Action::PersistDrafts => self.persist_drafts(),
             Action::NewDraft { cwd } => self.new_draft(cwd),
             Action::CreateTask {
                 draft_id,
@@ -1198,7 +1219,7 @@ impl App {
             Action::TogglePin { id, pinned } => {
                 self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
                 if pinned {
-                    self.preferences.pinned.push(id);
+                    self.preferences.pinned.insert(0, id);
                 }
                 let saved = self.preferences.save_pinned(&self.config_dir);
                 self.report_save(saved);

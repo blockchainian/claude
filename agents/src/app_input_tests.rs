@@ -221,6 +221,32 @@ fn batch_dispatches_in_order_and_stops_when_action_exits() {
 }
 
 #[test]
+fn pinning_puts_the_session_first() {
+    let (directory, mut app, _path, _registry) = registry_app("bg");
+    let first = app.view.selected_id().unwrap().clone();
+    let second = SessionKey {
+        id: "second".into(),
+        ..first.clone()
+    };
+    let pin = |id: &SessionKey, pinned| Action::TogglePin {
+        id: id.clone(),
+        pinned,
+    };
+    app.handle_action(Some(pin(&first, true)));
+    app.handle_action(Some(pin(&second, true)));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned,
+        vec![second.clone(), first.clone()]
+    );
+    app.handle_action(Some(pin(&first, false)));
+    app.handle_action(Some(pin(&first, true)));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned,
+        vec![first, second]
+    );
+}
+
+#[test]
 fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("state_5.sqlite");
@@ -361,7 +387,7 @@ fn app_creates_worktree_with_the_task_request() {
     app.handle_action(Some(Action::NewDraft { cwd: repo.clone() }));
     assert!(screen(&mut app).contains("New task"));
     app.handle_action(Some(Action::CreateTask {
-        draft_id: 1,
+        draft_id: DraftId { millis: 0, counter: 1 },
         provider: ProviderId::Claude,
         request: crate::tasks::NewTask {
             cwd: repo,
@@ -377,7 +403,7 @@ fn app_creates_worktree_with_the_task_request() {
     // The worktree arrives with the request; handling it would start a real task.
     let event = app.receiver.recv_timeout(Duration::from_secs(15)).unwrap();
     assert!(
-        matches!(&event, Input::WorktreeCreated { draft_id: 1, request, result: Ok((path, branch)), .. }
+        matches!(&event, Input::WorktreeCreated { draft_id: DraftId { millis: 0, counter: 1 }, request, result: Ok((path, branch)), .. }
         if path == &worktree && branch == "feature-path" && request.prompt == "probe")
     );
     assert_eq!(
