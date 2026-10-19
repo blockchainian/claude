@@ -163,6 +163,90 @@ fn files_control_liveness_and_descriptions_survive_transcript_changes() {
 }
 
 #[test]
+fn bg_sessions_scan_tasks_without_adoption_and_deduplicate_adopted_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let mut tasks = Tasks::new(root.join("root"));
+    let path = root.join("session.jsonl");
+    fs::write(&path, RECORDS).unwrap();
+    let records: Vec<serde_json::Value> = RECORDS
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let id = records[1]["toolUseResult"]["backgroundTaskId"]
+        .as_str()
+        .unwrap();
+    let mut session = super::super::session(
+        "session".into(),
+        transcript::Summary::default(),
+        Some(path),
+        Utc::now(),
+    );
+    session.process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    session.background_job = Some(crate::model::BackgroundJob {
+        id: "job".into(),
+        needs: None,
+        awaits_prompt: false,
+    });
+    let directory = tasks.directory(&session);
+    fs::create_dir_all(&directory).unwrap();
+    let output = directory.join(format!("{id}.output"));
+    fs::write(
+        &output,
+        include_bytes!("../../../tests/fixtures/background/running.output"),
+    )
+    .unwrap();
+    let adopted_output = root.join("adopted.output");
+    fs::write(&adopted_output, b"").unwrap();
+    let writer = HoldingProcess::start(&output, &adopted_output);
+    let mut sessions = [session];
+    let jobs = root.join("jobs/job");
+    fs::create_dir_all(&jobs).unwrap();
+    assert!(!jobs.join("adopt.json").exists());
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
+    assert_eq!(sessions[0].background.len(), 1);
+    assert_eq!(sessions[0].background[0].output, Some(output.clone()));
+    assert_eq!(
+        sessions[0].background[0].description,
+        records[0]["message"]["content"][0]["input"]["description"]
+    );
+    let mut adopt: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/background/adopt.json"
+    ))
+    .unwrap();
+    adopt["shells"][0]["pid"] = writer.child.id().into();
+    adopt["shells"][0]["outputPath"] = output.to_str().unwrap().into();
+    let mut separate = adopt["shells"][0].clone();
+    separate["outputPath"] = adopted_output.to_str().unwrap().into();
+    adopt["shells"].as_array_mut().unwrap().push(separate);
+    fs::write(jobs.join("adopt.json"), adopt.to_string()).unwrap();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
+    assert_eq!(sessions[0].background.len(), 2);
+    for expected in [&output, &adopted_output] {
+        assert_eq!(
+            sessions[0]
+                .background
+                .iter()
+                .filter(|task| task.output.as_ref() == Some(expected))
+                .count(),
+            1
+        );
+    }
+    fs::write(
+        &output,
+        include_bytes!("../../../tests/fixtures/background/exited.output"),
+    )
+    .unwrap();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
+    assert_eq!(sessions[0].background.len(), 1);
+    assert_eq!(sessions[0].background[0].output, Some(adopted_output));
+}
+
+#[test]
 fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();

@@ -155,7 +155,6 @@ impl Tasks {
                 .is_some_and(|process| process.label.as_deref() == Some("bg"))
             {
                 self.adopted(config, session, liveness)?;
-                continue;
             }
             let entries = match fs::read_dir(self.directory(session)) {
                 Ok(entries) => entries,
@@ -234,6 +233,10 @@ impl Tasks {
                     .get(&(session.id.id.clone(), id.clone()))
                     .cloned()
                     .flatten()
+                    && !session
+                        .background
+                        .iter()
+                        .any(|existing| existing.output == task.output)
                 {
                     session.background.push(task);
                 }
