@@ -120,9 +120,13 @@ pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
         Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
         Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
         Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
-        Kind::Error | Kind::Denied => Style::default().fg(Color::Red),
+        Kind::Error | Kind::Denied => error_style(),
     };
     (body.bold(), body)
+}
+
+pub(super) fn error_style() -> Style {
+    Style::default().fg(Color::Red)
 }
 
 pub(super) fn time_style() -> Style {

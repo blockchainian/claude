@@ -74,9 +74,19 @@ impl PromptBox {
             .search
             .as_ref()
             .map(|search| format!("History: {}", search.query.text()));
-        let label = search_label.as_deref().unwrap_or(label);
+        // A failed send keeps its reason after the label until the next send.
+        let failed_label = match &self.state {
+            SendState::Failed(reason) => {
+                Some(format!("{label} {}", reason.lines().next().unwrap_or("")))
+            }
+            SendState::Ready => None,
+        };
+        let label = search_label
+            .as_deref()
+            .or(failed_label.as_deref())
+            .unwrap_or(label);
         let prefix_budget = usize::from(width.saturating_sub((width / 3).max(1)));
-        let label_budget = if self.search.is_some() {
+        let label_budget = if self.search.is_some() || failed_label.is_some() {
             prefix_budget.saturating_sub(3)
         } else {
             usize::from(width / 3).min(prefix_budget.saturating_sub(3))
@@ -85,7 +95,8 @@ impl PromptBox {
         let heading = format!("{label} {PROMPT_MARKER} ");
         let prefix = clip(&heading, prefix_budget);
         let inset = prefix.width() as u16;
-        self.text_width.set((usize::from(width), usize::from(inset)));
+        self.text_width
+            .set((usize::from(width), usize::from(inset)));
         let positions = self
             .editor
             .visual_positions(usize::from(width), usize::from(inset));
@@ -142,7 +153,9 @@ impl PromptBox {
         let layout = self.layout(area.width, label);
         let height = usize::from(area.height);
         let start = self.mouse_scroll_start(&layout, height);
-        let style = if self.focused {
+        let style = if matches!(self.state, SendState::Failed(_)) && self.search.is_none() {
+            style::error_style()
+        } else if self.focused {
             Style::default().cyan()
         } else {
             Style::default().dim()
@@ -410,21 +423,36 @@ mod tests {
     }
 
     #[test]
-    fn send_feedback_does_not_change_prompt_and_disabled_reason_is_visible() {
+    fn failed_send_shows_its_reason_in_red_after_the_label() {
         let mut editor = focused();
-        for (state, expected) in [
-            (SendState::Ready, "Task"),
-            (SendState::Failed("denied".into()), "Task ❯"),
-        ] {
-            editor.state = state;
-            let screen = rendered(&editor, 80, None);
-            assert!(screen.contains("Task"));
-            assert!(screen.contains(expected), "{screen}");
-            assert!(
-                !screen.contains("sending") && !screen.contains("failed"),
-                "{screen}"
-            );
+        editor.editor.set_text("retry me");
+        editor.state = SendState::Failed("Claude attach timed out\nscreen".into());
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buffer = Buffer::empty(area);
+        editor.render(area, &mut buffer, "Task", None);
+        let heading = "Task Claude attach timed out ❯ retry me";
+        let screen: String = (0..heading.chars().count() as u16)
+            .map(|column| buffer[(column, 0)].symbol().to_owned())
+            .collect();
+        assert_eq!(screen, heading);
+        let marker = heading.find('❯').unwrap();
+        for column in 0..=heading[..marker].chars().count() as u16 {
+            assert_eq!(buffer[(column, 0)].fg, Color::Red, "column {column}");
         }
+        assert_ne!(
+            buffer[(heading.chars().count() as u16 - 1, 0)].fg,
+            Color::Red
+        );
+        let caret = editor.cursor(area, "Task").unwrap();
+        assert_eq!(caret, (heading.chars().count() as u16, 0));
+        editor.state = SendState::Ready;
+        assert!(!rendered(&editor, 80, None).contains("timed out"));
+    }
+
+    #[test]
+    fn disabled_reason_is_visible() {
+        let mut editor = focused();
+        editor.state = SendState::Failed("denied".into());
         let screen = rendered(&editor, 100, Some("/bg"));
         assert!(screen.contains("Task ❮ /bg"), "{screen}");
         assert!(!screen.contains("denied"));
@@ -559,7 +587,10 @@ mod tests {
         assert_eq!(height, editor.layout(138, "New prompt").lines.len() as u16);
         assert!(height > 5, "{height}");
         let rows = screen_rows(&editor, 138, height);
-        assert!(rows.iter().filter(|row| row.is_empty()).count() == 2, "{rows:?}");
+        assert!(
+            rows.iter().filter(|row| row.is_empty()).count() == 2,
+            "{rows:?}"
+        );
         let clipped = screen_rows(&editor, 138, 3);
         assert_eq!(clipped, rows[rows.len() - 3..]);
         let area = Rect::new(0, 0, 138, 3);
@@ -569,7 +600,10 @@ mod tests {
         }
         let caret = editor.cursor(area, "New prompt").unwrap();
         assert_eq!(caret.1, 0);
-        assert_eq!(screen_rows(&editor, 138, 3), rows[rows.len() - 5..rows.len() - 2]);
+        assert_eq!(
+            screen_rows(&editor, 138, 3),
+            rows[rows.len() - 5..rows.len() - 2]
+        );
     }
 }
 

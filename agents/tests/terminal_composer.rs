@@ -54,10 +54,89 @@ fn xterm_tmux_keeps_fallbacks_and_dashboard_keys() {
     probe("xterm");
 }
 
-fn probe(format: &str) {
+#[test]
+#[ignore = "requires tmux"]
+fn failed_send_shows_its_reason_in_red_in_tmux() {
     let directory = tempfile::tempdir().unwrap();
-    let codex = directory.path().join("codex");
-    let claude = directory.path().join("claude");
+    let (codex, claude) = composer_session(directory.path());
+    let binary =
+        std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
+    let binary = Path::new(&binary).canonicalize().unwrap();
+    let tmux = Tmux(format!("agents-send-failed-{}", std::process::id()));
+    tmux.run(&[
+        "-f",
+        "/dev/null",
+        "new-session",
+        "-d",
+        "-s",
+        "probe",
+        "-x",
+        "100",
+        "-y",
+        "40",
+        "-e",
+        &format!("CODEX_HOME={}", codex.display()),
+        "-e",
+        &format!("CLAUDE_CONFIG_DIR={}", claude.display()),
+        "-e",
+        &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
+        binary.to_str().unwrap(),
+    ]);
+    tmux.wait(|s| s.contains("Inactive 1"));
+    tmux.key("Tab");
+    let screen = tmux.wait(|s| s.contains("Composer ❯"));
+    let row = screen
+        .lines()
+        .position(|line| line.contains("Composer ❯"))
+        .unwrap();
+    tmux.literal(&format!("\x1b[<0;15;{}M\x1b[<0;15;{}m", row + 1, row + 1));
+    tmux.literal("retry me");
+    tmux.wait(|s| s.contains("❯ retry me"));
+    tmux.key("Enter");
+    // No app-server daemon runs for this CODEX_HOME, so the real send fails.
+    let failed = |s: &str| {
+        s.lines().any(|line| {
+            line.trim_start().starts_with("Composer ")
+                && !line.contains("Composer ❯")
+                && line.trim_end().ends_with("❯ retry me")
+        })
+    };
+    let screen = tmux.wait(failed);
+    let heading = screen
+        .lines()
+        .find(|line| line.trim_end().ends_with("❯ retry me"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let mut parser = vt100::Parser::new(40, 100, 0);
+    parser.process(capture.replace('\n', "\r\n").as_bytes());
+    let screen = parser.screen();
+    let row = (0..40)
+        .find(|&row| screen.contents_between(row, 0, row, 100).contains(&heading))
+        .unwrap();
+    let text = screen.contents_between(row, 0, row, 100);
+    let marker = text[..text.find('❯').unwrap()].chars().count() as u16;
+    let start = (text.len() - text.trim_start().len()) as u16;
+    for column in start..=marker {
+        assert_eq!(
+            screen.cell(row, column).unwrap().fgcolor(),
+            vt100::Color::Idx(1),
+            "column {column}: {text}"
+        );
+    }
+    assert_eq!(
+        screen.cell(row, marker + 2).unwrap().fgcolor(),
+        vt100::Color::Default
+    );
+    tmux.key("Enter");
+    tmux.wait(failed);
+}
+
+/// Writes one Codex task named Composer into `directory` and returns its Codex and Claude homes.
+fn composer_session(directory: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let codex = directory.join("codex");
+    let claude = directory.join("claude");
     std::fs::create_dir(&codex).unwrap();
     std::fs::create_dir(&claude).unwrap();
     let transcript = codex.join("rollout.jsonl");
@@ -73,12 +152,15 @@ fn probe(format: &str) {
         .unwrap();
     db.execute(
         "UPDATE threads SET rollout_path=?1, cwd=?2, archived=0, name='Composer'",
-        rusqlite::params![
-            transcript.to_str().unwrap(),
-            directory.path().to_str().unwrap()
-        ],
+        rusqlite::params![transcript.to_str().unwrap(), directory.to_str().unwrap()],
     )
     .unwrap();
+    (codex, claude)
+}
+
+fn probe(format: &str) {
+    let directory = tempfile::tempdir().unwrap();
+    let (codex, claude) = composer_session(directory.path());
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
