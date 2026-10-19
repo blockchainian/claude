@@ -513,8 +513,15 @@ impl View {
             } else {
                 area.x
             };
+            // The duration label sits on the border between the log list and its detail in both
+            // layouts; the New button, shown only in time order, shares the model's border.
+            let jump_y = if self.log_sort == LogSort::Duration {
+                layout.log.bottom()
+            } else {
+                model_y
+            };
             self.render_log_jump(
-                Rect::new(left, model_y, area.right().saturating_sub(left), 1),
+                Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
                 buf,
             );
             self.render_log_model(
@@ -2022,11 +2029,7 @@ mod background_title_tests {
             view.render(area, &mut buf);
             let viewport = view.viewport.borrow();
             let top = viewport.log_borders[0];
-            let y = if width < WIDE_LAYOUT_COLUMNS {
-                top.y
-            } else {
-                viewport.log_borders[1].y
-            };
+            let y = viewport.log_borders[1].y;
             let label = Rect::new(viewport.log.right() + 1 - 10, y, 10, 1);
             let text: String = (label.x..label.right())
                 .map(|x| buf[(x, y)].symbol())
@@ -2047,12 +2050,8 @@ mod background_title_tests {
             for (target, _) in &viewport.field_targets {
                 assert!(!target.intersects(label), "width {width}: {target:?}");
             }
-            if width >= WIDE_LAYOUT_COLUMNS {
-                let text: String = (top.x..top.right())
-                    .map(|x| buf[(x, top.y)].symbol())
-                    .collect();
-                assert!(!text.contains("duration"));
-            }
+            let text: String = (0..width).map(|x| buf[(x, top.y)].symbol()).collect();
+            assert!(!text.contains("duration"), "width {width}: {text}");
         }
     }
 
