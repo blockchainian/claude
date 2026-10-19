@@ -122,8 +122,9 @@ impl View {
                 0,
             )
         } else if wide {
-            // Give an odd content row to the top; narrow remainders go top, then list.
-            (content_height.div_ceil(2), 0, content_height / 2)
+            // Round the upper share down and give the remaining content rows below.
+            let top = (u32::from(content_height) * 618 / 1000) as u16;
+            (top, 0, content_height - top)
         } else {
             (
                 content_height.div_ceil(3),

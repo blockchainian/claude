@@ -5633,19 +5633,19 @@ fn center_layout_narrow_buffer_ranges_at_120_columns() {
 }
 
 #[test]
-fn center_layout_wide_balances_inner_content_across_sizes() {
+fn center_layout_wide_splits_content_by_golden_ratio_across_sizes() {
     for (width, height) in [(200, 60), (200, 61), (180, 40), (160, 50), (150, 50)] {
-        assert_equal_content_buffer(width, height, "");
+        assert_content_shares_buffer(width, height, "");
     }
 }
 
 #[test]
-fn center_layout_wide_equal_content_buffer_at_200x45() {
-    assert_equal_content_buffer(200, 45, "");
+fn center_layout_wide_golden_content_buffer_at_200x45() {
+    assert_content_shares_buffer(200, 45, "");
 }
 
 #[test]
-fn center_layout_equal_content_buffer_with_growing_input() {
+fn center_layout_content_shares_with_growing_input() {
     for (width, height) in [
         (200, 60),
         (200, 61),
@@ -5659,25 +5659,25 @@ fn center_layout_equal_content_buffer_with_growing_input() {
         (149, 50),
     ] {
         for lines in 2..=7 {
-            assert_equal_content_buffer(width, height, &vec!["input"; lines].join("\n"));
+            assert_content_shares_buffer(width, height, &vec!["input"; lines].join("\n"));
         }
-        assert_equal_content_buffer(width, height, &"wrapped input ".repeat(100));
+        assert_content_shares_buffer(width, height, &"wrapped input ".repeat(100));
     }
 }
 
 #[test]
 fn center_layout_narrow_balances_inner_content_across_sizes() {
     for (width, height) in [(120, 60), (120, 61), (100, 40), (149, 50)] {
-        assert_equal_content_buffer(width, height, "");
+        assert_content_shares_buffer(width, height, "");
     }
 }
 
 #[test]
 fn center_layout_narrow_equal_content_buffer_at_100x45() {
-    assert_equal_content_buffer(100, 45, "");
+    assert_content_shares_buffer(100, 45, "");
 }
 
-fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
+fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
     let (mut view, now) = log_fixture();
     view.input_box.editor.set_text(input);
     let area = Rect::new(0, 0, width, height);
@@ -5704,9 +5704,12 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     };
     assert_eq!(heights.iter().sum::<u16>(), available);
     assert!(heights.windows(2).all(|pair| pair[0] >= pair[1]));
-    assert!(heights[0] - heights[heights.len() - 1] <= 1);
+    if !wide {
+        assert!(heights[0] - heights[heights.len() - 1] <= 1);
+    }
     let expected = if wide {
-        (available.div_ceil(2), available.div_ceil(2), available / 2)
+        let upper = (u32::from(available) * 618 / 1000) as u16;
+        (upper, upper, available - upper)
     } else {
         (available.div_ceil(3), (available + 1) / 3, available / 3)
     };
@@ -5772,7 +5775,7 @@ fn center_layout_golden_rects_follow_each_area() {
     for (width, height, top, log_height, list_width, details_width, body_height, list_height) in [
         (80, 24, 17, 6, 38, 37, 6, 6),
         (120, 40, 27, 12, 58, 57, 11, 11),
-        (200, 60, 31, 28, 48, 48, 27, 27),
+        (200, 60, 37, 22, 48, 48, 33, 33),
         (80, 24, 17, 6, 38, 37, 6, 6),
     ] {
         let area = Rect::new(5, 7, width, height);

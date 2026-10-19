@@ -1,3 +1,6 @@
+#[path = "support/terminal_golden_layout.rs"]
+mod terminal_golden_layout;
+
 #[path = "support/terminal_path_display.rs"]
 mod terminal_path_display;
 
@@ -1164,10 +1167,9 @@ fn terminal_layout_tracks_width() {
         let top_height = top_end - 2;
         let bottom_height = lines.len() - log_rule - 2;
         if width >= 150 {
-            assert!(
-                top_height == bottom_height || top_height == bottom_height + 1,
-                "content heights differ: top {top_height}, bottom {bottom_height}: {capture}"
-            );
+            let content = height as usize - 6;
+            assert_eq!(top_height, content * 618 / 1000, "{capture}");
+            assert_eq!(top_height + bottom_height, content, "{capture}");
         } else {
             let list_height = log_rule - prompt - 2;
             let content = height as usize - 7;
