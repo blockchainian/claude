@@ -961,14 +961,15 @@ fn wide_border_labels_stay_in_their_columns() {
             rendered.join("\n")
         );
         let bottom = segment(&buffer, details.clone(), middle);
-        let start = (details.len() - " Working ".len()) / 2;
+        // The fixture's recorded prompt cache has long expired, so ⏸︎ follows the status.
+        let start = (details.len() - 11) / 2;
         assert_eq!(
             segment(
                 &buffer,
-                details.start + start as u16..details.start + start as u16 + 9,
+                details.start + start as u16..details.start + start as u16 + 11,
                 1
             ),
-            " Working "
+            " Working ⏸\u{fe0e} "
         );
         assert!(!bottom.contains("2m 0s"));
         assert!(!bottom.contains("Working"));

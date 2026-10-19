@@ -664,19 +664,19 @@ impl View {
             .and_then(|session| session.started_at)
             .map(|at| format_duration((now - at).num_seconds()))
             .filter(fits);
+        let cache_remaining = session
+            .and_then(|session| session.cache_expires_at)
+            .map(|expires| expires - now);
         let elapsed = elapsed.map(|elapsed| {
             let mut spans = Vec::new();
-            // An expired prompt cache shows ⏸︎ where its countdown was.
-            if let Some(remaining) = session
-                .and_then(|session| session.cache_expires_at)
-                .map(|expires| expires - now)
-                .filter(|remaining| *remaining <= chrono::Duration::minutes(15))
+            if let Some(seconds) = cache_remaining
+                .filter(|remaining| {
+                    *remaining >= chrono::Duration::seconds(1)
+                        && *remaining <= chrono::Duration::minutes(15)
+                })
+                .map(|remaining| remaining.num_seconds())
             {
-                let countdown = if remaining < chrono::Duration::seconds(1) {
-                    "⏸\u{fe0e}".to_owned()
-                } else {
-                    format_duration(remaining.num_seconds())
-                };
+                let countdown = format_duration(seconds);
                 if fits(&format!("{countdown} · {elapsed}")) {
                     spans.push(Span::styled(countdown, style::error_style()));
                     spans.push(" · ".dim());
@@ -707,6 +707,14 @@ impl View {
         let status = if width <= 1 {
             Line::from("…".bold())
         } else {
+            // An expired prompt cache follows the status as ⏸︎.
+            let status = if cache_remaining.is_some_and(|remaining| {
+                remaining < chrono::Duration::seconds(1)
+            }) {
+                format!("{status} ⏸\u{fe0e}")
+            } else {
+                status.to_string()
+            };
             truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width)
         };
         let mut header = truncate_line_to_width(status, width);
