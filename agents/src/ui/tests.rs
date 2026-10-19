@@ -2222,7 +2222,7 @@ fn details_include_attention_and_clip_messages() {
     for label in [
         "claude-opus",
         "project",
-        "Needs attention",
+        "Needs input",
         "Open task to review.",
         "Waiting for your response.",
         "Update",
@@ -2230,12 +2230,13 @@ fn details_include_attention_and_clip_messages() {
         assert!(rendered.contains(label), "{label}");
     }
     let position = |label: &str| {
-        rendered
-            .lines()
-            .position(|line| !line.contains("Group:") && line.contains(label))
+        rendered.lines().position(|line| {
+            line.split('│')
+                .any(|section| section.trim_start().starts_with(label))
+        })
     };
     assert!(position("Update") < position("Prompt"));
-    assert!(position("Needs attention") < position("Prompt"));
+    assert!(position("Prompt") < position("Needs input"));
     let viewport = view.viewport.borrow();
     let folder = viewport
         .details_links
@@ -7074,7 +7075,7 @@ fn ask_user_question_details_snapshot() {
     let pending = render(&view);
     assert!(
         pending.contains(&format!(
-            "Needs attention\n{}",
+            "Needs input\n{}",
             row.pending_questions.join("\n")
         )),
         "{pending}"
@@ -7087,7 +7088,7 @@ fn ask_user_question_details_snapshot() {
     row.pending_questions.clear();
     view.set_sessions(vec![row.clone()], false);
     let answered = render(&view);
-    assert!(answered.contains("Needs attention\nOpen task to review.\nWaiting for your response."));
+    assert!(answered.contains("Needs input\nOpen task to review.\nWaiting for your response."));
     assert_eq!(
         answered,
         include_str!("../../tests/ui_snapshots/details_questions_answered.txt")
@@ -7095,7 +7096,7 @@ fn ask_user_question_details_snapshot() {
     row.status = SessionStatus::Working;
     row.pending_questions.push("cd 要不要显示？".into());
     view.set_sessions(vec![row], false);
-    assert!(!render(&view).contains("Needs attention"));
+    assert!(!render(&view).contains("Needs input"));
 }
 
 #[test]
@@ -7121,7 +7122,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
             questions += 1;
             assert_eq!(cells[0].fg, Color::Yellow);
         }
-        if text.starts_with("Needs attention") {
+        if text.starts_with("Needs input") {
             assert_eq!(cells[0].fg, Color::LightRed);
             assert!(cells[0].modifier.contains(ratatui::style::Modifier::BOLD));
         }

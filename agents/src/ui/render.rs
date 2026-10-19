@@ -840,8 +840,8 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: needs attention, activity, background, update,
-        // prompt and queued messages, tasks. The title sits on the rule above the panel.
+        // Sections top to bottom: activity, background, update, prompt and queued
+        // messages, needs input, tasks. The title sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
@@ -854,54 +854,6 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
-
-        let needs = session
-            .background_job
-            .as_ref()
-            .and_then(|job| job.needs.as_deref());
-        if session.status == SessionStatus::NeedsInput || needs.is_some() {
-            separate_section(&mut items);
-            let start = items.len();
-            items.push(
-                centered_header(
-                    Span::styled("Needs attention", style::attention_title_style()).into(),
-                    Line::default(),
-                    width,
-                )
-                .into(),
-            );
-            if let Some(needs) = needs {
-                items.extend(
-                    textwrap::wrap(needs, width.max(1))
-                        .into_iter()
-                        .map(|text| Line::from(text.into_owned()).into()),
-                );
-            } else if session.pending_questions.is_empty() {
-                items.extend([
-                    "Open task to review.".dim().into(),
-                    "Waiting for your response.".into(),
-                ]);
-            } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            question.clone(),
-                            style::log_styles(&crate::log::Kind::Assistant).1,
-                        )),
-                        width,
-                    )
-                    .into()
-                }));
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key(
-                "Needs attention",
-                &(needs, &session.pending_questions),
-            ));
-            copies.push(None);
-            body_links.push(Vec::new());
-        }
-        item_links.resize(items.len(), Vec::new());
 
         let activity = session.activity.as_ref();
         if let Some(activity) = activity {
@@ -1068,6 +1020,54 @@ impl View {
             body_links.push(super::links::text_links(queued, &session.cwd, &[]));
         }
 
+        item_links.resize(items.len(), Vec::new());
+
+        let needs = session
+            .background_job
+            .as_ref()
+            .and_then(|job| job.needs.as_deref());
+        if session.status == SessionStatus::NeedsInput || needs.is_some() {
+            separate_section(&mut items);
+            let start = items.len();
+            items.push(
+                centered_header(
+                    Span::styled("Needs input", style::attention_title_style()).into(),
+                    Line::default(),
+                    width,
+                )
+                .into(),
+            );
+            if let Some(needs) = needs {
+                items.extend(
+                    textwrap::wrap(needs, width.max(1))
+                        .into_iter()
+                        .map(|text| Line::from(text.into_owned()).into()),
+                );
+            } else if session.pending_questions.is_empty() {
+                items.extend([
+                    "Open task to review.".dim().into(),
+                    "Waiting for your response.".into(),
+                ]);
+            } else {
+                items.extend(session.pending_questions.iter().map(|question| {
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(Span::styled(
+                            question.clone(),
+                            style::log_styles(&crate::log::Kind::Assistant).1,
+                        )),
+                        width,
+                    )
+                    .into()
+                }));
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key(
+                "Needs input",
+                &(needs, &session.pending_questions),
+            ));
+            copies.push(None);
+            body_links.push(Vec::new());
+        }
         item_links.resize(items.len(), Vec::new());
 
         let tasks = [

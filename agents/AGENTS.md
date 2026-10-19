@@ -33,7 +33,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 ## Details panel
 
 - The status and elapsed time sit on the rule above the panel; the task's name sits centered on the rule below, between the pull request or a new task's branch on the left and the project folder on the right, and clicking it renames the task in the panel's bottom row.
-- Sections run Needs attention, Last activity, Background, Update, Prompt and its queued prompts, then Tasks.
+- Sections run Last activity, Background, Update, Prompt and its queued prompts, Needs input, then Tasks.
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
 - The activity section is `Last activity`.
 

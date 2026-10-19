@@ -42,7 +42,7 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     assert!(find("Prompt") < find("Tasks"));
     assert!(find("Update") < find("Tasks"));
     assert!(find("Update") < find("Prompt"));
-    assert!(find("Needs attention") < find("Tasks"));
+    assert!(find("Needs input") < find("Tasks"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
     assert!(rows[find("Tasks")].ends_with("2/4"));
@@ -160,7 +160,9 @@ fn tasks_long_list_uses_details_scroll_and_keeps_other_sections() {
     assert!(before.iter().any(|row| row.trim() == "Prompt"));
     assert_eq!(view.viewport.borrow().details_scroll.reveal[0], 0);
     assert_eq!(view.viewport.borrow().details_scroll.reveal[3], 1);
-    for label in ["Update", "Prompt"] {
+    assert_eq!(before[0].trim(), "Update");
+    assert_eq!(after[0].trim(), "Task update");
+    for label in ["Prompt", "Needs input"] {
         let position = |rows: &[String]| rows.iter().position(|row| row.trim() == label).unwrap();
         assert_eq!(position(&before), position(&after) + 1);
     }

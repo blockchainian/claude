@@ -48,7 +48,7 @@ fn section_labels_stay_centered_before_right_values() {
             ("Background", ""),
             ("Update", "7s ago"),
             ("Prompt", "1m 4s"),
-            ("Needs attention", ""),
+            ("Needs input", ""),
         ] {
             let y = (area.y..area.bottom())
                 .find(|&y| text(&buf, area, y).contains(label))

@@ -1,12 +1,12 @@
-            Needs attention
-Open task to review.
-Waiting for your response.
-
                  Update
 Task update
 
                  Prompt
 Session title
+
+              Needs input
+Open task to review.
+Waiting for your response.
 
                  Tasks               1/2
 ● Working first

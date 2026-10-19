@@ -172,7 +172,10 @@ fn ask_question_rejections_list_what_was_answered() {
     let rejected = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
     assert_eq!(output(&with_result(REJECTED, rejected)), "Rejected");
     let noted = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nask me later";
-    assert_eq!(output(&with_result(REJECTED, noted)), "Rejected\n\nask me later");
+    assert_eq!(
+        output(&with_result(REJECTED, noted)),
+        "Rejected\n\nask me later"
+    );
     assert_eq!(
         output(&with_result(REJECTED, "The tool use was rejected.")),
         "The tool use was rejected."

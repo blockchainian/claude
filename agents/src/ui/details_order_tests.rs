@@ -38,11 +38,18 @@ fn details_section_order_preserves_clicks_and_copies() {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n");
-        let mut sections = vec!["Needs attention"];
+        let mut sections = vec![];
         if activity {
             sections.push("Last activity");
         }
-        sections.extend(["Background", "Update", "Prompt", "Queued prompt", "Tasks"]);
+        sections.extend([
+            "Background",
+            "Update",
+            "Prompt",
+            "Queued prompt",
+            "Needs input",
+            "Tasks",
+        ]);
         assert!(!rendered.contains("Project"));
         assert!(!rendered.contains("Unknown"));
         let positions: Vec<_> = sections

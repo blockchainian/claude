@@ -1893,6 +1893,53 @@ fn terminal_details_section_positions() {
     }
 }
 
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_details_needs_input_follows_prompt_before_tasks() {
+    let (directory, tmux, transcript) = start_probe("details-needs-input");
+    let job = directory.path().join("claude/jobs/details-needs-input");
+    std::fs::create_dir_all(&job).unwrap();
+    // Safe fields from the real Claude Code background state payload.
+    let mut state: serde_json::Value = serde_json::from_str(
+        r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#,
+    )
+    .unwrap();
+    state["sessionId"] = transcript.file_stem().unwrap().to_str().unwrap().into();
+    state["needs"] = "send a prompt to start".into();
+    std::fs::write(job.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+    let original = std::fs::read_to_string(&transcript).unwrap();
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "70"]);
+    std::fs::write(
+        &transcript,
+        format!(
+            "{original}\n{}",
+            include_str!("fixtures/claude-todos.jsonl")
+        ),
+    )
+    .unwrap();
+    let capture = tmux.capture_when(|capture| {
+        capture.lines().any(|line| {
+            line.split('│')
+                .nth(1)
+                .is_some_and(|panel| panel.trim() == "Needs input")
+        })
+    });
+    let panel: Vec<_> = capture
+        .lines()
+        .filter_map(|line| line.split('│').nth(1))
+        .collect();
+    let positions = ["Prompt", "Needs input", "Tasks"].map(|label| {
+        panel
+            .iter()
+            .position(|line| line.trim_start().starts_with(label))
+            .unwrap()
+    });
+    assert!(positions.is_sorted(), "{capture}");
+    assert!(!capture.contains("Needs attention"), "{capture}");
+    assert!(capture.contains("send a prompt to start"), "{capture}");
+    println!("{{\"needs_input_after_prompt_before_tasks\":\"pass\"}}");
+}
+
 #[path = "support/terminal_codex_exit.rs"]
 mod terminal_codex_exit;
 
