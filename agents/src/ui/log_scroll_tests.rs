@@ -744,3 +744,129 @@ fn log_detail_recorded_footer_scrolling_down() {
 fn log_detail_recorded_footer_scrolling_up() {
     recorded_tool_footer(false);
 }
+
+#[test]
+fn output_border_top_double_click_scrolls_without_changing_events() {
+    output_border_jump(false);
+}
+
+#[test]
+fn output_border_bottom_double_click_scrolls_without_changing_events() {
+    output_border_jump(true);
+}
+
+fn output_border_jump(bottom: bool) {
+    for width in [100, 149, 150, 200] {
+        for height in [20, 45] {
+            let (mut view, now) = fixture(true);
+            let draw = |view: &View| {
+                let area = Rect::new(0, 0, width, height);
+                let mut buffer = Buffer::empty(area);
+                view.render_at(area, &mut buffer, now);
+                buffer
+            };
+            draw(&view);
+            view.set_active_panel(Panel::Output);
+            view.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+            let buffer = draw(&view);
+            let before = view.viewport.borrow().log_detail_scroll;
+            let max = view.viewport.borrow().log_detail_max;
+            assert!(
+                before > 0 && before < max,
+                "{width}x{height}: {before}/{max}"
+            );
+            let selected = view.log_selected;
+            let log_scroll = view.viewport.borrow().log_scroll;
+            let output = view.viewport.borrow().log_detail;
+            let y = if bottom { height - 2 } else { output.y };
+            // The narrow layout shares this rule with the log list.
+            let x = view.viewport.borrow().log.x;
+            if bottom {
+                assert_eq!(buffer[(x, y)].symbol(), "─", "missing lower rule");
+                assert_eq!(output.bottom(), y);
+            }
+            view.set_active_panel(Panel::TaskList);
+            for _ in 0..2 {
+                for kind in [
+                    MouseEventKind::Down(MouseButton::Left),
+                    MouseEventKind::Up(MouseButton::Left),
+                ] {
+                    assert_eq!(view.handle_mouse(mouse(kind, x, y)), None);
+                }
+            }
+            draw(&view);
+            assert_eq!(
+                view.log_selected, selected,
+                "border changed event at {width}x{height}, bottom={bottom}"
+            );
+            assert_eq!(view.viewport.borrow().log_scroll, log_scroll);
+            assert!(view.active_panel == Panel::Output);
+            assert_eq!(
+                view.viewport.borrow().log_detail_scroll,
+                if bottom { max } else { 0 }
+            );
+        }
+    }
+}
+
+#[test]
+fn output_border_terminal_without_scrollback_only_activates_output() {
+    for width in [100, 200] {
+        let (mut view, now) = fixture(true);
+        let id = view.selected_id().unwrap().clone();
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::session_terminal::TerminalScreen::new(6, 80),
+        ));
+        screen.lock().unwrap().process(b"terminal contents");
+        view.show_terminal(id, screen.clone());
+        let area = Rect::new(0, 0, width, 30);
+        view.render_at(area, &mut Buffer::empty(area), now);
+        let selected = view.log_selected;
+        let before = screen.lock().unwrap().screen().contents();
+        let x = view.viewport.borrow().log.x;
+        let top = view.viewport.borrow().log_detail.y;
+        for y in [top, 28] {
+            view.set_active_panel(Panel::TaskList);
+            for _ in 0..2 {
+                for kind in [
+                    MouseEventKind::Down(MouseButton::Left),
+                    MouseEventKind::Up(MouseButton::Left),
+                ] {
+                    assert_eq!(view.handle_mouse(mouse(kind, x, y)), None);
+                }
+            }
+            assert_eq!(view.log_selected, selected);
+            assert!(view.active_panel == Panel::Output);
+            assert_eq!(screen.lock().unwrap().screen().contents(), before);
+        }
+    }
+}
+
+#[test]
+fn output_border_layout_reserves_one_row_and_keeps_hit_regions_separate() {
+    let (view, now) = fixture(true);
+    for width in [100, 149, 150, 200] {
+        for height in 2..60 {
+            let area = Rect::new(0, 0, width, height);
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, now);
+            let layout = view.center_layout(area);
+            let viewport = view.viewport.borrow();
+            if !layout.log_detail.is_empty() {
+                let [top, bottom] = viewport.output_borders;
+                assert_eq!(top.y, viewport.log_detail.y);
+                assert_eq!(bottom.y, layout.footer.y - 1);
+                assert_eq!(viewport.log_detail.bottom(), bottom.y);
+                assert_eq!(bottom.width, width);
+                assert!(viewport.log.bottom() <= top.y);
+                assert!(viewport.prompt.bottom() <= top.y);
+                assert!(!viewport.log_detail.contains((bottom.x, bottom.y).into()));
+                for x in 0..width {
+                    assert_eq!(buffer[(x, bottom.y)].symbol(), "─");
+                }
+            } else {
+                assert!(viewport.output_borders.iter().all(|rect| rect.is_empty()));
+            }
+        }
+    }
+}

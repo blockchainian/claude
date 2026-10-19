@@ -281,6 +281,12 @@ impl View {
                         .any(|(rect, _)| rect.contains(position))
                 {
                     Panel::Details
+                } else if viewport
+                    .output_borders
+                    .iter()
+                    .any(|rect| rect.contains(position))
+                {
+                    Panel::Output
                 } else if viewport.log.contains(position)
                     || viewport
                         .log_borders
@@ -505,6 +511,17 @@ impl View {
                 source,
                 text: text.clone(),
                 label,
+            });
+        }
+        if let Some(border) = viewport
+            .output_borders
+            .iter()
+            .position(|rect| rect.contains(position))
+        {
+            return Some(ClickTarget::ListBorder {
+                panel: Panel::Output,
+                row: position.y,
+                bottom: border == 1,
             });
         }
         if !viewport.log_jump.contains(position)
@@ -847,7 +864,13 @@ impl View {
                 self.click_target_at(position)
         {
             if self.defer_click(target) {
-                if panel == Panel::Details {
+                if panel == Panel::Output {
+                    self.set_active_panel(Panel::Output);
+                    self.navigate_detail(
+                        Panel::Output,
+                        if bottom { KeyCode::End } else { KeyCode::Home },
+                    );
+                } else if panel == Panel::Details {
                     let mut viewport = self.viewport.borrow_mut();
                     let state = &mut viewport.details_scroll;
                     let row = if bottom { state.content_top } else { u16::MAX };

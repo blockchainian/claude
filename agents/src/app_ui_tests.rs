@@ -622,11 +622,12 @@ fn wait_for_click(app: &mut App) {
 
 fn detail(buffer: &ratatui::buffer::Buffer) -> String {
     let rendered = lines(buffer);
-    let separator = rendered
+    let bottom = rendered.len() - 2;
+    let separator = rendered[..bottom]
         .iter()
         .rposition(|line| line.contains("────"))
         .unwrap();
-    rendered[separator + 1..rendered.len() - 1].join("\n")
+    rendered[separator + 1..bottom].join("\n")
 }
 
 #[test]

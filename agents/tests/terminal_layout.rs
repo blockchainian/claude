@@ -1,6 +1,9 @@
 #[path = "support/terminal_details_borders.rs"]
 mod terminal_details_borders;
 
+#[path = "support/terminal_output_borders.rs"]
+mod terminal_output_borders;
+
 #[path = "support/terminal_golden_layout.rs"]
 mod terminal_golden_layout;
 
@@ -2077,14 +2080,14 @@ fn terminal_log_metadata_aligns_new_with_clock() {
             (rows[2][..separator].width() + 2, 1, model)
         };
         tmux.mouse(64, column, top + 1, false);
-        tmux.wait_for(|capture| capture.contains("run_in_background"));
+        tmux.wait_for(|capture| capture.contains("User"));
         let without_arrivals = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(!without_arrivals.contains("↓ Latest"), "{without_arrivals}");
         let panel_width = width - column - 1;
         let former = column + panel_width / 2;
         tmux.mouse(0, former, bottom, true);
         let clicked = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        assert!(clicked.contains("run_in_background"), "{clicked}");
+        assert!(clicked.contains("User"), "{clicked}");
         let mut arrival: serde_json::Value = serde_json::from_str(
             include_str!("fixtures/transcript.jsonl")
                 .lines()
@@ -2143,13 +2146,45 @@ fn terminal_log_metadata_aligns_new_with_clock() {
         };
         let border_column = column + (width - column) / 3;
         double_click(border_column, top);
-        tmux.wait_for(|capture| {
-            !capture.contains("↓ 1 New") && capture.contains("run_in_background")
-        });
+        tmux.wait_for(|capture| !capture.contains("↓ 1 New") && capture.contains("User"));
         double_click(border_column, bottom);
-        tmux.wait_for(|capture| {
-            !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
-        });
+        if width < 150 {
+            let shared = tmux.capture_when(|capture| {
+                capture
+                    .lines()
+                    .skip(bottom + 1)
+                    .take(48 - bottom - 1)
+                    .any(|line| line.contains("User"))
+            });
+            assert!(
+                !shared
+                    .lines()
+                    .skip(bottom + 1)
+                    .take(48 - bottom - 1)
+                    .any(|line| line.contains("terminal-new-jump-proof")),
+                "the shared rule scrolls output without selecting the newest event: {shared}"
+            );
+            let latest = shared
+                .lines()
+                .enumerate()
+                .skip(top + 1)
+                .take(bottom - top - 1)
+                .find(|(_, line)| line.contains("terminal-new-jump-proof"))
+                .expect("newest event remains in the log list")
+                .0;
+            tmux.mouse(0, column + 2, latest, true);
+            tmux.wait_for(|capture| {
+                capture
+                    .lines()
+                    .skip(bottom + 1)
+                    .take(48 - bottom - 1)
+                    .any(|line| line.contains("terminal-new-jump-proof"))
+            });
+        } else {
+            tmux.wait_for(|capture| {
+                !capture.contains("↓ 1 New") && capture.contains("terminal-new-jump-proof")
+            });
+        }
         tmux.mouse(64, column, top + 1, false);
         tmux.wait_for(|capture| capture.contains("decision"));
         double_click(jump, model);

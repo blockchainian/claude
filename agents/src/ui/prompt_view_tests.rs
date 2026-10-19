@@ -281,14 +281,14 @@ fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
     let layout = view.center_layout(area);
     assert_eq!(layout.prompt.height, (40 - 3 - 2) / 2);
     assert!(layout.top.height >= 6, "{:?}", layout.top);
-    assert!(layout.log_detail.height >= 6, "{:?}", layout.log_detail);
+    assert!(layout.log_detail.height >= 5, "{:?}", layout.log_detail);
     let rendered = log_screen(&view, 120, 40, now);
     assert!(rendered.contains("No reply needed."), "{rendered}");
     // Wide mode puts the log beside the panels, so the prompt may take two thirds.
     let wide = view.center_layout(Rect::new(0, 0, 200, 40));
     assert_eq!(wide.prompt.height, (40 - 3 - 2) * 2 / 3);
     assert!(wide.top.height >= 4, "{:?}", wide.top);
-    assert!(wide.log_detail.height >= 4, "{:?}", wide.log_detail);
+    assert!(wide.log_detail.height >= 3, "{:?}", wide.log_detail);
 }
 
 #[test]

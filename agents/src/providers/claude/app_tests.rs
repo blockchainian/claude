@@ -158,7 +158,8 @@ fn log_detail(app: &App) -> String {
 fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let rule = (0..area.height)
+    let bottom = area.height - 2;
+    let rule = (0..bottom)
         .rev()
         .find(|&y| {
             (0..area.width)
@@ -167,7 +168,7 @@ fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
                 > usize::from(area.width / 2)
         })
         .expect("log detail has a top rule");
-    (rule + 1..area.height - 1)
+    (rule + 1..bottom)
         .map(|y| {
             (0..area.width)
                 .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))

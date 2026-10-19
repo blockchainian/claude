@@ -164,6 +164,7 @@ struct Viewport {
     /// Space reserved for the New button or duration label.
     log_label: Rect,
     log_borders: [Rect; 2],
+    output_borders: [Rect; 2],
     /// Index into the task log of each drawn log row, top down.
     log_rows: Vec<usize>,
     /// Lines of the selected event scrolled off the top.

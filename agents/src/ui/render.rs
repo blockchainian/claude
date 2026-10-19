@@ -110,7 +110,7 @@ impl View {
         let log_height = bottom_height.saturating_sub(footer_height).max(10);
         let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6;
         // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
-        // The detail rectangle adds its top rule back below; it is not content.
+        // The output keeps its top rule inside this share and leaves one row for its bottom rule.
         let content_height = area
             .height
             .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
@@ -149,7 +149,7 @@ impl View {
             row(
                 area,
                 header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
-                detail_height + 1,
+                detail_height,
             )
         } else {
             Rect::default()
@@ -341,6 +341,7 @@ impl View {
             viewport.details_input = Rect::default();
             viewport.log = Rect::default();
             viewport.log_borders = [Rect::default(); 2];
+            viewport.output_borders = [Rect::default(); 2];
             viewport.log_detail = Rect::default();
             viewport.terminal = Rect::default();
             viewport.details_links.clear();
@@ -470,6 +471,9 @@ impl View {
         self.render_log(layout.log, buf, now);
         if !layout.log_detail.is_empty() {
             rule(row(layout.log_detail, 0, 1), buf);
+            let bottom = row(area, layout.log_detail.bottom() - area.y, 1);
+            rule(bottom, buf);
+            self.viewport.borrow_mut().output_borders = [row(layout.log_detail, 0, 1), bottom];
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
         let footer_title = self.viewport.borrow_mut().log_detail_footer_title.take();

@@ -21,5 +21,5 @@
                                                   ↓
  Reason: The server-side auto mode classifier judged this action dangerous (it gave no e…
 
-
+────────────────────────────────────────────────────────────────────────────────────────────────────
  ? help  esc Previous  ↑/↓ move  enter Terminal  n new

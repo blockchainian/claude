@@ -11,5 +11,4 @@ Spawn agent                                                                     
                                                                   foreground interactive Claude session (a normal claude process running in some other terminal), we want to
                                                                   first convert it into a background job, then claude attach it, so the panel can detach freely.
 
-                                                                  Answer with evidence (command output, help text, docs text quoted verbatim, files under ~/.claude such as
-                                                                  jobs/ or session registries). Never quote a WebSearch/WebFetch summary as fact; quote raw text. Mark…
+                                                                  Answer with evidence (command output, help text, docs text quoted verbatim, files under ~/.claude such as…

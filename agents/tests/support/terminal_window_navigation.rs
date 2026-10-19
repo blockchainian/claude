@@ -185,7 +185,7 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
             .skip(2)
             .filter_map(|(row, line)| (line.matches('─').count() > width / 2).then_some(row))
             .collect::<Vec<_>>();
-        assert_eq!(rules.len(), if width == 200 { 2 } else { 3 }, "{initial}");
+        assert_eq!(rules.len(), if width == 200 { 3 } else { 4 }, "{initial}");
         let task_list = (0, separators[0], 2, rules[0]);
         let task_detail = (
             separators[0] + 1,
@@ -198,7 +198,7 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
         } else {
             (0, width, rules[1] + 1, rules[2])
         };
-        let log_detail = (0, width, rules.last().unwrap() + 1, 49);
+        let log_detail = (0, width, rules[rules.len() - 2] + 1, rules[rules.len() - 1]);
         let slice = |capture: &str, (left, right, top, bottom): (usize, usize, usize, usize)| {
             capture
                 .lines()

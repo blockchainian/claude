@@ -5267,7 +5267,7 @@ fn task_log_tall_finished_snapshot() {
 }
 
 #[test]
-fn task_log_short_terminal_splits_content_equally() {
+fn task_log_short_terminal_reserves_output_bottom_rule() {
     let mut view = fixture();
     view.rows[view.selected].transcript = Some("/tmp/task-log.jsonl".into());
     let (log, _) = log_fixture();
@@ -5275,7 +5275,7 @@ fn task_log_short_terminal_splits_content_equally() {
     view.log_session = view.selected_id().cloned();
     let layout = view.center_layout(Rect::new(0, 0, 140, 22));
     assert_eq!(layout.log.height, 5);
-    assert_eq!(layout.log_detail.height, 6);
+    assert_eq!(layout.log_detail.height, 5);
     assert_eq!(layout.list.height, 5);
     let rendered = screen(&view, 140, 22);
     assert!(rendered.contains("Also inspect the tests"));
@@ -5292,7 +5292,7 @@ fn task_log_requires_room_for_header_and_six_body_rows() {
 }
 
 #[test]
-fn task_log_rules_match_header_and_footer_gap_is_empty() {
+fn task_log_rules_match_header_and_output_bottom_rule() {
     use ratatui::style::Modifier;
     let (mut view, now) = log_fixture();
     for loaded in [true, false] {
@@ -5330,13 +5330,17 @@ fn task_log_rules_match_header_and_footer_gap_is_empty() {
                     assert_eq!(buf[(x, y)].symbol(), " ");
                     assert_eq!(buf[(x, y)].modifier, Modifier::empty());
                 }
-                for y in layout.log_detail.y + 1..layout.footer.y {
+                for y in layout.log_detail.y + 1..layout.log_detail.bottom() {
                     assert_eq!(buf[(x, y)].symbol(), " ");
                     assert_eq!(buf[(x, y)].modifier, Modifier::empty());
                 }
             }
-            assert_eq!(buf[(x, 23)].symbol(), " ");
-            assert_eq!(buf[(x, 23)].modifier, Modifier::empty());
+            assert_eq!(buf[(x, layout.footer.y - 1)].symbol(), "─");
+            assert!(
+                buf[(x, layout.footer.y - 1)]
+                    .modifier
+                    .contains(Modifier::DIM)
+            );
         }
         assert!(buf[(2, middle)].modifier.contains(Modifier::DIM));
     }
@@ -5816,23 +5820,27 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
         - 2
         - u16::from(!wide);
     let detail = layout.log_detail.height.saturating_sub(1);
-    // Count content between the rendered detail rule and footer, excluding the rule.
-    assert_eq!(detail, layout.footer.y - layout.log_detail.y - 1);
+    // Count output content between its two rules.
+    assert_eq!(detail, layout.footer.y - layout.log_detail.y - 2);
     let heights = if wide {
         vec![top, detail]
     } else {
         vec![top, layout.log.height, detail]
     };
-    assert_eq!(heights.iter().sum::<u16>(), available);
+    assert_eq!(heights.iter().sum::<u16>() + 1, available);
     assert!(heights.windows(2).all(|pair| pair[0] >= pair[1]));
     if !wide {
-        assert!(heights[0] - heights[heights.len() - 1] <= 1);
+        assert!(heights[0] - heights[heights.len() - 1] <= 2);
     }
     let expected = if wide {
         let upper = (u32::from(available) * 618 / 1000) as u16;
-        (upper, upper, available - upper)
+        (upper, upper, available - upper - 1)
     } else {
-        (available.div_ceil(3), (available + 1) / 3, available / 3)
+        (
+            available.div_ceil(3),
+            (available + 1) / 3,
+            available / 3 - 1,
+        )
     };
     println!(
         "{width}x{height}, input {} rows: top {top}, log {}, detail {detail}",
@@ -5857,7 +5865,7 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
     } else {
         assert_eq!(layout.prompt.bottom() + 1, layout.log.y);
         assert_eq!(layout.log.bottom(), layout.log_detail.y);
-        assert_eq!(layout.log_detail.bottom(), layout.footer.y);
+        assert_eq!(layout.log_detail.bottom() + 1, layout.footer.y);
         assert!(buf[(0, layout.log.y)].symbol() != "│");
     }
 }
@@ -5914,7 +5922,7 @@ fn center_layout_golden_rects_follow_each_area() {
             );
             layout.log_detail
         };
-        assert_eq!(bottom, Rect::new(5, 7 + top, width, log_height));
+        assert_eq!(bottom, Rect::new(5, 7 + top, width, log_height - 1));
         assert_eq!(layout.footer, Rect::new(5, 7 + height - 1, width, 1));
         if details_width == 0 {
             assert_eq!(layout.details, Rect::default());
@@ -5939,7 +5947,7 @@ fn center_layout_log_and_details_hide_thresholds() {
     let layout = view.center_layout(Rect::new(0, 0, 94, 19));
     assert_eq!(layout.log.height, 4);
     assert_eq!(layout.list.height, 4);
-    assert_eq!(layout.log_detail.height, 5);
+    assert_eq!(layout.log_detail.height, 4);
     assert!(layout.details.width > 0);
     assert!(
         !view
@@ -8684,7 +8692,7 @@ fn open_view_scrollbar() {
     assert_eq!(buf[(scrollbar_x, area.top())].fg, Color::Reset);
     assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), " ");
     assert_eq!(buf[(scrollbar_x, layout.log_detail.top())].symbol(), "─");
-    assert_eq!(buf[(scrollbar_x, layout.log_detail.bottom())].symbol(), " ");
+    assert_eq!(buf[(scrollbar_x, layout.log_detail.bottom())].symbol(), "─");
     for y in area.top()..area.bottom() {
         assert_ne!(buf[(area.right() - 1, y)].symbol(), "▕");
     }
@@ -9884,7 +9892,7 @@ fn task_border_double_clicks_select_both_ends_in_both_layouts() {
 }
 
 #[test]
-fn log_border_double_clicks_select_both_ends_in_both_layouts() {
+fn log_border_double_clicks_respect_shared_output_border() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = log_fixture();
         log_screen(&view, width, 20, now);
@@ -9913,8 +9921,14 @@ fn log_border_double_clicks_select_both_ends_in_both_layouts() {
         click(&mut view, log.bottom());
         assert_eq!(view.visible_log_event(), Some(&oldest));
         click(&mut view, log.bottom());
-        assert_eq!(view.visible_log_event(), Some(&newest));
-        assert_eq!(view.log_scroll(), view.log_max_scroll());
+        if width < super::render::WIDE_LAYOUT_COLUMNS {
+            assert_eq!(view.visible_log_event(), Some(&oldest));
+            assert_eq!(view.log_scroll(), 0);
+            assert!(view.active_panel == Panel::Output);
+        } else {
+            assert_eq!(view.visible_log_event(), Some(&newest));
+            assert_eq!(view.log_scroll(), view.log_max_scroll());
+        }
         log_screen(&view, width, 20, now);
         assert!(view.viewport.borrow().log_jump.is_empty());
         // New arrivals provide a single-click return path after jumping to the oldest.
@@ -10032,7 +10046,7 @@ fn log_border_help_entries_fit() {
 }
 
 #[test]
-fn log_border_bottom_double_click_selects_latest_in_both_layouts() {
+fn log_border_bottom_double_click_selects_latest_only_when_not_shared() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = log_fixture();
         view.select_fixture_event(Some(view.log[0].clone()));
@@ -10045,8 +10059,13 @@ fn log_border_bottom_double_click_selects_latest_in_both_layouts() {
         );
         click_mouse(&mut view, mouse);
         click_mouse(&mut view, mouse);
-        assert_eq!(view.visible_log_event(), view.log.last(), "width {width}");
-        assert_eq!(view.log_scroll(), view.log_max_scroll());
+        if width < super::render::WIDE_LAYOUT_COLUMNS {
+            assert_eq!(view.visible_log_event(), view.log.first(), "width {width}");
+            assert!(view.active_panel == Panel::Output);
+        } else {
+            assert_eq!(view.visible_log_event(), view.log.last(), "width {width}");
+            assert_eq!(view.log_scroll(), view.log_max_scroll());
+        }
     }
 }
 
