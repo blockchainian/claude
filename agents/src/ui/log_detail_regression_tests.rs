@@ -193,6 +193,7 @@ fn detail_body_uses_default_foreground_and_preserves_title_and_markdown_styles()
 
 #[test]
 fn tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (mut view, now) = open_tool_fixture();
     let mut event = view.visible_log_event().unwrap().clone();
     event.calls.truncate(1);
@@ -384,6 +385,8 @@ fn search_finds_hidden_suffix_at_200_columns() {
 
 #[test]
 fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    super::super::highlight::use_theme(false, None).unwrap();
     let fixture = include_str!("../../tests/fixtures/claude-write/python.jsonl");
     let mut record: serde_json::Value = serde_json::from_str(fixture).unwrap();
     let mut snapshot = String::new();

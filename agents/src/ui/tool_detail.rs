@@ -1019,6 +1019,8 @@ mod tests {
 
     #[test]
     fn manager_await_json_displays_multiline_strings_and_copies_drawn_text() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        highlight::use_theme(false, None).unwrap();
         let source = include_str!("../../tests/fixtures/codex-manager-await.jsonl").trim_end();
         let parts = Part::text_parts(source.into(), false);
         assert_eq!(parts.len(), 1);
@@ -1077,6 +1079,7 @@ mod tests {
 
     #[test]
     fn json_sections_use_multiline_highlighting_and_placeholders_are_dim() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let source = include_str!("../../tests/fixtures/codex-manager-await.jsonl").trim_end();
         let mut parts = Vec::new();
         push_section(

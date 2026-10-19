@@ -74,6 +74,7 @@ fn section_labels_stay_centered_before_right_values() {
 
 #[test]
 fn status_rule_keeps_github_pr_hyperlink_and_visible_click_target() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut row = session("project", "A task", SessionStatus::Ready, 0);
     row.git_branch = Some("hidden-branch".into());
     row.pr = Some(crate::model::PullRequest {
