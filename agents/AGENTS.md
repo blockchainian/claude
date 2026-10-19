@@ -78,7 +78,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 The gate every change passes:
 
-- **tests**: `cargo test`
+- **tests**: `cargo nextest run`
 - **lint**: `cargo clippy --all-targets`
 - **build**: `cargo build --release`
 
