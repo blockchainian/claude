@@ -168,6 +168,15 @@ impl View {
         Some(None)
     }
 
+    pub(super) fn position_question_paste(&mut self, area: Rect, column: u16, row: u16) {
+        let id = self.selected_id().expect("question session").clone();
+        self.questions
+            .views
+            .get_mut(&id)
+            .expect("visible question")
+            .position_paste(area, column, row);
+    }
+
     pub(super) fn question_paste(&mut self, text: &str) -> bool {
         let Some(id) = self.selected_id().cloned() else {
             return false;
@@ -300,6 +309,60 @@ mod tests {
         let mut view = View::default();
         view.set_sessions(vec![row], false);
         view
+    }
+
+    #[test]
+    fn middle_paste_question_focuses_free_text_only() {
+        let mut view = fixture();
+        let rendered = screen(&view, 160, 40);
+        let y = rendered
+            .lines()
+            .position(|line| line.contains("Type something."))
+            .unwrap() as u16;
+        let x = view.viewport.borrow().prompt.x + 1 + 5;
+        view.mouse_focus = Panel::LogList;
+        let event = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Middle),
+            column: x + 20,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(view.handle_mouse(event), Some(Action::PasteText));
+        view.handle_paste("剪贴板后");
+        screen(&view, 160, 40);
+        assert_eq!(
+            view.handle_mouse(MouseEvent {
+                column: x + 5,
+                ..event
+            }),
+            Some(Action::PasteText)
+        );
+        view.handle_paste("贴🦀");
+        let rendered = screen(&view, 160, 40);
+        assert!(
+            rendered.replace(' ', "").contains("剪贴板贴🦀后"),
+            "{rendered}"
+        );
+        let area = view.viewport.borrow().prompt.inner(Margin::new(1, 0));
+        assert_eq!(
+            view.active_question().unwrap().cursor(area),
+            Some((x + 10, y))
+        );
+        assert_eq!(
+            view.handle_mouse(MouseEvent {
+                row: area.y,
+                ..event
+            }),
+            None
+        );
+        let Some(Action::AnswerQuestions { answer, .. }) =
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        else {
+            panic!("free text answer");
+        };
+        let answer = &answer.answers["Probe single choice?"];
+        assert!(answer.answers.is_empty());
+        assert_eq!(answer.other.as_deref(), Some("剪贴板贴🦀后"));
     }
 
     #[test]

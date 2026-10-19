@@ -2,34 +2,61 @@ use super::*;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_middle_paste_uses_focused_input() {
+fn terminal_middle_paste_uses_clicked_input() {
     use base64::Engine;
     let (directory, tmux, _transcript) = start_probe("middle-paste");
     let clipboard = directory.path().join("clipboard/text");
-    std::fs::write(&clipboard, "middle🦀").unwrap();
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let (row, line) = capture
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| line.contains("Stop hook"))
-        .last()
-        .unwrap();
-    let column = line[..line.find("Stop hook").unwrap()].width();
+    std::fs::write(&clipboard, "贴🦀").unwrap();
+    begin_named_draft(&tmux, "Middle paste");
+    let locate = |text: &str| {
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        capture
+            .lines()
+            .enumerate()
+            .find_map(|(row, line)| {
+                let byte = line.find(text)?;
+                Some((line[..byte].width(), row))
+            })
+            .unwrap_or_else(|| panic!("missing {text}: {capture}"))
+    };
+    let caret = |x: usize, y: usize| {
+        let actual = tmux.run(&[
+            "display-message",
+            "-t",
+            "probe",
+            "-p",
+            "#{cursor_x},#{cursor_y}",
+        ]);
+        assert_eq!(actual.trim(), format!("{x},{y}"));
+    };
+    let (column, row) = locate("Middle paste ❯");
+    let start = column + "Middle paste ❯ ".width();
+    tmux.mouse(1, start + 30, row, true);
+    tmux.wait_for(|capture| capture.contains("Middle paste ❯ 贴🦀"));
+    caret(start + "贴🦀".width(), row);
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.mouse(1, start + 30, row, true);
+    tmux.wait_for(|capture| capture.contains("Middle paste ❯ 贴🦀贴🦀"));
+    caret(start + "贴🦀贴🦀".width(), row);
+    tmux.run(&["send-keys", "-t", "probe", "C-u"]);
+    tmux.run(&["send-keys", "-t", "probe", "-l", "剪贴板后"]);
+    tmux.wait_for(|capture| capture.contains("Middle paste ❯ 剪贴板后"));
+    // Focus task search, then middle-click the second display cell of 板.
+    tmux.mouse(0, 2, 4, true);
     tmux.run(&["send-keys", "-t", "probe", "/"]);
     tmux.wait_for(|capture| capture.contains("Search ❯"));
-    // A middle click on the log detail must keep the task search focused.
-    tmux.mouse(1, column, row, true);
-    tmux.wait_for(|capture| capture.contains("Search ❯ middle🦀"));
-    tmux.run(&["send-keys", "-t", "probe", "-l", "x"]);
-    tmux.wait_for(|capture| capture.contains("Search ❯ middle🦀x"));
-    std::fs::remove_file(&clipboard).unwrap();
-    tmux.mouse(1, column, row, true);
-    let error = tmux.capture_when(|capture| capture.contains("No such file or directory"));
-    assert!(error.contains("Search ❯ middle🦀x"), "{error}");
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-    tmux.wait_for(|capture| capture.contains("Stop hook"));
+    tmux.mouse(1, start + 5, row, true);
+    tmux.wait_for(|capture| capture.contains("Middle paste ❯ 剪贴板贴🦀后"));
+    caret(start + "剪贴板贴🦀".width(), row);
+    tmux.mouse(1, 2, 4, true);
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    assert!(capture.contains("Middle paste ❯ 剪贴板贴🦀后"), "{capture}");
+    assert!(!capture.contains("贴🦀贴🦀后"), "{capture}");
+    tmux.mouse(0, start + 30, row, true);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    tmux.run(&["send-keys", "-t", "probe", "C-u"]);
+    tmux.wait_for(|capture| !capture.contains("剪贴板"));
 
-    begin_named_draft(&tmux, "Middle paste");
     let event: serde_json::Value =
         serde_json::from_str(include_str!("../fixtures/claude-queued-image.jsonl").trim()).unwrap();
     let bytes = base64::engine::general_purpose::STANDARD
@@ -42,17 +69,21 @@ fn terminal_middle_paste_uses_focused_input() {
     let image = directory.path().join("middle picture.png");
     std::fs::write(&image, bytes).unwrap();
     std::fs::write(&clipboard, format!("'{}'", image.display())).unwrap();
-    tmux.mouse(1, 1, 1, true);
+    tmux.mouse(1, start + 30, row, true);
     tmux.wait_for(|capture| capture.contains("[Image #1]"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "tail"]);
     let capture = tmux.capture_when(|capture| capture.contains("[Image #1]tail"));
+    std::fs::remove_file(&clipboard).unwrap();
+    tmux.mouse(1, start + 30, row, true);
+    let error = tmux.capture_when(|capture| capture.contains("No such file or directory"));
+    assert!(error.contains("[Image #1]tail"), "{error}");
     let path = std::env::temp_dir().join("agents-middle-paste-tmux.txt");
     std::fs::write(&path, capture).unwrap();
     let verdict = serde_json::json!({
         "verdict": "pass",
-        "focused_search": "pass",
-        "missing_clipboard_notice": "pass",
+        "clicked_input_and_cursor": "pass",
         "prompt_image_path": "pass",
+        "missing_clipboard_notice": "pass",
         "capture": path,
     });
     std::fs::write(

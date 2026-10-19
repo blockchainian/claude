@@ -123,6 +123,7 @@ struct Viewport {
     tabs: Vec<(usize, Rect)>,
     tab_bar: Rect,
     list: Rect,
+    search: Rect,
     list_rows: Rect,
     first_entry: usize,
     log: Rect,
@@ -530,7 +531,12 @@ impl View {
         if self.selector.is_some() && !self.input_box.focused {
             return;
         }
-        if self.question_paste(text) {
+        if !self.searching
+            && !self.log_search.editing
+            && !self.log_detail_search.editing
+            && self.title_editor().is_none()
+            && self.question_paste(text)
+        {
             return;
         }
         if self.title_editor().is_some() {

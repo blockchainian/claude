@@ -92,7 +92,10 @@ impl View {
         {
             return None;
         }
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        if matches!(
+            mouse.kind,
+            MouseEventKind::Down(MouseButton::Left | MouseButton::Middle)
+        ) {
             self.focus(Panel::Terminal);
         }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");

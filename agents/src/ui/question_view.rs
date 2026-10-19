@@ -382,6 +382,25 @@ impl QuestionView {
         rows.get(y).copied().flatten().map(Target::Option)
     }
 
+    pub(super) fn paste_at(&self, area: Rect, column: u16, row: u16) -> bool {
+        self.page < self.pages.len()
+            && Self::other_row(&self.questions()[self.page])
+            && self.target(area, column, row)
+                == Some(Target::Option(self.questions()[self.page].options.len()))
+    }
+
+    pub(super) fn position_paste(&mut self, area: Rect, column: u16, row: u16) {
+        assert!(self.paste_at(area, column, row));
+        let start = 5 + self.other_check().width() as u16;
+        let focus = self.questions()[self.page].options.len();
+        self.set_focus(focus);
+        self.pages[self.page].other.click_row_after(
+            Rect::new(area.x + start, row, area.width.saturating_sub(start), 1),
+            "",
+            column,
+        );
+    }
+
     pub(super) fn paste(&mut self, text: &str) {
         if self.editing() {
             let page = &mut self.pages[self.page];

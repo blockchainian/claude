@@ -64,6 +64,55 @@ impl LineEdit {
         positions
     }
 
+    /// Places the caret after the displayed grapheme, or at the visible line's end.
+    pub(super) fn click_after(&mut self, width: usize, inset: usize, column: usize, row: usize) {
+        let positions = self.visual_positions(width, inset);
+        let row = row.min(positions.last().expect("end caret").2);
+        let &(byte, x, _) = positions
+            .iter()
+            .rfind(|p| p.2 == row && p.1 <= column)
+            .or_else(|| positions.iter().find(|p| p.2 == row))
+            .expect("visual row has caret");
+        let mut offset = byte;
+        if let Some(grapheme) = self.text[byte..].graphemes(true).next()
+            && grapheme != "\n"
+            && grapheme != "\r\n"
+            && column >= x
+        {
+            offset += grapheme.len();
+        }
+        self.set_cursor(self.caret_boundary(offset, true));
+    }
+
+    pub(super) fn click_row_after(
+        &mut self,
+        area: ratatui::layout::Rect,
+        prefix: &str,
+        column: u16,
+    ) {
+        let width = usize::from(area.width).saturating_sub(prefix.width());
+        if width == 0 {
+            self.set_cursor(self.text.len());
+            return;
+        }
+        let (visible, _) = self.window(width);
+        let start = visible.as_ptr() as usize - self.text.as_ptr() as usize;
+        let column = usize::from(column.saturating_sub(area.x)).saturating_sub(prefix.width());
+        let mut end = start;
+        let mut x = 0;
+        for grapheme in visible.graphemes(true) {
+            end += grapheme.len();
+            x += grapheme.width();
+            if column < x {
+                break;
+            }
+        }
+        if column >= visible.width() {
+            end = self.text.len();
+        }
+        self.set_cursor(self.caret_boundary(end, true));
+    }
+
     /// Returns false when the caret is already on the requested boundary row.
     pub(super) fn move_vertical(&mut self, width: usize, inset: usize, down: bool) -> bool {
         // Columns count from the text's start on every row, so the label's inset on the

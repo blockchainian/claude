@@ -1,3 +1,6 @@
+#[path = "middle_paste_tests.rs"]
+mod middle_paste_tests;
+
 #[path = "claude_client_tests.rs"]
 mod claude_client_tests;
 
@@ -259,10 +262,7 @@ fn mouse_tabs_ignore_other_events() {
         MouseEventKind::ScrollLeft,
         MouseEventKind::ScrollRight,
     ] {
-        assert_eq!(
-            view.handle_mouse(mouse(kind, rect.x, rect.y)),
-            (kind == MouseEventKind::Down(MouseButton::Middle)).then_some(Action::PasteText)
-        );
+        assert_eq!(view.handle_mouse(mouse(kind, rect.x, rect.y)), None);
         assert_eq!(view.status_filter, 0);
         assert_eq!(view.selected, selected);
         assert_eq!(view.viewport.borrow().scroll, 7);

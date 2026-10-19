@@ -180,7 +180,7 @@ fn a_focused_terminal_takes_pastes() {
 }
 
 #[test]
-fn middle_paste_follows_the_program_mouse_mode_without_changing_focus() {
+fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
     for (protocol, expected, release) in [
         (&b""[..], Some(Action::PasteText), None),
         (
@@ -212,8 +212,11 @@ fn middle_paste_follows_the_program_mouse_mode_without_changing_focus() {
         let focus = view.mouse_focus;
         assert!(focus != Panel::Terminal);
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.mouse_focus == focus);
-        assert_eq!(view.terminal_paste("text"), None);
+        assert!(view.mouse_focus == Panel::Terminal);
+        assert_eq!(
+            view.terminal_paste("text"),
+            Some(Action::TerminalPaste("text".into()))
+        );
         assert_eq!(
             view.handle_mouse(mouse(
                 MouseEventKind::Up(MouseButton::Middle),
@@ -222,7 +225,7 @@ fn middle_paste_follows_the_program_mouse_mode_without_changing_focus() {
             )),
             release
         );
-        assert!(view.mouse_focus == focus);
+        assert!(view.mouse_focus == Panel::Terminal);
     }
 }
 

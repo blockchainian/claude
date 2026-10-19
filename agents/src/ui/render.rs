@@ -440,6 +440,7 @@ impl View {
         {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log = layout.log;
+            viewport.search = layout.search;
             viewport.log_detail = inset(layout.log_detail);
         }
         self.render_log(layout.log, buf, now);

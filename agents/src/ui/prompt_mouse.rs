@@ -9,6 +9,19 @@ pub(super) struct PromptMouse {
 }
 
 impl PromptBox {
+    pub(in crate::ui) fn paste_mouse(&mut self, area: Rect, label: &str, mouse: MouseEvent) {
+        let layout = self.layout(area.width, label);
+        let start = self.mouse_scroll_start(&layout, usize::from(area.height));
+        let (width, inset) = self.text_width.get();
+        self.editor.click_after(
+            width,
+            inset,
+            usize::from(mouse.column.saturating_sub(area.x)),
+            start + usize::from(mouse.row.saturating_sub(area.y)),
+        );
+        self.mouse.anchor = None;
+    }
+
     pub(in crate::ui) fn mouse_selecting(&self) -> bool {
         self.mouse.anchor.is_some()
     }

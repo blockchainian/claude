@@ -34,6 +34,18 @@ pub(super) struct PendingClick {
     open_heading: bool,
 }
 
+#[derive(Clone, Copy)]
+enum PasteTarget {
+    Terminal,
+    Prompt(Rect),
+    Title(Rect),
+    Branch(Rect),
+    Search(Rect),
+    LogSearch(Rect),
+    DetailSearch(Rect),
+    Question(Rect),
+}
+
 impl View {
     pub(crate) fn set_log_sort(&mut self, sorting: LogSort) {
         let following = self.following_log();
@@ -254,15 +266,16 @@ impl View {
         if self.frozen_draft() {
             return None;
         }
-        if mouse.kind == MouseEventKind::Down(MouseButton::Middle) {
-            return self
-                .terminal_mouse(mouse)
-                .unwrap_or(Some(Action::PasteText));
+        let middle = mouse.kind == MouseEventKind::Down(MouseButton::Middle);
+        let paste_target = middle.then(|| self.paste_target(mouse)).flatten();
+        if middle && paste_target.is_none() {
+            return None;
         }
         let position = (mouse.column, mouse.row).into();
         if self.name_target.is_some()
             && self.title_editor().is_some()
             && !self.rename.text().trim().is_empty()
+            && !middle
             && matches!(mouse.kind, MouseEventKind::Down(_))
             && !self.viewport.borrow().title_input.contains(position)
         {
@@ -274,7 +287,10 @@ impl View {
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
             self.mouse_focus = {
                 let viewport = self.viewport.borrow();
-                if viewport.list.contains(position) || viewport.tab_bar.contains(position) {
+                if viewport.list.contains(position)
+                    || viewport.tab_bar.contains(position)
+                    || viewport.search.contains(position)
+                {
                     Panel::TaskList
                 } else if viewport.log.contains(position)
                     || viewport
@@ -297,6 +313,14 @@ impl View {
             };
         }
         if self.mouse_focus != previous_focus
+            && !matches!(
+                paste_target,
+                Some(
+                    PasteTarget::Search(_)
+                        | PasteTarget::LogSearch(_)
+                        | PasteTarget::DetailSearch(_)
+                )
+            )
             && (self.searching || self.log_search.editing || self.log_detail_search.editing)
         {
             self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -314,7 +338,12 @@ impl View {
         if let Some(action) = self.terminal_mouse(mouse) {
             return action;
         }
-        let next = self.handle_mouse_event(mouse);
+        let next = if let Some(target) = paste_target {
+            self.position_paste(target, mouse);
+            Some(Action::PasteText)
+        } else {
+            self.handle_mouse_event(mouse)
+        };
         if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
             self.input_box.focused = self.mouse_focus == Panel::Prompt
                 && self.input_disabled().is_none()
@@ -325,6 +354,84 @@ impl View {
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
+        }
+    }
+
+    fn paste_target(&self, mouse: MouseEvent) -> Option<PasteTarget> {
+        if self.help || self.confirm_dialog.is_some() {
+            return None;
+        }
+        let at = (mouse.column, mouse.row).into();
+        let v = self.viewport.borrow();
+        if v.terminal.contains(at) && self.shown_terminal().is_some() {
+            return Some(PasteTarget::Terminal);
+        }
+        if self.title_editor().is_some() {
+            return v
+                .title_input
+                .contains(at)
+                .then_some(PasteTarget::Title(v.title_input));
+        }
+        if let Some(selector) = &self.selector
+            && selector.branch_editor().is_some()
+            && v.details_input.contains(at)
+        {
+            return Some(PasteTarget::Branch(v.details_input));
+        }
+        if v.prompt.contains(at) && self.input_disabled().is_none() {
+            let area = v.prompt.inner(Margin::new(1, 0));
+            if let Some(question) = self.active_question() {
+                return question
+                    .paste_at(area, mouse.column, mouse.row)
+                    .then_some(PasteTarget::Question(area));
+            }
+            return Some(PasteTarget::Prompt(area));
+        }
+        if self.searching && v.search.contains(at) {
+            return Some(PasteTarget::Search(v.search));
+        }
+        let row = super::log::search_input_rect(v.log);
+        if self.log_search.editing && row.contains(at) {
+            return Some(PasteTarget::LogSearch(row));
+        }
+        let row = super::log::search_input_rect(v.log_detail);
+        if self.log_detail_search.editing && row.contains(at) {
+            return Some(PasteTarget::DetailSearch(row));
+        }
+        None
+    }
+
+    fn position_paste(&mut self, target: PasteTarget, mouse: MouseEvent) {
+        let search = format!("Search {PROMPT_MARKER} ");
+        match target {
+            PasteTarget::Terminal => unreachable!("terminal mouse handles paste"),
+            PasteTarget::Prompt(area) => {
+                self.focus_input();
+                self.input_box.paste_mouse(area, &self.input_label(), mouse);
+            }
+            PasteTarget::Title(area) => self.rename.click_row_after(area, "", mouse.column),
+            PasteTarget::Branch(area) => {
+                let selector = self.selector.as_mut().expect("branch selector");
+                selector.selected = selector.len() - 1;
+                selector
+                    .active_editor()
+                    .expect("branch editor")
+                    .click_row_after(area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
+            }
+            PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
+            PasteTarget::LogSearch(area) => {
+                self.log_search
+                    .query
+                    .click_row_after(area, &search, mouse.column)
+            }
+            PasteTarget::DetailSearch(area) => {
+                self.log_detail_search
+                    .query
+                    .click_row_after(area, &search, mouse.column)
+            }
+            PasteTarget::Question(area) => {
+                self.position_question_paste(area, mouse.column, mouse.row);
+            }
         }
     }
 
