@@ -74,7 +74,7 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
     let claude_reset: chrono::DateTime<chrono::Utc> = "2026-10-23T16:00:00Z".parse().unwrap();
     let codex_reset: chrono::DateTime<chrono::Utc> = "2026-10-25T08:33:00Z".parse().unwrap();
     let expected = format!(
-        "Weekly Claude 79% left until {}, 1 reset · Codex 84% left until {}, 2 resets",
+        "Weekly Claude resets {}, 1 reset credit · Codex resets {}, 2 reset credits",
         claude_reset
             .with_timezone(&chrono::Local)
             .format("%a %H:%M"),

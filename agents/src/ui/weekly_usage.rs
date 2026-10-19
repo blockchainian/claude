@@ -3,14 +3,22 @@ use crate::state::UsageView;
 
 pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) -> String {
     let left = usage.left_percent();
-    let mut text = format!("{name} {left}% left");
+    let mut text = match view {
+        UsageView::Compact => format!("{name} {left}% left"),
+        UsageView::Detailed => name.to_owned(),
+    };
     let credits = usage.reset_credits.filter(|count| *count > 0);
     if (view == UsageView::Detailed || (left < 5 && credits.is_none()))
         && let Some(reset) = usage.resets_at
     {
         let reset = reset + chrono::Duration::seconds(30);
         text.push_str(&format!(
-            " until {}",
+            " {} {}",
+            if view == UsageView::Detailed {
+                "resets"
+            } else {
+                "until"
+            },
             reset.with_timezone(&chrono::Local).format("%a %H:%M")
         ));
     }
@@ -18,7 +26,7 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
         && let Some(count) = credits
     {
         text.push_str(&format!(
-            ", {count} reset{}",
+            ", {count} reset credit{}",
             if count == 1 { "" } else { "s" }
         ));
     }
@@ -49,7 +57,10 @@ mod tests {
                 for view in [UsageView::Compact, UsageView::Detailed] {
                     assert_eq!(
                         provider_text(name, &usage, view),
-                        format!("{name} 3% left until {expected}"),
+                        match view {
+                            UsageView::Compact => format!("{name} 3% left until {expected}"),
+                            UsageView::Detailed => format!("{name} resets {expected}"),
+                        },
                         "{actual}, {view:?}"
                     );
                 }
@@ -77,21 +88,32 @@ mod tests {
                             resets_at: reset_at,
                             reset_credits: credits,
                         };
-                        let mut expected = format!("Claude {left}% left");
+                        let mut expected = match view {
+                            UsageView::Compact => format!("Claude {left}% left"),
+                            UsageView::Detailed => "Claude".to_owned(),
+                        };
                         let has_credits = matches!(credits, Some(1 | 2));
                         if reset_at.is_some()
                             && (view == UsageView::Detailed || (left < 5 && !has_credits))
                         {
-                            expected.push_str(&format!(" until {local}"));
+                            expected.push_str(&match view {
+                                UsageView::Compact => format!(" until {local}"),
+                                UsageView::Detailed => format!(" resets {local}"),
+                            });
                         }
                         if has_credits && (view == UsageView::Detailed || left < 5) {
                             expected.push_str(if credits == Some(1) {
-                                ", 1 reset"
+                                ", 1 reset credit"
                             } else {
-                                ", 2 resets"
+                                ", 2 reset credits"
                             });
                         }
-                        assert_eq!(provider_text("Claude", &usage, view), expected);
+                        for name in ["Claude", "Codex"] {
+                            assert_eq!(
+                                provider_text(name, &usage, view),
+                                expected.replace("Claude", name)
+                            );
+                        }
                     }
                 }
             }

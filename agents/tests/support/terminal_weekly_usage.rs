@@ -30,18 +30,19 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("Weekly ") && line.contains("until"))
+            .is_some_and(|line| line.contains("Weekly ") && line.contains("resets"))
     });
     let detailed = capture.lines().next().unwrap().to_owned();
+    assert!(!detailed.contains("% left"), "{detailed}");
     for (name, reset) in [
         ("Claude", "2026-10-23T16:00:00Z"),
         ("Codex", "2026-10-25T08:33:00Z"),
     ] {
         let reset = reset.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
         let time = reset.with_timezone(&chrono::Local).format("%a %H:%M");
-        let percent = if name == "Claude" { 79 } else { 84 };
+        let credits = if name == "Claude" { "1 reset credit" } else { "2 reset credits" };
         assert!(
-            detailed.contains(&format!("{name} {percent}% left until {time}")),
+            detailed.contains(&format!("{name} resets {time}, {credits}")),
             "{detailed}"
         );
     }
@@ -64,7 +65,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("Weekly ") && line.contains("until"))
+            .is_some_and(|line| line.contains("Weekly ") && line.contains("resets"))
     });
     let line = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let line = line.lines().next().unwrap();
@@ -77,7 +78,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("Weekly ") && !line.contains("until"))
+            .is_some_and(|line| line.contains("Weekly ") && !line.contains("resets"))
     });
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(state_path).unwrap()).unwrap();
