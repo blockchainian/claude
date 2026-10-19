@@ -25,7 +25,7 @@ pub(super) struct AskUserQuestion {
     stopping: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
     #[cfg(test)]
-    port: u16,
+    pub(super) port: u16,
 }
 impl AskUserQuestion {
     pub(super) fn bind(port: u16, config: PathBuf) -> io::Result<Self> {

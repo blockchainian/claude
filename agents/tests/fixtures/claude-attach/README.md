@@ -3,6 +3,7 @@
 Claude Code 2.1.299, real temporary trusted git repositories, Haiku background sessions, and 200-column × 50-row attach PTYs:
 
 - `idle.screen.txt` and `busy.screen.txt`: verbatim tmux screen captures. The empty input prompt contains a non-breaking space after `❯`.
+- `interrupted.screen.txt`: Claude Code 2.1.302 tmux capture after Esc interrupted a two-line prompt before any reply and restored it to the input box; the working directory is shown as `~/project`.
 - `attach.raw`: unmodified tmux terminal output across the capture attempts.
 - `queued.screen.txt`: actual busy submission screen, including the input hint `Press up to edit queued messages`.
 - `queued-command.json`: one actual transcript attachment delivered at a tool boundary after Enter accepted input while busy. Its attachment type is `queued_command`; its prompt and session ID identify the delivered input.

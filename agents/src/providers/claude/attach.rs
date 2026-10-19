@@ -73,6 +73,18 @@ pub(super) fn inspect(job_id: &str, cwd: &Path) -> io::Result<String> {
     }
 }
 
+/// Leaves `text` in Claude's input without submitting it.
+#[cfg(test)]
+pub(super) fn type_input(job_id: &str, cwd: &Path, text: &str) -> io::Result<()> {
+    let mut terminal = Terminal::spawn(job_id, cwd)?;
+    let result = terminal.wait_at("type-ready", ready).and_then(|()| {
+        terminal.paste(text)?;
+        terminal.wait_at("typed", left_input)
+    });
+    let detached = terminal.detach();
+    result.and(detached)
+}
+
 fn validate_job_id(job_id: &str) -> io::Result<()> {
     if job_id.is_empty()
         || job_id.starts_with('-')
@@ -351,7 +363,27 @@ impl Terminal {
         Ok(pasted_input)
     }
 
+    /// Clears text left in Claude's input, such as the prompt Claude restores after an
+    /// interrupt, with Ctrl+U only: Esc or Ctrl+C would end the running turn and any pending
+    /// AskUserQuestion.
+    fn clear_left_input(&mut self) -> io::Result<()> {
+        self.wait_at("initial-screen", |screen| {
+            ready(screen) || left_input(screen)
+        })?;
+        while left_input(&self.screen()) {
+            let before = editor_text(&self.screen());
+            // Ctrl+U deletes the text before the cursor on its line, then the line break.
+            self.write(b"\x15")?;
+            // Claude redraws the box in steps, so a frame without the box is not a result.
+            self.wait_at("input-cleared", |screen| {
+                input_box(screen).is_some() && editor_text(screen) != before
+            })?;
+        }
+        Ok(())
+    }
+
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
+        self.clear_left_input()?;
         self.wait_at("initial-ready", ready)?;
         match input {
             SessionInput::Prompt(text) => {
@@ -459,6 +491,21 @@ fn ready(screen: &str) -> bool {
         prompt_state(screen),
         Some(PromptState::Empty | PromptState::Queued)
     )
+}
+
+/// The state of Claude's own input box, which opens below a rule; a dialog's `❯` selection
+/// cursor and a transcript prompt are not the box.
+fn input_box(screen: &str) -> Option<PromptState<'_>> {
+    let (row, _) = prompt(screen)?;
+    row.checked_sub(1)
+        .and_then(|above| screen.lines().nth(above))
+        .is_some_and(|line| line.trim_start().starts_with('─'))
+        .then(|| prompt_state(screen))
+        .flatten()
+}
+
+fn left_input(screen: &str) -> bool {
+    matches!(input_box(screen), Some(PromptState::Editing(_)))
 }
 
 fn actual_empty(screen: &str) -> bool {
@@ -581,6 +628,34 @@ mod tests {
         );
         assert!(screen.contains("Resume this session with:"), "{screen}");
         assert!(!ready(&screen));
+    }
+
+    #[test]
+    fn captured_interrupted_prompt_is_left_input() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/interrupted.screen.txt");
+        assert!(left_input(screen), "{screen}");
+        assert!(!ready(screen));
+    }
+
+    #[test]
+    fn captured_idle_and_busy_screens_have_no_left_input() {
+        for screen in [
+            include_str!("../../../tests/fixtures/claude-attach/idle.screen.txt"),
+            include_str!("../../../tests/fixtures/claude-attach/busy.screen.txt"),
+            include_str!("../../../tests/fixtures/claude-attach/queued.screen.txt"),
+        ] {
+            assert!(!left_input(screen), "{screen}");
+        }
+    }
+
+    #[test]
+    fn captured_question_cursor_is_not_left_input() {
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/synchronized-question.raw");
+        let mut parser = OutputScreen::new();
+        parser.process(raw);
+        let screen = parser.complete().expect("completed question screen");
+        assert!(prompt(&screen).is_some(), "{screen}");
+        assert!(!left_input(&screen), "{screen}");
     }
 
     #[test]
