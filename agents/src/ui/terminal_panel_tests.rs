@@ -180,6 +180,53 @@ fn a_focused_terminal_takes_pastes() {
 }
 
 #[test]
+fn middle_paste_follows_the_program_mouse_mode_without_changing_focus() {
+    for (protocol, expected, release) in [
+        (&b""[..], Some(Action::PasteText), None),
+        (
+            &b"\x1b[?1000h\x1b[?1006h"[..],
+            Some(Action::TerminalInput(b"\x1b[<1;2;2M".to_vec())),
+            Some(Action::TerminalInput(b"\x1b[<1;2;2m".to_vec())),
+        ),
+    ] {
+        let (mut view, now, _screen) = open_terminal(protocol);
+        let terminal = view.viewport.borrow().terminal;
+        let middle = mouse(
+            MouseEventKind::Down(MouseButton::Middle),
+            terminal.x + 1,
+            terminal.y + 1,
+        );
+        assert_eq!(view.handle_mouse(middle), expected);
+        assert!(view.mouse_focus == Panel::Terminal);
+        assert_eq!(
+            view.terminal_paste("text"),
+            Some(Action::TerminalPaste("text".into()))
+        );
+
+        let list = view.viewport.borrow().list;
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), list.x + 1, list.y),
+        );
+        log_screen(&view, 100, 45, now);
+        let focus = view.mouse_focus;
+        assert!(focus != Panel::Terminal);
+        assert_eq!(view.handle_mouse(middle), expected);
+        assert!(view.mouse_focus == focus);
+        assert_eq!(view.terminal_paste("text"), None);
+        assert_eq!(
+            view.handle_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Middle),
+                middle.column,
+                middle.row
+            )),
+            release
+        );
+        assert!(view.mouse_focus == focus);
+    }
+}
+
+#[test]
 fn loading_terminal_shows_running_dots_without_a_cursor() {
     let (view, now, _screen) = open_terminal(b"");
     let drawn = log_screen(&view, 100, 45, now);

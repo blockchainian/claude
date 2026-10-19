@@ -914,7 +914,7 @@ fn control_enter_uses_the_draft_rule_instead_of_sending_to_a_provider_session() 
 }
 
 #[test]
-fn draft_name_blur_saves_like_enter_outside_every_panel() {
+fn draft_name_blurs_on_left_and_right_clicks_and_middle_click_keeps_editing() {
     for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
         for (x, y) in [(0, 0), (2, 5), (80, 5), (158, 38)] {
             let (directory, mut view) = fixture();
@@ -922,7 +922,7 @@ fn draft_name_blur_saves_like_enter_outside_every_panel() {
             view.handle_paste("  Saved on blur  ");
             render(&view);
             assert!(!view.viewport.borrow().title_input.contains((x, y).into()));
-            view.handle_mouse(MouseEvent {
+            let action = view.handle_mouse(MouseEvent {
                 kind: MouseEventKind::Down(button),
                 column: x,
                 row: y,
@@ -934,6 +934,22 @@ fn draft_name_blur_saves_like_enter_outside_every_panel() {
                 row: y,
                 modifiers: KeyModifiers::NONE,
             });
+            if button == MouseButton::Middle {
+                assert_eq!(action, Some(Action::PasteText));
+                assert_eq!(view.name_target, Some(id));
+                assert!(view.selector.is_none());
+                view.handle_paste("kept editing");
+                assert_eq!(view.rename.text(), "  Saved on blur  kept editing");
+                assert!(
+                    view.drafts
+                        .iter()
+                        .find(|d| d.id == id)
+                        .unwrap()
+                        .name
+                        .is_none()
+                );
+                continue;
+            }
             assert_eq!(
                 view.drafts
                     .iter()

@@ -225,6 +225,7 @@ pub enum Action {
         answer: crate::ask::Answer,
     },
     PasteImage,
+    PasteText,
     SendImages {
         id: SessionKey,
         text: String,

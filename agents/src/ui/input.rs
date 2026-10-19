@@ -254,6 +254,11 @@ impl View {
         if self.frozen_draft() {
             return None;
         }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Middle) {
+            return self
+                .terminal_mouse(mouse)
+                .unwrap_or(Some(Action::PasteText));
+        }
         let position = (mouse.column, mouse.row).into();
         if self.name_target.is_some()
             && self.title_editor().is_some()

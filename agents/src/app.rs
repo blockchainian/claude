@@ -556,21 +556,7 @@ impl App {
         let action = match event {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
-            Event::Paste(text) => {
-                if let Some(action) = self.view.terminal_paste(&text) {
-                    return self.handle_action(Some(action));
-                }
-                if self.view.pasting_prompt() {
-                    match crate::images::ImageAttachment::from_paste(&text) {
-                        Ok(Some(image)) => self.view.attach_image(image),
-                        Ok(None) => self.view.handle_paste(&text),
-                        Err(error) => self.view.set_notice(Some(error.to_string())),
-                    }
-                } else {
-                    self.view.handle_paste(&text);
-                }
-                return false;
-            }
+            Event::Paste(text) => return self.paste(&text),
             Event::ThemeChanged(theme) => {
                 self.apply_background(theme == Theme::Light);
                 return false;
@@ -578,6 +564,22 @@ impl App {
             _ => return false,
         };
         self.handle_action(action)
+    }
+
+    fn paste(&mut self, text: &str) -> bool {
+        if let Some(action) = self.view.terminal_paste(text) {
+            return self.handle_action(Some(action));
+        }
+        if self.view.pasting_prompt() {
+            match crate::images::ImageAttachment::from_paste(text) {
+                Ok(Some(image)) => self.view.attach_image(image),
+                Ok(None) => self.view.handle_paste(text),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            }
+        } else {
+            self.view.handle_paste(text);
+        }
+        false
     }
 
     fn refresh_log(&mut self, visible: usize) {
@@ -1281,6 +1283,10 @@ impl App {
             }
             Action::PasteImage => match self.clipboard.image() {
                 Ok(image) => self.view.attach_image(image),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            },
+            Action::PasteText => match self.clipboard.text() {
+                Ok(text) => return self.paste(&text),
                 Err(error) => self.view.set_notice(Some(error.to_string())),
             },
             Action::ShowMore => {

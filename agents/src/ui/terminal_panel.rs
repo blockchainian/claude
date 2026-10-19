@@ -92,11 +92,16 @@ impl View {
         {
             return None;
         }
-        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
             self.focus(Panel::Terminal);
         }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();
+        if mouse.kind == MouseEventKind::Down(MouseButton::Middle)
+            && screen.mouse_protocol_mode() == vt100::MouseProtocolMode::None
+        {
+            return Some(Some(Action::PasteText));
+        }
         Some(
             mouse_bytes(
                 mouse,

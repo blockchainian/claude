@@ -259,7 +259,10 @@ fn mouse_tabs_ignore_other_events() {
         MouseEventKind::ScrollLeft,
         MouseEventKind::ScrollRight,
     ] {
-        assert!(view.handle_mouse(mouse(kind, rect.x, rect.y)).is_none());
+        assert_eq!(
+            view.handle_mouse(mouse(kind, rect.x, rect.y)),
+            (kind == MouseEventKind::Down(MouseButton::Middle)).then_some(Action::PasteText)
+        );
         assert_eq!(view.status_filter, 0);
         assert_eq!(view.selected, selected);
         assert_eq!(view.viewport.borrow().scroll, 7);

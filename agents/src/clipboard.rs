@@ -22,6 +22,20 @@ impl Clipboard {
         }
     }
 
+    pub fn text(&mut self) -> io::Result<String> {
+        if let Some(directory) = &self.directory {
+            return std::fs::read_to_string(directory.join("text"));
+        }
+        if self.clipboard.is_none() {
+            self.clipboard = Some(arboard::Clipboard::new().map_err(io::Error::other)?);
+        }
+        self.clipboard
+            .as_mut()
+            .expect("clipboard was initialized")
+            .get_text()
+            .map_err(io::Error::other)
+    }
+
     pub(crate) fn image(&mut self) -> io::Result<crate::images::ImageAttachment> {
         if let Some(directory) = &self.directory {
             let image = image::open(directory.join("image.png")).map_err(|error| match error {
@@ -71,6 +85,31 @@ impl Clipboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_clipboard_reads_text_verbatim() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut clipboard = Clipboard::from_directory(directory.path().to_owned());
+        for text in ["first 🦀\n第二行\r\nthird", ""] {
+            std::fs::write(directory.path().join("text"), text).unwrap();
+            assert_eq!(clipboard.text().unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn directory_clipboard_reports_missing_and_invalid_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut clipboard = Clipboard::from_directory(directory.path().to_owned());
+        assert_eq!(
+            clipboard.text().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        std::fs::write(directory.path().join("text"), [0xff]).unwrap();
+        assert_eq!(
+            clipboard.text().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 
     #[test]
     fn directory_clipboard_copies_text_synchronously_and_isolates_instances() {
