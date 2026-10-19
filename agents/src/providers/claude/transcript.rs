@@ -1367,9 +1367,9 @@ pub(super) mod tests {
     #[test]
     fn peer_prompts_show_sender_and_body() {
         let expected = [
-            "(translate-pdf) translate-pdf: user approved the pilot; second file (MathJax page) done: ~/Documents/MIT-zh/6.1910-Computation Structures/L01-notes-basics-of-information.pdf. Asking the user now whether to batch the remaining 155.",
-            "(general-purpose) 41 files: 23209 bytes before, 19698 bytes after. All files parse, so none are left unfixed.",
-            "(codex-support-research) {\"type\":\"idle_notification\",\"from\":\"codex-support-research\",\"timestamp\":\"2026-10-13T17:36:33.617Z\",\"idleReason\":\"available\",\"result\":\"done\"}",
+            "translate-pdf → translate-pdf: user approved the pilot; second file (MathJax page) done: ~/Documents/MIT-zh/6.1910-Computation Structures/L01-notes-basics-of-information.pdf. Asking the user now whether to batch the remaining 155.",
+            "general-purpose → 41 files: 23209 bytes before, 19698 bytes after. All files parse, so none are left unfixed.",
+            "codex-support-research → {\"type\":\"idle_notification\",\"from\":\"codex-support-research\",\"timestamp\":\"2026-10-13T17:36:33.617Z\",\"idleReason\":\"available\",\"result\":\"done\"}",
         ];
         for (line, expected) in include_str!("../../../tests/fixtures/claude-peer-prompts.jsonl")
             .lines()

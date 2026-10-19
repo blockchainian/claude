@@ -8997,7 +8997,7 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
         assert!(header.ends_with(&clock), "time: {header}");
         assert!(
             !super::log::open_text(view.visible_log_event().unwrap())
-                .contains(&format!("({sender})"))
+                .contains(&format!("{sender} → "))
         );
     }
 }

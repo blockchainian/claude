@@ -2,11 +2,19 @@ pub(crate) mod agent;
 
 use chrono::{DateTime, Utc};
 
+fn participant_name(name: Option<&str>) -> Option<&str> {
+    name.map(str::trim).filter(|name| !name.is_empty())
+}
+
+/// The `sender → ` prefix a message from another participant opens with.
+fn participant_prefix(name: Option<&str>) -> Option<String> {
+    participant_name(name).map(|name| format!("{name} → "))
+}
+
 pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
-    match name.map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) if body.is_empty() => format!("({name})"),
-        Some(name) => format!("({name}) {body}"),
-        None => body.to_owned(),
+    match participant_name(name) {
+        Some(name) if body.is_empty() => name.to_owned(),
+        _ => participant_prefix(name).unwrap_or_default() + body,
     }
 }
 
@@ -96,9 +104,7 @@ impl Event {
         let offset = if agent::summary(self).is_some() {
             0
         } else {
-            self.sender.as_deref().map_or(0, |sender| {
-                participant_text(Some(sender), "").len() + 1
-            })
+            participant_prefix(self.sender.as_deref()).map_or(0, |prefix| prefix.len())
         };
         crate::model::Activity {
             paths: self.paths.iter()
