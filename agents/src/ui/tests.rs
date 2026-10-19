@@ -9755,7 +9755,11 @@ fn claude_agent_display_from_real_records() {
             "Spawn agent 接手边框和标题行改动",
             "feature:ux-implementer",
         ),
-        ("toolu_01YMEgiGEMc9cjoePq6j2E69", "Spawn agent 滚动条挪到最右边", "fork"),
+        (
+            "toolu_01YMEgiGEMc9cjoePq6j2E69",
+            "Spawn agent 滚动条挪到最右边",
+            "fork",
+        ),
     ] {
         let event = events
             .iter()
@@ -10226,10 +10230,12 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                         let bits = cell.symbol().chars().next().unwrap() as u32;
                         assert!((0x2800..=0x28ff).contains(&bits));
                         assert_eq!((bits - 0x2800) & bit, bit, "{width}, {used}, {dot}");
-                        assert_eq!(
-                            cell.style(),
-                            buffer[(0, y)].style().patch(style::timeline_style(colors))
-                        );
+                        let bar_style = if used > 95.0 {
+                            style::error_style()
+                        } else {
+                            style::timeline_style(colors)
+                        };
+                        assert_eq!(cell.style(), buffer[(0, y)].style().patch(bar_style));
                     }
                     if visible % 2 == 1 {
                         let x = if side == 0 {

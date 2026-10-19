@@ -85,15 +85,16 @@ fn compact_provider(
         format!("{partial}{full}")
     };
     let empty = Span::raw(" ".repeat(usize::from(limit) - dots.div_ceil(2)));
-    let number = Span::styled(
-        format!("{used}%"),
-        if used > 95 {
-            super::style::error_style()
-        } else {
-            ratatui::style::Style::default()
-        },
-    );
-    let bar = Span::styled(bar, super::style::timeline_style(use_colors));
+    let (number_style, bar_style) = if used > 95 {
+        (super::style::error_style(), super::style::error_style())
+    } else {
+        (
+            ratatui::style::Style::default(),
+            super::style::timeline_style(use_colors),
+        )
+    };
+    let number = Span::styled(format!("{used}%"), number_style);
+    let bar = Span::styled(bar, bar_style);
     let label = Span::raw(name.to_owned());
     let gap = Span::raw(if dots == 0 { "" } else { " " });
     let empty = if dots == 0 {
@@ -298,6 +299,33 @@ mod tests {
                     _ => unreachable!(),
                 };
                 assert_eq!(target, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn compact_bar_uses_error_color_above_95_percent() {
+        for (used, red) in [(95.0, false), (96.0, true)] {
+            let usage = WeeklyUsage::from_used_percent(used, None).unwrap();
+            let area = Rect::new(0, 0, 200, 1);
+            let mut buf = Buffer::empty(area);
+            render(
+                area,
+                &[],
+                [Some(&usage); 2],
+                UsageView::Compact,
+                true,
+                &mut buf,
+            )
+            .unwrap();
+            let bar = buf
+                .content
+                .iter()
+                .filter(|cell| cell.symbol() == "⣿")
+                .collect::<Vec<_>>();
+            assert!(!bar.is_empty());
+            for cell in bar {
+                assert_eq!(cell.fg == ratatui::style::Color::Red, red, "{used}");
             }
         }
     }
