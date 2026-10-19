@@ -254,7 +254,12 @@ impl View {
                 title,
                 buf,
             );
-            line(Line::from(status).style(style), status_area, buf);
+            let status_style = if !header && task.status == SessionStatus::NeedsInput {
+                super::style::attention_title_style()
+            } else {
+                style
+            };
+            line(Line::from(status).style(status_style), status_area, buf);
             if !updated.is_empty() {
                 let age = format_relative_time(reference, Some(task.updated_at));
                 Line::from(age)
