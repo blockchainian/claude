@@ -231,6 +231,7 @@ fn mouse_tabs_ignore_overlays() {
             }
             _ => unreachable!(),
         }
+        screen(&view, 120, 40);
         view.viewport.borrow_mut().scroll = 7;
         let selected = view.selected;
         assert!(
@@ -788,7 +789,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
     let output_y = (body.y..body.bottom())
         .find(|&y| {
             (body.x..body.right())
-                .map(|x| before[(x, y)].symbol())
+                .map(|x| cell_text(before[(x, y)].symbol()))
                 .collect::<String>()
                 .contains("Background output")
         })
@@ -799,11 +800,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
         .find(|(_, path)| path == &PathBuf::from("https://example.com/pull/833"))
         .unwrap();
     let pr = *pr;
-    assert!(
-        before[(pr.x, pr.y)]
-            .symbol()
-            .contains("https://example.com/pull/833")
-    );
+    assert!(cell_text(before[(pr.x, pr.y)].symbol()).contains("https://example.com/pull/833"));
     assert!(matches!(
         before[(pr.x, pr.y)].diff_option,
         ratatui::buffer::CellDiffOption::ForcedWidth(_)
@@ -819,7 +816,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
     let after_y = (body.y..body.bottom())
         .find(|&y| {
             (body.x..body.right())
-                .map(|x| after[(x, y)].symbol())
+                .map(|x| cell_text(after[(x, y)].symbol()))
                 .collect::<String>()
                 .contains("Background output")
         })
@@ -1083,6 +1080,7 @@ fn mouse_list_ignores_overlays() {
                 .collect::<String>(),
         );
         key(&mut view, overlay);
+        screen(&view, 160, 40);
         let selected = view.selected;
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
@@ -1139,7 +1137,7 @@ fn screen(view: &View, width: u16, height: u16) -> String {
         .chunks(usize::from(width))
         .map(|row| {
             row.iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -1960,7 +1958,7 @@ fn group_headers_have_no_count() {
                         }
                     };
                     let heading = (0..area.width)
-                        .map(|x| buf[(x, y as u16)].symbol())
+                        .map(|x| cell_text(buf[(x, y as u16)].symbol()))
                         .collect::<String>();
                     assert_eq!(
                         heading.trim(),
@@ -2649,7 +2647,11 @@ fn delete_dialog_mouse_follows_visible_options() {
         let (x, y) = (area.y..area.bottom())
             .flat_map(|y| (area.x..area.right() - 1).map(move |x| (x, y)))
             .find(|&(x, y)| {
-                format!("{}{}", buf[(x, y)].symbol(), buf[(x + 1, y)].symbol()) == label
+                format!(
+                    "{}{}",
+                    cell_text(buf[(x, y)].symbol()),
+                    cell_text(buf[(x + 1, y)].symbol())
+                ) == label
             })
             .unwrap();
         let action = click_mouse(
@@ -2829,7 +2831,9 @@ fn task_titles_take_the_next_accent_when_first_shown_and_keep_it() {
         view.render_center_rows(area, &mut buf, Utc::now());
         (0..area.height)
             .find_map(|y| {
-                let line: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+                let line: String = (0..area.width)
+                    .map(|x| cell_text(buf[(x, y)].symbol()))
+                    .collect();
                 let x = line.find(title)?;
                 Some(buf[(line[..x].chars().count() as u16, y)].fg)
             })
@@ -2878,7 +2882,7 @@ fn details_folder_and_pr_use_rule_styles_and_keep_links() {
         assert!(folder.right() < pr.x);
         for (offset, symbol) in "project".chars().enumerate() {
             let cell = &buf[(folder.x + offset as u16, y)];
-            assert_eq!(cell.symbol(), symbol.to_string());
+            assert_eq!(cell_text(cell.symbol()), symbol.to_string());
             assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
             assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
         }
@@ -2889,10 +2893,9 @@ fn details_folder_and_pr_use_rule_styles_and_keep_links() {
             assert_eq!(cell.style(), reference.style());
             if x == pr.x {
                 assert!(cell.symbol().contains("\x1b]8;;"));
-                assert!(cell.symbol().contains(url.to_str().unwrap()));
+                assert!(cell_text(cell.symbol()).contains(url.to_str().unwrap()));
             }
         }
-        view.underline_links(&mut buf);
         assert!(buf[(folder.x, y)].symbol().contains("\x1b[4:4m"));
         assert!(
             buf[(folder.x, y)]
@@ -2974,14 +2977,14 @@ fn log_model_and_effort_use_dim_style_and_picker_targets() {
                     );
                     for (offset, symbol) in text.chars().enumerate() {
                         let cell = &buf[(rect.x + offset as u16, y)];
-                        assert_eq!(cell.symbol(), symbol.to_string());
+                        assert_eq!(cell_text(cell.symbol()), symbol.to_string());
                         assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
                         assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
                     }
                 }
                 if use_colors && width == 120 && human_name.is_none() {
                     let text: String = (layout.log.x..layout.log.right())
-                        .map(|x| buf[(x, y)].symbol())
+                        .map(|x| cell_text(buf[(x, y)].symbol()))
                         .collect();
                     let styles: String = (layout.log.x..layout.log.right())
                         .map(|x| {
@@ -3017,7 +3020,7 @@ fn details_status_folder_and_optional_pr_snapshot() {
         let layout = view.center_layout(buf.area);
         let mut text = String::new();
         for x in layout.details.x..layout.details.right() {
-            let symbol = buf[(x, y)].symbol();
+            let symbol = cell_text(buf[(x, y)].symbol());
             let symbol = symbol
                 .rsplit("\x1b\\")
                 .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
@@ -3083,7 +3086,7 @@ fn details_activity_and_message_are_independent() {
             .chunks(40)
             .map(|row| {
                 row.iter()
-                    .map(|cell| cell.symbol())
+                    .map(|cell| cell_text(cell.symbol()))
                     .collect::<String>()
                     .trim_end()
                     .to_owned()
@@ -3231,18 +3234,18 @@ fn details_activity_uses_tool_color() {
             header
                 .chars()
                 .enumerate()
-                .all(|(x, ch)| buf[(x as u16, *y)].symbol() == ch.to_string())
+                .all(|(x, ch)| cell_text(buf[(x as u16, *y)].symbol()) == ch.to_string())
         })
         .expect("activity header");
     for (offset, character) in header.chars().enumerate() {
         let cell = &buf[(offset as u16, y)];
-        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, Color::Reset);
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Run checks".chars().enumerate() {
         let cell = &buf[(offset as u16, y + 1)];
-        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, crate::theme::text_accent_color());
         assert!(!cell.modifier.contains(Modifier::DIM));
     }
@@ -3274,18 +3277,18 @@ fn details_message_uses_model_color_under_markdown() {
             header
                 .chars()
                 .enumerate()
-                .all(|(x, ch)| buf[(x as u16, *y)].symbol() == ch.to_string())
+                .all(|(x, ch)| cell_text(buf[(x as u16, *y)].symbol()) == ch.to_string())
         })
         .expect("message header");
     for (offset, character) in header.chars().enumerate() {
         let cell = &buf[(offset as u16, y)];
-        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, Color::Reset);
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Plain code bold italic".chars().enumerate() {
         let cell = &buf[(offset as u16, y + 1)];
-        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(
             cell.fg,
             if (6..10).contains(&offset) {
@@ -3304,7 +3307,7 @@ fn details_message_uses_model_color_under_markdown() {
     }
     for (offset, character) in "Second paragraph".chars().enumerate() {
         let cell = &buf[(offset as u16, y + 3)];
-        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, Color::Yellow);
     }
 }
@@ -3356,7 +3359,7 @@ fn prompt_header_omits_message_counts_and_clamps_elapsed_time() {
             .chunks(40)
             .find(|row| {
                 row.iter()
-                    .map(|cell| cell.symbol())
+                    .map(|cell| cell_text(cell.symbol()))
                     .collect::<String>()
                     .trim_start()
                     .starts_with("Prompt")
@@ -3365,7 +3368,7 @@ fn prompt_header_omits_message_counts_and_clamps_elapsed_time() {
         assert_eq!(
             header
                 .iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end(),
             expected
@@ -3395,7 +3398,7 @@ mod details_header {
 
     fn label(buf: &Buffer, rule: Rect) -> String {
         (rule.x..rule.right())
-            .map(|x| buf[(x, rule.y)].symbol())
+            .map(|x| cell_text(buf[(x, rule.y)].symbol()))
             .collect::<String>()
             .trim_matches(['─', '╶', '╴'])
             .trim()
@@ -3528,7 +3531,7 @@ mod details_header {
             assert!(label(&buf, name).ends_with(header));
             let start = name.x - 2 + (name.width + 3 - (header.width() as u16 + 2)) / 2 + 1;
             let title = &buf[(start, name.y)];
-            assert_eq!(title.symbol(), "H");
+            assert_eq!(cell_text(title.symbol()), "H");
             assert_eq!(title.fg, view.title_color(&session_key("header")));
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
@@ -3536,7 +3539,7 @@ mod details_header {
             let start = rule.x - 2 + (rule.width + 3 - (status.label().len() as u16 + 2)) / 2 + 1;
             for (offset, symbol) in status.label().chars().enumerate() {
                 let cell = &buf[(start + offset as u16, rule.y)];
-                assert_eq!(cell.symbol(), symbol.to_string());
+                assert_eq!(cell_text(cell.symbol()), symbol.to_string());
                 assert_eq!(cell.fg, ratatui::style::Color::Reset);
                 assert!(cell.modifier.contains(Modifier::BOLD));
                 assert!(!cell.modifier.contains(Modifier::DIM));
@@ -3609,7 +3612,7 @@ mod details_header {
                 let start = top.x + (segment - expected.width() as u16) / 2 - 2;
                 for (offset, symbol) in expected.chars().enumerate() {
                     assert_eq!(
-                        buf[(start + offset as u16, top.y)].symbol(),
+                        cell_text(buf[(start + offset as u16, top.y)].symbol()),
                         symbol.to_string()
                     );
                 }
@@ -3621,7 +3624,7 @@ mod details_header {
                         .all(|x| buf[(x, top.y)].symbol() == "─")
                 );
                 let bottom_text = (top.x..top.right())
-                    .map(|x| buf[(x, bottom)].symbol())
+                    .map(|x| cell_text(buf[(x, bottom)].symbol()))
                     .collect::<String>();
                 assert!(!bottom_text.contains("Working"));
                 assert!(bottom_text.contains("project"));
@@ -3645,8 +3648,7 @@ mod details_header {
                 if !layout.log.is_empty() {
                     let strip = &buf[(layout.list.right() - 1, bottom)];
                     assert!(
-                        strip
-                            .symbol()
+                        cell_text(strip.symbol())
                             .chars()
                             .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
                     );
@@ -3668,11 +3670,11 @@ mod details_header {
             let rule = Rect::new(top.x, view.viewport.borrow().details.bottom(), top.width, 1);
             let width = rule.width;
             let text = (rule.x..rule.right())
-                .map(|x| buf[(x, rule.y)].symbol())
+                .map(|x| cell_text(buf[(x, rule.y)].symbol()))
                 .collect::<String>();
             assert!(!text.contains("3h 12m"));
             let top_text = (top.x..top.right())
-                .map(|x| buf[(x, top.y)].symbol())
+                .map(|x| cell_text(buf[(x, top.y)].symbol()))
                 .collect::<String>();
             // The centered status keeps elapsed's width and its spaces clear on both sides, plus
             // a status cell, two spaces and two rule cells.
@@ -3765,7 +3767,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     view.render_details(area, &mut buf, now);
     let line = |buf: &Buffer, y: u16| {
         (0..area.width)
-            .map(|x| buf[(x, y)].symbol())
+            .map(|x| cell_text(buf[(x, y)].symbol()))
             .collect::<String>()
             .trim_end()
             .to_owned()
@@ -3813,7 +3815,7 @@ fn details_queued_messages_render_all_paragraphs_and_message_style() {
         .chunks(40)
         .map(|row| {
             row.iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -3908,7 +3910,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
         .chunks(40)
         .map(|row| {
             row.iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -4051,7 +4053,7 @@ fn details_background_includes_only_working_subagents() {
         .chunks(40)
         .map(|row| {
             row.iter()
-                .map(|c| c.symbol())
+                .map(|c| cell_text(c.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -4077,7 +4079,7 @@ fn details_background_includes_only_working_subagents() {
     view.render_details(area, &mut buf, now);
     assert!(buf.content.chunks(40).any(|row| {
         row.iter()
-            .map(|c| c.symbol())
+            .map(|c| cell_text(c.symbol()))
             .collect::<String>()
             .contains("Background")
     }));
@@ -4094,7 +4096,7 @@ fn details_background_includes_only_working_subagents() {
     let text = buf
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(|cell| cell_text(cell.symbol()))
         .collect::<String>();
     assert!(text.contains("──────────── Worker command ───────── 0s"));
     assert!(text.contains("Nested agent"));
@@ -4123,7 +4125,7 @@ fn background_box_dims_title_rule_but_not_output() {
         .expect("box top border");
     assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
     assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
-    assert_eq!(buf[(15, top)].symbol(), "R");
+    assert_eq!(cell_text(buf[(15, top)].symbol()), "R");
     assert!(buf[(15, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.log[7].clone();
@@ -4134,14 +4136,14 @@ fn background_box_dims_title_rule_but_not_output() {
     let columns = super::detail_model::detail_columns(title_buf.area, title_buf.area);
     (&detail.sections[0].title.line(columns).0).render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
-        .find(|x| title_buf[(*x, 0)].symbol() == "R")
+        .find(|x| cell_text(title_buf[(*x, 0)].symbol()) == "R")
         .unwrap();
     assert_eq!(title_buf[(0, 0)].modifier, buf[(0, top)].modifier);
     assert_eq!(
         title_buf[(title_x, 0)].fg,
         detail.sections[0].title.title_style.fg.unwrap()
     );
-    assert_eq!(buf[(0, top + 1)].symbol(), "t");
+    assert_eq!(cell_text(buf[(0, top + 1)].symbol()), "t");
     assert!(!buf[(0, top + 1)].modifier.contains(Modifier::DIM));
 }
 
@@ -4205,7 +4207,7 @@ fn details_markdown_snapshot() {
         .chunks(40)
         .map(|row| {
             row.iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -4330,7 +4332,7 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
         .chunks(usize::from(width))
         .map(|row| {
             row.iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -4394,7 +4396,7 @@ fn assert_task_metadata(width: u16, show_status: bool, show_updated: bool) {
     let list = view.center_layout(area).list;
     let y = view.viewport.borrow().marker.unwrap().1;
     let text: String = (list.x..list.right())
-        .map(|x| buf[(x, y)].symbol())
+        .map(|x| cell_text(buf[(x, y)].symbol()))
         .collect();
     let status = View::status(&view.rows[0]).0;
     assert_eq!(
@@ -4439,10 +4441,10 @@ fn task_rows_start_at_left_padding_without_marker_and_click_correctly() {
                 view.render(area, &mut buf);
                 assert_eq!(view.marker_pos(), Some((list.x, y)));
                 assert_eq!(
-                    buf[(list.x, y)].symbol(),
+                    cell_text(buf[(list.x, y)].symbol()),
                     View::status(&view.rows[second]).1.content
                 );
-                assert_eq!(buf[(list.x + 2, y)].symbol(), &title[..1]);
+                assert_eq!(cell_text(buf[(list.x + 2, y)].symbol()), &title[..1]);
                 for x in list.x..list.right() {
                     assert_ne!(buf[(x, y)].symbol(), "❯");
                     assert!(
@@ -4490,7 +4492,7 @@ fn task_metadata_drops_rightmost_columns_at_title_limit() {
         view.render_center_rows(area, &mut buf, now);
         let y = view.viewport.borrow().marker.unwrap().1;
         let text: String = (area.x..area.right())
-            .map(|x| buf[(x, y)].symbol())
+            .map(|x| cell_text(buf[(x, y)].symbol()))
             .collect();
         assert_eq!(
             text.contains(View::status(&view.rows[0]).0),
@@ -4551,14 +4553,14 @@ fn list_row_highlights_include_column_padding() {
             };
             let marker_x = content.x;
             if kind == "picker" {
-                assert_eq!(buf[(marker_x, y)].symbol(), "c");
+                assert_eq!(cell_text(buf[(marker_x, y)].symbol()), "c");
             } else {
                 assert!(!(content.x..content.right()).any(|x| buf[(x, y)].symbol() == "❯"));
             }
             if kind == "task" {
                 assert_eq!(buf[(marker_x, y)].symbol(), "●");
                 assert_eq!(
-                    buf[(marker_x + 2, y)].symbol(),
+                    cell_text(buf[(marker_x + 2, y)].symbol()),
                     &view.rows[0].display_title()[..1]
                 );
             }
@@ -4652,7 +4654,7 @@ fn dashboard_log_bodies_center_on_the_panel() {
                 );
                 let cell = &buf[(x + offset as u16, y)];
                 assert_eq!(
-                    cell.symbol(),
+                    cell_text(cell.symbol()),
                     ch.to_string(),
                     "kind {:?} at {width}",
                     event.kind
@@ -4668,7 +4670,7 @@ fn dashboard_log_bodies_center_on_the_panel() {
             if width >= 150 && event.kind == crate::log::Kind::Assistant {
                 let detail = view.center_layout(area).log_detail;
                 let header: String = (detail.x..detail.right())
-                    .map(|x| buf[(x, detail.y + 1)].symbol())
+                    .map(|x| cell_text(buf[(x, detail.y + 1)].symbol()))
                     .collect();
                 assert_eq!(header.trim().split("  ").next(), Some("Assistant"));
             }
@@ -4707,12 +4709,12 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
             let first = log.y;
             let last = log.bottom() - 1 - u16::from(search);
             assert_eq!(
-                buf[(x, first)].symbol(),
+                cell_text(buf[(x, first)].symbol()),
                 first_symbol,
                 "first row at {width}, search={search}"
             );
             assert_eq!(
-                buf[(x, last)].symbol(),
+                cell_text(buf[(x, last)].symbol()),
                 first_symbol,
                 "last row at {width}, search={search}"
             );
@@ -4762,12 +4764,15 @@ fn dashboard_screen_padding_is_one_cell() {
         let layout = view.center_layout(area);
         assert_eq!(layout.list.x, 1);
         assert_eq!(buf[(1, 0)].symbol(), " ");
-        assert_eq!(buf[(2, 0)].symbol(), "A");
+        assert_eq!(cell_text(buf[(2, 0)].symbol()), "A");
         assert_eq!(view.viewport.borrow().tab_bar.x, 1);
         for x in 1..width - 1 {
             if x < layout.details.x || x >= layout.details.right() {
                 let joint = x == layout.gap.x + 1 || (width >= 150 && x == layout.log.x - 2);
-                assert_eq!(buf[(x, 1)].symbol(), if joint { "┬" } else { "─" });
+                assert_eq!(
+                    cell_text(buf[(x, 1)].symbol()),
+                    if joint { "┬" } else { "─" }
+                );
             }
         }
         for y in 0..area.height {
@@ -4800,7 +4805,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         view.render_at(area, &mut buf, now);
         let text = |y, start, end| {
             (start..end)
-                .map(|x| buf[(x, y)].symbol())
+                .map(|x| cell_text(buf[(x, y)].symbol()))
                 .collect::<String>()
         };
         let separators: Vec<_> = (0..width)
@@ -4884,8 +4889,12 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
                     .iter()
                     .position(|&index| index == view.log.len() - 2)
                     .unwrap() as u16;
-            let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
-            let log: String = (left..width).map(|x| buf[(x, y)].symbol()).collect();
+            let row: String = (0..width)
+                .map(|x| cell_text(buf[(x, y)].symbol()))
+                .collect();
+            let log: String = (left..width)
+                .map(|x| cell_text(buf[(x, y)].symbol()))
+                .collect();
             assert!(
                 log.trim_end().chars().count() as u16 + left <= width - 11,
                 "log body right at {width}: {row}"
@@ -4941,13 +4950,15 @@ fn dashboard_log_search_uses_the_row_padding() {
             1
         };
         let y = view.viewport.borrow().log.bottom() - 1;
-        let input: String = (left..left + 13).map(|x| buf[(x, y)].symbol()).collect();
+        let input: String = (left..left + 13)
+            .map(|x| cell_text(buf[(x, y)].symbol()))
+            .collect();
         assert_eq!(input, "Search ❯ Tool");
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
         view.log_search.editing = false;
         view.render_at(area, &mut buf, now);
         let query: String = (width - 5..width - 1)
-            .map(|x| buf[(x, y)].symbol())
+            .map(|x| cell_text(buf[(x, y)].symbol()))
             .collect();
         assert_eq!(query, "Tool");
         assert_eq!(buf[(width - 1, y)].symbol(), " ");
@@ -4989,14 +5000,14 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
             let y = top + offset as u16;
             let text = |start, end| {
                 (start..end)
-                    .map(|x| buffer[(x, y)].symbol())
+                    .map(|x| cell_text(buffer[(x, y)].symbol()))
                     .collect::<String>()
             };
             assert_eq!(text(log.x, log.x + 10), "long body ", "width {width}");
             assert_eq!(text(log.right() - 8, log.right()), format!("{time:>8}"));
             assert_eq!(text(log.right() - 10, log.right() - 8), "  ");
             assert_eq!(buffer[(log.right() - 11, y)].symbol(), "…");
-            assert_eq!(buffer[(log.x, y)].symbol(), "l");
+            assert_eq!(cell_text(buffer[(log.x, y)].symbol()), "l");
         }
         view.scroll_content_row(true, true, top);
         view.render_at(area, &mut buffer, now);
@@ -5216,9 +5227,9 @@ fn task_log_rules_match_header_and_footer_gap_is_empty() {
                     } else if y == layout.log_detail.y && x == layout.gap.x + 1 {
                         "─"
                     } else {
-                        rule.symbol()
+                        cell_text(rule.symbol())
                     };
-                    assert_eq!(buf[(x, y)].symbol(), expected);
+                    assert_eq!(cell_text(buf[(x, y)].symbol()), expected);
                     assert_eq!(buf[(x, y)].modifier, rule.modifier);
                 }
             }
@@ -5300,7 +5311,7 @@ fn non_current_log_time_matches_unselected_task_and_details_times() {
     let task_y = (0..area.height)
         .find(|&y| {
             (0..area.width)
-                .map(|x| tasks[(x, y)].symbol())
+                .map(|x| cell_text(tasks[(x, y)].symbol()))
                 .collect::<String>()
                 .contains("Other task")
         })
@@ -5322,7 +5333,7 @@ fn non_current_log_time_matches_unselected_task_and_details_times() {
     let details_y = (0..area.height)
         .find(|&y| {
             (0..area.width)
-                .map(|x| details[(x, y)].symbol())
+                .map(|x| cell_text(details[(x, y)].symbol()))
                 .collect::<String>()
                 .contains("Update")
         })
@@ -5937,7 +5948,7 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
         .chunks(30)
         .map(|row| {
             row.iter()
-                .map(|cell| cell.symbol())
+                .map(|cell| cell_text(cell.symbol()))
                 .collect::<String>()
                 .trim_end()
                 .to_owned()
@@ -5969,7 +5980,7 @@ mod log_path_abbrev {
             .next()
             .unwrap()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(|cell| cell_text(cell.symbol()))
             .collect::<String>();
         assert!(row.contains("Read ~/…/project/main.rs"), "{row}");
     }
@@ -6011,7 +6022,10 @@ mod log_search {
     }
 
     fn text(buf: &Buffer) -> String {
-        buf.content.iter().map(|cell| cell.symbol()).collect()
+        buf.content
+            .iter()
+            .map(|cell| cell_text(cell.symbol()))
+            .collect()
     }
 
     #[test]
@@ -6258,8 +6272,8 @@ mod line_edit {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let y = view.center_layout(area).log.bottom() - 1;
-        assert_eq!(buf[(10, y)].symbol(), "你");
-        assert_eq!(buf[(12, y)].symbol(), "好");
+        assert_eq!(cell_text(buf[(10, y)].symbol()), "你");
+        assert_eq!(cell_text(buf[(12, y)].symbol()), "好");
         assert_eq!(view.cursor_pos(area), Some((14, y)));
     }
 
@@ -6432,7 +6446,7 @@ mod subagent_rows {
             .chunks(usize::from(width))
             .map(|row| {
                 row.iter()
-                    .map(|c| c.symbol())
+                    .map(|c| cell_text(c.symbol()))
                     .collect::<String>()
                     .trim_end()
                     .to_owned()
@@ -6484,13 +6498,13 @@ mod subagent_rows {
                     let y = (list.y..list.bottom())
                         .find(|&y| {
                             (list.x..list.right())
-                                .map(|x| buf[(x, y)].symbol())
+                                .map(|x| cell_text(buf[(x, y)].symbol()))
                                 .collect::<String>()
                                 .contains(&format!("Child {index}"))
                         })
                         .unwrap();
                     let prefix = (list.x..list.x + 3)
-                        .map(|x| buf[(x, y)].symbol())
+                        .map(|x| cell_text(buf[(x, y)].symbol()))
                         .collect::<String>();
                     assert_eq!(
                         prefix,
@@ -6828,9 +6842,11 @@ mod subagent_rows {
                 .find(|&y| buf[(0, y)].symbol() == "└" && buf[(3, y)].symbol() == "●")
                 .unwrap();
             assert_eq!(buf[(3, row)].symbol(), "●");
-            assert_eq!(buf[(5, row)].symbol(), "界");
+            assert_eq!(cell_text(buf[(5, row)].symbol()), "界");
             if width >= 57 {
-                let text: String = (0..width).map(|x| buf[(x, row)].symbol()).collect();
+                let text: String = (0..width)
+                    .map(|x| cell_text(buf[(x, row)].symbol()))
+                    .collect();
                 assert!(text.contains("Working"), "{text}");
                 assert!(text.contains("1m ago"), "{text}");
             }
@@ -7072,8 +7088,8 @@ fn ask_user_question_details_snapshot() {
                 let mut text = String::new();
                 let mut cells = row.iter();
                 while let Some(cell) = cells.next() {
-                    text.push_str(cell.symbol());
-                    for _ in 1..cell.symbol().width() {
+                    text.push_str(cell_text(cell.symbol()));
+                    for _ in 1..cell_text(cell.symbol()).width() {
                         cells.next();
                     }
                 }
@@ -7135,7 +7151,10 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
     view.render_details(area, &mut buf, Utc::now());
     let mut questions = 0;
     for cells in buf.content.chunks(100) {
-        let text = cells.iter().map(|cell| cell.symbol()).collect::<String>();
+        let text = cells
+            .iter()
+            .map(|cell| cell_text(cell.symbol()))
+            .collect::<String>();
         if text.trim_start().starts_with("Pick a color?") {
             questions += 1;
             assert_eq!(cells[0].fg, Color::Yellow);
@@ -7385,7 +7404,7 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
             }
             if end < body.width - 1 {
                 let last = " ";
-                assert_eq!(buf[(body.right() - 1, row.y)].symbol(), last);
+                assert_eq!(cell_text(buf[(body.right() - 1, row.y)].symbol()), last);
             }
             if title != "Read" {
                 let viewport = view.viewport.borrow();
@@ -7490,7 +7509,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         // Shell display prefixes occupy the group origin without selectable bytes.
         let prefix_x = region.area.x + offset;
         for (row, glyph) in rows.iter().zip(["┌", "│", "└", " "]) {
-            assert_eq!(buf[(prefix_x, row.y)].symbol(), glyph);
+            assert_eq!(cell_text(buf[(prefix_x, row.y)].symbol()), glyph);
             assert_eq!(buf[(prefix_x + 1, row.y)].symbol(), " ");
             // Muted like the time labels: the default foreground dimmed, not the tool accent.
             assert_eq!(buf[(prefix_x, row.y)].fg, ratatui::style::Color::Reset);
@@ -7638,7 +7657,7 @@ fn task_log_selected_tool_highlighting_refreshes_when_theme_changes() {
         let mut cells = Vec::new();
         for y in area.y..area.bottom() {
             for x in area.x..area.right() {
-                cells.push((buf[(x, y)].symbol().to_owned(), buf[(x, y)].fg));
+                cells.push((cell_text(buf[(x, y)].symbol()).to_owned(), buf[(x, y)].fg));
             }
         }
         cells
@@ -8877,7 +8896,7 @@ fn mixed_open_outputs_keep_literal_markup_and_copy_pretty_json() {
         {
             for (cells, bytes) in &row.cells {
                 let drawn: String = (cells.start..cells.end)
-                    .map(|offset| buf[(row.x + offset, row.y)].symbol())
+                    .map(|offset| cell_text(buf[(row.x + offset, row.y)].symbol()))
                     .collect();
                 assert_eq!(drawn, &json.text[bytes.clone()]);
             }
@@ -9028,7 +9047,7 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
             .chunks(2000)
             .map(|row| {
                 row.iter()
-                    .map(|cell| cell.symbol())
+                    .map(|cell| cell_text(cell.symbol()))
                     .collect::<String>()
                     .trim()
                     .to_owned()
@@ -9082,7 +9101,7 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
         (list.top()..list.bottom())
             .map(|y| {
                 (list.left()..list.right())
-                    .map(|x| buf[(x, y)].symbol().to_owned())
+                    .map(|x| cell_text(buf[(x, y)].symbol()).to_owned())
                     .collect::<String>()
             })
             .collect::<Vec<_>>()
@@ -9148,7 +9167,7 @@ fn usage_chart_and_activity_strip_share_the_same_style() {
         let strip = &buf[(x, layout.prompt.y - 1)];
         for cell in [chart, strip] {
             assert!(
-                cell.symbol()
+                cell_text(cell.symbol())
                     .chars()
                     .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
             );
@@ -9303,7 +9322,7 @@ fn task_notification_detail_hides_task_id_and_shows_output_content() {
                 let mut text = String::new();
                 let mut column = 0;
                 while column < row.len() {
-                    let symbol = row[column].symbol();
+                    let symbol = cell_text(row[column].symbol());
                     text.push_str(symbol);
                     column += unicode_width::UnicodeWidthStr::width(symbol).max(1);
                 }
@@ -9411,15 +9430,21 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
                 (joint + 1, layout.log.bottom(), "╴"),
             ] {
                 let cell = &buf[(x, y)];
-                assert_eq!(cell.symbol(), symbol, "width {width}, x {x}, y {y}");
+                assert_eq!(
+                    cell_text(cell.symbol()),
+                    symbol,
+                    "width {width}, x {x}, y {y}"
+                );
                 assert_eq!(cell.style(), buf[(joint, y)].style());
                 assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
             }
         }
-        let bottom: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+        let bottom: String = (0..width)
+            .map(|x| cell_text(buf[(x, y)].symbol()))
+            .collect();
         assert!(!bottom.contains(" Working "), "{bottom}");
         let top: String = (0..width)
-            .map(|x| buf[(x, layout.header.y + 1)].symbol())
+            .map(|x| cell_text(buf[(x, layout.header.y + 1)].symbol()))
             .collect();
         assert!(top.contains(" Working "), "{top}");
         assert!(bottom.contains(" Task log example "), "{bottom}");
@@ -9443,7 +9468,9 @@ fn border_labels_use_half_lines_beside_screen_edge_corners() {
             .find(|(_, field)| *field == Field::Model)
             .unwrap()
             .0;
-        let row: String = (0..width).map(|x| buf[(x, model.y)].symbol()).collect();
+        let row: String = (0..width)
+            .map(|x| cell_text(buf[(x, model.y)].symbol()))
+            .collect();
         assert!(row.contains("opus · medium "), "{row}");
         for x in [model.x - 1, width - 2] {
             assert!(
@@ -9803,7 +9830,7 @@ fn claude_agent_display_from_real_records() {
             view.render_at(buffer.area, &mut buffer, now);
             let title = view.viewport.borrow().log_text.sources[0].text.to_string();
             assert_eq!(title, description);
-            assert!((0..200).any(|x| buffer[(x, header as u16)].symbol() == "S"));
+            assert!((0..200).any(|x| cell_text(buffer[(x, header as u16)].symbol()) == "S"));
         }
         let description = event.calls[0].detail_title.clone();
         assert!(
@@ -9838,8 +9865,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         let chart_top = (baseline.y..baseline.bottom())
             .find(|&y| {
                 (baseline.x..baseline.right()).any(|x| {
-                    before[(x, y)]
-                        .symbol()
+                    cell_text(before[(x, y)].symbol())
                         .chars()
                         .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
                 })
@@ -9862,8 +9888,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         }
         assert!(
             (layout.search.x..layout.search.right()).all(|x| {
-                after[(x, layout.search.y)]
-                    .symbol()
+                cell_text(after[(x, layout.search.y)].symbol())
                     .chars()
                     .all(|c| !('\u{2801}'..='\u{28ff}').contains(&c))
             }),
@@ -9873,12 +9898,12 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         view.render_at(area, &mut after, now);
         if !layout.list.is_empty() {
             let notice: String = (layout.list.x..layout.list.right())
-                .map(|x| after[(x, layout.list.bottom() - 1)].symbol())
+                .map(|x| cell_text(after[(x, layout.list.bottom() - 1)].symbol()))
                 .collect();
             assert!(notice.contains("Notice"));
         }
         let input: String = (layout.search.x..layout.search.right())
-            .map(|x| after[(x, layout.search.y)].symbol())
+            .map(|x| cell_text(after[(x, layout.search.y)].symbol()))
             .collect();
         assert!(input.contains("Search ❯ Task"));
         assert_eq!(view.cursor_pos(area).unwrap().1, layout.search.y);
@@ -10038,7 +10063,11 @@ fn details_model_has_no_prefix() {
     let lines = buffer
         .content
         .chunks(100)
-        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell_text(cell.symbol()))
+                .collect::<String>()
+        })
         .collect::<Vec<_>>();
     assert!(
         lines.iter().any(|line| line.contains("claude-opus · high")),
@@ -10227,7 +10256,7 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                             0x47
                         };
                         let cell = &buffer[(x, y)];
-                        let bits = cell.symbol().chars().next().unwrap() as u32;
+                        let bits = cell_text(cell.symbol()).chars().next().unwrap() as u32;
                         assert!((0x2800..=0x28ff).contains(&bits));
                         assert_eq!((bits - 0x2800) & bit, bit, "{width}, {used}, {dot}");
                         let bar_style = if used > 95.0 {
@@ -10243,7 +10272,10 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                         } else {
                             anchor + 1 - cells
                         };
-                        assert_eq!(buffer[(x, y)].symbol(), if side == 0 { "⡇" } else { "⢸" });
+                        assert_eq!(
+                            cell_text(buffer[(x, y)].symbol()),
+                            if side == 0 { "⡇" } else { "⢸" }
+                        );
                     }
                     let outside = if side == 0 {
                         *start + number.len() as u16..center - 8
@@ -10258,7 +10290,7 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                 for start in [left_number, right_number] {
                     for (i, c) in number.chars().enumerate() {
                         let cell = &buffer[(start + i as u16, y)];
-                        assert_eq!(cell.symbol(), c.to_string());
+                        assert_eq!(cell_text(cell.symbol()), c.to_string());
                         let expected = if used > 95.0 {
                             style::error_style()
                         } else {
@@ -10268,7 +10300,7 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                     }
                 }
                 let text = (0..width)
-                    .map(|x| buffer[(x, y)].symbol())
+                    .map(|x| cell_text(buffer[(x, y)].symbol()))
                     .collect::<String>();
                 assert!(text.contains("Claude · Codex"), "{text}");
             }
@@ -10437,7 +10469,7 @@ fn details_weekly_usage_keeps_model_and_effort_targets() {
             .0;
         assert_eq!((rect.x, rect.width), (x, width));
         let line = (area.x..area.right())
-            .map(|x| buffer[(x, rect.y)].symbol())
+            .map(|x| cell_text(buffer[(x, rect.y)].symbol()))
             .collect::<String>();
         assert!(line.contains("claude-opus · high"), "{line}");
         assert!(
@@ -10487,7 +10519,11 @@ fn task_header_weekly_usage_live_accounts() {
         let text = buffer
             .content
             .chunks(160)
-            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+            })
             .find(|line| line.contains('%') && line.contains("Active "))
             .expect("rendered live usage line");
         assert!(!text.contains("Model: "));
@@ -10615,7 +10651,7 @@ fn context_usage_on_details_border_keeps_status_and_elapsed() {
             view.render_at(area, &mut buf, now);
             let details = view.center_layout(area).details;
             let border: String = (details.x..details.right())
-                .map(|x| buf[(x, details.y - 1)].symbol())
+                .map(|x| cell_text(buf[(x, details.y - 1)].symbol()))
                 .collect();
             if let Some(percent) = percent {
                 assert!(border.starts_with(&format!("{percent}% ")), "{border}");
@@ -10638,3 +10674,6 @@ fn context_usage_on_details_border_keeps_status_and_elapsed() {
 
 #[path = "summary_consistency_tests.rs"]
 mod summary_consistency_tests;
+
+#[path = "overlay_tests.rs"]
+mod overlay_tests;

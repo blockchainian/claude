@@ -162,7 +162,7 @@ fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
         .rev()
         .find(|&y| {
             (0..area.width)
-                .filter(|&x| buffer[(x, y)].symbol() == "─")
+                .filter(|&x| crate::ui::cell_text(buffer[(x, y)].symbol()) == "─")
                 .count()
                 > usize::from(area.width / 2)
         })
@@ -170,7 +170,7 @@ fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
     (rule + 1..area.height - 1)
         .map(|y| {
             (0..area.width)
-                .map(|x| buffer[(x, y)].symbol())
+                .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
                 .collect::<String>()
         })
         .collect::<Vec<_>>()
@@ -418,7 +418,7 @@ fn top_border_loads_first_event_of_whole_log() {
     let bottom = (0..45)
         .find(|&y| {
             (100..200)
-                .map(|x| buffer[(x, y)].symbol())
+                .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
                 .collect::<String>()
                 .contains("claude-opus")
         })
@@ -427,7 +427,7 @@ fn top_border_loads_first_event_of_whole_log() {
                 "{}",
                 (0..45)
                     .map(|y| (0..200)
-                        .map(|x| buffer[(x, y)].symbol())
+                        .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
                         .collect::<String>())
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -466,13 +466,13 @@ fn top_border_loads_first_event_of_whole_log() {
             let row = (0..45)
                 .find(|&y| {
                     (130..200)
-                        .map(|x| buffer[(x, y)].symbol())
+                        .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
                         .collect::<String>()
                         .contains(" New ")
                 })
                 .unwrap();
             let line = (0..200)
-                .map(|x| buffer[(x, row)].symbol())
+                .map(|x| crate::ui::cell_text(buffer[(x, row)].symbol()))
                 .collect::<String>();
             let column = line.chars().position(|c| c == '↓').unwrap() as u16;
             for kind in [

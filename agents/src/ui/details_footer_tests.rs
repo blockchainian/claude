@@ -14,7 +14,7 @@ fn details_body_leaves_spare_rows_without_project_or_model() {
             view.render_details(area, &mut buf, Utc::now());
             let text = |y| {
                 (area.x..area.right())
-                    .map(|x| buf[(x, y)].symbol())
+                    .map(|x| cell_text(buf[(x, y)].symbol()))
                     .collect::<String>()
             };
             assert_eq!(text(area.y).trim(), "Prompt");
@@ -46,7 +46,6 @@ fn details_status_links_keep_underlines_and_click_targets_in_both_layouts() {
         });
         let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
         view.render(buf.area, &mut buf);
-        view.underline_links(&mut buf);
         let area = view.viewport.borrow().details;
         let links = view.viewport.borrow().details_links.clone();
         for target in [
@@ -113,7 +112,7 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
             assert_eq!(effort.x, model.right() + 3);
             let text = |rect: Rect| {
                 (rect.x..rect.right())
-                    .map(|x| buf[(x, rect.y)].symbol())
+                    .map(|x| cell_text(buf[(x, rect.y)].symbol()))
                     .collect::<String>()
             };
             assert_eq!(text(model), label.unwrap_or("claude-opus-5-5"));
@@ -153,7 +152,7 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
                     viewport.log.y - 1
                 };
                 let line: String = (viewport.log.x + u16::from(width < 150)..buf.area.right())
-                    .map(|x| buf[(x, model_y)].symbol())
+                    .map(|x| cell_text(buf[(x, model_y)].symbol()))
                     .collect();
                 if !expected.is_empty() {
                     assert!(line.starts_with(expected), "{line}");
@@ -173,7 +172,7 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
                         super::super::log::log_row_areas(viewport.log).1.right()
                     );
                     let text: String = (jump.x..jump.right())
-                        .map(|x| buf[(x, jump.y)].symbol())
+                        .map(|x| cell_text(buf[(x, jump.y)].symbol()))
                         .collect();
                     assert_eq!(text, " ↓ 3 New ");
                 }
@@ -216,7 +215,7 @@ fn draft_title_rule_places_directory_left_and_branch_right() {
         assert!(branch.x > title.right());
         let text = |rect: Rect| {
             (rect.x..rect.right())
-                .map(|x| buf[(x, rect.y)].symbol())
+                .map(|x| cell_text(buf[(x, rect.y)].symbol()))
                 .collect::<String>()
         };
         assert_eq!(text(directory), "agents");

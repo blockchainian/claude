@@ -28,7 +28,11 @@ impl View {
                     let model = self.model_text(settings.provider, model);
                     call.detail_title.push_str(&format!(" · {model}"));
                 }
-                if let Some(effort) = settings.effort.as_deref().filter(|effort| !effort.is_empty()) {
+                if let Some(effort) = settings
+                    .effort
+                    .as_deref()
+                    .filter(|effort| !effort.is_empty())
+                {
                     call.detail_title.push_str(&format!(" · {effort}"));
                 }
             }
@@ -141,6 +145,7 @@ impl View {
             viewport.log_links = drawn_links;
         }
         self.capture_list_text(text_selection::Panel::LogList, text_area, scroll, buf);
+        super::links::underline(buf, &self.viewport.borrow().log_links);
     }
 
     pub(super) fn visible_log_event(&self) -> Option<&Event> {
@@ -368,6 +373,7 @@ impl View {
             }
         }
         self.highlight_text_selection(text_selection::Panel::Log, buf);
+        super::links::underline(buf, &self.viewport.borrow().log_links);
     }
 
     fn detail_scroll_layout(

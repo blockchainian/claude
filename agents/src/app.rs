@@ -280,10 +280,7 @@ impl App {
                     "{} exited with {status}",
                     command.get_program().to_string_lossy()
                 )),
-                Err(error) => Some(format!(
-                    "Cannot start {:?}: {error}",
-                    command.get_program()
-                )),
+                Err(error) => Some(format!("Cannot start {:?}: {error}", command.get_program())),
             };
             self.view.set_notice(notice);
         }
@@ -371,7 +368,6 @@ impl App {
             self.refresh_usage();
             self.refresh_activity(area.width, now);
             self.view.render_at(area, frame.buffer_mut(), now);
-            self.view.underline_links(frame.buffer_mut());
             cursor = self.view.cursor_pos(area);
         })?;
         self.terminal_drawn();
@@ -972,8 +968,7 @@ impl App {
 
     fn input_error(&mut self, input: &SessionInput, error: String) {
         if matches!(input, SessionInput::Interrupt) {
-            self.view
-                .set_notice(Some(format!("Cannot stop: {error}")));
+            self.view.set_notice(Some(format!("Cannot stop: {error}")));
         } else {
             self.view.input_failed(error);
         }
@@ -1005,8 +1000,7 @@ impl App {
             Err(error) => {
                 self.pending_inputs.remove(&id);
                 if interrupt {
-                    self.view
-                        .set_notice(Some(format!("Cannot stop: {error}")));
+                    self.view.set_notice(Some(format!("Cannot stop: {error}")));
                 } else {
                     self.view.input_complete(&id, &input, Err(error));
                 }
@@ -1384,9 +1378,7 @@ impl App {
             }
             Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
-                Err(error) => self
-                    .view
-                    .set_notice(Some(format!("Cannot copy: {error}"))),
+                Err(error) => self.view.set_notice(Some(format!("Cannot copy: {error}"))),
             },
             Action::Unsupported(what) => {
                 self.view
@@ -1405,10 +1397,9 @@ impl App {
                     Ok(mut child) => {
                         thread::spawn(move || child.wait());
                     }
-                    Err(error) => self.view.set_notice(Some(format!(
-                        "Cannot open {}: {error}",
-                        target.display()
-                    ))),
+                    Err(error) => self
+                        .view
+                        .set_notice(Some(format!("Cannot open {}: {error}", target.display()))),
                 }
             }
         }

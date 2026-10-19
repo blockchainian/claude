@@ -290,5 +290,6 @@ impl View {
         let text_area = state.list_rows;
         drop(state);
         self.capture_list_text(text_selection::Panel::Tasks, text_area, start, buf);
+        super::links::underline(buf, &self.viewport.borrow().list_links);
     }
 }

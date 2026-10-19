@@ -3084,3 +3084,6 @@ fn terminal_duration_sort_jump_position() {
     std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
     println!("{verdict}");
 }
+
+#[path = "support/terminal_link_overlays.rs"]
+mod terminal_link_overlays;

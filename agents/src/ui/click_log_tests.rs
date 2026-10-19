@@ -90,7 +90,7 @@ fn detail_centers_multiline_sections_and_arrow_on_panel_midline() {
                     - columns.text.x;
             for (row, line) in rows.iter().zip(text.lines()) {
                 let drawn: String = (0..block_width)
-                    .map(|x| buf[(region.area.x + offset + x, row.y)].symbol())
+                    .map(|x| cell_text(buf[(region.area.x + offset + x, row.y)].symbol()))
                     .collect();
                 assert_eq!(
                     drawn.trim_end(),
@@ -338,7 +338,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     view.rows[view.selected].cwd = directory.path().into();
     view.select_fixture_event(Some(event));
     view.log_detail_search.query.set_text("decks.txt");
-    let mut buf = detail_buffer(&view, 200, now);
+    let buf = detail_buffer(&view, 200, now);
     let (rect, target) = view
         .viewport
         .borrow()
@@ -349,13 +349,12 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
         .clone();
     assert_eq!(target, path);
     assert!(rect.x > view.viewport.borrow().log_text.area.x);
-    assert_eq!(buf[(rect.x, rect.y)].symbol(), "o");
+    assert_eq!(cell_text(buf[(rect.x, rect.y)].symbol()), "o");
     assert!(
         buf[(rect.x + 7, rect.y)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
-    view.underline_links(&mut buf);
     assert!(buf[(rect.x, rect.y)].symbol().starts_with("\x1b[4:4m"));
     assert!(!buf[(rect.x - 1, rect.y)].symbol().contains("\x1b["));
     release_click(&mut view, MouseButton::Left, rect.x + 2, rect.y);
@@ -596,7 +595,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
     let rows: Vec<String> = buf
         .content
         .chunks(164)
-        .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+        .map(|row| row.iter().map(|cell| cell_text(cell.symbol())).collect())
         .collect();
     let title = rows
         .iter()
@@ -677,7 +676,7 @@ fn background_await_detail_uses_markdown_body() {
     let text = rendered
         .content
         .iter()
-        .map(|cell| cell.symbol())
+        .map(|cell| cell_text(cell.symbol()))
         .collect::<String>();
     assert!(!text.contains("lastMessage"));
     assert!(!text.contains("[exited with code"));

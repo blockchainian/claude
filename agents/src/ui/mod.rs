@@ -116,6 +116,19 @@ fn tab_after_refresh(status: Option<SessionStatus>, current_tab: usize) -> usize
     }
 }
 
+#[cfg(test)]
+pub(crate) fn cell_text(symbol: &str) -> &str {
+    symbol
+        .strip_prefix("\x1b[4:4m")
+        .and_then(|s| s.strip_suffix("\x1b[24m"))
+        .unwrap_or(symbol)
+}
+
+struct Overlay {
+    area: Rect,
+    modal: bool,
+}
+
 #[derive(Default)]
 struct Viewport {
     scroll: usize,
@@ -133,6 +146,7 @@ struct Viewport {
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
+    overlays: Vec<Overlay>,
     /// The details panel's bottom input row for a new branch.
     details_input: Rect,
     /// The shared task name editor on the details panel's lower rule.
@@ -383,18 +397,6 @@ fn session_order(session: &Session) -> (std::cmp::Reverse<DateTime<Utc>>, &Sessi
 }
 
 impl View {
-    /// Underlines every link the last frame drew in `buf`.
-    pub fn underline_links(&self, buf: &mut Buffer) {
-        let viewport = self.viewport.borrow();
-        for links in [
-            &viewport.list_links,
-            &viewport.details_links,
-            &viewport.log_links,
-        ] {
-            links::underline(buf, links);
-        }
-    }
-
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             mouse_focus: Panel::TaskList,

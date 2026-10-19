@@ -706,6 +706,10 @@ impl View {
         let Some(selector) = &self.selector else {
             return;
         };
+        self.viewport
+            .borrow_mut()
+            .overlays
+            .push(Overlay { area, modal: false });
         Clear.render(area, buf);
         // Both branch controls take the bottom row, below the scrolling branches.
         let create = selector.create_index().filter(|_| area.height > 0);
@@ -798,7 +802,11 @@ mod tests {
         buffer
             .content
             .chunks(usize::from(area.width))
-            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -1029,7 +1037,7 @@ mod tests {
                     &branches[*index]
                 };
                 let text: String = (rect.x..rect.right())
-                    .map(|x| buffer[(x, rect.y)].symbol())
+                    .map(|x| cell_text(buffer[(x, rect.y)].symbol()))
                     .collect();
                 assert_eq!(text.trim_end(), expected);
                 assert_eq!(

@@ -300,6 +300,10 @@ impl View {
         {
             // A panel this frame leaves out keeps no links from the last one.
             let mut viewport = self.viewport.borrow_mut();
+            viewport.overlays.clear();
+            viewport.picker_rows.clear();
+            viewport.confirm_options.clear();
+            viewport.list_links.clear();
             viewport.marker = None;
             viewport.field_targets.clear();
             viewport.details = Rect::default();
@@ -383,6 +387,10 @@ impl View {
                 layout.header.height,
                 layout.footer.y.saturating_sub(layout.header.bottom()),
             ));
+            self.viewport.borrow_mut().overlays.push(Overlay {
+                area: body,
+                modal: true,
+            });
             Clear.render(body, buf);
             let mut lines = self.center_help_lines(body.width);
             if lines.len() > usize::from(body.height) {
@@ -417,6 +425,10 @@ impl View {
             && !layout.list.is_empty()
         {
             let bottom = row(layout.list, layout.list.height - 1, 1);
+            self.viewport.borrow_mut().overlays.push(Overlay {
+                area: bottom,
+                modal: false,
+            });
             Clear.render(bottom, buf);
             line(notice.clone().dim(), bottom, buf);
         }
@@ -606,13 +618,10 @@ impl View {
         );
         Clear.render(dialog, buf);
         let viewport = &mut *self.viewport.borrow_mut();
-        for links in [
-            &mut viewport.list_links,
-            &mut viewport.details_links,
-            &mut viewport.log_links,
-        ] {
-            super::links::cover(links, dialog);
-        }
+        viewport.overlays.push(Overlay {
+            area: dialog,
+            modal: true,
+        });
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
         viewport.confirm_options = [false, true]
@@ -826,15 +835,18 @@ impl View {
             }
             return;
         };
+        let mut links = Vec::new();
         if let Some(area) = folder_area {
-            viewport.details_links.push((area, cwd.clone()));
+            links.push((area, cwd.clone()));
         }
         if let (Some(area), Some(pr)) = (right_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
             super::hyperlink::hyperlink(buf, area, &url);
-            viewport.details_links.push((area, PathBuf::from(url)));
+            links.push((area, PathBuf::from(url)));
         }
+        super::links::underline(buf, &links);
+        viewport.details_links.extend(links);
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
@@ -1535,6 +1547,7 @@ impl View {
             .sort_by_key(|source| source.id);
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
+        super::links::underline(buf, &self.viewport.borrow().details_links);
     }
 }
 

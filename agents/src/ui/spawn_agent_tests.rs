@@ -62,8 +62,8 @@ fn panel(view: &mut View, event: &Event) -> String {
             let mut result = String::new();
             let mut cells = row.iter();
             while let Some(cell) = cells.next() {
-                result.push_str(cell.symbol());
-                for _ in 1..cell.symbol().width() {
+                result.push_str(cell_text(cell.symbol()));
+                for _ in 1..cell_text(cell.symbol()).width() {
                     cells.next();
                 }
             }

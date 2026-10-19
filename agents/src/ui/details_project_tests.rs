@@ -1,7 +1,7 @@
 use super::*;
 
 fn visible(cell: &ratatui::buffer::Cell) -> &str {
-    cell.symbol()
+    cell_text(cell.symbol())
         .rsplit("\x1b\\")
         .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
         .unwrap_or("")

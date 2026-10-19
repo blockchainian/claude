@@ -42,8 +42,8 @@ fn text(buf: &Buffer) -> String {
             let mut text = String::new();
             let mut cells = row.iter();
             while let Some(cell) = cells.next() {
-                text.push_str(cell.symbol());
-                for _ in 1..cell.symbol().width() {
+                text.push_str(cell_text(cell.symbol()));
+                for _ in 1..cell_text(cell.symbol()).width() {
                     cells.next();
                 }
             }

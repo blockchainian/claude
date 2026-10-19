@@ -263,6 +263,9 @@ impl View {
         if self.frozen_draft() {
             return None;
         }
+        if let Some(action) = self.overlay_mouse(mouse) {
+            return action;
+        }
         let middle = mouse.kind == MouseEventKind::Down(MouseButton::Middle);
         let paste_target = middle.then(|| self.paste_target(mouse)).flatten();
         if middle && paste_target.is_none() {
@@ -522,6 +525,114 @@ impl View {
         None
     }
 
+    fn overlay_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
+        let position = (mouse.column, mouse.row).into();
+        let modal = self
+            .viewport
+            .borrow()
+            .overlays
+            .iter()
+            .rev()
+            .find(|overlay| {
+                overlay.modal
+                    || overlay.area.contains(position)
+                    || self
+                        .mouse_press
+                        .is_some_and(|(_, x, y, _)| overlay.area.contains((x, y).into()))
+            })
+            .map(|overlay| overlay.modal)?;
+        if !modal
+            && mouse.kind == MouseEventKind::Down(MouseButton::Middle)
+            && self.viewport.borrow().details_input.contains(position)
+            && self
+                .selector
+                .as_ref()
+                .is_some_and(|selector| selector.branch_editor().is_some())
+        {
+            return None;
+        }
+        // Selectors keep their wheel navigation.
+        if !modal
+            && matches!(
+                mouse.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            return None;
+        }
+        self.pending_click = None;
+        self.text_selection.borrow_mut().take();
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Right) => {
+                self.mouse_press = Some((MouseButton::Right, mouse.column, mouse.row, false));
+            }
+            MouseEventKind::Up(MouseButton::Right) => {
+                if self
+                    .mouse_press
+                    .take()
+                    .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
+                    && (modal || self.selector.is_some())
+                {
+                    self.last_detail_click = None;
+                    self.right_click();
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.mouse_press = Some((MouseButton::Left, mouse.column, mouse.row, false));
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some((_, _, _, dragged)) = self.mouse_press.as_mut() {
+                    *dragged = true;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let press = self.mouse_press.take();
+                let Some((MouseButton::Left, x, y, false)) = press else {
+                    return Some(None);
+                };
+                if modal {
+                    let choice = self
+                        .viewport
+                        .borrow()
+                        .confirm_options
+                        .iter()
+                        .find(|(rect, _)| rect.contains(position) && rect.contains((x, y).into()))
+                        .map(|(_, confirm)| *confirm);
+                    if let Some(confirm) = choice {
+                        return Some(if confirm {
+                            let dialog =
+                                self.confirm_dialog.take().expect("confirm dialog is open");
+                            self.accept_confirmation(dialog)
+                        } else {
+                            self.cancel_confirmation();
+                            None
+                        });
+                    }
+                } else {
+                    let choice = self
+                        .viewport
+                        .borrow()
+                        .picker_rows
+                        .iter()
+                        .find(|(rect, _)| rect.contains((x, y).into()))
+                        .map(|(_, index)| *index);
+                    if let Some(index) = choice
+                        && let Some(selector) = self.selector.as_mut()
+                    {
+                        selector.selected = index;
+                        self.input_box.focused = false;
+                        if selector.branch_editor().is_some() && index + 1 == selector.len() {
+                            return Some(None);
+                        }
+                        return Some(self.apply_choice(index));
+                    }
+                }
+            }
+            _ => self.mouse_press = None,
+        }
+        Some(None)
+    }
+
     fn handle_mouse_event(&mut self, mut mouse: MouseEvent) -> Option<Action> {
         if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
             self.mouse_press = Some((MouseButton::Right, mouse.column, mouse.row, false));
@@ -565,50 +676,7 @@ impl View {
             }
             return None;
         }
-        if self.confirm_dialog.is_some() {
-            self.pending_click = None;
-            self.text_selection.borrow_mut().take();
-            match mouse.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    self.mouse_press = Some((MouseButton::Left, mouse.column, mouse.row, false));
-                }
-                MouseEventKind::Drag(MouseButton::Left) => {
-                    if let Some((_, _, _, dragged)) = self.mouse_press.as_mut() {
-                        *dragged = true;
-                    }
-                }
-                MouseEventKind::Up(MouseButton::Left) => {
-                    let press = self.mouse_press.take();
-                    let viewport = self.viewport.borrow();
-                    let choice = viewport
-                        .confirm_options
-                        .iter()
-                        .find(|(rect, _)| {
-                            rect.contains((mouse.column, mouse.row).into())
-                                && press.is_some_and(|(button, x, y, dragged)| {
-                                    button == MouseButton::Left
-                                        && !dragged
-                                        && rect.contains((x, y).into())
-                                })
-                        })
-                        .map(|(_, confirm)| *confirm);
-                    drop(viewport);
-                    if let Some(confirm) = choice {
-                        return if confirm {
-                            let dialog =
-                                self.confirm_dialog.take().expect("confirm dialog is open");
-                            self.accept_confirmation(dialog)
-                        } else {
-                            self.cancel_confirmation();
-                            None
-                        };
-                    }
-                }
-                _ => self.mouse_press = None,
-            }
-            return None;
-        }
-        if self.help || self.rename_target.is_some() || self.searching {
+        if self.rename_target.is_some() || self.searching {
             self.mouse_press = None;
             self.text_selection.borrow_mut().take();
             return None;
@@ -704,24 +772,6 @@ impl View {
         };
         let position = (mouse.column, mouse.row).into();
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-            let choice = self
-                .viewport
-                .borrow()
-                .picker_rows
-                .iter()
-                .find(|(rect, _)| rect.contains(position))
-                .map(|(_, index)| *index);
-            if let Some(index) = choice
-                && let Some(selector) = self.selector.as_mut()
-            {
-                selector.selected = index;
-                self.input_box.focused = false;
-                if selector.branch_editor().is_some() && index + 1 == selector.len() {
-                    return None;
-                }
-                self.pending_click = None;
-                return self.apply_choice(index);
-            }
             let field = self
                 .viewport
                 .borrow()

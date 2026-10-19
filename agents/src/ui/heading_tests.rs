@@ -27,7 +27,7 @@ fn headings_center_at_wide_and_narrow_widths() {
             .to_string();
             let padding = (usize::from(width) - label.width()) / 2;
             let drawn = (area.x..area.right())
-                .map(|x| buf[(x, area.y)].symbol())
+                .map(|x| cell_text(buf[(x, area.y)].symbol()))
                 .collect::<String>();
             assert_eq!(
                 drawn.trim_end(),

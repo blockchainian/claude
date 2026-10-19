@@ -75,7 +75,11 @@ fn assert_summary_surface(event: &crate::log::Event, width: u16, child: bool) ->
     let rendered = actual
         .content
         .chunks(usize::from(width))
-        .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
+        .map(|row| {
+            row.iter()
+                .map(|c| cell_text(c.symbol()))
+                .collect::<String>()
+        })
         .collect::<Vec<_>>();
     let y = rendered
         .iter()
@@ -84,7 +88,7 @@ fn assert_summary_surface(event: &crate::log::Event, width: u16, child: bool) ->
                 == expected
                     .content
                     .iter()
-                    .map(|c| c.symbol())
+                    .map(|c| cell_text(c.symbol()))
                     .collect::<String>()
                     .trim()
         })

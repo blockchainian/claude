@@ -92,7 +92,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
 fn text_cell<'a>(buffer: &'a Buffer, text: &str) -> &'a ratatui::buffer::Cell {
     for y in buffer.area.y..buffer.area.bottom() {
         let row: String = (buffer.area.x..buffer.area.right())
-            .map(|x| buffer[(x, y)].symbol())
+            .map(|x| cell_text(buffer[(x, y)].symbol()))
             .collect();
         if let Some(byte) = row.find(text) {
             return &buffer[(buffer.area.x + row[..byte].chars().count() as u16, y)];
@@ -437,7 +437,7 @@ fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
         snapshot.push_str(&format!("{path}\n"));
         for y in area.y..area.bottom() {
             let row: String = (area.x..area.right())
-                .map(|x| buffer[(x, y)].symbol())
+                .map(|x| cell_text(buffer[(x, y)].symbol()))
                 .collect();
             if row.trim().is_empty() {
                 continue;
