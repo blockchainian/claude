@@ -88,7 +88,7 @@ fn codex_exit_list_colors_only_status_digits() {
         assert!(!text.contains("exit"));
         let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 1));
         line.render(buffer.area, &mut buffer);
-        let base = super::super::style::log_styles(&event.kind).1.fg.unwrap();
+        let base = super::super::style::log_styles(&Kind::Tool).1.fg.unwrap();
         assert_eq!(buffer[(0, 0)].fg, base);
         if code != 0 {
             assert_eq!(text, format!("false ({code})"));

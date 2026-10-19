@@ -916,7 +916,7 @@ impl View {
                     style::exit_code_line(
                         label,
                         activity.exit_code,
-                        style::log_styles(&activity.kind).1,
+                        style::log_body_style(&activity.kind, activity.exit_code),
                     ),
                     width,
                 )

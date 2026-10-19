@@ -54,16 +54,19 @@ pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
 }
 
 fn tool_name(name: &str) -> String {
+    if name.contains(' ') {
+        return name.to_owned();
+    }
     let Some((server, tool)) = name
         .strip_prefix("mcp__")
         .and_then(|rest| rest.split_once("__"))
     else {
         return name
-            .split_once('.')
+            .rsplit_once('.')
             .filter(|(server, tool)| !server.is_empty() && !tool.is_empty())
             .map(|(server, tool)| {
                 let mcp = format!("{server} {tool}");
-                if MCP_RULES.subjects.iter().any(|(name, _)| *name == mcp) {
+                if TOOL_RULES.iter().any(|rule| rule.name == mcp) {
                     mcp
                 } else {
                     tool.to_owned()
@@ -95,21 +98,24 @@ pub(crate) fn display_tool_name(name: &str) -> String {
     title_name(&name)
 }
 
-/// MCP server spelling is preserved; only underscore tool identifiers use sentence case.
+/// Preserve MCP server spelling and camel case; capitalize native tool labels.
 pub(crate) fn title_name(name: &str) -> String {
     let name = tool_name(name);
     if let Some((server, tool)) = name.split_once(' ') {
         return format!("{server} {}", tool.replace('_', " "));
     }
-    if !name.contains('_') {
+    if !name.contains('_') && name.chars().skip(1).any(char::is_uppercase) {
         return name;
     }
-    let text = name
-        .split('_')
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
+    let text = if name.contains('_') {
+        name.split('_')
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    } else {
+        name
+    };
     let mut chars = text.chars();
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().collect::<String>() + chars.as_str()
@@ -136,7 +142,6 @@ pub(crate) enum Input {
     QuestionList,
     Arguments,
     FetchPrompt,
-    AgentMessage,
     Shell,
 }
 
@@ -146,45 +151,285 @@ pub(crate) enum Format {
     Markdown,
 }
 
-pub(crate) struct Rules {
-    pub subjects: &'static [(&'static str, Subject)],
-    pub inputs: &'static [(&'static str, Input, Format)],
-    pub expanded: &'static [(&'static str, bool)],
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Output {
+    Read,
+    Write,
+    Patch,
+    Shell,
+    Matches,
+    Questions,
+    Markdown,
+    Fetch,
+    Empty,
+    Hidden,
+    Wait,
 }
 
-const MCP_RULES: Rules = Rules {
-    subjects: &[
-        ("codex-manager start", Subject::Field("name")),
-        ("codex-manager send", Subject::Field("threadId")),
-        ("codex-manager interrupt", Subject::Field("threadId")),
-        (
-            "codex-manager detach",
-            Subject::ResultField {
-                result: "name",
-                input: "threadId",
-            },
-        ),
-    ],
-    inputs: &[
-        (
-            "codex-manager start",
-            Input::Field("prompt"),
-            Format::Markdown,
-        ),
-        (
-            "codex-manager send",
-            Input::Field("prompt"),
-            Format::Markdown,
-        ),
-    ],
-    expanded: &[],
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum TaskAction {
+    Create,
+    Update,
+    Plan,
+}
+
+/// All tool-specific field and display choices are declared once, independent of provider.
+#[derive(Clone, Copy)]
+pub(crate) struct ToolRule {
+    pub name: &'static str,
+    pub subject: Option<Subject>,
+    pub input: Option<(Input, Format)>,
+    pub output: Option<Output>,
+    pub question: bool,
+    pub hidden: bool,
+    pub wrapper: bool,
+    pub task: Option<TaskAction>,
+    pub list_subject: bool,
+}
+
+const DEFAULT_RULE: ToolRule = ToolRule {
+    name: "",
+    subject: None,
+    input: None,
+    output: None,
+    question: false,
+    hidden: false,
+    wrapper: false,
+    task: None,
+    list_subject: false,
 };
 
-fn find<T: Copy>(name: &str, table: &[(&str, T)]) -> Option<T> {
-    table.iter().find_map(|(tool, value)| {
-        (*tool == name || (!name.contains(' ') && *tool == name.rsplit('.').next().unwrap_or(name)))
-            .then_some(*value)
-    })
+pub(crate) const TOOL_RULES: &[ToolRule] = &[
+    ToolRule {
+        name: "Read",
+        subject: Some(Subject::Field("file_path")),
+        input: Some((Input::Field(""), Format::Text)),
+        output: Some(Output::Read),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "Write",
+        subject: Some(Subject::Field("file_path")),
+        input: Some((Input::Field("content"), Format::Text)),
+        output: Some(Output::Write),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "Edit",
+        subject: Some(Subject::Field("file_path")),
+        input: Some((Input::Field(""), Format::Text)),
+        output: Some(Output::Patch),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "Bash",
+        subject: Some(Subject::Shell { description: true }),
+        input: Some((Input::Shell, Format::Text)),
+        output: Some(Output::Shell),
+        list_subject: false,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "exec_command",
+        subject: Some(Subject::Shell { description: false }),
+        input: Some((Input::Shell, Format::Text)),
+        output: Some(Output::Shell),
+        list_subject: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "shell",
+        subject: Some(Subject::Shell { description: false }),
+        input: Some((Input::Shell, Format::Text)),
+        output: Some(Output::Shell),
+        list_subject: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "CommandExecution",
+        subject: Some(Subject::Shell { description: false }),
+        input: Some((Input::Shell, Format::Text)),
+        output: Some(Output::Shell),
+        list_subject: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "ToolSearch",
+        subject: Some(Subject::Field("query")),
+        input: Some((Input::Field(""), Format::Text)),
+        output: Some(Output::Matches),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "AskUserQuestion",
+        subject: Some(Subject::QuestionHeaders),
+        input: Some((Input::QuestionList, Format::Text)),
+        output: Some(Output::Questions),
+        question: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "request_user_input",
+        subject: Some(Subject::QuestionHeaders),
+        input: Some((Input::QuestionList, Format::Text)),
+        output: Some(Output::Questions),
+        question: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "Agent",
+        subject: Some(Subject::Field("description")),
+        input: Some((Input::Field("prompt"), Format::Markdown)),
+        output: Some(Output::Markdown),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "Task",
+        subject: Some(Subject::Field("description")),
+        input: Some((Input::Field("prompt"), Format::Markdown)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "spawn_agent",
+        subject: Some(Subject::Field("task_name")),
+        input: Some((Input::Field("message"), Format::Markdown)),
+        output: Some(Output::Hidden),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "SendMessage",
+        subject: Some(Subject::Recipient),
+        input: Some((Input::Field("message"), Format::Markdown)),
+        output: Some(Output::Markdown),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "send_message",
+        subject: Some(Subject::Field("target")),
+        input: Some((Input::Field("message"), Format::Markdown)),
+        output: Some(Output::Empty),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "followup_task",
+        subject: Some(Subject::Field("target")),
+        input: Some((Input::Field("message"), Format::Markdown)),
+        output: Some(Output::Empty),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "wait_agent",
+        input: Some((Input::Field("timeout_ms"), Format::Text)),
+        output: Some(Output::Wait),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "WebFetch",
+        subject: Some(Subject::Field("url")),
+        input: Some((Input::FetchPrompt, Format::Text)),
+        output: Some(Output::Fetch),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "Skill",
+        subject: Some(Subject::Field("skill")),
+        input: Some((Input::Arguments, Format::Text)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "apply_patch",
+        subject: Some(Subject::Field("paths")),
+        input: Some((Input::Field(""), Format::Text)),
+        wrapper: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "exec",
+        wrapper: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "view_image",
+        wrapper: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "update_plan",
+        task: Some(TaskAction::Plan),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "TaskCreate",
+        hidden: true,
+        task: Some(TaskAction::Create),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "TaskUpdate",
+        hidden: true,
+        task: Some(TaskAction::Update),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "TaskList",
+        hidden: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "TaskGet",
+        hidden: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "ListAgents",
+        hidden: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "codex-manager start",
+        subject: Some(Subject::Field("name")),
+        input: Some((Input::Field("prompt"), Format::Markdown)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "codex-manager send",
+        subject: Some(Subject::Field("threadId")),
+        input: Some((Input::Field("prompt"), Format::Markdown)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "codex-manager interrupt",
+        subject: Some(Subject::Field("threadId")),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
+        name: "codex-manager detach",
+        subject: Some(Subject::ResultField {
+            result: "name",
+            input: "threadId",
+        }),
+        ..DEFAULT_RULE
+    },
+];
+
+pub(crate) fn rule(name: &str) -> &'static ToolRule {
+    let name = tool_name(name);
+    TOOL_RULES
+        .iter()
+        .find(|rule| rule.name == name)
+        .unwrap_or(&DEFAULT_RULE)
+}
+
+pub(crate) fn tool_kind(name: &str) -> crate::log::Kind {
+    if rule(name).question {
+        crate::log::Kind::Assistant
+    } else {
+        crate::log::Kind::Tool
+    }
+}
+
+pub(crate) fn tool_hidden(name: &str) -> bool {
+    rule(name).hidden
 }
 
 fn text<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
@@ -196,46 +441,64 @@ fn recipient(input: &Value) -> Option<&str> {
     text(input, "to").filter(|to| !to.starts_with("uds:"))
 }
 
-pub(crate) fn expanded(name: &str, rules: &Rules) -> bool {
-    find(name, rules.expanded).unwrap_or(true)
-}
-
-/// A human description stands alone; otherwise the display name heads its subject.
+/// A human description stands alone; shell calls use their declared command subject.
 pub(crate) fn list_label(
     name: &str,
     subject: Option<&str>,
     input: &Value,
+    exit_code: Option<i64>,
 ) -> (String, Option<String>) {
-    match input["description"]
-        .as_str()
-        .filter(|text| !text.trim().is_empty())
-    {
-        Some(description) => (description.to_owned(), None),
-        None => (
-            name.to_owned(),
-            subject.filter(|text| !text.is_empty()).map(str::to_owned),
-        ),
+    let display = display_tool_name(name);
+    let mut label = if let Some(description) = text(input, "description") {
+        (description.to_owned(), None)
+    } else if rule(name).list_subject {
+        (
+            subject
+                .filter(|subject| !subject.is_empty())
+                .unwrap_or(&display)
+                .to_owned(),
+            None,
+        )
+    } else {
+        (
+            display,
+            subject
+                .filter(|subject| !subject.is_empty())
+                .map(str::to_owned),
+        )
+    };
+    if let Some(code) = exit_code.filter(|code| *code != 0) {
+        label
+            .1
+            .as_mut()
+            .unwrap_or(&mut label.0)
+            .push_str(&format!(" ({code})"));
     }
+    label
 }
 
-pub(crate) fn list_title(name: &str, subject: Option<&str>, input: &Value) -> String {
-    let (head, member) = list_label(name, subject, input);
+pub(crate) fn list_title(
+    name: &str,
+    subject: Option<&str>,
+    input: &Value,
+    exit_code: Option<i64>,
+) -> String {
+    let (head, member) = list_label(name, subject, input, exit_code);
     let mut groups = groups::Groups::default();
     groups.add(&head, member.as_deref());
     groups.finish().unwrap()
 }
 
-fn subject_rule(name: &str, rules: &Rules) -> Option<Subject> {
-    find(name, rules.subjects).or_else(|| find(&tool_name(name), MCP_RULES.subjects))
+pub(crate) fn detail_titles(name: &str, subject: Option<&str>) -> (String, String) {
+    (
+        display_tool_name(name),
+        subject.unwrap_or_default().to_owned(),
+    )
 }
 
 /// Read a declared subject from JSON output, leaving the input subject as fallback.
-pub(crate) fn result_subject(
-    name: &str,
-    output: Option<&[Section]>,
-    rules: &Rules,
-) -> Option<String> {
-    let Subject::ResultField { result, .. } = subject_rule(name, rules)? else {
+pub(crate) fn result_subject(name: &str, output: Option<&[Section]>) -> Option<String> {
+    let Subject::ResultField { result, .. } = rule(name).subject? else {
         return None;
     };
     output?.iter().find_map(|section| {
@@ -252,15 +515,11 @@ fn shell_command(input: &Value) -> Option<&str> {
     text(input, "command").or_else(|| text(input, "cmd"))
 }
 
-pub(crate) fn presentation(
-    name: &str,
-    input: &Value,
-    rules: &Rules,
-) -> (String, Option<String>, Vec<Section>) {
+pub(crate) fn presentation(name: &str, input: &Value) -> (String, Option<String>, Vec<Section>) {
     let raw_name = name;
     let name = display_tool_name(name);
     let mut remaining = input.clone();
-    let subject = match subject_rule(raw_name, rules) {
+    let subject = match rule(raw_name).subject {
         Some(Subject::Field(field) | Subject::ResultField { input: field, .. }) => remaining
             .as_object_mut()
             .and_then(|object| object.remove(field))
@@ -297,14 +556,8 @@ pub(crate) fn presentation(
         .filter(|headers| !headers.is_empty()),
         None => None,
     };
-    let input_rule = |name: &str, table: &[(&str, Input, Format)]| {
-        table
-            .iter()
-            .find_map(|(tool, input, format)| find(name, &[(*tool, (*input, *format))]))
-    };
-    let rule = input_rule(raw_name, rules.inputs)
-        .or_else(|| input_rule(&tool_name(raw_name), MCP_RULES.inputs));
-    let sections = match rule {
+    let input_rule = rule(raw_name).input;
+    let sections = match input_rule {
         Some((Input::Field(""), _)) => Vec::new(),
         Some((method, format)) => {
             let (body, mut sections) = match method {
@@ -323,9 +576,6 @@ pub(crate) fn presentation(
                 ),
                 Input::QuestionList => (String::new(), question_sections(input)),
                 Input::Arguments => (input["args"].as_str().unwrap_or("").to_owned(), Vec::new()),
-                Input::AgentMessage => {
-                    (text(input, "message").unwrap_or("").to_owned(), Vec::new())
-                }
                 Input::FetchPrompt => (
                     text(input, "prompt").unwrap_or("").to_owned(),
                     text(input, "url")
@@ -355,7 +605,6 @@ pub(crate) fn presentation(
                     Format::Markdown => Section::Markdown {
                         label: match method {
                             Input::Field(field) => field,
-                            Input::AgentMessage => "message",
                             _ => "",
                         }
                         .into(),
@@ -368,7 +617,247 @@ pub(crate) fn presentation(
         }
         None => json_input(&remaining),
     };
+    let sections = if matches!(rule(raw_name).output, Some(Output::Write)) {
+        match (text(input, "file_path"), input["content"].as_str()) {
+            (Some(path), Some(content)) => vec![file_code_section("input", path, content)],
+            _ => sections,
+        }
+    } else {
+        sections
+    };
     (name, subject, sections)
+}
+
+pub(crate) struct ToolResult<'a> {
+    pub content: &'a Value,
+    pub value: &'a Value,
+    pub text: &'a str,
+    pub error: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct ResultState {
+    pub exit_code: Option<i64>,
+    pub is_error: bool,
+    pub denied: bool,
+}
+
+/// Read explicit outcome metadata; output prose does not determine success.
+pub(crate) fn result_state(text: &str, value: &Value, error: bool) -> ResultState {
+    let exit_code = value["exit_code"]
+        .as_i64()
+        .or_else(|| {
+            text.lines()
+                .next()?
+                .strip_prefix("Exit code ")?
+                .parse()
+                .ok()
+        })
+        .or_else(|| {
+            text.starts_with("Chunk ID:").then_some(())?;
+            text.split_once("\nOutput:\n")?
+                .0
+                .lines()
+                .find_map(|line| line.strip_prefix("Process exited with code ")?.parse().ok())
+        })
+        .filter(|code| *code != 0);
+    let reason = value["error"]["message"].as_str().unwrap_or(text);
+    let denied = reason == "user rejected MCP tool call"
+        || reason
+            .strip_prefix("Error: ")
+            .unwrap_or(reason)
+            .starts_with("The user doesn't want to proceed with this tool use.");
+    ResultState {
+        exit_code,
+        is_error: error
+            || denied
+            || exit_code.is_some()
+            || value["isError"] == true
+            || value["result"]["isError"] == true
+            || value["status"] == "failed"
+            || value["error"]["message"].is_string()
+            || text.starts_with("Error: "),
+        denied,
+    }
+}
+
+pub(crate) fn result_kind(kind: crate::log::Kind, state: &ResultState) -> crate::log::Kind {
+    if state.denied {
+        crate::log::Kind::Denied
+    } else if state.is_error {
+        crate::log::Kind::Error
+    } else {
+        kind
+    }
+}
+
+pub(crate) fn text_output(text: &str, mode: Option<Output>, input: &Value) -> Vec<Section> {
+    let value = serde_json::from_str(text).unwrap_or(Value::Null);
+    let content = if value["content"].is_array() {
+        value["content"].clone()
+    } else {
+        Value::String(text.to_owned())
+    };
+    let state = result_state(text, &Value::Null, value["isError"] == true);
+    output(
+        mode,
+        input,
+        &ToolResult {
+            content: &content,
+            value: &value,
+            text,
+            error: state.is_error,
+        },
+    )
+}
+
+pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_>) -> Vec<Section> {
+    match mode {
+        Some(Output::Hidden | Output::Empty) if !result.error => return Vec::new(),
+        Some(Output::Wait) if !result.error => {
+            let value = serde_json::from_str::<Value>(result.text).unwrap_or(Value::Null);
+            let text = if value["timed_out"] == true {
+                "(timed out)"
+            } else {
+                value["message"].as_str().unwrap_or(result.text)
+            };
+            return mcp_content(&Value::String(text.to_owned()));
+        }
+        _ => {}
+    }
+
+    let value = result.value;
+    let generic = || {
+        let mut content = result.content.clone();
+        if let Some(text) = content
+            .as_str()
+            .filter(|text| text.starts_with("Exit code "))
+        {
+            content = text.split_once('\n').map_or("", |(_, body)| body).into();
+        }
+        mcp_content(&content)
+    };
+    if let Some(Output::Questions) = mode {
+        let listed = if result.error {
+            rejected_answers(&input["questions"], result.text)
+                .or_else(|| rejected_questions(result.text))
+        } else {
+            serde_json::from_value(value["answers"].clone())
+                .ok()
+                .map(|answers| answer_list(&value["questions"], &answers))
+        };
+        if let Some(output) = listed {
+            return vec![text_section("output", &output)];
+        }
+    }
+    if result.error {
+        return generic();
+    }
+    match mode {
+        Some(Output::Markdown) => vec![Section::Markdown {
+            label: "output".to_owned(),
+            text: result.text.to_owned(),
+        }],
+        Some(Output::Fetch) if value["result"].is_string() => vec![Section::Markdown {
+            label: "output".to_owned(),
+            text: value["result"].as_str().unwrap().to_owned(),
+        }],
+        Some(Output::Read) if value["type"] == "image" => {
+            vec![Section::Placeholder(format!(
+                "[image {}]",
+                value["file"]["type"].as_str().unwrap_or("unknown")
+            ))]
+        }
+        Some(Output::Read) if value["file"]["content"].is_string() => {
+            vec![file_code_section(
+                "output",
+                value["file"]["filePath"].as_str().unwrap_or(""),
+                value["file"]["content"].as_str().unwrap(),
+            )]
+        }
+        Some(Output::Patch) => patch_section(value)
+            .map(|section| vec![section])
+            .unwrap_or_else(generic),
+        Some(Output::Write) if value["type"] == "update" => patch_section(value)
+            .map(|section| vec![section])
+            .unwrap_or_else(generic),
+        Some(Output::Shell) if value.get("stdout").is_some() || value.get("stderr").is_some() => {
+            ["stdout", "stderr"]
+                .into_iter()
+                .filter_map(|key| {
+                    value[key]
+                        .as_str()
+                        .filter(|text| !text.is_empty())
+                        .map(|text| text_section(key, text))
+                })
+                .collect()
+        }
+        Some(Output::Matches) if value["matches"].is_array() => {
+            vec![text_section(
+                "output",
+                &value["matches"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|name| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )]
+        }
+        _ => generic(),
+    }
+}
+
+pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
+    Section::Code {
+        label: label.to_owned(),
+        lang: lang.to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+pub(crate) fn file_code_section(label: &str, path: &str, text: &str) -> Section {
+    let path = std::path::Path::new(path);
+    let lang = path
+        .extension()
+        .or_else(|| path.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    code_section(label, lang, text)
+}
+
+fn patch_section(value: &serde_json::Value) -> Option<Section> {
+    let hunks = value["structuredPatch"].as_array()?;
+    let text = hunks
+        .iter()
+        .map(|hunk| {
+            std::iter::once(format!(
+                "@@ -{},{} +{},{} @@",
+                hunk["oldStart"], hunk["oldLines"], hunk["newStart"], hunk["newLines"]
+            ))
+            .chain(
+                hunk["lines"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|line| line.as_str().map(str::to_owned)),
+            )
+            .collect::<Vec<_>>()
+            .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(Section::Diff {
+        label: String::new(),
+        text,
+    })
+}
+
+fn text_section(label: &str, text: &str) -> Section {
+    Section::Text {
+        label: label.to_owned(),
+        text: text.to_owned(),
+    }
 }
 
 pub(crate) fn question_texts(input: &Value) -> Vec<String> {
@@ -488,9 +977,17 @@ fn question_sections(input: &Value) -> Vec<Section> {
 
 /// Add explicit headings for separately reported stderr output.
 pub(super) fn annotate(call: &mut ToolCall) {
+    if !call.is_error {
+        match rule(&call.name).output {
+            Some(Output::Hidden) => call.hide_output = true,
+            Some(Output::Empty) => call.output = Some(Vec::new()),
+            _ => {}
+        }
+    }
     if let Some(output) = &mut call.output {
         *output = std::mem::take(output)
             .into_iter()
+            .filter(|section| !matches!(section, Section::Text { text, .. } | Section::Markdown { text, .. } | Section::Prose { text, .. } | Section::Code { text, .. } | Section::Diff { text, .. } | Section::Shell { text, .. } | Section::Structured { text, .. } if text.is_empty()))
             .flat_map(label_section)
             .collect();
     }
@@ -516,6 +1013,59 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tool_declarations_are_unique_and_keep_captured_agent_fields() {
+        let mut names = std::collections::HashSet::new();
+        for rule in super::TOOL_RULES {
+            assert!(
+                names.insert(rule.name),
+                "duplicate declaration: {}",
+                rule.name
+            );
+        }
+        for line in include_str!("../../tests/fixtures/codex-agent-names.jsonl").lines() {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            let payload = &record["payload"];
+            let name = payload["name"].as_str().unwrap();
+            let input: serde_json::Value =
+                serde_json::from_str(payload["arguments"].as_str().unwrap()).unwrap();
+            let subject = input[if name == "spawn_agent" {
+                "task_name"
+            } else {
+                "target"
+            }]
+            .as_str()
+            .unwrap();
+            for raw in [
+                name.to_owned(),
+                format!("collaboration.{name}"),
+                format!("functions.collaboration.{name}"),
+            ] {
+                let (_, actual, sections) = super::presentation(&raw, &input);
+                assert_eq!(actual.as_deref(), Some(subject));
+                assert_eq!(
+                    sections,
+                    vec![crate::log::Section::Markdown {
+                        label: "message".into(),
+                        text: input["message"].as_str().unwrap().to_owned(),
+                    }]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn captured_wait_name_keeps_a_capitalized_tool_label() {
+        let record: serde_json::Value =
+            include_str!("../../tests/fixtures/codex-perspective/beta.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .find(|record| record["payload"]["name"] == "wait")
+                .unwrap();
+        let name = record["payload"]["name"].as_str().unwrap();
+        assert_eq!(super::display_tool_name(name), "Wait");
+    }
+
     #[test]
     fn captured_mcp_names_preserve_server_and_tool_case() {
         let record: serde_json::Value =
@@ -581,26 +1131,17 @@ mod tests {
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
-        let rules = super::Rules {
-            subjects: &[(
-                "inspect",
-                super::Subject::ResultField {
-                    result: "name",
-                    input: "threadId",
-                },
-            )],
-            inputs: &[],
-            expanded: &[],
-        };
         let input = &records[0]["message"]["content"][0]["input"];
         let content = &records[1]["message"]["content"][0]["content"];
         let output = super::mcp_content(content);
         assert_eq!(
-            super::result_subject("inspect", Some(&output), &rules).as_deref(),
+            super::result_subject("mcp__codex-manager__detach", Some(&output)).as_deref(),
             Some("模型和new挪位")
         );
         assert_eq!(
-            super::presentation("inspect", input, &rules).1.as_deref(),
+            super::presentation("mcp__codex-manager__detach", input)
+                .1
+                .as_deref(),
             input["threadId"].as_str()
         );
         let mut value: serde_json::Value =
@@ -616,7 +1157,7 @@ mod tests {
                 text: value.to_string(),
             }];
             assert_eq!(
-                super::result_subject("inspect", Some(&output), &rules),
+                super::result_subject("mcp__codex-manager__detach", Some(&output)),
                 None
             );
         }
@@ -653,13 +1194,8 @@ mod tests {
                 })
                 .unwrap();
         let call = &record["message"]["content"][0];
-        let rules = super::Rules {
-            subjects: &[],
-            inputs: &[],
-            expanded: &[],
-        };
         for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
-            let (name, subject, input) = super::presentation(name, &call["input"], &rules);
+            let (name, subject, input) = super::presentation(name, &call["input"]);
             assert_eq!(name, "codex-manager start");
             assert_eq!(subject.as_deref(), Some("tool-calls"));
             assert_eq!(

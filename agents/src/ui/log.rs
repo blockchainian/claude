@@ -1259,7 +1259,8 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         ..event.clone()
     };
     let event = &listed;
-    let body_style = super::style::log_styles(&event.kind).1;
+    let exit_code = match event.calls.as_slice() { [call] => call.exit_code, _ => None };
+    let body_style = super::style::log_body_style(&event.kind, exit_code);
     if is_prose(&event.kind) {
         // Markdown blocks end at line breaks, so they are kept until rendering.
         let body = event
@@ -1300,10 +1301,7 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         FittedBody {
             line: super::style::exit_code_line(
                 shortened,
-                match event.calls.as_slice() {
-                    [call] => call.exit_code,
-                    _ => None,
-                },
+                exit_code,
                 body_style,
             ),
             source: text,
@@ -2049,7 +2047,8 @@ mod panel_detail_tests {
                 let row = layout
                     .rows
                     .iter()
-                    .position(|(source, cells)| *source == id && !cells.is_empty())
+                    .enumerate()
+                    .position(|(row, (source, _))| *source == id && !layout.lines[row].to_string().trim().is_empty())
                     .unwrap();
                 assert_eq!(layout.lines[row + 1].to_string(), "");
                 assert!(layout.rows[row + 1].1.is_empty());

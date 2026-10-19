@@ -113,13 +113,13 @@ impl TaskReplay {
         for block in blocks {
             if record["type"] == "assistant" && block["type"] == "tool_use" {
                 let input = &block["input"];
-                match block["name"].as_str() {
-                    Some("TaskCreate") => {
+                match block["name"].as_str().and_then(|name| crate::providers::tool::rule(name).task) {
+                    Some(crate::providers::tool::TaskAction::Create) => {
                         if let Some(id) = block["id"].as_str() {
                             self.creates.insert(id.to_owned());
                         }
                     }
-                    Some("TaskUpdate") => {
+                    Some(crate::providers::tool::TaskAction::Update) => {
                         if let Some(id) = input["taskId"].as_str()
                             && let Some(task) = tasks.iter_mut().find(|task| task.id == id)
                         {
@@ -517,7 +517,7 @@ impl Background {
 
             if record["type"] == "assistant"
                 && block["type"] == "tool_use"
-                && block["name"] == "Bash"
+                && block["name"].as_str().is_some_and(|name| crate::providers::tool::rule(name).output == Some(crate::providers::tool::Output::Shell))
                 && let Some(id) = block["id"].as_str()
                 && let Some((task, output)) = self.pending.remove(id)
                 && let Some(started_at) = at
@@ -677,7 +677,7 @@ fn read_messages(
                 }
                 if record["type"] == "assistant"
                     && block["type"] == "tool_use"
-                    && block["name"] == "AskUserQuestion"
+                    && block["name"].as_str().is_some_and(|name| crate::providers::tool::rule(name).question)
                     && let Some(id) = block["id"].as_str()
                 {
                     questions_found = true;

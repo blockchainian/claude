@@ -260,7 +260,7 @@ fn preformatted_detail_rows_stay_in_content_column() {
 }
 
 #[test]
-fn detail_without_subject_centers_tool_in_both_modes() {
+fn detail_without_subject_keeps_tool_name_in_left_metadata() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-names.jsonl");
     let event = crate::providers::claude::log::tail(&path, 200)
@@ -286,11 +286,7 @@ fn detail_without_subject_centers_tool_in_both_modes() {
         let title = "SubagentHandback";
         assert_eq!(
             header[..header.rfind(title).unwrap()].width(),
-            usize::from(super::super::centering::centered_x(
-                columns.panel,
-                columns.text,
-                title.width() as u16,
-            ))
+            usize::from(columns.text.x)
         );
         assert!(header[..header.find(title).unwrap()].trim().is_empty());
         assert!(

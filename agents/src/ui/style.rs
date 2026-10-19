@@ -125,6 +125,14 @@ pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
     (body.bold(), body)
 }
 
+/// Numeric command status has its own error span; the summary keeps its tool color.
+pub(super) fn log_body_style(kind: &crate::log::Kind, exit_code: Option<i64>) -> Style {
+    let kind = if *kind == crate::log::Kind::Error && exit_code.is_some_and(|code| code != 0) {
+        &crate::log::Kind::Tool
+    } else { kind };
+    log_styles(kind).1
+}
+
 pub(super) fn error_style() -> Style {
     Style::default().fg(Color::Red)
 }

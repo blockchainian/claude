@@ -6,82 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) fn tool_hidden(name: &str) -> bool {
-    matches!(
-        name,
-        "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" | "ListAgents"
-    )
-}
-
-use crate::providers::tool::{Format, Input, Subject};
-
-const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
-    subjects: &[
-        ("Read", Subject::Field("file_path")),
-        ("Write", Subject::Field("file_path")),
-        ("Edit", Subject::Field("file_path")),
-        ("Bash", Subject::Shell { description: true }),
-        ("ToolSearch", Subject::Field("query")),
-        ("AskUserQuestion", Subject::QuestionHeaders),
-        ("request_user_input", Subject::QuestionHeaders),
-        ("Agent", Subject::Field("description")),
-        ("Task", Subject::Field("description")),
-        ("spawn_agent", Subject::Field("description")),
-        ("SendMessage", Subject::Recipient),
-        ("send_message", Subject::Recipient),
-        ("WebFetch", Subject::Field("url")),
-        ("Skill", Subject::Field("skill")),
-    ],
-    inputs: &[
-        ("Read", Input::Field(""), Format::Text),
-        ("Write", Input::Field("content"), Format::Text),
-        ("Edit", Input::Field(""), Format::Text),
-        ("Bash", Input::Shell, Format::Text),
-        ("ToolSearch", Input::Field(""), Format::Text),
-        ("AskUserQuestion", Input::QuestionList, Format::Text),
-        ("request_user_input", Input::QuestionList, Format::Text),
-        ("Agent", Input::Field("prompt"), Format::Markdown),
-        ("Task", Input::Field("prompt"), Format::Markdown),
-        ("spawn_agent", Input::Field("prompt"), Format::Markdown),
-        ("SendMessage", Input::Field("message"), Format::Markdown),
-        ("send_message", Input::Field("message"), Format::Markdown),
-        ("WebFetch", Input::FetchPrompt, Format::Text),
-        ("Skill", Input::Arguments, Format::Text),
-    ],
-    expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
-};
-
-#[derive(Clone, Copy)]
-enum Output {
-    Read,
-    Write,
-    Patch,
-    Shell,
-    Matches,
-    Questions,
-    Markdown,
-    Fetch,
-}
-
-const OUTPUTS: &[(&str, Output)] = &[
-    ("Read", Output::Read),
-    ("Write", Output::Write),
-    ("Edit", Output::Patch),
-    ("Bash", Output::Shell),
-    ("ToolSearch", Output::Matches),
-    ("AskUserQuestion", Output::Questions),
-    ("request_user_input", Output::Questions),
-    ("Agent", Output::Markdown),
-    ("SendMessage", Output::Markdown),
-    ("WebFetch", Output::Fetch),
-];
-
-pub(super) fn tool_kind(name: &str) -> Kind {
-    match name.rsplit('.').next() {
-        Some("AskUserQuestion" | "request_user_input") => Kind::Assistant,
-        _ => Kind::Tool,
-    }
-}
+pub(super) use crate::providers::tool::{tool_hidden, tool_kind};
+use crate::providers::tool::{self, Output, Subject};
+#[cfg(test)]
+use crate::providers::tool::code_section;
 
 /// Reuses the backward log parser, including result lookup and merged tool rows.
 #[derive(Default)]
@@ -571,57 +499,10 @@ fn text_section(label: &str, text: &str) -> Section {
     }
 }
 
-fn code_section(label: &str, lang: &str, text: &str) -> Section {
-    Section::Code {
-        label: label.to_owned(),
-        lang: lang.to_owned(),
-        text: text.to_owned(),
-    }
-}
-
-fn file_code_section(label: &str, path: &str, text: &str) -> Section {
-    let path = Path::new(path);
-    let lang = path
-        .extension()
-        .or_else(|| path.file_name())
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    code_section(label, lang, text)
-}
-
-fn patch_section(value: &serde_json::Value) -> Option<Section> {
-    let hunks = value["structuredPatch"].as_array()?;
-    let text = hunks
-        .iter()
-        .map(|hunk| {
-            std::iter::once(format!(
-                "@@ -{},{} +{},{} @@",
-                hunk["oldStart"], hunk["oldLines"], hunk["newStart"], hunk["newLines"]
-            ))
-            .chain(
-                hunk["lines"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|line| line.as_str().map(str::to_owned)),
-            )
-            .collect::<Vec<_>>()
-            .join("\n")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some(Section::Diff {
-        label: String::new(),
-        text,
-    })
-}
-
 fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -> ToolCall {
-    let (display_name, mut subject, mut sections) =
-        crate::providers::tool::presentation(name, input, &RULES);
-    let mode = OUTPUTS
-        .iter()
-        .find_map(|(tool, mode)| (*tool == display_name).then_some(*mode));
+    let (_, mut subject, sections) =
+        crate::providers::tool::presentation(name, input);
+    let mode = tool::rule(name).output;
     if matches!(mode, Some(Output::Read))
         && let Some(result) = result
     {
@@ -639,112 +520,14 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             ));
         }
     }
-    if matches!(mode, Some(Output::Write))
-        && let (Some(path), Some(content)) =
-            (input["file_path"].as_str(), input["content"].as_str())
-    {
-        sections = vec![file_code_section("input", path, content)];
-    }
-    if matches!(mode, Some(Output::Shell)) {
-        sections = sections
-            .into_iter()
-            .map(|section| match section {
-                Section::Prose { text, .. } => Section::Shell { text, prefix: 0 },
-                section => section,
-            })
-            .collect();
-    }
-    let exit_code = result.and_then(|result| {
-        result
-            .content
-            .lines()
-            .next()?
-            .strip_prefix("Exit code ")?
-            .parse()
-            .ok()
-    });
-    let output = result.map(|result| {
-        let value = &result.value;
-        let generic = || {
-            let mut content = result.raw_content.clone();
-            if exit_code.is_some()
-                && let Some(text) = content.as_str()
-            {
-                content = text.split_once('\n').map_or("", |(_, body)| body).into();
-            }
-            crate::providers::tool::mcp_content(&content)
-        };
-        if let Some(Output::Questions) = mode {
-            let listed = if result.error {
-                crate::providers::tool::rejected_answers(&input["questions"], &result.content)
-            } else {
-                serde_json::from_value(value["answers"].clone())
-                    .ok()
-                    .map(|answers| {
-                        crate::providers::tool::answer_list(&value["questions"], &answers)
-                    })
-            };
-            if let Some(output) = listed {
-                return vec![text_section("output", &output)];
-            }
-        }
-        if result.error {
-            return generic();
-        }
-        match mode {
-            Some(Output::Markdown) => vec![Section::Markdown {
-                label: "output".to_owned(),
-                text: result.content.clone(),
-            }],
-            Some(Output::Fetch) if value["result"].is_string() => vec![Section::Markdown {
-                label: "output".to_owned(),
-                text: value["result"].as_str().unwrap().to_owned(),
-            }],
-            Some(Output::Read) if value["type"] == "image" => {
-                vec![Section::Placeholder(format!(
-                    "[image {}]",
-                    value["file"]["type"].as_str().unwrap_or("unknown")
-                ))]
-            }
-            Some(Output::Read) if value["file"]["content"].is_string() => {
-                vec![file_code_section(
-                    "output",
-                    value["file"]["filePath"].as_str().unwrap_or(""),
-                    value["file"]["content"].as_str().unwrap(),
-                )]
-            }
-            Some(Output::Patch) => patch_section(value)
-                .map(|section| vec![section])
-                .unwrap_or_else(generic),
-            Some(Output::Write) if value["type"] == "update" => patch_section(value)
-                .map(|section| vec![section])
-                .unwrap_or_else(generic),
-            Some(Output::Shell) if value.is_object() => ["stdout", "stderr"]
-                .into_iter()
-                .filter_map(|key| {
-                    value[key]
-                        .as_str()
-                        .filter(|text| !text.is_empty())
-                        .map(|text| text_section(key, text))
-                })
-                .collect(),
-            Some(Output::Matches) if value["matches"].is_array() => {
-                vec![text_section(
-                    "output",
-                    &value["matches"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter_map(|name| name.as_str())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )]
-            }
-            _ => generic(),
-        }
-    });
-    subject = crate::providers::tool::result_subject(name, output.as_deref(), &RULES).or(subject);
-    let title = subject.clone().unwrap_or_else(|| display_name.clone());
+    let state = result.map(|result| tool::result_state(&result.content, &serde_json::Value::Null, result.error));
+    let exit_code = state.as_ref().and_then(|state| state.exit_code);
+    let output = result.map(|result| tool::output(mode, input, &tool::ToolResult {
+        content: &result.raw_content, value: &result.value, text: &result.content,
+        error: result.error,
+    }));
+    subject = crate::providers::tool::result_subject(name, output.as_deref()).or(subject);
+    let (detail_left, detail_title) = tool::detail_titles(name, subject.as_deref());
     let mut call = ToolCall {
         agent_message: None,
         started_at: None,
@@ -752,20 +535,16 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
-        detail_left: if subject.is_some() {
-            display_name.clone()
-        } else {
-            String::new()
-        },
-        detail_title: title.clone(),
-        show_details: crate::providers::tool::expanded(name, &RULES),
+        detail_left,
+        detail_title,
+        show_details: true,
         id: String::new(),
-        title: crate::providers::tool::list_title(&display_name, subject.as_deref(), input),
+        title: tool::list_title(name, subject.as_deref(), input, exit_code),
         name: name.to_owned(),
         input: sections,
         output,
         exit_code,
-        is_error: result.is_some_and(|result| result.error),
+        is_error: state.is_some_and(|state| state.is_error),
         duration: None,
     };
     call.agent_message = crate::log::agent::tool_message(name, input);
@@ -1184,18 +963,9 @@ impl Log {
         }
         let subject =
             (!detail_call.detail_left.is_empty()).then_some(detail_call.detail_title.as_str());
-        let display_name = if subject.is_some() {
-            detail_call.detail_left.as_str()
-        } else {
-            detail_call.detail_title.as_str()
-        };
-        let label = crate::providers::tool::list_label(display_name, subject, input);
-        let path = RULES.subjects.iter().find_map(|(tool, field)| {
-            (*tool == name
-                && *field == Subject::Field("file_path")
-                && !detail_call.detail_left.is_empty())
-            .then_some(detail_call.detail_title.clone())
-        });
+        let label = tool::list_label(name, subject, input, detail_call.exit_code);
+        let path = (tool::rule(name).subject == Some(Subject::Field("file_path")))
+            .then(|| detail_call.detail_title.clone());
         let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
             (self.entries[index].event.kind == Kind::Assistant) != (kind == Kind::Assistant)
@@ -1273,8 +1043,10 @@ impl Log {
         if let Some(result) = result {
             if result.denial.is_some() {
                 entry.event.kind = Kind::Denied;
-            } else if result.error && entry.event.kind != Kind::Denied {
-                entry.event.kind = Kind::Error;
+            } else if entry.event.kind != Kind::Denied {
+                entry.event.kind = tool::result_kind(entry.event.kind.clone(), &tool::result_state(
+                    &result.content, &serde_json::Value::Null, result.error,
+                ));
             }
             if !entry.missing
                 && entry
@@ -2106,6 +1878,30 @@ pub(crate) mod tests {
             Some(vec![text_section("output", &expected)])
         );
         assert!(events[0].calls[0].input.is_empty());
+    }
+
+    #[test]
+    fn captured_read_with_empty_file_content_has_no_output_sections() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let call = records.iter().find(|record| record["message"]["content"][0]["name"] == "Read").unwrap().clone();
+        let id = call["message"]["content"][0]["id"].as_str().unwrap();
+        let mut result = records.iter().find(|record| record["message"]["content"][0]["tool_use_id"] == id).unwrap().clone();
+        result["toolUseResult"]["file"]["content"] = "".into();
+        result["message"]["content"][0]["content"] = "".into();
+        let events = events_from(vec![call, result]);
+        assert_eq!(events[0].calls[0].output, Some(Vec::new()));
+    }
+
+    #[test]
+    fn captured_shell_failure_has_the_same_status_in_row_and_detail() {
+        let events = events_from(include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines().map(|line| serde_json::from_str::<Value>(line).unwrap()).collect());
+        let event = events.iter().find(|event| event.calls.iter().any(|call| call.exit_code == Some(1))).unwrap();
+        let call = event.calls.iter().find(|call| call.exit_code == Some(1)).unwrap();
+        assert!(call.title.ends_with(" (1)"), "{}", call.title);
+        assert!(event.body.contains(" (1)"), "{}", event.body);
+        assert!(call.is_error);
     }
 
     #[test]

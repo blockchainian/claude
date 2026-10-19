@@ -58,7 +58,7 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
 fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].kind, Kind::Tool);
+    assert_eq!(entries[0].kind, Kind::Error);
     assert_eq!(entries[0].body, "type (1)");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
@@ -722,10 +722,7 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     );
     assert_eq!(
         call.output,
-        Some(vec![crate::log::Section::Text {
-            label: "output".into(),
-            text: String::new(),
-        }])
+        Some(Vec::new())
     );
     assert_eq!(call.exit_code, None);
     assert_record_timing(event, &records("shell")[1]);

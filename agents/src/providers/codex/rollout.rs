@@ -1,7 +1,7 @@
 use crate::providers::text::printable;
 use crate::log::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
-use crate::providers::tool::{Format, Input, Subject};
+use crate::providers::tool::{self, Output, tool_kind, list_title};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -10,134 +10,14 @@ use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-fn tool_kind(name: &str) -> Kind {
-    match name.rsplit('.').next() {
-        Some("AskUserQuestion" | "request_user_input") => Kind::Assistant,
-        _ => Kind::Tool,
-    }
-}
-
-const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
-    subjects: &[
-        ("exec_command", Subject::Shell { description: false }),
-        ("shell", Subject::Shell { description: false }),
-        ("CommandExecution", Subject::Shell { description: false }),
-        ("apply_patch", Subject::Field("paths")),
-        ("AskUserQuestion", Subject::QuestionHeaders),
-        ("request_user_input", Subject::QuestionHeaders),
-        ("Agent", Subject::Field("description")),
-        ("Task", Subject::Field("description")),
-        ("spawn_agent", Subject::Field("task_name")),
-        ("SendMessage", Subject::Recipient),
-        ("send_message", Subject::Field("target")),
-        ("followup_task", Subject::Field("target")),
-        ("WebFetch", Subject::Field("url")),
-        ("Skill", Subject::Field("skill")),
-    ],
-    inputs: &[
-        ("exec_command", Input::Shell, Format::Text),
-        ("shell", Input::Shell, Format::Text),
-        ("CommandExecution", Input::Shell, Format::Text),
-        ("apply_patch", Input::Field(""), Format::Text),
-        ("AskUserQuestion", Input::QuestionList, Format::Text),
-        ("request_user_input", Input::QuestionList, Format::Text),
-        ("Agent", Input::Field("prompt"), Format::Markdown),
-        ("Task", Input::Field("prompt"), Format::Markdown),
-        ("spawn_agent", Input::AgentMessage, Format::Markdown),
-        ("wait_agent", Input::Field("timeout_ms"), Format::Text),
-        ("SendMessage", Input::Field("message"), Format::Markdown),
-        ("send_message", Input::Field("message"), Format::Markdown),
-        ("followup_task", Input::Field("message"), Format::Markdown),
-        ("WebFetch", Input::Field("prompt"), Format::Text),
-        ("Skill", Input::Arguments, Format::Text),
-    ],
-    expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
-};
-
-#[derive(Clone, Copy)]
-enum Output {
-    QuestionRejection,
-    Empty,
-    Hidden,
-    Wait,
-}
-
-const OUTPUTS: &[(&str, Output)] = &[
-    ("AskUserQuestion", Output::QuestionRejection),
-    ("request_user_input", Output::QuestionRejection),
-    ("spawn_agent", Output::Hidden),
-    ("send_message", Output::Empty),
-    ("followup_task", Output::Empty),
-    ("wait_agent", Output::Wait),
-];
-
-#[derive(Clone, Copy)]
-enum ListTitle {
-    Subject,
-}
-
-const LIST_TITLES: &[(&str, ListTitle)] = &[
-    ("exec_command", ListTitle::Subject),
-    ("shell", ListTitle::Subject),
-    ("CommandExecution", ListTitle::Subject),
-];
-
-fn rule<T: Copy>(name: &str, rules: &[(&str, T)]) -> Option<T> {
-    let name = name.rsplit(['.', ' ']).next().unwrap_or(name);
-    rules
-        .iter()
-        .find_map(|(tool, mode)| (*tool == name).then_some(*mode))
-}
-
-fn list_title(
-    raw_name: &str,
-    display_name: &str,
-    subject: Option<&str>,
-    input: &Value,
-    exit_code: Option<i64>,
-) -> String {
-    match rule(raw_name, LIST_TITLES) {
-        Some(ListTitle::Subject) => {
-            let title = input["description"]
-                .as_str()
-                .filter(|text| !text.trim().is_empty())
-                .or(subject.filter(|text| !text.is_empty()))
-                .unwrap_or(display_name);
-            match exit_code {
-                Some(code) => format!("{title} ({code})"),
-                None => title.to_owned(),
-            }
-        }
-        None => crate::providers::tool::list_title(display_name, subject, input),
-    }
-}
-
+#[cfg(test)]
 fn response_output(name: &str, text: &str) -> Vec<Section> {
-    output_sections(text, rule(name, OUTPUTS))
+    tool::text_output(text, tool::rule(name).output, &Value::Null)
 }
 
+#[cfg(test)]
 fn output_sections(text: &str, mode: Option<Output>) -> Vec<Section> {
-    let text = match mode {
-        Some(Output::Hidden | Output::Empty) => return Vec::new(),
-        Some(Output::Wait) => match serde_json::from_str::<Value>(text) {
-            Ok(value) if value["timed_out"] == true => "(timed out)".to_owned(),
-            Ok(value) => value["message"].as_str().unwrap_or(text).to_owned(),
-            Err(_) => text.to_owned(),
-        },
-        Some(Output::QuestionRejection) => {
-            crate::providers::tool::rejected_questions(text).unwrap_or_else(|| text.to_owned())
-        }
-        None => text.to_owned(),
-    };
-    vec![text_section("output", &text)]
-}
-
-fn apply_output_rule(name: &str, call: &mut ToolCall) {
-    match rule(name, OUTPUTS) {
-        Some(Output::Hidden) => call.hide_output = true,
-        Some(Output::Empty) => call.output = Some(Vec::new()),
-        _ => {}
-    }
+    tool::text_output(text, mode, &Value::Null)
 }
 
 const CHUNK: u64 = 64 * 1024;
@@ -224,10 +104,7 @@ impl Tasks {
             let payload = &record["payload"];
             if record["type"] != "response_item"
                 || payload["type"] != "function_call"
-                || payload["name"]
-                    .as_str()
-                    .and_then(|name| name.rsplit('.').next())
-                    != Some("update_plan")
+                || !payload["name"].as_str().is_some_and(|name| tool::rule(name).task == Some(tool::TaskAction::Plan))
             {
                 return;
             }
@@ -245,7 +122,7 @@ impl Tasks {
 }
 
 fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
-    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid Codex update_plan");
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid Codex plan");
     let arguments = tool_arguments(payload).ok_or_else(invalid)?;
     arguments["plan"]
         .as_array()
@@ -578,26 +455,9 @@ fn response_tool_name(payload: &Value) -> String {
 fn tool_body(payload: &Value) -> Option<String> {
     let name = payload["name"].as_str()?;
     // Wrapper calls are represented by their completed inner items.
-    if matches!(
-        name.rsplit('.').next(),
-        Some("exec" | "apply_patch" | "view_image")
-    ) {
-        return None;
-    }
-    let arguments = tool_arguments(payload).unwrap_or(Value::Null);
-    let raw_name = response_tool_name(payload);
-    let (name, subject, _) =
-        crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
-    if let Some(message) = crate::log::agent::tool_message(&raw_name, &arguments) {
-        return Some(message.content.text().to_owned());
-    }
-    Some(list_title(
-        &raw_name,
-        &crate::providers::tool::title_name(&name),
-        subject.as_deref(),
-        &arguments,
-        None,
-    ))
+    if tool::rule(name).wrapper || tool::tool_hidden(name) { return None; }
+    let call = response_tool_call(payload, None);
+    Some(call.agent_message.as_ref().map(|message| message.content.text().to_owned()).unwrap_or(call.title))
 }
 
 const ENCRYPTED_CONTENT: &str = "(encrypted)";
@@ -634,10 +494,9 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let raw = payload["arguments"].as_str().unwrap_or("");
     let arguments = tool_arguments(payload);
     let raw_name = response_tool_name(payload);
-    let (name, subject, mut input) = crate::providers::tool::presentation(
+    let (_, subject, mut input) = crate::providers::tool::presentation(
         &raw_name,
         arguments.as_ref().unwrap_or(&Value::Null),
-        &TOOL_RULES,
     );
     if payload["type"] == "custom_tool_call" {
         input = vec![text_section(
@@ -647,22 +506,25 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     } else if arguments.is_none() {
         input = vec![text_section("input", raw)];
     }
-    let output = output.map(|text| response_output(&raw_name, text));
-    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref(), &TOOL_RULES)
+    let state = output.map(|text| {
+        let value = serde_json::from_str(text).unwrap_or(Value::Null);
+        tool::result_state(text, &Value::Null, value["isError"] == true)
+    });
+    let output = output.map(|text| tool::text_output(text, tool::rule(&raw_name).output, arguments.as_ref().unwrap_or(&Value::Null)));
+    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref())
         .or(subject);
-    let display_name = crate::providers::tool::title_name(&name);
+    let (detail_left, detail_title) = tool::detail_titles(&raw_name, subject.as_deref());
     let mut call = ToolCall {
         agent_message: None,
-        detail_left: display_name.to_owned(),
-        detail_title: subject.clone().unwrap_or_default(),
-        show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
+        detail_left,
+        detail_title,
+        show_details: true,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
         title: list_title(
             &raw_name,
-            &display_name,
             subject.as_deref(),
             arguments.as_ref().unwrap_or(&Value::Null),
-            None,
+            state.as_ref().and_then(|state| state.exit_code),
         ),
         name: raw_name.clone(),
         started_at: None,
@@ -672,8 +534,8 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         agent_path: None,
         input,
         output,
-        exit_code: None,
-        is_error: false,
+        exit_code: state.as_ref().and_then(|state| state.exit_code),
+        is_error: state.is_some_and(|state| state.is_error),
         duration: None,
     };
     call.agent_message = arguments.as_ref().and_then(|input| crate::log::agent::tool_message(&raw_name, input));
@@ -682,7 +544,6 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     { message.content = crate::log::agent::Content::Encrypted; }
     call.agent_path = call.agent_message.as_ref().and_then(|message| message.recipient.clone());
     crate::log::agent::present(&mut call);
-    apply_output_rule(&raw_name, &mut call);
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -738,7 +599,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                     } else if let Some(text) = result.as_str() {
                         vec![result_section(text)]
                     } else {
-                        vec![text_section("result", &result.to_string())]
+                        vec![text_section("output", &result.to_string())]
                     }
                 })
                 .or_else(|| {
@@ -759,23 +620,21 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         _ => (item_type.to_owned(), item.clone(), None),
     };
     let raw_name = name;
-    let (name, subject, input) =
-        crate::providers::tool::presentation(&raw_name, &arguments, &TOOL_RULES);
-    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref(), &TOOL_RULES)
+    let (_, subject, input) =
+        crate::providers::tool::presentation(&raw_name, &arguments);
+    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref())
         .or(subject);
-    let display_name = crate::providers::tool::title_name(&name);
-    let exit_code = item["exit_code"]
-        .as_i64()
-        .filter(|code| item_type == "CommandExecution" && *code != 0);
+    let (detail_left, detail_title) = tool::detail_titles(&raw_name, subject.as_deref());
+    let state = tool::result_state("", item, false);
+    let exit_code = state.exit_code;
     let mut call = ToolCall {
         agent_message: None,
-        detail_left: display_name.to_owned(),
-        detail_title: subject.clone().unwrap_or_default(),
+        detail_left,
+        detail_title,
         show_details: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
         title: list_title(
             &raw_name,
-            &display_name,
             subject.as_deref(),
             &arguments,
             exit_code,
@@ -790,10 +649,9 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         // Completed items can have no result body; an empty output still marks completion.
         output: Some(output.unwrap_or_default()),
         exit_code,
-        is_error: item["status"] == "failed" || item["result"]["isError"] == true,
+        is_error: state.is_error,
         duration: None,
     };
-    apply_output_rule(&raw_name, &mut call);
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -929,7 +787,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         source_records: Vec::new(),
         sender: None,
         detail_body: None,
-        kind: Kind::Tool,
+        kind: tool::result_kind(Kind::Tool, &tool::result_state("", item, call.is_error)),
         body,
         paths,
         started_at,
@@ -1614,9 +1472,11 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 if let Some((_, _, offset)) = &ended {
                     source_records.insert(0, reference(*offset));
                 }
+                let is_error = call.is_error;
                 calls.push(call);
                 (
-                    tool_kind(payload["name"].as_str().unwrap()),
+                    tool::result_kind(tool_kind(payload["name"].as_str().unwrap()), &tool::result_state(
+                        ended.as_ref().map(|(_, text, _)| text.as_str()).unwrap_or(""), &Value::Null, is_error)),
                     body,
                     completed_at,
                 )
@@ -1933,10 +1793,22 @@ mod tests {
     }
 
     #[test]
+    fn captured_fetch_uses_the_shared_url_and_prompt_format() {
+        let record: Value = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines().map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| record["message"]["content"][0]["name"] == "WebFetch").unwrap();
+        let block = &record["message"]["content"][0];
+        let mut payload = block.clone();
+        payload["arguments"] = block["input"].to_string().into();
+        let call = response_tool_call(&payload, None);
+        assert!(matches!(&call.input[0], Section::Text { text, .. } if text == &format!("url: {}", block["input"]["url"].as_str().unwrap())));
+    }
+
+    #[test]
     fn output_rules_declare_agent_result_behavior() {
         for name in ["spawn_agent", "send_message", "followup_task", "wait_agent"] {
             assert!(
-                OUTPUTS.iter().any(|(tool, _)| *tool == name),
+                tool::rule(name).output.is_some(),
                 "missing output rule: {name}"
             );
         }
@@ -1946,18 +1818,14 @@ mod tests {
     fn command_rules_declare_summaries() {
         for name in ["exec_command", "shell", "CommandExecution"] {
             assert!(
-                TOOL_RULES
-                    .subjects
-                    .iter()
-                    .any(|(tool, subject)| *tool == name
-                        && matches!(subject, Subject::Shell { description: false })),
+                matches!(tool::rule(name).subject, Some(tool::Subject::Shell { description: false })),
                 "missing command subject: {name}"
             );
         }
     }
 
     #[test]
-    fn output_rules_handle_aliases_from_real_wait_payload() {
+    fn output_rules_handle_namespaces_from_real_wait_payload() {
         let record = include_str!("../../../tests/fixtures/codex-interaction/parent.jsonl")
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
@@ -1969,21 +1837,15 @@ mod tests {
             })
             .unwrap();
         let raw = record["payload"]["output"].as_str().unwrap();
-        let aliases = [
-            ("review_progress", Output::Wait),
-            ("notify", Output::Empty),
-            ("dispatch", Output::Hidden),
-        ];
         for (name, expected) in [
             (
-                "collaboration.review_progress",
+                "collaboration.wait_agent",
                 vec![text_section("output", "Wait completed.")],
             ),
-            ("collaboration.notify", Vec::new()),
-            ("collaboration.dispatch", Vec::new()),
+            ("collaboration.send_message", Vec::new()),
+            ("collaboration.spawn_agent", Vec::new()),
         ] {
-            let mode = rule(name, &aliases);
-            assert_eq!(output_sections(raw, mode), expected, "{name}");
+            assert_eq!(response_output(name, raw), expected, "{name}");
         }
         let mut timed_out: Value = serde_json::from_str(raw).unwrap();
         timed_out["timed_out"] = true.into();
@@ -2094,8 +1956,7 @@ mod tests {
             let (_, _, input) = crate::providers::tool::presentation(
                 name,
                 &tool_arguments(&payload).unwrap(),
-                &TOOL_RULES,
-            );
+                    );
             assert_eq!(call.input, input);
             assert_eq!(call.output, Some(response_output(name, "output")));
         }
@@ -2548,6 +2409,15 @@ mod tests {
     }
 
     #[test]
+    fn captured_mcp_failures_and_rejections_set_the_row_kind() {
+        for record in mcp_error_records() {
+            let event = completed_tool(&record).unwrap().unwrap();
+            let message = record["payload"]["item"]["error"]["message"].as_str().unwrap();
+            assert_eq!(event.kind, if message == "user rejected MCP tool call" { Kind::Denied } else { Kind::Error });
+        }
+    }
+
+    #[test]
     fn mcp_completed_errors_keep_reason_and_failed_state() {
         for mut record in mcp_error_records() {
             let message = record["payload"]["item"]["error"]["message"]
@@ -2628,7 +2498,7 @@ mod tests {
     }
 
     #[test]
-    fn question_rejection_moves_recorded_questions_before_explanation() {
+    fn question_rejection_uses_the_shared_rejection_format() {
         let payload = input_records("pending")
             .into_iter()
             .find(|record| record["payload"]["name"] == "request_user_input")
@@ -2642,19 +2512,9 @@ mod tests {
         )
         .unwrap();
         let output = result["message"]["content"][0]["content"].as_str().unwrap();
-        let (explanation, questions) = output.split_once("Questions asked:").unwrap();
         let call = response_tool_call(&payload, Some(output));
-        assert_eq!(
-            call.output.unwrap(),
-            vec![text_section(
-                "output",
-                &format!(
-                    "Questions asked:{}\n\n{}",
-                    questions.trim_end(),
-                    explanation.trim_end()
-                )
-            )]
-        );
+        assert_eq!(call.output.unwrap(), vec![text_section("output", "Chat about this\n\nYou have not answered all questions")]);
+        assert!(call.is_error);
     }
 
     #[test]

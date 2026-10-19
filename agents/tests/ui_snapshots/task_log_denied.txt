@@ -16,7 +16,7 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                Edit                                            10s
+ Edit                                                                                           10s
 
                                                   ↓
  Reason: The server-side auto mode classifier judged this action dangerous (it gave no e…

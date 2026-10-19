@@ -196,8 +196,8 @@ fn terminal_failed_plain_output_uses_default_foreground() {
             "mcp-failed-output",
             include_str!("../fixtures/codex-mcp-errors.jsonl"),
             (
-                "Codebase-memory-mcp trace path",
-                "Codebase-memory-mcp trace path",
+                "codebase-memory-mcp trace path",
+                "codebase-memory-mcp trace path",
             ),
             "user rejected MCP tool call",
         ),
