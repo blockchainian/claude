@@ -170,3 +170,85 @@ fn terminal_shell_file_read_colors() {
         }
     }
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_shell_multi_file_read_colors() {
+    let command = "sed -n '1p' a.rs; echo '---'; head -n 1 b.py && cat Cargo.toml";
+    let lines = [
+        "let answer = \"rust-output\";",
+        "---",
+        "print(\"python-output\")",
+        "name = \"toml-output\"",
+    ];
+    let body = lines.join("\n");
+    let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let mut calls: Vec<serde_json::Value> = include_str!("../fixtures/claude-tool-calls.jsonl")
+        .lines()
+        .take(2)
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    calls[0]["message"]["content"][0]["input"]["command"] = command.into();
+    calls[1]["toolUseResult"]["stdout"] = body.clone().into();
+    calls[1]["toolUseResult"]["stderr"] = "".into();
+    calls[1]["message"]["content"][0]["content"] = body.into();
+    records.extend(calls);
+    let transcript = records
+        .iter()
+        .map(|record| format!("{record}\n"))
+        .collect::<String>();
+    let (_directory, tmux, _) = start_probe_with_transcript("multi-file-read", &transcript);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| capture.contains(lines[3]));
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let path = std::env::temp_dir().join("agents-multi-file-read.ansi");
+    std::fs::write(&path, &colored).unwrap();
+    let parser = captured_screen(&colored, 200, 50);
+    let output_start = capture
+        .lines()
+        .position(|line| line.contains(lines[0]))
+        .unwrap();
+    let rows: Vec<_> = lines
+        .iter()
+        .map(|needle| {
+            capture
+                .lines()
+                .enumerate()
+                .skip(output_start)
+                .find_map(|(row, line)| line.contains(needle).then_some((row, line)))
+                .unwrap_or_else(|| panic!("missing {needle:?}: {capture}"))
+        })
+        .collect();
+    for pair in rows.windows(2) {
+        assert_eq!(
+            pair[0].0 + 1,
+            pair[1].0,
+            "output is not continuous: {capture}"
+        );
+    }
+    let color = |index: usize, needle: &str| {
+        let (row, line) = rows[index];
+        parser
+            .screen()
+            .cell(
+                row as u16,
+                line[..line.find(needle).unwrap()].width() as u16,
+            )
+            .unwrap()
+            .fgcolor()
+    };
+    for (index, identifier, string) in [
+        (0, "answer", "rust-output"),
+        (2, "print", "python-output"),
+        (3, "name", "toml-output"),
+    ] {
+        assert_ne!(color(index, identifier), color(index, string), "{capture}");
+    }
+    let verdict =
+        serde_json::json!({"verdict": "pass", "continuous_rows": rows.len(), "capture": path});
+    std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
+    println!("{verdict}");
+}

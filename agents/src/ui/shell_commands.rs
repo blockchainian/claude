@@ -1,13 +1,13 @@
 use std::ops::Range;
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct Command {
+pub(crate) struct Command {
     pub range: Range<usize>,
     pub and_next: bool,
 }
 
 /// Returns source ranges only when shell grouping is unambiguous.
-pub(super) fn split(source: &str) -> Option<Vec<Command>> {
+pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
     let bytes = source.as_bytes();
     let mut commands = Vec::new();
     let mut groups = Vec::new();

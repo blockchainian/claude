@@ -257,8 +257,12 @@ impl Part {
                         for span in &mut line.spans {
                             let paths = super::paths::text_paths(&span.content, cwd);
                             span.content = super::line_truncation::abbreviate_paths_for_wrap(
-                                &span.content, &paths, width, cwd,
-                            ).into();
+                                &span.content,
+                                &paths,
+                                width,
+                                cwd,
+                            )
+                            .into();
                         }
                     }
                 }
@@ -790,8 +794,15 @@ mod tests {
             event.calls.truncate(1);
             let detail = detail(&event, "event time".into(), Style::new().dim());
             let title = &detail.sections[0].title;
-            let clock = event.calls[0].started_at.map(|at| at.with_timezone(&chrono::Local).format("%H:%M:%S").to_string());
-            assert_eq!(title.time.as_deref(), clock.as_deref().or(Some("event time")));
+            let clock = event.calls[0].started_at.map(|at| {
+                at.with_timezone(&chrono::Local)
+                    .format("%H:%M:%S")
+                    .to_string()
+            });
+            assert_eq!(
+                title.time.as_deref(),
+                clock.as_deref().or(Some("event time"))
+            );
             let body: Vec<_> = detail.sections[0]
                 .groups
                 .iter()
@@ -945,7 +956,12 @@ mod tests {
             let parts = &detail.sections[0].groups[0].parts;
             if matches!(
                 kind,
-                Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent | Kind::QueuedUser | Kind::QueuedSystem
+                Kind::User
+                    | Kind::Compaction
+                    | Kind::Assistant
+                    | Kind::Agent
+                    | Kind::QueuedUser
+                    | Kind::QueuedSystem
             ) {
                 assert_eq!(parts.len(), 1);
                 assert!(parts[0].markdown());
@@ -1285,6 +1301,25 @@ mod tests {
         assert!(matches!(parts[0].body, Body::Code(ref lang) if lang == "rust"));
     }
 
+    #[test]
+    fn adjacent_output_blocks_keep_only_source_lines() {
+        let mut parts = Vec::new();
+        for section in [
+            crate::providers::tool::code_section("stdout", "rs", "fn main() {}\n"),
+            Section::Text {
+                label: "stdout".into(),
+                text: "---\n".into(),
+            },
+            crate::providers::tool::code_section("stdout", "py", "print('ready')\n"),
+            crate::providers::tool::code_section("stdout", "toml", "[package]"),
+        ] {
+            push_section(&mut parts, &section, Style::new(), true);
+        }
+        assert_eq!(
+            texts(&parts, 80),
+            ["fn main() {}", "---", "print('ready')", "[package]"]
+        );
+    }
     const SHELL_SAMPLE: &str = r#"cd ~/Code/blockchainian/dot && F="darwin/Library/Application Support/Code/User/settings.json" && git diff --stat -- "$F"; sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F" && sed -n 6,9p "$F""#;
 
     fn command_part(command: &str) -> Part {

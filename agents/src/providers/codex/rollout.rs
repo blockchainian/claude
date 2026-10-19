@@ -2077,6 +2077,37 @@ mod tests {
     }
 
     #[test]
+    fn shell_multiple_file_reads_highlight_stdout() {
+        let mut record = tool_records()
+            .into_iter()
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        let command = "sed -n '1p' src/main.rs\necho '---'; head -n 1 probe.py && cat Cargo.toml";
+        let stdout = "fn main() {}\n---\nprint('ready')\n[package]\nname = \"agents\"";
+        record["payload"]["item"]["command"][2] = command.into();
+        record["payload"]["item"]["aggregated_output"] = stdout.into();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file.as_file(), "{record}").unwrap();
+        let events = tail(file.path(), 20).unwrap();
+        let output = events[0].calls[0].output.as_ref().unwrap();
+        assert_eq!(output.len(), 4);
+        assert_eq!(
+            output[0],
+            tool::code_section("output", "rs", "fn main() {}\n")
+        );
+        assert!(matches!(&output[1], Section::Text { label, text }
+            if label == "output" && text == "---\n"));
+        assert_eq!(
+            output[2],
+            tool::code_section("output", "py", "print('ready')\n")
+        );
+        assert_eq!(
+            output[3],
+            tool::code_section("output", "toml", "[package]\nname = \"agents\"")
+        );
+    }
+
+    #[test]
     fn shell_response_titles_use_command_subject_and_shell_detail() {
         let record = tool_records()
             .into_iter()

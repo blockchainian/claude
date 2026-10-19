@@ -37,7 +37,7 @@ mod render;
 mod reset_credit;
 mod rows;
 mod selection_tabs;
-mod shell_commands;
+pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;

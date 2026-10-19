@@ -1950,6 +1950,33 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shell_multiple_file_reads_highlight_stdout() {
+        let mut records: Vec<Value> =
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .take(2)
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let command = "sed -n '1p' src/main.rs\necho '---'; head -n 1 probe.py && cat Cargo.toml";
+        let stdout = "fn main() {}\n---\nprint('ready')\n[package]\nname = \"agents\"";
+        records[0]["message"]["content"][0]["input"]["command"] = command.into();
+        records[1]["toolUseResult"]["stdout"] = stdout.into();
+        records[1]["toolUseResult"]["stderr"] = "".into();
+        records[1]["message"]["content"][0]["content"] = stdout.into();
+        let events = events_from(records);
+        let output = events[0].calls[0].output.as_ref().unwrap();
+        assert_eq!(output.len(), 4);
+        assert_eq!(output[0], code_section("stdout", "rs", "fn main() {}\n"));
+        assert!(matches!(&output[1], Section::Text { label, text }
+            if label == "stdout" && text == "---\n"));
+        assert_eq!(output[2], code_section("stdout", "py", "print('ready')\n"));
+        assert_eq!(
+            output[3],
+            code_section("stdout", "toml", "[package]\nname = \"agents\"")
+        );
+    }
+
+    #[test]
     fn tool_calls_keep_input_and_result_sections() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
