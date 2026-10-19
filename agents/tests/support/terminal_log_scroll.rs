@@ -329,3 +329,21 @@ fn terminal_scrollbar_uses_right_edge_blocks_below_rule() {
     }
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_log_scroll_footer_shows_scrolled_off_title() {
+    let (_directory, tmux, _) = start_probe_with_transcript("footer-title", &scroll_transcript());
+    let capture = tmux.capture_when(|text| text.contains("scroll after"));
+    let row = capture
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains("scroll after"))
+        .map(|(row, _)| row)
+        .max()
+        .unwrap();
+    tmux.mouse(64, 90, row, false);
+    let entered = tmux.capture_when(|text| text.contains("window row 60"));
+    let footer = entered.lines().last().unwrap();
+    assert!(footer.contains("Assistant"), "{footer}");
+}
