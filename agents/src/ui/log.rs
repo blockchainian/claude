@@ -114,12 +114,7 @@ impl View {
             } else {
                 start + index + 1 == matching.len()
             };
-            let now = if self.log_sort == LogSort::Duration {
-                self.last_update
-            } else {
-                now
-            };
-            let time = event_time(event, session, last, now);
+            let time = event_time(event, session, last, now, self.log_sort);
             let links = render_event(
                 event,
                 &time,
@@ -169,31 +164,40 @@ impl View {
         let Some(event) = self.visible_log_event() else {
             return;
         };
-        let time = event_time(event, session, self.is_newest_shown(), now);
+        let time = event_time(event, session, self.is_newest_shown(), now, self.log_sort);
         let list_links = self.viewport.borrow().log_links.clone();
         self.render_event_detail(event, &time, area, buf, &session.cwd, now);
         self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
-    /// Draws the button that jumps back to the newest row at the time column’s right edge while
-    /// an older event is selected and new events have arrived.
+    /// Draws the duration label or the New button at the time column’s right edge.
+    /// The button appears while an older event is selected and new events have arrived.
     pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_jump = Rect::default();
-        if self.log_sort == LogSort::Duration || self.following_log() {
+        viewport.log_label = Rect::default();
+        let label = if self.log_sort == LogSort::Duration {
             viewport.log_unseen = 0;
-            return;
-        }
-        if viewport.log_unseen == 0 {
-            return;
-        }
-        let label = format!(" ↓ {} New ", viewport.log_unseen);
+            " duration ".to_owned()
+        } else {
+            if self.following_log() {
+                viewport.log_unseen = 0;
+                return;
+            }
+            if viewport.log_unseen == 0 {
+                return;
+            }
+            format!(" ↓ {} New ", viewport.log_unseen)
+        };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
         let right = viewport.log.right().saturating_add(1).min(area.right());
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
         Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);
-        viewport.log_jump = jump;
+        viewport.log_label = jump;
+        if self.log_sort == LogSort::Time {
+            viewport.log_jump = jump;
+        }
     }
 
     /// Draws the selected event as scrolling sections, including their titles and times.
@@ -243,7 +247,9 @@ impl View {
                 layout
             }
         };
-        if (!shows_calls(event) || (event.calls.len() == 1 && event.calls[0].started_at.is_none()))
+        if (!shows_calls(event)
+            || (event.calls.len() == 1
+                && (self.log_sort == LogSort::Duration || event.calls[0].started_at.is_none())))
             && let Some((_, span)) = layout.times.first_mut()
         {
             span.content = time.to_owned().into();
@@ -761,14 +767,27 @@ impl View {
             .then(|| super::tool_detail::running_redraw_in(now))
     }
 
-    /// How long until the newest visible row's time changes, or `None` if it never does.
+    /// How long until a visible row's time changes, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
-        if self.log_sort == LogSort::Duration {
-            return None;
-        }
         let session = self.selected_row()?;
         if self.log_session.as_ref() != Some(&session.id) {
             return None;
+        }
+        if self.log_sort == LogSort::Duration {
+            let viewport = self.viewport.borrow();
+            let height = viewport
+                .log
+                .height
+                .saturating_sub(u16::from(self.log_search.active()));
+            return self
+                .shown_log_events()
+                .skip(self.log_scroll())
+                .take(usize::from(height))
+                .filter_map(|(index, event)| {
+                    mode_row_time(event, session, index + 1 == self.log.len(), self.log_sort)
+                })
+                .filter_map(|time| row_time_changes_in(&time, now))
+                .min();
         }
         let event = self.shown_log_events().last()?.1;
         if self.viewport.borrow().log.height > 0 && self.log_scroll() < self.log_max_scroll() {
@@ -825,15 +844,26 @@ pub(super) fn sort_duration(
     last_update: DateTime<Utc>,
     last: bool,
 ) -> Option<chrono::Duration> {
-    if matches!(event.kind, Kind::User | Kind::Assistant) {
-        return event
-            .previous_end
-            .map(|previous| event.started_at - previous);
-    }
-    match row_time(event, session, last) {
+    match mode_row_time(event, session, last, LogSort::Duration)? {
         RowTime::Settled(duration) => Some(duration),
         RowTime::Running(start) => Some(last_update - start),
-        RowTime::Clock(_) | RowTime::Ago(_) => None,
+        RowTime::Clock(_) | RowTime::Ago(_) => unreachable!("duration rows have elapsed times"),
+    }
+}
+
+fn mode_row_time(event: &Event, session: &Session, last: bool, sort: LogSort) -> Option<RowTime> {
+    if sort == LogSort::Time {
+        return Some(row_time(event, session, last));
+    }
+    match event.kind {
+        Kind::User | Kind::Assistant => event
+            .previous_end
+            .map(|previous| RowTime::Settled(event.started_at - previous)),
+        Kind::Tool | Kind::Error | Kind::Denied => match row_time(event, session, last) {
+            time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
+            RowTime::Clock(_) | RowTime::Ago(_) => None,
+        },
+        _ => None,
     }
 }
 
@@ -905,8 +935,16 @@ fn row_time_changes_in(time: &RowTime, now: DateTime<Utc>) -> Option<std::time::
     }
 }
 
-fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) -> String {
-    format_row_time(&row_time(event, session, last), now)
+fn event_time(
+    event: &Event,
+    session: &Session,
+    last: bool,
+    now: DateTime<Utc>,
+    sort: LogSort,
+) -> String {
+    mode_row_time(event, session, last, sort)
+        .map(|time| format_row_time(&time, now))
+        .unwrap_or_default()
 }
 
 /// Centers a one-row label of `width` on the panel midline, clear of the clock column's gap.
@@ -1720,7 +1758,13 @@ pub(super) mod log_markdown {
             event.duration,
             Some(chrono::Duration::nanoseconds(370_339_250))
         );
-        let time = event_time(event, &session, true, event.ended_at.unwrap());
+        let time = event_time(
+            event,
+            &session,
+            true,
+            event.ended_at.unwrap(),
+            LogSort::Time,
+        );
         assert_eq!(time, "370ms");
         let area = Rect::new(0, 0, 40, 1);
         let mut buffer = Buffer::empty(area);
@@ -1769,9 +1813,12 @@ pub(super) mod log_markdown {
         let previous = event.previous_end.unwrap();
         session.last_record_at = Some(previous + chrono::Duration::seconds(30));
         let now = previous + chrono::Duration::seconds(120);
-        assert_eq!(event_time(event, &session, true, now), "2m 0s");
+        assert_eq!(
+            event_time(event, &session, true, now, LogSort::Time),
+            "2m 0s"
+        );
         session.status = SessionStatus::Ready;
-        assert_eq!(event_time(event, &session, true, now), "30s");
+        assert_eq!(event_time(event, &session, true, now, LogSort::Time), "30s");
     }
 
     #[test]

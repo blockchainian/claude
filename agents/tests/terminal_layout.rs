@@ -3019,7 +3019,7 @@ mod terminal_await_output;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_duration_sort_border_spacing() {
+fn terminal_duration_sort_jump_position() {
     let mut captures = Vec::new();
     for width in [80, 200] {
         let (_directory, tmux, _transcript) = start_probe("duration-border");
@@ -3055,10 +3055,9 @@ fn terminal_duration_sort_border_spacing() {
             .find(|row| row.contains("duration"))
             .unwrap();
         assert!(!border.contains("Sort · "), "{capture}");
-        assert_eq!(border.width(), width, "{capture}");
-        // The log viewport ends before the screen's one-cell right padding.
-        let border = border.strip_suffix('─').unwrap();
-        assert!(border.ends_with(" duration╶─"), "{capture}");
+        // tmux omits trailing blank cells, including the label's final space.
+        assert!(border.ends_with(" duration"), "{capture}");
+        assert_eq!(border.width(), width - 1, "{capture}");
         if width < 150 {
             assert!(border.contains("medium"), "{capture}");
         }

@@ -475,10 +475,8 @@ impl View {
                 Rect::new(left, model_y, area.right().saturating_sub(left), 1),
                 buf,
             );
-            let sort_label = self.render_log_sort(self.viewport.borrow().log_borders[0], buf);
             self.render_log_model(
                 Rect::new(left, model_y, area.right().saturating_sub(left), 1),
-                sort_label,
                 buf,
             );
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
@@ -824,19 +822,8 @@ impl View {
         }
     }
 
-    fn render_log_sort(&self, border: Rect, buf: &mut Buffer) -> Rect {
-        if self.log_sort != LogSort::Duration || border.is_empty() {
-            return Rect::default();
-        }
-        render_rule_ends(border, 0, None, Some(Line::from("duration").dim()), buf)
-            .1
-            // Reserve the label's leading space as well as its text for model controls.
-            .map(|area| Rect::new(area.x - 1, area.y, area.width + 1, area.height))
-            .unwrap_or_default()
-    }
-
     /// Groups the model and effort on the left; each value opens its own picker.
-    fn render_log_model(&self, rule: Rect, sort_label: Rect, buf: &mut Buffer) {
+    fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
         let (model, effort) = match (self.selected_row(), self.selected_draft()) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
             (Some(session), _) => (
@@ -858,13 +845,12 @@ impl View {
             (None, None) => return,
         };
         let separator = super::title_rule::SEPARATOR;
-        let jump = self.viewport.borrow().log_jump;
-        let right = [jump, sort_label]
-            .into_iter()
-            .filter(|area| area.intersects(rule))
-            .map(|area| area.x.saturating_sub(1))
-            .min()
-            .unwrap_or_else(|| rule.right().saturating_sub(2));
+        let label = self.viewport.borrow().log_label;
+        let right = if label.intersects(rule) {
+            label.x.saturating_sub(1)
+        } else {
+            rule.right().saturating_sub(2)
+        };
         let mut x = rule.x + 2;
         let values: Vec<_> = [(model, Field::Model), (effort, Field::Effort)]
             .into_iter()
@@ -1973,7 +1959,7 @@ mod background_title_tests {
     use unicode_width::UnicodeWidthStr;
 
     #[test]
-    fn duration_sort_label_uses_top_border_and_clears_model_controls() {
+    fn duration_label_occupies_jump_position_without_click_target_or_overlap() {
         let mut view = View::default();
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
@@ -1982,55 +1968,43 @@ mod background_title_tests {
             effort: Some("high".into()),
             branch: "main".into(),
         });
-        for width in [44, 100, 150, 200] {
-            for sort in [LogSort::Time, LogSort::Duration] {
-                view.log_sort = sort;
-                let area = Rect::new(0, 0, width, 40);
-                let mut buf = Buffer::empty(area);
-                view.render(area, &mut buf);
-                let border = view.viewport.borrow().log_borders[0];
-                let text: String = (border.x..border.right())
-                    .map(|x| buf[(x, border.y)].symbol())
+        for width in [44, 80, 100, 149, 150, 200] {
+            view.log_sort = LogSort::Duration;
+            let area = Rect::new(0, 0, width, 40);
+            let mut buf = Buffer::empty(area);
+            view.render(area, &mut buf);
+            let viewport = view.viewport.borrow();
+            let top = viewport.log_borders[0];
+            let y = if width < WIDE_LAYOUT_COLUMNS {
+                top.y
+            } else {
+                viewport.log_borders[1].y
+            };
+            let label = Rect::new(viewport.log.right() + 1 - 10, y, 10, 1);
+            let text: String = (label.x..label.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect();
+            assert_eq!(text, " duration ", "width {width}");
+            let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/ui_snapshots/log_duration_label_{width}.txt"));
+            let snapshot = format!("{row}\n");
+            if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+                std::fs::write(&path, &snapshot).unwrap();
+            }
+            assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+            assert!(viewport.log_jump.is_empty());
+            for x in label.x..label.right() {
+                assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+            }
+            for (target, _) in &viewport.field_targets {
+                assert!(!target.intersects(label), "width {width}: {target:?}");
+            }
+            if width >= WIDE_LAYOUT_COLUMNS {
+                let text: String = (top.x..top.right())
+                    .map(|x| buf[(x, top.y)].symbol())
                     .collect();
-                assert_eq!(text.contains("duration"), sort == LogSort::Duration);
-                assert!(!text.contains("Sort · "), "{text}");
-                if sort == LogSort::Duration {
-                    assert!(text.ends_with(" duration╶─"), "{text}");
-                    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-                        "tests/ui_snapshots/log_duration_border_{width}.txt"
-                    ));
-                    let snapshot = format!("{text}\n");
-                    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
-                        std::fs::write(&path, &snapshot).unwrap();
-                    }
-                    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
-                    let label_x = border.right() - 10;
-                    assert_eq!(buf[(label_x - 1, border.y)].symbol(), " ");
-                    for x in label_x..border.right() - 1 {
-                        assert!(
-                            buf[(x, border.y)]
-                                .modifier
-                                .contains(ratatui::style::Modifier::DIM)
-                        );
-                    }
-                    if width < WIDE_LAYOUT_COLUMNS {
-                        for field in [Field::Model, Field::Effort] {
-                            let rect = view
-                                .viewport
-                                .borrow()
-                                .field_targets
-                                .iter()
-                                .find(|(_, value)| *value == field)
-                                .unwrap()
-                                .0;
-                            assert_eq!(rect.y, border.y);
-                            assert!(rect.right() + 1 < label_x);
-                            if field == Field::Effort {
-                                assert_eq!(buf[(rect.right(), border.y)].symbol(), " ");
-                            }
-                        }
-                    }
-                }
+                assert!(!text.contains("duration"));
             }
         }
     }
