@@ -10161,19 +10161,31 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                     .find(|(_, f)| *f == Field::WeeklyUsage)
                     .unwrap()
                     .0;
+                for (_, tab) in &viewport.tabs {
+                    assert!(target.right() < tab.x || target.x > tab.right());
+                    let gap = if tab.x < target.x {
+                        tab.right()
+                    } else {
+                        target.right()
+                    };
+                    assert_eq!(buffer[(gap, y)].symbol(), " ");
+                    assert_eq!(buffer[(gap, y)].bg, buffer[(width / 2, y)].bg);
+                }
                 let half = (target.width - 1) / 2;
-                // Both bars reserve the longer provider label and the maximum percentage.
-                let bar = half - 6 - 1 - 4 - 1;
-                let dots = (f64::from(bar * 2) * used / 100.0).round() as u16;
-                for dot in 0..bar * 2 {
+                // Both bars grow toward the midline and stop before the percentage.
+                let bar = half - 6 - 1;
+                let number = format!("{used:.0}%");
+                let capacity = bar - number.len() as u16 - 1;
+                let dots = ((f64::from(bar * 2) * used / 100.0).round() as u16).min(capacity * 2);
+                for dot in 0..capacity * 2 {
                     let left_x = target.x + 7 + dot / 2;
                     let right_x = target.right() - 8 - dot / 2;
-                    let left_bit = if dot % 2 == 0 { 0x02 } else { 0x10 };
-                    let right_bit = if dot % 2 == 0 { 0x10 } else { 0x02 };
+                    let left_bit = if dot % 2 == 0 { 0x47 } else { 0xb8 };
+                    let right_bit = if dot % 2 == 0 { 0xb8 } else { 0x47 };
                     for (x, bit) in [(left_x, left_bit), (right_x, right_bit)] {
                         let cell = &buffer[(x, y)];
                         let bits = cell.symbol().chars().next().unwrap() as u32;
-                        let on = (0x2800..=0x28ff).contains(&bits) && (bits - 0x2800) & bit != 0;
+                        let on = (0x2800..=0x28ff).contains(&bits) && (bits - 0x2800) & bit == bit;
                         assert_eq!(on, dot < dots, "{width}, {used}, {dot}, {x}");
                         if on {
                             assert_eq!(
@@ -10183,6 +10195,8 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                         }
                     }
                 }
+                assert_eq!(buffer[(target.right() - 6, y)].symbol(), "C");
+                assert_eq!(buffer[(target.right() - 7, y)].symbol(), " ");
                 let filled = dots.div_ceil(2);
                 let number = format!("{used:.0}%");
                 let left_number = target.x + 7 + filled + 1;

@@ -40,23 +40,25 @@ fn compact_provider(
     use_colors: bool,
 ) -> Line<'static> {
     let used = 100 - usage.left_percent();
-    let bar_width = half - COMPACT_TEXT_WIDTH;
-    let dots = (f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize;
-    // The activity strip's second dot row, mirrored at half-cell precision.
-    let full = "⠒".repeat(dots / 2);
+    let number = format!("{used}%");
+    let bar_width = half - COMPACT_LABEL_WIDTH - 1;
+    let capacity = usize::from(bar_width) - number.len() - 1;
+    let dots =
+        ((f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize).min(capacity * 2);
+    // Fill all four dot rows, mirrored at half-cell precision.
+    let full = "⣿".repeat(dots / 2);
     let partial = if dots.is_multiple_of(2) {
         ""
     } else if left {
-        "⠂"
+        "⡇"
     } else {
-        "⠐"
+        "⢸"
     };
     let bar = if left {
         format!("{full}{partial}")
     } else {
         format!("{partial}{full}")
     };
-    let number = format!("{used}%");
     let empty = Span::raw(
         " ".repeat(usize::from(half - COMPACT_LABEL_WIDTH - 2) - dots.div_ceil(2) - number.len()),
     );
@@ -70,7 +72,7 @@ fn compact_provider(
     );
     let bar = Span::styled(bar, super::style::timeline_style(use_colors));
     let label = Span::raw(format!(
-        "{name:>width$}",
+        "{name:<width$}",
         width = usize::from(COMPACT_LABEL_WIDTH)
     ));
     if left {
@@ -125,8 +127,8 @@ pub(super) fn render(
         };
         // Keep a blank center cell and shrink both sides together against tabs.
         let half = ((budget.saturating_sub(1)) / 2)
-            .min(available[0])
-            .min(available[1]);
+            .min(available[0].saturating_sub(1))
+            .min(available[1].saturating_sub(1));
         if half < COMPACT_TEXT_WIDTH {
             return None;
         }

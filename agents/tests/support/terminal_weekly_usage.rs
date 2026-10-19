@@ -170,6 +170,7 @@ fn assert_compact(line: &str, width: usize) {
         line.contains("Claude ") && line.contains(" Codex"),
         "{line}"
     );
+    assert!(!line.contains("  Codex"), "{line}");
     assert!(line.contains("21%") && line.contains("16%"), "{line}");
     assert!(!line.contains('·') && !line.contains('█'), "{line}");
     assert!(
@@ -178,9 +179,9 @@ fn assert_compact(line: &str, width: usize) {
     );
     let start = line[..line.find("Claude").unwrap()].width();
     let end = line[..line.find("Codex").unwrap()].width() + "Codex".width();
-    assert_eq!((start + end - 1) / 2, width / 2, "{line}");
+    assert_eq!((start + end) / 2, width / 2, "{line}");
     assert!(
-        cells[..width / 2].contains(&'⠒') && cells[width / 2 + 1..].contains(&'⠒'),
+        cells[..width / 2].contains(&'⣿') && cells[width / 2 + 1..].contains(&'⣿'),
         "{line}"
     );
 }
