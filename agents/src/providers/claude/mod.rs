@@ -6,6 +6,7 @@ mod attach;
 #[cfg(test)]
 mod attach_live_tests;
 mod background;
+pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;
 mod defaults;

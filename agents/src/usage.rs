@@ -33,6 +33,7 @@ pub struct Series {
     pub bins: BTreeMap<i64, Bin>,
     context_tokens: Option<u64>,
     context_window: Option<u64>,
+    claude_context: crate::providers::claude::context::Context,
     /// Bytes of complete records read so far.
     read: u64,
     /// When the next request started: the latest input record, else the end of the last request.
@@ -89,11 +90,14 @@ impl Series {
                 let Some(ClaudeMessage {
                     id: Some(id),
                     usage: Some(usage),
+                    model,
                 }) = record.message
                 else {
                     return;
                 };
                 let prompt = usage.prompt_tokens();
+                self.context_tokens = Some(prompt);
+                self.context_window = self.claude_context.window(model.as_deref(), prompt);
                 let output = usage.output_tokens;
                 match &mut self.last_request {
                     Some((_, counted_output)) if self.message.as_ref() == Some(&id) => {
@@ -219,6 +223,7 @@ struct ClaudeRecord {
 
 #[derive(Deserialize)]
 struct ClaudeMessage {
+    model: Option<String>,
     id: Option<String>,
     usage: Option<ClaudeUsage>,
 }
@@ -301,15 +306,34 @@ mod tests {
     const CLAUDE_TOOL_USE: &str = r#"{"parentUuid":"c","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_01EYBBw4","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"ls"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":36336,"cache_read_input_tokens":14755,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":36336},"output_tokens":260,"service_tier":"standard"}},"type":"assistant","uuid":"d","timestamp":"2026-10-14T10:25:37.804Z","sessionId":"s"}"#;
 
     #[test]
-    fn context_usage_claude_is_unavailable() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-        let mut usage = Series::default();
-        usage.update(&path, ProviderId::Claude).unwrap();
-        assert_eq!(usage.context_percent(), None);
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/claude-main-model-history.jsonl");
-        usage = Series::default();
-        usage.update(&path, ProviderId::Claude).unwrap();
+    fn context_usage_claude_uses_model_window_table() {
+        for (fixture, percent) in [("opus", Some(24)), ("old", Some(12)), ("unknown", None)] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/fixtures/claude-context/{fixture}.jsonl"));
+            let mut usage = Series::default();
+            usage.update(&path, ProviderId::Claude).unwrap();
+            assert_eq!(usage.context_percent(), percent, "{fixture}");
+        }
+    }
+
+    #[test]
+    fn context_usage_claude_remembers_long_context_after_compaction() {
+        let mut record: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/claude-context/opus.jsonl"))
+                .unwrap();
+        record["message"]["model"] = "claude-opus-4-6".into();
+        let first = record.to_string();
+        record["message"]["id"] = "compacted-response".into();
+        record["message"]["usage"]["cache_read_input_tokens"] = 50_000.into();
+        let second = record.to_string();
+        let (mut file, mut usage) = series(ProviderId::Claude, &[&first]);
+        assert_eq!(usage.context_percent(), Some(24));
+        writeln!(file, "{second}").unwrap();
+        usage.update(file.path(), ProviderId::Claude).unwrap();
+        assert_eq!(usage.context_percent(), Some(5));
+        record["message"]["model"] = "unlisted-model".into();
+        writeln!(file, "{record}").unwrap();
+        usage.update(file.path(), ProviderId::Claude).unwrap();
         assert_eq!(usage.context_percent(), None);
     }
 
@@ -353,7 +377,7 @@ mod tests {
             let (_file, usage) = series(provider, &[]);
             assert_eq!(usage.context_percent(), None);
         }
-        for model in [Some("claude-opus-5-5"), Some("claude-opus-5-5[1m]"), None] {
+        for model in [Some("unlisted-model"), None] {
             let mut message: serde_json::Value = serde_json::from_str(CLAUDE_THINKING).unwrap();
             message["message"]["model"] = model.into();
             let message = message.to_string();

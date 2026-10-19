@@ -10427,7 +10427,7 @@ mod codex_background_tests;
 #[test]
 fn context_usage_on_details_border_keeps_status_and_elapsed() {
     for (provider, fixture, percent) in [
-        (ProviderId::Claude, "transcript.jsonl", None),
+        (ProviderId::Claude, "transcript.jsonl", Some(5)),
         (ProviderId::Codex, "codex-latest-activity.jsonl", Some(9)),
     ] {
         let (mut view, now) = log_fixture();
