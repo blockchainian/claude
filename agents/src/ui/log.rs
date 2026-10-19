@@ -1362,7 +1362,10 @@ pub(super) fn render_footer_title(
     if end <= start {
         return;
     }
-    let title = truncate_line_with_ellipsis_if_overflow(title, usize::from(end - start));
+    let title = truncate_line_with_ellipsis_if_overflow(
+        Line::from(title.to_string()).dim(),
+        usize::from(end - start),
+    );
     let width = title.width() as u16;
     let centered = super::centering::centered_x(columns.panel, columns.text, width);
     let x = if centered >= start {

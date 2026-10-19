@@ -643,3 +643,29 @@ fn log_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
     );
     assert!(footers.iter().any(|footer| footer.contains("Second tool")));
 }
+
+#[test]
+fn log_detail_footer_title_is_muted() {
+    let (mut view, _) = fixture(true);
+    screen_rows(&view, 100, 40);
+    detail_wheel(&mut view, true);
+    let area = Rect::new(0, 0, 100, 40);
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer);
+    let footer = (0..100)
+        .map(|x| buffer[(x, 39)].symbol())
+        .collect::<String>();
+    let x = column_of(&footer, "Assistant").unwrap_or_else(|| panic!("{footer}")) as u16;
+    for x in x..x + "Assistant".len() as u16 {
+        let cell = &buffer[(x, 39)];
+        assert!(
+            cell.modifier.contains(ratatui::style::Modifier::DIM),
+            "{cell:?}"
+        );
+        assert_eq!(cell.fg, ratatui::style::Color::Reset, "{cell:?}");
+        assert!(
+            !cell.modifier.contains(ratatui::style::Modifier::BOLD),
+            "{cell:?}"
+        );
+    }
+}
