@@ -38,12 +38,11 @@ fn details_section_order_preserves_clicks_and_copies() {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n");
-        let mut sections = vec![];
+        let mut sections = vec!["Background"];
         if activity {
             sections.push("Last activity");
         }
         sections.extend([
-            "Background",
             "Update",
             "Prompt",
             "Queued prompt",

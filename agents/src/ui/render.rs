@@ -617,23 +617,38 @@ impl View {
     /// Centers the bold status on the rule row `rule`, whose end cells are its corners, a space
     /// apart from the rule on each side, with the elapsed time at its right end.
     fn render_status_rule(&self, rule: Rect, buf: &mut Buffer, now: chrono::DateTime<chrono::Utc>) {
-        let session = self.selected_row();
+        let session = self
+            .selected_row()
+            .filter(|_| self.selected_draft().is_none());
         let status = match (session, self.selected_draft()) {
             (Some(session), _) => Self::status(session).0,
             (None, Some(_)) => "New",
             (None, None) => return,
         };
         self::rule(rule, buf);
-        // The status stays centered on the whole rule, so the time's width is kept clear on both sides.
-        let mut reserved = 0;
-        if let Some(at) = session.and_then(|session| session.started_at) {
-            let elapsed = format_duration((now - at).num_seconds());
-            // Keep a status cell, its spaces and the rule cells and corners around it.
-            if usize::from(rule.width) >= 2 * (elapsed.width() + 2) + 7 {
-                let (_, area) = render_rule_ends(rule, 0, None, Some(elapsed.dim()), buf);
-                reserved = area.map_or(0, |area| 2 * usize::from(area.width + 2));
-            }
-        }
+        // The status stays centered on the whole rule, keeping both end labels clear.
+        let fits = |text: &String| usize::from(rule.width) >= 2 * (text.width() + 2) + 7;
+        let elapsed = session
+            .and_then(|session| session.started_at)
+            .map(|at| format_duration((now - at).num_seconds()))
+            .filter(fits);
+        let context = session
+            .and_then(|_| self.selected_context_percent())
+            .map(|percent| format!("{percent}%"))
+            .filter(fits);
+        let (left, right) = render_rule_ends(
+            rule,
+            0,
+            context.map(|text| text.dim()),
+            elapsed.map(|text| text.dim()),
+            buf,
+        );
+        let reserved = [left, right]
+            .into_iter()
+            .flatten()
+            .map(|area| 2 * usize::from(area.width + 2))
+            .max()
+            .unwrap_or(0);
         // The corner, one rule cell and a space on each side.
         let width = usize::from(rule.width).saturating_sub(6 + reserved);
         let status = if width <= 1 {
@@ -654,7 +669,9 @@ impl View {
     /// panel, a space apart on each side; a double click edits a task's name. The pull request,
     /// or a new task's branch, on the left and the project folder's name on the right flank it.
     fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
-        let session = self.selected_row();
+        let session = self
+            .selected_row()
+            .filter(|_| self.selected_draft().is_none());
         let draft = self.selected_draft();
         let (title, title_style, cwd) = match (session, draft) {
             (Some(session), _) => (
@@ -685,11 +702,8 @@ impl View {
                 .pr
                 .as_ref()
                 .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id))),
-            (None, Some(draft)) => draft
-                .branch_choice
-                .as_ref()
-                .map(|choice| choice.name().to_owned())
-                .or_else(|| (!draft.setup.branch.is_empty()).then(|| draft.setup.branch.clone()))
+            (None, Some(draft)) => (!draft.branch_name().is_empty())
+                .then(|| draft.branch_name().to_owned())
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
@@ -747,7 +761,7 @@ impl View {
         if editor.is_some() {
             self.viewport.borrow_mut().title_input = input;
         }
-        if session.is_some() {
+        if session.is_some() || draft.is_some_and(|draft| draft.name.is_some()) {
             self.viewport.borrow_mut().details_title = input;
         }
         let (left_area, folder_area) = render_rule_ends(
@@ -869,8 +883,13 @@ impl View {
             viewport.details_links.clear();
             viewport.details_text = text_selection::TextRegion::default();
         }
-        if self.selected_draft().is_some() {
+        if let Some(draft) = self.selected_draft() {
             self.viewport.borrow_mut().details = area;
+            if let Some(error) = &draft.error {
+                Paragraph::new(error.as_str())
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .render(area, buf);
+            }
             return;
         }
         let Some(session) = self.selected_row() else {
@@ -878,7 +897,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: activity, background, update, prompt and queued
+        // Sections top to bottom: background, activity, update, prompt and queued
         // messages, needs input, tasks. The title sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
@@ -892,40 +911,6 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
-
-        let activity = session.activity.as_ref();
-        if let Some(activity) = activity {
-            let label =
-                super::text::summary(&activity.label, &session.cwd, width, &activity.kind, None);
-            separate_section(&mut items);
-            let start = items.len() + 1;
-            items.extend([
-                Item::Decoration(centered_header(
-                    "Last activity".dim().into(),
-                    Span::styled(
-                        format_relative_time(now, Some(activity.at)),
-                        style::time_style(),
-                    )
-                    .into(),
-                    width,
-                )),
-                truncate_line_with_ellipsis_if_overflow(
-                    style::exit_code_line(
-                        label.to_string(),
-                        activity.exit_code,
-                        style::log_body_style(&activity.kind, activity.exit_code),
-                    ),
-                    width,
-                )
-                .into(),
-            ]);
-            bodies.push(start..items.len());
-            keys.push(body_key("Last activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
-        }
-
-        item_links.resize(items.len(), Vec::new());
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
@@ -992,6 +977,40 @@ impl View {
                 )
             });
             background = start..items.len();
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        let activity = session.activity.as_ref();
+        if let Some(activity) = activity {
+            let label =
+                super::text::summary(&activity.label, &session.cwd, width, &activity.kind, None);
+            separate_section(&mut items);
+            let start = items.len() + 1;
+            items.extend([
+                Item::Decoration(centered_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
+                    width,
+                )),
+                truncate_line_with_ellipsis_if_overflow(
+                    style::exit_code_line(
+                        label.to_string(),
+                        activity.exit_code,
+                        style::log_body_style(&activity.kind, activity.exit_code),
+                    ),
+                    width,
+                )
+                .into(),
+            ]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
 
         item_links.resize(items.len(), Vec::new());
@@ -1103,7 +1122,11 @@ impl View {
                 items.extend(session.pending_questions.iter().map(|question| {
                     truncate_line_with_ellipsis_if_overflow(
                         super::text::summary(
-                            question, &session.cwd, width, &crate::log::Kind::Assistant, None,
+                            question,
+                            &session.cwd,
+                            width,
+                            &crate::log::Kind::Assistant,
+                            None,
                         ),
                         width,
                     )
@@ -1333,7 +1356,11 @@ impl View {
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
                             super::text::summary(
-                                text, &child.cwd, usize::from(item_area.width), &kind, None,
+                                text,
+                                &child.cwd,
+                                usize::from(item_area.width),
+                                &kind,
+                                None,
                             ),
                             usize::from(item_area.width),
                         )
@@ -1743,7 +1770,6 @@ fn box_height(lines: usize) -> usize {
     1 + lines
 }
 
-
 #[cfg(test)]
 mod wrapped_path_tests {
     use super::*;
@@ -1914,7 +1940,10 @@ mod branch_input_tests {
                 editor.insert(text);
                 view.selector = Some(Selector::new(
                     SelectorKind::Branch {
-                        draft: 1,
+                        draft: crate::model::DraftId {
+                            millis: 0,
+                            counter: 1,
+                        },
                         branches: vec!["main".into()],
                         editor,
                         editing: true,

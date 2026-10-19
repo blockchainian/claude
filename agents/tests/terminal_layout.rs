@@ -138,7 +138,21 @@ fn begin_named_draft(tmux: &Tmux, name: &str) {
     assert_title_caret(tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "-l", name]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    // The wizard opens the repository browser; a prompt-only probe closes it.
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .any(|line| line.split('│').any(|part| part.trim() == ".."))
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| capture.contains(&format!("{name} ❯")));
+}
+
+fn delete_named_draft(tmux: &Tmux) {
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| capture.contains("Permanently delete “"));
+    tmux.run(&["send-keys", "-t", "probe", "2"]);
+    tmux.wait_for(|capture| !capture.contains("Permanently delete “"));
 }
 
 // The name editor shares the details rule with the repository and branch labels.
@@ -398,10 +412,16 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
     tmux.run(&["send-keys", "-t", "probe", "-l", "unfinished task"]);
     tmux.wait_for(|capture| capture.contains("Branch probe ❯ unfinished task"));
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .any(|line| line.split('│').any(|part| part.trim() == ".."))
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     let capture = tmux.capture_when(|capture| capture.contains("Create new branch"));
     assert!(capture.contains("Branch probe ❯"), "{capture}");
     assert!(
-        !capture.contains("Branch probe ❯ unfinished task"),
+        capture.contains("Branch probe ❯ unfinished task"),
         "{capture}"
     );
     assert!(!capture.contains("New branch ❯"), "{capture}");
@@ -416,7 +436,8 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
         .position(|line| line.split('│').any(|part| part.trim() == "main"))
         .unwrap();
     assert!(main_row < row, "{capture}");
-    // The default choice is a button: Enter enters its editor, while empty Enter stays there.
+    // The checked-out branch is highlighted; select the create row explicitly.
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     let input = tmux.capture_when(|capture| capture.contains("New branch ❯"));
     assert!(!input.contains("Create new branch"), "{input}");
@@ -432,7 +453,9 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
         row, input_row,
         "button and editor share the bottom row: {input}"
     );
-    println!("--- branch button screen ---\n{capture}--- branch editor screen ---\n{input}--- branch screens end ---");
+    println!(
+        "--- branch button screen ---\n{capture}--- branch editor screen ---\n{input}--- branch screens end ---"
+    );
     let input_line = input.lines().nth(input_row).unwrap();
     let input_column = input_line[..input_line.find("New branch ❯").unwrap()].width();
     for column in input_column..input_column + "New branch ❯ ".width() {
@@ -465,9 +488,12 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
     tmux.wait_for(|capture| capture.contains("Create new branch"));
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     let cancelled = tmux.capture_when(|capture| !capture.contains("Create new branch"));
-    assert!(!cancelled.contains("Branch probe ❯"), "{cancelled}");
-    assert!(!cancelled.contains("unfinished task"), "{cancelled}");
-    // Restarting must forget both the name and the prompt.
+    assert!(
+        cancelled.contains("Branch probe ❯ unfinished task"),
+        "{cancelled}"
+    );
+    delete_named_draft(&tmux);
+    // Explicit deletion removes both the name and the prompt.
     tmux.run(&["send-keys", "-t", "probe", "n"]);
     let naming = assert_title_caret(&tmux, "New task", 0);
     assert!(!naming.contains("Branch probe"), "{naming}");
@@ -511,7 +537,7 @@ fn terminal_prompt_newline_entry() {
             "{{\"prompt_newline\":\"pass\",\"entry\":\"{name}\",\"capture\":\"{}\"}}",
             path.display()
         );
-        tmux.run(&["send-keys", "-t", "probe", "C-c"]);
+        tmux.run(&["send-keys", "-t", "probe", "End", "C-u"]);
         tmux.wait_for(|capture| {
             capture.contains("Prompt probe ❯") && !capture.contains("first line")
         });
@@ -565,9 +591,9 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     }
     begin_named_draft(&tmux, "Prompt probe");
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    delete_named_draft(&tmux);
     tmux.wait_for(|capture| {
-        // Escape discards the empty new task and returns to the task chooser.
+        // Confirmed deletion returns to the task chooser.
         capture.contains("No task ❮ Select a task to type") && !capture.contains("Prompt probe ❯")
     });
     begin_named_draft(&tmux, "Prompt probe");
@@ -1770,7 +1796,8 @@ fn background_text_probe(name: &str, text: &str) -> (tempfile::TempDir, Tmux, st
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_details_section_positions() {
-    let (_directory, tmux, transcript) = background_text_probe("details-sections", "Running checks\n");
+    let (_directory, tmux, transcript) =
+        background_text_probe("details-sections", "Running checks\n");
     let background = include_str!("fixtures/background/records.jsonl");
     let original = format!(
         "{}\n{background}\n{}",
@@ -1828,7 +1855,7 @@ fn terminal_details_section_positions() {
                         .collect()
                 })
                 .collect();
-            let positions = ["Last activity", "Background", "Update", "Prompt", "Tasks"]
+            let positions = ["Background", "Last activity", "Update", "Prompt", "Tasks"]
                 .map(|label| panel.iter().position(|row| row.contains(label)).unwrap());
             assert!(positions.is_sorted(), "{panel:?}");
             for label in ["Update", "Prompt", "Tasks"] {
@@ -1919,6 +1946,28 @@ fn terminal_details_section_positions() {
             );
         }
     }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_details_background_before_activity() {
+    let (_directory, tmux, transcript) =
+        background_text_probe("background-before-activity", "Running checks\n");
+    let content = format!(
+        "{}\n{}\n{}",
+        std::fs::read_to_string(&transcript).unwrap(),
+        include_str!("fixtures/background/records.jsonl"),
+        include_str!("fixtures/claude-todos.jsonl")
+    );
+    std::fs::write(&transcript, content).unwrap();
+    tmux.run(&["resize-window", "-t", "probe", "-x", "112", "-y", "70"]);
+    let capture = tmux.capture_when(|capture| {
+        let positions = ["Background", "Last activity", "Update", "Prompt", "Tasks"]
+            .map(|label| capture.lines().position(|row| row.contains(label)));
+        positions.iter().all(Option::is_some) && positions.is_sorted()
+    });
+    println!("{capture}");
+    println!("{{\"details_background_before_activity\":\"pass\"}}");
 }
 
 #[test]
@@ -2879,4 +2928,27 @@ fn terminal_weekly_usage_on_task_header() {
             })
         );
     }
+}
+
+#[test]
+#[ignore = "requires tmux; runs the real app with isolated preferences"]
+fn terminal_context_usage_on_details_border() {
+    let (_directory, tmux, _transcript) = start_probe("context-border");
+    let capture = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .nth(1)
+            .is_some_and(|row| row.contains("╴26% "))
+    });
+    let border = capture.lines().nth(1).unwrap();
+    assert!(border.contains("Ready"), "{capture}");
+    assert!(
+        border.find("26%").unwrap() < border.find("Ready").unwrap(),
+        "{capture}"
+    );
+    let result = serde_json::json!({"verdict":"passed", "border":border});
+    if let Some(path) = std::env::var_os("AGENTS_CONTEXT_TERMINAL_RESULT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    }
+    println!("{result}");
 }

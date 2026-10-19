@@ -3814,8 +3814,13 @@ fn details_queued_messages_render_all_paragraphs_and_message_style() {
     for y in [3, 4, 6, 7, 9] {
         for x in 0..rows[y].len() {
             assert_eq!(
-                buf[(x as u16, y as u16)].modifier.contains(ratatui::style::Modifier::BOLD),
-                style::log_styles(&crate::log::Kind::QueuedUser).1.add_modifier.contains(ratatui::style::Modifier::BOLD),
+                buf[(x as u16, y as u16)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD),
+                style::log_styles(&crate::log::Kind::QueuedUser)
+                    .1
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD),
             );
         }
     }
@@ -3892,7 +3897,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_activity_background_update_prompt_tasks() {
+fn details_sections_run_background_activity_update_prompt_tasks() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         exit_code: None,
@@ -3913,8 +3918,8 @@ fn details_sections_run_activity_background_update_prompt_tasks() {
     }];
     let rendered = queued_details(row, 40);
     let positions = [
-        "Last activity",
         "Background\n",
+        "Last activity",
         "Update",
         "Prompt\n",
         "Tasks",
@@ -7054,8 +7059,11 @@ fn ask_user_question_details_snapshot() {
     assert!(
         pending.contains(&format!(
             "Needs input\n{}",
-            row.pending_questions.iter().map(|question| question.replace('`', ""))
-                .collect::<Vec<_>>().join("\n")
+            row.pending_questions
+                .iter()
+                .map(|question| question.replace('`', ""))
+                .collect::<Vec<_>>()
+                .join("\n")
         )),
         "{pending}"
     );
@@ -8928,22 +8936,22 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
     for (index, sender, body) in [
         (2, "a113c3cb9c1482c7a", "Report:"),
         (3, "a113c3cb9c1482c7a", "Report:"),
-        (
-            4,
-            "translate-pdf",
-            "translate-pdf pilots ready for review.",
-        ),
-        (
-            5,
-            "translate-pdf",
-            "translate-pdf pilots ready for review.",
-        ),
+        (4, "translate-pdf", "translate-pdf pilots ready for review."),
+        (5, "translate-pdf", "translate-pdf pilots ready for review."),
     ] {
         let mut event = events[index].clone();
         event.started_at = now - Duration::seconds(120);
-        assert_eq!(super::log::body_line(&event, 200, &view.rows[0].cwd).to_string(), format!("{sender} → message"));
+        assert_eq!(
+            super::log::body_line(&event, 200, &view.rows[0].cwd).to_string(),
+            format!("{sender} → message")
+        );
         assert!(event.body.starts_with(body));
-        let clock = event.calls[0].started_at.unwrap().with_timezone(&chrono::Local).format("%H:%M:%S").to_string();
+        let clock = event.calls[0]
+            .started_at
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%H:%M:%S")
+            .to_string();
         let mut later = event.clone();
         later.started_at = now;
         view.set_log(vec![event.clone(), later]);
@@ -8953,7 +8961,10 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
             .lines()
             .nth(usize::from(view.viewport.borrow().log_detail.y + 1))
             .unwrap();
-        assert!(header.trim_start().starts_with("Message"), "sender: {header}");
+        assert!(
+            header.trim_start().starts_with("Message"),
+            "sender: {header}"
+        );
         assert!(header.contains(sender), "kind: {header}");
         assert!(header.ends_with(&clock), "time: {header}");
         assert!(
@@ -9770,9 +9781,10 @@ fn claude_agent_display_from_real_records() {
         }
         let description = event.calls[0].detail_title.clone();
         assert!(
-            description.is_empty() || !rows[header + 1..]
-                .iter()
-                .any(|row| row.replace(' ', "") == description.replace(' ', "")),
+            description.is_empty()
+                || !rows[header + 1..]
+                    .iter()
+                    .any(|row| row.replace(' ', "") == description.replace(' ', "")),
             "{screen}"
         );
     }
@@ -10140,27 +10152,64 @@ fn task_header_weekly_usage_reset_threshold() {
 
 #[test]
 fn task_header_weekly_usage_click_targets_cover_the_whole_visible_label() {
-    for mode in [crate::state::UsageView::Compact, crate::state::UsageView::Detailed] {
+    for mode in [
+        crate::state::UsageView::Compact,
+        crate::state::UsageView::Detailed,
+    ] {
         let mut view = weekly_usage_view();
         view.usage_view = mode;
         let rendered = weekly_header(&view, 200);
-        let target = view.viewport.borrow().field_targets.iter()
-            .find(|(_, field)| *field == Field::WeeklyUsage).unwrap().0;
+        let target = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::WeeklyUsage)
+            .unwrap()
+            .0;
         assert_eq!(target.x as usize, rendered.find("Weekly ").unwrap());
         for x in target.x..target.right() {
             let mut view = weekly_usage_view();
             view.usage_view = mode;
             weekly_header(&view, 200);
-            view.handle_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: target.y, modifiers: KeyModifiers::NONE });
-            let action = view.handle_mouse(MouseEvent { kind: MouseEventKind::Up(MouseButton::Left), column: x, row: target.y, modifiers: KeyModifiers::NONE });
-            let expected = if mode == crate::state::UsageView::Compact { crate::state::UsageView::Detailed } else { crate::state::UsageView::Compact };
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: x,
+                row: target.y,
+                modifiers: KeyModifiers::NONE,
+            });
+            let action = view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: x,
+                row: target.y,
+                modifiers: KeyModifiers::NONE,
+            });
+            let expected = if mode == crate::state::UsageView::Compact {
+                crate::state::UsageView::Detailed
+            } else {
+                crate::state::UsageView::Compact
+            };
             assert_eq!(action, Some(Action::PersistUsageView(expected)), "x={x}");
         }
         weekly_header(&view, 30);
-        assert!(!view.viewport.borrow().field_targets.iter().any(|(_, field)| *field == Field::WeeklyUsage));
+        assert!(
+            !view
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .any(|(_, field)| *field == Field::WeeklyUsage)
+        );
         view.weekly_usage.clear();
         assert!(!weekly_header(&view, 200).contains("Weekly "));
-        assert!(!view.viewport.borrow().field_targets.iter().any(|(_, field)| *field == Field::WeeklyUsage));
+        assert!(
+            !view
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .any(|(_, field)| *field == Field::WeeklyUsage)
+        );
     }
 }
 
@@ -10355,3 +10404,33 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
 
 #[path = "codex_background_tests.rs"]
 mod codex_background_tests;
+
+#[test]
+fn context_usage_on_details_border_keeps_status_and_elapsed() {
+    let (mut view, now) = log_fixture();
+    let id = view.selected_id().unwrap().clone();
+    view.rows[view.selected].started_at = Some(now - Duration::seconds(90));
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+    let mut usage = crate::usage::Series::default();
+    usage.update(&path, id.provider).unwrap();
+    view.set_context_usage(&id, usage.context_percent());
+    for width in [80, 120, 200] {
+        let area = Rect::new(0, 0, width, 40);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let details = view.center_layout(area).details;
+        let border: String = (details.x..details.right())
+            .map(|x| buf[(x, details.y - 1)].symbol())
+            .collect();
+        assert!(border.starts_with("26% "), "{border}");
+        let percent_end = border.find('%').unwrap();
+        let status_start = border.find("Working").unwrap();
+        assert!(percent_end < status_start, "{border}");
+        assert!(border.contains("1m 30s"), "{border}");
+    }
+    view.set_context_usage(&session_key("other-session"), Some(80));
+    assert!(!screen(&view, 120, 40).lines().nth(1).unwrap().contains('%'));
+    view.set_context_usage(&id, None);
+    assert!(!screen(&view, 120, 40).lines().nth(1).unwrap().contains('%'));
+}
