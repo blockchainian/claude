@@ -1,6 +1,9 @@
 #[path = "support/terminal_path_display.rs"]
 mod terminal_path_display;
 
+#[path = "support/terminal_prompt_cache.rs"]
+mod terminal_prompt_cache;
+
 #[path = "support/terminal_weekly_usage.rs"]
 mod terminal_weekly_usage;
 
@@ -2933,20 +2936,30 @@ fn terminal_weekly_usage_on_task_header() {
 #[test]
 #[ignore = "requires tmux; runs the real app with isolated preferences"]
 fn terminal_context_usage_on_details_border() {
-    let (_directory, tmux, _transcript) = start_probe("context-border");
-    let capture = tmux.capture_when(|capture| {
+    let (_claude_directory, claude, _transcript) = start_probe("claude-context-border");
+    let capture = claude.capture_when(|capture| capture.contains("Update"));
+    let claude_border = capture.lines().nth(1).unwrap().to_owned();
+    assert!(!claude_border.contains('%'), "{capture}");
+    assert!(claude_border.contains("Inactive"), "{capture}");
+
+    let (_codex_directory, codex) = terminal_codex_exit::start_codex_probe(
+        "codex-context-border",
+        include_str!("fixtures/codex-latest-activity.jsonl"),
+    );
+    let capture = codex.capture_when(|capture| {
         capture
             .lines()
             .nth(1)
-            .is_some_and(|row| row.contains("╴26% "))
+            .is_some_and(|row| row.contains("╴9% "))
     });
-    let border = capture.lines().nth(1).unwrap();
-    assert!(border.contains("Inactive"), "{capture}");
+    let codex_border = capture.lines().nth(1).unwrap();
+    assert!(codex_border.contains("Inactive"), "{capture}");
     assert!(
-        border.find("26%").unwrap() < border.find("Inactive").unwrap(),
+        codex_border.find("9%").unwrap() < codex_border.find("Inactive").unwrap(),
         "{capture}"
     );
-    let result = serde_json::json!({"verdict":"passed", "border":border});
+    let result =
+        serde_json::json!({"verdict":"passed", "claude":claude_border, "codex":codex_border});
     if let Some(path) = std::env::var_os("AGENTS_CONTEXT_TERMINAL_RESULT") {
         std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
     }

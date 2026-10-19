@@ -86,27 +86,9 @@ impl Series {
         match record.kind.as_deref() {
             Some("user") => self.request_start = Some(at),
             Some("assistant") => {
-                self.context_tokens = record
-                    .message
-                    .as_ref()
-                    .and_then(|message| message.usage.as_ref().map(ClaudeUsage::prompt_tokens));
-                self.context_window = record.message.as_ref().and_then(|message| {
-                    message
-                        .model
-                        .as_deref()
-                        .filter(|model| !model.is_empty())
-                        .map(|model| {
-                            if model.contains("[1m]") {
-                                1_000_000
-                            } else {
-                                200_000
-                            }
-                        })
-                });
                 let Some(ClaudeMessage {
                     id: Some(id),
                     usage: Some(usage),
-                    ..
                 }) = record.message
                 else {
                     return;
@@ -237,7 +219,6 @@ struct ClaudeRecord {
 
 #[derive(Deserialize)]
 struct ClaudeMessage {
-    model: Option<String>,
     id: Option<String>,
     usage: Option<ClaudeUsage>,
 }
@@ -320,16 +301,16 @@ mod tests {
     const CLAUDE_TOOL_USE: &str = r#"{"parentUuid":"c","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_01EYBBw4","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"ls"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":36336,"cache_read_input_tokens":14755,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":36336},"output_tokens":260,"service_tier":"standard"}},"type":"assistant","uuid":"d","timestamp":"2026-10-14T10:25:37.804Z","sessionId":"s"}"#;
 
     #[test]
-    fn context_usage_claude_uses_latest_assistant_prompt() {
+    fn context_usage_claude_is_unavailable() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
         let mut usage = Series::default();
         usage.update(&path, ProviderId::Claude).unwrap();
-        assert_eq!(usage.context_percent(), Some(26));
+        assert_eq!(usage.context_percent(), None);
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-main-model-history.jsonl");
         usage = Series::default();
         usage.update(&path, ProviderId::Claude).unwrap();
-        assert_eq!(usage.context_percent(), Some(47));
+        assert_eq!(usage.context_percent(), None);
     }
 
     #[test]
@@ -367,17 +348,17 @@ mod tests {
     }
 
     #[test]
-    fn context_usage_requires_model_usage_and_positive_window() {
+    fn context_usage_requires_codex_usage_and_positive_window() {
         for provider in [ProviderId::Claude, ProviderId::Codex] {
             let (_file, usage) = series(provider, &[]);
             assert_eq!(usage.context_percent(), None);
         }
-        for model in [Some("claude-opus-5-5[1m]"), None] {
+        for model in [Some("claude-opus-5-5"), Some("claude-opus-5-5[1m]"), None] {
             let mut message: serde_json::Value = serde_json::from_str(CLAUDE_THINKING).unwrap();
             message["message"]["model"] = model.into();
             let message = message.to_string();
             let (_file, usage) = series(ProviderId::Claude, &[&message]);
-            assert_eq!(usage.context_percent(), model.map(|_| 5));
+            assert_eq!(usage.context_percent(), None);
         }
         let mut count: serde_json::Value = serde_json::from_str(CODEX_TOKEN_COUNT).unwrap();
         count["payload"]["info"]["model_context_window"] = 0.into();

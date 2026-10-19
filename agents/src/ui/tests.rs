@@ -1101,6 +1101,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
+        cache_expires_at: None,
         model: None,
         effort: None,
         git_branch: None,
@@ -10407,30 +10408,43 @@ mod codex_background_tests;
 
 #[test]
 fn context_usage_on_details_border_keeps_status_and_elapsed() {
-    let (mut view, now) = log_fixture();
-    let id = view.selected_id().unwrap().clone();
-    view.rows[view.selected].started_at = Some(now - Duration::seconds(90));
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-    let mut usage = crate::usage::Series::default();
-    usage.update(&path, id.provider).unwrap();
-    view.set_context_usage(&id, usage.context_percent());
-    for width in [80, 120, 200] {
-        let area = Rect::new(0, 0, width, 40);
-        let mut buf = Buffer::empty(area);
-        view.render_at(area, &mut buf, now);
-        let details = view.center_layout(area).details;
-        let border: String = (details.x..details.right())
-            .map(|x| buf[(x, details.y - 1)].symbol())
-            .collect();
-        assert!(border.starts_with("26% "), "{border}");
-        let percent_end = border.find('%').unwrap();
-        let status_start = border.find("Working").unwrap();
-        assert!(percent_end < status_start, "{border}");
-        assert!(border.contains("1m 30s"), "{border}");
+    for (provider, fixture, percent) in [
+        (ProviderId::Claude, "transcript.jsonl", None),
+        (ProviderId::Codex, "codex-latest-activity.jsonl", Some(9)),
+    ] {
+        let (mut view, now) = log_fixture();
+        view.rows[view.selected].id.provider = provider;
+        view.rows[view.selected].started_at = Some(now - Duration::seconds(90));
+        let id = view.selected_id().unwrap().clone();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture);
+        let mut usage = crate::usage::Series::default();
+        usage.update(&path, provider).unwrap();
+        view.set_context_usage(&id, usage.context_percent());
+        for width in [80, 120, 200] {
+            let area = Rect::new(0, 0, width, 40);
+            let mut buf = Buffer::empty(area);
+            view.render_at(area, &mut buf, now);
+            let details = view.center_layout(area).details;
+            let border: String = (details.x..details.right())
+                .map(|x| buf[(x, details.y - 1)].symbol())
+                .collect();
+            if let Some(percent) = percent {
+                assert!(border.starts_with(&format!("{percent}% ")), "{border}");
+                assert!(
+                    border.find('%').unwrap() < border.find("Working").unwrap(),
+                    "{border}"
+                );
+            } else {
+                assert!(!border.contains('%'), "{border}");
+            }
+            assert!(border.contains("Working"), "{border}");
+            assert!(border.contains("1m 30s"), "{border}");
+        }
+        view.set_context_usage(&session_key("other-session"), Some(80));
+        assert!(!screen(&view, 120, 40).lines().nth(1).unwrap().contains('%'));
+        view.set_context_usage(&id, None);
+        assert!(!screen(&view, 120, 40).lines().nth(1).unwrap().contains('%'));
     }
-    view.set_context_usage(&session_key("other-session"), Some(80));
-    assert!(!screen(&view, 120, 40).lines().nth(1).unwrap().contains('%'));
-    view.set_context_usage(&id, None);
-    assert!(!screen(&view, 120, 40).lines().nth(1).unwrap().contains('%'));
 }
