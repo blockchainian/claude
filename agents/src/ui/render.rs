@@ -524,10 +524,16 @@ impl View {
                 Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
                 buf,
             );
+            // The narrow layout starts them at the midline, under the task's folder on the title
+            // rule.
+            let model_left = if area.width < WIDE_LAYOUT_COLUMNS && !layout.gap.is_empty() {
+                layout.gap.x + HORIZONTAL_PADDING
+            } else {
+                left
+            };
             self.render_log_model(
-                Rect::new(left, model_y, area.right().saturating_sub(left), 1),
+                Rect::new(model_left, model_y, area.right().saturating_sub(model_left), 1),
                 buf,
-                area.width < WIDE_LAYOUT_COLUMNS,
             );
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
@@ -878,9 +884,7 @@ impl View {
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
-    /// Draws the model and effort on the log's border, from its left end, or flush against its
-    /// right end when `right_aligned`.
-    fn render_log_model(&self, rule: Rect, buf: &mut Buffer, right_aligned: bool) {
+    fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
         let draft = self.selected_draft();
         let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
@@ -916,8 +920,6 @@ impl View {
                     .map(|value| (value, field))
             })
             .collect();
-        // Lays the values out from the left, then shifts them flush against `right` when asked.
-        let mut pieces = Vec::new();
         for (index, (value, field)) in values.iter().enumerate() {
             let gap = if index == 0 {
                 0
@@ -932,48 +934,32 @@ impl View {
             if available == 0 {
                 break;
             }
-            let gap_x = x;
-            x += gap;
+            if gap > 0 {
+                Line::from(separator)
+                    .style(style::time_style())
+                    .render(Rect::new(x, rule.y, gap, 1), buf);
+                x += gap;
+            } else {
+                buf[(x - 1, rule.y)]
+                    .set_symbol("╴")
+                    .set_style(style::time_style());
+            }
             let text = truncate_line_with_ellipsis_if_overflow(
                 Line::from(value.clone()),
                 usize::from(available),
             );
             let width = text.width() as u16;
-            pieces.push((gap_x, gap, Rect::new(x, rule.y, width, 1), text, *field));
-            x += width;
-        }
-        let Some(start) = pieces.first().map(|piece| piece.0) else {
-            return;
-        };
-        let shift = if right_aligned {
-            right.saturating_sub(x)
-        } else {
-            0
-        };
-        let (open, close) = if right_aligned {
-            (" ", "╶")
-        } else {
-            ("╴", " ")
-        };
-        buf[(start + shift - 1, rule.y)]
-            .set_symbol(open)
-            .set_style(style::time_style());
-        for (gap_x, gap, area, text, field) in pieces {
-            if gap > 0 {
-                Line::from(separator)
-                    .style(style::time_style())
-                    .render(Rect::new(gap_x + shift, rule.y, gap, 1), buf);
-            }
-            let area = Rect {
-                x: area.x + shift,
-                ..area
-            };
+            let area = Rect::new(x, rule.y, width, 1);
             text.style(style::time_style()).render(area, buf);
-            self.viewport.borrow_mut().field_targets.push((area, field));
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .push((area, *field));
+            x += width;
+            buf[(x, rule.y)]
+                .set_symbol(" ")
+                .set_style(style::time_style());
         }
-        buf[(x + shift, rule.y)]
-            .set_symbol(close)
-            .set_style(style::time_style());
     }
     pub(super) fn render_details(
         &self,

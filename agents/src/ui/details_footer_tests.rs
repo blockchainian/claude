@@ -108,11 +108,13 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
             };
             assert_eq!(model.y, y);
             assert_eq!(effort.y, y);
-            if width >= 150 {
-                assert_eq!(model.x, layout.log.x);
+            // The narrow layout starts them at the midline, under the task's folder.
+            let start = if width >= 150 {
+                layout.log.x
             } else {
-                assert_eq!(effort.right(), width - 2);
-            }
+                layout.gap.x + super::super::render::HORIZONTAL_PADDING + 2
+            };
+            assert_eq!(model.x, start);
             assert_eq!(effort.x, model.right() + 3);
             let text = |rect: Rect| {
                 (rect.x..rect.right())
@@ -131,7 +133,7 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
 }
 
 #[test]
-fn model_effort_border_shows_only_known_values_beside_right_aligned_new() {
+fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
     for width in [80, 149, 150, 220] {
         for (model, effort, expected) in [
             (Some("Opus"), Some("high"), "Opus · high"),
@@ -155,27 +157,16 @@ fn model_effort_border_shows_only_known_values_beside_right_aligned_new() {
                 } else {
                     viewport.log.y - 1
                 };
-                let line: String = (viewport.log.x + u16::from(width < 150)..buf.area.right())
+                let start = if width >= 150 {
+                    viewport.log.x
+                } else {
+                    view.center_layout(buf.area).gap.x + 3
+                };
+                let line: String = (start..buf.area.right())
                     .map(|x| cell_text(buf[(x, model_y)].symbol()))
                     .collect();
-                if expected.is_empty() {
-                } else if width >= 150 {
+                if !expected.is_empty() {
                     assert!(line.starts_with(expected), "{line}");
-                } else {
-                    // The narrow layout right-aligns them, clear of the New button.
-                    let end = if unseen == 0 {
-                        buf.area.right() - 2
-                    } else {
-                        viewport.log_jump.x - 1
-                    };
-                    let row: Vec<_> = (0..width)
-                        .map(|x| cell_text(buf[(x, model_y)].symbol()).to_owned())
-                        .collect();
-                    let text = expected.trim_end();
-                    let start = usize::from(end) - text.chars().count();
-                    assert_eq!(row[start - 1], " ", "{line}");
-                    assert_eq!(row[start..usize::from(end)].concat(), text, "{line}");
-                    assert_eq!(row[usize::from(end)], "╶", "{line}");
                 }
                 assert_eq!(
                     line.contains('·'),

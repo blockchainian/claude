@@ -289,12 +289,9 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
         };
         let log = view.viewport.borrow().log;
         assert_eq!(text(model.x, model.y, model.width), model_name);
-        if width >= 150 {
-            assert_eq!(model.x, log.x);
-        } else {
-            // The narrow layout right-aligns the values before the rule's last two cells.
-            assert_eq!(effort.right(), width - 2);
-        }
+        // The narrow layout starts them at the midline, under the task's folder.
+        let gap = view.center_layout(area).gap;
+        assert_eq!(model.x, if width >= 150 { log.x } else { gap.x + 3 });
         assert_eq!(
             model.y,
             if width >= 150 {
@@ -364,7 +361,14 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             let mut buffer = Buffer::empty(frame);
             view.render_at(frame, &mut buffer, Utc::now());
             let area = view.viewport.borrow().log;
-            let rule_left = if width >= 150 { area.x - 2 } else { 0 };
+            let gap = view.center_layout(frame).gap;
+            let rule_left = if width >= 150 {
+                area.x - 2
+            } else if gap.is_empty() {
+                0
+            } else {
+                gap.x + 1
+            };
             let rule = Rect::new(
                 rule_left,
                 if width >= 150 {
@@ -395,29 +399,17 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             } else {
                 name.into()
             };
-            let effort_start = start + name_width + 3;
-            let effort_width = rule
-                .right()
-                .saturating_sub(2 + effort_start)
-                .min(effort_width);
-            // The narrow layout shifts the values flush against the rule's right end.
-            let end = if show_effort {
-                effort_start + effort_width
-            } else {
-                start + name_width
-            };
-            let shift = if width < 150 && name_width > 0 {
-                (rule.right() - 2).saturating_sub(end)
-            } else {
-                0
-            };
-            let (start, effort_start) = (start + shift, effort_start + shift);
             let drawn = (start..start + name_width)
                 .map(|x| buffer[(x, rule.y)].symbol())
                 .collect::<String>();
             assert_eq!(drawn, expected_name, "width={width}");
             let targets = view.viewport.borrow().field_targets.clone();
             let y = rule.y;
+            let effort_start = start + name_width + 3;
+            let effort_width = rule
+                .right()
+                .saturating_sub(2 + effort_start)
+                .min(effort_width);
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)

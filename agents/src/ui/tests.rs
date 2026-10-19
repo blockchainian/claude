@@ -2960,12 +2960,11 @@ fn log_model_and_effort_use_dim_style_and_picker_targets() {
                     assert_eq!(
                         rect.x,
                         if field == Field::Model {
-                            if width >= 150 {
-                                layout.log.x
+                            (if width >= 150 {
+                                layout.log.x - 2
                             } else {
-                                // Right-aligned before the rule's last two cells.
-                                area.right() - 2 - (text.len() + 3 + "medium".len()) as u16
-                            }
+                                layout.gap.x + 1
+                            }) + 2
                         } else {
                             targets
                                 .iter()
@@ -5292,7 +5291,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_keeps_panel()
     view.rows[view.selected].transcript = None;
     let rendered = log_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
-    assert!(rendered.lines().nth(10).unwrap().ends_with(" opus╶─"));
+    assert!(rendered.lines().nth(10).unwrap().contains("╴opus "));
 }
 
 #[test]
@@ -9473,7 +9472,7 @@ fn border_labels_use_half_lines_beside_screen_edge_corners() {
         let row: String = (0..width)
             .map(|x| cell_text(buf[(x, model.y)].symbol()))
             .collect();
-        assert!(row.contains("opus · medium"), "{row}");
+        assert!(row.contains("opus · medium "), "{row}");
         for x in [model.x - 1, width - 2] {
             assert!(
                 buf[(x, model.y)]
@@ -9481,9 +9480,7 @@ fn border_labels_use_half_lines_beside_screen_edge_corners() {
                     .contains(ratatui::style::Modifier::DIM)
             );
         }
-        if width < 150 {
-            assert!(row.ends_with(" opus · medium╶─"), "{row}");
-        }
+        assert_eq!(buf[(model.x - 1, model.y)].symbol(), "╴", "{row}");
     }
 }
 
@@ -10469,8 +10466,8 @@ fn details_weekly_usage_keeps_model_and_effort_targets() {
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
     let targets = &view.viewport.borrow().field_targets;
-    // The narrow layout right-aligns them before the rule's last two cells.
-    for (field, x, width) in [(Field::Model, 85, 11), (Field::Effort, 99, 4)] {
+    // The narrow layout starts them at the midline, under the task's folder.
+    for (field, x, width) in [(Field::Model, 57, 11), (Field::Effort, 71, 4)] {
         let rect = targets
             .iter()
             .find(|(_, candidate)| *candidate == field)
