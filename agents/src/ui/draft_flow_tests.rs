@@ -355,17 +355,6 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
     row.model = Some("claude-opus-5-5".into());
     for effort in [Some("medium"), None] {
         view.rows[view.selected].effort = effort.map(str::to_owned);
-        // Missing effort remains visible even when the picker has no choices.
-        if effort.is_none() {
-            for model in &mut view
-                .input_choices
-                .get_mut(&ProviderId::Claude)
-                .unwrap()
-                .models
-            {
-                model.efforts.clear();
-            }
-        }
         for width in [20, 40, 60, 80, 120, 149, 150, 200] {
             let frame = Rect::new(0, 0, width, 60);
             let mut buffer = Buffer::empty(frame);
@@ -383,9 +372,14 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                 1,
             );
             let total = rule.width.saturating_sub(4);
-            let effort_width = effort.unwrap_or("Default").len() as u16;
-            let available = total.saturating_sub(effort_width.min(total / 2) + 3);
-            let show_effort = available > 0;
+            // A missing effort is not drawn, so the model gets the whole rule.
+            let effort_width = effort.map_or(0, str::len) as u16;
+            let available = if effort.is_some() {
+                total.saturating_sub(effort_width.min(total / 2) + 3)
+            } else {
+                total
+            };
+            let show_effort = effort.is_some() && available > 0;
             // The catalog's name for `claude-opus-5-5`.
             let name = "Opus 5.5";
             let name_width = available.min(name.len() as u16);

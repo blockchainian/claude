@@ -24,11 +24,10 @@ impl View {
         let mut display = event.clone();
         for call in &mut display.calls {
             if let Some(settings) = &call.model_settings {
-                let model = self.model_text(
-                    settings.provider,
-                    settings.model.as_deref().unwrap_or_default(),
-                );
-                call.detail_title.push_str(&format!(" · {model}"));
+                if let Some(model) = settings.model.as_deref().filter(|model| !model.is_empty()) {
+                    let model = self.model_text(settings.provider, model);
+                    call.detail_title.push_str(&format!(" · {model}"));
+                }
                 if let Some(effort) = settings.effort.as_deref().filter(|effort| !effort.is_empty()) {
                     call.detail_title.push_str(&format!(" · {effort}"));
                 }
@@ -1785,12 +1784,7 @@ pub(super) mod log_markdown {
 
     #[test]
     fn non_prose_rows_keep_markdown_literal() {
-        for kind in [
-            Kind::Tool,
-            Kind::Session,
-            Kind::Error,
-            Kind::Denied,
-        ] {
+        for kind in [Kind::Tool, Kind::Session, Kind::Error, Kind::Denied] {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
             let x = body_padding(&buffer) as u16;

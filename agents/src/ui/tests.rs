@@ -9663,7 +9663,7 @@ fn log_border_fields_keep_click_actions_without_jumping() {
 }
 
 #[test]
-fn log_border_shows_placeholders_for_missing_model_and_effort() {
+fn log_border_hides_missing_model_and_effort() {
     let (mut view, now) = log_fixture();
     let row = &mut view.rows[view.selected];
     row.background_job = Some(crate::model::BackgroundJob {
@@ -9682,8 +9682,9 @@ fn log_border_shows_placeholders_for_missing_model_and_effort() {
         crate::providers::Provider::input_choices(&provider),
     )]));
     let screen = log_screen(&view, 100, 45, now);
-    assert!(screen.contains("Unknown · Default"), "{screen}");
-    assert_eq!(view.viewport.borrow().field_targets.len(), 2);
+    assert!(!screen.contains("Unknown"), "{screen}");
+    assert!(!screen.contains("Default"), "{screen}");
+    assert!(view.viewport.borrow().field_targets.is_empty());
 }
 
 #[test]
@@ -10491,7 +10492,7 @@ fn task_header_weekly_usage_live_accounts() {
 }
 
 #[test]
-fn session_models_group_by_catalog_display_name_and_effort_has_a_default() {
+fn session_models_group_by_catalog_display_name() {
     let config = tempfile::tempdir().unwrap();
     crate::providers::claude::write_fixture_cache(config.path());
     let provider = crate::providers::claude::ClaudeProvider::new(config.path().into());
@@ -10510,8 +10511,6 @@ fn session_models_group_by_catalog_display_name_and_effort_has_a_default() {
         view.session_model_text(&view.rows[0]),
         view.session_model_text(&view.rows[1])
     );
-    let rendered = screen(&view, 160, 40);
-    assert!(rendered.contains("Default"), "{rendered}");
 }
 
 #[test]

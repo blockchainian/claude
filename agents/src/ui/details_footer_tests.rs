@@ -128,13 +128,13 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
 }
 
 #[test]
-fn model_effort_border_groups_optional_values_and_right_aligns_new() {
+fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
     for width in [80, 149, 150, 220] {
         for (model, effort, expected) in [
             (Some("Opus"), Some("high"), "Opus · high"),
-            (Some("Opus"), None, "Opus · Default"),
-            (None, Some("high"), "Unknown · high"),
-            (None, None, "Unknown · Default"),
+            (Some("Opus"), None, "Opus "),
+            (None, Some("high"), "high "),
+            (None, None, ""),
         ] {
             for unseen in [0, 3] {
                 let mut view = fixture();
@@ -158,7 +158,11 @@ fn model_effort_border_groups_optional_values_and_right_aligns_new() {
                 if !expected.is_empty() {
                     assert!(line.starts_with(expected), "{line}");
                 }
-                assert_eq!(line.contains('·'), true, "{line}");
+                assert_eq!(
+                    line.contains('·'),
+                    model.is_some() && effort.is_some(),
+                    "{line}"
+                );
                 if unseen == 0 {
                     assert!(viewport.log_jump.is_empty());
                 } else {
