@@ -264,7 +264,6 @@ impl View {
             self.name_target = None;
             self.open_repositories(dir, Some(&repository));
             self.selector.as_mut()?.origin = Origin::Wizard;
-            self.focus_selector();
         } else if draft.branch == DraftBranch::Unchosen {
             self.name_target = None;
             self.open_branches(true);
@@ -327,7 +326,6 @@ impl View {
             },
             selected,
         ));
-        self.focus_selector();
         true
     }
 
@@ -355,7 +353,6 @@ impl View {
         }
         self.rename_target = None;
         self.name_target = Some(id);
-        self.focus_selector();
     }
 
     /// Branch picks finish their selector; only wizard picks advance the rule.
@@ -460,7 +457,6 @@ impl View {
                         .parent()
                         .map_or_else(|| repository.clone(), Path::to_path_buf);
                     self.open_repositories(dir, Some(&repository));
-                    self.focus_selector();
                     return;
                 }
                 Field::Branch => {
@@ -548,12 +544,6 @@ impl View {
         let mut selector = Selector::new(kind, current.unwrap_or_default());
         selector.current = current;
         self.selector = Some(selector);
-        self.focus_selector();
-    }
-
-    /// Gives the selector the keys, as a click in the details panel does.
-    fn focus_selector(&mut self) {
-        self.active_panel = Panel::Details;
     }
 
     /// Keeps an unapplied branch name when leaving its selector.
@@ -591,7 +581,6 @@ impl View {
             }
             self.name_target = None;
             self.rename.clear();
-            self.active_panel = Panel::Prompt;
         }
     }
 
@@ -879,6 +868,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = draft_view(directory.path(), directory.path());
         let area = Rect::new(3, 2, 160, 40);
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Model);
         assert!(!view.prompt_focused());
         let selector = view.selector.as_ref().unwrap();
@@ -901,6 +891,7 @@ mod tests {
             Some("claude-sonnet-5-5")
         );
         assert!(view.pending_click.is_none());
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Effort);
         let selector = view.selector.as_ref().unwrap();
         let SelectorKind::Effort { values, .. } = &selector.kind else {
@@ -913,6 +904,7 @@ mod tests {
         assert!(view.selector.is_none());
         assert!(view.pending_click.is_none());
         assert_eq!(view.drafts[0].setup.effort.as_deref(), Some("low"));
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Effort);
         let selector = view.selector.as_ref().unwrap();
         let SelectorKind::Effort { values, .. } = &selector.kind else {
@@ -925,10 +917,12 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(view.drafts[0].setup.effort.as_deref(), Some("high"));
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Effort);
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(view.selector.is_none());
         assert_eq!(view.drafts.len(), 1);
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Effort);
         screen(&view, area);
         let row = row_of(&view, 0);
@@ -998,9 +992,11 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(view.input_label(), "named task");
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         view.drafts[0].repository_confirmed = true;
         view.handle_paste("unfinished task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        view.set_active_panel(Panel::Details);
         view.selector.as_mut().unwrap().selected = 2;
     }
 
@@ -1213,7 +1209,8 @@ mod tests {
                     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
                 };
                 assert_eq!(action, None);
-                assert!(view.prompt_focused());
+                assert!(!view.prompt_focused());
+                view.set_active_panel(Panel::Prompt);
                 let action = view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
                 let Some(Action::CreateTask {
                     request, branch, ..
@@ -1242,6 +1239,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = draft_view(directory.path(), directory.path());
         view.drafts[0].setup.branch.clear();
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Branch);
         assert!(view.selector.is_none());
         assert_eq!(view.name_target, view.selected_draft);
@@ -1254,8 +1252,10 @@ mod tests {
                 .iter()
                 .all(|(_, field)| *field != Field::Branch)
         );
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Model);
         assert!(view.selector.is_some());
+        view.set_active_panel(Panel::Details);
         view.open_field(Field::Effort);
         assert!(view.selector.is_some());
     }

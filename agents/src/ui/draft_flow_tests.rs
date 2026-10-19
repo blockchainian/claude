@@ -92,6 +92,7 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
 fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::model::DraftId {
     let id = view.add_draft(setup(cwd));
     view.open_name(id);
+    view.set_active_panel(Panel::Details);
     view.handle_paste(name);
     assert_eq!(key(view, KeyCode::Enter), None);
     assert!(view.selected_draft().unwrap().name.is_some());
@@ -99,6 +100,7 @@ fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::mod
     let draft = view.drafts.iter_mut().find(|draft| draft.id == id).unwrap();
     draft.repository_confirmed = true;
     view.close_selector();
+    view.set_active_panel(Panel::Prompt);
     id
 }
 /// Submits the current prompt through the field rule.
@@ -458,6 +460,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
 fn wizard_name_opens_repository_before_prompt() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
+    view.set_active_panel(Panel::Details);
     view.handle_paste("wizard task");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert!(matches!(
@@ -533,6 +536,7 @@ fn assert_field_click_cancels(field: Field) {
             let prompt = view.input_box.editor.text().to_owned();
             let name_target = view.name_target;
             let name = view.rename.text().to_owned();
+            view.set_active_panel(Panel::Details);
             let now = Utc::now();
             let area = Rect::new(0, 0, width, 50);
             let mut before = Buffer::empty(area);
@@ -549,7 +553,7 @@ fn assert_field_click_cancels(field: Field) {
             assert_eq!(view.name_target, name_target);
             assert_eq!(view.rename.text(), name);
             assert_eq!(view.input_box.editor.text(), prompt);
-            assert_eq!(view.prompt_focused(), named);
+            assert!(!view.prompt_focused());
             let draft = view.selected_draft().unwrap();
             assert_eq!(
                 (
@@ -618,7 +622,10 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
             assert!(!view.selected_draft().unwrap().repository_confirmed);
             if order != "branch" {
                 if order == "repository" {
+                    view.set_active_panel(Panel::Details);
                     key(&mut view, KeyCode::Esc);
+                    assert!(view.selector.is_none());
+                    assert!(view.confirm_dialog.is_none());
                     render(&view);
                     click_field(&mut view, Field::Directory);
                 }
@@ -655,10 +662,12 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
                 .0;
             assert_eq!(click(&mut view, row.x, row.y), None);
             if branch == "feature/new" {
+                view.set_active_panel(Panel::Details);
                 view.handle_paste(branch);
                 assert_eq!(key(&mut view, KeyCode::Enter), None);
             }
-            assert!(view.selector.is_none());
+            assert!(view.selector.is_none(), "order={order}, branch={branch}");
+            view.set_active_panel(Panel::Prompt);
             assert!(view.prompt_focused());
             assert!(!view.selected_draft().unwrap().working);
             view.handle_paste("use the chosen branch");
@@ -692,17 +701,19 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
 }
 
 #[test]
-fn prompt_enter_opens_missing_branch_and_wizard_pick_only_focuses_prompt() {
+fn prompt_enter_opens_missing_branch_and_wizard_pick_keeps_prompt() {
     let (_directory, mut view) = git_draft();
     view.handle_paste("half prompt");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
+    view.set_active_panel(Panel::Details);
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(
         view.selected_draft().unwrap().branch,
         DraftBranch::Existing("main".into())
     );
     assert!(view.selector.is_none());
+    view.set_active_panel(Panel::Prompt);
     assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(matches!(
@@ -785,8 +796,10 @@ fn wizard_selector_escape_only_closes_one_layer_and_then_confirms_delete() {
     for field in [Field::Directory, Field::Branch] {
         view.open_field(field);
         view.selector.as_mut().unwrap().origin = Origin::Wizard;
+        view.set_active_panel(Panel::Details);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert!(view.selector.is_none());
+        view.set_active_panel(Panel::Prompt);
         assert!(view.prompt_focused());
         assert_eq!(view.input_box.editor.text(), "half prompt");
         assert_eq!(key(&mut view, KeyCode::Esc), None);
@@ -825,7 +838,14 @@ fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
             Some("original")
         );
         assert!(view.name_target.is_none());
-        assert!(view.prompt_focused());
+        assert!(
+            view.active_panel
+                == if right_click {
+                    Panel::Details
+                } else {
+                    Panel::Prompt
+                }
+        );
     }
 }
 
@@ -1023,6 +1043,7 @@ fn frozen_repository_results_and_double_click_title_use_draft_identity() {
     assert_eq!(view.name_target, Some(id));
     assert_eq!(view.rename.text(), "original");
     key(&mut view, KeyCode::Esc);
+    view.set_active_panel(Panel::Prompt);
     view.drafts[0].branch = DraftBranch::Existing("main".into());
     view.handle_paste("prompt");
     assert!(matches!(
@@ -1036,7 +1057,7 @@ fn frozen_repository_results_and_double_click_title_use_draft_identity() {
 }
 
 #[test]
-fn right_click_cancels_delete_confirmation_and_returns_prompt_focus() {
+fn right_click_cancels_delete_confirmation_and_keeps_clicked_panel() {
     let (directory, mut view) = fixture();
     named_draft(&mut view, directory.path(), "keep me");
     view.handle_paste("keep prompt");
@@ -1055,7 +1076,7 @@ fn right_click_cancels_delete_confirmation_and_returns_prompt_focus() {
         });
     }
     assert!(view.confirm_dialog.is_none());
-    assert!(view.prompt_focused());
+    assert!(view.active_panel == Panel::TaskList);
     assert_eq!(view.input_box.editor.text(), "keep prompt");
 }
 
@@ -1425,6 +1446,7 @@ fn draft_configured_defaults_survive_clearing_overrides() {
     view.add_draft(setup);
     for field in [Field::Model, Field::Effort] {
         view.open_field(field);
+        view.set_active_panel(Panel::Details);
         key(&mut view, KeyCode::Enter);
     }
     let buffer = render(&view);

@@ -61,7 +61,7 @@ fn middle_paste_prompt_hits_display_cells_and_line_ends() {
 #[test]
 fn middle_paste_non_inputs_do_nothing() {
     let mut view = fixture();
-    view.focus_input();
+    view.prepare_prompt();
     view.input_box.editor.set_text("kept");
     screen(&view, 160, 40);
     let viewport = view.viewport.borrow();
@@ -110,7 +110,6 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
             Panel::LogList => super::super::log::search_input_rect(layout.log),
             _ => super::super::log::search_input_rect(layout.log_detail.inner(Margin::new(1, 0))),
         };
-        view.active_panel = Panel::Prompt;
         paste_at(&mut view, area.right() - 1, area.y);
         let editor = match panel {
             Panel::TaskList => &view.search,

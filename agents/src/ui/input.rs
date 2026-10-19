@@ -164,9 +164,6 @@ impl View {
             return;
         }
         if self.prompt_focused() {
-            if self.active_panel == Panel::Prompt {
-                self.active_panel = Panel::TaskList;
-            }
             return;
         }
         if self.log_detail_search.editing {
@@ -266,6 +263,45 @@ impl View {
         if self.frozen_draft() {
             return None;
         }
+        let position = (mouse.column, mouse.row).into();
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+            let panel = {
+                let viewport = self.viewport.borrow();
+                if viewport.list.contains(position)
+                    || viewport.tab_bar.contains(position)
+                    || viewport.search.contains(position)
+                {
+                    Panel::TaskList
+                } else if viewport.title_input.contains(position)
+                    || viewport.details_title.contains(position)
+                    || viewport.details_input.contains(position)
+                    || viewport
+                        .field_targets
+                        .iter()
+                        .any(|(rect, _)| rect.contains(position))
+                {
+                    Panel::Details
+                } else if viewport.log.contains(position)
+                    || viewport
+                        .log_borders
+                        .iter()
+                        .any(|rect| rect.contains(position))
+                {
+                    Panel::LogList
+                } else if viewport.terminal.contains(position) && self.terminal.is_some() {
+                    Panel::Terminal
+                } else if viewport.log_detail.contains(position) {
+                    Panel::LogDetail
+                } else if viewport.details.contains(position) {
+                    Panel::Details
+                } else if viewport.prompt.contains(position) {
+                    Panel::Prompt
+                } else {
+                    Panel::TaskList
+                }
+            };
+            self.set_active_panel(panel);
+        }
         if let Some(action) = self.overlay_mouse(mouse) {
             return action;
         }
@@ -274,7 +310,6 @@ impl View {
         if middle && paste_target.is_none() {
             return None;
         }
-        let position = (mouse.column, mouse.row).into();
         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
             let viewport = self.viewport.borrow();
             self.pressed_task = viewport
@@ -302,48 +337,6 @@ impl View {
             self.accept_draft_name();
             self.close_selector();
         }
-        let previous_focus = self.active_panel;
-        if matches!(mouse.kind, MouseEventKind::Down(_)) {
-            self.active_panel = {
-                let viewport = self.viewport.borrow();
-                if viewport.list.contains(position)
-                    || viewport.tab_bar.contains(position)
-                    || viewport.search.contains(position)
-                {
-                    Panel::TaskList
-                } else if viewport.log.contains(position)
-                    || viewport
-                        .log_borders
-                        .iter()
-                        .any(|rect| rect.contains(position))
-                {
-                    Panel::LogList
-                } else if viewport.terminal.contains(position) && self.terminal.is_some() {
-                    Panel::Terminal
-                } else if viewport.log_detail.contains(position) {
-                    Panel::LogDetail
-                } else if viewport.details.contains(position) {
-                    Panel::Details
-                } else if viewport.prompt.contains(position) {
-                    Panel::Prompt
-                } else {
-                    Panel::Other
-                }
-            };
-        }
-        if self.active_panel != previous_focus
-            && !matches!(
-                paste_target,
-                Some(
-                    PasteTarget::Search(_)
-                        | PasteTarget::LogSearch(_)
-                        | PasteTarget::DetailSearch(_)
-                )
-            )
-            && (self.searching || self.log_search.editing || self.log_detail_search.editing)
-        {
-            self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        }
         let previous = if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && let Some((MouseButton::Left, x, y, false)) = self.mouse_press
             && self.pending_click.as_ref().is_some_and(|pending| {
@@ -363,9 +356,6 @@ impl View {
         } else {
             self.handle_mouse_event(mouse)
         };
-        if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
-            self.focus(self.active_panel);
-        }
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
@@ -421,7 +411,7 @@ impl View {
         match target {
             PasteTarget::Terminal => unreachable!("terminal mouse handles paste"),
             PasteTarget::Prompt(area) => {
-                self.focus_input();
+                self.prepare_prompt();
                 self.input_box.paste_mouse(area, &self.input_label(), mouse);
             }
             PasteTarget::Title(area) => self.rename.click_row_after(area, "", mouse.column),
@@ -652,9 +642,6 @@ impl View {
                         && let Some(selector) = self.selector.as_mut()
                     {
                         selector.selected = index;
-                        if self.active_panel == Panel::Prompt {
-                            self.active_panel = Panel::TaskList;
-                        }
                         if selector.branch_editor().is_some() && index + 1 == selector.len() {
                             return Some(None);
                         }
@@ -668,6 +655,7 @@ impl View {
     }
 
     fn handle_mouse_event(&mut self, mut mouse: MouseEvent) -> Option<Action> {
+        let position = (mouse.column, mouse.row).into();
         if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
             self.mouse_press = Some((MouseButton::Right, mouse.column, mouse.row, false));
             return None;
@@ -683,25 +671,14 @@ impl View {
                     self.right_click();
                     return None;
                 }
-                if self
-                    .viewport
-                    .borrow()
-                    .log_detail
-                    .contains((mouse.column, mouse.row).into())
-                {
+                if self.viewport.borrow().log_detail.contains(position) {
                     return if self.terminal.is_some() {
                         Some(Action::CloseTerminal)
                     } else {
                         self.selected_id().cloned().map(Action::OpenTerminal)
                     };
                 }
-                if self.selector.is_some()
-                    && self
-                        .viewport
-                        .borrow()
-                        .details
-                        .contains((mouse.column, mouse.row).into())
-                {
+                if self.selector.is_some() && self.viewport.borrow().details.contains(position) {
                     self.pending_click = None;
                     self.cancel_selector();
                 } else {
@@ -722,7 +699,7 @@ impl View {
         if self.input_disabled().is_none()
             && (self.input_box.mouse_selecting()
                 || (mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                    && prompt.contains((mouse.column, mouse.row).into())))
+                    && prompt.contains(position)))
             && matches!(
                 mouse.kind,
                 MouseEventKind::Down(MouseButton::Left)
@@ -734,7 +711,7 @@ impl View {
                 self.mouse_press = None;
                 self.pending_click = None;
                 self.text_selection.borrow_mut().take();
-                self.focus_input();
+                self.prepare_prompt();
             }
             return self.input_box.select_mouse(
                 prompt.inner(Margin::new(1, 0)),
@@ -744,11 +721,7 @@ impl View {
         }
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                if self
-                    .viewport
-                    .borrow()
-                    .prompt
-                    .contains((mouse.column, mouse.row).into()) =>
+                if self.viewport.borrow().prompt.contains(position) =>
             {
                 let area = self.viewport.borrow().prompt.inner(Margin::new(1, 0));
                 self.input_box.scroll_mouse(
@@ -829,6 +802,7 @@ impl View {
                 {
                     self.close_selector();
                 } else {
+                    self.set_active_panel(Panel::Details);
                     self.open_field(field);
                 }
                 return None;
@@ -840,7 +814,6 @@ impl View {
                 if !self.defer_click(ClickTarget::Title(id)) {
                     return None;
                 }
-                self.active_panel = Panel::Details;
                 if let Some(draft) = self.selected_draft() {
                     self.open_name(draft.id);
                     return None;
@@ -862,7 +835,7 @@ impl View {
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && self.viewport.borrow().prompt.contains(position)
         {
-            self.focus_input();
+            self.prepare_prompt();
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
@@ -1283,9 +1256,6 @@ impl View {
         self.rename.set_text(&title);
         self.rename_target = Some(id);
         self.name_target = None;
-        if self.active_panel == Panel::Prompt {
-            self.active_panel = Panel::TaskList;
-        }
         self.search.clear();
         self.searching = false;
         None

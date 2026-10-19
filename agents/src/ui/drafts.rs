@@ -343,8 +343,7 @@ impl View {
     pub(super) fn cancel_confirmation(&mut self) {
         self.confirm_dialog = None;
         if self.selected_draft.is_some() {
-            self.active_panel = Panel::Prompt;
-            self.focus_input();
+            self.prepare_prompt();
         }
     }
 
@@ -359,9 +358,6 @@ impl View {
                     title: name.clone(),
                     confirm: false,
                 });
-                if self.active_panel == Panel::Prompt {
-                    self.active_panel = Panel::TaskList;
-                }
             } else {
                 self.discard_selected_draft();
             }
@@ -402,8 +398,7 @@ impl View {
         {
             self.discard_selected_draft();
         } else if self.selected_draft.is_some() {
-            self.active_panel = Panel::Prompt;
-            self.focus_input();
+            self.prepare_prompt();
         } else {
             self.reconcile_selection();
         }
@@ -422,8 +417,8 @@ impl View {
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             self.input_box = std::mem::take(&mut draft.input);
         }
-        self.active_panel = Panel::Prompt;
-        self.focus_input();
+
+        self.prepare_prompt();
     }
 
     pub(super) fn submit_draft(&mut self, id: DraftId) {
@@ -598,6 +593,7 @@ mod tests {
         view.handle_paste("probe");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
         view.handle_paste(text);
         view.set_sessions(Vec::new(), false);
@@ -659,6 +655,7 @@ mod persistence_flow_tests {
     fn leaving_named_draft_keeps_its_prompt() {
         let mut view = named();
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         view.handle_paste("half prompt");
         view.leave_draft();
         assert_eq!(view.drafts.len(), 1);
@@ -668,6 +665,7 @@ mod persistence_flow_tests {
     fn creation_failure_keeps_editable_prompt() {
         let mut view = named();
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         view.handle_paste("retry prompt");
         let id = view.drafts[0].id;
         view.submit_draft(id);
@@ -680,6 +678,7 @@ mod persistence_flow_tests {
     fn named_draft_escape_opens_delete_confirmation() {
         let mut view = named();
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(view.confirm_dialog.is_some());
         assert_eq!(view.drafts.len(), 1);
@@ -716,6 +715,7 @@ mod recovery_tests {
         view.handle_paste(name);
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         id
     }
     #[test]
@@ -915,6 +915,7 @@ mod confirmation_attention_tests {
         view.handle_paste("Keep this draft");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         view.confirm_draft_delete();
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -949,6 +950,7 @@ mod confirmation_attention_tests {
         view.handle_paste("Delete this draft");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
+        view.set_active_panel(Panel::Prompt);
         view.confirm_draft_delete();
         row.status = SessionStatus::NeedsInput;
         let key = row.id.clone();

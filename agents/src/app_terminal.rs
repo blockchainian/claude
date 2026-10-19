@@ -133,16 +133,14 @@ impl App {
             {
                 self.open_terminal(id);
             } else if let Some(id) = waiting {
-                let awaits_prompt = self
-                    .session(&id)
-                    .is_some_and(|session| {
-                        session
-                            .background_job
-                            .as_ref()
-                            .is_some_and(|job| job.awaits_prompt)
-                    });
+                let awaits_prompt = self.session(&id).is_some_and(|session| {
+                    session
+                        .background_job
+                        .as_ref()
+                        .is_some_and(|job| job.awaits_prompt)
+                });
                 if awaits_prompt {
-                    self.view.focus_input();
+                    self.view.prepare_prompt();
                 } else {
                     self.open_terminal(id);
                 }
@@ -503,7 +501,10 @@ mod tests {
         {
             // Output wakes the dashboard again only after it draws the last frame.
             terminal.drawn();
-            assert!(Instant::now() < deadline, "terminal never drew Claude's input");
+            assert!(
+                Instant::now() < deadline,
+                "terminal never drew Claude's input"
+            );
             let _ = app.receiver.recv_timeout(Duration::from_millis(50));
         }
         app.view.show_terminal(id.clone(), terminal.screen.clone());
@@ -676,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_for_a_prompt_focuses_the_input_instead_of_a_terminal() {
+    fn waiting_for_a_prompt_preserves_the_active_panel() {
         let (_directory, mut app, _id) = fixture();
         draw(&mut app);
         let session = &mut app.sessions[0];
@@ -694,7 +695,11 @@ mod tests {
         app.view.set_sessions(app.sessions.clone(), false);
         app.sync_terminal();
         assert!(app.terminal.is_none());
-        assert!(app.view.pasting_prompt());
+        assert!(!app.view.pasting_prompt());
+        app.handle_event(crossterm::event::Event::Key(
+            crossterm::event::KeyCode::Char('/').into(),
+        ));
+        assert!(draw(&mut app).contains("Search ❯"));
     }
 
     #[test]

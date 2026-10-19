@@ -258,6 +258,7 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
         view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
     assert_eq!(view.rename.text(), "甲丙");
+    view.set_active_panel(Panel::Details);
     view.open_field(draft_controls::Field::Directory);
     assert!(view.title_editor().is_none());
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -267,7 +268,8 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
     assert!(view.name_target.is_none());
     assert!(view.selector.is_some());
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(view.prompt_focused());
+    assert!(!view.prompt_focused());
+    view.set_active_panel(Panel::Prompt);
     view.handle_paste("prompt body");
     assert_eq!(view.input_box.editor.text(), "prompt body");
     view.add_draft(DraftSetup {

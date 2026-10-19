@@ -43,7 +43,7 @@ fn window_navigation_all_directions_in_both_layouts() {
                         );
                     }
                     log_screen(&view, width, 45, now);
-                    view.active_panel = source;
+                    view.set_active_panel(source);
 
                     assert_eq!(chord(&mut view, direction), None);
                     assert!(
@@ -69,7 +69,7 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
                 key(&mut view, KeyCode::Char(c));
             }
         } else {
-            view.active_panel = Panel::Prompt;
+            view.set_active_panel(Panel::Prompt);
             view.input_box.editor.insert("one two");
         }
         assert_eq!(chord(&mut view, 'x'), None);
@@ -93,6 +93,7 @@ fn window_navigation_terminal_ctrl_w_l_is_not_forwarded() {
             crate::session_terminal::TerminalScreen::new(10, 40),
         )),
     );
+    view.set_active_panel(Panel::Terminal);
     // A horizontal arrangement checks that terminal input cannot consume navigation.
     {
         let v = &mut *view.viewport.borrow_mut();
@@ -112,6 +113,7 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
             crate::session_terminal::TerminalScreen::new(10, 40),
         )),
     );
+    view.set_active_panel(Panel::Terminal);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
         None
@@ -128,7 +130,7 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
 #[test]
 fn window_navigation_release_and_second_ctrl_w_preserve_input() {
     let (mut view, _) = log_fixture();
-    view.active_panel = Panel::Prompt;
+    view.set_active_panel(Panel::Prompt);
     view.input_box.editor.insert("one two three");
     let prefix = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
     assert_eq!(view.handle_key(prefix), None);
@@ -194,6 +196,7 @@ fn window_navigation_real_terminal_probe() {
         let (mut view, now) = log_fixture();
         view.rows[0].process = None;
         view.show_terminal(session_key("log"), terminal.screen.clone());
+        view.set_active_panel(Panel::Terminal);
         log_screen(&view, width, 45, now);
         assert_eq!(chord(&mut view, 'l'), None);
         assert!(view.active_panel == Panel::Terminal); // no panel to the right
@@ -207,6 +210,7 @@ fn window_navigation_real_terminal_probe() {
                 }
         );
         view.show_terminal(session_key("log"), terminal.screen.clone());
+        view.set_active_panel(Panel::Terminal);
         // A real readline Ctrl-W deletes the last word before the following key.
         let command = format!("echo one{width} two");
         terminal.write(command.as_bytes()).unwrap();
@@ -232,4 +236,26 @@ fn window_navigation_real_terminal_probe() {
     )
     .unwrap();
     println!("{verdict}");
+}
+
+#[test]
+fn task_and_editor_updates_preserve_the_active_panel() {
+    let (mut view, _) = log_fixture();
+    view.set_active_panel(Panel::Details);
+    view.prepare_prompt();
+    assert!(view.active_panel == Panel::Details);
+    view.select_log_event(Some(0));
+    assert!(view.active_panel == Panel::Details);
+    view.set_sessions(view.rows.clone(), false);
+    assert!(view.active_panel == Panel::Details);
+    view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: std::env::temp_dir(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    assert!(view.active_panel == Panel::Details);
+    view.close_selector();
+    assert!(view.active_panel == Panel::Details);
 }

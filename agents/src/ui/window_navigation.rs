@@ -2,7 +2,8 @@ use super::{Panel, View};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl View {
-    pub(super) fn focus(&mut self, panel: Panel) {
+    /// Mouse interactions and Ctrl-W navigation share this activation entry point.
+    pub(super) fn set_active_panel(&mut self, panel: Panel) {
         if panel != self.active_panel
             && (self.searching || self.log_search.editing || self.log_detail_search.editing)
         {
@@ -65,7 +66,7 @@ impl View {
             .map(|(panel, _)| panel);
         drop(v);
         if let Some(panel) = target {
-            self.focus(panel);
+            self.set_active_panel(panel);
         }
     }
 }

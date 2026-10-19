@@ -252,7 +252,6 @@ enum Panel {
     Terminal,
     Details,
     Prompt,
-    Other,
 }
 
 pub(crate) use crate::model::LogSort;
@@ -592,11 +591,10 @@ impl View {
             && self.confirm_dialog.is_none()
     }
 
-    pub(crate) fn focus_input(&mut self) {
+    pub(crate) fn prepare_prompt(&mut self) {
         if self.input_disabled().is_none() {
             self.dismiss_selector();
             self.name_target = None;
-            self.active_panel = Panel::Prompt;
         }
     }
 
@@ -1132,8 +1130,7 @@ impl View {
             if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
                 self.input_box = std::mem::take(&mut draft.input);
             }
-            self.active_panel = Panel::Prompt;
-            self.focus_input();
+            self.prepare_prompt();
         }
     }
 
@@ -1148,9 +1145,6 @@ impl View {
         self.selector = None;
         self.text_selection.borrow_mut().take();
         let viewport = self.viewport.get_mut();
-        if self.active_panel == Panel::Prompt {
-            self.active_panel = Panel::TaskList;
-        }
         let left = TaskPanels {
             input_box: std::mem::take(&mut self.input_box),
             details_scroll: std::mem::take(&mut viewport.details_scroll),

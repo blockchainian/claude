@@ -10,18 +10,14 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 impl View {
-    /// Shows `screen` in the log detail panel and gives it keyboard focus.
+    /// Shows `screen` in the log detail panel.
     pub fn show_terminal(&mut self, id: SessionKey, screen: Screen) {
         self.terminal = Some((id, screen));
-        self.focus(Panel::Terminal);
     }
 
     pub fn hide_terminal(&mut self) {
         self.terminal = None;
         self.viewport.borrow_mut().terminal = Rect::default();
-        if self.active_panel == Panel::Terminal {
-            self.focus(Panel::LogDetail);
-        }
     }
 
     /// The rows and columns a terminal gets in the log detail panel, below its top rule.
@@ -89,7 +85,7 @@ impl View {
             mouse.kind,
             MouseEventKind::Down(MouseButton::Left | MouseButton::Middle)
         ) {
-            self.focus(Panel::Terminal);
+            self.set_active_panel(Panel::Terminal);
         }
         let parser = self.shown_terminal()?.lock().expect("terminal screen lock");
         let screen = parser.screen();

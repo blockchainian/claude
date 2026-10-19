@@ -21,8 +21,29 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
         .unwrap()
         .check_ready(std::time::Instant::now(), |_| false);
     view.show_terminal(session_key("log"), screen.clone());
+    view.set_active_panel(Panel::Terminal);
     log_screen(&view, 100, 45, now);
     (view, now, screen)
+}
+
+#[test]
+fn showing_and_hiding_terminal_preserves_the_active_panel() {
+    for panel in [
+        Panel::TaskList,
+        Panel::Details,
+        Panel::LogList,
+        Panel::Prompt,
+        Panel::LogDetail,
+        Panel::Terminal,
+    ] {
+        let (mut view, _) = log_fixture();
+        view.set_active_panel(panel);
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(TerminalScreen::new(10, 40)));
+        view.show_terminal(session_key("log"), screen);
+        assert!(view.active_panel == panel);
+        view.hide_terminal();
+        assert!(view.active_panel == panel);
+    }
 }
 
 #[test]

@@ -131,7 +131,8 @@ fn escape_stopping_a_running_turn_returns_its_prompt_to_the_input() {
         // The fixture shows the Inactive tab; a live task belongs on Active.
         view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(view.selected_id(), Some(&id));
-        view.focus_input();
+        view.set_active_panel(Panel::Prompt);
+        view.prepare_prompt();
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             Some(Action::Stop(id.clone()))

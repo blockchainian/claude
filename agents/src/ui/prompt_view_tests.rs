@@ -301,10 +301,10 @@ fn prompt_paste_and_cursor_require_the_active_prompt_panel() {
     view.handle_paste(text);
     assert!(view.input_box.editor.is_empty());
     assert_eq!(view.cursor_pos(area), None);
-    view.focus(Panel::Prompt);
+    view.set_active_panel(Panel::Prompt);
     view.handle_paste(text);
     assert_eq!(view.input_box.editor.text(), text);
     assert!(view.cursor_pos(area).is_some());
-    view.focus(Panel::TaskList);
+    view.set_active_panel(Panel::TaskList);
     assert_eq!(view.cursor_pos(area), None);
 }

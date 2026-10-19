@@ -518,6 +518,12 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     app.handle_action(Some(Action::NewDraft {
         cwd: repository.clone(),
     }));
+    draw(&mut app, 180);
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('w'),
+        KeyModifiers::CONTROL,
+    )));
+    key(&mut app, KeyCode::Char('l'));
     app.handle_event(Event::Paste("branch flow task".into()));
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Enter);
@@ -549,6 +555,11 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("branch flow task"), "{rendered}");
     assert!(!rendered.contains("Create new branch"), "{rendered}");
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('w'),
+        KeyModifiers::CONTROL,
+    )));
+    key(&mut app, KeyCode::Char('j'));
     app.handle_event(Event::Paste("saved prompt".into()));
     key(&mut app, KeyCode::Esc);
     assert!(
@@ -1303,6 +1314,14 @@ fn terminal_restore_fixture() -> (tempfile::TempDir, App, SessionKey) {
     .unwrap();
     app.view.show_terminal(id.clone(), terminal.screen.clone());
     app.terminal = Some(terminal);
+    draw(&mut app, 200);
+    for direction in ['j', 'j'] {
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+        )));
+        key(&mut app, KeyCode::Char(direction));
+    }
     (directory, app, id)
 }
 

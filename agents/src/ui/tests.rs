@@ -2736,7 +2736,8 @@ fn delete_dialog_cancel_and_position_keys() {
 #[test]
 fn escape_in_an_empty_prompt_stops_only_a_stoppable_task() {
     let mut view = lifecycle_fixture();
-    view.focus_input();
+    view.set_active_panel(Panel::Prompt);
+    view.prepare_prompt();
     view.input_box.editor.set_text("draft");
     assert_eq!(key(&mut view, KeyCode::Esc), None);
     assert!(view.input_box.editor.is_empty());
@@ -2746,7 +2747,8 @@ fn escape_in_an_empty_prompt_stops_only_a_stoppable_task() {
     );
     assert!(view.prompt_focused());
     let mut view = fixture();
-    view.focus_input();
+    view.set_active_panel(Panel::Prompt);
+    view.prepare_prompt();
     assert_eq!(key(&mut view, KeyCode::Esc), None);
     assert!(view.prompt_focused());
 }
