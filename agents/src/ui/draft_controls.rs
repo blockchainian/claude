@@ -346,6 +346,7 @@ impl View {
         } else {
             DraftBranch::Existing(branch)
         };
+        draft.repository_confirmed = true;
         self.close_selector();
         self.draft_changed(id);
         if origin == Origin::Wizard {
