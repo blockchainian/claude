@@ -475,8 +475,10 @@ impl View {
                 Rect::new(left, model_y, area.right().saturating_sub(left), 1),
                 buf,
             );
+            let sort_label = self.render_log_sort(self.viewport.borrow().log_borders[0], buf);
             self.render_log_model(
                 Rect::new(left, model_y, area.right().saturating_sub(left), 1),
+                sort_label,
                 buf,
             );
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
@@ -802,8 +804,20 @@ impl View {
         }
     }
 
+    fn render_log_sort(&self, border: Rect, buf: &mut Buffer) -> Rect {
+        if self.log_sort != LogSort::Duration || border.is_empty() {
+            return Rect::default();
+        }
+        let label = "Sort · duration";
+        let width = (label.width() as u16).min(border.width);
+        let area = Rect::new(border.right() - width, border.y, width, 1);
+        Clear.render(area, buf);
+        line(Line::from(label).dim(), area, buf);
+        area
+    }
+
     /// Groups the model and effort on the left; each value opens its own picker.
-    fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
+    fn render_log_model(&self, rule: Rect, sort_label: Rect, buf: &mut Buffer) {
         let (model, effort) = match (self.selected_row(), self.selected_draft()) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
             (Some(session), _) => (
@@ -826,11 +840,12 @@ impl View {
         };
         let separator = super::title_rule::SEPARATOR;
         let jump = self.viewport.borrow().log_jump;
-        let right = if jump.intersects(rule) {
-            jump.x.saturating_sub(1)
-        } else {
-            rule.right().saturating_sub(2)
-        };
+        let right = [jump, sort_label]
+            .into_iter()
+            .filter(|area| area.intersects(rule))
+            .map(|area| area.x.saturating_sub(1))
+            .min()
+            .unwrap_or_else(|| rule.right().saturating_sub(2));
         let mut x = rule.x + 2;
         let values: Vec<_> = [(model, Field::Model), (effort, Field::Effort)]
             .into_iter()
@@ -1915,6 +1930,56 @@ mod wrapped_path_tests {
 mod background_title_tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn duration_sort_label_uses_top_border_and_clears_model_controls() {
+        let mut view = View::default();
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd: std::env::temp_dir(),
+            model: Some("a-model-name-that-needs-truncation".into()),
+            effort: Some("high".into()),
+            branch: "main".into(),
+        });
+        for width in [44, 100, 150, 200] {
+            for sort in [LogSort::Time, LogSort::Duration] {
+                view.log_sort = sort;
+                let area = Rect::new(0, 0, width, 40);
+                let mut buf = Buffer::empty(area);
+                view.render(area, &mut buf);
+                let border = view.viewport.borrow().log_borders[0];
+                let text: String = (border.x..border.right())
+                    .map(|x| buf[(x, border.y)].symbol())
+                    .collect();
+                assert_eq!(text.contains("Sort · duration"), sort == LogSort::Duration);
+                if sort == LogSort::Duration {
+                    assert!(text.ends_with("Sort · duration"), "{text}");
+                    let label_x = border.right() - 15;
+                    for x in label_x..border.right() {
+                        assert!(
+                            buf[(x, border.y)]
+                                .modifier
+                                .contains(ratatui::style::Modifier::DIM)
+                        );
+                    }
+                    if width < WIDE_LAYOUT_COLUMNS {
+                        for field in [Field::Model, Field::Effort] {
+                            let rect = view
+                                .viewport
+                                .borrow()
+                                .field_targets
+                                .iter()
+                                .find(|(_, value)| *value == field)
+                                .unwrap()
+                                .0;
+                            assert_eq!(rect.y, border.y);
+                            assert!(rect.right() < label_x);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn background_titles_are_centered_with_optional_time_and_cjk() {

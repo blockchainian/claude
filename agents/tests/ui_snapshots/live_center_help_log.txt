@@ -4,9 +4,9 @@
 
  Navigate            Tasks                   View                Log
  ↑      Up           n          New          tab/⇧tab  Filter    /                       Search
- ↓      Down         o          Terminal     /         Search    2× click top border     Earliest
- enter  Terminal     f          Fork         g         Group     2× click bottom border  Latest
- →/⌃l   Terminal     r          Rename
+ ↓      Down         o          Terminal     /         Search    t                       Sort
+ enter  Terminal     f          Fork         g         Group     2× click top border     Earliest
+ →/⌃l   Terminal     r          Rename                           2× click bottom border  Latest
  pgup   Page up      x          Stop
  pgdn   Page down    a          Archive
  ⌃c     Quit         h          Hide

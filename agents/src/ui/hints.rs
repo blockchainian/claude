@@ -107,6 +107,7 @@ impl View {
                 "Log",
                 &[
                     ("/", "Search"),
+                    ("t", "Sort"),
                     ("2× click top border", "Earliest"),
                     ("2× click bottom border", "Latest"),
                 ],
@@ -131,6 +132,15 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_help_includes_duration_sort_key() {
+        let view = View::default();
+        assert!(view.center_help_lines(120).iter().any(|line| {
+            let text = line.to_string();
+            text.contains("t") && text.contains("Sort")
+        }));
+    }
 
     #[test]
     fn grouping_key_works_without_a_footer_hint() {
