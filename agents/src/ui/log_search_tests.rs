@@ -295,7 +295,11 @@ fn duration_keys_include_messages_none_ties_and_running_update_time() {
     view.render_log(area, &mut first, now);
     let mut later = Buffer::empty(area);
     view.render_log(area, &mut later, now + chrono::Duration::seconds(30));
-    assert_eq!(first, later, "duration rows only tick on updates");
+    assert_ne!(first, later, "running duration ticks between updates");
+    assert_eq!(
+        view.log_redraw_in(now),
+        Some(std::time::Duration::from_secs(1))
+    );
     assert_eq!(before, view.log_order);
     let row = view.shown_position(6).unwrap() as u16;
     let text: String = (0..100).map(|x| first[(x, row)].symbol()).collect();

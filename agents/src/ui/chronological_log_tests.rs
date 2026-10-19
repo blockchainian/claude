@@ -472,3 +472,149 @@ fn duration_updates_cancel_list_drag_only_when_event_order_changes() {
         assert_eq!(copied.is_some(), change == "unchanged", "{change}");
     }
 }
+
+#[test]
+fn duration_columns_and_detail_titles_follow_sort_values() {
+    use crate::log::Kind;
+    let (_dir, mut view, events) = fixture();
+    let now = Utc::now();
+    view.rows[view.selected].status = SessionStatus::Working;
+    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    view.log_session = view.selected_id().cloned();
+    view.rows[view.selected].process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: None,
+        started_at: None,
+    });
+    let template = events
+        .iter()
+        .find(|event| event.calls.len() == 1)
+        .unwrap()
+        .clone();
+    for kind in [
+        Kind::User,
+        Kind::Assistant,
+        Kind::Tool,
+        Kind::Error,
+        Kind::Denied,
+        Kind::Compaction,
+        Kind::Agent,
+        Kind::Session,
+        Kind::QueuedUser,
+        Kind::QueuedSystem,
+    ] {
+        for state in ["settled", "running", "missing", "clock", "recorded"] {
+            let mut event = template.clone();
+            event.kind = kind.clone();
+            event.calls[0].started_at = None;
+            event.started_at = now - chrono::Duration::seconds(5);
+            event.previous_end = Some(now - chrono::Duration::seconds(12));
+            event.ended_at = Some(now - chrono::Duration::seconds(2));
+            event.completed_time = false;
+            event.background = false;
+            if state == "running" {
+                event.ended_at = None;
+            }
+            if state == "missing" {
+                event.previous_end = None;
+            }
+            if state == "clock" {
+                event.completed_time = true;
+                event.duration = None;
+            }
+            if state == "recorded" {
+                event.completed_time = true;
+                event.duration = Some(chrono::Duration::seconds(8));
+                event.previous_end = None;
+            }
+            for sort in [LogSort::Time, LogSort::Duration] {
+                view.log_sort = sort;
+                if sort == LogSort::Duration {
+                    event.calls[0].started_at = Some(event.started_at);
+                }
+                view.set_log(vec![event.clone()]);
+                view.select_log_event(Some(0));
+                view.last_update = now - chrono::Duration::seconds(3);
+                let expected = if sort == LogSort::Time {
+                    match kind {
+                        Kind::Tool | Kind::Error | Kind::Denied => match state {
+                            "recorded" => "8s".into(),
+                            "clock" => super::formatting::clock_text(event.ended_at.unwrap()),
+                            "missing" => super::formatting::clock_text(event.started_at),
+                            "running" => "12s".into(),
+                            _ => "10s".into(),
+                        },
+                        _ => "5s ago".into(),
+                    }
+                } else {
+                    match kind {
+                        _ if state == "missing" => String::new(),
+                        Kind::User | Kind::Assistant if state == "recorded" => String::new(),
+                        Kind::User | Kind::Assistant => "7s".into(),
+                        Kind::Tool | Kind::Error | Kind::Denied => match state {
+                            "recorded" => "8s".into(),
+                            "clock" => String::new(),
+                            "running" => "12s".into(),
+                            _ => "10s".into(),
+                        },
+                        _ => String::new(),
+                    }
+                };
+                let area = Rect::new(0, 0, 100, 4);
+                let mut buf = Buffer::empty(area);
+                view.render_log(area, &mut buf, now);
+                let time: String = (92..100).map(|x| buf[(x, 0)].symbol()).collect();
+                assert_eq!(time.trim(), expected, "{sort:?} {kind:?} {state} list");
+                let detail = Rect::new(0, 0, 100, 30);
+                let mut buf = Buffer::empty(detail);
+                view.render_log_detail(detail, &mut buf, now);
+                let time: String = (92..100).map(|x| buf[(x, 1)].symbol()).collect();
+                assert_eq!(time.trim(), expected, "{sort:?} {kind:?} {state} detail");
+            }
+        }
+    }
+}
+
+#[test]
+fn duration_running_rows_redraw_only_while_visible_and_keep_update_order() {
+    let (_dir, mut view, mut events) = fixture();
+    let now = Utc::now();
+    events.truncate(3);
+    for event in &mut events {
+        event.kind = crate::log::Kind::Tool;
+        event.completed_time = false;
+        event.background = false;
+        event.started_at = now - chrono::Duration::seconds(5);
+        event.previous_end = Some(now - chrono::Duration::seconds(10));
+        event.ended_at = Some(now - chrono::Duration::seconds(2));
+    }
+    events[0].ended_at = Some(now - chrono::Duration::seconds(7));
+    events[1].previous_end = Some(now - chrono::Duration::seconds(30));
+    events[2].ended_at = None;
+    view.rows[view.selected].status = SessionStatus::Working;
+    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    view.log_session = view.selected_id().cloned();
+    view.rows[view.selected].process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: None,
+        started_at: None,
+    });
+    view.log_sort = LogSort::Duration;
+    view.set_log(events);
+    view.select_log_event(Some(1));
+    let area = Rect::new(0, 0, 100, 1);
+    let mut buf = Buffer::empty(area);
+    view.render_log(area, &mut buf, now);
+    let order = view.log_order.clone();
+    assert_eq!(
+        view.log_redraw_in(now),
+        Some(std::time::Duration::from_secs(1))
+    );
+    view.render_log(area, &mut buf, now + chrono::Duration::seconds(1));
+    assert_eq!(view.log_order, order);
+    let time: String = (92..100).map(|x| buf[(x, 0)].symbol()).collect();
+    assert_eq!(time.trim(), "11s");
+    view.select_log_event(Some(0));
+    view.render_log(area, &mut buf, now);
+    assert_eq!(view.log_redraw_in(now), None);
+}
