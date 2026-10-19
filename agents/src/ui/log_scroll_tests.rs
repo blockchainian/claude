@@ -500,3 +500,15 @@ fn log_scroll_wheel_reversing_at_title_does_not_pause() {
     wheel(&mut view, false);
     assert_eq!(view.log_selected, Some(0));
 }
+
+#[test]
+fn log_detail_focus_toggles_log_sort() {
+    let (mut view, _) = fixture(false);
+    assert!(view.mouse_focus == Panel::LogDetail);
+    let action = view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+    assert_eq!(view.log_sort, LogSort::Duration);
+    assert!(matches!(
+        action,
+        Some(Action::PersistSorting(LogSort::Duration))
+    ));
+}

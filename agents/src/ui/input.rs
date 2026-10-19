@@ -1467,7 +1467,8 @@ impl View {
         }
         if plain
             && key.code == KeyCode::Char('t')
-            && (self.mouse_focus == Panel::LogList || self.log_list_focused)
+            && (matches!(self.mouse_focus, Panel::LogList | Panel::LogDetail)
+                || self.log_list_focused)
         {
             self.set_log_sort(match self.log_sort {
                 LogSort::Time => LogSort::Duration,
