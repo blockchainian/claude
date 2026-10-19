@@ -667,7 +667,7 @@ impl View {
     }
     /// Centers the selected task's name, or a new task's label, on the rule under the details
     /// panel, a space apart on each side; a double click edits a task's name. The project
-    /// folder on the left and the pull request, or a new task's branch, on the right flank it.
+    /// folder on the left and the pull request or branch on the right flank it.
     fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
         let session = self
             .selected_row()
@@ -701,7 +701,13 @@ impl View {
             (Some(session), _) => session
                 .pr
                 .as_ref()
-                .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id))),
+                .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)))
+                .or_else(|| {
+                    session
+                        .git_branch
+                        .as_ref()
+                        .map(|branch| Span::styled(branch.clone(), style::time_style()))
+                }),
             (None, Some(draft)) => (!draft.branch_name().is_empty())
                 .then(|| draft.branch_name().to_owned())
                 .map(|branch| Span::styled(branch, style::time_style())),

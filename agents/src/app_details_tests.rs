@@ -155,7 +155,7 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
 }
 
 #[test]
-fn app_details_without_pr_has_only_folder_link_and_no_branch() {
+fn app_details_without_pr_has_only_folder_link_and_truncated_branch() {
     let (_directory, mut app) = setup(false);
     app.sessions[0].git_branch = Some("分支".repeat(40));
     app.sessions[0].pr = None;
@@ -176,8 +176,8 @@ fn app_details_without_pr_has_only_folder_link_and_no_branch() {
         };
         let rule = row_text(buffer, y, left, end);
         assert!(!rule.contains("#13"));
-        assert!(!rule.contains("分支"));
-        for x in left..left + 5 {
+        assert!(rule.contains('分') && rule.contains('…'), "{width}: {rule}");
+        for x in end - 5..end {
             assert_eq!(
                 click_link(
                     &mut app,

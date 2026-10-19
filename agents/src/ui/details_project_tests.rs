@@ -66,6 +66,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
         for width in [80, 149, 150, 220] {
             let mut view = fixture();
             let selected = &mut view.rows[view.selected];
+            selected.title = "T".into();
             selected.git_branch = Some("hidden-branch".into());
             selected.pr = pr.then(|| crate::model::PullRequest {
                 number: 833,
@@ -88,7 +89,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                 row.contains(view.rows[view.selected].display_title()),
                 "{width}: {row}"
             );
-            assert!(!row.contains("hidden-branch"));
+            assert_eq!(row.contains("hidden-branch"), !pr, "{width}: {row}");
             assert_eq!(folder.x, details.x);
             assert_eq!(
                 (folder.x..folder.right())

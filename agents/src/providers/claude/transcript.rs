@@ -983,6 +983,46 @@ pub(super) mod tests {
     use super::*;
     use std::io::Write;
 
+    #[test]
+    fn background_branch_reaches_details_border() {
+        let mut fixture = tempfile::NamedTempFile::new().unwrap();
+        fixture
+            .write_all(include_bytes!(
+                "../../../tests/fixtures/claude-background-branch.jsonl"
+            ))
+            .unwrap();
+        let live = std::env::var_os("AGENTS_BRANCH_TRANSCRIPT").map(PathBuf::from);
+        let path = live.as_deref().unwrap_or(fixture.path());
+        let summary = read(path, std::fs::metadata(path).unwrap().len()).unwrap();
+        assert_eq!(summary.git_branch.as_deref(), Some("agents-panel"));
+        assert!(summary.pr.is_none());
+        eprintln!(
+            "parsed cwd={:?}, branch={:?}, pr={:?}",
+            summary.cwd, summary.git_branch, summary.pr
+        );
+        let mut session = super::super::session(
+            "branch-regression".into(),
+            summary,
+            Some(path.into()),
+            Utc::now(),
+        );
+        session.title = "Branch regression".into();
+        session.status = crate::model::SessionStatus::Ready;
+        let mut view = crate::ui::View::new(crate::model::Grouping::Project, false);
+        view.set_sessions(vec![session], false);
+        let mut buffer = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 149, 40));
+        view.render(buffer.area, &mut buffer);
+        let footer = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .find(|line| line.contains("Branch regression") && line.contains("─"))
+            .unwrap();
+        assert!(footer.contains("agents-panel"), "{footer}");
+    }
+
     fn cache_records() -> Vec<Value> {
         include_str!("../../../tests/fixtures/prompt-cache/claude.jsonl")
             .lines()

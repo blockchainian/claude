@@ -2256,7 +2256,7 @@ fn details_include_attention_and_clip_messages() {
             .iter()
             .any(|(_, field)| *field == Field::Model)
     );
-    assert!(!rendered.contains("main"));
+    assert!(rendered.contains("main"));
     assert!(!rendered.contains("Reasoning"));
 }
 
@@ -3040,7 +3040,7 @@ fn details_status_folder_and_optional_pr_snapshot() {
     view.set_sessions(vec![row], false);
     let text = render(&view);
     assert!(!text.contains("#833"));
-    assert!(!text.contains("hidden-branch"));
+    assert!(text.contains("hidden-branch"));
     assert_eq!(view.viewport.borrow().details_links.len(), 1);
 }
 
