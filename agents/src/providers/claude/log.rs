@@ -712,6 +712,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     subject = crate::providers::tool::result_subject(name, output.as_deref(), &RULES).or(subject);
     let title = subject.clone().unwrap_or_else(|| display_name.clone());
     let mut call = ToolCall {
+        agent_message: None,
         started_at: None,
         hide_output: false,
         agent_thread_id: None,
@@ -1026,6 +1027,7 @@ impl Log {
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
+                agent_message: None,
                 started_at: None,
                 hide_output: false,
                 agent_thread_id: None,

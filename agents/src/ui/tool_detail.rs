@@ -803,6 +803,7 @@ mod tests {
     #[test]
     fn tool_descriptions_are_centered_in_single_and_merged_title_rows() {
         let call = ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,
@@ -834,6 +835,7 @@ mod tests {
     #[test]
     fn call_titles_keep_type_and_labels_out_of_the_body() {
         let mut call = ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,
@@ -977,6 +979,7 @@ mod tests {
     #[test]
     fn running_part_has_no_copy_source_or_selectable_cells() {
         let parts = flattened_parts(&event(vec![ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,
@@ -1479,6 +1482,7 @@ mod tests {
     fn merged_calls_keep_separate_sections_and_groups() {
         let sections = parts(&event(vec![
             ToolCall {
+                agent_message: None,
                 started_at: None,
                 hide_output: false,
                 agent_thread_id: None,
@@ -1502,6 +1506,7 @@ mod tests {
                 duration: None,
             },
             ToolCall {
+                agent_message: None,
                 started_at: None,
                 hide_output: false,
                 agent_thread_id: None,
@@ -1567,6 +1572,7 @@ mod tests {
         for count in [1, 2] {
             let calls = vec![
                 ToolCall {
+                    agent_message: None,
                     started_at: None,
                     hide_output: false,
                     agent_thread_id: None,
@@ -1602,6 +1608,7 @@ mod tests {
     #[test]
     fn wide_code_and_diff_keep_logical_lines() {
         let parts = flattened_parts(&event(vec![ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,
@@ -1706,6 +1713,7 @@ mod tests {
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
         let parts = flattened_parts(&event(vec![ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,

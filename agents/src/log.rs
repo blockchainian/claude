@@ -1,3 +1,5 @@
+pub(crate) mod agent;
+
 use chrono::{DateTime, Utc};
 
 pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
@@ -120,6 +122,7 @@ pub(crate) trait Reader: Send {
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
+    pub agent_message: Option<agent::Message>,
     /// Per-message clock for collaboration sections.
     pub started_at: Option<DateTime<Utc>>,
     /// Calls such as agent creation and messages have no result block.

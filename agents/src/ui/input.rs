@@ -175,6 +175,7 @@ impl View {
             previous_end: None,
             images: Vec::new(),
             calls: vec![crate::log::ToolCall {
+                agent_message: None,
                 started_at: None,
                 hide_output: false,
                 agent_thread_id: None,

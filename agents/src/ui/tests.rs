@@ -7228,6 +7228,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,
@@ -7251,6 +7252,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
+            agent_message: None,
             started_at: None,
             hide_output: false,
             agent_thread_id: None,

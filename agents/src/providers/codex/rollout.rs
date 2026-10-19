@@ -738,6 +738,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         .or(subject);
     let display_name = crate::providers::tool::title_name(&name);
     let mut call = ToolCall {
+        agent_message: None,
         detail_left: display_name.to_owned(),
         detail_title: subject.clone().unwrap_or_default(),
         show_details: crate::providers::tool::expanded(&name, &TOOL_RULES),
@@ -851,6 +852,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         .as_i64()
         .filter(|code| item_type == "CommandExecution" && *code != 0);
     let mut call = ToolCall {
+        agent_message: None,
         detail_left: display_name.to_owned(),
         detail_title: subject.clone().unwrap_or_default(),
         show_details: true,
@@ -1775,6 +1777,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     (author.to_owned(), recipient.to_owned()),
                 );
                 calls.push(ToolCall {
+                    agent_message: None,
                     detail_left: crate::providers::tool::title_name(message_type),
                     detail_title: route,
                     show_details: true,

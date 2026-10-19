@@ -1,6 +1,6 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
-mod tool;
+pub(crate) mod tool;
 
 use crate::log;
 use crate::model::{Action, Session};
