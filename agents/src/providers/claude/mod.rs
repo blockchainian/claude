@@ -694,6 +694,10 @@ impl ClaudeProvider {
 }
 
 impl Provider for ClaudeProvider {
+    fn display_name(&self) -> &'static str {
+        "Claude"
+    }
+
     fn setup(&mut self) -> io::Result<()> {
         settings::ensure_ask_user_question(
             &self.config_dir.join("settings.json"),

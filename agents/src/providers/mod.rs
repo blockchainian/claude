@@ -185,6 +185,7 @@ pub trait Provider {
         None
     }
     fn id(&self) -> ProviderId;
+    fn display_name(&self) -> &'static str;
     /// Whether a published terminal screen still shows startup progress.
     fn terminal_screen_is_loading(&self, _screen: &str) -> bool {
         false

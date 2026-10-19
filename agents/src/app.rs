@@ -186,6 +186,7 @@ impl App {
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
         view.set_input_choices(hub.input_choices());
+        view.provider_names = hub.display_names();
         let (sender, receiver) = mpsc::channel();
         Self {
             sender,

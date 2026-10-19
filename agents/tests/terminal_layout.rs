@@ -2788,7 +2788,7 @@ fn terminal_manager_detach_result_name() {
 
 #[test]
 #[ignore = "requires tmux and local Claude account authentication; reads live weekly usage"]
-fn terminal_weekly_usage_on_model_rule() {
+fn terminal_weekly_usage_on_task_header() {
     let (_directory, tmux, _transcript) = start_probe("weekly-usage");
     for width in [120, 200] {
         tmux.run(&[
@@ -2803,15 +2803,18 @@ fn terminal_weekly_usage_on_model_rule() {
         let capture = tmux.capture_when(|capture| {
             capture.lines().any(|line| line.width() == width as usize)
                 && capture.lines().any(|line| {
-                    line.contains("claude-opus-5-5 · medium · weekly ") && line.contains("% left")
+                    line.contains("Claude ") && line.contains('%') && line.contains("Weekly  ")
                 })
         });
         let row = capture
             .lines()
-            .find(|line| line.contains(" · weekly "))
+            .find(|line| line.contains("Weekly  "))
             .unwrap();
         assert!(!row.contains("Model:"), "{row}");
-        assert!(row.contains('─'), "model must stay on the rule: {row}");
+        assert!(
+            row.contains("Active ") && row.contains("Inactive "),
+            "{row}"
+        );
         println!(
             "{}",
             serde_json::json!({

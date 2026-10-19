@@ -10045,101 +10045,180 @@ fn details_model_has_no_prefix() {
     );
 }
 
+fn weekly_usage_view() -> View {
+    let mut view = fixture();
+    let hub = crate::sessions::Hub::new(vec![
+        Box::new(crate::providers::codex::CodexProvider::new(
+            PathBuf::new(),
+            PathBuf::new(),
+        )),
+        Box::new(crate::providers::claude::ClaudeProvider::new(PathBuf::new())),
+    ]);
+    view.provider_names = hub.display_names();
+    view.weekly_usage = HashMap::from([
+        (
+            ProviderId::Claude,
+            crate::providers::WeeklyUsage {
+                left_percent: 79,
+                resets_at: None,
+            },
+        ),
+        (
+            ProviderId::Codex,
+            crate::providers::WeeklyUsage {
+                left_percent: 95,
+                resets_at: None,
+            },
+        ),
+    ]);
+    view
+}
+
+fn weekly_header(view: &View, width: u16) -> String {
+    let text = screen(view, width, 40);
+    let y = view.viewport.borrow().tab_bar.y;
+    text.lines().nth(usize::from(y)).unwrap().to_owned()
+}
+
 #[test]
-fn details_weekly_usage_text_and_targets() {
-    use crate::providers::WeeklyUsage;
+fn task_header_weekly_usage_both_providers() {
+    let view = weekly_usage_view();
+    let text = weekly_header(&view, 160);
+    let label = "Weekly  Claude 79% left · Codex 95% left";
+    assert!(text.contains(label), "{text}");
+    assert_eq!(text.find(label).unwrap(), (160 - label.width()) / 2);
+    assert!(text.contains("Active 5"));
+    assert!(text.contains("Inactive 1"));
+    let snapshot = text.trim_end().to_owned() + "\n";
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/details_weekly_usage.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(path, &snapshot).unwrap();
+    }
+    assert_eq!(
+        snapshot,
+        include_str!("../../tests/ui_snapshots/details_weekly_usage.txt")
+    );
+}
+
+#[test]
+fn task_header_weekly_usage_styles() {
+    let view = weekly_usage_view();
+    let area = Rect::new(0, 0, 160, 40);
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, Utc::now());
+    let text = weekly_header(&view, 160);
+    let start = text.find("Weekly  ").expect("weekly label") as u16;
+    let y = view.viewport.borrow().tab_bar.y;
+    let inactive = view.viewport.borrow().tabs[1].1;
+    for x in start..start + 6 {
+        assert_eq!(buffer[(x, y)].style(), buffer[(inactive.x + 1, y)].style());
+    }
+    for x in start + 8..start + 8 + "Claude 79% left · Codex 95% left".width() as u16 {
+        assert_eq!(buffer[(x, y)].style(), buffer[(0, y)].style());
+    }
+}
+
+#[test]
+fn task_header_weekly_usage_single_provider() {
+    for (missing, label) in [
+        (ProviderId::Claude, "Weekly  Codex 95% left"),
+        (ProviderId::Codex, "Weekly  Claude 79% left"),
+    ] {
+        let mut view = weekly_usage_view();
+        view.weekly_usage.remove(&missing);
+        assert!(weekly_header(&view, 160).contains(label));
+    }
+}
+
+#[test]
+fn task_header_weekly_usage_reset_threshold() {
+    let reset = chrono::DateTime::parse_from_rfc3339("2026-10-22T23:00:00+00:00")
+        .unwrap()
+        .with_timezone(&Utc);
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for left in [0, 3, 4, 5, 19, 20] {
+            for resets_at in [Some(reset), None] {
+                let mut view = weekly_usage_view();
+                view.weekly_usage.insert(
+                    provider,
+                    crate::providers::WeeklyUsage {
+                        left_percent: left,
+                        resets_at,
+                    },
+                );
+                let text = weekly_header(&view, 160);
+                let name = if provider == ProviderId::Claude {
+                    "Claude"
+                } else {
+                    "Codex"
+                };
+                let expected = format!(
+                    "{name} {left}% left, resets {}",
+                    reset.with_timezone(&chrono::Local).format("%a %H:%M")
+                );
+                assert_eq!(
+                    text.contains(&expected),
+                    left < 5 && resets_at.is_some(),
+                    "{text}"
+                );
+                assert_eq!(
+                    text.contains("resets"),
+                    left < 5 && resets_at.is_some(),
+                    "{text}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn task_header_weekly_usage_absent_or_too_wide() {
+    let mut view = weekly_usage_view();
+    for width in [30, 54, 58] {
+        let text = weekly_header(&view, width);
+        assert!(!text.contains("Weekly") && !text.contains('%'), "{text}");
+        assert!(
+            text.contains("Active 5") && text.contains("Inactive 1"),
+            "{text}"
+        );
+    }
+    view.weekly_usage.clear();
+    assert!(!weekly_header(&view, 160).contains("Weekly"));
+}
+
+#[test]
+fn details_weekly_usage_keeps_model_and_effort_targets() {
+    let mut view = weekly_usage_view();
     let mut row = session("weekly", "Weekly task", SessionStatus::Ready, 0);
     row.model = Some("claude-opus".into());
     row.effort = Some("high".into());
-    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![row], false);
-    let reset = chrono::DateTime::parse_from_rfc3339("2026-10-23T15:59:59.800627+00:00")
-        .unwrap()
-        .with_timezone(&Utc);
-    let render = |view: &View| {
-        let area = Rect::new(5, 3, 100, 40);
-        let mut buffer = Buffer::empty(area);
-        view.render_at(area, &mut buffer, Utc::now());
-        let y = view
-            .viewport
-            .borrow()
-            .field_targets
+    let area = Rect::new(5, 3, 100, 40);
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, Utc::now());
+    let targets = &view.viewport.borrow().field_targets;
+    for (field, x, width) in [(Field::Model, 7, 11), (Field::Effort, 21, 4)] {
+        let rect = targets
             .iter()
-            .find(|(_, field)| *field == Field::Model)
+            .find(|(_, candidate)| *candidate == field)
             .unwrap()
-            .0
-            .y;
-        (area.x..area.right())
-            .map(|x| buffer[(x, y)].symbol())
-            .collect::<String>()
-            .trim_end()
-            .to_owned()
-    };
-    assert!(!render(&view).contains("weekly"));
-    for (left, suffix) in [
-        (82, "".to_owned()),
-        (20, "".to_owned()),
-        (
-            2,
-            format!(
-                " · resets {}",
-                reset.with_timezone(&chrono::Local).format("%a %H:%M")
-            ),
-        ),
-    ] {
-        view.weekly_usage.insert(
-            ProviderId::Claude,
-            WeeklyUsage {
-                left_percent: left,
-                resets_at: Some(reset),
-            },
-        );
-        let text = render(&view);
+            .0;
+        assert_eq!((rect.x, rect.width), (x, width));
+        let line = (area.x..area.right())
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect::<String>();
+        assert!(line.contains("claude-opus · high"), "{line}");
         assert!(
-            text.contains(&format!("claude-opus · high · weekly {left}% left{suffix}")),
-            "{text}"
+            !line.contains("weekly") && !line.contains("Model:"),
+            "{line}"
         );
-        assert_eq!(text.contains("resets"), left < 20);
-        if left == 82 {
-            let snapshot = text.trim_end().to_owned() + "\n";
-            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/ui_snapshots/details_weekly_usage.txt");
-            if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
-                std::fs::write(path, &snapshot).unwrap();
-            }
-            assert_eq!(
-                snapshot,
-                include_str!("../../tests/ui_snapshots/details_weekly_usage.txt")
-            );
-        }
-        let targets = &view.viewport.borrow().field_targets;
-        let model = targets
-            .iter()
-            .find(|(_, field)| *field == Field::Model)
-            .unwrap()
-            .0;
-        let effort = targets
-            .iter()
-            .find(|(_, field)| *field == Field::Effort)
-            .unwrap()
-            .0;
-        assert_eq!((model.x, model.width), (7, 11));
-        assert_eq!((effort.x, effort.width), (21, 4));
     }
-    view.weekly_usage
-        .get_mut(&ProviderId::Claude)
-        .unwrap()
-        .resets_at = None;
-    assert!(!render(&view).contains("resets"));
-    view.rows[0].effort = None;
-    assert!(render(&view).contains("claude-opus · weekly 2% left"));
-    view.rows[0].id.provider = ProviderId::Codex;
-    assert!(!render(&view).contains("weekly"));
 }
 
 #[test]
 #[ignore = "reads local credentials and live provider usage; requires the running Codex daemon"]
-fn details_weekly_usage_live_accounts() {
+fn task_header_weekly_usage_live_accounts() {
     let (mut hub, _) = crate::providers::configured().unwrap();
     let sessions = hub.refresh().sessions;
     let jobs = hub.weekly_usage_jobs(std::time::Instant::now());
@@ -10168,6 +10247,7 @@ fn details_weekly_usage_live_accounts() {
             .clone();
         let mut view = test_view(Grouping::Project, false);
         view.weekly_usage = hub.weekly_usage().clone();
+        view.provider_names = hub.display_names();
         view.status_filter = usize::from(row.status == SessionStatus::Inactive);
         view.set_sessions(vec![row], false);
         let area = Rect::new(0, 0, 160, 80);
@@ -10177,7 +10257,7 @@ fn details_weekly_usage_live_accounts() {
             .content
             .chunks(160)
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
-            .find(|line| line.contains(" · weekly "))
+            .find(|line| line.contains("Weekly  "))
             .expect("rendered live usage line");
         assert!(!text.contains("Model: "));
         println!("{provider}: {}", text.trim());

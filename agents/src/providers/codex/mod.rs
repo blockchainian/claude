@@ -545,6 +545,10 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 }
 
 impl Provider for CodexProvider {
+    fn display_name(&self) -> &'static str {
+        "Codex"
+    }
+
     fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
         let command = self
             .launch(&Action::Resume(session.id.clone()), Some(session))

@@ -36,6 +36,16 @@ impl Hub {
             .as_ref()
     }
 
+    pub fn display_names(&self) -> Vec<(ProviderId, &'static str)> {
+        let mut names = self
+            .providers
+            .iter()
+            .map(|provider| (provider.id(), provider.display_name()))
+            .collect::<Vec<_>>();
+        names.sort_by_key(|(id, _)| *id);
+        names
+    }
+
     pub fn capabilities(&self) -> HashMap<ProviderId, Capabilities> {
         self.providers
             .iter()

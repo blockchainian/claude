@@ -362,6 +362,47 @@ impl View {
             tabs,
             buf,
         );
+        let usage = self
+            .provider_names
+            .iter()
+            .filter_map(|(provider, name)| {
+                let usage = self.weekly_usage.get(provider)?;
+                let mut text = format!("{name} {}% left", usage.left_percent);
+                if usage.left_percent < 5
+                    && let Some(resets_at) = usage.resets_at
+                {
+                    text.push_str(&format!(
+                        ", resets {}",
+                        resets_at.with_timezone(&chrono::Local).format("%a %H:%M")
+                    ));
+                }
+                Some(text)
+            })
+            .collect::<Vec<_>>();
+        if !usage.is_empty() && !tabs.is_empty() {
+            let text = Line::from(vec![
+                Span::styled("Weekly", style::inactive_tab_style()),
+                Span::raw(format!("  {}", usage.join(" · "))),
+            ]);
+            let width = text.width();
+            if width <= usize::from(tabs.width) {
+                let target = Rect::new(
+                    tabs.x + (tabs.width - width as u16) / 2,
+                    tabs.y,
+                    width as u16,
+                    1,
+                );
+                if self
+                    .viewport
+                    .borrow()
+                    .tabs
+                    .iter()
+                    .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
+                {
+                    text.render(target, buf);
+                }
+            }
+        }
         rule(row(layout.header, 1, 1), buf);
 
         line(self.center_footer_hints(), inset(layout.footer), buf);
@@ -821,25 +862,6 @@ impl View {
             buf[(x, rule.y)]
                 .set_symbol(" ")
                 .set_style(style::time_style());
-        }
-        if let Some(usage) = self
-            .selected_row()
-            .and_then(|session| self.weekly_usage.get(&session.id.provider))
-        {
-            let mut text = format!(" · weekly {}% left", usage.left_percent);
-            if usage.left_percent < 20
-                && let Some(resets_at) = usage.resets_at
-            {
-                text.push_str(&format!(
-                    " · resets {}",
-                    resets_at.with_timezone(&chrono::Local).format("%a %H:%M")
-                ));
-            }
-            text.push(' ');
-            let available = right.saturating_sub(x);
-            truncate_line_with_ellipsis_if_overflow(Line::from(text), usize::from(available))
-                .style(style::time_style())
-                .render(Rect::new(x, rule.y, available, 1), buf);
         }
     }
     pub(super) fn render_details(
