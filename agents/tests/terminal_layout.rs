@@ -124,6 +124,14 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     result
 }
 
+fn begin_named_draft(tmux: &Tmux, name: &str) {
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.wait_for(|capture| capture.contains("New task"));
+    tmux.run(&["send-keys", "-t", "probe", "-l", name]);
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| capture.contains(&format!("{name} ❯")));
+}
+
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_background_log_has_no_marker_and_keeps_its_time() {
@@ -352,127 +360,96 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
         .join("\n");
     let (_directory, tmux, _transcript) = start_probe_with_transcript("branch-prompt", &transcript);
     tmux.wait_for(|capture| capture.contains("Stop hook"));
-    tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
+    begin_named_draft(&tmux, "Branch probe");
     tmux.run(&["send-keys", "-t", "probe", "-l", "unfinished task"]);
-    tmux.wait_for(|capture| capture.contains("unfinished task"));
-    // Enter on the prompt lists the branches above the new branch's input on the panel's
-    // bottom row, which starts selected with its placeholder.
+    tmux.wait_for(|capture| capture.contains("Branch probe ❯ unfinished task"));
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    let capture = tmux.capture_when(|capture| capture.contains("New branch name"));
+    let capture = tmux.capture_when(|capture| capture.contains("Create new branch"));
+    assert!(capture.contains("Branch probe ❯"), "{capture}");
+    assert!(
+        !capture.contains("Branch probe ❯ unfinished task"),
+        "{capture}"
+    );
+    assert!(!capture.contains("New branch ❯"), "{capture}");
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("New branch name"))
+        .find(|(_, line)| line.contains("Create new branch"))
         .unwrap();
-    let create_column = line[..line.find("New branch name").unwrap()].width();
-    let branch_line = capture
+    let create_column = line[..line.find("Create new branch").unwrap()].width();
+    let main_row = capture
         .lines()
-        .find(|line| {
-            line.chars()
-                .skip(create_column)
-                .collect::<String>()
-                .starts_with("main")
-        })
+        .position(|line| line.split('│').any(|part| part.trim() == "main"))
         .unwrap();
-    assert_eq!(
-        create_column,
-        branch_line[..branch_line.find("main").unwrap()].width()
-    );
-    let bottom_rule = capture
-        .lines()
-        .skip(row + 1)
-        .find(|line| line.contains("main"))
-        .unwrap();
-    assert!(bottom_rule.contains("╴main "), "{bottom_rule}");
-    assert!(capture.contains("New prompt ❯ unfinished task"));
+    assert!(main_row < row, "{capture}");
+    // The default choice is a button: Enter enters its editor, while empty Enter stays there.
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    let input = tmux.capture_when(|capture| capture.contains("New branch ❯"));
+    assert!(!input.contains("Create new branch"), "{input}");
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| capture.contains("New branch ❯"));
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&colored, 200, 50);
-    // The details panel ends at the next vertical separator; the input row has no highlight.
-    let branch_suffix = &branch_line[branch_line.find("main").unwrap()..];
-    let end = create_column + branch_suffix[..branch_suffix.find('│').unwrap()].width();
-    for x in create_column - 1..end {
-        let cell = parser.screen().cell(row as u16, x as u16).unwrap();
+    let input_row = input
+        .lines()
+        .position(|line| line.contains("New branch ❯"))
+        .unwrap();
+    let input_line = input.lines().nth(input_row).unwrap();
+    let input_column = input_line[..input_line.find("New branch ❯").unwrap()].width();
+    for column in input_column..input_column + "New branch ❯ ".width() {
         assert_eq!(
-            cell.bgcolor(),
+            parser
+                .screen()
+                .cell(input_row as u16, column as u16)
+                .unwrap()
+                .bgcolor(),
             vt100::Color::Default,
-            "column {x}: {colored}"
+            "{colored}"
         );
     }
-    let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_y}"]);
-    assert_eq!(cursor.trim().parse::<usize>().unwrap(), row);
-    let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_x}"]);
-    assert_eq!(cursor.trim().parse::<usize>().unwrap(), create_column);
+    tmux.run(&["send-keys", "-t", "probe", "-l", "feature/discard"]);
+    tmux.wait_for(|capture| capture.contains("New branch ❯ feature/discard"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let button = tmux.capture_when(|capture| capture.contains("Create new branch"));
+    assert!(!button.contains("feature/discard"), "{button}");
+    assert!(button.contains("Branch probe ❯"), "{button}");
+    // A click also enters the editor, with the discarded text gone.
+    tmux.mouse(0, create_column, row, true);
+    let empty = tmux.capture_when(|capture| capture.contains("New branch ❯"));
+    assert!(!empty.contains("feature/discard"), "{empty}");
     tmux.run(&["send-keys", "-t", "probe", "-l", "feature/probe"]);
-    let typed =
-        tmux.capture_when(|capture| capture.lines().nth(row).unwrap().contains("feature/probe"));
-    let input = typed.lines().nth(row).unwrap();
-    assert_eq!(
-        input[..input.find("feature/probe").unwrap()].width(),
-        create_column
-    );
-    assert!(!input.contains("New branch"), "{input}");
-    let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_x}"]);
-    assert_eq!(
-        cursor.trim().parse::<usize>().unwrap(),
-        create_column + "feature/probe".len()
-    );
-    // Enter applies the branch and the same row asks for the task's name.
-    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    let naming = tmux.capture_when(|capture| {
-        capture.contains("╴feature/probe ")
-            && capture
-                .lines()
-                .nth(row)
-                .is_some_and(|line| line.contains("New task") && !line.contains('❯'))
-    });
-    assert!(naming.contains("New prompt ❯ unfinished task"), "{naming}");
-    let cursor = tmux.run(&[
-        "display-message",
-        "-p",
-        "-t",
-        "probe",
-        "#{cursor_x} #{cursor_y}",
-    ]);
-    assert_eq!(cursor.trim(), format!("{create_column} {row}"));
-    // Esc returns to the branch list with the typed name kept, then to the prompt with the
-    // draft kept, where Esc clears the text and then discards the draft.
+    tmux.run(&["send-keys", "-t", "probe", "Left"]);
+    tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
+    tmux.run(&["send-keys", "-t", "probe", "-l", "b"]);
+    tmux.wait_for(|capture| capture.contains("New branch ❯ feature/probe"));
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-    tmux.wait_for(|capture| {
-        capture.contains("╴feature/probe ")
-            && capture
-                .lines()
-                .nth(row)
-                .is_some_and(|line| line.contains("feature/probe"))
-    });
+    tmux.wait_for(|capture| capture.contains("Create new branch"));
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-    tmux.wait_for(|capture| {
-        capture.contains("New prompt ❯ unfinished task")
-            && capture.contains("╴feature/probe ")
-            && capture
-                .lines()
-                .nth(row)
-                .is_some_and(|line| line.trim_matches([' ', '│']).is_empty())
-    });
+    let cancelled = tmux.capture_when(|capture| !capture.contains("Create new branch"));
+    assert!(!cancelled.contains("Branch probe ❯"), "{cancelled}");
+    assert!(!cancelled.contains("unfinished task"), "{cancelled}");
+    // Restarting must forget both the name and the prompt.
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    let naming = tmux.capture_when(|capture| capture.contains("New task"));
+    assert!(!naming.contains("Branch probe"), "{naming}");
+    assert!(!naming.contains("unfinished task"), "{naming}");
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-    tmux.wait_for(|capture| !capture.contains("unfinished task"));
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-    tmux.wait_for(|capture| !capture.contains("New prompt ❯"));
     let output = Command::new("git")
-        .args(["branch", "--list", "feature/probe"])
+        .args(["branch", "--list", "feature/probe", "feature/discard"])
         .current_dir(repository.path())
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
-    println!("{{\"branch_prompt\":\"pass\",\"alignment\":\"pass\",\"restore\":\"pass\"}}");
+    println!(
+        "{{\"branch_prompt\":\"pass\",\"empty_prompt\":\"pass\",\"branch_edit\":\"pass\",\"cancel\":\"pass\"}}"
+    );
 }
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_newline_entry() {
     let (_directory, tmux, _transcript) = start_probe("prompt-newlines");
-    tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
+    begin_named_draft(&tmux, "Prompt probe");
     for (name, entry) in [
         ("shift-enter", "first line\x1b[13;2usecond line"),
         ("option-enter", "first line\x1b\rsecond line"),
@@ -485,7 +462,7 @@ fn terminal_prompt_newline_entry() {
         tmux.wait_for(|capture| {
             let rows: Vec<_> = capture.lines().collect();
             rows.windows(2).any(|pair| {
-                pair[0].contains("New prompt ❯ first line") && pair[1].trim() == "second line"
+                pair[0].contains("Prompt probe ❯ first line") && pair[1].trim() == "second line"
             })
         });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -497,7 +474,7 @@ fn terminal_prompt_newline_entry() {
         );
         tmux.run(&["send-keys", "-t", "probe", "C-c"]);
         tmux.wait_for(|capture| {
-            capture.contains("New prompt ❯") && !capture.contains("first line")
+            capture.contains("Prompt probe ❯") && !capture.contains("first line")
         });
     }
 }
@@ -549,33 +526,27 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
         assert_caret("Rename ❯ ", 9);
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     }
-    tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
+    begin_named_draft(&tmux, "Prompt probe");
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| {
-        capture
-            .lines()
-            .last()
-            .is_some_and(|line| line.trim() == "? help  esc back  ↑/↓ move  enter open  n new")
-            // Escape discards the empty new task.
-            && !capture.contains("New prompt ❯")
+        // Escape discards the empty new task and returns to the task chooser.
+        capture.contains("No task ❮ Select a task to type") && !capture.contains("Prompt probe ❯")
     });
-    tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
+    begin_named_draft(&tmux, "Prompt probe");
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("New prompt ❯"))
+        .find(|(_, line)| line.contains("Prompt probe ❯"))
         .unwrap();
     let marker = line[..line.find('❯').unwrap()].width();
     tmux.mouse(0, marker, row, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "你好"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯ 你好"));
+    tmux.wait_for(|capture| capture.contains("Prompt probe ❯ 你好"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let row = capture
         .lines()
-        .position(|line| line.contains("New prompt ❯ 你好"))
+        .position(|line| line.contains("Prompt probe ❯ 你好"))
         .unwrap();
     let cursor = tmux.run(&[
         "display-message",

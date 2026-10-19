@@ -12,7 +12,7 @@ pub(crate) struct DraftSetup {
     pub branch: String,
 }
 
-/// The step of a new task's flow: its prompt, then its branch, then its name.
+/// The step of a new task's flow: its name, then its prompt, then its branch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Step {
     Prompt,
@@ -25,6 +25,8 @@ pub(super) struct Draft {
     pub setup: DraftSetup,
     pub step: Step,
     pub input: prompt_box::PromptBox,
+    pub name: Option<String>,
+    pub prompt: Option<line_edit::LineEdit>,
     /// The branch the task runs on instead of the repository's checked-out one.
     pub branch_choice: Option<crate::tasks::BranchChoice>,
     pub job: Option<String>,
@@ -57,8 +59,10 @@ impl View {
         self.drafts.push(Draft {
             id,
             setup,
-            step: Step::Prompt,
+            step: Step::Name,
             input: prompt_box::PromptBox::default(),
+            name: None,
+            prompt: None,
             branch_choice: None,
             job: None,
             working: false,
@@ -67,8 +71,7 @@ impl View {
         });
         self.status_filter = 0;
         self.select_draft(id);
-        self.open_repositories(self.startup_cwd.clone(), None);
-        self.input_box.focused = true;
+        self.open_name(id);
         id
     }
 
@@ -217,6 +220,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
+        view.handle_paste("probe");
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
         view.handle_paste(text);
         view.set_sessions(Vec::new(), false);

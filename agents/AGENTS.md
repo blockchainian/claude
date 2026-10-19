@@ -39,7 +39,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## New task
 
-- `n` opens the repository browser in the details panel. Enter on the typed prompt (labelled `New prompt`) lists the local branches above a `New branch name` input on the panel's bottom row, selected by default: arrows walk the list while the input is empty, a click or Enter applies a branch and Enter applies the typed name, and the same row then takes the task's name, whose Enter creates the task. Esc steps back to the branch list, then to the prompt, keeping the draft.
+- `n` starts with the task name in the details panel's bottom row (`New task` while empty); the project folder opens the repository browser. Enter keeps a nonempty name and focuses the prompt, labelled with that name. Submitting the prompt saves it and clears its box, then lists local branches with `Create new branch` selected. Click or Enter applies an existing branch immediately, or turns that button into the bottom-row `New branch ❯ ` editor. Enter on a nonempty branch name creates the task; Esc clears and closes that editor, and Esc in the branch list discards the draft. Outside Git, submitting the prompt creates the task directly.
 
 ## Log panels
 

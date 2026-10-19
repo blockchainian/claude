@@ -4,8 +4,7 @@ use super::*;
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_mouse_click_places_caret() {
     let (_directory, tmux, _transcript) = start_probe("prompt-mouse");
-    tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
+    begin_named_draft(&tmux, "Mouse probe");
     tmux.run(&[
         "send-keys",
         "-t",
@@ -20,14 +19,14 @@ fn terminal_prompt_mouse_click_places_caret() {
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("New prompt ❯"))
+        .find(|(_, line)| line.contains("Mouse probe ❯"))
         .unwrap();
     let x = line[..line.find("写工具详情计划").unwrap()].width();
     tmux.mouse(0, x + 3, row, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "查"]);
     tmux.wait_for(|capture| capture.contains("写查工具详情计划"));
     // Rows after the first start at the box's left edge, not after the label.
-    let edge = line[..line.find("New prompt").unwrap()].width();
+    let edge = line[..line.find("Mouse probe").unwrap()].width();
     tmux.mouse(0, edge + 3, row + 1, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "x"]);
     tmux.wait_for(|capture| capture.contains("No xreply needed."));
@@ -37,7 +36,7 @@ fn terminal_prompt_mouse_click_places_caret() {
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let row = capture
         .lines()
-        .position(|line| line.contains("New prompt ❯"))
+        .position(|line| line.contains("Mouse probe ❯"))
         .unwrap();
     tmux.mouse(0, x + 2, row, false);
     tmux.mouse(32, x + 6, row, false);

@@ -232,13 +232,19 @@ impl View {
             && self.confirm_dialog.is_none()
             && !self.input_box.focused
             && let Some(selector) = &self.selector
-            && selector.input_active()
-            && let Some((editor, _)) = selector.input()
+            && let Some((editor, prompt)) = selector
+                .name_input()
+                .map(|(editor, _)| (editor, String::new()))
+                .or_else(|| {
+                    selector
+                        .branch_editor()
+                        .map(|editor| (editor, format!("New branch {PROMPT_MARKER} ")))
+                })
         {
             let input = self.viewport.borrow().details_input;
             if !input.is_empty() {
-                let (_, cursor) = editor.window(usize::from(input.width));
-                return Some((input.x + cursor, input.y));
+                let (_, caret) = input_row(&prompt, editor, input);
+                return Some((input.x + caret, input.y));
             }
         }
         if !self.help
@@ -1761,7 +1767,7 @@ mod branch_input_tests {
     use crate::ui::draft_controls::{Selector, SelectorKind};
 
     #[test]
-    fn branch_input_uses_panel_padding_without_marker_or_highlight() {
+    fn branch_input_matches_search_row_with_panel_padding_and_cursor() {
         for width in [100, 160, 200] {
             for text in ["", "feature/你好", "feature/".repeat(30).as_str()] {
                 let area = Rect::new(4, 2, width, 40);
@@ -1773,50 +1779,25 @@ mod branch_input_tests {
                         draft: 1,
                         branches: vec!["main".into()],
                         editor,
+                        editing: true,
                     },
                     1,
                 ));
-                let layout = view.center_layout(area);
-                // The prompt and the panel both take their outer margin from this constant.
-                let prompt = layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0));
-                assert_eq!(layout.top.right(), area.right() - HORIZONTAL_PADDING);
-                assert_eq!(prompt.x, area.x + HORIZONTAL_PADDING);
                 let mut buffer = Buffer::empty(area);
                 view.render(area, &mut buffer);
-                let rows = &view.viewport.borrow().picker_rows;
-                let rect = rows[1].0;
-                assert_eq!(rect, view.viewport.borrow().details_input);
-                assert_eq!(rect.x, layout.details.x);
-                assert_eq!(buffer[(rect.x, rows[0].0.y)].symbol(), "m");
-                for x in rect.x - HORIZONTAL_PADDING..rect.right() + HORIZONTAL_PADDING {
-                    let cell = &buffer[(x, rect.y)];
-                    assert_ne!(cell.symbol(), "❯");
-                    assert_eq!(cell.bg, Color::Reset, "{text:?} column {x}");
-                    // The empty input shows its placeholder dimmed.
-                    let placeholder = text.is_empty()
-                        && (rect.x..rect.x + "New branch name".len() as u16).contains(&x);
-                    assert_eq!(
-                        cell.modifier.is_empty(),
-                        !placeholder,
-                        "{text:?} column {x}"
-                    );
-                    if x < rect.x || x >= rect.right() {
-                        assert_eq!(cell.symbol(), " ", "padding column {x}");
-                    }
-                }
-                let (editor, placeholder) = view.selector.as_ref().unwrap().input().unwrap();
-                let (visible, caret) = editor.window(usize::from(rect.width));
+                let rect = view.viewport.borrow().details_input;
+                assert_eq!(rect.x, view.center_layout(area).details.x);
+                let editor = view.selector.as_ref().unwrap().branch_editor().unwrap();
                 let mut expected = Buffer::empty(rect);
-                Clear.render(rect, &mut expected);
-                if text.is_empty() {
-                    line(Line::from(placeholder.dim()), rect, &mut expected);
-                } else {
-                    line(Line::from(visible.to_owned()), rect, &mut expected);
-                }
+                render_input_row("New branch ❯ ", editor, rect, &mut expected);
+                assert_eq!(
+                    view.cursor_pos(area),
+                    Some((rect.x + input_row("New branch ❯ ", editor, rect).1, rect.y))
+                );
                 for x in rect.x..rect.right() {
                     assert_eq!(buffer[(x, rect.y)], expected[(x, rect.y)]);
+                    assert_eq!(buffer[(x, rect.y)].bg, Color::Reset);
                 }
-                assert_eq!(view.cursor_pos(area), Some((rect.x + caret, rect.y)));
             }
         }
     }

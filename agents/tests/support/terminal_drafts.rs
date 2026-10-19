@@ -68,7 +68,7 @@ fn terminal_repository_browser_applies_single_clicks() {
     let (_directory, tmux, _transcript) =
         start_probe_with_transcript("repository-click", &transcript_at(&source));
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    let capture = tmux.capture_when(|capture| capture.contains("New prompt ❯"));
+    let capture = tmux.capture_when(|capture| capture.contains("New task"));
     let (row, line) = capture
         .lines()
         .enumerate()
@@ -126,26 +126,23 @@ sys.exit(1)
             ).unwrap()).unwrap();
         },
     );
-    tmux.run(&["send-keys", "-t", "probe", "n"]);
-    let capture = tmux.capture_when(|capture| capture.contains("New prompt ❯"));
-    let (row, line) = capture
-        .lines()
-        .enumerate()
-        .find(|(_, line)| line.contains("main") && line.contains(" New "))
-        .unwrap();
-    tmux.mouse(0, line[..line.find("main").unwrap()].width(), row, true);
-    tmux.wait_for(|capture| capture.contains("Create new branch"));
-    tmux.run(&["send-keys", "-t", "probe", "End"]);
-    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    tmux.run(&["send-keys", "-t", "probe", "-l", "feature/async"]);
-    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    tmux.run(&["send-keys", "-t", "probe", "-l", "background task"]);
-    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
+    begin_named_draft(&tmux, "background task");
     tmux.run(&["send-keys", "-t", "probe", "-l", "background prompt"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    let capture = tmux.capture_when(|capture| !capture.contains("New prompt ❯"));
-    assert!(!capture.contains("New prompt ❯"), "{capture}");
+    let branches = tmux.capture_when(|capture| capture.contains("Create new branch"));
+    assert!(branches.contains("background task ❯"), "{branches}");
+    assert!(
+        !branches.contains("background task ❯ background prompt"),
+        "{branches}"
+    );
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| capture.contains("New branch ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "-l", "feature/async"]);
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    let capture = tmux.capture_when(|capture| {
+        !capture.contains("Create new branch") && !capture.contains("New branch ❯")
+    });
+    assert!(!capture.contains("background task ❯"), "{capture}");
     assert!(
         !capture.contains("Creating") && !capture.contains("Sending"),
         "{capture}"

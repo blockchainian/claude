@@ -25,13 +25,17 @@ impl View {
         } else if let Some(step) = self.selected_draft().map(|draft| draft.step)
             && (self.input_box.focused || self.selector.is_some())
         {
-            // The prompt's keys lead the flow; the selector's keys finish each later step.
+            // Each step advertises the keys its focused input consumes.
             match step {
                 _ if self.input_box.focused => hint_line(&[("esc", "cancel"), ("enter", "next")]),
                 super::drafts::Step::Branch => {
-                    hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "next")])
+                    if self.selector.as_ref().is_some_and(Selector::input_active) {
+                        hint_line(&[("esc", "back"), ("enter", "create")])
+                    } else {
+                        hint_line(&[("↑/↓", "move"), ("esc", "cancel"), ("enter", "select")])
+                    }
                 }
-                super::drafts::Step::Name => hint_line(&[("esc", "back"), ("enter", "create")]),
+                super::drafts::Step::Name => hint_line(&[("esc", "back"), ("enter", "next")]),
                 super::drafts::Step::Prompt => {
                     hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
                 }

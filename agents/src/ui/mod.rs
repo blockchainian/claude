@@ -489,8 +489,8 @@ impl View {
     }
 
     fn input_label(&self) -> String {
-        if self.selected_draft().is_some() {
-            return "New prompt".into();
+        if let Some(draft) = self.selected_draft() {
+            return draft.name.clone().unwrap_or_default();
         }
         self.selected_row()
             .map(|session| session.display_title().to_owned())

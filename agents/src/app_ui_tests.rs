@@ -505,28 +505,50 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
         cwd: repository.clone(),
     }));
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "╴main ");
-    click(&mut app, x + 1, y);
+    let (x, y) = position(&buffer, "repository");
+    click(&mut app, x, y);
+    key(&mut app, KeyCode::Enter);
+    let rendered = lines(&draw(&mut app, 180)).join("\n");
+    assert!(rendered.contains("New task"), "{rendered}");
+    app.handle_event(Event::Paste("branch flow task".into()));
+    key(&mut app, KeyCode::Enter);
+    let rendered = lines(&draw(&mut app, 180)).join("\n");
+    assert!(rendered.contains("branch flow task ❯"), "{rendered}");
+    app.handle_event(Event::Paste("saved prompt".into()));
+    key(&mut app, KeyCode::Enter);
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "New branch name");
+    let rendered = lines(&buffer).join("\n");
+    assert!(rendered.contains("branch flow task ❯"), "{rendered}");
+    assert!(!rendered.contains("saved prompt"), "{rendered}");
+    let (x, y) = position(&buffer, "Create new branch");
     click(&mut app, x, y);
     assert!(
         app.view
             .flush_pending_click(Instant::now() + Duration::from_secs(1))
             .is_none()
     );
-    draw(&mut app, 180);
+    let buffer = draw(&mut app, 180);
+    let (x, y) = position(&buffer, "New branch ❯ ");
     app.handle_event(Event::Paste("feature/paste-route-proof".into()));
     let buffer = draw(&mut app, 180);
-    assert_eq!(position(&buffer, "feature/paste-route-proof"), (x, y));
+    assert_eq!(
+        position(&buffer, "New branch ❯ feature/paste-route-proof"),
+        (x, y)
+    );
     assert_eq!(buffer[(x - 1, y)].symbol(), " ");
     assert_eq!(buffer[(x - 1, y)].bg, ratatui::style::Color::Reset);
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("╴main "), "{rendered}");
-    assert!(rendered.contains("New prompt ❯"), "{rendered}");
-    assert!(!rendered.contains("New branch"), "{rendered}");
+    assert!(rendered.contains("branch flow task ❯"), "{rendered}");
+    assert!(rendered.contains("Create new branch"), "{rendered}");
+    assert!(!rendered.contains("New branch ❯"), "{rendered}");
     assert!(!rendered.contains("paste-route-proof"), "{rendered}");
+    key(&mut app, KeyCode::Esc);
+    let rendered = lines(&draw(&mut app, 180)).join("\n");
+    assert!(!rendered.contains("branch flow task"), "{rendered}");
+    assert!(!rendered.contains("saved prompt"), "{rendered}");
+    assert!(!rendered.contains("Create new branch"), "{rendered}");
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repository)

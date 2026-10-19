@@ -544,6 +544,9 @@ impl View {
             {
                 selector.selected = index;
                 self.input_box.focused = false;
+                if selector.branch_editor().is_some() && index + 1 == selector.len() {
+                    return None;
+                }
                 if matches!(
                     selector.kind,
                     draft_controls::SelectorKind::Repository { .. }
@@ -1010,13 +1013,13 @@ impl View {
                 self.discard_selected_draft();
                 return None;
             }
-            // A new task's prompt stays in its box: Enter moves on to its branch and name.
+            // A new task saves its first prompt before choosing its branch.
             if key.code == KeyCode::Enter
                 && key.modifiers.is_empty()
                 && let Some(draft) = self.selected_draft()
             {
                 if !draft.working && draft.job.is_none() && !self.input_box.editor.is_empty() {
-                    self.start_branch_step();
+                    return self.start_branch_step();
                 }
                 return None;
             }

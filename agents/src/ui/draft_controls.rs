@@ -41,8 +41,9 @@ pub(super) enum SelectorKind {
         draft: DraftId,
         branches: Vec<String>,
         editor: line_edit::LineEdit,
+        editing: bool,
     },
-    /// The input naming the new task, typed after its branch.
+    /// The input naming the new task before its prompt.
     Name {
         draft: DraftId,
         editor: line_edit::LineEdit,
@@ -58,7 +59,7 @@ pub(super) enum SelectorKind {
     },
 }
 
-const NEW_BRANCH: &str = "New branch name";
+const NEW_BRANCH: &str = "Create new branch";
 const NEW_TASK: &str = "New task";
 
 impl Selector {
@@ -91,33 +92,39 @@ impl Selector {
         }
     }
 
-    /// The input row at the panel's bottom and the placeholder it shows while empty.
-    pub(super) fn input(&self) -> Option<(&line_edit::LineEdit, &'static str)> {
+    /// The task name uses a placeholder on the panel's bottom row.
+    pub(super) fn name_input(&self) -> Option<(&line_edit::LineEdit, &'static str)> {
         match &self.kind {
-            SelectorKind::Branch { editor, .. } => Some((editor, NEW_BRANCH)),
             SelectorKind::Name { editor, .. } => Some((editor, NEW_TASK)),
             _ => None,
         }
     }
 
-    /// The input row's editor while the keys type into it: always for the task's name, and for
-    /// the new branch's name while its row is the selected choice.
+    pub(super) fn branch_editor(&self) -> Option<&line_edit::LineEdit> {
+        match &self.kind {
+            SelectorKind::Branch {
+                editor,
+                editing: true,
+                ..
+            } => Some(editor),
+            _ => None,
+        }
+    }
+
     pub(super) fn active_editor(&mut self) -> Option<&mut line_edit::LineEdit> {
         match &mut self.kind {
             SelectorKind::Branch {
-                branches, editor, ..
-            } if self.selected == branches.len() => Some(editor),
-            SelectorKind::Name { editor, .. } => Some(editor),
+                editor,
+                editing: true,
+                ..
+            }
+            | SelectorKind::Name { editor, .. } => Some(editor),
             _ => None,
         }
     }
 
     pub(super) fn input_active(&self) -> bool {
-        match &self.kind {
-            SelectorKind::Branch { branches, .. } => self.selected == branches.len(),
-            SelectorKind::Name { .. } => true,
-            _ => false,
-        }
+        self.name_input().is_some() || self.branch_editor().is_some()
     }
 
     /// The choice index of the new branch's input row.
@@ -166,11 +173,19 @@ impl Selector {
                 }));
                 rows
             }
-            SelectorKind::Branch { branches, .. } => branches
-                .iter()
-                .enumerate()
-                .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
-                .collect(),
+            SelectorKind::Branch {
+                branches, editing, ..
+            } => {
+                let mut rows: Vec<_> = branches
+                    .iter()
+                    .enumerate()
+                    .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
+                    .collect();
+                if !editing {
+                    rows.push(ListRow::Choice(branches.len(), Line::from(NEW_BRANCH)));
+                }
+                rows
+            }
             SelectorKind::Name { .. } => Vec::new(),
             SelectorKind::Model { labels: values, .. } | SelectorKind::Effort { values, .. } => {
                 values
@@ -208,15 +223,30 @@ impl View {
         ));
     }
 
-    /// Moves the selected draft from its prompt to its branch, or straight to its name outside a
-    /// repository.
-    pub(super) fn start_branch_step(&mut self) {
-        let Some(id) = self.selected_draft else {
-            return;
-        };
-        self.set_step(id, Step::Branch);
-        if !self.open_branches(false) {
+    /// Saves the submitted prompt and clears its box before choosing a branch.
+    pub(super) fn start_branch_step(&mut self) -> Option<Action> {
+        let id = self.selected_draft?;
+        if self.selected_draft()?.name.is_none() {
             self.open_name(id);
+            return None;
+        }
+        self.input_box.history = self.prompt_history.clone();
+        let Some(prompt_box::PromptAction::Submit(_)) = self
+            .input_box
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        else {
+            return None;
+        };
+        let prompt = std::mem::take(&mut self.input_box.editor);
+        self.input_box.submitting = false;
+        self.drafts.iter_mut().find(|draft| draft.id == id)?.prompt = Some(prompt);
+        self.set_step(id, Step::Branch);
+        if self.open_branches(false) {
+            None
+        } else if self.selected_draft()?.setup.branch.is_empty() {
+            self.create_task(id)
+        } else {
+            None
         }
     }
 
@@ -226,8 +256,7 @@ impl View {
         }
     }
 
-    /// Lists the selected draft's branches, selecting its current choice or the new branch's
-    /// input; false when the draft is outside a repository or its branches cannot be read.
+    /// Lists local branches, selecting the current branch or the create button.
     fn open_branches(&mut self, select_current: bool) -> bool {
         let Some(draft) = self.selected_draft() else {
             return false;
@@ -235,8 +264,12 @@ impl View {
         if draft.setup.branch.is_empty() {
             return false;
         }
-        let Ok(branches) = crate::tasks::local_branches(&draft.setup.cwd) else {
-            return false;
+        let branches = match crate::tasks::local_branches(&draft.setup.cwd) {
+            Ok(branches) => branches,
+            Err(error) => {
+                self.set_notice(Some(format!("Cannot read branches: {error}")));
+                return false;
+            }
         };
         let current = draft
             .branch_choice
@@ -255,6 +288,7 @@ impl View {
                 draft: draft.id,
                 branches,
                 editor,
+                editing: false,
             },
             selected,
         ));
@@ -262,7 +296,7 @@ impl View {
         true
     }
 
-    fn open_name(&mut self, id: DraftId) {
+    pub(super) fn open_name(&mut self, id: DraftId) {
         self.set_step(id, Step::Name);
         self.selector = Some(Selector::new(
             SelectorKind::Name {
@@ -274,76 +308,63 @@ impl View {
         self.focus_selector();
     }
 
-    /// Records the chosen branch, then asks for the task's name in the new-task flow.
-    fn choose_branch(&mut self, id: DraftId, branch: String, new: bool) {
-        let Some(draft) = self.drafts.iter_mut().find(|item| item.id == id) else {
-            return;
-        };
+    /// Records the chosen branch and creates a task once its prompt is saved.
+    fn choose_branch(&mut self, id: DraftId, branch: String, new: bool) -> Option<Action> {
+        let draft = self.drafts.iter_mut().find(|item| item.id == id)?;
         draft.branch_choice = if new {
             Some(BranchChoice::New(branch))
         } else {
             (branch != draft.setup.branch).then_some(BranchChoice::Existing(branch))
         };
         if draft.step == Step::Branch {
-            self.open_name(id);
+            self.create_task(id)
         } else {
             self.close_selector();
+            None
         }
     }
 
-    /// Creates the task from its name, the prompt box's text and the chosen branch.
-    fn create_task(&mut self, id: DraftId, name: String) -> Option<Action> {
+    /// Creates the task from its saved name, prompt and chosen branch.
+    fn create_task(&mut self, id: DraftId) -> Option<Action> {
         let draft = self.drafts.iter().find(|draft| draft.id == id)?;
         if draft.working || draft.job.is_some() {
             return None;
         }
-        self.input_box.history = self.prompt_history.clone();
-        // The prompt box submits its text the way it does for a task, recording the history.
-        self.input_box.focused = true;
-        let Some(prompt_box::PromptAction::Submit(prompt)) = self
-            .input_box
-            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        else {
-            return None;
-        };
-        let draft = self.drafts.iter().find(|draft| draft.id == id)?;
+        let name = draft.name.as_ref().expect("task name before creation");
+        let prompt = draft.prompt.as_ref().expect("task prompt before creation");
         let action = Action::CreateTask {
             draft_id: id,
             provider: draft.setup.provider,
             branch: draft.branch_choice.clone(),
             request: crate::tasks::NewTask {
                 cwd: draft.setup.cwd.clone(),
-                name: Some(name),
+                name: Some(name.clone()),
                 model: draft.setup.model.clone(),
                 effort: draft.setup.effort.clone(),
-                prompt,
-                images: self.input_box.editor.image_paths(),
+                prompt: prompt.prompt_text(),
+                images: prompt.image_paths(),
             },
         };
         self.submit_draft(id);
         Some(action)
     }
 
-    /// Esc or a right click: the name step returns to the branch step, which returns to the
-    /// prompt; any other selector closes.
+    /// Esc leaves branch editing first; the branch list cancels the draft.
     pub(super) fn cancel_selector(&mut self) {
-        let naming = matches!(
-            &self.selector,
-            Some(Selector {
-                kind: SelectorKind::Name { .. },
-                ..
-            })
-        );
-        if naming
-            && let Some(id) = self.selected_draft
-            && self
-                .selected_draft()
-                .is_some_and(|draft| draft.step == Step::Name)
+        if let Some(Selector {
+            kind: SelectorKind::Branch {
+                editor, editing, ..
+            },
+            ..
+        }) = &mut self.selector
         {
-            self.set_step(id, Step::Branch);
-            if self.open_branches(true) {
+            if *editing {
+                editor.clear();
+                *editing = false;
                 return;
             }
+            self.discard_selected_draft();
+            return;
         }
         self.close_selector();
     }
@@ -512,7 +533,8 @@ impl View {
                         draft_id: *draft,
                         cwd: cwd.clone(),
                     };
-                    self.close_selector();
+                    let draft = *draft;
+                    self.open_name(draft);
                     Some(action)
                 }
             },
@@ -520,15 +542,23 @@ impl View {
                 draft,
                 branches,
                 editor,
+                editing,
             } => {
                 let draft = *draft;
+                if index == branches.len() && !editing {
+                    if let SelectorKind::Branch { editing, .. } = &mut self.selector.as_mut()?.kind
+                    {
+                        *editing = true;
+                    }
+                    return None;
+                }
                 // The input row applies the typed name; an empty name stays put.
                 let (branch, new) = match branches.get(index) {
                     Some(branch) => (branch.clone(), false),
                     None => (editor.text().trim().to_owned(), true),
                 };
                 if !branch.is_empty() {
-                    self.choose_branch(draft, branch, new);
+                    return self.choose_branch(draft, branch, new);
                 }
                 None
             }
@@ -538,7 +568,9 @@ impl View {
                 if name.is_empty() {
                     return None;
                 }
-                self.create_task(draft, name)
+                self.drafts.iter_mut().find(|item| item.id == draft)?.name = Some(name);
+                self.close_selector();
+                None
             }
             SelectorKind::Model { target, values, .. }
             | SelectorKind::Effort { target, values } => {
@@ -583,15 +615,7 @@ impl View {
             let selected = selector.selected;
             return Some(self.apply_choice(selected));
         }
-        // An empty input row still walks the list with the arrow and page keys; text makes
-        // every other key line editing.
-        let navigation = matches!(
-            key.code,
-            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown
-        ) && key.modifiers.is_empty();
-        if let Some(editor) = selector.active_editor()
-            && !(navigation && editor.is_empty())
-        {
+        if let Some(editor) = selector.active_editor() {
             editor.handle(key);
             return Some(None);
         }
@@ -609,8 +633,9 @@ impl View {
         };
         Clear.render(area, buf);
         // The input row takes the panel's bottom row, below the list.
-        let input = selector.input().filter(|_| area.height > 1);
-        let list = if input.is_some() {
+        let input = selector.name_input().filter(|_| area.height > 0);
+        let branch = selector.branch_editor().filter(|_| area.height > 0);
+        let list = if input.is_some() || branch.is_some() {
             render::row(area, 0, area.height - 1)
         } else {
             area
@@ -632,6 +657,12 @@ impl View {
             if let Some(index) = selector.create_index() {
                 rows.push((row, index));
             }
+            self.viewport.borrow_mut().details_input = row;
+        }
+        if let Some(editor) = branch {
+            let row = super::log::search_input_rect(area);
+            render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
+            rows.push((row, selector.create_index().expect("branch input choice")));
             self.viewport.borrow_mut().details_input = row;
         }
         self.viewport.borrow_mut().picker_rows = rows;
@@ -794,194 +825,153 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn branch_step_lists_branches_above_the_new_branch_input_and_leads_to_the_name() {
-        let directory = tempfile::tempdir().unwrap();
-        let repository = repository(directory.path());
-        let mut view = draft_view(&repository, directory.path());
-        view.handle_paste("unfinished task");
-        let area = Rect::new(0, 0, 160, 40);
-        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(view.drafts[0].step, Step::Branch);
-        assert!(!view.input_box.focused);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        let rows = panel_rows(&view, area);
-        assert_eq!(rows[..2], ["feature/a", "main"]);
-        assert_eq!(rows.last().map(String::as_str), Some("New branch name"));
-        assert!(!rows.contains(&"Create new branch".to_owned()));
-        let input = view.viewport.borrow().details_input;
-        assert_eq!(input.y, view.viewport.borrow().details.bottom() - 1);
-        assert_eq!(view.cursor_pos(area), Some((input.x, input.y)));
-        assert!(view.center_footer_hints().to_string().contains("back"));
-        // Enter on the empty input stays put; the arrows walk the list while it is empty.
-        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(view.drafts[0].step, Step::Branch);
-        view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(view.selector.as_ref().unwrap().selected, 1);
-        screen(&view, area);
-        assert_eq!(view.cursor_pos(area), None);
-        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        // Text makes the keys line editing: j and k type, Left moves the caret.
-        for code in [KeyCode::Char('j'), KeyCode::Char('k')] {
-            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
-        }
-        view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
-        view.handle_paste("你好");
-        view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        view.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
-        let rows = panel_rows(&view, area);
-        assert_eq!(rows.last().map(String::as_str), Some("jk/你 x好"));
-        assert_eq!(view.cursor_pos(area).unwrap().1, input.y);
-        assert_eq!(view.input_box.editor.text(), "unfinished task");
-        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(
-            view.drafts[0].branch_choice,
-            Some(BranchChoice::New("jk/你x好".into()))
-        );
+    fn prompt_step(view: &mut View) {
+        let id = view.selected_draft.unwrap();
+        view.open_name(id);
         assert_eq!(view.drafts[0].step, Step::Name);
-        assert!(!view.input_box.focused);
-        assert_eq!(view.input_box.editor.text(), "unfinished task");
-        assert!(view.input_box.history.borrow().is_empty());
-        let rows = panel_rows(&view, area);
-        assert_eq!(rows.last().map(String::as_str), Some("New task"));
-        // Esc from the name returns to the branch list with the typed name kept.
-        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert_eq!(view.drafts[0].step, Step::Branch);
-        let rows = panel_rows(&view, area);
-        assert_eq!(rows.last().map(String::as_str), Some("jk/你 x好"));
-        view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        // Esc from the branch list returns to the prompt with the draft kept.
-        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert_eq!(view.drafts[0].step, Step::Prompt);
-        assert!(view.selector.is_none());
-        assert!(view.input_box.focused);
-        assert_eq!(view.input_box.editor.text(), "unfinished task");
-        // Reopening keeps the typed name; clearing it frees the arrows, and an existing branch
-        // by keyboard, then the name, creates the task.
-        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(view.drafts[0].step, Step::Branch);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        for _ in 0.."jk/你x好".chars().count() {
-            view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        }
-        view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
-            view.drafts[0].branch_choice,
-            Some(BranchChoice::Existing("feature/a".into()))
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            None
         );
         assert_eq!(view.drafts[0].step, Step::Name);
         view.handle_paste("named task");
-        let action = view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let Some(Action::CreateTask {
-            request, branch, ..
-        }) = action
-        else {
-            panic!("{action:?}");
-        };
-        assert_eq!(request.name.as_deref(), Some("named task"));
-        assert_eq!(request.prompt, "unfinished task");
-        assert_eq!(branch, Some(BranchChoice::Existing("feature/a".into())));
-        assert!(view.selector.is_none());
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(view.input_label(), "named task");
+        assert!(view.input_box.focused);
+        view.handle_paste("unfinished task");
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     }
 
     #[test]
-    fn a_single_click_on_a_branch_row_applies_it_like_a_repository() {
+    fn branch_button_enters_an_editor_and_escape_discards_text_then_draft() {
         let directory = tempfile::tempdir().unwrap();
         let repository = repository(directory.path());
         let mut view = draft_view(&repository, directory.path());
-        view.handle_paste("unfinished task");
+        prompt_step(&mut view);
+        assert!(view.input_box.editor.is_empty());
+        assert_eq!(view.input_label(), "named task");
         let area = Rect::new(0, 0, 160, 40);
-        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        screen(&view, area);
-        // A click on the input row only selects it.
-        let input = row_of(&view, 2);
-        assert_eq!(click(&mut view, input), None);
+        let rows = panel_rows(&view, area);
+        assert_eq!(&rows[..3], &["feature/a", "main", "Create new branch"]);
+        assert!(!view.selector.as_ref().unwrap().input_active());
         assert_eq!(view.selector.as_ref().unwrap().selected, 2);
-        assert_eq!(view.drafts[0].step, Step::Branch);
-        let feature = row_of(&view, 0);
-        assert_eq!(click(&mut view, feature), None);
-        assert!(view.pending_click_in(Instant::now()).is_none());
+        assert_eq!(view.cursor_pos(area), None);
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let rows = panel_rows(&view, area);
+        assert_eq!(rows.last().unwrap().trim_end(), "New branch ❯");
+        let input = view.viewport.borrow().details_input;
+        assert_eq!(view.cursor_pos(area), Some((input.x + 13, input.y)));
         assert_eq!(
-            view.drafts[0].branch_choice,
-            Some(BranchChoice::Existing("feature/a".into()))
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            None
         );
-        assert_eq!(view.drafts[0].step, Step::Name);
-        assert!(matches!(
-            view.selector.as_ref().unwrap().kind,
-            SelectorKind::Name { .. }
-        ));
-        // Outside the flow, the branch field on the rule applies and returns to the prompt.
+        view.handle_paste("feature/你好");
+        view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        view.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(
+            panel_rows(&view, area)
+                .last()
+                .unwrap()
+                .contains("feature/你 x好")
+        );
+        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!view.selector.as_ref().unwrap().input_active());
+        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(panel_rows(&view, area).last().unwrap().trim_end() == "New branch ❯");
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert_eq!(view.drafts[0].step, Step::Prompt);
-        view.open_field(Field::Branch);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 0);
-        screen(&view, area);
-        let main = row_of(&view, 1);
-        assert_eq!(click(&mut view, main), None);
-        assert_eq!(view.drafts[0].branch_choice, None);
+        assert!(view.drafts.is_empty());
         assert!(view.selector.is_none());
-        assert!(view.input_box.focused);
-        assert_eq!(view.drafts[0].step, Step::Prompt);
+        assert!(view.input_box.editor.is_empty());
     }
 
     #[test]
-    fn branch_input_enter_and_escape_preserve_draft_and_prompt() {
+    fn clicking_the_branch_editor_does_not_submit_its_text() {
         let directory = tempfile::tempdir().unwrap();
-        let mut view = draft_view(directory.path(), directory.path());
-        view.close_selector();
-        view.handle_paste("saved input");
-        view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        let cursor = view.input_box.editor.cursor();
-        let label = view.input_label();
-        let draft = view.drafts[0].id;
-        view.selector = Some(Selector::new(
-            SelectorKind::Branch {
-                draft,
-                branches: vec!["main".into()],
-                editor: line_edit::LineEdit::default(),
-            },
-            1,
-        ));
-        view.focus_selector();
+        let repository = repository(directory.path());
+        let mut view = draft_view(&repository, directory.path());
+        prompt_step(&mut view);
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(!view.input_box.focused);
-        assert_eq!(view.input_label(), label);
-        view.handle_paste("feature/input");
+        view.handle_paste("feature/probe");
+        screen(&view, Rect::new(0, 0, 160, 40));
+        let input = view.viewport.borrow().details_input;
+        assert_eq!(click(&mut view, input), None);
+        assert!(view.selector.as_ref().unwrap().input_active());
+        assert_eq!(view.drafts[0].step, Step::Branch);
+    }
+
+    #[test]
+    fn new_task_panel_snapshots() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = repository(directory.path());
+        let mut view = draft_view(&repository, directory.path());
+        let area = Rect::new(0, 0, 160, 16);
+        let mut states = Vec::new();
+        states.push(panel_rows(&view, area).join("\n"));
+        prompt_step(&mut view);
+        states.push(panel_rows(&view, area).join("\n"));
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(view.input_label(), label);
-        assert_eq!(view.input_box.editor.text(), "saved input");
-        assert_eq!(view.input_box.editor.cursor(), cursor);
-        assert!(view.prompt_history.borrow().is_empty());
-        assert_eq!(
-            view.drafts[0].branch_choice,
-            Some(BranchChoice::New("feature/input".into()))
-        );
-        assert!(view.selector.is_none());
-        assert!(view.input_box.focused);
-        view.selector = Some(Selector::new(
-            SelectorKind::Branch {
-                draft,
-                branches: vec!["main".into()],
-                editor: line_edit::LineEdit::default(),
-            },
-            1,
-        ));
-        view.focus_selector();
-        view.handle_paste("dropped");
-        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert_eq!(view.drafts.len(), 1);
-        assert_eq!(view.input_box.editor.text(), "saved input");
-        assert!(view.input_box.focused);
-        assert!(view.selector.is_none());
+        view.handle_paste("feature/probe");
+        states.push(panel_rows(&view, area).join("\n"));
+        let actual = states.join("\n---\n") + "\n";
+        if std::env::var_os("UPDATE_DRAFT_SNAPSHOT").is_some() {
+            std::fs::write("tests/ui_snapshots/new_task_steps.txt", &actual).unwrap();
+        } else {
+            assert_eq!(
+                actual,
+                include_str!("../../tests/ui_snapshots/new_task_steps.txt")
+            );
+        }
+    }
+
+    #[test]
+    fn branch_keyboard_and_single_click_create_with_the_saved_name_and_prompt() {
+        for mouse in [false, true] {
+            for new in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let repository = repository(directory.path());
+                let mut view = draft_view(&repository, directory.path());
+                prompt_step(&mut view);
+                let area = Rect::new(0, 0, 160, 40);
+                screen(&view, area);
+                let action = if new {
+                    if mouse {
+                        let button = row_of(&view, 2);
+                        assert_eq!(click(&mut view, button), None);
+                    } else {
+                        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                    }
+                    view.handle_paste("feature/probe");
+                    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+                } else if mouse {
+                    let feature = row_of(&view, 0);
+                    click(&mut view, feature)
+                } else {
+                    view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+                    view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+                    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+                };
+                let Some(Action::CreateTask {
+                    request, branch, ..
+                }) = action
+                else {
+                    panic!("{action:?}")
+                };
+                assert_eq!(request.name.as_deref(), Some("named task"));
+                assert_eq!(request.prompt, "unfinished task");
+                assert_eq!(
+                    branch,
+                    Some(if new {
+                        BranchChoice::New("feature/probe".into())
+                    } else {
+                        BranchChoice::Existing("feature/a".into())
+                    })
+                );
+                assert!(view.selector.is_none());
+                assert!(view.pending_click_in(Instant::now()).is_none());
+            }
+        }
     }
 
     #[test]
@@ -990,7 +980,10 @@ mod tests {
         let mut view = draft_view(directory.path(), directory.path());
         view.drafts[0].setup.branch.clear();
         view.open_field(Field::Branch);
-        assert_eq!(view.selector.as_ref().unwrap().field(), Field::Directory);
+        assert!(matches!(
+            view.selector.as_ref().unwrap().kind,
+            SelectorKind::Name { .. }
+        ));
         let area = Rect::new(0, 0, 120, 24);
         screen(&view, area);
         assert!(
