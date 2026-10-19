@@ -216,8 +216,8 @@ mod tests {
 
     #[test]
     fn detailed_labels_stay_next_to_center() {
-        let reset = "2026-10-23T16:00:00Z".parse().unwrap();
-        let time = chrono::DateTime::<chrono::Utc>::from(reset)
+        let reset: chrono::DateTime<chrono::Utc> = "2026-10-23T16:00:00Z".parse().unwrap();
+        let time = reset
             .with_timezone(&chrono::Local)
             .format("%a %H:%M")
             .to_string();
