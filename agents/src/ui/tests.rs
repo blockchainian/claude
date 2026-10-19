@@ -9694,9 +9694,15 @@ fn log_border_fields_keep_click_actions_without_jumping() {
             };
             click_mouse(&mut view, mouse);
             assert_eq!(view.visible_log_event(), Some(&selected));
+            assert_eq!(view.selector.as_ref().unwrap().field(), field);
+            let model = view.selected_row().unwrap().model.clone();
+            let effort = view.selected_row().unwrap().effort.clone();
+            log_screen(&view, width, 45, now);
             click_mouse(&mut view, mouse);
             assert_eq!(view.visible_log_event(), Some(&selected));
-            assert!(view.selector.is_some());
+            assert!(view.selector.is_none());
+            assert_eq!(view.selected_row().unwrap().model, model);
+            assert_eq!(view.selected_row().unwrap().effort, effort);
         }
     }
 }

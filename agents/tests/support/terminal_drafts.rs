@@ -484,6 +484,12 @@ fn terminal_draft_defaults_and_inherited_choices() {
                         1,
                         "{picker}"
                     );
+                    tmux.mouse(0, column, row, true);
+                    tmux.wait_for(|capture| {
+                        capture.contains(title) && !capture.contains("enter select")
+                    });
+                    tmux.mouse(0, column, row, true);
+                    tmux.wait_for(|capture| capture.contains("enter select"));
                     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
                     tmux.wait_for(|capture| {
                         capture.contains(title)
@@ -493,7 +499,31 @@ fn terminal_draft_defaults_and_inherited_choices() {
                                 .any(|line| line.contains(model) && line.contains(effort))
                     });
                 }
-                checks.push(serde_json::json!({"width":width,"model":model,"effort":effort,"named":named,"clickable":true,"inherit":true}));
+                for value in ["source", "main"] {
+                    let capture = tmux.capture_when(|capture| {
+                        capture.lines().any(|line| {
+                            line.contains(title) && line.contains("source") && line.contains("main")
+                        }) && !capture.contains("enter select")
+                    });
+                    let (row, line) = capture
+                        .lines()
+                        .enumerate()
+                        .find(|(_, line)| line.contains(title) && line.contains(value))
+                        .unwrap();
+                    let column = line[..line.find(value).unwrap()].width();
+                    tmux.mouse(0, column, row, true);
+                    tmux.wait_for(|capture| capture.contains("enter select"));
+                    tmux.mouse(0, column, row, true);
+                    tmux.wait_for(|capture| {
+                        !capture.contains("enter select")
+                            && capture.lines().any(|line| {
+                                line.contains(title)
+                                    && line.contains("source")
+                                    && line.contains("main")
+                            })
+                    });
+                }
+                checks.push(serde_json::json!({"width":width,"model":model,"effort":effort,"named":named,"clickable":true,"inherit":true,"same_field_cancel":true}));
             }
         }
     }

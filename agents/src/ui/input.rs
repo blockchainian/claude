@@ -788,7 +788,15 @@ impl View {
                     };
                     return Some(Action::PersistUsageView(self.usage_view));
                 }
-                self.open_field(field);
+                if self
+                    .selector
+                    .as_ref()
+                    .is_some_and(|selector| selector.field() == field)
+                {
+                    self.cancel_selector();
+                } else {
+                    self.open_field(field);
+                }
                 return None;
             }
             if self.viewport.borrow().details_title.contains(position)

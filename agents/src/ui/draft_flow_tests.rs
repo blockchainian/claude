@@ -480,6 +480,123 @@ fn git_draft() -> (FixtureDirectory, View) {
     (directory, view)
 }
 
+fn click_field(view: &mut View, field: Field) {
+    let rect = view
+        .viewport
+        .borrow()
+        .field_targets
+        .iter()
+        .find(|(_, target)| *target == field)
+        .unwrap()
+        .0;
+    assert!(
+        view.viewport
+            .borrow()
+            .overlays
+            .iter()
+            .all(|overlay| !overlay.area.intersects(rect))
+    );
+    assert_eq!(click(view, rect.x, rect.y), None);
+}
+
+fn assert_field_click_cancels(field: Field) {
+    for width in [120, 200] {
+        for named in [false, true] {
+            let (_directory, mut view) = git_draft();
+            if named {
+                view.handle_paste("half prompt");
+            } else {
+                let id = view.selected_draft.unwrap();
+                view.drafts
+                    .iter_mut()
+                    .find(|draft| draft.id == id)
+                    .unwrap()
+                    .name = None;
+                view.open_name(id);
+            }
+            let draft = view.selected_draft().unwrap();
+            let choices = (
+                draft.setup.cwd.clone(),
+                draft.setup.model.clone(),
+                draft.setup.effort.clone(),
+                draft.branch.clone(),
+            );
+            let prompt = view.input_box.editor.text().to_owned();
+            let name_target = view.name_target;
+            let name = view.rename.text().to_owned();
+            let now = Utc::now();
+            let area = Rect::new(0, 0, width, 50);
+            let mut before = Buffer::empty(area);
+            view.render_at(area, &mut before, now);
+            click_field(&mut view, field);
+            assert_eq!(view.selector.as_ref().unwrap().field(), field);
+            let mut after = Buffer::empty(area);
+            view.render_at(area, &mut after, now);
+            click_field(&mut view, field);
+            assert!(
+                view.selector.is_none(),
+                "{field:?}, width={width}, named={named}"
+            );
+            assert_eq!(view.name_target, name_target);
+            assert_eq!(view.rename.text(), name);
+            assert_eq!(view.input_box.editor.text(), prompt);
+            assert_eq!(view.input_box.focused, named);
+            let draft = view.selected_draft().unwrap();
+            assert_eq!(
+                (
+                    draft.setup.cwd.clone(),
+                    draft.setup.model.clone(),
+                    draft.setup.effort.clone(),
+                    draft.branch.clone()
+                ),
+                choices
+            );
+            after.reset();
+            view.render_at(area, &mut after, now);
+            assert_eq!(after, before);
+        }
+    }
+}
+
+#[test]
+fn model_field_click_cancels_selector() {
+    assert_field_click_cancels(Field::Model);
+}
+
+#[test]
+fn effort_field_click_cancels_selector() {
+    assert_field_click_cancels(Field::Effort);
+}
+
+#[test]
+fn repository_field_click_cancels_selector() {
+    assert_field_click_cancels(Field::Directory);
+}
+
+#[test]
+fn branch_field_click_cancels_selector() {
+    assert_field_click_cancels(Field::Branch);
+}
+
+#[test]
+fn clicking_another_field_switches_selector() {
+    let (_directory, mut view) = git_draft();
+    let fields = [Field::Model, Field::Effort, Field::Directory, Field::Branch];
+    for from in fields {
+        for to in fields {
+            if from == to {
+                continue;
+            }
+            view.close_selector();
+            render(&view);
+            click_field(&mut view, from);
+            render(&view);
+            click_field(&mut view, to);
+            assert_eq!(view.selector.as_ref().unwrap().field(), to);
+        }
+    }
+}
+
 #[test]
 fn prompt_enter_opens_missing_branch_and_wizard_pick_only_focuses_prompt() {
     let (_directory, mut view) = git_draft();

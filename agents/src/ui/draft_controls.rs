@@ -84,7 +84,6 @@ impl Selector {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn field(&self) -> Field {
         match &self.kind {
             SelectorKind::Repository { .. } => Field::Directory,
