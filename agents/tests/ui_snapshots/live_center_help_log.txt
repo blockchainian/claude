@@ -2,22 +2,22 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  Task shortcuts
 
- Navigate            Tasks                   View                Log
- ↑      Up           n          New          tab/⇧tab  Filter    /                       Search
- ↓      Down         o          Terminal     /         Search    t                       Sort
- enter  Terminal     f          Fork         g         Group     2× click top border     Earliest
- →/⌃l   Terminal     r          Rename                           2× click bottom border  Latest
- pgup   Page up      x          Stop
- pgdn   Page down    a          Archive
- ⌃c     Quit         h          Hide
- esc    Previous     backspace  Delete
-                     p          Pin/unpin
+ Navigate                                Tasks
+ ↑           Up                          n          New
+ ↓           Down                        o          Terminal
+ ⌃w h/j/k/l  Focus left/down/up/right    f          Fork
+ enter       Terminal                    r          Rename
+ →/⌃l        Terminal                    x          Stop
+ pgup        Page up                     a          Archive
+ pgdn        Page down                   h          Hide
+ ⌃c          Quit                        backspace  Delete
+ esc         Previous                    p          Pin/unpin
 
-
-
-
-
-
+ View                                    Log
+ tab/⇧tab  Filter                        /                       Search
+ /         Search                        t                       Sort
+ g         Group                         2× click top border     Earliest
+                                         2× click bottom border  Latest
 
 
 

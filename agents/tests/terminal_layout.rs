@@ -3182,3 +3182,6 @@ fn terminal_inactive_elapsed_stays_at_last_record() {
     )
     .unwrap();
 }
+
+#[path = "support/terminal_window_navigation.rs"]
+mod terminal_window_navigation;

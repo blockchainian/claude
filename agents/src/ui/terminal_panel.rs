@@ -52,13 +52,6 @@ impl View {
             && self.shown_terminal().is_some()
     }
 
-    fn focus(&mut self, panel: Panel) {
-        self.mouse_focus = panel;
-        self.input_box.focused = panel == Panel::Prompt && self.input_disabled().is_none();
-        self.log_list_focused = panel == Panel::LogList;
-        self.log_detail_focused = panel == Panel::LogDetail;
-    }
-
     pub fn terminal_paste(&self, text: &str) -> Option<Action> {
         self.terminal_focused()
             .then(|| Action::TerminalPaste(text.to_owned()))

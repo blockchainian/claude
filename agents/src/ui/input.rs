@@ -362,11 +362,7 @@ impl View {
             self.handle_mouse_event(mouse)
         };
         if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
-            self.input_box.focused = self.mouse_focus == Panel::Prompt
-                && self.input_disabled().is_none()
-                && self.title_editor().is_none();
-            self.log_list_focused = self.mouse_focus == Panel::LogList;
-            self.log_detail_focused = self.mouse_focus == Panel::LogDetail;
+            self.focus(self.mouse_focus);
         }
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
@@ -1305,6 +1301,28 @@ impl View {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if let Some(prefix) = self.window_prefix.take() {
+            if key.modifiers.is_empty()
+                && let KeyCode::Char(direction @ ('h' | 'j' | 'k' | 'l')) = key.code
+            {
+                self.move_panel(direction);
+                return None;
+            }
+            let first = self.handle_panel_key(prefix);
+            let second = self.handle_panel_key(key);
+            return match (first, second) {
+                (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
+                (action, None) | (None, action) => action,
+            };
+        }
+        if key.code == KeyCode::Char('w') && key.modifiers == KeyModifiers::CONTROL {
+            self.window_prefix = Some(key);
+            return None;
+        }
+        self.handle_panel_key(key)
+    }
+
+    fn handle_panel_key(&mut self, key: KeyEvent) -> Option<Action> {
         if self.frozen_draft() {
             return if key.code == KeyCode::Char('c')
                 && key.modifiers.contains(KeyModifiers::CONTROL)

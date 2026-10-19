@@ -52,6 +52,7 @@ mod tool_detail;
 mod usage_chart;
 pub(crate) mod vscode;
 mod weekly_usage;
+mod window_navigation;
 pub use highlight::use_theme as use_highlight_theme;
 pub use style::light_background;
 pub use style::set_light_background;
@@ -259,6 +260,7 @@ pub(crate) use crate::model::LogSort;
 
 pub struct View {
     mouse_focus: Panel,
+    window_prefix: Option<KeyEvent>,
     /// The session whose program runs in the log detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
     pub(crate) startup_cwd: PathBuf,
@@ -401,6 +403,7 @@ impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             mouse_focus: Panel::TaskList,
+            window_prefix: None,
             terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             log: Vec::new(),

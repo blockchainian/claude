@@ -10949,3 +10949,6 @@ mod summary_consistency_tests;
 
 #[path = "overlay_tests.rs"]
 mod overlay_tests;
+
+#[path = "window_navigation_tests.rs"]
+mod window_navigation_tests;

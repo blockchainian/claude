@@ -89,6 +89,7 @@ impl View {
                 &[
                     ("↑", "Up"),
                     ("↓", "Down"),
+                    ("⌃w h/j/k/l", "Focus left/down/up/right"),
                     ("enter", "Terminal"),
                     ("→/⌃l", "Terminal"),
                     ("pgup", "Page up"),
