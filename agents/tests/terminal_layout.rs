@@ -3145,3 +3145,37 @@ fn terminal_finished_claude_subagents_remain_under_inactive_parent() {
     }
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_inactive_elapsed_stays_at_last_record() {
+    let (_directory, tmux, _transcript) = start_probe("inactive-elapsed");
+    let header = |capture: &str| {
+        capture
+            .lines()
+            .find(|line| line.contains("Inactive") && line.contains('─'))
+            .expect("inactive details header")
+            .trim_end()
+            .to_owned()
+    };
+    let first = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .any(|line| line.contains("Inactive") && line.contains("16s"))
+    });
+    std::thread::sleep(Duration::from_secs(2));
+    // Force a redraw after wall time advances, without changing the session.
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    let second = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .any(|line| line.contains("Inactive") && line.contains("16s"))
+    });
+    assert_eq!(header(&first), header(&second));
+    std::fs::write(
+        std::env::temp_dir().join("agents-inactive-elapsed-verdict.json"),
+        serde_json::json!({"inactive_elapsed": "pass", "elapsed": "16s", "redraw_stable": true})
+            .to_string(),
+    )
+    .unwrap();
+}

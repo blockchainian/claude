@@ -665,8 +665,15 @@ impl View {
         // The status stays centered on the whole rule, keeping both end labels clear.
         let fits = |text: &String| usize::from(rule.width) >= 2 * (text.width() + 2) + 7;
         let elapsed = session
-            .and_then(|session| session.started_at)
-            .map(|at| format_duration((now - at).num_seconds()))
+            .and_then(|session| {
+                let start = session.started_at?;
+                let end = if session.status == SessionStatus::Inactive {
+                    session.last_record_at.unwrap_or(session.updated_at)
+                } else {
+                    now
+                };
+                Some(format_duration((end - start).num_seconds()))
+            })
             .filter(fits);
         let cache_remaining = session
             .and_then(|session| session.cache_expires_at)

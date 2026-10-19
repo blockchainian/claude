@@ -3470,6 +3470,41 @@ mod details_header {
         }
     }
 
+    fn assert_inactive_elapsed(provider: ProviderId, last_record: bool) {
+        let start = "2026-10-13T12:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
+        for (seconds, expected) in [(125, "2m 5s"), (-1, "0s")] {
+            let mut row = session("header", "Finished task", SessionStatus::Inactive, 0);
+            row.id.provider = provider;
+            row.started_at = Some(start);
+            row.updated_at = start + Duration::seconds(if last_record { 999 } else { seconds });
+            row.last_record_at = last_record.then_some(start + Duration::seconds(seconds));
+            let mut view = test_view(Grouping::Project, true);
+            view.status_filter = 1;
+            view.set_sessions(vec![row], false);
+            let headers: Vec<_> = [300, 900]
+                .into_iter()
+                .map(|advance| {
+                    let (buf, rule) = rule(&view, start + Duration::seconds(advance));
+                    label(&buf, rule)
+                })
+                .collect();
+            assert_eq!(headers[0], headers[1]);
+            assert!(headers[0].ends_with(expected), "{}", headers[0]);
+        }
+    }
+
+    #[test]
+    fn inactive_elapsed_stops_at_last_record() {
+        assert_inactive_elapsed(ProviderId::Claude, true);
+    }
+
+    #[test]
+    fn inactive_elapsed_uses_updated_at_without_last_record() {
+        assert_inactive_elapsed(ProviderId::Codex, false);
+    }
+
     #[test]
     fn status_is_on_top_and_the_title_below_in_wide_and_narrow_layouts() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
