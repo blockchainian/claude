@@ -1,6 +1,6 @@
 //! Persisted command-center configuration and runtime state.
 
-use crate::model::Grouping;
+use crate::model::{Grouping, LogSort};
 use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -70,6 +70,7 @@ pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
     pub grouping: Grouping,
+    pub sorting: LogSort,
     pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
@@ -96,6 +97,7 @@ struct StoredConfig {
     worktree_root: Option<PathBuf>,
     double_click_ms: u64,
     grouping: String,
+    sorting: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     theme: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,6 +112,7 @@ impl Default for StoredConfig {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default().as_str().into(),
+            sorting: LogSort::default().as_str().into(),
             theme: None,
             light_theme: None,
             dark_theme: None,
@@ -171,6 +174,7 @@ impl Default for Preferences {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default(),
+            sorting: LogSort::default(),
             pinned: Vec::new(),
             theme: None,
             light_theme: None,
@@ -230,6 +234,7 @@ impl Preferences {
             worktree_root: stored.config.worktree_root,
             double_click_ms: stored.config.double_click_ms,
             grouping,
+            sorting: LogSort::parse(&stored.config.sorting).unwrap_or_default(),
             pinned: stored
                 .state
                 .pinned
@@ -297,6 +302,13 @@ impl Preferences {
         })
     }
 
+    pub fn save_sorting(&self, config_dir: &Path) -> io::Result<()> {
+        update(config_dir, |document| {
+            document["config"]["sorting"] = self.sorting.as_str().into();
+            Ok(())
+        })
+    }
+
     #[cfg(test)]
     pub fn save(&self, config_dir: &Path) -> io::Result<()> {
         update(config_dir, |document| {
@@ -305,6 +317,7 @@ impl Preferences {
                     worktree_root: self.worktree_root.clone(),
                     double_click_ms: self.double_click_ms,
                     grouping: self.grouping.as_str().into(),
+                    sorting: self.sorting.as_str().into(),
                     theme: self.theme.clone(),
                     light_theme: self.light_theme.clone(),
                     dark_theme: self.dark_theme.clone(),

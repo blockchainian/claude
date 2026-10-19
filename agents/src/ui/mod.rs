@@ -236,12 +236,7 @@ enum Panel {
     Other,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum LogSort {
-    #[default]
-    Time,
-    Duration,
-}
+pub(crate) use crate::model::LogSort;
 
 pub struct View {
     mouse_focus: Panel,

@@ -37,6 +37,7 @@ fn preferences_round_trip_and_corrupt_defaults() {
         worktree_root: Some(dir.path().join("trees")),
         double_click_ms: 200,
         grouping: Grouping::Model,
+        sorting: LogSort::Duration,
         pinned: vec![
             "claude:second".parse().unwrap(),
             "codex:first".parse().unwrap(),
@@ -121,6 +122,7 @@ fn stale_writers_only_replace_their_field() {
     let mut pins = Preferences::load(dir.path());
     let mut view = pins.clone();
     let mut grouping = pins.clone();
+    let mut sorting = pins.clone();
     pins.pinned = vec!["claude:pinned".parse().unwrap()];
     view.usage_view = UsageView::Detailed;
     grouping.grouping = Grouping::Model;
@@ -131,12 +133,15 @@ fn stale_writers_only_replace_their_field() {
     view.save_usage(dir.path(), ProviderId::Codex, &usage(16.0, Some(2)))
         .unwrap();
     grouping.save_grouping(dir.path()).unwrap();
+    sorting.sorting = LogSort::Duration;
+    sorting.save_sorting(dir.path()).unwrap();
     let preferences = Preferences::load(dir.path());
     assert_eq!(preferences.pinned, pins.pinned);
     assert_eq!(preferences.usage_view, UsageView::Detailed);
     assert_eq!(preferences.grouping, Grouping::Model);
     assert_eq!(preferences.double_click_ms, 450);
     assert_eq!(preferences.usage.len(), 2);
+    assert_eq!(preferences.sorting, LogSort::Duration);
     let stored: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
     assert_eq!(stored["config"]["custom"], "keep");
@@ -269,4 +274,40 @@ fn drafts_round_trip_drop_unnamed_and_malformed_without_losing_other_state() {
     let after: serde_json::Value =
         serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
     assert_eq!(after["state"]["drafts"], document["state"]["drafts"]);
+}
+
+#[test]
+fn sorting_round_trip_and_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    for sorting in [Some("time"), Some("duration"), Some("broken"), None] {
+        let mut document = serde_json::json!({
+            "config": {"grouping": "model", "double_click_ms": 450},
+            "state": {"pinned": ["codex:kept"], "usage_view": "detailed"}
+        });
+        if let Some(sorting) = sorting {
+            document["config"]["sorting"] = sorting.into();
+        }
+        fs::write(
+            dir.path().join("agents.json"),
+            serde_json::to_vec(&document).unwrap(),
+        )
+        .unwrap();
+        let preferences = Preferences::load(dir.path());
+        assert_eq!(preferences.grouping, Grouping::Model);
+        assert_eq!(preferences.double_click_ms, 450);
+        assert_eq!(preferences.pinned, vec!["codex:kept".parse().unwrap()]);
+        assert_eq!(preferences.usage_view, UsageView::Detailed);
+        preferences.save(dir.path()).unwrap();
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
+        assert_eq!(
+            stored["config"]["sorting"],
+            if sorting == Some("duration") {
+                "duration"
+            } else {
+                "time"
+            }
+        );
+        assert_eq!(Preferences::load(dir.path()), preferences);
+    }
 }

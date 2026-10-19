@@ -35,6 +35,34 @@ pub(super) struct PendingClick {
 }
 
 impl View {
+    pub(crate) fn set_log_sort(&mut self, sorting: LogSort) {
+        let following = self.following_log();
+        let full = self
+            .log_selected
+            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+        let background_full = self
+            .log_background_return
+            .as_ref()
+            .and_then(|saved| saved.event)
+            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+        self.log_sort = sorting;
+        self.prepare_log_search();
+        self.log_selected = full.and_then(|full| self.shown_position(full));
+        let background_event = background_full.and_then(|full| self.shown_position(full));
+        if let Some(saved) = &mut self.log_background_return {
+            saved.event = background_event;
+        }
+        self.log_pending_older = 0;
+        self.viewport.borrow_mut().log_unseen = 0;
+        if self.log_background_return.is_none() {
+            self.show_newest_log();
+        } else if following {
+            self.viewport.borrow_mut().log_scroll = self.log_max_scroll();
+        } else {
+            self.reveal_log_selection();
+        }
+    }
+
     fn detail_copy_label(&self, event: &crate::log::Event) -> String {
         super::log::copied_label(event)
     }
@@ -1443,35 +1471,11 @@ impl View {
             && key.code == KeyCode::Char('t')
             && (self.mouse_focus == Panel::LogList || self.log_list_focused)
         {
-            let following = self.following_log();
-            let full = self
-                .log_selected
-                .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
-            let background_full = self
-                .log_background_return
-                .as_ref()
-                .and_then(|saved| saved.event)
-                .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
-            self.log_sort = match self.log_sort {
+            self.set_log_sort(match self.log_sort {
                 LogSort::Time => LogSort::Duration,
                 LogSort::Duration => LogSort::Time,
-            };
-            self.prepare_log_search();
-            self.log_selected = full.and_then(|full| self.shown_position(full));
-            let background_event = background_full.and_then(|full| self.shown_position(full));
-            if let Some(saved) = &mut self.log_background_return {
-                saved.event = background_event;
-            }
-            self.log_pending_older = 0;
-            self.viewport.borrow_mut().log_unseen = 0;
-            if self.log_sort == LogSort::Duration && self.log_background_return.is_none() {
-                self.show_newest_log();
-            } else if following {
-                self.viewport.borrow_mut().log_scroll = self.log_max_scroll();
-            } else {
-                self.reveal_log_selection();
-            }
-            return None;
+            });
+            return Some(Action::PersistSorting(self.log_sort));
         }
         match navigation.unwrap_or(key.code) {
             KeyCode::Up => self.move_selection(false),

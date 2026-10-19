@@ -278,6 +278,8 @@ pub enum Action {
     },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
+    /// `t`: the log sorting changed; persist it.
+    PersistSorting(LogSort),
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,
     /// `r`: set the session display name.
@@ -310,6 +312,30 @@ pub enum Action {
     /// Click on a drawn path, image placeholder or pull request link: open the
     /// file, directory or URL with macOS `open`.
     OpenPath(PathBuf),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LogSort {
+    #[default]
+    Time,
+    Duration,
+}
+
+impl LogSort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Time => "time",
+            Self::Duration => "duration",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "time" => Some(Self::Time),
+            "duration" => Some(Self::Duration),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
