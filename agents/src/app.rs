@@ -131,6 +131,8 @@ pub struct App {
     terminal: Option<crate::session_terminal::SessionTerminal>,
     /// The task whose terminal opens once that task's previous client has closed.
     terminal_task: Option<SessionKey>,
+    /// The waiting task whose terminal opened on its own, so closing it keeps it closed.
+    waiting_terminal: Option<SessionKey>,
     /// Clients being reaped before the same session can open another terminal.
     closing_terminals: std::collections::HashMap<SessionKey, session_terminal::TerminalClose>,
     log_stamp: Option<LogStamp>,
@@ -194,6 +196,7 @@ impl App {
             launch: None,
             terminal: None,
             terminal_task: None,
+            waiting_terminal: None,
             closing_terminals: std::collections::HashMap::new(),
             log_stamp: None,
             full_log_stamp: None,

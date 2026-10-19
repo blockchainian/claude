@@ -1,6 +1,7 @@
 //! Opens, feeds and closes the session terminal shown in the log detail panel.
 
 use super::{App, Input};
+use crate::model::SessionStatus;
 use crate::providers::{SessionInput, SessionKey, TerminalCommand, TerminalInput};
 use crate::session_terminal::SessionTerminal;
 
@@ -46,6 +47,31 @@ impl App {
                 .view
                 .set_notice(Some(format!("Failed to open the terminal: {error}"))),
         }
+    }
+
+    /// Returns the selected background task once per wait on input the dashboard cannot answer,
+    /// such as a permission prompt, so the user replies in its terminal.
+    fn waiting_terminal(&mut self) -> Option<SessionKey> {
+        let session = self
+            .view
+            .selected_id()
+            .and_then(|id| self.session(id))
+            .filter(|session| {
+                session.status == SessionStatus::NeedsInput
+                    && session.ask.is_none()
+                    && session.is_live_background()
+            });
+        let Some(session) = session else {
+            self.waiting_terminal = None;
+            return None;
+        };
+        if self.waiting_terminal.as_ref() == Some(&session.id)
+            || self.view.terminal_size().is_none()
+        {
+            return None;
+        }
+        self.waiting_terminal = Some(session.id.clone());
+        Some(session.id)
     }
 
     /// Detaches or ends the open terminal and shows the log detail again.
@@ -99,10 +125,13 @@ impl App {
     /// still selected, closes unselected or exited programs, and fits the selected
     /// terminal to the panel.
     pub(super) fn sync_terminal(&mut self) {
+        let waiting = self.waiting_terminal();
         let Some(terminal) = &mut self.terminal else {
             if let Some(id) = self.terminal_task.take()
                 && self.view.selected_id() == Some(&id)
             {
+                self.open_terminal(id);
+            } else if let Some(id) = waiting {
                 self.open_terminal(id);
             }
             return;
@@ -501,6 +530,49 @@ mod tests {
                 .contains("DETACHED")
         );
         assert_reaped(pid);
+    }
+
+    #[test]
+    fn waiting_terminal_opens_once_per_wait_without_questions() {
+        let (_directory, mut app, id) = fixture();
+        draw(&mut app);
+        assert!(app.waiting_terminal().is_none());
+        let session = &mut app.sessions[0];
+        session.status = SessionStatus::NeedsInput;
+        session.process = Some(crate::model::Process {
+            pid: 1,
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        session.background_job = Some(crate::model::BackgroundJob {
+            id: "job".into(),
+            needs: None,
+        });
+        assert_eq!(app.waiting_terminal(), Some(id.clone()));
+        assert!(
+            app.waiting_terminal().is_none(),
+            "a closed terminal stays closed"
+        );
+        app.sessions[0].status = SessionStatus::Working;
+        assert!(app.waiting_terminal().is_none());
+        app.sessions[0].status = SessionStatus::NeedsInput;
+        assert_eq!(app.waiting_terminal(), Some(id.clone()));
+        app.sessions[0].status = SessionStatus::Working;
+        app.waiting_terminal();
+        app.sessions[0].status = SessionStatus::NeedsInput;
+        app.sessions[0].ask = Some(crate::ask::Ask {
+            id: "ask".into(),
+            kind: crate::ask::AskKind::Questions {
+                questions: vec![],
+                blocking: true,
+            },
+            session: id,
+            since: chrono::Utc::now(),
+        });
+        assert!(
+            app.waiting_terminal().is_none(),
+            "questions have their own view"
+        );
     }
 
     #[test]
