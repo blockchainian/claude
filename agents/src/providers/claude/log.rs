@@ -715,6 +715,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         agent_message: None,
         started_at: None,
         hide_output: false,
+        model_settings: None,
         agent_thread_id: None,
         agent_path: None,
         detail_left: if subject.is_some() {
@@ -1030,6 +1031,7 @@ impl Log {
                 agent_message: None,
                 started_at: None,
                 hide_output: false,
+                model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
                 detail_left: format!("Task {}", field("task-id").unwrap_or("")),

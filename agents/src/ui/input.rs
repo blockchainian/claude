@@ -178,6 +178,7 @@ impl View {
                 agent_message: None,
                 started_at: None,
                 hide_output: false,
+                model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
                 detail_left: "background".into(),

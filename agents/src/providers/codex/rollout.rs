@@ -753,6 +753,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         name: raw_name.clone(),
         started_at: None,
         hide_output: false,
+        model_settings: None,
         agent_thread_id: None,
         agent_path: None,
         input,
@@ -867,6 +868,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         name: raw_name.clone(),
         started_at: None,
         hide_output: false,
+        model_settings: None,
         agent_thread_id: None,
         agent_path: None,
         input,
@@ -1786,6 +1788,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     name: message_type.to_owned(),
                     started_at: Some(at),
                     hide_output: true,
+                    model_settings: None,
                     agent_thread_id: None,
                     agent_path: Some(if author == "/root" { recipient } else { author }.to_owned()),
                     input: vec![Section::Markdown {

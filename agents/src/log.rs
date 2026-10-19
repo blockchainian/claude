@@ -122,6 +122,8 @@ pub(crate) trait Reader: Send {
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
+    /// Recorded model settings for an agent creation event.
+    pub model_settings: Option<ModelSettings>,
     pub agent_message: Option<agent::Message>,
     /// Per-message clock for collaboration sections.
     pub started_at: Option<DateTime<Utc>>,
@@ -147,6 +149,13 @@ pub struct ToolCall {
     pub is_error: bool,
     /// How long a completed call in a merged event ran, from its request to its result.
     pub duration: Option<chrono::Duration>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelSettings {
+    pub provider: crate::providers::ProviderId,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// One labelled part of a tool call's input or output, as the open log event draws it.
