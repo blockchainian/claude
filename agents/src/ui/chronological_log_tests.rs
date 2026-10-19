@@ -35,6 +35,49 @@ fn draw(view: &View) {
     );
 }
 
+impl View {
+    pub(crate) fn assert_log_tail(&self) {
+        assert_eq!(self.log_selected, self.matching_log_count().checked_sub(1));
+        assert_eq!(self.log_scroll(), self.log_max_scroll());
+        assert!(self.following_log());
+    }
+}
+
+#[test]
+fn duration_toggle_follows_slowest_before_and_after_history_load() {
+    for following in [false, true] {
+        let (_dir, mut view, mut events) = fixture();
+        let total = events.len();
+        for (index, event) in events.iter_mut().enumerate() {
+            event.kind = crate::log::Kind::Tool;
+            event.completed_time = true;
+            event.ended_at = Some(event.started_at);
+            event.duration = Some(chrono::Duration::seconds((total - index) as i64));
+        }
+        view.set_log(events[16..].to_vec());
+        draw(&view);
+        if !following {
+            view.navigate_log(KeyCode::Home);
+        }
+        view.mouse_focus = Panel::LogList;
+        view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        view.assert_log_tail();
+        assert_eq!(view.visible_log_event(), Some(&events[16]));
+        draw(&view);
+        view.assert_log_tail();
+
+        view.apply_log_update(crate::log::Update {
+            events: events.clone(),
+            prepended: 16,
+            ..Default::default()
+        });
+        view.assert_log_tail();
+        assert_eq!(view.visible_log_event(), Some(&events[0]));
+        draw(&view);
+        view.assert_log_tail();
+    }
+}
+
 #[test]
 fn chronological_rows_follow_appends_at_bottom() {
     let (_dir, mut view, events) = fixture();

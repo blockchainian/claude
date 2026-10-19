@@ -199,7 +199,7 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
 }
 
 #[test]
-fn duration_toggle_keeps_event_and_search_order() {
+fn duration_toggle_selects_slowest_and_keeps_search_order() {
     let (_dir, mut view) = fixture();
     view.mouse_focus = Panel::LogList;
     let mut events: Vec<_> = view.log.iter().cycle().take(4).cloned().collect();
@@ -216,14 +216,14 @@ fn duration_toggle_keeps_event_and_search_order() {
         .into();
     }
     view.set_log(events);
-    view.select_log_event(Some(0));
-    let selected = view.visible_log_event().cloned();
+    view.select_log_event(Some(1));
+    let slowest = view.log[0].clone();
     key(&mut view, KeyCode::Char('t'));
     assert_eq!(
         view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
         [1, 3, 2, 0]
     );
-    assert_eq!(view.visible_log_event(), selected.as_ref());
+    assert_eq!(view.visible_log_event(), Some(&slowest));
     key(&mut view, KeyCode::Char('/'));
     for c in "target".chars() {
         key(&mut view, KeyCode::Char(c));
@@ -242,7 +242,9 @@ fn duration_toggle_keeps_event_and_search_order() {
         view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
         [0, 1, 2, 3]
     );
-    assert_eq!(view.visible_log_event(), selected.as_ref());
+    assert_eq!(view.visible_log_event(), Some(&slowest));
+    assert_eq!(view.log_selected, Some(0));
+    assert!(!view.following_log());
 }
 
 #[test]
