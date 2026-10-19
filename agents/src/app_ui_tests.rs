@@ -284,6 +284,7 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
 
 #[test]
 fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
+    // Nineteen rows keep all three panels visible in both layouts.
     for width in [120, 180] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -309,13 +310,13 @@ fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         std::fs::write(&path, &payload).unwrap();
         app.refresh();
         select_archive(&mut app);
-        let buffer = draw_size(&mut app, width, 30);
+        let buffer = draw_size(&mut app, width, 19);
         let (x, y) = log_position(&buffer, "event-39");
         // A burst is dispatched before the next frame, just like the real App loop.
         for _ in 0..12 {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         }
-        let buffer = draw_size(&mut app, width, 30);
+        let buffer = draw_size(&mut app, width, 19);
         assert!(detail(&buffer).contains("event-27"));
         assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
         let selected_position = log_position(&buffer, "event-27");
@@ -325,20 +326,20 @@ fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         payload.push_str(&format!("{record}\n"));
         std::fs::write(&path, &payload).unwrap();
         app.refresh();
-        let buffer = draw_size(&mut app, width, 30);
+        let buffer = draw_size(&mut app, width, 19);
         assert!(detail(&buffer).contains("event-27"));
         assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
         assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
         assert_eq!(log_position(&buffer, "event-27"), selected_position);
         for expected in (0..27).rev() {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-            let buffer = draw_size(&mut app, width, 30);
+            let buffer = draw_size(&mut app, width, 19);
             let label = format!("event-{expected:02}");
             assert!(detail(&buffer).contains(&label));
             assert_log_cursor(&buffer, log_position(&buffer, &label).1);
         }
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-        assert!(detail(&draw_size(&mut app, width, 30)).contains("event-00"));
+        assert!(detail(&draw_size(&mut app, width, 19)).contains("event-00"));
     }
 }
 
