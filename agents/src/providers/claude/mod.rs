@@ -479,6 +479,13 @@ impl ClaudeProvider {
             if session.process.is_none() {
                 session.background_job = jobs.get(&session.id.id).cloned();
             }
+            // A background job that ended its turn on a request for the user
+            // still shows idle in the session registry.
+            if session.status == SessionStatus::Ready
+                && session.background_job.as_ref().is_some_and(|job| job.needs.is_some())
+            {
+                session.status = SessionStatus::NeedsInput;
+            }
         }
         if let Err(error) =
             self.background
@@ -1394,6 +1401,34 @@ mod tests {
         );
         assert!(process_exists(std::process::id()).unwrap());
         assert!(registry_path.exists());
+    }
+
+    #[test]
+    fn idle_background_job_with_needs_is_needs_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut entry = registry::tests::fixture(dir.path());
+        entry["kind"] = "bg".into();
+        entry["jobId"] = "recorded".into();
+        entry["status"] = "idle".into();
+        let id = entry["sessionId"].as_str().unwrap().to_owned();
+        transcript(dir.path(), &id, 0);
+        fs::write(
+            dir.path()
+                .join("sessions")
+                .join(format!("{}.json", std::process::id())),
+            serde_json::to_vec(&entry).unwrap(),
+        )
+        .unwrap();
+        let job = dir.path().join("jobs/recorded");
+        fs::create_dir_all(&job).unwrap();
+        let state = serde_json::json!({
+            "state": "blocked", "template": "bg", "sessionId": id,
+            "needs": "Reply 改 to add the headers",
+        });
+        fs::write(job.join("state.json"), state.to_string()).unwrap();
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        assert_eq!(session.status, SessionStatus::NeedsInput);
     }
 
     #[test]
