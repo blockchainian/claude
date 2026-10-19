@@ -28,26 +28,69 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
     text
 }
 
-fn provider_spans(
-    text: String,
+/// Both sides reserve the longer label, a gap, `100%`, and another gap.
+const COMPACT_LABEL_WIDTH: u16 = 6;
+const COMPACT_TEXT_WIDTH: u16 = COMPACT_LABEL_WIDTH + 1 + 4 + 1;
+
+fn compact_provider(
+    name: &str,
     usage: &WeeklyUsage,
-    bar_width: usize,
+    half: u16,
     left: bool,
+    use_colors: bool,
 ) -> Line<'static> {
-    let style = if 100 - usage.left_percent() > 95 {
-        super::style::error_style()
+    let used = 100 - usage.left_percent();
+    let bar_width = half - COMPACT_TEXT_WIDTH;
+    let dots = (f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize;
+    // The activity strip's second dot row, mirrored at half-cell precision.
+    let full = "⠒".repeat(dots / 2);
+    let partial = if dots.is_multiple_of(2) {
+        ""
+    } else if left {
+        "⠂"
     } else {
-        ratatui::style::Style::default()
+        "⠐"
     };
-    let filled =
-        (bar_width as f64 * f64::from(100 - usage.left_percent()) / 100.0).round() as usize;
-    let blocks = Span::styled("█".repeat(filled), style);
-    let empty = Span::raw(" ".repeat(bar_width - filled));
-    let number = Span::styled(text, style);
-    if left {
-        Line::from(vec![blocks, empty, Span::raw(" "), number])
+    let bar = if left {
+        format!("{full}{partial}")
     } else {
-        Line::from(vec![number, Span::raw(" "), empty, blocks])
+        format!("{partial}{full}")
+    };
+    let number = format!("{used}%");
+    let empty = Span::raw(
+        " ".repeat(usize::from(half - COMPACT_LABEL_WIDTH - 2) - dots.div_ceil(2) - number.len()),
+    );
+    let number = Span::styled(
+        number,
+        if used > 95 {
+            super::style::error_style()
+        } else {
+            ratatui::style::Style::default()
+        },
+    );
+    let bar = Span::styled(bar, super::style::timeline_style(use_colors));
+    let label = Span::raw(format!(
+        "{name:>width$}",
+        width = usize::from(COMPACT_LABEL_WIDTH)
+    ));
+    if left {
+        Line::from(vec![
+            label,
+            Span::raw(" "),
+            bar,
+            Span::raw(" "),
+            number,
+            empty,
+        ])
+    } else {
+        Line::from(vec![
+            empty,
+            number,
+            Span::raw(" "),
+            bar,
+            Span::raw(" "),
+            label,
+        ])
     }
 }
 
@@ -57,6 +100,7 @@ pub(super) fn render(
     tabs: &[(usize, Rect)],
     usage: [Option<&WeeklyUsage>; 2],
     view: UsageView,
+    use_colors: bool,
     buf: &mut Buffer,
 ) -> Option<Rect> {
     if area.is_empty() || usage.iter().all(Option::is_none) {
@@ -73,6 +117,32 @@ pub(super) fn render(
         }
     }
     let names = ["Claude", "Codex"];
+    if view == UsageView::Compact {
+        let budget = if area.width >= super::render::WIDE_LAYOUT_COLUMNS {
+            area.width / 2
+        } else {
+            (usize::from(area.width) * 3 / 4) as u16
+        };
+        // Keep a blank center cell and shrink both sides together against tabs.
+        let half = ((budget.saturating_sub(1)) / 2)
+            .min(available[0])
+            .min(available[1]);
+        if half < COMPACT_TEXT_WIDTH {
+            return None;
+        }
+        for i in 0..2 {
+            if let Some(usage) = usage[i] {
+                let side = Rect::new(
+                    if i == 0 { center - half } else { center + 1 },
+                    area.y,
+                    half,
+                    1,
+                );
+                compact_provider(names[i], usage, half, i == 0, use_colors).render(side, buf);
+            }
+        }
+        return Some(Rect::new(center - half, area.y, half * 2 + 1, 1));
+    }
     let texts = std::array::from_fn::<_, 2, _>(|i| {
         usage[i].map(|usage| provider_text(names[i], usage, view))
     });
@@ -80,35 +150,15 @@ pub(super) fn render(
         text.as_ref()
             .map_or(0, |text| Line::from(text.as_str()).width() as u16)
     });
-    let half = if view == UsageView::Compact {
-        let budget = if area.width >= super::render::WIDE_LAYOUT_COLUMNS {
-            usize::from(area.width) / 2
-        } else {
-            usize::from(area.width) * 3 / 4
-        };
-        // Reserve the center cell before dividing the budget between providers.
-        let half = (budget.saturating_sub(1) / 2) as u16;
-        let half = available
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| usage[*i].is_some())
-            .fold(half, |half, (_, space)| half.min(*space));
-        if half < widths.into_iter().max().unwrap() + 1 {
-            return None;
-        }
-        Some(half)
-    } else {
-        None
-    };
-    if (0..2).any(|i| usage[i].is_some() && half.unwrap_or(widths[i] + 1) > available[i]) {
+    if (0..2).any(|i| usage[i].is_some() && widths[i] + 1 > available[i]) {
         return None;
     }
     let mut target = Rect::new(center, area.y, 1, 1);
     for i in 0..2 {
-        let Some(usage) = usage[i] else {
+        if usage[i].is_none() {
             continue;
-        };
-        let width = half.unwrap_or(widths[i] + 1);
+        }
+        let width = widths[i] + 1;
         let side = Rect::new(
             if i == 0 { center - width } else { center + 1 },
             area.y,
@@ -121,18 +171,7 @@ pub(super) fn render(
             Rect::new(target.x, area.y, side.right() - target.x, 1)
         };
         let text = texts[i].as_ref().unwrap().clone();
-        let line = if let Some(half) = half {
-            let number_width = widths.into_iter().max().unwrap();
-            let bar = half.saturating_sub(number_width + 2);
-            let text = if i == 0 {
-                format!("{text:>width$}", width = usize::from(number_width))
-            } else {
-                format!("{text:<width$}", width = usize::from(number_width))
-            };
-            provider_spans(text, usage, usize::from(bar), i == 0)
-        } else {
-            Line::from(text)
-        };
+        let line = Line::from(text);
         let line = if i == 0 {
             line.right_aligned()
         } else {

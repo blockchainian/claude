@@ -27,7 +27,7 @@ fn draw(app: &mut App, width: u16) -> String {
         .content
         .chunks(usize::from(width))
         .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
-        .find(|row| row.contains(" · "))
+        .find(|row| row.contains("Active ") && row.contains("Inactive "))
         .expect("weekly row on first render")
 }
 
@@ -47,10 +47,11 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
     .unwrap();
     let mut app = app(directory.path());
     let first = draw(&mut app, 200);
-    assert!(first.contains("21% · 16%"), "{first}");
+    assert!(first.contains("21%") && first.contains("16%"), "{first}");
+    assert!(!first.contains('·'));
     // Loading cached values does not schedule or throttle the first account requests.
     assert_eq!(app.hub.weekly_usage_jobs(Instant::now()).len(), 2);
-    let start = first.find("█").unwrap() as u16;
+    let start = first[..first.find('⠒').unwrap()].width() as u16;
     let y = 0;
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
@@ -113,7 +114,8 @@ fn weekly_usage_refresh_updates_display_and_only_its_provider_state() {
     let codex = crate::providers::WeeklyUsage::from_used_percent(16.0, None).unwrap();
     app.complete_weekly_usage(ProviderId::Claude, Ok(Some(claude.clone())));
     app.complete_weekly_usage(ProviderId::Codex, Ok(Some(codex.clone())));
-    assert!(draw(&mut app, 200).contains("21% · 16%"));
+    let header = draw(&mut app, 200);
+    assert!(header.contains("21%") && header.contains("16%"), "{header}");
     let saved = Preferences::load(directory.path());
     assert_eq!(saved.usage_view, crate::state::UsageView::Detailed);
     assert_eq!(saved.usage.get(&ProviderId::Claude), Some(&claude));

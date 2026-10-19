@@ -360,6 +360,7 @@ impl View {
                 self.weekly_usage.get(&ProviderId::Codex),
             ],
             self.usage_view,
+            self.use_colors,
             buf,
         );
         if let Some(target) = weekly_target {

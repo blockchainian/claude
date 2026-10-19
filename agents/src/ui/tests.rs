@@ -10078,7 +10078,7 @@ fn weekly_header(view: &View, width: u16) -> String {
 
 #[test]
 fn task_header_weekly_usage_mirrored_modes_and_widths() {
-    for width in [160, 150, 149, 80, 39, 40] {
+    for width in [200, 160, 150, 149, 80, 39, 40] {
         for mode in [
             crate::state::UsageView::Compact,
             crate::state::UsageView::Detailed,
@@ -10086,19 +10086,18 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
             let mut view = weekly_usage_view();
             view.usage_view = mode;
             let text = weekly_header(&view, width);
-            let cells = text.chars().collect::<Vec<_>>();
-            let center = usize::from(width / 2);
-            assert!(!text.contains("Weekly"), "{text}");
-            assert_eq!(cells[center], '·', "{width}: {text}");
-            assert_eq!(cells[center - 1], ' ');
-            assert_eq!(cells[center + 1], ' ');
             let viewport = view.viewport.borrow();
             let target = viewport
                 .field_targets
                 .iter()
                 .find(|(_, f)| *f == Field::WeeklyUsage)
-                .unwrap()
-                .0;
+                .map(|(r, _)| *r);
+            if mode == crate::state::UsageView::Compact && width <= 40 {
+                assert!(target.is_none(), "{width}: {text}");
+                assert!(!text.contains('%'));
+                continue;
+            }
+            let target = target.unwrap();
             assert!(
                 viewport
                     .tabs
@@ -10106,34 +10105,28 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
                     .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
             );
             if mode == crate::state::UsageView::Compact {
-                assert!(!text.contains("Claude") && !text.contains("Codex"));
-                assert!(text.contains("21% · 5%"), "{text}");
+                assert!(!text.contains('·') && !text.contains('█'), "{text}");
+                assert!(
+                    text.contains("Claude ") && text.contains(" Codex"),
+                    "{text}"
+                );
+                assert!(text.contains("21%") && text.contains("5%"), "{text}");
                 let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
                     width / 2
                 } else {
                     width * 3 / 4
                 };
                 assert!(target.width <= budget);
+                assert_eq!(target.x + target.width / 2, width / 2);
                 if width >= 149 {
                     assert_eq!(target.width, (budget - 1) / 2 * 2 + 1);
                 }
                 if width == 80 {
                     assert!(target.width > width / 2);
                 }
-                let half = usize::from((target.width - 1) / 2);
-                let bar = half - 1 - 3 - 1;
-                let left = cells[usize::from(target.x)..center]
-                    .iter()
-                    .filter(|c| **c == '█')
-                    .count();
-                let right = cells[center + 1..usize::from(target.right())]
-                    .iter()
-                    .filter(|c| **c == '█')
-                    .count();
-                assert_eq!(left, (bar as f64 * 0.21).round() as usize);
-                assert_eq!(right, (bar as f64 * 0.05).round() as usize);
             } else {
                 assert!(text.contains("Claude · Codex"), "{text}");
+                assert_eq!(text.chars().nth(usize::from(width / 2)), Some('·'));
             }
         }
     }
@@ -10149,54 +10142,66 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
 
 #[test]
 fn task_header_weekly_usage_symmetric_bars_and_styles() {
-    for width in [160, 150, 149, 80, 39, 40] {
+    for width in [200, 160, 150, 149, 80] {
         for used in [0.0, 5.0, 21.0, 50.0, 95.0, 96.0, 100.0] {
-            let mut view = weekly_usage_view();
-            for usage in view.weekly_usage.values_mut() {
-                usage.used_percent = used;
-            }
-            let area = Rect::new(0, 0, width, 40);
-            let mut buffer = Buffer::empty(area);
-            view.render_at(area, &mut buffer, Utc::now());
-            let y = view.viewport.borrow().tab_bar.y;
-            let center = width / 2;
-            let target = view
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .find(|(_, f)| *f == Field::WeeklyUsage)
-                .unwrap()
-                .0;
-            let half = (target.width - 1) / 2;
-            let number = format!("{used:.0}%");
-            let bar = half - 2 - number.len() as u16;
-            let filled = (f64::from(bar) * used / 100.0).round() as u16;
-            let expected = buffer[(0, y)].style().patch(if used > 95.0 {
-                style::error_style()
-            } else {
-                ratatui::style::Style::default()
-            });
-            for i in 0..half {
-                let left = &buffer[(center - 1 - i, y)];
-                let right = &buffer[(center + 1 + i, y)];
-                assert_eq!(
-                    left.symbol() == "█",
-                    right.symbol() == "█",
-                    "{width}, {used}, {i}"
-                );
-                if i >= half - filled {
-                    assert_eq!(left.symbol(), "█");
-                    assert_eq!(left.style(), expected);
-                    assert_eq!(right.style(), expected);
+            for colors in [false, true] {
+                let mut view = weekly_usage_view();
+                view.use_colors = colors;
+                for usage in view.weekly_usage.values_mut() {
+                    usage.used_percent = used;
                 }
-            }
-            for i in 0..number.len() as u16 {
-                assert_eq!(
-                    buffer[(center - 1 - number.len() as u16 + i, y)].style(),
-                    expected
-                );
-                assert_eq!(buffer[(center + 2 + i, y)].style(), expected);
+                let area = Rect::new(0, 0, width, 40);
+                let mut buffer = Buffer::empty(area);
+                view.render_at(area, &mut buffer, Utc::now());
+                let viewport = view.viewport.borrow();
+                let y = viewport.tab_bar.y;
+                let target = viewport
+                    .field_targets
+                    .iter()
+                    .find(|(_, f)| *f == Field::WeeklyUsage)
+                    .unwrap()
+                    .0;
+                let half = (target.width - 1) / 2;
+                // Both bars reserve the longer provider label and the maximum percentage.
+                let bar = half - 6 - 1 - 4 - 1;
+                let dots = (f64::from(bar * 2) * used / 100.0).round() as u16;
+                for dot in 0..bar * 2 {
+                    let left_x = target.x + 7 + dot / 2;
+                    let right_x = target.right() - 8 - dot / 2;
+                    let left_bit = if dot % 2 == 0 { 0x02 } else { 0x10 };
+                    let right_bit = if dot % 2 == 0 { 0x10 } else { 0x02 };
+                    for (x, bit) in [(left_x, left_bit), (right_x, right_bit)] {
+                        let cell = &buffer[(x, y)];
+                        let bits = cell.symbol().chars().next().unwrap() as u32;
+                        let on = (0x2800..=0x28ff).contains(&bits) && (bits - 0x2800) & bit != 0;
+                        assert_eq!(on, dot < dots, "{width}, {used}, {dot}, {x}");
+                        if on {
+                            assert_eq!(
+                                cell.style(),
+                                buffer[(0, y)].style().patch(style::timeline_style(colors))
+                            );
+                        }
+                    }
+                }
+                let filled = dots.div_ceil(2);
+                let number = format!("{used:.0}%");
+                let left_number = target.x + 7 + filled + 1;
+                let right_number = target.right() - 7 - filled - 1 - number.len() as u16;
+                for start in [left_number, right_number] {
+                    for (i, c) in number.chars().enumerate() {
+                        let cell = &buffer[(start + i as u16, y)];
+                        assert_eq!(cell.symbol(), c.to_string());
+                        let expected = if used > 95.0 {
+                            style::error_style()
+                        } else {
+                            ratatui::style::Style::default()
+                        };
+                        assert_eq!(cell.style(), buffer[(0, y)].style().patch(expected));
+                    }
+                }
+                for x in left_number + number.len() as u16..right_number {
+                    assert_eq!(buffer[(x, y)].symbol(), " ", "center gap {width}, {used}");
+                }
             }
         }
     }
@@ -10204,7 +10209,7 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
 
 #[test]
 fn task_header_weekly_usage_single_provider() {
-    for width in [160, 80] {
+    for width in [200, 80] {
         for mode in [
             crate::state::UsageView::Compact,
             crate::state::UsageView::Detailed,
@@ -10214,27 +10219,34 @@ fn task_header_weekly_usage_single_provider() {
                 view.usage_view = mode;
                 view.weekly_usage.remove(&missing);
                 let text = weekly_header(&view, width);
-                assert!(!text.contains('·') && !text.contains("Weekly"), "{text}");
+                assert!(!text.contains('·'), "{text}");
                 let cells = text.chars().collect::<Vec<_>>();
                 let center = usize::from(width / 2);
-                if missing == ProviderId::Codex {
-                    assert_eq!(
-                        cells[center - 2],
-                        if mode == crate::state::UsageView::Compact {
-                            '%'
-                        } else {
-                            'e'
-                        }
-                    );
+                let viewport = view.viewport.borrow();
+                let target = viewport
+                    .field_targets
+                    .iter()
+                    .find(|(_, f)| *f == Field::WeeklyUsage)
+                    .unwrap()
+                    .0;
+                let (present, absent) = if missing == ProviderId::Codex {
+                    ("Claude", "Codex")
                 } else {
-                    assert_eq!(
-                        cells[center + 2],
-                        if mode == crate::state::UsageView::Compact {
-                            '5'
-                        } else {
-                            'C'
-                        }
-                    );
+                    ("Codex", "Claude")
+                };
+                assert!(text.contains(present) && !text.contains(absent), "{text}");
+                if mode == crate::state::UsageView::Compact {
+                    assert_eq!(target.x + target.width / 2, width / 2);
+                    let empty = if missing == ProviderId::Codex {
+                        center..usize::from(target.right())
+                    } else {
+                        usize::from(target.x)..center + 1
+                    };
+                    assert!(cells[empty].iter().all(|c| *c == ' '));
+                } else if missing == ProviderId::Codex {
+                    assert_eq!(cells[center - 2], 'e');
+                } else {
+                    assert_eq!(cells[center + 2], 'C');
                 }
             }
         }
@@ -10252,7 +10264,8 @@ fn task_header_weekly_usage_details_and_compact_reset() {
     }
     for width in [160, 80] {
         let text = weekly_header(&view, width);
-        assert!(text.contains("97% · 97%"), "{text}");
+        assert_eq!(text.matches("97%").count(), 2, "{text}");
+        assert!(!text.contains('·'));
         assert!(!text.contains("credit") && !text.contains("until") && !text.contains("resets"));
         view.usage_view = crate::state::UsageView::Detailed;
         let text = weekly_header(&view, width);
@@ -10403,7 +10416,7 @@ fn task_header_weekly_usage_live_accounts() {
             .content
             .chunks(160)
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
-            .find(|line| line.contains("% · "))
+            .find(|line| line.contains('%') && line.contains("Active "))
             .expect("rendered live usage line");
         assert!(!text.contains("Model: "));
         println!("{provider}: {}", text.trim());

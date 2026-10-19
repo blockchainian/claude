@@ -22,7 +22,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("21% · 16%") || line.contains("Weekly"))
+            .is_some_and(|line| line.contains("21%") && line.contains("16%"))
     });
     let compact = capture.lines().next().unwrap().to_owned();
     assert!(
@@ -82,10 +82,9 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     let last = line[..line.rfind(" credits").unwrap()].width() + " credits".width() - 1;
     tmux.mouse(0, last, 0, true);
     tmux.wait_for(|capture| {
-        capture
-            .lines()
-            .next()
-            .is_some_and(|line| line.contains("21% · 16%") && !line.contains("resets"))
+        capture.lines().next().is_some_and(|line| {
+            line.contains("21%") && line.contains("16%") && !line.contains("resets")
+        })
     });
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(state_path).unwrap()).unwrap();
@@ -96,7 +95,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.width() <= 80 && line.contains("21% · 16%"))
+            .is_some_and(|line| line.width() <= 80 && line.contains("21%") && line.contains("16%"))
     });
     let compact = capture.lines().next().unwrap().to_owned();
     assert_compact(&compact, 80);
@@ -134,14 +133,14 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.contains("21% · 16%"))
+            .is_some_and(|line| line.contains("21%") && line.contains("16%"))
     });
     tmux.run(&["resize-window", "-t", "probe", "-x", "80", "-y", "50"]);
     tmux.wait_for(|capture| {
         capture
             .lines()
             .next()
-            .is_some_and(|line| line.width() <= 80 && line.contains("21% · 16%"))
+            .is_some_and(|line| line.width() <= 80 && line.contains("21%") && line.contains("16%"))
     });
     let saved: serde_json::Value = serde_json::from_slice(
         &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
@@ -165,21 +164,25 @@ fn assert_centered(line: &str, width: usize) {
 }
 
 fn assert_compact(line: &str, width: usize) {
-    assert_centered(line, width);
-    assert!(line.contains("21% · 16%"), "{line}");
+    let cells = line.chars().collect::<Vec<_>>();
+    assert_eq!(cells[width / 2], ' ');
     assert!(
-        !line.contains("Claude") && !line.contains("Codex"),
+        line.contains("Claude ") && line.contains(" Codex"),
         "{line}"
     );
+    assert!(line.contains("21%") && line.contains("16%"), "{line}");
+    assert!(!line.contains('·') && !line.contains('█'), "{line}");
     assert!(
         !line.contains("reset") && !line.contains("credit"),
         "{line}"
     );
-    let dot = line.find('·').unwrap();
-    let left = &line[..dot];
-    let right = &line[dot + '·'.len_utf8()..];
-    assert!(left.contains('█') && right.contains('█'), "{line}");
-    assert!(!line.contains('▌') && !line.contains('▐'), "{line}");
+    let start = line[..line.find("Claude").unwrap()].width();
+    let end = line[..line.find("Codex").unwrap()].width() + "Codex".width();
+    assert_eq!((start + end - 1) / 2, width / 2, "{line}");
+    assert!(
+        cells[..width / 2].contains(&'⠒') && cells[width / 2 + 1..].contains(&'⠒'),
+        "{line}"
+    );
 }
 
 fn assert_detailed(line: &str, width: usize) {
