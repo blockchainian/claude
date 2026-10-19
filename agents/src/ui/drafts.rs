@@ -343,7 +343,7 @@ impl View {
     pub(super) fn cancel_confirmation(&mut self) {
         self.confirm_dialog = None;
         if self.selected_draft.is_some() {
-            self.mouse_focus = Panel::Prompt;
+            self.active_panel = Panel::Prompt;
             self.focus_input();
         }
     }
@@ -359,7 +359,9 @@ impl View {
                     title: name.clone(),
                     confirm: false,
                 });
-                self.input_box.focused = false;
+                if self.active_panel == Panel::Prompt {
+                    self.active_panel = Panel::TaskList;
+                }
             } else {
                 self.discard_selected_draft();
             }
@@ -400,7 +402,7 @@ impl View {
         {
             self.discard_selected_draft();
         } else if self.selected_draft.is_some() {
-            self.mouse_focus = Panel::Prompt;
+            self.active_panel = Panel::Prompt;
             self.focus_input();
         } else {
             self.reconcile_selection();
@@ -420,7 +422,7 @@ impl View {
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             self.input_box = std::mem::take(&mut draft.input);
         }
-        self.mouse_focus = Panel::Prompt;
+        self.active_panel = Panel::Prompt;
         self.focus_input();
     }
 
@@ -749,7 +751,7 @@ mod recovery_tests {
             view.selected_draft().unwrap().setup.model.as_deref(),
             Some("opus")
         );
-        assert!(view.input_box.focused);
+        assert!(view.prompt_focused());
         assert!(view.selector.is_none());
         view.select(
             view.rows
@@ -799,8 +801,10 @@ mod recovery_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut view = View::default();
         named(&mut view, dir.path(), "Delete me");
-        view.input_box.focused = false;
-        view.mouse_focus = Panel::TaskList;
+        if view.active_panel == Panel::Prompt {
+            view.active_panel = Panel::TaskList;
+        }
+        view.active_panel = Panel::TaskList;
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
             None
@@ -917,7 +921,7 @@ mod confirmation_attention_tests {
             None
         );
         assert!(view.confirm_dialog.is_none());
-        assert!(view.input_box.focused);
+        assert!(view.prompt_focused());
     }
 
     #[test]

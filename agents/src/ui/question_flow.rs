@@ -320,7 +320,7 @@ mod tests {
             .position(|line| line.contains("Type something."))
             .unwrap() as u16;
         let x = view.viewport.borrow().prompt.x + 1 + 5;
-        view.mouse_focus = Panel::LogList;
+        view.active_panel = Panel::LogList;
         let event = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Middle),
             column: x + 20,
@@ -371,7 +371,9 @@ mod tests {
         assert!(view.active_question().is_some());
         view.rename_target = view.selected_id().cloned();
         view.rename.set_text("你好");
-        view.input_box.focused = false;
+        if view.active_panel == Panel::Prompt {
+            view.active_panel = Panel::TaskList;
+        }
         let area = Rect::new(0, 0, 160, 40);
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer);

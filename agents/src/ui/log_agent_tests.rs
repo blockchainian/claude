@@ -47,8 +47,7 @@ fn log_enter_selects_spawned_child_by_thread_id() {
         .unwrap()
         .clone();
     view.select_fixture_event(Some(event));
-    view.mouse_focus = Panel::LogList;
-    view.log_list_focused = true;
+    view.active_panel = Panel::LogList;
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         None
@@ -70,8 +69,7 @@ fn log_enter_selects_incoming_child_by_path() {
         .unwrap()
         .clone();
     view.select_fixture_event(Some(event));
-    view.mouse_focus = Panel::LogList;
-    view.log_list_focused = true;
+    view.active_panel = Panel::LogList;
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         None
@@ -94,8 +92,8 @@ fn log_agent_jump_requires_list_focus() {
             .unwrap()
             .clone();
         view.select_fixture_event(Some(event));
-        view.mouse_focus = focus;
-        view.log_list_focused = focus == Panel::LogList;
+        view.active_panel = focus;
+
         view.jump_log_agent();
         assert_eq!(view.selected_row().unwrap().id.id, "parent");
     }

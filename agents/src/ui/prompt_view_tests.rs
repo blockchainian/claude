@@ -10,8 +10,8 @@ fn task_double_click_keeps_task_focus_and_enter_opens() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y);
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(!view.input_box.focused);
-    assert!(view.mouse_focus == Panel::TaskList);
+    assert!(!view.prompt_focused());
+    assert!(view.active_panel == Panel::TaskList);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
         Some(Action::OpenTerminal(id))
@@ -32,7 +32,7 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
             input.y,
         ),
     );
-    assert!(view.input_box.focused, "{rendered}");
+    assert!(view.prompt_focused(), "{rendered}");
     let pasted = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.handle_paste(pasted);
     assert_eq!(view.input_box.editor.text(), pasted);
@@ -58,12 +58,12 @@ fn right_click_leaves_input_on_press_and_shows_newest_on_release() {
     view.select_fixture_event(Some(view.log[0].clone()));
     let expected = view.log_selected;
     log_screen(&view, 120, 40, now);
-    view.input_box.focused = true;
+    view.active_panel = Panel::Prompt;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
-    assert!(!view.input_box.focused);
+    assert!(!view.prompt_focused());
     assert_eq!(view.log_selected, expected);
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
-    assert!(!view.input_box.focused);
+    assert!(!view.prompt_focused());
     assert_eq!(view.visible_log_event(), view.log.last());
 }
 
@@ -96,8 +96,8 @@ fn whole_log_row_double_click_keeps_log_focus_and_detail() {
         assert_eq!(view.visible_log_event(), Some(&expected));
         assert_eq!(click_mouse(&mut view, click), None);
         assert_eq!(click_mouse(&mut view, click), None);
-        assert!(!view.input_box.focused);
-        assert!(view.mouse_focus == Panel::LogList);
+        assert!(!view.prompt_focused());
+        assert!(view.active_panel == Panel::LogList);
         assert_eq!(view.visible_log_event(), Some(&expected));
         log_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();
@@ -115,7 +115,8 @@ fn successful_input_keeps_prompt_while_another_task_is_selected() {
     let prompt = |view: &View| {
         let area = Rect::new(0, 0, 80, 1);
         let mut buffer = Buffer::empty(area);
-        view.input_box.render(area, &mut buffer, "Task", None);
+        view.input_box
+            .render(area, &mut buffer, "Task", None, view.prompt_focused());
         buffer
     };
     let mut view = fixture();
@@ -214,7 +215,7 @@ fn pending_prompt_clears_next_frame_and_blocks_repeated_enter() {
     let mut view = fixture();
     let id = view.selected_id().unwrap().clone();
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
-    view.input_box.focused = true;
+    view.active_panel = Panel::Prompt;
     view.input_box.editor.set_text(text);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
@@ -243,14 +244,16 @@ fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
     ] {
         let mut view = fixture();
         let id = view.selected_id().unwrap().clone();
-        view.input_box.focused = true;
+        view.active_panel = Panel::Prompt;
         view.handle_paste(include_str!("../../tests/fixtures/claude-peer-message.txt"));
         let area = Rect::new(0, 0, 120, 5);
         let mut before = Buffer::empty(area);
-        view.input_box.render(area, &mut before, "Task", None);
+        view.input_box
+            .render(area, &mut before, "Task", None, view.prompt_focused());
         view.input_sending(&id, &input);
         let mut during = Buffer::empty(area);
-        view.input_box.render(area, &mut during, "Task", None);
+        view.input_box
+            .render(area, &mut during, "Task", None, view.prompt_focused());
         assert_eq!(during, before);
         assert_eq!(key(&mut view, KeyCode::Enter), None);
         view.input_complete(&id, &input, Ok(()));
@@ -265,7 +268,7 @@ fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
 fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
     let (mut view, now) = log_fixture();
     view.rows[view.selected].process = None;
-    view.input_box.focused = true;
+    view.active_panel = Panel::Prompt;
     let paragraph = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.handle_paste(&paragraph.lines().take(7).collect::<Vec<_>>().join("\n"));
     let area = Rect::new(0, 0, 120, 40);
@@ -286,4 +289,22 @@ fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
     assert_eq!(wide.prompt.height, (40 - 3 - 2) * 2 / 3);
     assert!(wide.top.height >= 4, "{:?}", wide.top);
     assert!(wide.log_detail.height >= 4, "{:?}", wide.log_detail);
+}
+
+#[test]
+fn prompt_paste_and_cursor_require_the_active_prompt_panel() {
+    let (mut view, now) = log_fixture();
+    view.rows[view.selected].process = None;
+    let area = Rect::new(0, 0, 120, 40);
+    log_screen(&view, 120, 40, now);
+    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.handle_paste(text);
+    assert!(view.input_box.editor.is_empty());
+    assert_eq!(view.cursor_pos(area), None);
+    view.focus(Panel::Prompt);
+    view.handle_paste(text);
+    assert_eq!(view.input_box.editor.text(), text);
+    assert!(view.cursor_pos(area).is_some());
+    view.focus(Panel::TaskList);
+    assert_eq!(view.cursor_pos(area), None);
 }

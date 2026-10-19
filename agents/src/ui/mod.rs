@@ -216,7 +216,6 @@ struct DetailsScroll {
 
 struct BackgroundReturn {
     event: Option<usize>,
-    detail_focused: bool,
     scroll: usize,
     search: log_search::LogSearch,
 }
@@ -259,7 +258,8 @@ enum Panel {
 pub(crate) use crate::model::LogSort;
 
 pub struct View {
-    mouse_focus: Panel,
+    /// The single keyboard destination; selection and scroll positions do not own focus.
+    active_panel: Panel,
     window_prefix: Option<KeyEvent>,
     /// The session whose program runs in the log detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
@@ -283,8 +283,6 @@ pub struct View {
     /// The selected event, shared by the list cursor and detail panel.
     log_selected: Option<usize>,
     log_background_event: Option<crate::log::Event>,
-    log_detail_focused: bool,
-    log_list_focused: bool,
     /// Older wheel steps waiting for App to extend the loaded transcript window.
     log_pending_older: usize,
     pub(crate) log_start_requested: bool,
@@ -402,7 +400,7 @@ fn session_order(session: &Session) -> (std::cmp::Reverse<DateTime<Utc>>, &Sessi
 impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
-            mouse_focus: Panel::TaskList,
+            active_panel: Panel::TaskList,
             window_prefix: None,
             terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
@@ -410,8 +408,6 @@ impl View {
             log_session: None,
             log_selected: None,
             log_background_event: None,
-            log_detail_focused: false,
-            log_list_focused: false,
             log_pending_older: 0,
             log_start_requested: false,
             log_background_return: None,
@@ -493,7 +489,7 @@ impl View {
     pub(crate) fn pasting_prompt(&self) -> bool {
         self.confirm_dialog.is_none()
             && !self.help
-            && self.input_box.focused
+            && self.prompt_focused()
             && !self.input_box.searching_history()
             && self.input_disabled().is_none()
     }
@@ -528,16 +524,17 @@ impl View {
         if self.confirm_dialog.is_some() || self.help {
             return;
         }
+        let prompt_focused = self.prompt_focused();
         if let Some(editor) = self
             .selector
             .as_mut()
-            .filter(|_| !self.input_box.focused)
+            .filter(|_| !prompt_focused)
             .and_then(Selector::active_editor)
         {
             editor.insert(text);
             return;
         }
-        if self.selector.is_some() && !self.input_box.focused {
+        if self.selector.is_some() && !self.prompt_focused() {
             return;
         }
         if !self.searching
@@ -550,7 +547,7 @@ impl View {
         }
         if self.title_editor().is_some() {
             self.rename.insert(text);
-        } else if self.input_box.focused {
+        } else if self.prompt_focused() {
             self.input_box.paste(text);
         } else if self.log_detail_search.editing {
             self.log_detail_search.query.insert(text);
@@ -589,11 +586,17 @@ impl View {
         }
     }
 
+    fn prompt_focused(&self) -> bool {
+        self.active_panel == Panel::Prompt
+            && self.title_editor().is_none()
+            && self.confirm_dialog.is_none()
+    }
+
     pub(crate) fn focus_input(&mut self) {
         if self.input_disabled().is_none() {
             self.dismiss_selector();
             self.name_target = None;
-            self.input_box.focused = true;
+            self.active_panel = Panel::Prompt;
         }
     }
 
@@ -1129,7 +1132,7 @@ impl View {
             if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
                 self.input_box = std::mem::take(&mut draft.input);
             }
-            self.mouse_focus = Panel::Prompt;
+            self.active_panel = Panel::Prompt;
             self.focus_input();
         }
     }
@@ -1145,7 +1148,9 @@ impl View {
         self.selector = None;
         self.text_selection.borrow_mut().take();
         let viewport = self.viewport.get_mut();
-        self.input_box.focused = false;
+        if self.active_panel == Panel::Prompt {
+            self.active_panel = Panel::TaskList;
+        }
         let left = TaskPanels {
             input_box: std::mem::take(&mut self.input_box),
             details_scroll: std::mem::take(&mut viewport.details_scroll),
@@ -1170,8 +1175,6 @@ impl View {
         self.log_search = shown.log_search;
         self.log_selected = None;
         self.log_background_event = None;
-        self.log_detail_focused = false;
-        self.log_list_focused = false;
         self.log_pending_older = 0;
         self.log_start_requested = false;
         self.log_background_return = None;

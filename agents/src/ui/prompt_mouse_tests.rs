@@ -2,7 +2,7 @@ use super::*;
 
 fn prompt(view: &mut View, text: &str, width: u16) -> (Rect, u16) {
     view.rows[view.selected].process = None;
-    view.input_box.focused = true;
+    view.active_panel = Panel::Prompt;
     view.input_box.editor.set_text(text);
     screen(view, width, 40);
     let area = view.viewport.borrow().prompt.inner(Margin::new(1, 0));
@@ -25,7 +25,11 @@ fn prompt_mouse_click_places_caret_on_wide_multiline_and_wrapped_cells() {
     assert_eq!(view.input_box.editor.cursor(), "写".len());
     click_mouse(
         &mut view,
-        mouse(MouseEventKind::Down(MouseButton::Left), area.x + 3, area.y + 1),
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 3,
+            area.y + 1,
+        ),
     );
     assert_eq!(view.input_box.editor.cursor(), "写工具详情计划\nNo ".len());
     click_mouse(
@@ -41,11 +45,15 @@ fn prompt_mouse_click_places_caret_on_wide_multiline_and_wrapped_cells() {
     screen(&view, 60, 40);
     click_mouse(
         &mut view,
-        mouse(MouseEventKind::Down(MouseButton::Left), area.x + 2, area.y + 1),
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 2,
+            area.y + 1,
+        ),
     );
     let columns = usize::from(area.right() - x);
     assert_eq!(view.input_box.editor.cursor(), columns + 2);
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
 }
 
 #[test]

@@ -478,7 +478,7 @@ fn detail_slash_search_jumps_and_highlights_without_closing() {
     log_screen(&view, 100, 25, now);
     assert_eq!(
         {
-            view.mouse_focus = Panel::LogDetail;
+            view.active_panel = Panel::LogDetail;
             view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         },
         None

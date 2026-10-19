@@ -43,18 +43,16 @@ fn window_navigation_all_directions_in_both_layouts() {
                         );
                     }
                     log_screen(&view, width, 45, now);
-                    view.mouse_focus = source;
-                    view.input_box.focused = source == Prompt;
-                    view.log_list_focused = source == LogList;
-                    view.log_detail_focused = source == LogDetail;
+                    view.active_panel = source;
+
                     assert_eq!(chord(&mut view, direction), None);
                     assert!(
-                        view.mouse_focus == target,
+                        view.active_panel == target,
                         "width={width} terminal={terminal} key={direction}"
                     );
-                    assert_eq!(view.input_box.focused, target == Prompt);
-                    assert_eq!(view.log_list_focused, target == LogList);
-                    assert_eq!(view.log_detail_focused, target == LogDetail);
+                    assert_eq!(view.prompt_focused(), target == Prompt);
+                    assert_eq!((view.active_panel == Panel::LogList), target == LogList);
+                    assert_eq!((view.active_panel == Panel::LogDetail), target == LogDetail);
                 }
             }
         }
@@ -71,7 +69,7 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
                 key(&mut view, KeyCode::Char(c));
             }
         } else {
-            view.input_box.focused = true;
+            view.active_panel = Panel::Prompt;
             view.input_box.editor.insert("one two");
         }
         assert_eq!(chord(&mut view, 'x'), None);
@@ -102,7 +100,7 @@ fn window_navigation_terminal_ctrl_w_l_is_not_forwarded() {
         v.list = Rect::new(42, 0, 40, 10);
     }
     assert_eq!(chord(&mut view, 'l'), None);
-    assert!(view.mouse_focus == Panel::TaskList);
+    assert!(view.active_panel == Panel::TaskList);
 }
 
 #[test]
@@ -130,7 +128,7 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
 #[test]
 fn window_navigation_release_and_second_ctrl_w_preserve_input() {
     let (mut view, _) = log_fixture();
-    view.input_box.focused = true;
+    view.active_panel = Panel::Prompt;
     view.input_box.editor.insert("one two three");
     let prefix = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
     assert_eq!(view.handle_key(prefix), None);
@@ -153,7 +151,7 @@ fn window_navigation_leaving_search_cancels_it_like_a_click() {
     chord(&mut view, 'l');
     assert!(!view.searching);
     assert!(view.search.is_empty());
-    assert!(view.mouse_focus == Panel::Details);
+    assert!(view.active_panel == Panel::Details);
 }
 
 #[test]
@@ -198,10 +196,10 @@ fn window_navigation_real_terminal_probe() {
         view.show_terminal(session_key("log"), terminal.screen.clone());
         log_screen(&view, width, 45, now);
         assert_eq!(chord(&mut view, 'l'), None);
-        assert!(view.mouse_focus == Panel::Terminal); // no panel to the right
+        assert!(view.active_panel == Panel::Terminal); // no panel to the right
         assert_eq!(chord(&mut view, 'k'), None);
         assert!(
-            view.mouse_focus
+            view.active_panel
                 == if width == 200 {
                     Panel::Prompt
                 } else {

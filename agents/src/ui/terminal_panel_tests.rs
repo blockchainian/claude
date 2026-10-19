@@ -197,7 +197,7 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             terminal.y + 1,
         );
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.mouse_focus == Panel::Terminal);
+        assert!(view.active_panel == Panel::Terminal);
         assert_eq!(
             view.terminal_paste("text"),
             Some(Action::TerminalPaste("text".into()))
@@ -209,10 +209,10 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             mouse(MouseEventKind::Down(MouseButton::Left), list.x + 1, list.y),
         );
         log_screen(&view, 100, 45, now);
-        let focus = view.mouse_focus;
+        let focus = view.active_panel;
         assert!(focus != Panel::Terminal);
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.mouse_focus == Panel::Terminal);
+        assert!(view.active_panel == Panel::Terminal);
         assert_eq!(
             view.terminal_paste("text"),
             Some(Action::TerminalPaste("text".into()))
@@ -225,7 +225,7 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             )),
             release
         );
-        assert!(view.mouse_focus == Panel::Terminal);
+        assert!(view.active_panel == Panel::Terminal);
     }
 }
 

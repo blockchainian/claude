@@ -707,6 +707,14 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
     assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
     assert!(app.view.log[0].body.starts_with("SubagentHandback"));
     key(&mut app, KeyCode::Esc);
+    // Return to the task list before changing the selected task.
+    let (column, row) = app.view.marker_pos().unwrap();
+    app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }));
     key(&mut app, KeyCode::Up);
     assert_eq!(app.view.log_session.as_ref(), Some(&parent.id));
     assert_eq!(app.log_stamp.as_ref().unwrap().session, parent.id);

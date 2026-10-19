@@ -573,7 +573,7 @@ fn task_search_returns_but_selected_detail_resets_to_newest() {
         .join("\n\n");
     let events = view.log.clone();
     {
-        view.mouse_focus = Panel::LogList;
+        view.active_panel = Panel::LogList;
         view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
     };
     for letter in "tool".chars() {
@@ -882,7 +882,7 @@ fn mouse_list_click_and_double_click_keep_focus_on_second_task() {
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, second);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(!view.input_box.focused);
+    assert!(!view.prompt_focused());
     assert_eq!(view.selected_id(), Some(&id));
 }
 
@@ -1056,7 +1056,7 @@ fn mouse_list_click_uses_last_render_scroll_offset() {
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, target);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(!view.input_box.focused);
+    assert!(!view.prompt_focused());
     assert_eq!(view.selected_id(), Some(&view.rows[target].id));
 }
 
@@ -2744,11 +2744,11 @@ fn escape_in_an_empty_prompt_stops_only_a_stoppable_task() {
         key(&mut view, KeyCode::Esc),
         Some(Action::Stop(session_key("42")))
     );
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     let mut view = fixture();
     view.focus_input();
     assert_eq!(key(&mut view, KeyCode::Esc), None);
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
 }
 
 #[test]
@@ -4836,7 +4836,7 @@ fn dashboard_screen_padding_is_one_cell() {
         let (mut view, now) = column_padding_fixture();
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
-        view.input_box.focused = true;
+        view.active_panel = Panel::Prompt;
         view.render_at(area, &mut buf, now);
         let layout = view.center_layout(area);
         assert_eq!(layout.list.x, 1);
@@ -6086,7 +6086,7 @@ mod log_search {
 
     fn open(view: &mut View) {
         {
-            view.mouse_focus = Panel::LogList;
+            view.active_panel = Panel::LogList;
             view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         };
     }
@@ -6129,7 +6129,7 @@ mod log_search {
                 );
             } else {
                 key(&mut view, KeyCode::Esc);
-                view.mouse_focus = Panel::LogDetail;
+                view.active_panel = Panel::LogDetail;
             }
             assert!(!view.log_search.active());
             assert_eq!(view.visible_log_event(), Some(&selected));
@@ -6339,7 +6339,7 @@ mod line_edit {
     fn log_search_caret_follows_cjk_inset_text() {
         let (mut view, now) = log_fixture();
         {
-            view.mouse_focus = Panel::LogList;
+            view.active_panel = Panel::LogList;
             view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         };
         for c in "你好".chars() {
@@ -6383,7 +6383,7 @@ mod input_row {
         task.search.set_text(query);
         let (mut log, _) = log_fixture();
         {
-            log.mouse_focus = Panel::LogList;
+            log.active_panel = Panel::LogList;
             log.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         };
         log.log_search.query.set_text(query);
@@ -6482,7 +6482,7 @@ mod input_row {
 fn task_log_search_active_snapshot() {
     let (mut view, now) = log_fixture();
     {
-        view.mouse_focus = Panel::LogList;
+        view.active_panel = Panel::LogList;
         view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
     };
     for c in "tests".chars() {
@@ -7230,7 +7230,7 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     click_mouse(&mut view, click);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert!(!view.input_box.focused);
+    assert!(!view.prompt_focused());
     key(&mut view, KeyCode::Esc);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
@@ -9695,7 +9695,7 @@ mod log_navigation {
                     continue;
                 }
                 let (mut view, _) = log_fixture();
-                view.mouse_focus = Panel::LogList;
+                view.active_panel = Panel::LogList;
                 if search {
                     view.prepare_log_search();
                     view.log_search.query.set_text("a");
@@ -9710,7 +9710,7 @@ mod log_navigation {
                 ] {
                     view.handle_mouse(mouse(kind, rect.x + 1, rect.y));
                 }
-                assert!(view.log_list_focused);
+                assert!(view.active_panel == Panel::LogList);
                 view.viewport.borrow_mut().log.height = 40;
                 let events: Vec<_> = view.shown_log_events().map(|(_, e)| e.clone()).collect();
                 assert!(events.len() >= 3);
@@ -9861,7 +9861,7 @@ fn task_border_double_clicks_select_both_ends_in_both_layouts() {
                     if bottom { viewport.task_scroll_max } else { 0 }
                 );
                 assert_eq!(view.status_filter, tab);
-                assert!(!view.input_box.focused);
+                assert!(!view.prompt_focused());
             }
         }
     }

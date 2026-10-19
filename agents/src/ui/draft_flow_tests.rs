@@ -465,7 +465,7 @@ fn wizard_name_opens_repository_before_prompt() {
         Some(SelectorKind::Repository { .. })
     ));
     assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
-    assert!(!view.input_box.focused);
+    assert!(!view.prompt_focused());
 }
 
 fn git_draft() -> (FixtureDirectory, View) {
@@ -549,7 +549,7 @@ fn assert_field_click_cancels(field: Field) {
             assert_eq!(view.name_target, name_target);
             assert_eq!(view.rename.text(), name);
             assert_eq!(view.input_box.editor.text(), prompt);
-            assert_eq!(view.input_box.focused, named);
+            assert_eq!(view.prompt_focused(), named);
             let draft = view.selected_draft().unwrap();
             assert_eq!(
                 (
@@ -659,7 +659,7 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
                 assert_eq!(key(&mut view, KeyCode::Enter), None);
             }
             assert!(view.selector.is_none());
-            assert!(view.input_box.focused);
+            assert!(view.prompt_focused());
             assert!(!view.selected_draft().unwrap().working);
             view.handle_paste("use the chosen branch");
             let action = key(&mut view, KeyCode::Enter);
@@ -703,7 +703,7 @@ fn prompt_enter_opens_missing_branch_and_wizard_pick_only_focuses_prompt() {
         DraftBranch::Existing("main".into())
     );
     assert!(view.selector.is_none());
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(matches!(
         key(&mut view, KeyCode::Enter),
@@ -724,7 +724,7 @@ fn border_branch_and_model_picks_never_create_with_everything_filled() {
     );
     view.open_field(Field::Model);
     assert_eq!(view.apply_choice(0), None);
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(!view.selected_draft().unwrap().working);
 }
@@ -741,7 +741,7 @@ fn border_repository_keeps_prompt_and_same_repository_keeps_branch() {
         panic!("repository pick");
     };
     assert!(view.name_target.is_none());
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
     let subdirectory = cwd.join("subdir");
     std::fs::create_dir(&subdirectory).unwrap();
@@ -787,7 +787,7 @@ fn wizard_selector_escape_only_closes_one_layer_and_then_confirms_delete() {
         view.selector.as_mut().unwrap().origin = Origin::Wizard;
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert!(view.selector.is_none());
-        assert!(view.input_box.focused);
+        assert!(view.prompt_focused());
         assert_eq!(view.input_box.editor.text(), "half prompt");
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert!(view.confirm_dialog.is_some());
@@ -825,7 +825,7 @@ fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
             Some("original")
         );
         assert!(view.name_target.is_none());
-        assert!(view.input_box.focused);
+        assert!(view.prompt_focused());
     }
 }
 
@@ -842,7 +842,7 @@ fn saving_existing_name_is_a_side_edit_and_does_not_create() {
         Some("renamed")
     );
     assert!(view.selector.is_none());
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
 }
 
@@ -1055,7 +1055,7 @@ fn right_click_cancels_delete_confirmation_and_returns_prompt_focus() {
         });
     }
     assert!(view.confirm_dialog.is_none());
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "keep prompt");
 }
 
@@ -1294,7 +1294,11 @@ fn draft_model_choices_are_unique_and_select_the_effective_value() {
         for (value, label) in values.iter().zip(labels) {
             assert_eq!(
                 label,
-                &choices.iter().find(|model| model.id == *value).unwrap().label
+                &choices
+                    .iter()
+                    .find(|model| model.id == *value)
+                    .unwrap()
+                    .label
             );
         }
         assert_eq!(
@@ -1537,7 +1541,7 @@ fn assert_name_prompt_click(name: &str) {
     render(&view);
     let prompt = view.viewport.borrow().prompt;
     click(&mut view, prompt.x + 2, prompt.y);
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     assert!(view.name_target.is_none());
     assert!(view.selector.is_none());
     key(&mut view, KeyCode::Char('p'));
@@ -1549,7 +1553,7 @@ fn assert_name_prompt_click(name: &str) {
     if name.is_empty() {
         key(&mut view, KeyCode::Enter);
         assert!(view.name_target.is_some());
-        assert!(!view.input_box.focused);
+        assert!(!view.prompt_focused());
     }
 }
 
@@ -1671,7 +1675,7 @@ fn draft_branch_edit_prompt_click_closes_and_enter_restores_text() {
     let prompt = view.viewport.borrow().prompt;
     click(&mut view, prompt.x + 2, prompt.y);
     assert!(view.selector.is_none());
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     view.handle_paste("Prompt kept");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_pending_branch(&view);
@@ -1754,7 +1758,10 @@ fn resumable_session_settings_dispatch_only_a_changed_value() {
                 else {
                     unreachable!()
                 };
-                assert_eq!(values[current], if field == Field::Model { model } else { "high" });
+                assert_eq!(
+                    values[current],
+                    if field == Field::Model { model } else { "high" }
+                );
                 let other = usize::from(current == 0);
                 let value = values[other].clone();
                 // Choosing the current value closes the selector without touching the session.

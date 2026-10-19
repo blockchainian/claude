@@ -532,7 +532,6 @@ impl View {
 
     /// Selects an index in the shown list; `None` selects its newest row.
     pub(super) fn select_log_event(&mut self, index: Option<usize>) {
-        self.log_detail_focused = index.is_some();
         let background = self.log_background_event.take().is_some();
         let len = self.matching_log_count();
         let index = len

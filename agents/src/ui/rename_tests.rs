@@ -267,7 +267,7 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
     assert!(view.name_target.is_none());
     assert!(view.selector.is_some());
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(view.input_box.focused);
+    assert!(view.prompt_focused());
     view.handle_paste("prompt body");
     assert_eq!(view.input_box.editor.text(), "prompt body");
     view.add_draft(DraftSetup {
@@ -302,7 +302,7 @@ fn failed_draft_keeps_its_title_editor() {
 #[test]
 fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
     let (_directory, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
-    assert!(view.mouse_focus == Panel::TaskList);
+    assert!(view.active_panel == Panel::TaskList);
     for code in [KeyCode::Char('r'), KeyCode::Esc, KeyCode::Char('/')] {
         view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }

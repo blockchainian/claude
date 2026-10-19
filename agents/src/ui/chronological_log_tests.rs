@@ -59,7 +59,7 @@ fn duration_toggle_follows_slowest_before_and_after_history_load() {
         if !following {
             view.navigate_log(KeyCode::Home);
         }
-        view.mouse_focus = Panel::LogList;
+        view.active_panel = Panel::LogList;
         view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
         view.assert_log_tail();
         assert_eq!(view.visible_log_event(), Some(&events[16]));
@@ -417,7 +417,7 @@ fn duration_updates_preserve_screen_row_and_follow_slowest() {
         event.duration = Some(chrono::Duration::seconds(10 + i as i64));
     }
     view.set_log(events[..8].to_vec());
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
     view.select_log_event(Some(5));
     view.viewport.borrow_mut().log_scroll = 4;
@@ -478,7 +478,7 @@ fn duration_updates_cancel_list_drag_only_when_event_order_changes() {
             event.duration = Some(chrono::Duration::seconds(10 + index as i64));
         }
         view.set_log(events.clone());
-        view.mouse_focus = Panel::LogList;
+        view.active_panel = Panel::LogList;
         view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
         view.select_log_event(Some(0));
         view.viewport.borrow_mut().log_scroll = 0;

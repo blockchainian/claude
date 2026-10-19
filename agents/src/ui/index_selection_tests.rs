@@ -18,7 +18,7 @@ fn paired_notifications_move_down_to_newer_with_all_bindings() {
     let rect = view.viewport.borrow().log;
     for code in [KeyCode::Down, KeyCode::Char('j')] {
         view.select_log_event(Some(0));
-        view.log_list_focused = true;
+        view.active_panel = Panel::LogList;
         view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         assert_eq!(view.log_selected, Some(1));
         view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
@@ -81,10 +81,10 @@ fn list_search_keeps_selected_full_index() {
     let (mut view, _) = log_fixture();
     view.set_log(events);
     view.select_log_event(Some(0));
-    view.log_list_focused = true;
-    view.log_detail_focused = false;
+    view.active_panel = Panel::LogList;
+
     {
-        view.mouse_focus = Panel::LogList;
+        view.active_panel = Panel::LogList;
         view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
     };
     assert!(view.log_search.editing);

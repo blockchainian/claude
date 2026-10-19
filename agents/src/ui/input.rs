@@ -163,8 +163,10 @@ impl View {
             self.confirm_draft_delete();
             return;
         }
-        if self.input_box.focused {
-            self.input_box.focused = false;
+        if self.prompt_focused() {
+            if self.active_panel == Panel::Prompt {
+                self.active_panel = Panel::TaskList;
+            }
             return;
         }
         if self.log_detail_search.editing {
@@ -177,7 +179,7 @@ impl View {
         }
         if let Some(previous) = self.log_background_return.take() {
             self.select_log_event(previous.event);
-            self.log_detail_focused = previous.detail_focused;
+
             self.log_detail_search = previous.search;
             self.viewport.borrow_mut().log_detail_scroll = previous.scroll;
         } else {
@@ -199,7 +201,7 @@ impl View {
         if self.log_background_return.is_none() {
             self.log_background_return = Some(BackgroundReturn {
                 event: self.log_selected,
-                detail_focused: self.log_detail_focused,
+
                 scroll: self.viewport.borrow().log_detail_scroll,
                 search: std::mem::take(&mut self.log_detail_search),
             });
@@ -239,7 +241,7 @@ impl View {
                 duration: None,
             }],
         });
-        self.log_detail_focused = true;
+
         self.viewport.borrow_mut().log_detail_layout = None;
         self.viewport.borrow_mut().log_detail_scroll = 0;
     }
@@ -300,9 +302,9 @@ impl View {
             self.accept_draft_name();
             self.close_selector();
         }
-        let previous_focus = self.mouse_focus;
+        let previous_focus = self.active_panel;
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
-            self.mouse_focus = {
+            self.active_panel = {
                 let viewport = self.viewport.borrow();
                 if viewport.list.contains(position)
                     || viewport.tab_bar.contains(position)
@@ -329,7 +331,7 @@ impl View {
                 }
             };
         }
-        if self.mouse_focus != previous_focus
+        if self.active_panel != previous_focus
             && !matches!(
                 paste_target,
                 Some(
@@ -362,7 +364,7 @@ impl View {
             self.handle_mouse_event(mouse)
         };
         if matches!(mouse.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)) {
-            self.focus(self.mouse_focus);
+            self.focus(self.active_panel);
         }
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
@@ -650,7 +652,9 @@ impl View {
                         && let Some(selector) = self.selector.as_mut()
                     {
                         selector.selected = index;
-                        self.input_box.focused = false;
+                        if self.active_panel == Panel::Prompt {
+                            self.active_panel = Panel::TaskList;
+                        }
                         if selector.branch_editor().is_some() && index + 1 == selector.len() {
                             return Some(None);
                         }
@@ -836,7 +840,7 @@ impl View {
                 if !self.defer_click(ClickTarget::Title(id)) {
                     return None;
                 }
-                self.mouse_focus = Panel::Details;
+                self.active_panel = Panel::Details;
                 if let Some(draft) = self.selected_draft() {
                     self.open_name(draft.id);
                     return None;
@@ -963,7 +967,6 @@ impl View {
                         }
                         if viewport.log.contains(position) {
                             drop(viewport);
-                            self.focus_input();
                             return None;
                         }
                         if detail.contains(position)
@@ -1044,14 +1047,11 @@ impl View {
                     });
                     self.select(task);
                     if double {
-                        self.focus_input();
                         return None;
                     }
                     self.last_click = Some((task, now));
                 } else if let Some(index) = log_row {
-                    if self.defer_click(ClickTarget::Log { index }) {
-                        self.focus_input();
-                    }
+                    self.defer_click(ClickTarget::Log { index });
                 } else if let Some(target @ ClickTarget::Details { .. }) =
                     self.click_target_at(position)
                 {
@@ -1283,7 +1283,9 @@ impl View {
         self.rename.set_text(&title);
         self.rename_target = Some(id);
         self.name_target = None;
-        self.input_box.focused = false;
+        if self.active_panel == Panel::Prompt {
+            self.active_panel = Panel::TaskList;
+        }
         self.search.clear();
         self.searching = false;
         None
@@ -1384,10 +1386,10 @@ impl View {
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
             && !matches!(
-                self.mouse_focus,
+                self.active_panel,
                 Panel::TaskList | Panel::LogList | Panel::LogDetail
             )
-            && !self.input_box.focused
+            && !self.prompt_focused()
             && self.title_editor().is_none()
             && !self.searching
             && !self.log_search.editing
@@ -1395,7 +1397,7 @@ impl View {
         {
             return None;
         }
-        if self.input_box.focused
+        if self.prompt_focused()
             && self.title_editor().is_none()
             && !self.searching
             && !self.log_search.editing
@@ -1546,7 +1548,6 @@ impl View {
             match key.code {
                 KeyCode::Esc => {
                     self.log_search.clear();
-                    self.log_list_focused = false;
                 }
                 KeyCode::Enter => self.log_search.editing = false,
                 _ => {
@@ -1609,11 +1610,11 @@ impl View {
             return None;
         }
         if plain && key.code == KeyCode::Char('/') {
-            match self.mouse_focus {
+            match self.active_panel {
                 Panel::TaskList => self.searching = true,
                 Panel::LogList => {
                     self.log_search.editing = true;
-                    self.log_list_focused = true;
+
                     self.prepare_log_search();
                 }
                 Panel::LogDetail => {
@@ -1624,14 +1625,14 @@ impl View {
             }
             return None;
         }
-        if plain && key.code == KeyCode::Enter && self.mouse_focus == Panel::LogList {
+        if plain && key.code == KeyCode::Enter && self.active_panel == Panel::LogList {
             self.jump_log_agent();
             return None;
         }
         let navigation = super::navigation::list_navigation(key);
         if let Some(code) = navigation
             && !self.searching
-            && self.mouse_focus == Panel::LogDetail
+            && self.active_panel == Panel::LogDetail
         {
             match code {
                 KeyCode::Home | KeyCode::End => self.navigate_log(code),
@@ -1656,7 +1657,7 @@ impl View {
         }
         if let Some(code) = navigation
             && !self.searching
-            && self.log_list_focused
+            && (self.active_panel == Panel::LogList)
         {
             self.navigate_log(code);
             return None;
@@ -1692,8 +1693,8 @@ impl View {
         }
         if plain
             && key.code == KeyCode::Char('t')
-            && (matches!(self.mouse_focus, Panel::LogList | Panel::LogDetail)
-                || self.log_list_focused)
+            && (matches!(self.active_panel, Panel::LogList | Panel::LogDetail)
+                || (self.active_panel == Panel::LogList))
         {
             self.set_log_sort(match self.log_sort {
                 LogSort::Time => LogSort::Duration,
@@ -1723,7 +1724,7 @@ impl View {
                 self.select(selected);
             }
             KeyCode::Enter | KeyCode::Right => return self.activate(),
-            KeyCode::Esc if self.mouse_focus == Panel::TaskList => self.select_previous_task(),
+            KeyCode::Esc if self.active_panel == Panel::TaskList => self.select_previous_task(),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();
                 self.viewport.borrow_mut().scroll = 0;

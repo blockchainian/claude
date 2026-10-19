@@ -79,7 +79,7 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
         let first = view.selected_id().cloned();
         key(&mut view, KeyCode::Down);
         let second = view.selected_id().cloned();
-        view.mouse_focus = panel;
+        view.active_panel = panel;
         if panel == Panel::TaskList {
             view.searching = true;
             view.search.set_text("Task");
@@ -87,7 +87,7 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert!(!view.searching);
         assert_eq!(view.selected_id(), second.as_ref());
-        view.mouse_focus = Panel::TaskList;
+        view.active_panel = Panel::TaskList;
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());
     }

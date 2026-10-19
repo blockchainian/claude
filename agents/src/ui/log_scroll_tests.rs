@@ -53,9 +53,7 @@ fn fixture(long: bool) -> (View, DateTime<Utc>) {
     }
     view.set_log(events);
     view.select_log_event(Some(1));
-    view.mouse_focus = Panel::LogDetail;
-    view.log_detail_focused = true;
-    view.input_box.focused = false;
+    view.active_panel = Panel::LogDetail;
     (view, now)
 }
 
@@ -510,7 +508,7 @@ fn log_scroll_wheel_reversing_at_title_does_not_pause() {
 #[test]
 fn log_detail_focus_toggles_log_sort() {
     let (mut view, _) = fixture(false);
-    assert!(view.mouse_focus == Panel::LogDetail);
+    assert!(view.active_panel == Panel::LogDetail);
     let action = view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
     assert_eq!(view.log_sort, LogSort::Duration);
     assert!(matches!(

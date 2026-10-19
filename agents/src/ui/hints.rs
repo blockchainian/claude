@@ -27,9 +27,9 @@ impl View {
         } else if self.active_question().is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
         } else if self.selected_draft().is_some()
-            && (self.input_box.focused || self.selector.is_some())
+            && (self.prompt_focused() || self.selector.is_some())
         {
-            if self.input_box.focused {
+            if self.prompt_focused() {
                 hint_line(&[("esc", "cancel"), ("enter", "next")])
             } else if self.selector.as_ref().is_some_and(Selector::input_active) {
                 hint_line(&[("esc", "back"), ("enter", "select")])
@@ -67,7 +67,7 @@ impl View {
             && self.title_editor().is_none()
             && self.active_question().is_none()
             && !(self.selected_draft().is_some()
-                && (self.input_box.focused || self.selector.is_some()))
+                && (self.prompt_focused() || self.selector.is_some()))
             && !self.log_search.editing
             && !self.log_detail_search.editing
     }
@@ -186,7 +186,7 @@ mod tests {
                 id: "task".into(),
             };
             match mode {
-                0 => view.input_box.focused = true,
+                0 => view.active_panel = Panel::Prompt,
                 1 => {
                     view.confirm_dialog = Some(ConfirmDialog {
                         action: ConfirmAction::Delete(id),

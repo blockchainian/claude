@@ -34,7 +34,6 @@ pub(super) struct PromptBox {
     pending_editor: Option<LineEdit>,
     mouse: prompt_mouse::PromptMouse,
     pub(super) editor: LineEdit,
-    pub(super) focused: bool,
     pub(super) state: SendState,
     pub(super) submitting: bool,
     pub(super) history: composer_history::History,
@@ -130,7 +129,14 @@ impl PromptBox {
             .clamp(1, usize::from(u16::MAX)) as u16
     }
 
-    pub(super) fn render(&self, area: Rect, buf: &mut Buffer, label: &str, disabled: Option<&str>) {
+    pub(super) fn render(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        label: &str,
+        disabled: Option<&str>,
+        focused: bool,
+    ) {
         if area.is_empty() {
             return;
         }
@@ -155,7 +161,7 @@ impl PromptBox {
         let start = self.mouse_scroll_start(&layout, height);
         let style = if matches!(self.state, SendState::Failed(_)) && self.search.is_none() {
             style::error_style()
-        } else if self.focused {
+        } else if focused {
             Style::default().cyan()
         } else {
             Style::default().dim()
@@ -183,7 +189,7 @@ impl PromptBox {
     }
 
     pub(super) fn cursor(&self, area: Rect, label: &str) -> Option<(u16, u16)> {
-        if !self.focused || area.is_empty() {
+        if area.is_empty() {
             return None;
         }
         let layout = self.layout(area.width, label);
@@ -204,9 +210,9 @@ impl PromptBox {
     }
 
     pub(super) fn paste(&mut self, text: &str) {
-        if self.focused && self.search.is_some() {
+        if self.search.is_some() {
             self.search_paste(text);
-        } else if self.focused {
+        } else {
             self.editor
                 .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
         }
@@ -214,7 +220,7 @@ impl PromptBox {
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
         let key = super::line_edit::normalize_key(key);
-        if !self.focused || key.kind == KeyEventKind::Release {
+        if key.kind == KeyEventKind::Release {
             return None;
         }
         if key.code == KeyCode::Char('v')
@@ -284,10 +290,7 @@ mod tests {
     const REAL_TEXT: &str = include_str!("../../tests/fixtures/claude-peer-message.txt");
 
     fn focused() -> PromptBox {
-        PromptBox {
-            focused: true,
-            ..PromptBox::default()
-        }
+        PromptBox::default()
     }
     fn key(editor: &mut PromptBox, code: KeyCode) -> Option<PromptAction> {
         editor.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
@@ -295,7 +298,7 @@ mod tests {
     fn rendered(editor: &PromptBox, width: u16, disabled: Option<&str>) -> String {
         let area = Rect::new(0, 0, width, editor.height(width, "Task"));
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "Task", disabled);
+        editor.render(area, &mut buffer, "Task", disabled, true);
         buffer
             .content
             .chunks(usize::from(width))
@@ -309,11 +312,11 @@ mod tests {
         let mut editor = focused();
         let area = Rect::new(8, 4, 35, 5);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "Task", None);
+        editor.render(area, &mut buffer, "Task", None, true);
         assert_eq!(buffer[(13, 4)].symbol(), "❯");
         assert_eq!(editor.cursor(area, "Task"), Some((15, 4)));
         editor.paste("你好");
-        editor.render(area, &mut buffer, "Task", None);
+        editor.render(area, &mut buffer, "Task", None, true);
         assert_eq!(buffer[(15, 4)].symbol(), "你");
         assert_eq!(buffer[(17, 4)].symbol(), "好");
         assert_eq!(editor.cursor(area, "Task"), Some((19, 4)));
@@ -322,11 +325,9 @@ mod tests {
     }
 
     #[test]
-    fn paste_preserves_real_multiline_content_only_when_focused() {
+    fn paste_preserves_real_multiline_content() {
         let mut editor = PromptBox::default();
-        editor.paste(REAL_TEXT);
-        assert!(editor.editor.is_empty());
-        editor.focused = true;
+
         editor.paste(REAL_TEXT);
         assert_eq!(editor.editor.text(), REAL_TEXT);
         let height = editor.height(70, "Task");
@@ -401,7 +402,6 @@ mod tests {
         assert_eq!(editor.handle_key(escape), None);
         assert!(editor.editor.is_empty());
         assert_eq!(editor.handle_key(escape), Some(PromptAction::Stop));
-        assert!(editor.focused);
     }
 
     #[test]
@@ -417,8 +417,7 @@ mod tests {
         assert_eq!(editor.cursor(area, "Task").unwrap().1, area.y);
         key(&mut editor, KeyCode::End);
         assert_eq!(editor.cursor(area, "Task"), Some(end));
-        editor.focused = false;
-        assert_eq!(editor.cursor(area, "Task"), None);
+
         assert_eq!(editor.cursor(Rect::default(), "Task"), None);
     }
 
@@ -429,7 +428,7 @@ mod tests {
         editor.state = SendState::Failed("Claude attach timed out\nscreen".into());
         let area = Rect::new(0, 0, 80, 1);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "Task", None);
+        editor.render(area, &mut buffer, "Task", None, true);
         let heading = "Task Claude attach timed out ❯ retry me";
         let screen: String = (0..heading.chars().count() as u16)
             .map(|column| buffer[(column, 0)].symbol().to_owned())
@@ -460,7 +459,7 @@ mod tests {
         for (reason, expected) in [("/bg", "升级命令中心 ❮ /bg"), ("", "升级命令中心 ❮")]
         {
             let mut buffer = Buffer::empty(area);
-            editor.render(area, &mut buffer, "升级命令中心", Some(reason));
+            editor.render(area, &mut buffer, "升级命令中心", Some(reason), true);
             use unicode_segmentation::UnicodeSegmentation;
             let mut column = 0;
             for grapheme in expected.graphemes(true) {
@@ -501,7 +500,7 @@ mod tests {
         assert_eq!(editor.height(60, label), 1);
         let area = Rect::new(0, 0, 60, 1);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, label, None);
+        editor.render(area, &mut buffer, label, None, true);
         let text = buffer
             .content
             .iter()
@@ -531,7 +530,7 @@ mod tests {
         use unicode_width::UnicodeWidthStr;
         let area = Rect::new(0, 0, width, height);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "New prompt", None);
+        editor.render(area, &mut buffer, "New prompt", None, true);
         buffer
             .content
             .chunks(usize::from(width))

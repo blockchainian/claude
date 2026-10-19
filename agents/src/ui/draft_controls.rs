@@ -553,8 +553,7 @@ impl View {
 
     /// Gives the selector the keys, as a click in the details panel does.
     fn focus_selector(&mut self) {
-        self.mouse_focus = Panel::Details;
-        self.input_box.focused = false;
+        self.active_panel = Panel::Details;
     }
 
     /// Keeps an unapplied branch name when leaving its selector.
@@ -592,8 +591,7 @@ impl View {
             }
             self.name_target = None;
             self.rename.clear();
-            self.mouse_focus = Panel::Prompt;
-            self.input_box.focused = true;
+            self.active_panel = Panel::Prompt;
         }
     }
 
@@ -738,11 +736,11 @@ impl View {
 
     /// Handles typing, navigation and choice in the details selector.
     pub(super) fn selector_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
-        let selector = self.selector.as_mut()?;
         // The selector has the keys only after a click in the details panel or on a border field.
-        if self.input_box.focused || self.mouse_focus != Panel::Details {
+        if self.prompt_focused() || self.active_panel != Panel::Details {
             return None;
         }
+        let selector = self.selector.as_mut()?;
         let cancel = key.code == KeyCode::Esc
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
         if cancel {
@@ -882,7 +880,7 @@ mod tests {
         let mut view = draft_view(directory.path(), directory.path());
         let area = Rect::new(3, 2, 160, 40);
         view.open_field(Field::Model);
-        assert!(!view.input_box.focused);
+        assert!(!view.prompt_focused());
         let selector = view.selector.as_ref().unwrap();
         let SelectorKind::Model { values, .. } = &selector.kind else {
             panic!("expected model choices");
@@ -896,7 +894,7 @@ mod tests {
         let sonnet = row_of(&view, sonnet_index);
         assert_eq!(click(&mut view, sonnet), None);
         assert!(view.selector.is_none());
-        assert!(!view.input_box.focused);
+        assert!(!view.prompt_focused());
         assert_eq!(view.name_target, view.selected_draft);
         assert_eq!(
             view.drafts[0].setup.model.as_deref(),
@@ -1215,7 +1213,7 @@ mod tests {
                     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
                 };
                 assert_eq!(action, None);
-                assert!(view.input_box.focused);
+                assert!(view.prompt_focused());
                 let action = view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
                 let Some(Action::CreateTask {
                     request, branch, ..

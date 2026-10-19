@@ -597,8 +597,8 @@ fn task_list_click_and_double_click_keep_actions_without_copying() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1)),
         None
     );
-    assert!(!view.input_box.focused);
-    assert!(view.mouse_focus == Panel::TaskList);
+    assert!(!view.prompt_focused());
+    assert!(view.active_panel == Panel::TaskList);
     assert_eq!(view.selected_id(), Some(&id));
 }
 
@@ -993,8 +993,8 @@ fn task_click_uses_press_position_and_completed_click_time() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1)),
         None
     );
-    assert!(!view.input_box.focused);
-    assert!(view.mouse_focus == Panel::TaskList);
+    assert!(!view.prompt_focused());
+    assert!(view.active_panel == Panel::TaskList);
     assert_eq!(view.selected_id(), Some(&id));
 }
 

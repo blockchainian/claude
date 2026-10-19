@@ -91,10 +91,7 @@ fn wrapped_vertical_movement_never_places_the_caret_inside_an_image() {
 
 #[test]
 fn failed_image_send_restores_attachments_beside_the_next_draft() {
-    let mut prompt = PromptBox {
-        focused: true,
-        ..PromptBox::default()
-    };
+    let mut prompt = PromptBox::default();
     prompt.editor.insert("first ");
     prompt.editor.insert_image(image());
     let first = prompt.editor.image_paths()[0].clone();
@@ -118,10 +115,7 @@ fn failed_image_send_restores_attachments_beside_the_next_draft() {
 
 #[test]
 fn recalled_history_keeps_the_image_attachment() {
-    let mut prompt = PromptBox {
-        focused: true,
-        ..PromptBox::default()
-    };
+    let mut prompt = PromptBox::default();
     prompt.editor.insert("describe ");
     prompt.editor.insert_image(image());
     let path = prompt.editor.image_paths()[0].clone();
@@ -134,10 +128,7 @@ fn recalled_history_keeps_the_image_attachment() {
 
 #[test]
 fn image_only_submit_carries_an_attachment_without_placeholder_text() {
-    let mut prompt = PromptBox {
-        focused: true,
-        ..PromptBox::default()
-    };
+    let mut prompt = PromptBox::default();
     prompt.editor.insert_image(image());
     assert_eq!(
         prompt.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)),
@@ -152,10 +143,7 @@ fn image_only_submit_carries_an_attachment_without_placeholder_text() {
 
 #[test]
 fn history_search_keeps_distinct_images_with_the_same_caption() {
-    let mut prompt = PromptBox {
-        focused: true,
-        ..PromptBox::default()
-    };
+    let mut prompt = PromptBox::default();
     let mut paths = Vec::new();
     for _ in 0..2 {
         prompt.editor = LineEdit::default();

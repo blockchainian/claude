@@ -236,7 +236,7 @@ impl View {
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
-            && !self.input_box.focused
+            && !self.prompt_focused()
             && let Some(selector) = &self.selector
             && let Some(editor) = selector.branch_editor()
         {
@@ -252,7 +252,7 @@ impl View {
         {
             return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
         }
-        if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
+        if self.prompt_focused() && !self.help && self.confirm_dialog.is_none() {
             return self.input_box.cursor(
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
                 &self.input_label(),
@@ -350,6 +350,7 @@ impl View {
                 buf,
                 &self.input_label(),
                 self.input_disabled(),
+                self.prompt_focused(),
             );
         }
         let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
@@ -522,7 +523,12 @@ impl View {
                 left
             };
             self.render_log_model(
-                Rect::new(model_left, model_y, area.right().saturating_sub(model_left), 1),
+                Rect::new(
+                    model_left,
+                    model_y,
+                    area.right().saturating_sub(model_left),
+                    1,
+                ),
                 buf,
             );
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
@@ -719,9 +725,9 @@ impl View {
             Line::from("…".bold())
         } else {
             // An expired prompt cache follows the status as ⏸︎.
-            let status = if cache_remaining.is_some_and(|remaining| {
-                remaining < chrono::Duration::seconds(1)
-            }) {
+            let status = if cache_remaining
+                .is_some_and(|remaining| remaining < chrono::Duration::seconds(1))
+            {
                 format!("{status} ⏸\u{fe0e}")
             } else {
                 status.to_string()

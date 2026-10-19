@@ -19,7 +19,7 @@ impl View {
     pub fn hide_terminal(&mut self) {
         self.terminal = None;
         self.viewport.borrow_mut().terminal = Rect::default();
-        if self.mouse_focus == Panel::Terminal {
+        if self.active_panel == Panel::Terminal {
             self.focus(Panel::LogDetail);
         }
     }
@@ -48,7 +48,7 @@ impl View {
 
     fn terminal_focused(&self) -> bool {
         self.confirm_dialog.is_none()
-            && self.mouse_focus == Panel::Terminal
+            && self.active_panel == Panel::Terminal
             && self.shown_terminal().is_some()
     }
 

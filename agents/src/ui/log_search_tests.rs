@@ -66,7 +66,7 @@ fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
 #[test]
 fn list_search_keeps_layout_when_the_selected_event_survives() {
     let (_dir, mut view) = fixture();
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('/'));
     draw_detail(&view);
     let selected = view.visible_log_event().unwrap().clone();
@@ -87,7 +87,7 @@ fn list_search_keeps_layout_when_the_selected_event_survives() {
 #[test]
 fn list_search_discards_layout_when_the_selected_event_changes() {
     let (_dir, mut view) = fixture();
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('/'));
     draw_detail(&view);
     let selected = view.visible_log_event().unwrap().clone();
@@ -101,7 +101,7 @@ fn list_search_discards_layout_when_the_selected_event_changes() {
 #[test]
 fn list_search_reuses_bodies_and_preserves_smart_matching() {
     let (_dir, mut view) = fixture();
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('/'));
     let bodies = view.log_search.bodies.as_ptr();
     for query in [
@@ -147,7 +147,7 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
     use ratatui::style::Modifier;
     use unicode_segmentation::UnicodeSegmentation;
     let (_dir, mut view) = fixture();
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('/'));
     view.log_search.query.set_text("hooks");
     view.rematch_log();
@@ -201,7 +201,7 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
 #[test]
 fn duration_toggle_selects_slowest_and_keeps_search_order() {
     let (_dir, mut view) = fixture();
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     let mut events: Vec<_> = view.log.iter().cycle().take(4).cloned().collect();
     for (index, event) in events.iter_mut().enumerate() {
         event.kind = crate::log::Kind::Tool;
@@ -285,7 +285,7 @@ fn duration_keys_include_messages_none_ties_and_running_update_time() {
     key(&mut view, KeyCode::Tab);
     view.set_log(events);
     view.last_update = now;
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('t'));
     assert_eq!(view.log_order, [0, 5, 4, 3, 2, 6, 1]);
     assert_eq!(
@@ -329,7 +329,7 @@ fn duration_toggle_preserves_background_return_event() {
                 event.duration = Some(chrono::Duration::seconds([30, 10, 20][index]));
             }
             view.set_log(events.clone());
-            view.mouse_focus = Panel::LogList;
+            view.active_panel = Panel::LogList;
             if duration_first {
                 key(&mut view, KeyCode::Char('t'));
             }
@@ -367,7 +367,7 @@ fn duration_toggle_preserves_background_return_event() {
                 }
             }
             assert!(view.log_background_return.is_some());
-            view.mouse_focus = Panel::LogList;
+            view.active_panel = Panel::LogList;
             key(&mut view, KeyCode::Char('t'));
             if update_before_return {
                 view.set_log(events.clone());
@@ -396,7 +396,7 @@ fn duration_toggle_preserves_background_return_event() {
 fn duration_empty_toggle_and_top_navigation_do_not_page() {
     let (_dir, mut view) = fixture();
     view.set_log(Vec::new());
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('t'));
     assert_eq!(view.log_sort, LogSort::Duration);
     assert!(view.log_order.is_empty());
@@ -404,7 +404,7 @@ fn duration_empty_toggle_and_top_navigation_do_not_page() {
     key(&mut view, KeyCode::Char('t'));
     assert_eq!(view.log_sort, LogSort::Time);
     let (_other, mut view) = fixture();
-    view.mouse_focus = Panel::LogList;
+    view.active_panel = Panel::LogList;
     key(&mut view, KeyCode::Char('t'));
     view.select_log_event(Some(0));
     view.move_log_selection(false);

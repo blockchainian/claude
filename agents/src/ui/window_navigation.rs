@@ -3,17 +3,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl View {
     pub(super) fn focus(&mut self, panel: Panel) {
-        if panel != self.mouse_focus
+        if panel != self.active_panel
             && (self.searching || self.log_search.editing || self.log_detail_search.editing)
         {
             self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         }
-        self.mouse_focus = panel;
-        self.input_box.focused = panel == Panel::Prompt
-            && self.input_disabled().is_none()
-            && self.title_editor().is_none();
-        self.log_list_focused = panel == Panel::LogList;
-        self.log_detail_focused = panel == Panel::LogDetail;
+        self.active_panel = panel;
     }
 
     pub(super) fn move_panel(&mut self, direction: char) {
@@ -30,11 +25,7 @@ impl View {
             (Panel::Prompt, v.prompt),
             bottom,
         ];
-        let source = if self.input_box.focused {
-            Panel::Prompt
-        } else {
-            self.mouse_focus
-        };
+        let source = self.active_panel;
         let Some((_, from)) = panels
             .iter()
             .find(|(panel, area)| *panel == source && !area.is_empty())

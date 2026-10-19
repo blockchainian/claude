@@ -1,10 +1,7 @@
 use super::*;
 
 fn focused(text: &str, width: u16) -> PromptBox {
-    let mut prompt = PromptBox {
-        focused: true,
-        ..PromptBox::default()
-    };
+    let mut prompt = PromptBox::default();
     prompt.paste(text);
     prompt.height(width, "Task");
     prompt
@@ -100,7 +97,6 @@ fn reverse_search_accepts_without_sending_and_cancel_restores_caret() {
     press(&mut prompt, KeyCode::Esc, KeyModifiers::NONE);
     assert_eq!(prompt.editor.text(), "draft");
     assert_eq!(prompt.editor.cursor(), cursor);
-    assert!(prompt.focused);
 }
 
 #[test]
@@ -137,7 +133,6 @@ fn history_search_steps_unique_matches_both_ways_and_handles_paste() {
     assert_eq!(prompt.editor.text(), "git status");
     press(&mut prompt, KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert_eq!(prompt.editor.text(), "draft");
-    assert!(prompt.focused);
 }
 #[test]
 fn vertical_stops_match_rendered_caret_after_resize_and_exact_wrap() {
@@ -182,8 +177,7 @@ fn enhanced_control_codes_keep_clear_and_history_bindings() {
 #[test]
 fn history_search_receives_slash_before_panel_search_routing() {
     let mut view = View::new(Grouping::Project, false);
-    view.mouse_focus = Panel::Details;
-    view.input_box.focused = true;
+    view.active_panel = Panel::Prompt;
     let mut entry = LineEdit::default();
     entry.set_text("path/to/file");
     view.prompt_history.borrow_mut().push(entry);

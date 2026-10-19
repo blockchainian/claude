@@ -2,7 +2,7 @@ use super::*;
 
 impl View {
     pub(super) fn jump_log_agent(&mut self) {
-        if self.mouse_focus != Panel::LogList || !self.log_list_focused {
+        if self.active_panel != Panel::LogList || !(self.active_panel == Panel::LogList) {
             return;
         }
         let Some(parent) = self
