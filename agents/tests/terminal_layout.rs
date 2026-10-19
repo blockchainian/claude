@@ -355,21 +355,17 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
     tmux.run(&["send-keys", "-t", "probe", "n"]);
     tmux.wait_for(|capture| capture.contains("New task ❯"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "unfinished task"]);
-    let capture = tmux.capture_when(|capture| capture.contains("unfinished task"));
+    tmux.wait_for(|capture| capture.contains("unfinished task"));
+    // Enter on the prompt lists the branches above the new branch's input on the panel's
+    // bottom row, which starts selected with its placeholder.
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    let capture = tmux.capture_when(|capture| capture.contains("New branch"));
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("main") && line.contains(" New "))
+        .find(|(_, line)| line.contains("New branch"))
         .unwrap();
-    let column = line[..line.find("main").unwrap()].width();
-    tmux.mouse(0, column, row, true);
-    let capture = tmux.capture_when(|capture| capture.contains("Create new branch"));
-    let (row, line) = capture
-        .lines()
-        .enumerate()
-        .find(|(_, line)| line.contains("Create new branch"))
-        .unwrap();
-    let create_column = line[..line.find("Create new branch").unwrap()].width();
+    let create_column = line[..line.find("New branch").unwrap()].width();
     let branch_line = capture
         .lines()
         .find(|line| {
@@ -383,26 +379,26 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
         create_column,
         branch_line[..branch_line.find("main").unwrap()].width()
     );
-    tmux.mouse(0, create_column, row, true);
-    let editing = tmux.capture_when(|capture| !capture.contains("Create new branch"));
-    let editor = editing.lines().nth(row).unwrap();
-    assert!(!editor.contains('❯'), "{editor}");
+    let bottom_rule = capture
+        .lines()
+        .skip(row + 1)
+        .find(|line| line.contains("main"))
+        .unwrap();
+    assert!(bottom_rule.contains("╴main "), "{bottom_rule}");
+    assert!(capture.contains("New task ❯ unfinished task"));
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&colored, 200, 50);
-    // The details panel ends at the next vertical separator.
+    // The details panel ends at the next vertical separator; the input row has no highlight.
     let branch_suffix = &branch_line[branch_line.find("main").unwrap()..];
     let end = create_column + branch_suffix[..branch_suffix.find('│').unwrap()].width();
     for x in create_column - 1..end {
         let cell = parser.screen().cell(row as u16, x as u16).unwrap();
-        assert!(cell.contents().trim().is_empty(), "column {x}: {colored}");
         assert_eq!(
             cell.bgcolor(),
             vt100::Color::Default,
             "column {x}: {colored}"
         );
     }
-    assert!(editing.contains("New task ❯ unfinished task"));
-    assert!(!editing.contains("New branch"));
     let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_y}"]);
     assert_eq!(cursor.trim().parse::<usize>().unwrap(), row);
     let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_x}"]);
@@ -415,17 +411,59 @@ fn terminal_branch_name_edits_in_details_and_preserves_input() {
         input[..input.find("feature/probe").unwrap()].width(),
         create_column
     );
+    assert!(!input.contains("New branch"), "{input}");
     let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_x}"]);
     assert_eq!(
         cursor.trim().parse::<usize>().unwrap(),
         create_column + "feature/probe".len()
     );
+    // Enter applies the branch and the same row asks for the task's name.
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    let naming = tmux.capture_when(|capture| {
+        capture.contains("╴feature/probe ")
+            && capture
+                .lines()
+                .nth(row)
+                .is_some_and(|line| line.contains("New task") && !line.contains('❯'))
+    });
+    assert!(naming.contains("New task ❯ unfinished task"), "{naming}");
+    let cursor = tmux.run(&[
+        "display-message",
+        "-p",
+        "-t",
+        "probe",
+        "#{cursor_x} #{cursor_y}",
+    ]);
+    assert_eq!(cursor.trim(), format!("{create_column} {row}"));
+    // Esc returns to the branch list with the typed name kept, then to the prompt with the
+    // draft kept, where Esc clears the text and then discards the draft.
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| {
-        capture.contains("New task ❯ unfinished task") && capture.contains("feature/probe")
+        capture.contains("╴feature/probe ")
+            && capture
+                .lines()
+                .nth(row)
+                .is_some_and(|line| line.contains("feature/probe"))
     });
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| {
+        capture.contains("New task ❯ unfinished task")
+            && capture.contains("╴feature/probe ")
+            && capture
+                .lines()
+                .nth(row)
+                .is_some_and(|line| line.trim_matches([' ', '│']).is_empty())
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| !capture.contains("unfinished task"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| !capture.contains("New task ❯"));
+    let output = Command::new("git")
+        .args(["branch", "--list", "feature/probe"])
+        .current_dir(repository.path())
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
     println!("{{\"branch_prompt\":\"pass\",\"alignment\":\"pass\",\"restore\":\"pass\"}}");
 }
 
@@ -1835,7 +1873,10 @@ fn terminal_details_section_positions() {
             let colored = captured_screen(&colored, width, 70);
             for (start, length) in [
                 (model_left + 2, "claude-opus-5-5".len()),
-                (model_left + 2 + "claude-opus-5-5 · ".width(), "medium".len()),
+                (
+                    model_left + 2 + "claude-opus-5-5 · ".width(),
+                    "medium".len(),
+                ),
             ] {
                 for x in start..start + length {
                     let cell = colored.screen().cell(model_y as u16, x as u16).unwrap();
