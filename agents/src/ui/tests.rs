@@ -885,10 +885,19 @@ fn mouse_list_click_and_double_click_keep_focus_on_second_task() {
 fn mouse_list_slow_or_split_clicks_only_select() {
     let mut view = fixture();
     let rendered = screen(&view, 160, 40);
+    let list = view.center_layout(Rect::new(0, 0, 160, 40)).list;
     let [first, second] = [0, 1].map(|i| view.selectable_indices()[i]);
     let [first_click, second_click] = [first, second].map(|row| {
         let (x, y) = rendered_cell(
-            &rendered,
+            &rendered
+                .lines()
+                .map(|line| {
+                    line.chars()
+                        .take(usize::from(list.right()))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
             &view.rows[row]
                 .display_title()
                 .chars()
@@ -2432,6 +2441,81 @@ fn live_center_rename_active() {
 }
 
 #[test]
+fn clicking_the_name_in_details_renames_at_the_panel_bottom() {
+    let mut view = test_view(Grouping::Project, true);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities {
+            rename: true,
+            ..Capabilities::default()
+        },
+    )]));
+    let row = session("42", "Task to find", SessionStatus::Ready, 120);
+    let id = row.id.clone();
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 88, 16);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    let title = view.viewport.borrow().details_title;
+    assert_eq!(title.y, view.viewport.borrow().details.y);
+    assert_eq!(
+        (title.x..title.right())
+            .map(|x| buf[(x, title.y)].symbol())
+            .collect::<String>(),
+        "Task to find"
+    );
+    let press = mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        title.x + 2,
+        title.y,
+    );
+    assert_eq!(click_mouse(&mut view, press), None);
+    assert_eq!(view.rename_target, Some(id.clone()));
+    assert_eq!(view.rename.text(), "Task to find");
+    let rendered = screen(&view, 88, 16);
+    let layout = view.center_layout(area);
+    // The input takes the details panel's bottom row and leaves the list whole.
+    assert!(layout.search.is_empty());
+    let input = view.viewport.borrow().details_input;
+    assert_eq!(input.y, view.viewport.borrow().details.bottom() - 1);
+    assert_eq!(input.x, layout.details.x);
+    let line = rendered.lines().nth(usize::from(input.y)).unwrap();
+    assert!(
+        line[line.find('│').unwrap()..].contains("Rename ❯ Task to find"),
+        "{rendered}"
+    );
+    assert!(!line.starts_with(" Rename"), "{rendered}");
+    let (_, caret) = view
+        .rename
+        .window(usize::from(input.width) - "Rename ❯ ".width());
+    assert_eq!(
+        view.cursor_pos(area),
+        Some((input.x + "Rename ❯ ".width() as u16 + caret, input.y))
+    );
+    assert!(view.center_footer_hints().to_string().contains("rename"));
+    view.handle_paste(" again");
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Rename {
+            id,
+            name: "Task to find again".into()
+        })
+    );
+    assert_eq!(view.rename_target, None);
+    assert_eq!(click_mouse(&mut view, press), None);
+    assert!(view.rename_target.is_some());
+    key(&mut view, KeyCode::Esc);
+    assert_eq!(view.rename_target, None);
+    assert!(screen(&view, 88, 16).contains("Task to find"));
+    // Without the rename capability the click reports it unsupported.
+    view.set_capabilities(HashMap::new());
+    assert_eq!(
+        click_mouse(&mut view, press),
+        Some(Action::Unsupported("Rename"))
+    );
+}
+
+#[test]
 fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
@@ -3313,6 +3397,11 @@ mod details_header {
             .to_owned()
     }
 
+    /// The task's name on the details panel's first row, under the status rule.
+    fn name_row(view: &View, rule: Rect) -> Rect {
+        Rect::new(rule.x, view.viewport.borrow().details.y, rule.width, 1)
+    }
+
     #[test]
     fn elapsed_wall_time_follows_redraw_for_every_row_kind() {
         let now = "2026-10-13T12:00:00Z"
@@ -3355,8 +3444,9 @@ mod details_header {
                             1,
                         );
                         let header = label(&buf, rule);
-                        assert!(label(&buf, bottom).contains("Working"));
-                        assert!(header.contains("Fix login bug"));
+                        assert!(!label(&buf, bottom).contains("Working"));
+                        assert!(header.starts_with("Working"), "{header}");
+                        assert_eq!(label(&buf, name_row(&view, rule)), "Fix login bug");
                         assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
                             assert!(header.ends_with(expected), "{header}");
@@ -3370,18 +3460,20 @@ mod details_header {
     }
 
     #[test]
-    fn title_alone_is_on_top_in_wide_and_narrow_layouts() {
+    fn status_is_on_top_and_the_title_below_in_wide_and_narrow_layouts() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         for width in [112, 200] {
             let (buf, rule) = rule_at_width(&view, Utc::now(), width);
-            assert_eq!(label(&buf, rule), "Header task");
+            assert_eq!(label(&buf, rule), "Working");
+            assert_eq!(label(&buf, name_row(&view, rule)), "Header task");
+            assert_eq!(name_row(&view, rule).y, rule.y + 1);
         }
     }
 
     #[test]
-    fn narrow_and_wide_truncate_the_title_on_top() {
+    fn narrow_and_wide_truncate_the_title_below_the_status() {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut row = session(
             "header",
@@ -3394,9 +3486,10 @@ mod details_header {
         view.set_sessions(vec![row], false);
         for width in [112, 200] {
             let (buf, rule) = rule_at_width(&view, now, width);
-            let header = label(&buf, rule);
+            let header = label(&buf, name_row(&view, rule));
             assert!(header.starts_with('升'), "{header}");
-            assert!(header.contains("…"), "{header}");
+            assert!(header.ends_with("…"), "{header}");
+            assert!(label(&buf, rule).starts_with("Working"));
         }
     }
 
@@ -3417,17 +3510,18 @@ mod details_header {
             };
             view.set_sessions(vec![session("header", "Header task", status, 0)], false);
             let (buf, rule) = rule(&view, Utc::now());
-            let header = label(&buf, rule);
+            let name = name_row(&view, rule);
+            let header = label(&buf, name);
             assert_eq!(header, "Header task");
-            let start = rule.x + (rule.width - (header.width() as u16 + 2)) / 2 + 1;
-            let title = &buf[(start, rule.y)];
+            let start = name.x + (name.width - header.width() as u16) / 2;
+            let title = &buf[(start, name.y)];
             assert_eq!(title.fg, view.title_color(&session_key("header")));
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
-            let bottom = view.viewport.borrow().details.bottom();
+            assert_eq!(view.viewport.borrow().details_title.x, start);
             let start = rule.x - 2 + (rule.width + 3 - (status.label().len() as u16 + 2)) / 2 + 1;
             for (offset, symbol) in status.label().chars().enumerate() {
-                let cell = &buf[(start + offset as u16, bottom)];
+                let cell = &buf[(start + offset as u16, rule.y)];
                 assert_eq!(cell.symbol(), symbol.to_string());
                 assert_eq!(cell.fg, ratatui::style::Color::Reset);
                 assert!(cell.modifier.contains(Modifier::BOLD));
@@ -3450,7 +3544,7 @@ mod details_header {
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row.clone()], false);
         let (buf, rule) = rule(&view, now);
-        let header = label(&buf, rule);
+        let header = label(&buf, name_row(&view, rule));
         assert!(header.starts_with("A very long"), "{header}");
         assert!(header.contains("…"), "{header}");
         assert_eq!(
@@ -3460,7 +3554,7 @@ mod details_header {
     }
 
     #[test]
-    fn truncates_title_on_top_border() {
+    fn truncates_title_on_the_name_row() {
         let mut row = session(
             "header",
             "A very long session title that exceeds the panel width",
@@ -3471,7 +3565,7 @@ mod details_header {
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row.clone()], false);
         let (buf, rule) = rule(&view, Utc::now());
-        let header = label(&buf, rule);
+        let header = label(&buf, name_row(&view, rule));
         let rendered = queued_details(row, 15);
         assert!(header.ends_with('…'), "{header}");
         assert_eq!(
@@ -3493,8 +3587,8 @@ mod details_header {
                 let (buf, top) = rule_at_width(&view, now, width);
                 let layout = view.center_layout(buf.area);
                 let bottom = view.viewport.borrow().details.bottom();
-                let expected = " Task log example ";
-                // The title centers on the whole segment between the separator's joint and the
+                let expected = " Working ";
+                // The status centers on the whole segment between the separator's joint and the
                 // log's joint or the screen's edge, not the space left of the time.
                 let segment = top.width + if width >= 150 { 4 } else { 3 };
                 let start = top.x + (segment - expected.width() as u16) / 2 - 2;
@@ -3514,16 +3608,9 @@ mod details_header {
                 let bottom_text = (top.x..top.right())
                     .map(|x| buf[(x, bottom)].symbol())
                     .collect::<String>();
-                let status_start = (usize::from(top.width + 3) - " Working ".len()) / 2 - 2;
-                assert_eq!(
-                    bottom_text
-                        .chars()
-                        .skip(status_start)
-                        .take(" Working ".len())
-                        .collect::<String>(),
-                    " Working "
-                );
+                assert!(!bottom_text.contains("Working"));
                 assert!(bottom_text.contains("project"));
+                assert_eq!(label(&buf, name_row(&view, top)), "Task log example");
                 for x in time_end - 6..time_end {
                     let cell = &buf[(x, top.y)];
                     assert!(cell.modifier.contains(Modifier::DIM));
@@ -3532,7 +3619,7 @@ mod details_header {
                 assert!(label(&buf, top).ends_with(" 3h 12m"));
                 assert!(!bottom_text.contains("3h 12m"));
                 assert!(!bottom_text.contains("Task log example"));
-                assert!(!label(&buf, top).contains("Working"));
+                assert!(!label(&buf, top).contains("Task log example"));
                 if !layout.log.is_empty() {
                     let strip = &buf[(layout.list.right() - 1, bottom)];
                     assert!(
@@ -3551,7 +3638,7 @@ mod details_header {
     }
 
     #[test]
-    fn centered_title_truncates_before_elapsed_is_dropped() {
+    fn centered_status_truncates_before_elapsed_is_dropped() {
         let (mut view, now) = log_fixture();
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
         for columns in 10..=100 {
@@ -3565,8 +3652,8 @@ mod details_header {
             let top_text = (top.x..top.right())
                 .map(|x| buf[(x, top.y)].symbol())
                 .collect::<String>();
-            // The centered title keeps elapsed's width and its spaces clear on both sides, plus
-            // a title cell, two spaces and two rule cells.
+            // The centered status keeps elapsed's width and its spaces clear on both sides, plus
+            // a status cell, two spaces and two rule cells.
             let elapsed_width = " 3h 12m ".len() as u16;
             let reserved = if width + 3 >= 2 * elapsed_width + 7 {
                 assert!(top_text.ends_with(" 3h 12m╶"), "width {width}: {top_text}");
@@ -3579,7 +3666,7 @@ mod details_header {
             // a cell beyond the details panel on each side.
             let available = usize::from(width + 3).saturating_sub(6 + usize::from(reserved));
             if available >= 1 {
-                let title = "Task log example";
+                let title = "Working";
                 let expected = if title.len() > available {
                     format!("{}…", &title[..available - 1])
                 } else {
@@ -3600,20 +3687,20 @@ mod details_header {
     }
 
     #[test]
-    fn tight_bottom_border_keeps_centered_status() {
+    fn tight_top_border_keeps_centered_status() {
         let (mut view, now) = log_fixture();
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
         let area = Rect::new(0, 0, 28, 25);
         let layout = view.center_layout(area);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let bottom = Rect::new(
+        let top = Rect::new(
             layout.details.x,
-            view.viewport.borrow().details.bottom(),
+            layout.header.y + 1,
             layout.details.width,
             1,
         );
-        assert!(label(&buf, bottom).contains("Working"));
+        assert!(label(&buf, top).contains("Working"), "{}", label(&buf, top));
     }
 }
 
@@ -5623,7 +5710,7 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     assert_eq!(
         buf[(
             status_left + (status_right - status_left - 9) / 2 + 1,
-            layout.details.bottom(),
+            layout.header.y + 1,
         )]
             .symbol(),
         "W"
@@ -6641,8 +6728,9 @@ mod subagent_rows {
             .lines()
             .nth(usize::from(layout.header.y + 1))
             .unwrap();
-        assert!(header.contains("Check files"), "{header}");
-        assert!(!header.contains("Working"), "{header}");
+        assert!(!header.contains("Check files"), "{header}");
+        let name = rendered.lines().nth(usize::from(layout.details.y)).unwrap();
+        assert!(name.contains("Check files"), "{name}");
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("child-model"));
         assert!(!rendered.contains("Needs attention"));
@@ -9314,11 +9402,15 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
             }
         }
         let bottom: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
-        assert!(bottom.contains(" Working "), "{bottom}");
+        assert!(!bottom.contains(" Working "), "{bottom}");
         let top: String = (0..width)
             .map(|x| buf[(x, layout.header.y + 1)].symbol())
             .collect();
-        assert!(top.contains(" Task log example "), "{top}");
+        assert!(top.contains(" Working "), "{top}");
+        let name: String = (layout.details.x..layout.details.right())
+            .map(|x| buf[(x, layout.details.y)].symbol())
+            .collect();
+        assert_eq!(name.trim(), "Task log example");
     }
 }
 

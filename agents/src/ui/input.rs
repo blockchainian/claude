@@ -568,6 +568,20 @@ impl View {
                 self.open_field(field);
                 return None;
             }
+            if self.viewport.borrow().details_title.contains(position)
+                && let Some(session) = self.selected_row()
+            {
+                let id = session.id.clone();
+                let title = session.display_title().to_owned();
+                self.pending_click = None;
+                if !self.selected_capabilities().rename {
+                    return Some(Action::Unsupported("Rename"));
+                }
+                self.mouse_focus = Panel::Details;
+                self.rename.set_text(&title);
+                self.rename_target = Some(id);
+                return None;
+            }
             if let Some(cwd) = self.heading_at(position) {
                 if self.defer_click(ClickTarget::Heading(cwd.clone())) {
                     return Some(Action::NewDraft { cwd });
@@ -1369,13 +1383,11 @@ impl View {
             }
             KeyCode::Char('x') => {
                 let id = self.selected_id()?.clone();
-                return Some(
-                    if self.can_stop_selected() {
-                        Action::Stop(id)
-                    } else {
-                        Action::Unsupported("Stop")
-                    },
-                );
+                return Some(if self.can_stop_selected() {
+                    Action::Stop(id)
+                } else {
+                    Action::Unsupported("Stop")
+                });
             }
             KeyCode::Char('h') => {
                 let id = self.selected_id()?.to_owned();

@@ -1,12 +1,12 @@
   Active 1                                                                              Inactive 0
-──────────────────────────────────────────────────┬─────────────── Task log example ────────────────
-                   /tmp/project                   │                     Prompt
- ● Task log example        Working            now │ Task log example
+──────────────────────────────────────────────────┬─────────────────── Working ─────────────────────
+                   /tmp/project                   │                Task log example
+ ● Task log example        Working            now │                     Prompt
+                                                  │ Task log example
                                                   │
                                                   │
                                                   │
-                                                  │
-──────────────────────────────────────────────────┴─────────────────── Working ─────────── project╶─
+──────────────────────────────────────────────────┴─────────────────────────────────────── project╶─
  Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                   Read src/main.rs， Read src/app.rs                             15s

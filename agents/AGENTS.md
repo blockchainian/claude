@@ -28,13 +28,18 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Panel inputs
 
-- Every one-line input in a panel (task search, rename, log search, log detail search) takes its panel's bottom row and draws through `render_input_row`: a cyan label, the plain text and the terminal cursor, with no row highlight.
+- Every one-line input in a panel (task search, rename, log search, log detail search, a new task's branch and name) takes its panel's bottom row and draws through `render_input_row`: a cyan label, the plain text and the terminal cursor, with no row highlight.
 
 ## Details panel
 
+- The status and elapsed time sit on the rule above the panel; the task's name takes the panel's first row, and clicking it renames the task in the panel's bottom row. The pull request or a new task's branch and the project folder sit on the rule below.
 - Sections run Needs attention, Last activity, Background, Update, Prompt and its queued prompts, then Tasks.
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
 - The activity section is `Last activity`.
+
+## New task
+
+- `n` opens the repository browser in the details panel. Enter on the typed prompt lists the local branches above a `New branch` input on the panel's bottom row, selected by default: arrows walk the list while the input is empty, Enter applies the typed or selected branch, and the same row then takes the task's name, whose Enter creates the task. Esc steps back to the branch list, then to the prompt, keeping the draft.
 
 ## Log panels
 

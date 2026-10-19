@@ -183,7 +183,7 @@ impl View {
         };
         // Keep the chart's original canvas and scale when the input row takes list space.
         let usage_chart = list;
-        let (list, search) = if self.searching || self.rename_target.is_some() {
+        let (list, search) = if self.searching || self.renaming_in_list() {
             let input = log::search_input_rect(list);
             (
                 row(list, 0, list.height.saturating_sub(input.height)),
@@ -265,6 +265,15 @@ impl View {
                 &self.log_search
             };
             let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
+            return Some((input.x + caret, input.y));
+        }
+        if self.renaming_in_details() && !self.help && self.confirm_dialog.is_none() {
+            let input = self.viewport.borrow().details_input;
+            if input.is_empty() {
+                return None;
+            }
+            let (prompt, edit) = self.input();
+            let (_, caret) = input_row(&prompt, edit, input);
             return Some((input.x + caret, input.y));
         }
         if !(self.searching || self.rename_target.is_some())
@@ -381,7 +390,7 @@ impl View {
         }
         self.render_center_rows(layout.list, buf, now);
         self.render_usage_chart(layout.usage_chart, buf, now);
-        if self.searching || self.rename_target.is_some() {
+        if self.searching || self.renaming_in_list() {
             let (prompt, edit) = self.input();
             Clear.render(layout.search, buf);
             render_input_row(&prompt, edit, layout.search, buf);
@@ -407,8 +416,20 @@ impl View {
             details.height = details.height.saturating_sub(1);
             Some(row(layout.details, details.height, 1))
         };
+        // The task's name takes the panel's first row; the sections scroll below it.
+        let panel = details;
+        let name_row = (!details.is_empty()
+            && (self.selected_row().is_some() || self.selected_draft().is_some()))
+        .then(|| {
+            details = row(panel, 1, panel.height - 1);
+            row(panel, 0, 1)
+        });
         if !details.is_empty() {
             self.render_details(details, buf, now);
+        }
+        if let Some(name_row) = name_row {
+            self.render_details_name(name_row, buf);
+            self.viewport.borrow_mut().details = panel;
         }
         {
             let mut viewport = self.viewport.borrow_mut();
@@ -465,13 +486,13 @@ impl View {
                 area.right()
             };
             if layout.header.height >= 2 {
-                self.render_details_title(
+                self.render_status_rule(
                     Rect::new(left, layout.header.y + 1, right - left, 1),
                     buf,
                     now,
                 );
             }
-            self.render_details_status(Rect::new(left, details_rule.y, right - left, 1), buf);
+            self.render_branch_rule(Rect::new(left, details_rule.y, right - left, 1), buf);
         }
         let mut separators = vec![];
         if layout.gap.width > 1 {
@@ -490,6 +511,13 @@ impl View {
         }
         join_separators(&separators, area, buf);
         self.render_controls(details, buf);
+        if self.renaming_in_details() && !details.is_empty() {
+            let input = log::search_input_rect(details);
+            let (prompt, edit) = self.input();
+            Clear.render(input, buf);
+            render_input_row(&prompt, edit, input, buf);
+            self.viewport.borrow_mut().details_input = input;
+        }
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.top, buf);
             self.viewport.borrow_mut().marker = None;
@@ -568,24 +596,31 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// Centers the selected task's title on the rule row `rule`, whose end cells are its
-    /// corners, a space apart from the rule on each side, with the elapsed time at its right end.
-    fn render_details_title(
-        &self,
-        rule: Rect,
-        buf: &mut Buffer,
-        now: chrono::DateTime<chrono::Utc>,
-    ) {
+    /// A rename started by clicking the name in the details panel, or while that panel had the
+    /// keys, takes the panel's bottom row.
+    pub(super) fn renaming_in_details(&self) -> bool {
+        self.rename_target.is_some() && self.mouse_focus == Panel::Details
+    }
+
+    fn renaming_in_list(&self) -> bool {
+        self.rename_target.is_some() && self.mouse_focus != Panel::Details
+    }
+
+    /// Centers the bold status on the rule row `rule`, whose end cells are its corners, a space
+    /// apart from the rule on each side, with the elapsed time at its right end.
+    fn render_status_rule(&self, rule: Rect, buf: &mut Buffer, now: chrono::DateTime<chrono::Utc>) {
         let session = self.selected_row();
-        if session.is_none() && self.selected_draft().is_none() {
-            return;
-        }
+        let status = match (session, self.selected_draft()) {
+            (Some(session), _) => Self::status(session).0,
+            (None, Some(_)) => "New",
+            (None, None) => return,
+        };
         self::rule(rule, buf);
-        // The title stays centered on the whole rule, so the time's width is kept clear on both sides.
+        // The status stays centered on the whole rule, so the time's width is kept clear on both sides.
         let mut reserved = 0;
         if let Some(at) = session.and_then(|session| session.started_at) {
             let elapsed = format_session_duration((now - at).num_seconds());
-            // Keep a title cell, its spaces and the rule cells and corners around it.
+            // Keep a status cell, its spaces and the rule cells and corners around it.
             if usize::from(rule.width) >= 2 * (elapsed.width() + 2) + 7 {
                 let (_, area) = render_rule_ends(rule, 0, None, Some(elapsed.dim()), buf);
                 reserved = area.map_or(0, |area| 2 * usize::from(area.width + 2));
@@ -593,22 +628,12 @@ impl View {
         }
         // The corner, one rule cell and a space on each side.
         let width = usize::from(rule.width).saturating_sub(6 + reserved);
-        let (title, title_style) = match session {
-            Some(session) => (
-                session.display_title().to_owned(),
-                self.title_style(&session.id).bold(),
-            ),
-            None => ("New task".to_owned(), Style::default().bold()),
-        };
-        let title = if width <= 1 {
-            Line::from(Span::styled("…", title_style))
+        let status = if width <= 1 {
+            Line::from("…".bold())
         } else {
-            truncate_line_with_ellipsis_if_overflow(
-                Line::from(Span::styled(title, title_style)),
-                width,
-            )
+            truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width)
         };
-        let mut header = truncate_line_to_width(title, width);
+        let mut header = truncate_line_to_width(status, width);
         header.spans.insert(0, " ".into());
         header.spans.push(" ".into());
         let label_width = header.width() as u16;
@@ -617,14 +642,38 @@ impl View {
         Clear.render(label, buf);
         line(header, label, buf);
     }
-    /// Centers the bold status on the rule between its two corner cells, a space apart on each
-    /// side.
-    fn render_details_status(&self, rule: Rect, buf: &mut Buffer) {
+    /// Centers the selected task's name, or a new task's label, on the details panel's first
+    /// row; a click on a task's name renames it.
+    fn render_details_name(&self, row: Rect, buf: &mut Buffer) {
+        let session = self.selected_row();
+        let (title, title_style) = match session {
+            Some(session) => (
+                session.display_title().to_owned(),
+                self.title_style(&session.id).bold(),
+            ),
+            None => ("New task".to_owned(), Style::default().bold()),
+        };
+        let title = truncate_line_with_ellipsis_if_overflow(
+            Line::from(Span::styled(title, title_style)),
+            usize::from(row.width),
+        );
+        let width = (title.width() as u16).min(row.width);
+        let area = Rect::new(row.x + row.width.saturating_sub(width) / 2, row.y, width, 1);
+        line(title, area, buf);
+        self.viewport.borrow_mut().details_title = if session.is_some() {
+            area
+        } else {
+            Rect::default()
+        };
+    }
+    /// The pull request, or a new task's branch, on the left and the project folder's name on
+    /// the right of the rule under the details panel.
+    fn render_branch_rule(&self, rule: Rect, buf: &mut Buffer) {
         let session = self.selected_row();
         let draft = self.selected_draft();
-        let (status, cwd) = match (session, draft) {
-            (Some(session), _) => (Self::status(session).0, &session.cwd),
-            (None, Some(draft)) => ("New", &draft.setup.cwd),
+        let cwd = match (session, draft) {
+            (Some(session), _) => &session.cwd,
+            (None, Some(draft)) => &draft.setup.cwd,
             (None, None) => return,
         };
         // The left corner is a joint, or the separator that keeps going down beside the prompt.
@@ -635,21 +684,6 @@ impl View {
         if buf[(rule.x, rule.y)].symbol() == "│" {
             buf[(rule.x, rule.y)].set_symbol("├");
         }
-        let width = usize::from(rule.width).saturating_sub(4);
-        let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
-        status.spans.insert(0, " ".into());
-        status.spans.push(" ".into());
-        let status_width = (status.width() as u16).min(rule.width);
-        let status_area = Rect::new(
-            rule.x + rule.width.saturating_sub(status_width) / 2,
-            rule.y,
-            status_width,
-            1,
-        );
-        Clear.render(status_area, buf);
-        line(status, status_area, buf);
-        // The pull request, or a new task's branch, on the left and the project folder's name on
-        // the right flank the status.
         let folder = cwd.file_name().map_or_else(
             || cwd.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
@@ -669,7 +703,7 @@ impl View {
         };
         let (left_area, folder_area) = render_rule_ends(
             rule,
-            status_width,
+            0,
             left,
             Some(Span::styled(folder, style::time_style())),
             buf,

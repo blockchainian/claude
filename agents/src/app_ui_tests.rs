@@ -922,14 +922,16 @@ fn wide_border_labels_stay_in_their_columns() {
             segment(
                 &buffer,
                 details.start + start as u16..details.start + start as u16 + 9,
-                middle
+                1
             ),
             " Working "
         );
         assert!(!bottom.contains("2m 0s"));
+        assert!(!bottom.contains("Working"));
         assert!(segment(&buffer, details.clone(), 1).ends_with(" 2m 0s"));
         let title_prefix: String = app.sessions[0].display_title().chars().take(8).collect();
-        assert!(segment(&buffer, details.clone(), 1).contains(&title_prefix));
+        assert!(segment(&buffer, details.clone(), 2).contains(&title_prefix));
+        assert!(!segment(&buffer, details.clone(), 1).contains(&title_prefix));
         assert!(segment(&buffer, tasks.clone(), 1).chars().all(|c| c == '─'));
         assert!(segment(&buffer, log.clone(), 1).chars().all(|c| c == '─'));
         for y in 2..middle {

@@ -1,12 +1,12 @@
   Active 2                  Inactive 1
-────────────────────┬─ Unloaded task ───
-    /tmp/project    │      Prompt
- ○ Unloaded task    │ Unloaded task
+────────────────────┬──── Inactive ─────
+    /tmp/project    │   Unloaded task
+ ○ Unloaded task    │      Prompt
+                    │ Unloaded task
                     │
                     │
                     │
                     │
-                    │
-                    ├──── Inactive ─ …╶─
+                    ├────────── proje…╶─
  Unloaded tas ❯
  ? help  esc Previous  ↑/↓ move  enter…

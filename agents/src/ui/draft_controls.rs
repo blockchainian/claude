@@ -776,13 +776,14 @@ mod tests {
         git(&repository, &["branch", "feature/a"]);
         repository
     }
+    /// The details panel's rows below its first, which names the new task.
     fn panel_rows(view: &View, area: Rect) -> Vec<String> {
         let rendered = screen(view, area);
         let details = view.viewport.borrow().details;
         rendered
             .lines()
-            .skip(usize::from(details.y))
-            .take(usize::from(details.height))
+            .skip(usize::from(details.y) + 1)
+            .take(usize::from(details.height) - 1)
             .map(|line| {
                 line.chars()
                     .skip(usize::from(details.x))
