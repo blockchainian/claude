@@ -3016,3 +3016,58 @@ mod terminal_summary;
 
 #[path = "support/terminal_await_output.rs"]
 mod terminal_await_output;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_duration_sort_border_spacing() {
+    let mut captures = Vec::new();
+    for width in [80, 200] {
+        let (_directory, tmux, _transcript) = start_probe("duration-border");
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        let before = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .any(|row| row.contains("medium") && row.width() == width)
+        });
+        let rows: Vec<_> = before.lines().collect();
+        let (column, top) = if width < 150 {
+            (
+                1,
+                rows.iter().position(|row| row.contains("medium")).unwrap(),
+            )
+        } else {
+            let separator = rows[2].rfind('│').unwrap();
+            (rows[2][..separator].width() + 2, 1)
+        };
+        tmux.mouse(0, column, top + 1, true);
+        tmux.run(&["send-keys", "-t", "probe", "t"]);
+        let capture = tmux.capture_when(|capture| capture.contains("duration"));
+        let border = capture
+            .lines()
+            .find(|row| row.contains("duration"))
+            .unwrap();
+        assert!(!border.contains("Sort · "), "{capture}");
+        assert_eq!(border.width(), width, "{capture}");
+        // The log viewport ends before the screen's one-cell right padding.
+        let border = border.strip_suffix('─').unwrap();
+        assert!(border.ends_with(" duration╶─"), "{capture}");
+        if width < 150 {
+            assert!(border.contains("medium"), "{capture}");
+        }
+        let path = std::env::temp_dir().join(format!("agents-duration-border-{width}.txt"));
+        std::fs::write(&path, &capture).unwrap();
+        captures.push(path);
+    }
+    let verdict = serde_json::json!({"verdict": "pass", "captures": captures});
+    let path = std::env::temp_dir().join("agents-duration-border-verdict.json");
+    std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    println!("{verdict}");
+}
