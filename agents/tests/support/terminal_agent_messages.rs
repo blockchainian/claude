@@ -70,15 +70,15 @@ fn terminal_codex_agent_message_bodies() {
         capture.contains("demo_sub → 演示完成") && capture.contains("演示完成")
     });
     assert!(
-        plaintext_capture.contains("new task → demo_sub"),
+        plaintext_capture.contains("demo_sub ← new task"),
         "{plaintext_capture}"
     );
     let (row, line) = plaintext_capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains("new task → demo_sub"))
+        .find(|(_, line)| line.contains("demo_sub ← new task"))
         .unwrap();
-    let column = line[..line.find("new task → demo_sub").unwrap()].width();
+    let column = line[..line.find("demo_sub ← new task").unwrap()].width();
     tmux.mouse(0, column, row, true);
     let encrypted_capture = tmux.capture_when(|capture| capture.contains("(encrypted)"));
     let record: serde_json::Value = serde_json::from_str(encrypted).unwrap();
@@ -92,9 +92,9 @@ fn terminal_codex_agent_message_bodies() {
     let mut captures = format!("{plaintext_capture}\n\n{encrypted_capture}");
     for (fixture, subject) in collaboration {
         let label = match subject {
-            "demo_sub" => format!("Spawn agent → {subject}"),
-            "ux_probe" => format!("Followup task → {subject}"),
-            _ => format!("message → {subject}"),
+            "demo_sub" => format!("{subject} · Spawn agent"),
+            "ux_probe" => format!("{subject} ← Followup task"),
+            _ => format!("{subject} ← message"),
         };
         let (row, line) = encrypted_capture
             .lines()
@@ -227,7 +227,7 @@ fn terminal_codex_collaboration_navigation() {
     let (column, row) = find(&capture, "Collaboration parent");
     tmux.mouse(0, column, row, true);
     let capture = tmux.capture_when(|capture| capture.contains("demo_sub → 演示完成"));
-    let (column, row) = find(&capture, "Spawn agent → demo_sub");
+    let (column, row) = find(&capture, "demo_sub · Spawn agent");
     tmux.mouse(0, column, row, true);
     let spawn = tmux.capture_when(|capture| {
         capture.contains("Spawn agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")

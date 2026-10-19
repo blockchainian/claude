@@ -46,7 +46,7 @@ fn codex_agent_messages_show_routes_and_payload() {
     let message = serde_json::to_string(&message).unwrap() + "\n";
     for (record, title, body) in [
         (plaintext, "demo_sub → 演示完成", "演示完成"),
-        (encrypted, "new task → demo_sub", "(encrypted)"),
+        (encrypted, "demo_sub ← new task", "(encrypted)"),
         (
             message.as_str(),
             "demo_sub → message",

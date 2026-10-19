@@ -676,7 +676,7 @@ fn agent_name(path: &str) -> &str {
 
 fn message_title(author: &str, recipient: &str, viewer: &str, content: &str) -> String {
     if author == viewer {
-        format!("{content} → {}", agent_name(recipient))
+        format!("{} ← {content}", agent_name(recipient))
     } else if recipient == viewer {
         format!("{} → {content}", agent_name(author))
     } else {
@@ -696,14 +696,19 @@ fn agent_route(
     let rule = rule(name, AGENT_ROUTES)?;
     let target = subject?;
     let route = format!("{} → {}", agent_name(sender), agent_name(target));
-    let title = if rule.assignment {
+    let title = if rule.assignment && matches!(rule.title, AgentTitle::Target) {
         format!(
-            "{} → {}",
-            crate::providers::tool::title_name(name),
-            agent_name(target)
+            "{} · {}",
+            agent_name(target),
+            crate::providers::tool::title_name(name)
         )
     } else {
-        message_title(sender, target, sender, "message")
+        let content = if rule.assignment {
+            crate::providers::tool::title_name(name)
+        } else {
+            "message".to_owned()
+        };
+        message_title(sender, target, sender, &content)
     };
     let detail = match rule.title {
         AgentTitle::Target => agent_name(target).to_owned(),
@@ -2463,7 +2468,7 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "Spawn agent → claude_calls");
+        assert_eq!(call.title, "claude_calls · Spawn agent");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2846,12 +2851,15 @@ mod tests {
                 payload["name"] = name.into();
                 let call = response_tool_call(&payload, Some("Plaintext result"));
                 let expected = if tool == "send_message" {
-                    format!("message → {subject}")
+                    format!("{subject} ← message")
                 } else {
-                    format!(
-                        "{} → {subject}",
-                        crate::providers::tool::title_name(payload["name"].as_str().unwrap())
-                    )
+                    let name =
+                        crate::providers::tool::title_name(payload["name"].as_str().unwrap());
+                    if tool == "spawn_agent" {
+                        format!("{subject} · {name}")
+                    } else {
+                        format!("{subject} ← {name}")
+                    }
                 };
                 assert_eq!(tool_body(&payload).unwrap(), expected);
                 assert_eq!(call.title, expected);
@@ -3062,9 +3070,9 @@ mod tests {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
-                "Spawn agent → real_scan",
-                "message → root",
-                "Followup task → ux_probe",
+                "real_scan · Spawn agent",
+                "root ← message",
+                "ux_probe ← Followup task",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -3100,7 +3108,7 @@ mod tests {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
             let expected = if name == "collaboration.send_message" {
-                "message → reviewer".to_owned()
+                "reviewer ← message".to_owned()
             } else {
                 crate::providers::tool::title_name(&crate::providers::tool::display_tool_name(name))
             };
@@ -3292,8 +3300,8 @@ mod perspective_tests {
     fn perspective_assignments_use_function_names() {
         let events = fixture("root");
         for (name, title) in [
-            ("spawn_agent", "Spawn agent → alpha"),
-            ("followup_task", "Followup task → alpha"),
+            ("spawn_agent", "alpha · Spawn agent"),
+            ("followup_task", "alpha ← Followup task"),
         ] {
             assert!(
                 events
@@ -3307,7 +3315,7 @@ mod perspective_tests {
     #[test]
     fn perspective_root_messages() {
         let events = fixture("root");
-        for title in ["alpha → message", "message → beta", "beta → beta 完成"] {
+        for title in ["alpha → message", "beta ← message", "beta → beta 完成"] {
             assert!(
                 events.iter().any(|e| e.body == title),
                 "{title}: {:?}",
@@ -3326,19 +3334,59 @@ mod perspective_tests {
                 .count(),
             2
         );
-        for title in ["alpha_kid → 孙子完成", "message → beta", "message → root"] {
+        for title in [
+            "alpha_kid · Spawn agent",
+            "alpha_kid → 孙子完成",
+            "beta ← message",
+            "root ← message",
+        ] {
             assert!(events.iter().any(|e| e.body == title), "{title}");
         }
         assert!(fixture("beta").iter().any(|e| e.body == "alpha → message"));
         assert!(
             fixture("beta")
                 .iter()
-                .any(|e| e.body == "2 messages → root")
+                .any(|e| e.body == "root ← 2 messages")
         );
         assert!(
             fixture("alpha_kid")
                 .iter()
                 .any(|e| e.body == "alpha → new task")
+        );
+    }
+
+    #[test]
+    fn perspective_incoming_messages_merge_from_real_records() {
+        let records = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl");
+        let mut lines = records.lines();
+        let metadata = lines.next().unwrap();
+        let messages: Vec<_> = lines
+            .filter(|line| {
+                let record: Value = serde_json::from_str(line).unwrap();
+                let payload = &record["payload"];
+                payload["type"] == "agent_message"
+                    && payload["author"] == "/root/beta"
+                    && payload["content"][0]["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Message Type: MESSAGE\n"))
+            })
+            .collect();
+        assert_eq!(messages.len(), 2);
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            format!("{metadata}\n{}\n", messages.join("\n")),
+        )
+        .unwrap();
+        let events = tail(file.path(), 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].body, "beta → 2 messages");
+        assert_eq!(events[0].calls.len(), 2);
+        assert!(
+            events[0]
+                .calls
+                .iter()
+                .all(|call| call.detail_title == "beta → root")
         );
     }
 
