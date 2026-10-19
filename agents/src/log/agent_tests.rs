@@ -90,3 +90,15 @@ fn claude_outgoing_exchange_has_no_invented_sender_or_recipient() {
         );
     }
 }
+
+#[test]
+fn ordinary_claude_prompts_are_not_agent_messages() {
+    let events = crate::providers::claude::log::tail_session(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl"),
+        100,
+        true,
+    ).unwrap();
+    let users: Vec<_> = events.iter().filter(|event| event.kind == super::Kind::User).collect();
+    assert!(!users.is_empty());
+    assert!(users.iter().all(|event| event.calls.is_empty()));
+}

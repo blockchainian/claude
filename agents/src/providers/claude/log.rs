@@ -888,12 +888,13 @@ impl Log {
                             .join("\n"),
                     )
                 });
-                let peer = text.as_deref().and_then(wrapped_message);
+                let wrapped = text.as_deref().and_then(wrapped_message);
+                let is_peer = wrapped.as_ref().is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
                 if let Some(text) = text.filter(|text| !text.trim().is_empty())
-                    && (record["isMeta"] != true || peer.is_some())
+                    && (record["isMeta"] != true || is_peer)
                     && !text.trim_start().starts_with("<task-notification>")
                 {
-                    if let Some((kind, sender, body)) = peer {
+                    if let Some((kind, sender, body)) = wrapped {
                         let (sender, body) = super::peer::origin_message(&record)
                             .map(|(name, body)| (name.map(str::to_owned), body.to_owned()))
                             .unwrap_or((sender, body));
@@ -901,7 +902,7 @@ impl Log {
                         self.entries.last_mut().unwrap().event.source =
                             record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
-                        self.peer_message();
+                        if is_peer { self.peer_message(); }
                     } else if !text.trim_start().starts_with('<') {
                         let images = self.images.take(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
@@ -967,7 +968,7 @@ impl Log {
                         (Kind::QueuedUser, text)
                     };
                     let peer = wrapped_message(body);
-                    let is_peer = peer.is_some();
+                    let is_peer = peer.as_ref().is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
                     let (sender, body) = peer
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
@@ -1787,7 +1788,7 @@ pub(crate) mod tests {
                         continue;
                     };
                     let (subject, field, markdown) = match name {
-                        "Agent" | "Task" => ("description", "prompt", true),
+                        "Agent" | "Task" => ("name", "prompt", true),
                         "SendMessage" => ("to", "message", true),
                         "WebFetch" => ("url", "prompt", false),
                         "Skill" => ("skill", "args", false),
@@ -1795,8 +1796,10 @@ pub(crate) mod tests {
                     };
                     let input = &block["input"];
                     let call = super::tool_call(name, input, None);
-                    assert_eq!(call.detail_title, input[subject].as_str().unwrap_or(name));
-                    assert_eq!(
+                    assert_eq!(call.detail_title, input[subject].as_str().unwrap_or(if name == "Agent" || name == "Task" { "" } else { name }));
+                    if let Some(message) = &call.agent_message {
+                        assert_eq!(call.detail_left, message.label());
+                    } else { assert_eq!(
                         call.detail_left,
                         if input[subject]
                             .as_str()
@@ -1807,13 +1810,14 @@ pub(crate) mod tests {
                             ""
                         }
                     );
+                    }
                     let text = input[field].as_str().unwrap_or("").to_owned();
                     match name {
                         "Agent" | "Task" => {
                             assert_eq!(
                                 call.input[0],
                                 Section::Markdown {
-                                    label: "prompt".into(),
+                                    label: String::new(),
                                     text
                                 }
                             );
@@ -1824,7 +1828,7 @@ pub(crate) mod tests {
                         "SendMessage" => assert_eq!(
                             call.input[0],
                             Section::Markdown {
-                                label: "message".into(),
+                                label: String::new(),
                                 text
                             }
                         ),
@@ -1872,8 +1876,8 @@ pub(crate) mod tests {
             .iter()
             .flat_map(|event| &event.calls)
         {
-            assert_ne!(call.detail_title, "Agent");
-            assert_eq!(call.detail_left, "Agent");
+            assert!(!call.detail_title.contains("实测 attach 发提示词"));
+            assert_eq!(call.detail_left, "Spawn agent");
             assert!(matches!(call.input[0], Section::Markdown { .. }));
         }
     }
@@ -1893,7 +1897,7 @@ pub(crate) mod tests {
                 .find(|call| call.name == "Agent")
                 .unwrap()
                 .detail_title,
-            "写工具详情计划"
+            ""
         );
         assert_eq!(
             calls
@@ -2242,8 +2246,8 @@ pub(crate) mod tests {
             let rows = [
                 "Bash mkdir, cd, ls, wc, head",
                 "找那个会话",
-                "SendMessage hide-idle-teammates",
-                "SendMessage team-lead",
+                "hide-idle-teammates ← message",
+                "team-lead ← message",
                 "SubagentHandback",
                 "WebFetch https://code.claude.com/docs/en/hooks",
                 "Bash cd, ls, sed, wc",
@@ -2253,7 +2257,7 @@ pub(crate) mod tests {
                 .lines()
                 .position(|candidate| candidate == line)
                 .unwrap();
-            assert_eq!(events[0].body, rows[index]);
+            assert_eq!(events[0].summary(), rows[index]);
             assert_eq!(events[0].calls[0].name, block["name"].as_str().unwrap());
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
@@ -2266,9 +2270,9 @@ pub(crate) mod tests {
         let expected = [
             "reviewer · Review files",
             "SubagentHandback",
-            "(worker-id) Checks passed.",
-            "(team-lead) Review files.",
-            "(peer-session) Checks passed.",
+            "worker-id → message",
+            "team-lead → message",
+            "peer-session → message",
         ];
         for (line, expected) in include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
             .lines()
@@ -2279,12 +2283,12 @@ pub(crate) mod tests {
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
             let row_expected = if expected == "reviewer · Review files" {
-                "Review files"
+                "reviewer · Spawn agent"
             } else {
                 expected
             };
             assert_eq!(
-                participant_text(events[0].sender.as_deref(), &events[0].body),
+                events[0].summary(),
                 row_expected
             );
             let record: Value = serde_json::from_str(line).unwrap();
@@ -2314,7 +2318,7 @@ pub(crate) mod tests {
             let row_expected = record["message"]["content"][0]["input"]["description"]
                 .as_str()
                 .unwrap_or(tool_name);
-            assert_eq!(tail(file.path(), 1).unwrap()[0].body, row_expected);
+            assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), if tool_name == "Task" { "reviewer · Spawn agent" } else { row_expected });
             let summary = super::super::transcript::read_subagent(
                 file.path(),
                 file.as_file().metadata().unwrap().len(),
@@ -2345,12 +2349,14 @@ pub(crate) mod tests {
                     json!({if name == "SendMessage" { "to" } else { "name" }: participant});
                 let file = tempfile::NamedTempFile::new().unwrap();
                 std::fs::write(file.path(), record.to_string()).unwrap();
-                let row_expected = if name == "SendMessage" && !participant.trim().is_empty() {
-                    format!("SendMessage {participant}")
-                } else {
-                    name.to_owned()
+                let row_expected = match (name, participant.trim().is_empty()) {
+                    ("Agent" | "Task", false) => "reviewer · Spawn agent".to_owned(),
+                    ("Agent" | "Task", true) => "Spawn agent".to_owned(),
+                    ("SendMessage", false) => "reviewer ← message".to_owned(),
+                    ("SendMessage", true) => "message".to_owned(),
+                    _ => name.to_owned(),
                 };
-                assert_eq!(tail(file.path(), 1).unwrap()[0].body, row_expected);
+                assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), row_expected);
                 let summary = super::super::transcript::read_subagent(
                     file.path(),
                     file.as_file().metadata().unwrap().len(),
@@ -2378,7 +2384,7 @@ pub(crate) mod tests {
         block["input"] = json!({"to": "uds:/tmp/cc-socks/29973.sock", "message": "No conflicts"});
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), record.to_string()).unwrap();
-        assert_eq!(tail(file.path(), 1).unwrap()[0].body, "SendMessage");
+        assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), "message");
         let summary = super::super::transcript::read_subagent(
             file.path(),
             file.as_file().metadata().unwrap().len(),

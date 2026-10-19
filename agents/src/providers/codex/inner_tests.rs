@@ -763,16 +763,16 @@ fn interaction_functions_win_over_completed_items() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/parent.jsonl");
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0].body, "demo_sub · Spawn agent");
+    assert_eq!(rows[0].summary(), "demo_sub · Spawn agent");
     assert_eq!(rows[0].calls[0].detail_left, "Spawn agent");
     assert_eq!(
         rows[0].calls[0].input,
         vec![crate::log::Section::Markdown {
-            label: "message".into(),
+            label: String::new(),
             text: "(encrypted)".into()
         }]
     );
-    assert_eq!(rows[1].body, "Wait agent");
+    assert_eq!(rows[1].summary(), "Wait agent");
     assert_eq!(
         rows[1].calls[0].input,
         vec![crate::log::Section::Prose {
@@ -787,7 +787,7 @@ fn interaction_functions_win_over_completed_items() {
             text: "Wait completed.".into()
         }])
     );
-    assert_eq!(rows[2].body, "demo_sub → 演示完成");
+    assert_eq!(rows[2].summary(), "demo_sub → 演示完成");
 }
 
 #[test]
@@ -795,16 +795,16 @@ fn interaction_messages_keep_route_and_merge_adjacent_sender() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
     let rows = tail(&path, 100).unwrap();
-    assert_eq!(rows[0].body, "root → new task");
+    assert_eq!(rows[0].summary(), "root → new task");
     assert_eq!(rows[0].calls[0].detail_left, "New task");
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/codex-interaction/messages.jsonl");
     let rows = tail(&path, 100).unwrap();
     assert!(
         rows.iter()
-            .any(|row| row.body.contains("messages") && row.calls.len() > 1)
+            .any(|row| row.summary().contains("messages") && row.calls.len() > 1)
     );
-    assert!(rows.iter().all(|row| !row.body.contains("encrypted")));
+    assert!(rows.iter().all(|row| !row.summary().contains("encrypted")));
 }
 
 #[test]
@@ -837,10 +837,10 @@ fn child_function_message_uses_session_sender() {
     )
     .unwrap();
     let rows = tail(file.path(), 100).unwrap();
-    assert_eq!(rows[0].body, "rename_gating ← message");
+    assert_eq!(rows[0].summary(), "rename_gating ← message");
     let mut reader = super::rollout::Reader::new(file.path().to_owned(), false);
     assert_eq!(
-        reader.refresh(100).unwrap().events[0].body,
+        reader.refresh(100).unwrap().events[0].summary(),
         "rename_gating ← message"
     );
 }

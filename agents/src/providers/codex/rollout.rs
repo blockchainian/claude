@@ -1517,7 +1517,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         }
         let mut images = Vec::new();
         let mut calls = Vec::new();
-        let mut detail_body = None;
+        let detail_body = None;
         let reference = |offset| crate::log::SourceRecord {
             path: path.to_path_buf(),
             offset,
@@ -1637,19 +1637,11 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                         "Missing Codex agent message payload",
                     )
                 })?;
-                detail_body = Some(
-                    if body.trim().is_empty()
-                        && payload["content"].as_array().is_some_and(|blocks| {
-                            blocks
-                                .iter()
-                                .any(|block| block["type"] == "encrypted_content")
-                        })
-                    {
-                        ENCRYPTED_CONTENT.to_owned()
-                    } else {
-                        body.to_owned()
-                    },
-                );
+                let encrypted = body.trim().is_empty()
+                    && payload["content"].as_array().is_some_and(|blocks| {
+                        blocks.iter().any(|block| block["type"] == "encrypted_content")
+                    });
+                let text = if encrypted { ENCRYPTED_CONTENT.to_owned() } else { body.to_owned() };
                 let field = |prefix: &str| {
                     header
                         .lines()
@@ -1665,14 +1657,13 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 let message_type = field("Message Type: ")?;
                 let author = required_text(payload, "author")?;
                 let recipient = required_text(payload, "recipient")?;
-                let text = detail_body.take().unwrap();
                 let message = crate::log::agent::Message {
                     author: Some(author.to_owned()), recipient: Some(recipient.to_owned()),
                     direction: if author == sender { crate::log::agent::Direction::Outgoing }
                         else if recipient == sender { crate::log::agent::Direction::Incoming }
                         else { crate::log::agent::Direction::Between },
                     kind: message_type.to_owned(),
-                    content: if text == ENCRYPTED_CONTENT { crate::log::agent::Content::Encrypted }
+                    content: if encrypted { crate::log::agent::Content::Encrypted }
                         else { crate::log::agent::Content::Text(text.clone()) },
                 };
                 let body = text.clone();
@@ -2757,25 +2748,25 @@ mod tests {
                     format!("{subject} ← message")
                 } else {
                     let name =
-                        crate::providers::tool::title_name(payload["name"].as_str().unwrap());
+                        crate::providers::tool::display_tool_name(payload["name"].as_str().unwrap());
                     if tool == "spawn_agent" {
                         format!("{subject} · {name}")
                     } else {
                         format!("{subject} ← {name}")
                     }
                 };
-                assert_eq!(tool_body(&payload).unwrap(), expected);
+                assert_eq!(tool_body(&payload).unwrap(), "(encrypted)");
                 assert_eq!(call.title, expected);
                 assert_eq!(
                     call.detail_title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
-                        format!("root → {}", agent_name(subject))
+                        agent_name(subject).to_owned()
                     }
                 );
                 let input = vec![Section::Markdown {
-                    label: "message".into(),
+                    label: String::new(),
                     text: "(encrypted)".into(),
                 }];
                 assert_eq!(call.input, input);
@@ -2784,7 +2775,7 @@ mod tests {
                 let mut row = record.clone();
                 row["payload"] = payload.clone();
                 std::fs::write(file.path(), row.to_string()).unwrap();
-                assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+                assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), expected);
                 assert_eq!(
                     summary(file.path()).unwrap().activity.unwrap().label,
                     expected
@@ -2811,20 +2802,19 @@ mod tests {
                 let call = response_tool_call(&payload, None);
                 assert_eq!(
                     call.detail_left,
-                    crate::providers::tool::title_name(&crate::providers::tool::display_tool_name(
-                        &name
-                    ))
+                    if tool == "send_message" { "Message".to_owned() }
+                    else { crate::providers::tool::display_tool_name(&name) }
                 );
                 assert_eq!(
                     call.detail_title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
-                        format!("root → {}", agent_name(subject))
+                        agent_name(subject).to_owned()
                     }
                 );
                 let expected = vec![Section::Markdown {
-                    label: "message".into(),
+                    label: String::new(),
                     text: "Review files.".into(),
                 }];
                 assert_eq!(call.input, expected);
@@ -2982,7 +2972,7 @@ mod tests {
             std::fs::write(file.path(), line).unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, expected);
+            assert_eq!(events[0].summary(), expected);
             assert_eq!(
                 summary(file.path()).unwrap().activity.unwrap().label,
                 expected
@@ -3015,7 +3005,7 @@ mod tests {
             } else {
                 crate::providers::tool::title_name(&crate::providers::tool::display_tool_name(name))
             };
-            assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+            assert_eq!(tail(file.path(), 1).unwrap()[0].summary(), expected);
             assert_eq!(
                 summary(file.path()).unwrap().activity.unwrap().label,
                 expected
@@ -3209,7 +3199,7 @@ mod perspective_tests {
             assert!(
                 events
                     .iter()
-                    .any(|e| e.calls.iter().any(|c| c.name == name) && e.body == title),
+                    .any(|e| e.calls.iter().any(|c| c.name == name) && e.summary() == title),
                 "{name}"
             );
         }
@@ -3220,9 +3210,9 @@ mod perspective_tests {
         let events = fixture("root");
         for title in ["alpha → message", "beta ← message", "beta → beta 完成"] {
             assert!(
-                events.iter().any(|e| e.body == title),
+                events.iter().any(|e| e.summary() == title),
                 "{title}: {:?}",
-                events.iter().map(|e| &e.body).collect::<Vec<_>>()
+                events.iter().map(|e| e.summary()).collect::<Vec<_>>()
             );
         }
     }
@@ -3233,7 +3223,7 @@ mod perspective_tests {
         assert_eq!(
             events
                 .iter()
-                .filter(|e| e.body == "root → new task")
+                .filter(|e| e.summary() == "root → new task")
                 .count(),
             2
         );
@@ -3243,18 +3233,18 @@ mod perspective_tests {
             "beta ← message",
             "root ← message",
         ] {
-            assert!(events.iter().any(|e| e.body == title), "{title}");
+            assert!(events.iter().any(|e| e.summary() == title), "{title}");
         }
-        assert!(fixture("beta").iter().any(|e| e.body == "alpha → message"));
+        assert!(fixture("beta").iter().any(|e| e.summary() == "alpha → message"));
         assert!(
             fixture("beta")
                 .iter()
-                .any(|e| e.body == "root ← 2 messages")
+                .any(|e| e.summary() == "root ← 2 messages")
         );
         assert!(
             fixture("alpha_kid")
                 .iter()
-                .any(|e| e.body == "alpha → new task")
+                .any(|e| e.summary() == "alpha → new task")
         );
     }
 
@@ -3283,7 +3273,7 @@ mod perspective_tests {
         .unwrap();
         let events = tail(file.path(), 10).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "beta → 2 messages");
+        assert_eq!(events[0].summary(), "beta → 2 messages");
         assert_eq!(events[0].calls.len(), 2);
         assert!(
             events[0]
@@ -3309,7 +3299,7 @@ mod perspective_tests {
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), format!("{root}\n{message}\n")).unwrap();
         assert_eq!(
-            tail(file.path(), 10).unwrap()[0].body,
+            tail(file.path(), 10).unwrap()[0].summary(),
             "alpha → beta · message"
         );
     }
@@ -3357,4 +3347,16 @@ fn codex_agent_exchange_records_route_type_and_encryption() {
     assert_ne!(merged.calls[0].id, merged.calls[1].id);
     assert_eq!(merged.started_at, merged.calls[1].started_at.unwrap());
 }
+
+    #[test]
+    fn plaintext_marker_is_not_an_encrypted_field() {
+        let mut record: Value = serde_json::from_str(include_str!("../../../tests/fixtures/codex-agent-messages/final-answer.jsonl")).unwrap();
+        let text = record["payload"]["content"][0]["text"].as_str().unwrap();
+        let header = text.split_once("\nPayload:\n").unwrap().0;
+        record["payload"]["content"][0]["text"] = format!("{header}\nPayload:\n(encrypted)").into();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), record.to_string()).unwrap();
+        let events = tail(file.path(), 10).unwrap();
+        assert_eq!(events[0].calls[0].agent_message.as_ref().unwrap().content, crate::log::agent::Content::Text("(encrypted)".to_owned()));
+    }
 }

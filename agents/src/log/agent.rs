@@ -102,7 +102,13 @@ pub fn name(path: &str) -> &str {
 
 impl Message {
     pub fn label(&self) -> String {
-        crate::providers::tool::title_name(&self.kind.to_lowercase())
+        const LABELS: &[(&str, &str)] = &[
+            ("MESSAGE", "Message"), ("NEW_TASK", "New task"),
+            ("FINAL_ANSWER", "Final answer"), ("SPAWN_AGENT", "Spawn agent"),
+            ("FOLLOWUP_TASK", "Followup task"),
+        ];
+        LABELS.iter().find_map(|(kind, label)| (*kind == self.kind).then(|| (*label).to_owned()))
+            .unwrap_or_else(|| crate::providers::tool::title_name(&self.kind))
     }
 
     pub fn route(&self) -> String {

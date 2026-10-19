@@ -15,7 +15,7 @@ fn subagent_reader_ignores_inherited_records_while_rollout_is_copied() {
     file.write_all(lines[2..].concat().as_bytes()).unwrap();
     let update = reader.refresh(usize::MAX).unwrap();
     assert_eq!(update.events.len(), 3);
-    assert_eq!(update.events[0].body, "provider_adapters ← new task");
+    assert_eq!(update.events[0].summary(), "provider_adapters ← new task");
 }
 
 #[test]
@@ -29,13 +29,13 @@ fn subagent_reader_pages_appends_and_resets_its_history_boundary() {
     file.write_all(lines[..split].concat().as_bytes()).unwrap();
     let mut reader = rollout::Reader::new(file.path().to_owned(), false);
     assert_eq!(
-        reader.refresh(1).unwrap().events[0].body,
+        reader.refresh(1).unwrap().events[0].summary(),
         "provider_adapters ← new task"
     );
     file.write_all(lines[split..].concat().as_bytes()).unwrap();
     let update = reader.refresh(usize::MAX).unwrap();
     assert_eq!(update.events.len(), 3);
-    assert_eq!(update.events[1].body, "provider_adapters ← message");
+    assert_eq!(update.events[1].summary(), "provider_adapters ← message");
     assert!(
         update
             .events
@@ -57,9 +57,9 @@ fn subagent_reader_excludes_inherited_history_and_formats_messages() {
     let mut reader = rollout::Reader::new(file.path().to_owned(), false);
     let update = reader.refresh(usize::MAX).unwrap();
     assert_eq!(update.events.len(), 3);
-    assert_eq!(update.events[0].body, "provider_adapters ← new task");
-    assert_eq!(update.events[1].body, "provider_adapters ← message");
-    assert!(update.events[2].body.starts_with("报告："));
+    assert_eq!(update.events[0].summary(), "provider_adapters ← new task");
+    assert_eq!(update.events[1].summary(), "provider_adapters ← message");
+    assert!(update.events[2].summary().starts_with("报告："));
     assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
     let summary = rollout::summary(file.path()).unwrap();
     assert!(summary.prompt_at.is_none());
