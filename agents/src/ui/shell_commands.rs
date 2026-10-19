@@ -314,6 +314,7 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
             }
             continue;
         }
+        let mut stdin = false;
         while index < command.range.end {
             while matches!(source.as_bytes().get(index), Some(b' ' | b'\t')) {
                 index += 1;
@@ -340,6 +341,10 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
                 break;
             };
             let option = &source[option];
+            if stdin || option == "-" {
+                stdin = true;
+                continue;
+            }
             if matches!(option, "-c" | "-e" | "--eval") {
                 if let Some(range) = argument(source, &mut index) {
                     scripts.push(Script {

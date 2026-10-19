@@ -468,6 +468,17 @@ mod tests {
     }
 
     #[test]
+    fn shell_script_python_heredoc_after_script_arguments() {
+        for source in [
+            "python3 - agents <<'EOF'\nimport json\nEOF",
+            "python3 - agents src tests <<'EOF'\nimport json\nEOF",
+            "python3 - -c 'print(42)' <<'EOF'\nimport json\nEOF",
+        ] {
+            assert_script_styles(source, "import json\n", "python");
+        }
+    }
+
+    #[test]
     fn shell_script_node_argument() {
         let (source, script, lang) = (
             "node -e 'const x = 42; console.log(x)' && echo done",
