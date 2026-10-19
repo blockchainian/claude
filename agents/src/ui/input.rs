@@ -961,8 +961,12 @@ impl View {
             .iter()
             .position(|i| *i == self.selected)
             .unwrap_or(0);
-        let code = if forward { KeyCode::Down } else { KeyCode::Up };
-        let selected = visible[super::navigation::step(current, visible.len(), 1, code)];
+        let next = if forward {
+            current.saturating_add(1).min(visible.len() - 1)
+        } else {
+            current.saturating_sub(1)
+        };
+        let selected = visible[next];
         self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {

@@ -54,6 +54,23 @@ fn terminal_task_navigation_and_opening_keys() {
     tmux.wait_for(|s| s.contains("Example task 12 ❯"));
     tmux.run(&["send-keys", "-t", "probe", "Down"]);
     tmux.wait_for(|s| s.contains("Example task 13 ❮"));
+    // Both keyboard and wheel stay on the last and first task.
+    tmux.run(&["send-keys", "-t", "probe", "Down", "/"]);
+    tmux.wait_for(|s| s.contains("Search ❯") && s.contains("Example task 13 ❮"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|s| !s.contains("Search ❯"));
+    tmux.mouse(65, 5, row, false);
+    tmux.wait_for(|s| s.contains("Example task 13 ❮"));
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.wait_for(|s| s.contains("Example task 12 ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "Up", "/"]);
+    tmux.wait_for(|s| s.contains("Search ❯") && s.contains("Example task 12 ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|s| !s.contains("Search ❯"));
+    tmux.mouse(64, 5, row, false);
+    tmux.wait_for(|s| s.contains("Example task 12 ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "Down"]);
+    tmux.wait_for(|s| s.contains("Example task 13 ❮"));
     for key in ["Enter", "Right", "C-l", "o"] {
         tmux.run(&["send-keys", "-t", "probe", key]);
         tmux.wait_for(|s| s.contains("Terminal is not supported"));
@@ -78,6 +95,6 @@ fn terminal_task_navigation_and_opening_keys() {
     tmux.wait_for(|s| s.contains("Previous") && s.contains("→/⌃l"));
     println!(
         "{}",
-        serde_json::json!({"task_history": "passed", "opening_keys": "passed", "search_escape": "passed", "help": "passed"})
+        serde_json::json!({"task_list_boundaries": "passed", "task_history": "passed", "opening_keys": "passed", "search_escape": "passed", "help": "passed"})
     );
 }

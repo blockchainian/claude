@@ -729,6 +729,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     );
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     // Pending and inactive children never populate the parent's Background section.
+    view.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
     while view.selected_id() != Some(&parent_key) {
         let previous = view.selected_id().cloned();
         view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));

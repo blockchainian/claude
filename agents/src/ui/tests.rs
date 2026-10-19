@@ -1867,6 +1867,7 @@ fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
     view.set_sessions(rows, true);
     key(&mut view, KeyCode::Tab);
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
+    key(&mut view, KeyCode::Home);
     while view.selected_id() != Some(&session_key("45")) {
         key(&mut view, KeyCode::Down);
     }
@@ -2163,7 +2164,7 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::PageDown);
     assert_eq!(view.selected_id(), None);
     key(&mut view, KeyCode::Down);
-    assert_eq!(view.selected_id(), Some(&session_key("0")));
+    assert_eq!(view.selected_id(), None);
 }
 #[test]
 fn styles_and_unicode_clipping() {

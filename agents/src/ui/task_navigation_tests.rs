@@ -50,6 +50,7 @@ fn opening_keys_use_terminal() {
 #[test]
 fn escape_walks_selection_history_without_bouncing() {
     let mut view = tasks();
+    view.set_selected(view.selectable_indices()[0]);
     let first = view.selected_id().cloned();
     key(&mut view, KeyCode::Down);
     let second = view.selected_id().cloned();
@@ -95,6 +96,7 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
 #[test]
 fn escape_skips_removed_and_hidden_tasks() {
     let mut view = tasks();
+    view.set_selected(view.selectable_indices()[0]);
     let first = view.selected_id().cloned();
     key(&mut view, KeyCode::Down);
     let removed = view.selected_id().cloned();
@@ -202,5 +204,44 @@ fn escape_closes_overlays_without_consuming_history() {
         assert!(!view.log_search.editing && !view.log_detail_search.editing);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());
+    }
+}
+
+#[test]
+fn task_list_keyboard_stops_at_both_ends() {
+    for (code, modifiers, forward) in [
+        (KeyCode::Up, KeyModifiers::NONE, false),
+        (KeyCode::Down, KeyModifiers::NONE, true),
+        (KeyCode::Char('k'), KeyModifiers::NONE, false),
+        (KeyCode::Char('j'), KeyModifiers::NONE, true),
+        (KeyCode::Char('p'), KeyModifiers::CONTROL, false),
+        (KeyCode::Char('n'), KeyModifiers::CONTROL, true),
+    ] {
+        let mut view = tasks();
+        key(
+            &mut view,
+            if forward { KeyCode::End } else { KeyCode::Home },
+        );
+        let selected = view.selected;
+        view.handle_key(KeyEvent::new(code, modifiers));
+        assert_eq!(view.selected, selected, "{code:?} at boundary");
+    }
+}
+
+#[test]
+fn task_list_wheel_stops_at_both_ends() {
+    for (kind, boundary) in [
+        (MouseEventKind::ScrollUp, KeyCode::Home),
+        (MouseEventKind::ScrollDown, KeyCode::End),
+    ] {
+        let mut view = tasks();
+        key(&mut view, boundary);
+        screen(&view, 120, 40);
+        let list = view.center_layout(Rect::new(0, 0, 120, 40)).list;
+        let selected = view.selected;
+        let scroll = view.viewport.borrow().scroll;
+        view.handle_mouse(mouse(kind, list.x, list.y));
+        assert_eq!(view.selected, selected, "{kind:?} at boundary");
+        assert_eq!(view.viewport.borrow().scroll, scroll);
     }
 }
