@@ -1277,20 +1277,17 @@ fn draft_model_choices_are_unique_and_select_the_effective_value() {
             panic!("expected model choices");
         };
         let choices = &view.input_choices[&ProviderId::Claude].models;
-        assert_eq!(
-            values,
-            &choices
-                .iter()
-                .map(|model| model.id.clone())
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            labels,
-            &choices
-                .iter()
-                .map(|model| model.label.clone())
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(values.len(), choices.len());
+        let mut unique = values.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), choices.len());
+        for (value, label) in values.iter().zip(labels) {
+            assert_eq!(
+                label,
+                &choices.iter().find(|model| model.id == *value).unwrap().label
+            );
+        }
         assert_eq!(
             values[selector.selected],
             model.unwrap_or("claude-fable-5-1")
@@ -1684,4 +1681,74 @@ fn draft_branch_edit_survives_selecting_another_task() {
     render(&view);
     click_field(&mut view, Field::Branch);
     assert_pending_branch(&view);
+}
+
+#[test]
+fn resumable_session_settings_open_and_dispatch_immediately() {
+    for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for status in [
+            SessionStatus::Inactive,
+            SessionStatus::Ready,
+            SessionStatus::Working,
+        ] {
+            let (directory, mut view) = fixture();
+            let model = if provider == ProviderId::Codex {
+                std::fs::write(
+                    directory.path().join("models_cache.json"),
+                    include_str!("../../tests/fixtures/codex-models-cache.json"),
+                )
+                .unwrap();
+                let provider = crate::providers::codex::CodexProvider::new(
+                    directory.path().into(),
+                    directory.path().join("manager"),
+                );
+                view.input_choices
+                    .insert(ProviderId::Codex, provider.input_choices());
+                "gpt-6.1-sol"
+            } else {
+                "claude-sonnet-5-5"
+            };
+            let session = &mut view.rows[view.selected];
+            session.id.provider = provider;
+            session.status = status;
+            session.process = None;
+            session.model = Some(model.into());
+            session.effort = Some("high".into());
+            let id = session.id.clone();
+            if status == SessionStatus::Inactive {
+                key(&mut view, KeyCode::Tab);
+            }
+            for field in [Field::Model, Field::Effort] {
+                let area = Rect::new(0, 0, 180, 52);
+                let mut buffer = Buffer::empty(area);
+                view.render_at(area, &mut buffer, Utc::now());
+                let rect = view
+                    .viewport
+                    .borrow()
+                    .field_targets
+                    .iter()
+                    .find(|(_, target)| *target == field)
+                    .unwrap()
+                    .0;
+                assert_eq!(click(&mut view, rect.x, rect.y), None);
+                let selector = view
+                    .selector
+                    .as_ref()
+                    .expect("resumable session selector opens");
+                let selected = selector.selected;
+                let expected = if field == Field::Model {
+                    Action::SetModel {
+                        id: id.clone(),
+                        model: model.into(),
+                    }
+                } else {
+                    Action::SetEffort {
+                        id: id.clone(),
+                        effort: "high".into(),
+                    }
+                };
+                assert_eq!(view.apply_choice(selected), Some(expected));
+            }
+        }
+    }
 }

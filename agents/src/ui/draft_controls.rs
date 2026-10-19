@@ -54,6 +54,7 @@ pub(super) enum SelectorKind {
         target: ControlTarget,
         values: Vec<String>,
         labels: Vec<String>,
+        families: Vec<String>,
     },
     Effort {
         target: ControlTarget,
@@ -170,8 +171,24 @@ impl Selector {
                 .enumerate()
                 .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
                 .collect(),
-            SelectorKind::Effort { labels: values, .. }
-            | SelectorKind::Model { labels: values, .. } => values
+            SelectorKind::Model {
+                labels, families, ..
+            } => {
+                let mut rows = Vec::new();
+                let mut previous = None;
+                for (index, (label, family)) in labels.iter().zip(families).enumerate() {
+                    if previous != Some(family) {
+                        if previous.is_some() {
+                            rows.push(ListRow::Text(Line::default()));
+                        }
+                        rows.push(ListRow::Text(Line::from(family.clone().dim())));
+                        previous = Some(family);
+                    }
+                    rows.push(ListRow::Choice(index, Line::from(label.clone())));
+                }
+                rows
+            }
+            SelectorKind::Effort { labels: values, .. } => values
                 .iter()
                 .enumerate()
                 .map(|(index, value)| ListRow::Choice(index, Line::from(value.clone())))
@@ -457,16 +474,14 @@ impl View {
                 self.draft_effort(draft).map(str::to_owned),
             )
         } else if let Some(session) = self.selected_row() {
-            if matches!(field, Field::Branch | Field::Directory)
-                || !session.can_resume()
-            {
+            if matches!(field, Field::Branch | Field::Directory) || !session.can_resume() {
                 return;
             }
             (
                 session.id.provider,
                 ControlTarget::Session(session.id.clone()),
-                self.session_settings(session).0.map(str::to_owned),
-                self.session_settings(session).1.map(str::to_owned),
+                session.model.clone(),
+                session.effort.clone(),
             )
         } else {
             return;
@@ -475,10 +490,18 @@ impl View {
             return;
         };
         let current_model = model.as_deref().and_then(|model| choices.model(model));
+        let mut models: Vec<_> = choices.models.iter().collect();
+        // Stable sorting keeps both first-seen families and their models in catalog order.
+        models.sort_by_key(|model| {
+            choices
+                .models
+                .iter()
+                .position(|choice| choice.family == model.family)
+                .expect("model family belongs to the catalog")
+        });
         let (values, current) = match field {
             Field::Model => (
-                choices
-                    .models
+                models
                     .iter()
                     .map(|model| model.id.clone())
                     .collect::<Vec<_>>(),
@@ -512,6 +535,7 @@ impl View {
                 target,
                 values,
                 labels,
+                families: models.iter().map(|model| model.family.clone()).collect(),
             }
         } else {
             SelectorKind::Effort {
@@ -694,17 +718,6 @@ impl View {
                         self.draft_changed(id);
                         None
                     }
-                    ControlTarget::Session(id)
-                        if !self.rows.iter().find(|session| session.id == id)?.is_live_background() =>
-                    {
-                        let settings = self.pending_settings.entry(id).or_default();
-                        if model {
-                            settings.model = Some(value);
-                        } else {
-                            settings.effort = Some(value);
-                        }
-                        None
-                    }
                     ControlTarget::Session(id) => Some(if model {
                         Action::SetModel { id, model: value }
                     } else {
@@ -790,6 +803,7 @@ impl View {
 mod tests {
     use super::*;
     include!("picker_layout_tests.rs");
+    include!("model_family_tests.rs");
 
     fn draft_view(cwd: &Path, config: &Path) -> View {
         crate::providers::claude::write_fixture_cache(config);

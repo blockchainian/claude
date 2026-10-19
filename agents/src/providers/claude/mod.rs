@@ -9,6 +9,8 @@ mod background;
 pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;
+#[cfg(test)]
+mod settings_tests;
 mod defaults;
 mod models;
 #[cfg(test)]
@@ -445,14 +447,27 @@ impl ClaudeProvider {
                 session.background_job = entry.job_id.filter(|id| !id.is_empty()).map(|id| {
                     let needs = jobs
                         .get(&session.id.id)
-                        .filter(|job| job.id == id)
-                        .and_then(|job| job.needs.clone());
+                        .filter(|state| state.job.id == id)
+                        .and_then(|state| state.job.needs.clone());
                     crate::model::BackgroundJob {
                         id,
                         needs,
                         awaits_prompt: false,
                     }
                 });
+            }
+            if let Some(state) = jobs.get(&session.id.id).filter(|state| {
+                session
+                    .background_job
+                    .as_ref()
+                    .is_some_and(|job| job.id == state.job.id)
+            }) {
+                if let Some(model) = &state.model {
+                    session.model = Some(model.clone());
+                }
+                if let Some(effort) = &state.effort {
+                    session.effort = Some(effort.clone());
+                }
             }
             session.process = entry.pid.map(|pid| Process {
                 pid,
@@ -482,7 +497,7 @@ impl ClaudeProvider {
         }
         for session in &mut sessions {
             if session.process.is_none() {
-                session.background_job = jobs.get(&session.id.id).cloned();
+                session.background_job = jobs.get(&session.id.id).map(|state| state.job.clone());
             }
             // A background job that ended its turn on a request for the user
             // still shows idle in the session registry.
@@ -943,8 +958,10 @@ impl Provider for ClaudeProvider {
             }
             Some(_) => Err(io::Error::other(FOREGROUND_SESSION)),
             None => match input {
-                SessionInput::Prompt(text) => {
-                    let output = resume_prompt(&session, &text).output()?;
+                input @ (SessionInput::Prompt(_)
+                | SessionInput::SetModel(_)
+                | SessionInput::SetEffort(_)) => {
+                    let output = resume_input(&session, &input)?.output()?;
                     if output.status.success() {
                         Ok(())
                     } else {
@@ -1041,12 +1058,24 @@ impl Provider for ClaudeProvider {
     }
 }
 
-fn resume_prompt(session: &Session, text: &str) -> Command {
+fn resume_input(session: &Session, input: &SessionInput) -> io::Result<Command> {
     let mut command = Command::new("claude");
     command
-        .args(["--bg", "--resume", &session.id.id, text])
+        .args(["--bg", "--resume", &session.id.id])
         .current_dir(&session.cwd);
-    command
+    match input {
+        SessionInput::Prompt(text) => {
+            command.arg(text);
+        }
+        SessionInput::SetModel(model) => {
+            command.args(["--model", model]);
+        }
+        SessionInput::SetEffort(effort) => {
+            command.args(["--effort", effort]);
+        }
+        _ => return Err(io::ErrorKind::Unsupported.into()),
+    }
+    Ok(command)
 }
 
 fn is_uuid(id: &str) -> bool {
@@ -1134,6 +1163,63 @@ fn session(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn live_background_settings_override_the_previous_turn() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("projects/probe");
+        fs::create_dir_all(&project).unwrap();
+        let id = "4165651d-b9e3-458d-8612-f8114e312363";
+        fs::write(project.join(format!("{id}.jsonl")), FIXTURE).unwrap();
+        let mut entry = registry::tests::fixture(directory.path());
+        entry["sessionId"] = id.into();
+        entry["kind"] = "bg".into();
+        entry["jobId"] = "settings-probe".into();
+        fs::write(
+            directory.path().join("sessions/live.json"),
+            serde_json::to_vec(&entry).unwrap(),
+        )
+        .unwrap();
+        let mut state: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-background-settings.json"
+        ))
+        .unwrap();
+        state["sessionId"] = id.into();
+        let job = directory.path().join("jobs/settings-probe");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(job.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+        let mut provider = ClaudeProvider::new(directory.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        assert!(session.is_live_background());
+        assert_eq!(session.model.as_deref(), Some("sonnet"));
+        assert_eq!(session.effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn inactive_settings_resume_without_a_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("projects/probe");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_bytes!("../../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut provider = ClaudeProvider::new(directory.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        for (input, option, value) in [
+            (SessionInput::SetModel("sonnet".into()), "--model", "sonnet"),
+            (SessionInput::SetEffort("high".into()), "--effort", "high"),
+        ] {
+            let command = resume_input(&session, &input).unwrap();
+            let args: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_str().unwrap())
+                .collect();
+            assert_eq!(args, ["--bg", "--resume", &session.id.id, option, value]);
+            assert_eq!(command.get_current_dir(), Some(session.cwd.as_path()));
+        }
+    }
+
     #[test]
     fn model_label_reads_the_transcript_name_of_the_session_model() {
         let fixture = std::fs::read_to_string(

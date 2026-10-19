@@ -167,6 +167,70 @@ pub(in crate::providers::codex) fn resume(client: &mut Client, thread_id: &str) 
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsParams<'a> {
+    thread_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct SettingsResponse {}
+
+/// Loads the thread and updates its settings without starting a turn.
+pub(in crate::providers::codex) fn set_settings(
+    client: &mut Client,
+    thread_id: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> io::Result<()> {
+    resume(client, thread_id)?;
+    let _: SettingsResponse = client.request(
+        "thread/settings/update",
+        SettingsParams {
+            thread_id,
+            model,
+            effort,
+        },
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn settings_payload_changes_only_the_selected_field() {
+        for (model, effort, expected) in [
+            (
+                Some("gpt-6.1-sol"),
+                None,
+                json!({"threadId":"thread", "model":"gpt-6.1-sol"}),
+            ),
+            (
+                None,
+                Some("high"),
+                json!({"threadId":"thread", "effort":"high"}),
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_value(SettingsParams {
+                    thread_id: "thread",
+                    model,
+                    effort
+                })
+                .unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum UserInput<'a> {
     Text { text: &'a str },

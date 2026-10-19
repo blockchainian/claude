@@ -24,13 +24,22 @@ pub(in crate::providers) struct Entry {
     pub status: Option<String>,
 }
 
-pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::BackgroundJob> {
+#[derive(Clone)]
+pub(super) struct BackgroundSession {
+    pub job: crate::model::BackgroundJob,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+pub(super) fn background_jobs(config: &Path) -> HashMap<String, BackgroundSession> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct State {
         session_id: String,
         template: String,
         needs: Option<String>,
+        #[serde(default)]
+        respawn_flags: Vec<String>,
     }
     let mut jobs = HashMap::new();
     for entry in fs::read_dir(config.join("jobs"))
@@ -50,12 +59,25 @@ pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::Ba
         let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
+        let setting = |name| {
+            state
+                .respawn_flags
+                .windows(2)
+                .find(|args| args[0] == name)
+                .map(|args| args[1].clone())
+        };
+        let model = setting("--model");
+        let effort = setting("--effort");
         jobs.insert(
             state.session_id,
-            crate::model::BackgroundJob {
-                id,
-                needs: state.needs,
-                awaits_prompt: false,
+            BackgroundSession {
+                job: crate::model::BackgroundJob {
+                    id,
+                    needs: state.needs,
+                    awaits_prompt: false,
+                },
+                model,
+                effort,
             },
         );
     }
@@ -170,8 +192,8 @@ pub(super) mod tests {
         fs::write(jobs.join("state.json"), state).unwrap();
         let found = background_jobs(directory.path());
         let job = found.get("e772d00b-c424-4632-a8df-74bc9c7b1629").unwrap();
-        assert_eq!(job.id, "job-distinct-from-session");
-        assert_eq!(job.needs, None);
+        assert_eq!(job.job.id, "job-distinct-from-session");
+        assert_eq!(job.job.needs, None);
     }
 
     #[test]
@@ -185,6 +207,7 @@ pub(super) mod tests {
         let found = background_jobs(directory.path());
         assert_eq!(
             found["e772d00b-c424-4632-a8df-74bc9c7b1629"]
+                .job
                 .needs
                 .as_deref(),
             Some("send a prompt to start")

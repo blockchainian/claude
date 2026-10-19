@@ -414,7 +414,10 @@ fn app_creates_worktree_with_the_task_request() {
     app.handle_action(Some(Action::NewDraft { cwd: repo.clone() }));
     assert!(screen(&mut app).contains("New task"));
     app.handle_action(Some(Action::CreateTask {
-        draft_id: DraftId { millis: 0, counter: 1 },
+        draft_id: DraftId {
+            millis: 0,
+            counter: 1,
+        },
         provider: ProviderId::Claude,
         request: crate::tasks::NewTask {
             cwd: repo,
@@ -511,7 +514,7 @@ fn registry_background_title_needs_and_delete_warning_reach_the_screen() {
 }
 
 #[test]
-fn codex_setting_actions_show_unsupported_input_errors() {
+fn codex_setting_actions_report_daemon_connection_failures() {
     let directory = tempfile::tempdir().unwrap();
     rusqlite::Connection::open(directory.path().join("state_5.sqlite"))
         .unwrap()
@@ -543,7 +546,7 @@ fn codex_setting_actions_show_unsupported_input_errors() {
     for action in [
         Action::SetModel {
             id: id.clone(),
-            model: "haiku".into(),
+            model: "gpt-6.1-sol".into(),
         },
         Action::SetEffort {
             id: id.clone(),
@@ -551,15 +554,8 @@ fn codex_setting_actions_show_unsupported_input_errors() {
         },
     ] {
         app.handle_action(Some(action));
-        assert!(app.pending_inputs.is_empty());
-        let area = ratatui::layout::Rect::new(0, 0, 240, 40);
-        let mut buffer = ratatui::buffer::Buffer::empty(area);
-        app.view.render(area, &mut buffer);
-        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
-        assert!(
-            rendered.contains("This task cannot receive that input"),
-            "{rendered}"
-        );
+        assert!(app.pending_inputs.contains(&id));
+        complete_input(&mut app, "Codex's app-server daemon isn't running");
     }
 }
 

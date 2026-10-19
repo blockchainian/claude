@@ -9,6 +9,8 @@ pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;
 #[cfg(test)]
+mod settings_tests;
+#[cfg(test)]
 mod subagents_tests;
 #[cfg(test)]
 mod tests;
@@ -326,6 +328,7 @@ impl ModelCatalog {
                 .map(|model| crate::providers::ModelChoice {
                     id: model.slug.clone(),
                     label: model.display_name.clone(),
+                    family: model_family(&model.slug, &model.display_name),
                     efforts: model
                         .supported_reasoning_levels
                         .iter()
@@ -343,6 +346,25 @@ impl ModelCatalog {
         };
         self.modified = Some(modified);
         Ok(())
+    }
+}
+
+fn model_family(slug: &str, display_name: &str) -> String {
+    let tier = slug.strip_prefix("gpt-").and_then(|suffix| {
+        let (version, tier) = suffix.split_once('-')?;
+        let numeric_version = version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+        (numeric_version && !tier.is_empty() && tier.bytes().all(|byte| byte.is_ascii_alphabetic()))
+            .then_some(tier)
+    });
+    if let Some(tier) = tier
+        && let Some(name) = display_name.split('-').nth(2)
+        && name.eq_ignore_ascii_case(tier)
+    {
+        name.to_owned()
+    } else {
+        display_name.to_owned()
     }
 }
 
@@ -696,14 +718,7 @@ impl Provider for CodexProvider {
         Some(command)
     }
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
-        if !session.can_resume()
-            || matches!(
-                input,
-                SessionInput::SetModel(_)
-                    | SessionInput::SetEffort(_)
-                    | SessionInput::Answer { .. }
-            )
-        {
+        if !session.can_resume() || matches!(input, SessionInput::Answer { .. }) {
             return None;
         }
         let home = self.home.clone();
@@ -711,11 +726,14 @@ impl Provider for CodexProvider {
         let archived = session.archived;
         Some(Box::new(move || {
             let mut client = app_server::Client::connect(&home)?;
-            // Codex refuses to resume an archived thread, so a prompt brings it back first.
+            // Input brings an archived thread back before resuming it.
             if archived
                 && matches!(
                     input,
-                    SessionInput::Prompt(_) | SessionInput::PromptWithImages { .. }
+                    SessionInput::Prompt(_)
+                        | SessionInput::PromptWithImages { .. }
+                        | SessionInput::SetModel(_)
+                        | SessionInput::SetEffort(_)
                 )
             {
                 app_server::thread::unarchive(&mut client, &id)?;
@@ -733,9 +751,13 @@ impl Provider for CodexProvider {
                         None => Ok(()),
                     }
                 }
-                SessionInput::SetModel(_)
-                | SessionInput::SetEffort(_)
-                | SessionInput::Answer { .. } => Err(io::ErrorKind::Unsupported.into()),
+                SessionInput::SetModel(model) => {
+                    app_server::thread::set_settings(&mut client, &id, Some(&model), None)
+                }
+                SessionInput::SetEffort(effort) => {
+                    app_server::thread::set_settings(&mut client, &id, None, Some(&effort))
+                }
+                SessionInput::Answer { .. } => Err(io::ErrorKind::Unsupported.into()),
             }
         }))
     }

@@ -1,0 +1,50 @@
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Sonnet 5 with high effort · Claude Max
+ ▝▝   ▝▝   /workspace/project · /rc
+
+
+❯ Reply READY only. Do not use tools.
+
+⏺ READY
+
+❯ /effort high
+  ⎿  Set effort level to high (saved as your default for new sessions): Comprehensive implementation with extensive testing and documentation
+
+❯ /model claude-sonnet-5
+  ⎿  Set model to Sonnet 5 and saved as your default for new sessions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                             ● high · /effort · Update available! Run: brew upgrade claude-code@latest
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Claude · Context 100% left · 200k · 0s
+  ⏵⏵ auto mode on (shift+tab to cycle)

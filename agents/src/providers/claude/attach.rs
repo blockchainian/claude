@@ -443,8 +443,19 @@ impl Terminal {
                 .map_err(|error| self.diagnostic("model-confirmation-cleared", error))
             }
             SessionInput::SetEffort(effort) => {
+                const CONFIRMATION: &str = "Your next response will be slower and use more tokens";
                 self.submit(&format!("/effort {effort}"))?;
-                self.wait_at("effort-submission-cleared", actual_empty)
+                self.wait_at("effort-confirmation", |screen| {
+                    actual_empty(screen)
+                        || (screen.contains(CONFIRMATION)
+                            && screen.contains(&format!("Yes, switch to {effort}")))
+                })?;
+                if !self.screen().contains(CONFIRMATION) {
+                    return Ok(());
+                }
+                self.write(b"\r")?;
+                self.wait_allowing(actual_empty, Some(CONFIRMATION))
+                    .map_err(|error| self.diagnostic("effort-confirmation-cleared", error))
             }
         }
     }
@@ -535,7 +546,11 @@ fn model_selected(screen: &str, label: &str) -> bool {
     }
     let header = screen.lines().take(5).any(|line| {
         line.split_once(" · ").is_some_and(|(model, _)| {
-            model.trim_start_matches(|ch: char| !ch.is_alphanumeric()) == label
+            let model = model.trim_start_matches(|ch: char| !ch.is_alphanumeric());
+            model == label
+                || model
+                    .rsplit_once(" with ")
+                    .is_some_and(|(model, effort)| model == label && effort.ends_with(" effort"))
         })
     });
     // Long transcripts scroll the header away; their status line is below the editor.
@@ -587,6 +602,15 @@ fn known_dialog(screen: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_model_header_includes_the_selected_effort() {
+        let screen =
+            include_str!("../../../tests/fixtures/claude-attach/model-effort-header.screen.txt");
+        assert!(model_selected(screen, "Sonnet 5"));
+        assert!(!model_selected(screen, "Sonnet 5.5"));
+        assert!(!model_selected(screen, "Opus 5.5"));
+    }
 
     #[test]
     #[ignore = "starts a real Claude background session and restores global model defaults"]
