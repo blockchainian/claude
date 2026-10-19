@@ -249,12 +249,6 @@ fn encode_answers(ask: &Ask, answer: &Answer) -> io::Result<BTreeMap<String, Str
             }
             values.push(other.clone());
         }
-        if values
-            .iter()
-            .any(|value| value.chars().any(char::is_control))
-        {
-            return Err(invalid());
-        }
         if !values.is_empty() {
             result.insert(question.text.clone(), values.join(", "));
         }

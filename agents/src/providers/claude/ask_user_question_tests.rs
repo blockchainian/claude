@@ -64,12 +64,15 @@ fn answer_encoding_rejects_invalid_values() {
             id.clone(),
             QuestionAnswer {
                 answers: vec![],
-                other: Some("note\ncontrol".into()),
+                other: Some("pasted\nnote".into()),
             },
         )]
         .into(),
     };
-    assert!(encode_answers(&ask, &answer).is_err());
+    assert_eq!(
+        encode_answers(&ask, &answer).unwrap()[&questions[0].text],
+        "pasted\nnote"
+    );
     let AskKind::Questions { questions, .. } = &mut ask.kind;
     questions[0].other = false;
     let answer = Answer {
