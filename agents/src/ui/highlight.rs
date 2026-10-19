@@ -17,7 +17,86 @@ const MAX_LINE_BYTES: usize = 4 * 1024;
 
 #[cfg(test)]
 thread_local! {
+    static HIGHLIGHT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(super) static JSON_HIGHLIGHTED_LINES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+// Highlighted lines and embedded shell styles do not depend on panel width.
+// Keep complete results within both entry and allocated-content budgets per render thread.
+const CODE_CACHE_ENTRIES: usize = 32;
+const CODE_CACHE_BYTES: usize = 4 * 1024 * 1024;
+
+thread_local! {
+    static CODE_CACHE: std::cell::RefCell<CodeCache> = const { std::cell::RefCell::new(CodeCache {
+        entries: Vec::new(),
+        bytes: 0,
+    }) };
+}
+
+struct CodeCache {
+    entries: Vec<CodeEntry>,
+    bytes: usize,
+}
+
+struct CodeEntry {
+    text: String,
+    language: String,
+    generation: u64,
+    lines: Vec<Line<'static>>,
+    bytes: usize,
+}
+
+impl CodeCache {
+    fn get(&mut self, text: &str, language: &str, generation: u64) -> Option<Vec<Line<'static>>> {
+        let position = self.entries.iter().position(|entry| {
+            entry.generation == generation && entry.text == text && entry.language == language
+        })?;
+        let entry = self.entries.remove(position);
+        let lines = entry.lines.clone();
+        self.entries.push(entry);
+        Some(lines)
+    }
+
+    fn insert(&mut self, text: &str, language: &str, generation: u64, lines: &[Line<'static>]) {
+        if text.len() > CODE_CACHE_BYTES || language.len() > CODE_CACHE_BYTES {
+            return;
+        }
+        let lines = lines.to_vec();
+        let text = text.to_owned();
+        let language = language.to_owned();
+        let bytes = std::mem::size_of::<CodeEntry>()
+            + text.capacity()
+            + language.capacity()
+            + lines.capacity() * std::mem::size_of::<Line<'static>>()
+            + lines
+                .iter()
+                .map(|line| {
+                    line.spans.capacity() * std::mem::size_of::<Span<'static>>()
+                        + line
+                            .spans
+                            .iter()
+                            .map(|span| match &span.content {
+                                std::borrow::Cow::Owned(text) => text.capacity(),
+                                std::borrow::Cow::Borrowed(_) => 0,
+                            })
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+        if bytes > CODE_CACHE_BYTES {
+            return;
+        }
+        while self.entries.len() >= CODE_CACHE_ENTRIES || self.bytes + bytes > CODE_CACHE_BYTES {
+            self.bytes -= self.entries.remove(0).bytes;
+        }
+        self.bytes += bytes;
+        self.entries.push(CodeEntry {
+            text,
+            language,
+            generation,
+            lines,
+            bytes,
+        });
+    }
 }
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
@@ -208,6 +287,18 @@ fn exceeds_limits(text: &str) -> bool {
 /// `text` as one line per source line, highlighted as `lang` when the language is known
 /// and the text is within the size limits, plain otherwise.
 pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
+    let generation = theme_generation();
+    if let Some(lines) = CODE_CACHE.with(|cache| cache.borrow_mut().get(text, lang, generation)) {
+        return lines;
+    }
+    let lines = code_lines_uncached(text, lang);
+    if generation == theme_generation() {
+        CODE_CACHE.with(|cache| cache.borrow_mut().insert(text, lang, generation, &lines));
+    }
+    lines
+}
+
+fn code_lines_uncached(text: &str, lang: &str) -> Vec<Line<'static>> {
     let Some(mut lines) = highlighted(text, lang) else {
         return plain_lines(text);
     };
@@ -273,6 +364,8 @@ fn highlighted(text: &str, lang: &str) -> Option<Vec<Line<'static>>> {
     }
     let syntax = find_syntax(lang)?;
     with_theme(|theme| {
+        #[cfg(test)]
+        HIGHLIGHT_CALLS.with(|count| count.set(count.get() + 1));
         let mut highlighter = HighlightLines::new(syntax, theme);
         let mut lines = Vec::new();
         for line in LinesWithEndings::from(text) {
@@ -346,6 +439,118 @@ mod tests {
 
     fn text(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
+    }
+
+    fn recorded_shell_command() -> String {
+        include_str!("../../tests/fixtures/claude-tool-details.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .flat_map(|record| {
+                record["message"]["content"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .find_map(|content| {
+                (content["name"] == "Bash")
+                    .then(|| content["input"]["command"].as_str().unwrap().to_owned())
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn recorded_code_reuses_highlighting_and_invalidates_changed_keys() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let source = recorded_shell_command();
+        use_theme(false, None).unwrap();
+        HIGHLIGHT_CALLS.with(|count| count.set(0));
+        let original = code_lines(&source, "bash");
+        let calls = HIGHLIGHT_CALLS.with(std::cell::Cell::get);
+        assert!(calls > 0);
+        assert_eq!(code_lines(&source, "bash"), original);
+        assert_eq!(HIGHLIGHT_CALLS.with(std::cell::Cell::get), calls);
+        code_lines(&(source.clone() + "\n"), "bash");
+        assert!(HIGHLIGHT_CALLS.with(std::cell::Cell::get) > calls);
+        let calls = HIGHLIGHT_CALLS.with(std::cell::Cell::get);
+        code_lines(&source, "python");
+        assert!(HIGHLIGHT_CALLS.with(std::cell::Cell::get) > calls);
+        let calls = HIGHLIGHT_CALLS.with(std::cell::Cell::get);
+        use_theme(true, None).unwrap();
+        let light = code_lines(&source, "bash");
+        assert!(HIGHLIGHT_CALLS.with(std::cell::Cell::get) > calls);
+        assert_ne!(light, original);
+        use_theme(false, None).unwrap();
+    }
+
+    #[test]
+    fn recorded_shell_cache_preserves_embedded_highlighting() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-inline-script.jsonl").trim(),
+        )
+        .unwrap();
+        let source = record["message"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|content| content["name"] == "Bash")
+            .unwrap()["input"]["command"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(!super::super::shell_commands::scripts(&source).is_empty());
+        use_theme(false, None).unwrap();
+        let expected = code_lines_uncached(&source, "bash");
+        HIGHLIGHT_CALLS.with(|count| count.set(0));
+        let drawn = code_lines(&source, "bash");
+        let calls = HIGHLIGHT_CALLS.with(std::cell::Cell::get);
+        assert!(calls > 1, "shell and embedded script both highlight");
+        assert_eq!(drawn, expected);
+        assert_eq!(code_lines(&source, "bash"), expected);
+        assert_eq!(HIGHLIGHT_CALLS.with(std::cell::Cell::get), calls);
+    }
+
+    #[test]
+    fn recorded_code_cache_bounds_entries_and_allocated_text() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        CODE_CACHE.with(|cache| {
+            cache.borrow_mut().entries.clear();
+            cache.borrow_mut().bytes = 0;
+        });
+        let source = recorded_shell_command();
+        for suffix in 0..=CODE_CACHE_ENTRIES {
+            code_lines(&format!("{source}\n# {suffix}"), "bash");
+        }
+        CODE_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert_eq!(cache.entries.len(), CODE_CACHE_ENTRIES);
+            assert!(cache.bytes <= CODE_CACHE_BYTES);
+            assert!(
+                !cache
+                    .entries
+                    .iter()
+                    .any(|entry| entry.text == format!("{source}\n# 0"))
+            );
+        });
+        let huge = source.repeat(CODE_CACHE_BYTES / source.len() + 1);
+        code_lines(&huge, "bash");
+        CODE_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert!(cache.bytes <= CODE_CACHE_BYTES);
+            assert!(!cache.entries.iter().any(|entry| entry.text == huge));
+        });
+        let large = source.repeat((CODE_CACHE_BYTES / 8) / source.len());
+        for suffix in 0..32 {
+            code_lines(&format!("{large}\n# {suffix}"), "unknown-language");
+        }
+        CODE_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert!(cache.bytes <= CODE_CACHE_BYTES);
+            assert!(
+                cache.entries.len() < CODE_CACHE_ENTRIES,
+                "byte budget evicts before entry budget"
+            );
+        });
     }
 
     #[test]
