@@ -273,7 +273,7 @@ impl App {
                     command.get_program().to_string_lossy()
                 )),
                 Err(error) => Some(format!(
-                    "Failed to start {:?}: {error}",
+                    "Cannot start {:?}: {error}",
                     command.get_program()
                 )),
             };
@@ -753,7 +753,7 @@ impl App {
                     self.view.log_session = None;
                 }
                 self.view
-                    .set_notice(Some(format!("Failed to read task log: {error}")));
+                    .set_notice(Some(format!("Cannot read task log: {error}")));
             }
         }
     }
@@ -965,7 +965,7 @@ impl App {
     fn input_error(&mut self, input: &SessionInput, error: String) {
         if matches!(input, SessionInput::Interrupt) {
             self.view
-                .set_notice(Some(format!("Failed to stop: {error}")));
+                .set_notice(Some(format!("Cannot stop: {error}")));
         } else {
             self.view.input_failed(error);
         }
@@ -998,7 +998,7 @@ impl App {
                 self.pending_inputs.remove(&id);
                 if interrupt {
                     self.view
-                        .set_notice(Some(format!("Failed to stop: {error}")));
+                        .set_notice(Some(format!("Cannot stop: {error}")));
                 } else {
                     self.view.input_complete(&id, &input, Err(error));
                 }
@@ -1178,7 +1178,7 @@ impl App {
         self.refresh();
         if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Failed to archive: {error}")));
+                .set_notice(Some(format!("Cannot archive: {error}")));
         }
     }
 
@@ -1189,7 +1189,7 @@ impl App {
                 self.view.unhide(id);
                 self.refresh();
                 self.view
-                    .set_notice(Some(format!("Failed to delete: {error}")));
+                    .set_notice(Some(format!("Cannot delete: {error}")));
             }
         }
     }
@@ -1318,7 +1318,7 @@ impl App {
                             Ok(()) => self.refresh(),
                             Err(error) => self
                                 .view
-                                .set_notice(Some(format!("Failed to rename: {error}"))),
+                                .set_notice(Some(format!("Cannot rename: {error}"))),
                         }
                     } else {
                         self.view
@@ -1378,7 +1378,7 @@ impl App {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
                 Err(error) => self
                     .view
-                    .set_notice(Some(format!("Failed to copy: {error}"))),
+                    .set_notice(Some(format!("Cannot copy: {error}"))),
             },
             Action::Unsupported(what) => {
                 self.view
@@ -1398,7 +1398,7 @@ impl App {
                         thread::spawn(move || child.wait());
                     }
                     Err(error) => self.view.set_notice(Some(format!(
-                        "Failed to open {}: {error}",
+                        "Cannot open {}: {error}",
                         target.display()
                     ))),
                 }
@@ -1425,7 +1425,7 @@ impl App {
     fn report_save(&mut self, result: io::Result<()>) {
         if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Failed to save preferences: {error}")));
+                .set_notice(Some(format!("Cannot save preferences: {error}")));
         }
     }
 

@@ -76,7 +76,7 @@ fn codex_zero_exit_parts_keep_input_arrow_output() {
 #[test]
 fn codex_exit_list_keeps_summary_and_nonzero_status() {
     assert_eq!(codex_exit_event(0).body, "false");
-    assert_eq!(codex_exit_event(1).body, "false (1)");
+    assert_eq!(codex_exit_event(1).body, "false · 1");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn codex_exit_list_colors_only_status_digits() {
         let base = super::super::style::log_styles(&Kind::Tool).1.fg.unwrap();
         assert_eq!(buffer[(0, 0)].fg, base);
         if code != 0 {
-            assert_eq!(text, format!("false ({code})"));
+            assert_eq!(text, format!("false · {code}"));
             let start = text[..text.rfind(&code.to_string()).unwrap()]
                 .chars()
                 .count() as u16;
@@ -194,7 +194,7 @@ fn command_exit_activity_colors_only_status_digits() {
         paths: Vec::new(),
         exit_code: Some(101),
         kind: Kind::Tool,
-        label: "false (101)".into(),
+        label: "false · 101".into(),
         at: now,
     });
     let area = Rect::new(0, 0, 160, 45);
@@ -205,13 +205,13 @@ fn command_exit_activity_colors_only_status_digits() {
         let text = (0..area.width)
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>();
-        if let Some(start) = text.find("false (101)") {
+        if let Some(start) = text.find("false · 101") {
             let x = text[..start].chars().count() as u16;
             assert_eq!(
                 buffer[(x + 6, y)].fg,
                 super::super::style::log_styles(&Kind::Tool).1.fg.unwrap()
             );
-            for x in x + 7..x + 10 {
+            for x in x + 8..x + 11 {
                 assert_eq!(
                     buffer[(x, y)].fg,
                     super::super::style::log_styles(&Kind::Error).1.fg.unwrap()

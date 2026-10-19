@@ -43,13 +43,7 @@ fn details_section_order_preserves_clicks_and_copies() {
         if activity {
             sections.push("Last activity");
         }
-        sections.extend([
-            "Update",
-            "Prompt",
-            "Queued prompt",
-            "Needs input",
-            "Tasks",
-        ]);
+        sections.extend(["Update", "Prompt", "Queued prompt", "Needs input", "Tasks"]);
         assert!(!rendered.contains("Project"));
         assert!(!rendered.contains("Unknown"));
         let positions: Vec<_> = sections
@@ -69,7 +63,7 @@ fn details_section_order_preserves_clicks_and_copies() {
             ("Moved prompt", "Copied prompt"),
         ];
         if activity {
-            copies.push(("Moved activity", "Copied latest activity"));
+            copies.push(("Moved activity", "Copied last activity"));
         }
         for (body, copied) in copies {
             let (x, y) = point(body);

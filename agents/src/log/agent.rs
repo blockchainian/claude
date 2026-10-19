@@ -161,7 +161,7 @@ impl Message {
                 Content::Text(text) => text,
                 Content::Encrypted => "message",
             },
-            "FOLLOWUP_TASK" => "Followup task",
+            "FOLLOWUP_TASK" => "followup task",
             _ => "message",
         })
     }
@@ -283,7 +283,7 @@ mod tests {
         for (line, expected) in records.lines().zip([
             "Spawn agent real_scan",
             "root ← message",
-            "ux_probe ← Followup task",
+            "ux_probe ← followup task",
         ]) {
             let record: Value = serde_json::from_str(line).unwrap();
             let payload = &record["payload"];

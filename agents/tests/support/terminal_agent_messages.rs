@@ -93,7 +93,7 @@ fn terminal_codex_agent_message_bodies() {
     for (fixture, subject) in collaboration {
         let label = match subject {
             "demo_sub" => format!("Spawn agent {subject}"),
-            "ux_probe" => format!("{subject} ← Followup task"),
+            "ux_probe" => format!("{subject} ← followup task"),
             _ => format!("{subject} ← message"),
         };
         let (row, line) = encrypted_capture
@@ -275,11 +275,14 @@ fn terminal_codex_collaboration_navigation() {
     println!("{verdict}");
 }
 
-
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_agent_exchange() {
-    let mut records = format!("{}\n{}", include_str!("../fixtures/transcript.jsonl"), include_str!("../fixtures/claude-agent-names.jsonl"));
+    let mut records = format!(
+        "{}\n{}",
+        include_str!("../fixtures/transcript.jsonl"),
+        include_str!("../fixtures/claude-agent-names.jsonl")
+    );
     for line in include_str!("../fixtures/claude-tool-details.jsonl").lines() {
         let record: serde_json::Value = serde_json::from_str(line).unwrap();
         if record["message"]["content"][0]["name"] == "SendMessage" {
@@ -287,7 +290,10 @@ fn terminal_claude_agent_exchange() {
             records.push('\n');
         }
     }
-    let peer = include_str!("../fixtures/claude-peer-prompts.jsonl").lines().next().unwrap();
+    let peer = include_str!("../fixtures/claude-peer-prompts.jsonl")
+        .lines()
+        .next()
+        .unwrap();
     records.push_str(&format!("{peer}\n{peer}\n"));
     let (_directory, tmux, _) = start_probe_with_transcript("claude-agent-exchange", &records);
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "70"]);
@@ -302,16 +308,38 @@ fn terminal_claude_agent_exchange() {
         ("hide-idle-teammates ← message", "Is the uncommitted edit"),
         ("translate-pdf → 2 messages", "translate-pdf:"),
     ] {
-        let (row, line) = capture.lines().enumerate().filter(|(_, line)| line.contains(label)).last().unwrap();
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.contains(label))
+            .last()
+            .unwrap();
         let column = line[..line.find(label).unwrap()].width();
         tmux.mouse(0, column, row, true);
         let detail = tmux.capture_when(|capture| {
-            capture.contains(body) && (label != "translate-pdf → 2 messages" || capture.lines().filter(|line| line.trim_start().starts_with("Message") && line.contains("translate-pdf")).count() == 2)
+            capture.contains(body)
+                && (label != "translate-pdf → 2 messages"
+                    || capture
+                        .lines()
+                        .filter(|line| {
+                            line.trim_start().starts_with("Message")
+                                && line.contains("translate-pdf")
+                        })
+                        .count()
+                        == 2)
         });
         captures.push_str(&format!("\n\n{detail}"));
     }
     let verdict = serde_json::json!({"verdict":"pass","provider":"claude","spawn":true,"outgoing":true,"incoming_merged":true,"details":true});
-    std::fs::write(std::env::temp_dir().join("agents-claude-exchange-probe.txt"), captures).unwrap();
-    std::fs::write(std::env::temp_dir().join("agents-claude-exchange-probe.json"), verdict.to_string()).unwrap();
+    std::fs::write(
+        std::env::temp_dir().join("agents-claude-exchange-probe.txt"),
+        captures,
+    )
+    .unwrap();
+    std::fs::write(
+        std::env::temp_dir().join("agents-claude-exchange-probe.json"),
+        verdict.to_string(),
+    )
+    .unwrap();
     println!("{verdict}");
 }

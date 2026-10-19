@@ -13,7 +13,7 @@ Wait agent
 beta → beta 完成
 Wait agent
 alpha → alpha 完成
-alpha ← Followup task
+alpha ← followup task
 Wait agent
 alpha → 追加完成
 

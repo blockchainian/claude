@@ -45,7 +45,7 @@ impl App {
             }
             Err(error) => self
                 .view
-                .set_notice(Some(format!("Failed to open the terminal: {error}"))),
+                .set_notice(Some(format!("Cannot open the terminal: {error}"))),
         }
     }
 
@@ -100,7 +100,7 @@ impl App {
         self.closing_terminals.remove(id);
         if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Failed to close the terminal: {error}")));
+                .set_notice(Some(format!("Cannot close the terminal: {error}")));
         }
     }
 
@@ -109,7 +109,7 @@ impl App {
             && let Err(error) = terminal.write(bytes)
         {
             self.view
-                .set_notice(Some(format!("Failed to write to the terminal: {error}")));
+                .set_notice(Some(format!("Cannot write to the terminal: {error}")));
         }
     }
 
@@ -118,7 +118,7 @@ impl App {
             && let Err(error) = terminal.paste(text)
         {
             self.view
-                .set_notice(Some(format!("Failed to write to the terminal: {error}")));
+                .set_notice(Some(format!("Cannot write to the terminal: {error}")));
         }
     }
 
@@ -166,7 +166,7 @@ impl App {
             && let Err(error) = terminal.resize(rows, cols)
         {
             self.view
-                .set_notice(Some(format!("Failed to resize the terminal: {error}")));
+                .set_notice(Some(format!("Cannot resize the terminal: {error}")));
         }
     }
 
@@ -743,7 +743,7 @@ mod tests {
         app.terminal = Some(terminal);
         app.close_terminal();
         finish_close(&mut app);
-        assert!(draw(&mut app).contains("Failed to close the terminal:"));
+        assert!(draw(&mut app).contains("Cannot close the terminal:"));
     }
 
     #[test]

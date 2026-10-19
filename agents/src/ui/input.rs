@@ -498,7 +498,7 @@ impl View {
             && let Some(session) = self.selected_row()
         {
             let source = match *label {
-                "Copied latest activity" => session.detail_sources[0].clone(),
+                "Copied last activity" => session.detail_sources[0].clone(),
                 "Copied update" => session.detail_sources[1].clone(),
                 "Copied prompt" => session.detail_sources[2].clone(),
                 "Copied tasks" => None,

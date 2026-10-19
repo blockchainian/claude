@@ -29,6 +29,12 @@ fn terminal_summary_styles_match_across_all_three_surfaces() {
         .iter()
         .find(|record| record["message"]["content"][0]["id"] == *call_id)
         .unwrap();
+    let summary = format!(
+        "{} · 1",
+        call["message"]["content"][0]["input"]["description"]
+            .as_str()
+            .unwrap()
+    );
     let transcript = [call, result]
         .into_iter()
         .map(|record| {
@@ -82,17 +88,17 @@ fn terminal_summary_styles_match_across_all_three_surfaces() {
         capture.contains("Summary probe")
             && capture.contains("Background")
             && capture.contains("Last activity")
-            && capture.matches("(1)").count() >= 3
+            && capture.matches(&summary).count() >= 3
     });
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parsed = captured_screen(&capture, 240, 70);
     let screen = parsed.screen();
     let mut statuses = 0;
     for (y, row) in screen.rows(0, 240).enumerate() {
-        for (byte, _) in row.match_indices("(1)") {
-            let x = row[..byte].width() as u16;
+        for (byte, _) in row.match_indices(&summary) {
+            let x = (row[..byte].width() + summary.width() - 3) as u16;
             assert_eq!(
-                screen.cell(y as u16, x + 1).unwrap().fgcolor(),
+                screen.cell(y as u16, x + 2).unwrap().fgcolor(),
                 vt100::Color::Idx(1)
             );
             assert_ne!(

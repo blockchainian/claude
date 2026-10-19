@@ -1056,7 +1056,7 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert_eq!(
-            rendered.contains("Failed to rename"),
+            rendered.contains("Cannot rename"),
             child_provider == ProviderId::Codex && parent_provider == ProviderId::Claude
         );
         assert!(app.launch.is_none());
@@ -1160,7 +1160,7 @@ fn manager_thread_mutations_reach_app_provider_paths() {
         let notice = if operation == "delete" {
             "Nothing to delete".to_owned()
         } else {
-            format!("Failed to {operation}")
+            format!("Cannot {operation}")
         };
         assert!(rendered.contains(&notice), "{rendered}");
         assert_eq!(std::fs::read(&state).unwrap(), bytes);

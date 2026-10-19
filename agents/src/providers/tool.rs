@@ -482,7 +482,7 @@ pub(crate) fn list_label(
             .1
             .as_mut()
             .unwrap_or(&mut label.0)
-            .push_str(&format!(" ({code})"));
+            .push_str(&format!(" · {code}"));
     }
     label
 }

@@ -18,13 +18,13 @@ fn terminal_log_search_finds_trailing_tool_after_unicode() {
         .collect::<Vec<_>>()
         .join("\n");
     let (_directory, tmux) = terminal_codex_exit::start_codex_probe("unicode-search", &fixture);
-    let capture = tmux.capture_when(|capture| capture.contains("检查日志 (1)"));
+    let capture = tmux.capture_when(|capture| capture.contains("检查日志 · 1"));
     let (row, line) = capture
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains('│') && line.contains("检查日志 (1)"))
+        .find(|(_, line)| line.contains('│') && line.contains("检查日志 · 1"))
         .unwrap();
-    let column = line[..line.find("检查日志 (1)").unwrap()].width();
+    let column = line[..line.find("检查日志 · 1").unwrap()].width();
     tmux.mouse(0, column, row, true);
     tmux.run(&["send-keys", "-t", "probe", "/"]);
     tmux.run(&["send-keys", "-t", "probe", "-l", "exec_command"]);
@@ -32,7 +32,7 @@ fn terminal_log_search_finds_trailing_tool_after_unicode() {
     assert!(
         capture
             .lines()
-            .any(|line| line.contains('│') && line.contains("检查日志 (1)")),
+            .any(|line| line.contains('│') && line.contains("检查日志 · 1")),
         "Unicode event disappeared from search results: {capture}"
     );
     assert!(capture.contains("Exec command"), "{capture}");

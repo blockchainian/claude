@@ -2013,8 +2013,8 @@ pub(crate) mod tests {
             .iter()
             .find(|call| call.exit_code == Some(1))
             .unwrap();
-        assert!(call.title.ends_with(" (1)"), "{}", call.title);
-        assert!(event.body.contains(" (1)"), "{}", event.body);
+        assert!(call.title.ends_with(" · 1"), "{}", call.title);
+        assert!(event.body.contains(" · 1"), "{}", event.body);
         assert!(call.is_error);
     }
 

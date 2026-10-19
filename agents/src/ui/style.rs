@@ -167,18 +167,11 @@ pub(super) fn log_jump_style() -> Style {
 pub(super) fn exit_code_line(text: String, code: Option<i64>, style: Style) -> Line<'static> {
     if let Some(code) = code.filter(|code| *code != 0) {
         let digits = code.to_string();
-        let status = [
-            (format!(" · {digits}"), " · ", ""),
-            (format!(" ({digits})"), " (", ")"),
-        ];
-        for (suffix, separator, closing) in status {
-            if let Some(prefix) = text.strip_suffix(&suffix) {
-                return Line::from(vec![
-                    Span::styled(format!("{prefix}{separator}"), style),
-                    Span::styled(digits, log_styles(&crate::log::Kind::Error).1.not_dim()),
-                    Span::styled(closing, style),
-                ]);
-            }
+        if let Some(prefix) = text.strip_suffix(&format!(" · {digits}")) {
+            return Line::from(vec![
+                Span::styled(format!("{prefix} · "), style),
+                Span::styled(digits, log_styles(&crate::log::Kind::Error).1.not_dim()),
+            ]);
         }
     }
     Line::from(Span::styled(text, style))

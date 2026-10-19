@@ -37,7 +37,7 @@ impl Client {
             .output()?;
         if !output.status.success() {
             return Err(io::Error::other(
-                "Could not read Claude Code credentials from Keychain",
+                "Cannot read Claude Code credentials from Keychain",
             ));
         }
         let credentials: Credentials = serde_json::from_slice(&output.stdout)?;

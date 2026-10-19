@@ -1402,7 +1402,7 @@ fn archive_errors_arrive_through_workers_for_both_providers() {
         let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
         app.handle_inputs(event, &mut None, &mut schedule).unwrap();
         let rendered = lines(&draw(&mut app, 160)).join("\n");
-        assert!(rendered.contains("Failed to archive:"), "{rendered}");
+        assert!(rendered.contains("Cannot archive:"), "{rendered}");
         key(&mut app, KeyCode::Home);
         assert!(
             app.view.selected_id().is_some(),

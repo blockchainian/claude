@@ -311,7 +311,7 @@ fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(screen.contains("Failed to stop"), "{screen}");
+    assert!(screen.contains("Cannot stop"), "{screen}");
     assert!(!screen.contains(" · failed:"), "{screen}");
     assert!(!screen.contains(" · sending"), "{screen}");
     assert_eq!(app.session(&id).unwrap().title, "Refreshed after stop");

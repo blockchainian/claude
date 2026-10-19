@@ -1841,7 +1841,7 @@ mod tests {
         failed["exit_code"] = 2.into();
         assert_eq!(
             completed_call(&failed, Some("yarn tsc".into())).title,
-            "yarn tsc (2)"
+            "yarn tsc · 2"
         );
         let mut empty = record["payload"]["item"].clone();
         empty["exit_code"] = 0.into();
@@ -2726,7 +2726,7 @@ mod tests {
                     if tool == "spawn_agent" {
                         format!("{name} {subject}")
                     } else {
-                        format!("{subject} ← {name}")
+                        format!("{subject} ← {}", name.to_lowercase())
                     }
                 };
                 assert_eq!(tool_body(&payload).unwrap(), "(encrypted)");
@@ -2942,7 +2942,7 @@ mod tests {
             .zip([
                 "Spawn agent real_scan",
                 "root ← message",
-                "ux_probe ← Followup task",
+                "ux_probe ← followup task",
             ])
         {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -3170,7 +3170,7 @@ mod perspective_tests {
         let events = fixture("root");
         for (name, title) in [
             ("spawn_agent", "Spawn agent alpha"),
-            ("followup_task", "alpha ← Followup task"),
+            ("followup_task", "alpha ← followup task"),
         ] {
             assert!(
                 events

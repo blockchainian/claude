@@ -1057,7 +1057,7 @@ impl View {
             ]);
             bodies.push(start..items.len());
             keys.push(body_key("Last activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            copies.push(Some((activity.label.as_str(), "Copied last activity")));
             body_links.push(if super::text::is_prose(&activity.kind) {
                 super::links::text_links(&activity.label, &session.cwd, &[])
             } else {
@@ -1269,7 +1269,7 @@ impl View {
                 })
                 .collect::<Vec<_>>();
             let markdown = match *label {
-                "Copied latest activity" => {
+                "Copied last activity" => {
                     activity.is_some_and(|activity| super::text::is_prose(&activity.kind))
                 }
                 "Copied tasks" => false,

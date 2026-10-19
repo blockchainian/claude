@@ -41,12 +41,10 @@ Subagent width=120
 Read .config/tmux/tmux.conf:44-63
 0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
 Last activity width=120
-false (1)
+false · 1
 0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
-7: Style::new().red().bg(Color::Reset).underline_color(Color::Reset)
-8: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
+8: Style::new().red().bg(Color::Reset).underline_color(Color::Reset)
 Subagent width=120
-false (1)
+false · 1
 0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
-7: Style::new().red().bg(Color::Reset).underline_color(Color::Reset)
-8: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
+8: Style::new().red().bg(Color::Reset).underline_color(Color::Reset)

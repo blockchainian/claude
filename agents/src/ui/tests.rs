@@ -3161,7 +3161,7 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
     view.set_sessions(vec![row], false);
     let rendered = log_screen(&view, 120, 40, now);
     for (body, label, path) in [
-        (activity, "Copied latest activity", "reports/activity.md"),
+        (activity, "Copied last activity", "reports/activity.md"),
         (message, "Copied update", "reports/reply.md"),
         (
             "Request reports/prompt.md",
@@ -9194,7 +9194,7 @@ mod details_order;
 
 #[test]
 fn details_activity_single_click_selects_source_and_double_click_copies() {
-    details_click_selects_source(7, "Copied latest activity");
+    details_click_selects_source(7, "Copied last activity");
 }
 
 #[test]

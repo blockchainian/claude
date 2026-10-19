@@ -63,7 +63,7 @@ fn terminal_codex_exit_sections() {
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
     assert_eq!(capture.matches("Exec command").count(), 1, "{capture}");
-    assert!(capture.contains("false (1)"), "{capture}");
+    assert!(capture.contains("false · 1"), "{capture}");
     assert!(!capture.contains("exec_command"), "{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let status = rows
@@ -79,7 +79,7 @@ fn terminal_codex_exit_sections() {
     let ansi = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&ansi, 160, 45);
     let screen = parser.screen();
-    for (marker, count) in [("Exec command · 1", 1), ("false (1)", 2)] {
+    for (marker, count) in [("Exec command · 1", 1), ("false · 1", 2)] {
         let rows: Vec<_> = screen
             .rows(0, 160)
             .enumerate()

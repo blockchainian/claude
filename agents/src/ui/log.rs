@@ -937,9 +937,6 @@ fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
     match *time {
         RowTime::Clock(at) => super::formatting::clock_text(at),
         RowTime::Settled(duration) => format_log_duration(duration),
-        RowTime::Running(start) if now - start < chrono::Duration::microseconds(500) => {
-            "0ms".into()
-        }
         RowTime::Running(start) => format_log_duration(now - start),
         RowTime::Ago(at) => format_relative_time(now, Some(at)),
     }
@@ -1687,13 +1684,13 @@ pub(super) mod log_markdown {
     }
 
     #[test]
-    fn running_times_keep_zero_milliseconds() {
+    fn running_times_under_a_millisecond_are_blank() {
         let now = Utc::now();
         for nanos in [-1, 0, 499_999, 500_000] {
             let start = now - chrono::Duration::nanoseconds(nanos);
             assert_eq!(
                 format_row_time(&RowTime::Running(start), now),
-                if nanos < 500_000 { "0ms" } else { "1ms" }
+                if nanos < 500_000 { "" } else { "1ms" }
             );
         }
     }

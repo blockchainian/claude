@@ -163,7 +163,7 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
         .map(|cell| cell.symbol())
         .collect();
     if matches!(input, SessionInput::Interrupt) {
-        assert!(!screen.contains("Failed to stop"), "{screen}");
+        assert!(!screen.contains("Cannot stop"), "{screen}");
     } else {
         assert!(
             !screen.contains(" · sent"),
