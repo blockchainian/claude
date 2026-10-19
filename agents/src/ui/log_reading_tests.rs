@@ -430,7 +430,11 @@ fn merged_calls_keep_descriptions_in_title_bars() {
     }
 }
 
-fn codex_events(fixture: &str) -> Vec<Event> {
+fn codex_fixture() -> (
+    tempfile::TempDir,
+    crate::providers::codex::CodexProvider,
+    crate::model::Session,
+) {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
     rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
@@ -441,7 +445,22 @@ fn codex_events(fixture: &str) -> Vec<Event> {
         dir.path().to_owned(),
         dir.path().join("manager"),
     );
-    let mut session = provider.refresh(1).sessions.remove(0);
+    let session = provider.refresh(1).sessions.remove(0);
+    (dir, provider, session)
+}
+
+fn codex_events(fixture: &str) -> Vec<Event> {
+    let (_dir, provider, session) = codex_fixture();
+    codex_fixture_events(&provider, &session, fixture)
+}
+
+fn codex_fixture_events(
+    provider: &crate::providers::codex::CodexProvider,
+    session: &crate::model::Session,
+    fixture: &str,
+) -> Vec<Event> {
+    use crate::providers::Provider;
+    let mut session = session.clone();
     session.transcript = Some(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")
@@ -453,12 +472,16 @@ fn codex_events(fixture: &str) -> Vec<Event> {
 /// Every input/output group follows the panel midline and preserves its own indentation.
 fn assert_centered_blocks(event: &Event, width: u16) {
     let detail = super::super::tool_detail::detail(event, String::new(), Style::new().dim());
+    assert_centered_detail(event, width, &detail);
+}
+
+fn assert_centered_detail(event: &Event, width: u16, detail: &super::super::detail_model::Detail) {
     let drawn = layout(event, width);
     let cap = usize::from(drawn.columns.text.width);
     let mut id = 0;
-    for section in detail.sections {
+    for section in &detail.sections {
         id += 1;
-        for group in section.groups {
+        for group in &section.groups {
             let start = id;
             id += group.parts.len();
             let widest = group
@@ -546,6 +569,7 @@ fn provider_detail_blocks_are_centered() {
     ] {
         entries.extend(events(fixture));
     }
+    let (_dir, provider, session) = codex_fixture();
     for fixture in [
         "codex-rollout.jsonl",
         "codex-tool-calls.jsonl",
@@ -563,12 +587,13 @@ fn provider_detail_blocks_are_centered() {
         "codex-input/plan-pending.jsonl",
         "codex-input/plan-answered.jsonl",
     ] {
-        entries.extend(codex_events(fixture));
+        entries.extend(codex_fixture_events(&provider, &session, fixture));
     }
     assert!(entries.len() > 30);
     for event in entries {
+        let detail = super::super::tool_detail::detail(&event, String::new(), Style::new().dim());
         for width in [200, 151, 120] {
-            assert_centered_blocks(&event, width);
+            assert_centered_detail(&event, width, &detail);
         }
     }
 }
@@ -619,10 +644,7 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
         })
         .unwrap();
     let call = &event.calls[0];
-    assert_eq!(
-        Some(call.detail_title.as_str()),
-        Some("attach-probe")
-    );
+    assert_eq!(Some(call.detail_title.as_str()), Some("attach-probe"));
     let body = body_parts(event);
     assert!(
         !body
@@ -1019,7 +1041,11 @@ fn tool_list_rows_choose_descriptions_by_data() {
                         format!("{} {}", call.detail_left, call.detail_title)
                     }
                 });
-            let mut expected = call.agent_message.as_ref().map(|message| message.summary(1)).unwrap_or(expected);
+            let mut expected = call
+                .agent_message
+                .as_ref()
+                .map(|message| message.summary(1))
+                .unwrap_or(expected);
             if let Some(code) = call.exit_code.filter(|code| *code != 0) {
                 expected.push_str(&format!(" ({code})"));
             }
