@@ -41,6 +41,7 @@ mod shortcut_help;
 mod structured_text;
 mod style;
 mod terminal_panel;
+pub(crate) mod text;
 mod text_selection;
 mod text_selection_layout;
 mod timeline;

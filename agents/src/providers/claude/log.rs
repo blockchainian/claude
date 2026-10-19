@@ -680,7 +680,7 @@ impl Log {
                             record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
                         if is_peer { self.peer_message(); }
-                    } else if !text.trim_start().starts_with('<') {
+                    } else if is_prompt_text(&record, &text) {
                         let images = self.images.take(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
                             Kind::Compaction
@@ -1123,6 +1123,12 @@ pub(super) fn pasted_content(mut text: &str) -> Option<String> {
     }
     body.push_str(text);
     found.then_some(body)
+}
+
+/// Human-origin prompts can start with XML; system wrappers remain system records.
+pub(super) fn is_prompt_text(record: &serde_json::Value, text: &str) -> bool {
+    !["<task-notification>", "<system-reminder>"].iter().any(|prefix| text.trim_start().starts_with(prefix))
+        && (record["origin"]["kind"] == "human" || !text.trim_start().starts_with('<'))
 }
 
 /// Unwrap pasted text without changing its code blocks or whitespace.

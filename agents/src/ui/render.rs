@@ -892,13 +892,13 @@ impl View {
 
         let activity = session.activity.as_ref();
         if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
-            let mut label = wrapped
-                .first()
-                .map_or(String::new(), |line| line.to_string());
-            if wrapped.len() > 1 {
-                label.push('…');
-            }
+            let label = super::text::summary(
+                &activity.label,
+                &session.cwd,
+                width,
+                &activity.kind,
+                None,
+            );
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
@@ -914,7 +914,7 @@ impl View {
                 .into(),
                 truncate_line_with_ellipsis_if_overflow(
                     style::exit_code_line(
-                        label,
+                        label.to_string(),
                         activity.exit_code,
                         style::log_body_style(&activity.kind, activity.exit_code),
                     ),
@@ -992,7 +992,7 @@ impl View {
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
-                wrap_details(message, &session.cwd, width, true)
+                super::text::lines(message, &session.cwd, width, true)
                     .into_iter()
                     .map(|mut line| {
                         for span in &mut line.spans {
@@ -1026,7 +1026,7 @@ impl View {
                 prompt => prompt,
             };
             let prompt_start = items.len();
-            let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
+            let prompt_body = super::text::lines(prompt_text, &session.cwd, width, true);
             items.extend(prompt_body.into_iter().map(Item::from));
             bodies.push(prompt_start..items.len());
             keys.push(body_key("Prompt", &session.prompt));
@@ -1045,9 +1045,9 @@ impl View {
             separate_section(&mut items);
             let start = items.len();
             items.extend(
-                wrap_details(queued, &session.cwd, width, true)
+                super::text::lines(queued, &session.cwd, width, true)
                     .into_iter()
-                    .map(|line| Item::from(line.bold())),
+                    .map(Item::from),
             );
             bodies.push(start..items.len());
             keys.push(body_key("Prompt", queued));
@@ -1074,9 +1074,9 @@ impl View {
             );
             if let Some(needs) = needs {
                 items.extend(
-                    textwrap::wrap(needs, width.max(1))
+                    super::text::lines(needs, &session.cwd, width, false)
                         .into_iter()
-                        .map(|text| Line::from(text.into_owned()).into()),
+                        .map(Item::from),
                 );
             } else if session.pending_questions.is_empty() {
                 items.extend([
@@ -1086,10 +1086,9 @@ impl View {
             } else {
                 items.extend(session.pending_questions.iter().map(|question| {
                     truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            question.clone(),
-                            style::log_styles(&crate::log::Kind::Assistant).1,
-                        )),
+                        super::text::summary(
+                            question, &session.cwd, width, &crate::log::Kind::Assistant, None,
+                        ),
                         width,
                     )
                     .into()
@@ -1295,13 +1294,15 @@ impl View {
                             task.clone(),
                         ));
                     }
-                    render_background(task, output, now, item_area, &mut content);
+                    render_background(task, output, &session.cwd, now, item_area, &mut content);
                 }
                 Item::Subagent(child) => {
                     let (text, kind) = subagent_line(child);
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
-                            Line::from(Span::styled(text.to_owned(), style::log_styles(&kind).1)),
+                            super::text::summary(
+                                text, &child.cwd, usize::from(item_area.width), &kind, None,
+                            ),
                             usize::from(item_area.width),
                         )
                     });
@@ -1563,8 +1564,8 @@ impl<T: Into<Line<'static>>> From<T> for Item<'_> {
     }
 }
 
-/// The first line of a working subagent's current tool call, or of its last
-/// message when it is between calls, with the log kind that styles it.
+/// A working subagent's current tool call, or its last message between calls,
+/// with the log kind that styles it.
 fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
     let activity = child
         .latest_activity()
@@ -1575,7 +1576,7 @@ fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
         (child.last_message.as_deref(), crate::log::Kind::Assistant)
     };
     (
-        text.unwrap_or_default().lines().next().unwrap_or_default(),
+        text.unwrap_or_default(),
         kind,
     )
 }
@@ -1585,6 +1586,7 @@ fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
 fn render_background(
     task: &crate::model::BackgroundTask,
     output: Vec<String>,
+    cwd: &std::path::Path,
     now: chrono::DateTime<chrono::Utc>,
     box_area: Rect,
     buf: &mut Buffer,
@@ -1593,7 +1595,15 @@ fn render_background(
     render_background_box(
         &task.description,
         Some(&elapsed),
-        output.into_iter().map(Line::from).collect(),
+        output.into_iter()
+            .flat_map(|text| {
+                super::tool_detail::Part::text_parts(text, false)
+                    .into_iter()
+                    .flat_map(|part| {
+                        part.lines_in(usize::from(box_area.width), Style::default(), now, cwd)
+                    })
+            })
+            .collect(),
         box_area,
         buf,
     );
@@ -1624,26 +1634,6 @@ fn box_height(lines: usize) -> usize {
     1 + lines
 }
 
-fn wrap_details(
-    text: &str,
-    cwd: &std::path::Path,
-    width: usize,
-    markdown: bool,
-) -> Vec<Line<'static>> {
-    let paths = super::paths::text_paths(text, cwd);
-    let text = super::line_truncation::abbreviate_paths_for_wrap(text, &paths, width, cwd);
-    if markdown {
-        super::markdown::render_with_options(
-            &text,
-            super::line_truncation::prose_wrap_options(width),
-        )
-    } else {
-        textwrap::wrap(&text, super::line_truncation::prose_wrap_options(width))
-            .into_iter()
-            .map(|line| Line::from(line.into_owned()))
-            .collect()
-    }
-}
 
 #[cfg(test)]
 mod wrapped_path_tests {
@@ -1652,9 +1642,20 @@ mod wrapped_path_tests {
     const MESSAGE: &str = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
 
     #[test]
+    fn details_and_log_share_structured_message_layout() {
+        let source = include_str!("../../tests/fixtures/structured_text/real-theme.plist");
+        let cwd = std::path::Path::new("/project");
+        let expected: Vec<_> = super::super::tool_detail::Part::prose_parts(source.into(), true)
+            .into_iter()
+            .flat_map(|part| part.lines_in(80, Style::default(), chrono::DateTime::UNIX_EPOCH, cwd))
+            .collect();
+        assert_eq!(super::text::lines(source, cwd, 80, true), expected);
+    }
+
+    #[test]
     fn wrapped_details_keep_fitting_paths_and_markdown_styles() {
         for markdown in [false, true] {
-            let lines = wrap_details(
+            let lines = super::text::lines(
                 "some prose before /tmp/fits.md and after",
                 std::path::Path::new("/project"),
                 20,
@@ -1666,7 +1667,7 @@ mod wrapped_path_tests {
                     .any(|line| line.to_string().contains("/tmp/fits.md"))
             );
         }
-        let lines = wrap_details(
+        let lines = super::text::lines(
             "**/private/workspace/reports/report.md**",
             std::path::Path::new("/project"),
             20,
@@ -1741,7 +1742,7 @@ mod wrapped_path_tests {
 
     #[test]
     fn wrapped_details_abbreviate_screenshot_path_at_narrow_width() {
-        let lines = wrap_details(MESSAGE, std::path::Path::new("/project"), 40, true);
+        let lines = super::text::lines(MESSAGE, std::path::Path::new("/project"), 40, true);
         let plain: Vec<_> = lines.iter().map(ToString::to_string).collect();
         assert_eq!(
             plain,

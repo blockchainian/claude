@@ -375,11 +375,11 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
     event.calls.clear();
     event.kind = Kind::QueuedUser;
     event.body = "Read **this** before {\"answer\":[1,2]} and continue".into();
-    let expected = super::super::tool_detail::Part::text_parts(event.body.clone(), false);
+    let expected = [event.body.as_str()];
     let actual = body_parts(&event);
     assert_eq!(
         actual.iter().map(|p| &p.source).collect::<Vec<_>>(),
-        expected.iter().map(|p| &p.source).collect::<Vec<_>>()
+        expected
     );
     for part in actual {
         assert!(

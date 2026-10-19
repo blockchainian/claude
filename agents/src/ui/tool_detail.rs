@@ -68,6 +68,7 @@ impl Part {
 
     /// Split structured blocks from text, retaining each fragment's copy source.
     pub fn text_parts(source: String, markdown: bool) -> Vec<Self> {
+        let source = crate::providers::text::printable(&source);
         let mut parts = Vec::new();
         let mut cursor = 0;
         let mut text_start = 0;
@@ -120,6 +121,7 @@ impl Part {
     }
 
     pub fn text(source: String, markdown: bool) -> Self {
+        let source = crate::providers::text::printable(&source);
         if let Some(document) = structured_text::parse(&source) {
             return Self::structured(document);
         }
@@ -231,9 +233,10 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
         cwd: &std::path::Path,
     ) -> Vec<Line<'static>> {
-        let paths = super::paths::text_paths(&self.source, cwd);
+        let text = crate::providers::text::printable(&self.source);
+        let paths = super::paths::text_paths(&text, cwd);
         let display =
-            super::line_truncation::abbreviate_paths_in_text(&self.source, &paths, usize::MAX, cwd);
+            super::line_truncation::abbreviate_paths_in_text(&text, &paths, usize::MAX, cwd);
         let drawn = display.replace('\t', "    ");
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
@@ -248,7 +251,19 @@ impl Part {
         };
         let lines: Vec<_> = blocks
             .into_iter()
-            .flat_map(|block| block.layout(options.clone()))
+            .flat_map(|mut block| {
+                if matches!(block.kind, ContentKind::Prose) {
+                    for line in &mut block.lines {
+                        for span in &mut line.spans {
+                            let paths = super::paths::text_paths(&span.content, cwd);
+                            span.content = super::line_truncation::abbreviate_paths_for_wrap(
+                                &span.content, &paths, width, cwd,
+                            ).into();
+                        }
+                    }
+                }
+                block.layout(options.clone())
+            })
             .collect();
         if matches!(self.body, Body::Arrow) {
             return lines;
@@ -431,7 +446,7 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
                 true,
             )
         } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
-            Part::prose_parts(event.body.clone(), false)
+            Part::prose_parts(event.body.clone(), true)
         } else if event.kind == Kind::Tool {
             Vec::new()
         } else {
@@ -930,7 +945,7 @@ mod tests {
             let parts = &detail.sections[0].groups[0].parts;
             if matches!(
                 kind,
-                Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
+                Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent | Kind::QueuedUser | Kind::QueuedSystem
             ) {
                 assert_eq!(parts.len(), 1);
                 assert!(parts[0].markdown());

@@ -219,7 +219,7 @@ fn log_selection_wheel_updates_detail_and_cursor_through_app() {
         );
         wheel(&mut app, MouseEventKind::ScrollUp, x, newest);
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("run_in_background"));
+        assert!(detail(&buffer).contains("codex thread"));
         let (_, older) = log_position(&buffer, "⏺");
         assert_log_cursor(&buffer, older);
         assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
@@ -248,7 +248,7 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         let (x, y) = log_position(&buffer, "⏺");
         click(&mut app, x, y);
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("run_in_background"));
+        assert!(detail(&buffer).contains("codex thread"));
         assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
         assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
         let mut arrival: serde_json::Value = serde_json::from_str(first).unwrap();
@@ -263,7 +263,7 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
         assert!(!detail(&buffer).contains("tail-arrival-proof"));
-        assert!(detail(&buffer).contains("run_in_background"));
+        assert!(detail(&buffer).contains("codex thread"));
         assert_log_cursor(&buffer, y);
         let (x, y) = position(&buffer, "↓ 1 New");
         click(&mut app, x, y);
@@ -361,7 +361,7 @@ fn log_selection_switching_tasks_resets_following_through_app() {
         let buffer = draw(&mut app, width);
         let (x, y) = log_position(&buffer, "对");
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-        assert!(detail(&draw(&mut app, width)).contains("run_in_background"));
+        assert!(detail(&draw(&mut app, width)).contains("codex thread"));
         key(&mut app, KeyCode::Down);
         let buffer = draw(&mut app, width);
         assert_ne!(app.view.selected_id(), Some(&first));
@@ -611,7 +611,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("run_in_background"),
+            detail(&buffer).contains("codex thread"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -629,7 +629,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("run_in_background"),
+            detail(&buffer).contains("codex thread"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -644,7 +644,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("run_in_background"),
+            detail(&buffer).contains("codex thread"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -768,7 +768,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         click(&mut app, x, y);
         wait_for_click(&mut app);
         let opened = draw_size(&mut app, width, height);
-        assert!(detail(&opened).contains("run_in_background"));
+        assert!(detail(&opened).contains("codex thread"));
         assert_eq!(
             lines(&opened)[usize::from(prompt + 2)..usize::from(list_end)],
             lines(&buffer)[usize::from(prompt + 2)..usize::from(list_end)],
@@ -1112,8 +1112,9 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 "clicked event must open below the prompt"
             );
             assert_eq!(detail_x, width / 2 - "User".len() as u16 / 2);
+            assert_eq!(buffer[(width - 1, detail_y)].symbol(), "▕");
             assert_eq!(
-                (1..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
+                (1..width - 1).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
                 Some(width - 2)
             );
             assert!(

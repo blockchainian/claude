@@ -742,7 +742,7 @@ fn read_messages(
         if !prompt_found
             && let Some(prompt) = prompt_text(&record)
             && !prompt.trim().is_empty()
-            && !prompt.trim_start().starts_with('<')
+            && super::log::is_prompt_text(&record, &prompt)
         {
             summary.detail_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
@@ -1203,9 +1203,17 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn queued_xml_prompt_keeps_the_document() {
+    fn xml_prompt_keeps_the_document_in_summary_and_log() {
         let xml = include_str!("../../../tests/fixtures/structured_text/real-theme.plist");
         assert_eq!(queued_prompts(vec![QueueOperation::Enqueue(xml.into())]), [xml]);
+        let mut record: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+        record["message"]["content"] = xml.into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{record}").unwrap();
+        assert_eq!(summary(&file).prompt, xml);
+        let events = super::super::log::tail(file.path(), 1).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].body, xml);
     }
 
     fn assert_summary(summary: &Summary) {

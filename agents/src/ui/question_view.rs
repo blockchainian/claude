@@ -473,9 +473,12 @@ impl QuestionView {
     fn question_lines(&self, width: u16, lines: &mut Vec<Line<'static>>) -> Vec<Option<usize>> {
         let question = &self.questions()[self.page];
         let page = &self.pages[self.page];
-        for text in textwrap::wrap(&question.text, usize::from(width.max(1))) {
-            lines.push(Line::from(text.into_owned()));
-        }
+        lines.extend(super::text::lines(
+            &question.text,
+            std::path::Path::new(""),
+            usize::from(width.max(1)),
+            false,
+        ));
         lines.push(Line::default());
         let mut rows = vec![None; lines.len()];
         for (index, option) in question.options.iter().enumerate() {
@@ -767,6 +770,25 @@ mod tests {
             press(&mut view, KeyCode::Esc),
             Some(Outcome::Dismiss)
         ));
+    }
+
+    #[test]
+    fn question_body_renders_recorded_inline_code() {
+        let record: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-questions-pending.jsonl"
+        ))
+        .unwrap();
+        let mut ask = fixture("Single");
+        let AskKind::Questions { questions, .. } = &mut ask.kind;
+        questions[0].text = record["message"]["content"][0]["input"]["questions"][0]["question"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let view = QuestionView::new(ask);
+        let mut lines = Vec::new();
+        view.question_lines(160, &mut lines);
+        assert!(lines[0].to_string().contains("rg -n 'background' src"));
+        assert!(!lines[0].to_string().contains('`'));
     }
 
     #[test]

@@ -322,7 +322,7 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
     let message = view.rows[0].last_message.as_ref().unwrap();
     let expected = format!(
         "{}\n{}",
-        message,
+        &message[message.find("⏺ Ran").unwrap()..],
         &view.rows[0].prompt[..view.rows[0].prompt.find("对，").unwrap()]
     );
     assert_eq!(

@@ -1,6 +1,9 @@
 #[path = "support/terminal_weekly_usage.rs"]
 mod terminal_weekly_usage;
 
+#[path = "support/terminal_message_text.rs"]
+mod terminal_message_text;
+
 #[path = "support/terminal_structured.rs"]
 mod terminal_structured;
 
@@ -195,7 +198,7 @@ fn terminal_background_log_has_no_marker_and_keeps_its_time() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_queued_details_wrap_bold_and_separate_messages() {
+fn terminal_queued_details_wrap_and_separate_messages() {
     let mut enqueue: serde_json::Value = include_str!("fixtures/claude-main-model-history.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
@@ -235,7 +238,7 @@ fn terminal_queued_details_wrap_bold_and_separate_messages() {
         }
         for row in y..=end {
             assert!(
-                screen.cell(row as u16, x as u16).unwrap().bold(),
+                !screen.cell(row as u16, x as u16).unwrap().bold(),
                 "{colored}"
             );
         }
@@ -251,7 +254,7 @@ fn terminal_queued_details_wrap_bold_and_separate_messages() {
         }
         previous_tail = Some(end);
     }
-    println!("{{\"queued_details\":\"pass\",\"wrap\":true,\"bold\":true,\"blank_rows\":true}}");
+    println!("{{\"queued_details\":\"pass\",\"wrap\":true,\"bold\":false,\"blank_rows\":true}}");
 }
 
 fn start_probe_with_transcript(
@@ -1724,10 +1727,8 @@ fn terminal_running_tool_animates_without_input() {
     );
 }
 
-#[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_details_section_positions() {
-    let (directory, tmux, transcript) = start_probe("details-sections");
+fn background_text_probe(name: &str, text: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
+    let (directory, tmux, transcript) = start_probe(name);
     let background = include_str!("fixtures/background/records.jsonl");
     let record: serde_json::Value =
         serde_json::from_str(background.lines().next().unwrap()).unwrap();
@@ -1752,14 +1753,22 @@ fn terminal_details_section_positions() {
             .as_str()
             .unwrap()
     ));
-    std::fs::write(&output, "Running checks\n").unwrap();
+    std::fs::write(&output, text).unwrap();
     tmux.run(&[
         "new-window",
         "-d",
         "-n",
         "writer",
-        &format!("sleep 300 > '{}'", output.display()),
+        &format!("sleep 300 >> '{}'", output.display()),
     ]);
+    (directory, tmux, transcript)
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_details_section_positions() {
+    let (_directory, tmux, transcript) = background_text_probe("details-sections", "Running checks\n");
+    let background = include_str!("fixtures/background/records.jsonl");
     let original = format!(
         "{}\n{background}\n{}",
         std::fs::read_to_string(&transcript).unwrap(),
@@ -1776,6 +1785,7 @@ fn terminal_details_section_positions() {
             capture.contains("#763") == has_pr
                 && capture.contains("Task 1")
                 && capture.contains("Background")
+                && capture.contains("Running checks")
         });
         for width in [112, 200] {
             tmux.run(&[

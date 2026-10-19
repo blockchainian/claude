@@ -1220,13 +1220,7 @@ pub(super) fn kind_label(kind: &Kind) -> &'static str {
     }
 }
 
-/// Whether an event's body is prose the log renders as Markdown.
-fn is_prose(kind: &Kind) -> bool {
-    matches!(
-        kind,
-        Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
-    )
-}
+use super::text::is_prose;
 
 pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> Line<'static> {
     fitted_body_line(event, body_width, cwd).line
@@ -1235,8 +1229,8 @@ pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path)
 /// An event's body as one log row, with paths shortened to fit the row.
 struct FittedBody {
     line: Line<'static>,
-    /// The text the row was drawn from, before any shortening: the event's prose with
-    /// its whitespace collapsed, or its tool text with home paths shown as `~`.
+    /// The text the row was drawn from, before any shortening: the event's prose,
+    /// or its tool text with home paths shown as `~`.
     source: String,
     /// Byte ranges of the tool paths inside `source`.
     paths: Vec<std::ops::Range<usize>>,
@@ -1262,45 +1256,19 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
     let exit_code = match event.calls.as_slice() { [call] => call.exit_code, _ => None };
     let body_style = super::style::log_body_style(&event.kind, exit_code);
     if is_prose(&event.kind) {
-        // Markdown blocks end at line breaks, so they are kept until rendering.
-        let body = event
-            .body
-            .lines()
-            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let paths = super::paths::text_paths(&body, cwd);
-        let shortened =
-            super::line_truncation::abbreviate_paths_in_text(&body, &paths, body_width, cwd);
-        let mut spans = Vec::new();
-        for line in super::markdown::render(&shortened, usize::MAX) {
-            // Blank separators and drawn rules carry no text for a single row.
-            let text = line.to_string();
-            if text
-                .chars()
-                .all(|ch| ch.is_whitespace() || matches!(ch, '─' | '┼'))
-            {
-                continue;
-            }
-            if !spans.is_empty() {
-                spans.push(Span::styled(" ", body_style));
-            }
-            spans.extend(line.spans.into_iter().map(|mut span| {
-                span.style = body_style.patch(span.style);
-                span
-            }));
-        }
+        let body = event.body.clone();
+        let line = super::text::summary(&body, cwd, body_width, &event.kind, None);
         FittedBody {
-            line: Line::from(spans),
+            line,
             source: body,
             paths: Vec::new(),
         }
     } else {
         let (text, paths) = display_paths(event, cwd);
-        let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width, cwd);
+        let shortened = super::text::summary(&text, cwd, body_width, &event.kind, Some(&paths));
         FittedBody {
             line: super::style::exit_code_line(
-                shortened,
+                shortened.to_string(),
                 exit_code,
                 body_style,
             ),
@@ -1808,8 +1776,6 @@ pub(super) mod log_markdown {
         for kind in [
             Kind::Tool,
             Kind::Session,
-            Kind::QueuedUser,
-            Kind::QueuedSystem,
             Kind::Error,
             Kind::Denied,
         ] {
