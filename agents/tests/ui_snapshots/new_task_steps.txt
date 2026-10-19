@@ -34,7 +34,7 @@ main
 
 New branch ❯ feature/probe
 ---
- ○ named task                                            new                now │
+ ○ named task                                            New                now │
                                                                                 ├╴feature/probe ────────────────── named task ───────────────────── repository╶─
  named task ❯ unfinished task
 ---

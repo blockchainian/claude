@@ -24,7 +24,7 @@ impl SessionStatus {
     pub fn label(self) -> &'static str {
         match self {
             Self::NeedsInput => "Needs input",
-            Self::New => "new",
+            Self::New => "New",
             Self::Working => "Working",
             Self::Ready => "Ready",
             Self::Inactive => "Inactive",
@@ -347,6 +347,28 @@ impl Grouping {
             Self::Project => Self::Status,
             Self::Status => Self::Model,
             Self::Model => Self::Project,
+        }
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::SessionStatus;
+
+    #[test]
+    fn session_status_labels_start_with_a_capital() {
+        for status in [
+            SessionStatus::NeedsInput,
+            SessionStatus::New,
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::Inactive,
+        ] {
+            assert!(
+                status.label().starts_with(char::is_uppercase),
+                "{status:?}: {}",
+                status.label()
+            );
         }
     }
 }

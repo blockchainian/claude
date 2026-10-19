@@ -596,7 +596,7 @@ mod persistence_flow_tests {
     fn named_draft_is_an_active_row_with_a_stable_key() {
         let view = named();
         assert_eq!(view.rows.len(), 1);
-        assert_eq!(view.rows[0].status.label(), "new");
+        assert_eq!(view.rows[0].status.label(), "New");
         assert!(view.selected_id().unwrap().id.starts_with("draft-"));
     }
     #[test]

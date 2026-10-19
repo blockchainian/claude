@@ -174,7 +174,7 @@ sys.exit(1)
         frozen.contains("background task ❯ background prompt"),
         "{frozen}"
     );
-    assert!(frozen.contains("new"), "{frozen}");
+    assert!(frozen.contains("New"), "{frozen}");
     assert!(!frozen.contains("still editable"), "{frozen}");
     assert!(!release.exists());
     std::fs::write(&release, "").unwrap();
@@ -322,5 +322,33 @@ fn terminal_task_names_edit_on_details_rule() {
     save_title_capture(&tmux, "09-keyboard-rename-saved");
     println!(
         r#"{{"verdict":"pass","inline_name":"pass","wide_caret":"pass","double_click_rename":"pass","single_click":"pass","rename_cancel":"pass","keyboard_rename":"pass"}}"#
+    );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_new_task_status_is_capitalized_in_list_and_details() {
+    let (_directory, tmux, _transcript) = start_probe("draft-status");
+    begin_named_draft(&tmux, "Status probe");
+    let capture = tmux.capture_when(|capture| {
+        capture.lines().any(|line| {
+            line.contains("Status probe") && line.contains("New") && !line.contains('─')
+        })
+    });
+    assert!(
+        capture
+            .lines()
+            .any(|line| line.contains('─') && line.split_whitespace().any(|word| word == "New")),
+        "{capture}"
+    );
+    assert!(
+        !capture.lines().any(|line| line.contains("Status probe")
+            && line.split_whitespace().any(|word| word == "new")),
+        "{capture}"
+    );
+    save_title_capture(&tmux, "new-task-status");
+    println!(
+        "{}",
+        serde_json::json!({"verdict":"pass", "task_list":"New", "details":"New"})
     );
 }
