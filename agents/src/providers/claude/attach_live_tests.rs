@@ -413,6 +413,48 @@ fn real_attach_prompt_paste_busy_steer_interrupt_model() {
 
 #[test]
 #[ignore = "starts a real billable Claude background session and restores global configuration"]
+fn real_terminal_panel_clears_left_input() {
+    let mut live = Live::new().unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {
+        let job = live.prepare()?;
+        let id = live.status(&job, "idle")?["sessionId"]
+            .as_str()
+            .ok_or_else(|| io::Error::other("registry lacks sessionId"))?
+            .to_owned();
+        live.wait_prompt(
+            &id,
+            "Reply exactly READY and stop. Do not use tools or edit files.",
+        )?;
+        let mut app = dashboard::app(
+            Box::new(ClaudeProvider::new(live.home.clone())),
+            live.repo.path().to_owned(),
+        );
+        let session = dashboard::session(&app, &id);
+        dashboard::open_terminal(&mut app, session.id.clone(), |screen| {
+            screen.lines().any(|line| line.trim() == "❯")
+        });
+        dashboard::paste_terminal(&mut app, "agents-panel stale text\nsecond line");
+        dashboard::wait_terminal(&mut app, |screen| screen.contains("second line"));
+        let prompt = "Reply exactly agents-panel-✓ and stop. Do not use tools.";
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
+            SessionInput::Prompt(prompt.to_owned()),
+        );
+        live.wait_prompt(&id, prompt)?;
+        dashboard::close_terminal(&mut app);
+        Ok(())
+    }));
+    let cleanup = live.cleanup();
+    assert!(cleanup.is_ok(), "cleanup failed: {cleanup:?}");
+    match result {
+        Ok(result) => result.unwrap(),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+#[test]
+#[ignore = "starts a real billable Claude background session and restores global configuration"]
 fn real_attach_clears_left_input_and_keeps_a_pending_question() {
     let mut live = Live::new().unwrap();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {

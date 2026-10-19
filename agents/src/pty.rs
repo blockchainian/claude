@@ -75,6 +75,11 @@ impl Pty {
     }
 
     /// Gives output to a reader thread; shutdown leaves draining to that reader.
+    /// A second handle on the terminal's input, for writing from another thread.
+    pub fn writer(&self) -> io::Result<File> {
+        self.master.try_clone()
+    }
+
     pub fn reader(&self) -> io::Result<File> {
         let reader = self.master.try_clone()?;
         self.output_claimed.set(true);

@@ -770,6 +770,7 @@ impl Provider for ClaudeProvider {
             SessionInput::Prompt(text) => TerminalInput::Paste {
                 text,
                 submit: b"\r",
+                prepare: Some(attach::clear_left_input),
             },
             SessionInput::Interrupt => TerminalInput::Write(b"\x1b"),
             _ => TerminalInput::Close,

@@ -38,8 +38,12 @@ pub(crate) fn delete(app: &mut App, id: SessionKey) {
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
 }
 
-pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
+/// Selects the session with the keyboard, as a user does.
+pub(crate) fn select(app: &mut App, id: &SessionKey) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    if app.view.selected_id() == Some(id) {
+        return;
+    }
     for _ in 0..5 {
         app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         for _ in 0..app.sessions.len() + 4 {
@@ -55,9 +59,56 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
     }
     assert_eq!(
         app.view.selected_id(),
-        Some(&id),
+        Some(id),
         "created session must be keyboard selectable"
     );
+}
+
+/// Opens the selected session's terminal in the log detail panel and waits until its screen
+/// satisfies `ready`.
+pub(crate) fn open_terminal(app: &mut App, id: SessionKey, ready: impl Fn(&str) -> bool) {
+    select(app, &id);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    app.open_terminal(id);
+    wait_terminal(app, ready);
+}
+
+/// Pastes `text` into the open terminal as the user's paste does.
+pub(crate) fn paste_terminal(app: &mut App, text: &str) {
+    app.paste_terminal(text);
+}
+
+pub(crate) fn close_terminal(app: &mut App) {
+    app.close_terminal();
+}
+
+/// Waits until the open terminal's screen satisfies `ready`.
+pub(crate) fn wait_terminal(app: &mut App, ready: impl Fn(&str) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let screen = app
+            .terminal
+            .as_ref()
+            .expect("terminal must be open")
+            .screen
+            .lock()
+            .unwrap()
+            .screen()
+            .contents();
+        if ready(&screen) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "terminal never got ready: {screen}"
+        );
+        let _ = app.receiver.recv_timeout(Duration::from_millis(100));
+    }
+}
+
+pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
+    select(app, &id);
     let action = match input.clone() {
         SessionInput::PromptWithImages { .. } | SessionInput::Answer { .. } => {
             app.send_input(id.clone(), input.clone());
@@ -84,10 +135,16 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
         app.pending_inputs.contains(&id),
         "App did not launch provider input"
     );
-    let event = app
-        .receiver
-        .recv_timeout(Duration::from_secs(120))
-        .expect("provider input deadline");
+    // An open terminal reports its output while the input runs.
+    let event = loop {
+        let event = app
+            .receiver
+            .recv_timeout(Duration::from_secs(120))
+            .expect("provider input deadline");
+        if !matches!(event, Input::TerminalOutput) {
+            break event;
+        }
+    };
     let Input::Sent { result, .. } = &event else {
         panic!("expected real provider completion")
     };

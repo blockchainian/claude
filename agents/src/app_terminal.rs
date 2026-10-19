@@ -173,9 +173,29 @@ impl App {
             return false;
         };
         let result = match delivery {
-            TerminalInput::Paste { text, submit } => {
-                self.view.input_sending(id, input);
-                terminal.paste(text).and_then(|()| terminal.write(submit))
+            TerminalInput::Paste {
+                text,
+                submit,
+                prepare,
+            } => {
+                // Preparing waits on the screen, so the paste runs as an input job.
+                let job = terminal.driver().map(|mut driver| {
+                    let text = text.to_owned();
+                    Box::new(move || {
+                        if let Some(prepare) = prepare {
+                            prepare(&mut driver)?;
+                        }
+                        driver.paste(&text)?;
+                        crate::providers::ScreenInput::write(&mut driver, submit)
+                    }) as crate::providers::Job
+                });
+                match job {
+                    Ok(job) => {
+                        self.start_input_job(id.clone(), input.clone(), job);
+                        return true;
+                    }
+                    Err(error) => Err(error),
+                }
             }
             TerminalInput::Write(bytes) => terminal.write(bytes),
             TerminalInput::Close => {
@@ -215,6 +235,8 @@ mod tests {
     use super::*;
     use crate::sessions::Hub;
     use ratatui::{Terminal, backend::TestBackend};
+    use std::io;
+    use std::path::Path;
     use std::process::Command;
     use std::time::{Duration, Instant};
 
@@ -427,21 +449,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn open_terminal_routes_only_its_providers_input_and_preserves_bytes() {
-        let (directory, mut app, id) = fixture();
-        assert!(!app.send_to_terminal(&id, &SessionInput::Interrupt));
-        let output = directory.path().join("input");
+    /// Opens a terminal whose program draws `screens` in turn, each after one input byte, and
+    /// then records the rest of its input to the returned file.
+    fn open_screens(
+        directory: &Path,
+        app: &mut App,
+        id: &SessionKey,
+        screens: &[&str],
+    ) -> std::path::PathBuf {
+        let output = directory.join("input");
+        let mut script = String::from("stty raw -echo; printf '\\033[?2004h'");
+        for (index, screen) in screens.iter().enumerate() {
+            let path = directory.join(format!("screen-{index}"));
+            std::fs::write(&path, screen.replace('\n', "\r\n")).unwrap();
+            if index > 0 {
+                script.push_str("; head -c 1 >> \"$1\"; printf '\\033[H\\033[2J'");
+            }
+            script.push_str(&format!("; cat '{}'", path.display()));
+        }
+        script.push_str("; cat >> \"$1\"");
         let mut command = Command::new("sh");
-        command
-            .args([
-                "-c",
-                r#"stty raw -echo; printf '\033[?2004hREADY'; cat > "$1""#,
-                "sh",
-            ])
-            .arg(&output);
+        command.args(["-c", &script, "sh"]).arg(&output);
         let sender = app.sender.clone();
-        let terminal = SessionTerminal::spawn(id.clone(), command, None, (20, 80), move || {
+        let terminal = SessionTerminal::spawn(id.clone(), command, None, (50, 200), move || {
             let _ = sender.send(Input::TerminalOutput);
         })
         .unwrap();
@@ -452,7 +482,7 @@ mod tests {
             .unwrap()
             .screen()
             .contents()
-            .contains("READY")
+            .contains('❯')
         {
             app.receiver
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -460,17 +490,67 @@ mod tests {
         }
         app.view.show_terminal(id.clone(), terminal.screen.clone());
         app.terminal = Some(terminal);
+        output
+    }
+
+    /// Waits for the terminal input job and returns its result.
+    fn sent(app: &mut App) -> io::Result<()> {
+        loop {
+            match app.receiver.recv_timeout(Duration::from_secs(20)).unwrap() {
+                Input::Sent { result, .. } => return result,
+                Input::TerminalOutput => {}
+                _ => panic!("unexpected input event"),
+            }
+        }
+    }
+
+    fn written(output: &Path, expected: &[u8]) -> Vec<u8> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while std::fs::read(output).unwrap_or_default().len() < expected.len() {
+            assert!(Instant::now() < deadline, "terminal never received input");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::fs::read(output).unwrap()
+    }
+
+    #[test]
+    fn open_terminal_clears_left_claude_input_before_the_paste() {
+        let (directory, mut app, id) = fixture();
+        let output = open_screens(
+            directory.path(),
+            &mut app,
+            &id,
+            &[
+                include_str!("../tests/fixtures/claude-attach/interrupted.screen.txt"),
+                include_str!("../tests/fixtures/claude-attach/idle.screen.txt"),
+            ],
+        );
+        assert!(app.send_to_terminal(&id, &SessionInput::Prompt("next".into())));
+        sent(&mut app).unwrap();
+        let expected = b"\x15\x1b[200~next\x1b[201~\r";
+        assert_eq!(written(&output, expected), expected);
+    }
+
+    #[test]
+    fn open_terminal_routes_only_its_providers_input_and_preserves_bytes() {
+        let (directory, mut app, id) = fixture();
+        assert!(!app.send_to_terminal(&id, &SessionInput::Interrupt));
+        let output = open_screens(
+            directory.path(),
+            &mut app,
+            &id,
+            &[include_str!(
+                "../tests/fixtures/claude-attach/idle.screen.txt"
+            )],
+        );
         let mut other = id.clone();
         other.id.push('x');
         assert!(!app.send_to_terminal(&other, &SessionInput::Interrupt));
         assert!(app.send_to_terminal(&id, &SessionInput::Prompt("line 1\nline 2".into())));
+        sent(&mut app).unwrap();
         assert!(app.send_to_terminal(&id, &SessionInput::Interrupt));
         let expected = b"\x1b[200~line 1\nline 2\x1b[201~\r\x1b";
-        while std::fs::read(&output).unwrap_or_default().len() < expected.len() {
-            assert!(Instant::now() < deadline, "terminal never received input");
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert_eq!(std::fs::read(output).unwrap(), expected);
+        assert_eq!(written(&output, expected), expected);
         let codex_id = SessionKey {
             provider: crate::providers::ProviderId::Codex,
             id: id.id.clone(),

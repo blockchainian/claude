@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 /// Output arriving within this interval is published together as one terminal frame.
 const FRAME: Duration = Duration::from_millis(16);
 const DETACH_TIMEOUT: Duration = Duration::from_secs(3);
+/// The longest an input job waits for the screen it expects.
+const INPUT_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub type Screen = Arc<Mutex<TerminalScreen>>;
 
@@ -167,21 +169,17 @@ impl SessionTerminal {
 
     /// Writes `text` as one paste, bracketed when the program asked for bracketed paste.
     pub fn paste(&mut self, text: &str) -> io::Result<()> {
-        let bracketed = self
-            .screen
-            .lock()
-            .expect("terminal screen lock")
-            .screen()
-            .bracketed_paste();
-        let mut bytes = Vec::with_capacity(text.len() + 12);
-        if bracketed {
-            bytes.extend_from_slice(b"\x1b[200~");
-        }
-        bytes.extend_from_slice(text.as_bytes());
-        if bracketed {
-            bytes.extend_from_slice(b"\x1b[201~");
-        }
+        let bytes = paste_bytes(&self.screen, text);
         self.write(&bytes)
+    }
+
+    /// The terminal's input and screen, for an input job off the dashboard thread.
+    pub fn driver(&self) -> io::Result<TerminalDriver> {
+        Ok(TerminalDriver {
+            writer: self.pty.writer()?,
+            screen: self.screen.clone(),
+            closed: self.closed.clone(),
+        })
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> io::Result<()> {
@@ -200,6 +198,69 @@ impl SessionTerminal {
     /// Detaches or ends the program.
     pub fn close(mut self) -> io::Result<()> {
         self.pty.close(self.detach, DETACH_TIMEOUT)
+    }
+}
+
+fn paste_bytes(screen: &Screen, text: &str) -> Vec<u8> {
+    let bracketed = screen
+        .lock()
+        .expect("terminal screen lock")
+        .screen()
+        .bracketed_paste();
+    let mut bytes = Vec::with_capacity(text.len() + 12);
+    if bracketed {
+        bytes.extend_from_slice(b"\x1b[200~");
+    }
+    bytes.extend_from_slice(text.as_bytes());
+    if bracketed {
+        bytes.extend_from_slice(b"\x1b[201~");
+    }
+    bytes
+}
+
+/// A session terminal's input and published screen, used by an input job.
+pub struct TerminalDriver {
+    writer: std::fs::File,
+    screen: Screen,
+    closed: Arc<AtomicBool>,
+}
+
+impl TerminalDriver {
+    pub fn paste(&mut self, text: &str) -> io::Result<()> {
+        let bytes = paste_bytes(&self.screen, text);
+        crate::providers::ScreenInput::write(self, &bytes)
+    }
+}
+
+impl crate::providers::ScreenInput for TerminalDriver {
+    fn wait_for(&mut self, stage: &str, ready: &dyn Fn(&str) -> bool) -> io::Result<String> {
+        let deadline = Instant::now() + INPUT_TIMEOUT;
+        loop {
+            let screen = self
+                .screen
+                .lock()
+                .expect("terminal screen lock")
+                .screen()
+                .contents();
+            if ready(&screen) {
+                return Ok(screen);
+            }
+            if self.closed.load(Ordering::Relaxed) {
+                return Err(io::Error::other(format!("{stage}: the terminal closed")));
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("{stage}: the terminal timed out"),
+                ));
+            }
+            thread::sleep(FRAME);
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.writer.write_all(bytes)?;
+        self.writer.flush()
     }
 }
 

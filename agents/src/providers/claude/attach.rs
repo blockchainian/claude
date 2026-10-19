@@ -1,6 +1,6 @@
 //! Sends input through a temporary, screen-checked Claude attach client.
 
-use crate::providers::SessionInput;
+use crate::providers::{ScreenInput, SessionInput};
 use std::fs::File;
 use std::io;
 use std::path::Path;
@@ -83,6 +83,24 @@ pub(super) fn type_input(job_id: &str, cwd: &Path, text: &str) -> io::Result<()>
     });
     let detached = terminal.detach();
     result.and(detached)
+}
+
+/// Clears text left in Claude's input, such as the prompt Claude restores after an interrupt,
+/// with Ctrl+U only: Esc or Ctrl+C would end the running turn and any pending AskUserQuestion.
+pub(super) fn clear_left_input(terminal: &mut dyn ScreenInput) -> io::Result<()> {
+    let mut screen = terminal.wait_for("initial-screen", &|screen| {
+        ready(screen) || left_input(screen)
+    })?;
+    while left_input(&screen) {
+        let before = editor_text(&screen);
+        // Ctrl+U deletes the text before the cursor on its line, then the line break.
+        terminal.write(b"\x15")?;
+        // Claude redraws the box in steps, so a frame without the box is not a result.
+        screen = terminal.wait_for("input-cleared", &|screen| {
+            input_box(screen).is_some() && editor_text(screen) != before
+        })?;
+    }
+    Ok(())
 }
 
 fn validate_job_id(job_id: &str) -> io::Result<()> {
@@ -363,27 +381,8 @@ impl Terminal {
         Ok(pasted_input)
     }
 
-    /// Clears text left in Claude's input, such as the prompt Claude restores after an
-    /// interrupt, with Ctrl+U only: Esc or Ctrl+C would end the running turn and any pending
-    /// AskUserQuestion.
-    fn clear_left_input(&mut self) -> io::Result<()> {
-        self.wait_at("initial-screen", |screen| {
-            ready(screen) || left_input(screen)
-        })?;
-        while left_input(&self.screen()) {
-            let before = editor_text(&self.screen());
-            // Ctrl+U deletes the text before the cursor on its line, then the line break.
-            self.write(b"\x15")?;
-            // Claude redraws the box in steps, so a frame without the box is not a result.
-            self.wait_at("input-cleared", |screen| {
-                input_box(screen).is_some() && editor_text(screen) != before
-            })?;
-        }
-        Ok(())
-    }
-
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
-        self.clear_left_input()?;
+        clear_left_input(self)?;
         self.wait_at("initial-ready", ready)?;
         match input {
             SessionInput::Prompt(text) => {
@@ -441,6 +440,17 @@ impl Terminal {
 
     fn detach(&mut self) -> io::Result<()> {
         self.pty.close(Some(b"\x1a"), DETACH_TIMEOUT)
+    }
+}
+
+impl ScreenInput for Terminal {
+    fn wait_for(&mut self, stage: &str, ready: &dyn Fn(&str) -> bool) -> io::Result<String> {
+        self.wait_at(stage, ready)?;
+        Ok(self.screen())
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.pty.write(bytes)
     }
 }
 

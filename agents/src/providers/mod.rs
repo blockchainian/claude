@@ -166,10 +166,19 @@ pub enum TerminalInput<'a> {
     Paste {
         text: &'a str,
         submit: &'static [u8],
+        /// Readies the program's input before the paste, such as clearing text left in it.
+        prepare: Option<fn(&mut dyn ScreenInput) -> io::Result<()>>,
     },
     Write(&'static [u8]),
     /// The terminal closes and the input takes the provider's own path.
     Close,
+}
+
+/// A terminal running a provider's program, driven from an input job.
+pub trait ScreenInput {
+    /// Waits until the complete screen satisfies `ready`, then returns it.
+    fn wait_for(&mut self, stage: &str, ready: &dyn Fn(&str) -> bool) -> io::Result<String>;
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
 }
 
 pub trait Provider {
