@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, writeFile, readFile, readdir, stat, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, stat, rm, rename, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { createCodexClient } from '../scripts/codex-api-client.mjs';
 
@@ -56,6 +57,17 @@ function send(res, event = completion()) {
     'x-ratelimit-secret': 'fake-refresh' });
   const data = `: heartbeat\r\nevent: ignored\r\ndata: ${JSON.stringify(event)}\r\n\r\ndata: [DONE]\r\n\r\n`;
   res.write(data.slice(0, 19)); res.end(data.slice(19));
+}
+
+function clientArgs(f) {
+  const clientModule = new URL('../scripts/codex-api-client.mjs', import.meta.url).href;
+  const code = `import { createCodexClient } from ${JSON.stringify(clientModule)};
+    const client = createCodexClient(JSON.parse(process.argv[1]));
+    try { await client.respond(${JSON.stringify(request)}); } finally { await client.close(); }`;
+  // Children receive only this fixture's private directory and loopback URLs.
+  const options = JSON.stringify({ codexHome: f.codexHome, baseUrl: f.options.baseUrl,
+    refreshUrl: f.options.refreshUrl, timeoutMs: 2000 });
+  return ['--input-type=module', '-e', code, options];
 }
 
 test('SSE completion, usage, request shape and safe per-attempt metrics', async t => {
@@ -160,16 +172,78 @@ test('independent processes coordinate refresh through the auth file lock', asyn
       res.end(JSON.stringify({ access_token: fresh(), refresh_token: 'rotated-refresh' }));
     } else { models++; send(res); }
   }, { expired: true });
-  const clientModule = new URL('../scripts/codex-api-client.mjs', import.meta.url).href;
-  const code = `import { createCodexClient } from ${JSON.stringify(clientModule)};
-    const client = createCodexClient(JSON.parse(process.argv[1]));
-    try { await client.respond(${JSON.stringify(request)}); } finally { await client.close(); }`;
-  // The children receive only this fixture's private directory and loopback URLs.
   const run = promisify(execFile);
-  const options = JSON.stringify({ codexHome: f.codexHome, baseUrl: f.options.baseUrl,
-    refreshUrl: f.options.refreshUrl, timeoutMs: 2000 });
-  await Promise.all([0, 1].map(() => run(process.execPath, ['--input-type=module', '-e', code, options], { timeout: 5000 })));
+  await Promise.all([0, 1].map(() => run(process.execPath, clientArgs(f), { timeout: 5000 })));
   assert.equal(refreshes, 1); assert.equal(models, 2);
+});
+
+test('SIGKILL during refresh leaves a lock that the next process reclaims', { timeout: 5000 }, async t => {
+  let refreshes = 0, ready;
+  const started = new Promise(resolve => { ready = resolve; });
+  const f = await fixture(t, (req, res) => {
+    if (req.url !== '/oauth/token') return send(res);
+    refreshes++;
+    if (refreshes === 1) ready();
+    else res.end(JSON.stringify({ access_token: fresh(), refresh_token: 'rotated-refresh' }));
+  }, { expired: true });
+  const args = clientArgs(f);
+  const child = spawn(process.execPath, args, { stdio: 'ignore' });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  await started;
+  const lockPath = join(f.codexHome, 'auth.json.refresh.lock');
+  const owner = JSON.parse(await readFile(lockPath, 'utf8'));
+  assert.equal(owner.pid, child.pid);
+  const exited = once(child, 'exit');
+  child.kill('SIGKILL');
+  assert.deepEqual(await exited, [null, 'SIGKILL']);
+  assert.throws(() => process.kill(owner.pid, 0), { code: 'ESRCH' });
+  await promisify(execFile)(process.execPath, args, { timeout: 1500 });
+  assert(Number.isFinite(owner.createdAt));
+  assert.equal(refreshes, 2);
+  assert.deepEqual(await readdir(f.codexHome), ['auth.json']);
+});
+
+test('an expired lock is reclaimed even when its recorded process is alive', async t => {
+  let refreshes = 0;
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/oauth/token') {
+      refreshes++; res.end(JSON.stringify({ access_token: fresh() }));
+    } else send(res);
+  }, { expired: true });
+  await writeFile(join(f.codexHome, 'auth.json.refresh.lock'),
+    JSON.stringify({ pid: process.pid, createdAt: Date.now() - 121_000 }));
+  await Promise.all(Array.from({ length: 4 }, () => promisify(execFile)(process.execPath,
+    clientArgs(f), { timeout: 1500 })));
+  assert.equal(refreshes, 1);
+  assert.deepEqual(await readdir(f.codexHome), ['auth.json']);
+});
+
+test('an expired partially written lock is reclaimed using its file timestamp', async t => {
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/oauth/token') res.end(JSON.stringify({ access_token: fresh() }));
+    else send(res);
+  }, { expired: true });
+  const lockPath = join(f.codexHome, 'auth.json.refresh.lock');
+  await writeFile(lockPath, '{');
+  const staleTime = new Date(Date.now() - 121_000);
+  await utimes(lockPath, staleTime, staleTime);
+  await promisify(execFile)(process.execPath, clientArgs(f), { timeout: 1500 });
+  assert.deepEqual(await readdir(f.codexHome), ['auth.json']);
+});
+
+test('a replaced lease prevents auth writes and preserves the successor lock on release', async t => {
+  let lockPath;
+  const successor = { pid: process.pid, createdAt: Date.now() };
+  const f = await fixture(t, async (req, res) => {
+    assert.equal(req.url, '/oauth/token');
+    await writeFile(`${lockPath}.successor`, JSON.stringify(successor));
+    await rename(`${lockPath}.successor`, lockPath);
+    res.end(JSON.stringify({ access_token: fresh(), refresh_token: 'rotated-refresh' }));
+  }, { expired: true });
+  lockPath = join(f.codexHome, 'auth.json.refresh.lock');
+  await assert.rejects(f.client().respond(request), { code: 'AUTH' });
+  assert.deepEqual(JSON.parse(await readFile(lockPath, 'utf8')), successor);
+  assert.deepEqual(JSON.parse(await readFile(join(f.codexHome, 'auth.json'), 'utf8')), f.auth);
 });
 
 test('concurrent 401 recovery refreshes once', async t => {

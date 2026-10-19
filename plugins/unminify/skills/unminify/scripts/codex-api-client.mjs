@@ -1,5 +1,5 @@
 // Reusable direct Codex Responses client backed by a ChatGPT file login.
-import { readFile, open, rename, unlink } from 'node:fs/promises';
+import { readFile, open, rename, unlink, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -148,15 +148,52 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
   async function lock() {
     const lockPath = `${authPath}.refresh.lock`;
     const deadline = Date.now() + timeoutMs + 30_000;
+    const sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino;
+    async function owns(identity) {
+      try { return sameFile(identity, await stat(lockPath)); }
+      catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+    }
+    async function remove(identity) {
+      if (await owns(identity)) {
+        try { await unlink(lockPath); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+    }
+    async function reclaim() {
+      let handle;
+      try {
+        handle = await open(lockPath, 'r');
+        const identity = await handle.stat();
+        let owner;
+        try { owner = JSON.parse(await handle.readFile('utf8')); }
+        catch (error) { if (!(error instanceof SyntaxError)) throw error; }
+        let dead = false;
+        if (Number.isSafeInteger(owner?.pid) && owner.pid > 0) {
+          try { process.kill(owner.pid, 0); }
+          catch (error) {
+            if (error.code === 'ESRCH') dead = true;
+            else if (error.code !== 'EPERM') throw error;
+          }
+        }
+        // mtime also recovers a crash between exclusive creation and metadata writing.
+        const createdAt = Number.isFinite(owner?.createdAt) ? owner.createdAt : identity.mtimeMs;
+        if (dead || Date.now() - createdAt > 120_000) await remove(identity);
+      } catch (error) { if (error.code !== 'ENOENT') throw authError(); }
+      finally { await handle?.close(); }
+    }
     for (;;) {
       try {
         const handle = await open(lockPath, 'wx', 0o600);
-        try { await handle.writeFile(JSON.stringify({ pid: process.pid })); }
+        const identity = await handle.stat();
+        try { await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: Date.now() })); }
         catch { await handle.close(); await unlink(lockPath); throw authError(); }
-        return async () => { await handle.close(); await unlink(lockPath); };
+        return {
+          async check() { if (!await owns(identity)) throw authError(); },
+          async release() { await handle.close(); await remove(identity); },
+        };
       } catch (error) {
         if (error.code !== 'EEXIST') throw authError();
-        // Never delete another owner's lock: an apparent stale owner may be racing a successor.
+        await reclaim();
         if (Date.now() >= deadline) throw authError();
         await delay(25);
       }
@@ -167,7 +204,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     const pending = refreshes.get(authPath);
     if (pending) { await pending; return readAuth(); }
     const promise = (async () => {
-      const release = await lock();
+      const lease = await lock();
       try {
         let latest = await readAuth();
         if (latest.tokens.access_token !== auth.tokens.access_token ||
@@ -185,6 +222,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
         }
         if (!data.access_token) throw authError();
         // Preserve fields written by other consumers while the refresh was in flight.
+        await lease.check();
         const current = await readAuth();
         if (current.tokens.access_token !== latest.tokens.access_token ||
           current.tokens.refresh_token !== latest.tokens.refresh_token) return current;
@@ -198,13 +236,14 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
           handle = await open(temporary, 'wx', 0o600);
           await handle.writeFile(JSON.stringify(latest, null, 2) + '\n');
           await handle.sync(); await handle.close(); handle = undefined;
+          await lease.check();
           await rename(temporary, authPath);
         } finally {
           await handle?.close();
           await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
         }
         return latest;
-      } finally { await release(); }
+      } finally { await lease.release(); }
     })().catch(() => { throw authError(); });
     refreshes.set(authPath, promise);
     try { return await promise; }
