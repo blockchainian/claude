@@ -848,6 +848,12 @@ impl Log {
                     });
                 }
             };
+            if let Some(text) = crate::codex_await_output::message(&text) {
+                return Section::Markdown {
+                    label: String::new(),
+                    text,
+                };
+            }
             let records = text
                 .lines()
                 .filter(|line| !line.trim().is_empty())
@@ -908,7 +914,7 @@ impl Log {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                detail_left: format!("Task {}", field("task-id").unwrap_or("")),
+                detail_left: String::new(),
                 detail_title: summary.to_owned(),
                 show_details: false,
                 id: field("task-id").unwrap_or("").to_owned(),

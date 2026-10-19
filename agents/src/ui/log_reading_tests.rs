@@ -651,41 +651,38 @@ fn notification_preformatted_blocks_preserve_logical_lines() {
         .lines()
         .find(|line| line.ends_with("Claude provider:"))
         .unwrap();
+    assert_eq!(
+        event.calls[0].output.as_ref().unwrap(),
+        &vec![crate::log::Section::Markdown {
+            label: String::new(),
+            text: message.into(),
+        }]
+    );
     for width in [200, 90] {
         let drawn = layout(&event, width);
-        let continuation = drawn
-            .sources
-            .iter()
-            .find(|source| source.text.contains("lastMessage"))
-            .unwrap();
-        for expected in super::super::markdown::render(message, usize::MAX)
-            .iter()
-            .map(ToString::to_string)
-            .filter(|line| !line.is_empty())
-        {
-            assert!(continuation.text.contains(&expected));
-        }
-        let rows: Vec<_> = drawn
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, (segment, _))| *segment == continuation.id)
-            .collect();
-        assert_eq!(rows.len(), continuation.text.lines().count());
-        for ((row, _), source) in rows.into_iter().zip(continuation.text.lines()) {
-            let expected = truncate_detail_line(
-                Line::from(source.to_owned()),
-                &mut Vec::new(),
-                drawn.columns.text.width.into(),
-            );
-            assert_eq!(
-                drawn.lines[row].to_string().trim_start(),
-                expected.to_string().trim_start()
-            );
-        }
         assert!(
-            continuation.text.contains(&format!("\n  {command_line}")),
-            "JSON continuations use structural indent"
+            drawn
+                .sources
+                .iter()
+                .any(|source| source.text.contains(command_line))
+        );
+        assert!(
+            !drawn
+                .sources
+                .iter()
+                .any(|source| source.text.contains("lastMessage"))
+        );
+        let expected = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+            Line::from(command_line.replace("/workspace/", "")),
+            drawn.columns.text.width.into(),
+        )
+        .to_string();
+        assert!(
+            drawn
+                .lines
+                .iter()
+                .any(|line| line.to_string().trim_start() == expected),
+            "Markdown code block stays preformatted at {width}"
         );
     }
 }

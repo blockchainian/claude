@@ -9271,7 +9271,7 @@ fn details_click_selects_source(index: usize, label: &'static str) {
 }
 
 #[test]
-fn task_notification_detail_shows_task_id_and_output_content() {
+fn task_notification_detail_hides_task_id_and_shows_output_content() {
     let dir = tempfile::tempdir().unwrap();
     let events =
         super::log::log_markdown::notification_events(dir.path(), Some("all 3 tests passed"));
@@ -9299,25 +9299,14 @@ fn task_notification_detail_shows_task_id_and_output_content() {
             })
             .collect();
         let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
-        assert_eq!(
-            detail.sections[0].title.left.as_deref(),
-            Some("Task b9wi31ww0")
-        );
+        assert_eq!(detail.sections[0].title.left.as_deref(), None);
         let header = 1;
         assert!(
             !lines[header + 1..]
                 .iter()
                 .any(|line| line.contains(&summary))
         );
-        let label_x =
-            super::detail_model::detail_columns(area, view.center_layout(buffer.area).log)
-                .text
-                .x;
-        let time_x = lines[header].trim_end().width() as u16 - 1;
-        assert_eq!(
-            buffer[(label_x, header as u16)].style(),
-            buffer[(time_x, header as u16)].style()
-        );
+        assert!(!lines[header].contains("Task b9wi31ww0"));
         assert_eq!(
             lines
                 .iter()

@@ -131,7 +131,6 @@ fn notification_output_keeps_plain_text_and_unrelated_json() {
     for text in [
         "plain output\n  unchanged\n",
         "{\"type\":\"result\",\"message\":\"done\"}\n",
-        include_str!("../../../tests/fixtures/claude-task-notification-output.txt"),
         "",
     ] {
         for summary in ["Agent finished", "Background command completed"] {
@@ -151,5 +150,37 @@ fn notification_output_marks_missing_files() {
     assert_eq!(
         notification_output(None, "Agent finished"),
         vec![Section::Placeholder("File no longer exists".into())]
+    );
+}
+
+#[test]
+fn notification_await_completion_is_markdown() {
+    let fixture = include_str!("../../../tests/fixtures/codex-manager-await.jsonl");
+    let event: Value = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        notification_output(Some(fixture), "Background command completed"),
+        vec![Section::Markdown {
+            label: String::new(),
+            text: event["lastMessage"].as_str().unwrap().into()
+        }]
+    );
+}
+
+#[test]
+fn notification_await_events_keep_order_and_errors() {
+    let fixture = include_str!("../../../tests/fixtures/codex-manager-await.jsonl");
+    let mut event: Value = serde_json::from_str(fixture).unwrap();
+    event["error"] = "Turn failed".into();
+    let output = format!("{fixture}{}\n[exited with code 1]\n", event);
+    assert_eq!(
+        notification_output(Some(&output), "Background command completed"),
+        vec![Section::Markdown {
+            label: String::new(),
+            text: format!(
+                "{}\n\n{}\n\nTurn failed",
+                event["lastMessage"].as_str().unwrap(),
+                event["lastMessage"].as_str().unwrap()
+            )
+        }]
     );
 }

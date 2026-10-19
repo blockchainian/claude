@@ -1532,7 +1532,7 @@ fn terminal_update_click_selects_source_row() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_task_notification_shows_summary_id_and_missing_file() {
+fn terminal_task_notification_shows_summary_without_id_and_missing_file() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("task-notification");
     let record = include_str!("fixtures/claude-task-notifications.jsonl")
@@ -1558,10 +1558,7 @@ fn terminal_task_notification_shows_summary_id_and_missing_file() {
         .expect("log detail rule");
     let detail = rows[rule + 1..rows.len() - 1].join("\n");
     assert_eq!(detail.matches(summary).count(), 1, "{capture}");
-    assert!(
-        rows[rule + 1].trim_start().starts_with("Task b9wi31ww0 "),
-        "{capture}"
-    );
+    assert!(!detail.contains("Task b9wi31ww0"), "{capture}");
     assert!(detail.contains("File no longer exists"), "{capture}");
     assert!(!detail.contains("output-file:"), "{capture}");
     let raw = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
@@ -2919,7 +2916,9 @@ fn terminal_weekly_usage_on_task_header() {
         });
         let row = capture
             .lines()
-            .find(|line| line.contains('%') && line.contains("Active ") && line.contains("Inactive "))
+            .find(|line| {
+                line.contains('%') && line.contains("Active ") && line.contains("Inactive ")
+            })
             .unwrap();
         assert!(
             !row.contains("Model:")
@@ -3014,3 +3013,6 @@ fn terminal_context_usage_on_details_border() {
 
 #[path = "support/terminal_summary.rs"]
 mod terminal_summary;
+
+#[path = "support/terminal_await_output.rs"]
+mod terminal_await_output;

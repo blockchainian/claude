@@ -643,3 +643,64 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         std::fs::read_to_string(path).unwrap().trim_end()
     );
 }
+
+#[test]
+fn background_await_detail_uses_markdown_body() {
+    let (mut view, now, output) = with_background();
+    let fixture = include_str!("../../tests/fixtures/background/codex-await.output");
+    std::fs::write(
+        output.path(),
+        fixture.split("[exited with code").next().unwrap(),
+    )
+    .unwrap();
+    log_screen(&view, 200, 60, now);
+    let (x, y) = {
+        let viewport = view.viewport.borrow();
+        (
+            viewport.details.x + 2,
+            viewport.details_background[0].0.start,
+        )
+    };
+    release_click(&mut view, MouseButton::Left, x, y);
+    release_click(&mut view, MouseButton::Left, x, y);
+    let event = view.visible_log_event().unwrap();
+    let detail = super::super::tool_detail::detail(event, String::new(), Style::default());
+    assert_eq!(detail.sections[0].title.left, None);
+    let body = detail_parts(event);
+    let message = body
+        .iter()
+        .find(|part| part.source.contains("d0b23338"))
+        .unwrap();
+    assert!(message.markdown());
+    assert!(!message.source.contains("lastMessage"));
+    let rendered = detail_buffer(&view, 160, now);
+    let text = rendered
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(!text.contains("lastMessage"));
+    assert!(!text.contains("[exited with code"));
+    let snapshot = rendered
+        .content
+        .chunks(164)
+        .map(|row| {
+            let mut text = String::new();
+            let mut x = 0;
+            while x < row.len() {
+                let symbol = row[x].symbol();
+                text.push_str(symbol);
+                x += symbol.width().max(1);
+            }
+            text.trim_end().to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots/background_await_detail.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}

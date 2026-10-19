@@ -2,6 +2,7 @@ mod activity;
 mod app;
 mod ask;
 mod clipboard;
+mod codex_await_output;
 mod images;
 mod jsonl;
 mod log;
