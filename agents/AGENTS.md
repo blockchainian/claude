@@ -41,6 +41,8 @@ The gate every change passes:
 
 ## Tests
 
+> Run coverage tests only when you need coverage.
+
 - Run the relevant tests.
 - **coverage tests**: `cargo llvm-cov nextest --no-fail-fast --html`
 
