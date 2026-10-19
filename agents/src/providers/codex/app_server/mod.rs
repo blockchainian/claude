@@ -1,3 +1,4 @@
+pub(super) mod account;
 #[cfg(test)]
 mod tests;
 pub(super) mod thread;

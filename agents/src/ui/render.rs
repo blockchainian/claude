@@ -816,6 +816,25 @@ impl View {
                 .set_symbol(" ")
                 .set_style(style::time_style());
         }
+        if let Some(usage) = self
+            .selected_row()
+            .and_then(|session| self.weekly_usage.get(&session.id.provider))
+        {
+            let mut text = format!(" · weekly {}% left", usage.left_percent);
+            if usage.left_percent < 20
+                && let Some(resets_at) = usage.resets_at
+            {
+                text.push_str(&format!(
+                    " · resets {}",
+                    resets_at.with_timezone(&chrono::Local).format("%a %H:%M")
+                ));
+            }
+            text.push(' ');
+            let available = right.saturating_sub(x);
+            truncate_line_with_ellipsis_if_overflow(Line::from(text), usize::from(available))
+                .style(style::time_style())
+                .render(Rect::new(x, rule.y, available, 1), buf);
+        }
     }
     pub(super) fn render_details(
         &self,

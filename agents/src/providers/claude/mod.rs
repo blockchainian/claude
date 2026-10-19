@@ -20,6 +20,7 @@ pub(super) mod registry;
 mod settings;
 mod subagents;
 mod transcript;
+mod weekly_usage;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
@@ -844,6 +845,10 @@ impl Provider for ClaudeProvider {
 
     fn input_choices(&self) -> crate::providers::InputChoices {
         models::input_choices(&self.config_dir, models::installed_version().as_deref())
+    }
+
+    fn weekly_usage(&self) -> Option<crate::providers::WeeklyUsageJob> {
+        Some(Box::new(weekly_usage::read))
     }
 
     fn task_defaults(&self, cwd: &Path) -> Option<io::Result<crate::tasks::TaskDefaults>> {
