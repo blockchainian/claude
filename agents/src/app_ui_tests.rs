@@ -1384,6 +1384,19 @@ fn archive_codex_fixture() -> (tempfile::TempDir, App) {
         .unwrap()
         .execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
         .unwrap();
+    let transcript = directory.path().join("rollout.jsonl");
+    std::fs::write(
+        &transcript,
+        include_str!("../tests/fixtures/codex-thread-clock.jsonl"),
+    )
+    .unwrap();
+    rusqlite::Connection::open(directory.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET rollout_path=?1",
+            [transcript.to_str().unwrap()],
+        )
+        .unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
         directory.path().into(),
         directory.path().join("manager"),

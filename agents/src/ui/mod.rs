@@ -1255,13 +1255,12 @@ impl View {
         }
     }
 
-    /// The row a tab selects when no task chosen in it is still listed: the task or subagent that
-    /// waited longest. Show more stands for tasks older than every listed one, so it wins where it
-    /// is listed.
+    /// The row a tab selects when no task chosen in it is still listed: the first visible row in
+    /// Inactive, or the longest-waiting active task or subagent in Active.
     fn fallback_selection(&self) -> usize {
         let selectable = self.selectable_indices();
-        if selectable.contains(&usize::MAX) {
-            return usize::MAX;
+        if self.status_filter == tab_for_status(SessionStatus::Inactive) {
+            return selectable.first().copied().unwrap_or(usize::MAX);
         }
         let prefer_active = self.status_filter == 0
             && selectable

@@ -286,7 +286,21 @@ fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
     );
     tmux.run(&["send-keys", "-t", "probe", "Home"]);
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    tmux.wait_for(|capture| listed(capture, "Finished child"));
+    let default_selection = tmux.capture_when(|capture| {
+        selected(capture, "Live parent") && listed(capture, "Finished child")
+    });
+    let first_task = default_selection
+        .lines()
+        .skip(2)
+        .find(|line| line.split('│').next().unwrap().contains('●'))
+        .unwrap();
+    assert!(first_task.contains("Live parent"), "{default_selection}");
+    tmux.run(&["send-keys", "-t", "probe", "Down"]);
+    tmux.wait_for(|capture| selected(capture, "Finished child"));
+    tmux.run(&["send-keys", "-t", "probe", "BTab"]);
+    tmux.wait_for(|capture| listed(capture, "Working child"));
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    let remembered_selection = tmux.capture_when(|capture| selected(capture, "Finished child"));
     tmux.run(&["send-keys", "-t", "probe", "Home"]);
     tmux.wait_for(|capture| selected(capture, "Live parent") && listed(capture, "Finished child"));
     entry["status"] = "idle".into();
@@ -307,7 +321,7 @@ fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
         !parent_row.split('│').next().unwrap().contains("Ready"),
         "{refreshed}"
     );
-    let verdict = serde_json::json!({"passed": true, "active": active, "inactive": inactive, "refreshed": refreshed});
+    let verdict = serde_json::json!({"passed": true, "active": active, "inactive": inactive, "default_selection": default_selection, "remembered_selection": remembered_selection, "refreshed": refreshed});
     if let Some(path) = std::env::var_os("AGENTS_STATUS_TABS_VERDICT") {
         std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
     }

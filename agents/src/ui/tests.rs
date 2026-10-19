@@ -1831,14 +1831,57 @@ fn the_first_load_selects_the_longest_waiting_task() {
 }
 
 #[test]
-fn inactive_without_its_chosen_task_selects_show_more() {
+fn inactive_without_its_chosen_task_selects_first_visible_row() {
     let mut view = fixture();
     view.set_sessions(view.rows.clone(), true);
 
     key(&mut view, KeyCode::BackTab);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
-    assert_eq!(view.selected, usize::MAX);
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn inactive_defaults_to_top_of_task_tree_and_remembers_user_selection() {
+    for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+        for has_more in [false, true] {
+            let mut view = test_view(grouping, false);
+            let parent = session("parent", "Live parent", SessionStatus::Working, 10);
+            let mut child = session("child", "Finished child", SessionStatus::Inactive, 600);
+            child.parent = Some(parent.id.clone());
+            let other = session("other", "Other finished task", SessionStatus::Inactive, 300);
+            let rows = vec![other.clone(), child.clone(), parent.clone()];
+            view.set_sessions(rows.clone(), has_more);
+            view.viewport.get_mut().scroll = 20;
+
+            key(&mut view, KeyCode::Tab);
+
+            let visible = view.visible_indices();
+            assert_eq!(visible.len(), 3);
+            assert_eq!(view.selected, visible[0]);
+            assert_eq!(view.viewport.borrow().scroll, 0);
+            screen(&view, 120, 24);
+            assert_eq!(view.viewport.borrow().scroll, 0);
+
+            view.select(visible[1]);
+            let chosen = view.selected_id().cloned();
+            key(&mut view, KeyCode::BackTab);
+            key(&mut view, KeyCode::Tab);
+            assert_eq!(view.selected_id(), chosen.as_ref());
+
+            // A remembered task that disappears must also fall back to the top.
+            key(&mut view, KeyCode::BackTab);
+            view.set_sessions(
+                rows.into_iter()
+                    .filter(|row| Some(&row.id) != chosen.as_ref())
+                    .collect(),
+                has_more,
+            );
+            key(&mut view, KeyCode::Tab);
+            assert_eq!(view.selected, view.visible_indices()[0]);
+            assert_eq!(view.viewport.borrow().scroll, 0);
+        }
+    }
 }
 
 #[test]
