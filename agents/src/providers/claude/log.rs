@@ -492,6 +492,14 @@ fn result_text(value: &serde_json::Value) -> String {
     })
 }
 
+/// Unwraps the `<tool_use_error>` tag Claude Code puts around its own tool errors.
+fn result_content(value: &serde_json::Value) -> serde_json::Value {
+    value
+        .as_str()
+        .and_then(|text| text.strip_prefix("<tool_use_error>")?.strip_suffix("</tool_use_error>"))
+        .map_or_else(|| value.clone(), Into::into)
+}
+
 fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
@@ -622,14 +630,15 @@ impl Log {
                             && let Some(id) = block["tool_use_id"].as_str()
                         {
                             let source_records = self.source_records();
+                            let content = result_content(&block["content"]);
                             let result = self.results.entry(id.to_owned()).or_insert(ResultAt {
                                 source_records: Vec::new(),
                                 at,
                                 sequence: self.sequence,
                                 error: false,
                                 denial: None,
-                                content: result_text(&block["content"]),
-                                raw_content: block["content"].clone(),
+                                content: result_text(&content),
+                                raw_content: content,
                                 value: record["toolUseResult"].clone(),
                             });
                             result.source_records.extend(source_records);
@@ -1907,6 +1916,24 @@ pub(crate) mod tests {
         let call = event.calls.iter().find(|call| call.exit_code == Some(1)).unwrap();
         assert!(call.title.ends_with(" (1)"), "{}", call.title);
         assert!(event.body.contains(" (1)"), "{}", event.body);
+        assert!(call.is_error);
+    }
+
+    #[test]
+    fn tool_use_error_shows_its_body() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let body = "This background session hasn't isolated its changes yet. Call EnterWorktree first so edits land in a worktree instead of the shared checkout, then retry this edit using the worktree path (a path inside a linked git worktree, including one you create with `git worktree add`, is accepted). (To disable this guard for this repo, set `\"worktree\": {\"bgIsolation\": \"none\"}` in .claude/settings.json.)";
+        let mut error = records[1].clone();
+        error["message"]["content"][0]["is_error"] = true.into();
+        error["message"]["content"][0]["content"] =
+            format!("<tool_use_error>{body}</tool_use_error>").into();
+        error["toolUseResult"] = format!("Error: {body}").into();
+        let events = events_from(vec![records[0].clone(), error]);
+        let call = &events[0].calls[0];
+        assert_eq!(call.output, Some(vec![text_section("output", body)]));
         assert!(call.is_error);
     }
 
