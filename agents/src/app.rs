@@ -221,6 +221,14 @@ impl App {
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
         view.set_input_choices(hub.input_choices());
+        for draft in &preferences.drafts {
+            if let Some((_, defaults)) = hub.task_defaults(&draft.cwd) {
+                match defaults {
+                    Ok(defaults) => view.set_draft_defaults(&draft.cwd, defaults),
+                    Err(error) => view.set_notice(Some(format!("Cannot create draft: {error}"))),
+                }
+            }
+        }
         view.provider_names = hub.display_names();
         let (sender, receiver) = mpsc::channel();
         Self {

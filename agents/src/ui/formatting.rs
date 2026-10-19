@@ -3,6 +3,37 @@ use chrono::{DateTime, Utc};
 use std::io::{Read, Seek, SeekFrom};
 
 impl View {
+    pub(super) fn draft_model<'a>(&self, draft: &'a super::drafts::Draft) -> Option<&'a str> {
+        draft
+            .setup
+            .model
+            .as_deref()
+            .or(draft.defaults.model.as_deref())
+    }
+
+    pub(super) fn draft_default_effort<'a>(
+        &'a self,
+        draft: &'a super::drafts::Draft,
+    ) -> Option<&'a str> {
+        if draft.setup.model.is_none() || draft.setup.model == draft.defaults.model {
+            draft.defaults.effort.as_deref()
+        } else {
+            self.input_choices
+                .get(&draft.setup.provider)?
+                .model(self.draft_model(draft)?)?
+                .default_effort
+                .as_deref()
+        }
+    }
+
+    pub(super) fn draft_effort<'a>(&'a self, draft: &'a super::drafts::Draft) -> Option<&'a str> {
+        draft
+            .setup
+            .effort
+            .as_deref()
+            .or_else(|| self.draft_default_effort(draft))
+    }
+
     /// The session model, resolved through the same catalog as the picker.
     pub(super) fn session_model_text(&self, session: &Session) -> Option<String> {
         Some(self.model_text(
@@ -28,12 +59,6 @@ pub(super) fn clock_text(at: DateTime<Utc>) -> String {
     at.with_timezone(&chrono::Local)
         .format(super::log::CLOCK_FORMAT)
         .to_string()
-}
-
-pub(super) fn effort_text(effort: Option<&str>) -> &str {
-    effort
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Default")
 }
 
 pub(super) fn tail_lines(path: &Path, count: usize) -> Vec<String> {

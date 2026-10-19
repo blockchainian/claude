@@ -387,7 +387,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
         )),
         Some(Action::Copy {
             text: "ecks".into(),
-            label: "Copied error message".into()
+            label: "Copied message".into()
         })
     );
 }

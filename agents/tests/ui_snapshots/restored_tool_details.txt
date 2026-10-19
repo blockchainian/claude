@@ -179,7 +179,7 @@ Skill                                                                           
                                                                                                     ↓
                                                                                                    •··
 SendMessage tool-2 — 120 columns
-Message                                            hide-idle-teammates
+Message                                           ← hide-idle-teammates
 
   Is the uncommitted edit to agents/src/ui/line_truncation.rs in the agents-panel worktree yours? I'm add-
   codex-support; my Codex thread (step 4 of the provider refactor) is mid-gate in that same tree and its cargo
@@ -190,7 +190,7 @@ Message                                            hide-idle-teammates
                                                             ↓
                                                            •··
 SendMessage tool-2 — 200 columns
-Message                                                                                    hide-idle-teammates
+Message                                                                                   ← hide-idle-teammates
 
                                                           Is the uncommitted edit to agents/src/ui/line_truncation.rs in the agents-panel
                                                           worktree yours? I'm add-codex-support; my Codex thread (step 4 of the provider
@@ -234,25 +234,25 @@ Spawn agent                                                                     
 
                                                                                               Review files.
 send_message call_f449799618f74814b21e98c2d8107ef5 — 120 columns
-Message                                                   root
+Message                                                  ← root
 
                                                       Review files.
                                                             ↓
                                                        (no output)
 send_message call_f449799618f74814b21e98c2d8107ef5 — 200 columns
-Message                                                                                           root
+Message                                                                                          ← root
 
                                                                                               Review files.
                                                                                                     ↓
                                                                                                (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 120 columns
-Followup task                                           ux_probe
+Followup task                                          ← ux_probe
 
                                                       Review files.
                                                             ↓
                                                        (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 200 columns
-Followup task                                                                                   ux_probe
+Followup task                                                                                  ← ux_probe
 
                                                                                               Review files.
                                                                                                     ↓
@@ -266,25 +266,25 @@ Spawn agent                                                                     
 
                                                                                                (encrypted)
 send_message call_79ce27eb65c447ee9080c286a12cb69c — 120 columns
-Message                                               rename_gating
+Message                                              ← rename_gating
 
                                                        (encrypted)
                                                             ↓
                                                        (no output)
 send_message call_79ce27eb65c447ee9080c286a12cb69c — 200 columns
-Message                                                                                       rename_gating
+Message                                                                                      ← rename_gating
 
                                                                                                (encrypted)
                                                                                                     ↓
                                                                                                (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 120 columns
-Followup task                                           ux_probe
+Followup task                                          ← ux_probe
 
                                                        (encrypted)
                                                             ↓
                                                        (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 200 columns
-Followup task                                                                                   ux_probe
+Followup task                                                                                  ← ux_probe
 
                                                                                                (encrypted)
                                                                                                     ↓

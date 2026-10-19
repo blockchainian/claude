@@ -454,7 +454,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
         cwd: directory.path().to_owned(),
     }));
     let buffer = draw(&mut app, 180);
-    let ((x, y), _) = row_ends(&buffer, "Unknown");
+    let ((x, y), _) = row_ends(&buffer, "Opus 5.5");
     click(&mut app, x, y);
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "Haiku 5.5");
@@ -463,7 +463,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("╴Haiku 5.5 "), "{rendered}");
     let buffer = draw(&mut app, 180);
-    let (_, (x, y)) = row_ends(&buffer, "Default");
+    let (_, (x, y)) = row_ends(&buffer, "medium");
     click(&mut app, x, y);
     let selector = lines(&draw(&mut app, 180)).join("\n");
     assert!(selector.contains("xhigh"), "{selector}");
@@ -819,7 +819,7 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
             }),
             Some(Action::Copy {
                 text: "Stop hook".into(),
-                label: "Copied user message".into()
+                label: "Copied message".into()
             }),
             "copy the real event body at {width}x{height}"
         );

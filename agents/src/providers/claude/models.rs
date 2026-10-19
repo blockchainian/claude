@@ -69,7 +69,10 @@ pub fn input_choices(config_dir: &Path, version: Option<&str>) -> InputChoices {
         .and_then(|bytes| serde_json::from_slice::<Cache>(&bytes).ok())
         .filter(|cache| cache.version == 2)
     else {
-        return InputChoices::default();
+        return InputChoices {
+            defaults: super::defaults::builtin(),
+            ..InputChoices::default()
+        };
     };
     let config = cache.catalog.config;
     let mut models: Vec<_> = config
@@ -86,6 +89,7 @@ pub fn input_choices(config_dir: &Path, version: Option<&str>) -> InputChoices {
         .collect();
     models.sort_by_key(|model| model.section.as_deref() != Some("main"));
     InputChoices {
+        defaults: super::defaults::builtin(),
         models: models
             .into_iter()
             .map(|model| {
@@ -202,7 +206,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         assert_eq!(
             input_choices(directory.path(), None),
-            InputChoices::default()
+            InputChoices {
+                defaults: super::super::defaults::builtin(),
+                ..InputChoices::default()
+            }
         );
         write_cache(
             directory.path(),
@@ -210,7 +217,10 @@ mod tests {
         );
         assert_eq!(
             input_choices(directory.path(), None),
-            InputChoices::default()
+            InputChoices {
+                defaults: super::super::defaults::builtin(),
+                ..InputChoices::default()
+            }
         );
     }
 }

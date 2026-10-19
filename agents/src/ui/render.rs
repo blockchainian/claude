@@ -838,7 +838,8 @@ impl View {
 
     /// Groups the model and effort on the left; each value opens its own picker.
     fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
-        let (model, effort) = match (self.selected_row(), self.selected_draft()) {
+        let draft = self.selected_draft();
+        let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
             (Some(session), _) => (
                 session
@@ -850,11 +851,9 @@ impl View {
             ),
             // A new task shows its defaults too, so both stay clickable.
             (None, Some(draft)) => (
-                Some(draft.setup.model.as_deref().map_or_else(
-                    || self.model_text(draft.setup.provider, ""),
-                    |model| self.model_text(draft.setup.provider, model),
-                )),
-                Some(super::formatting::effort_text(draft.setup.effort.as_deref()).to_owned()),
+                self.draft_model(draft)
+                    .map(|model| self.model_text(draft.setup.provider, model)),
+                self.draft_effort(draft).map(str::to_owned),
             ),
             (None, None) => return,
         };

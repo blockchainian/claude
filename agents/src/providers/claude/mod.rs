@@ -886,11 +886,15 @@ impl Provider for ClaudeProvider {
         Some(
             defaults::resolve(&self.config_dir, cwd, |name| std::env::var(name).ok()).map(
                 |mut defaults| {
+                    let builtin = defaults::builtin();
                     // With no configured effort, Claude uses the model's own default.
                     if defaults.effort.is_none() {
                         defaults.effort = defaults.model.as_deref().and_then(|model| {
                             self.input_choices().model(model)?.default_effort.clone()
                         });
+                        if defaults.effort.is_none() && defaults.model == builtin.model {
+                            defaults.effort = builtin.effort;
+                        }
                     }
                     defaults
                 },

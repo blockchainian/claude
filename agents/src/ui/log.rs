@@ -1373,9 +1373,9 @@ pub(super) fn render_footer_title(
     title.render(Rect::new(x, footer.y, width, 1), buf);
 }
 
-/// The footer confirmation after copying an open log event, such as "Copied user message".
-pub(super) fn copied_label(event: &Event) -> String {
-    format!("Copied {} message", kind_label(&event.kind).to_lowercase())
+/// The footer confirmation after copying an open log event.
+pub(super) fn copied_label(_event: &Event) -> String {
+    "Copied message".into()
 }
 
 pub(super) fn kind_label(kind: &Kind) -> &'static str {

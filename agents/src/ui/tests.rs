@@ -4252,7 +4252,7 @@ fn compaction_summary_renders_compaction_tag_and_keeps_visible_body() {
     assert_eq!(events.len(), 1);
     let event = &events[0];
     assert_eq!(super::log::kind_label(&event.kind), "Compaction");
-    assert_eq!(super::log::copied_label(event), "Copied compaction message");
+    assert_eq!(super::log::copied_label(event), "Copied message");
     let (mut view, now) = log_fixture();
     view.log = events.clone();
     view.select_fixture_event(Some(event.clone()));
@@ -7426,7 +7426,7 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
                 view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, row.y)),
                 Some(Action::Copy {
                     text: title.into(),
-                    label: "Copied tool message".into()
+                    label: "Copied message".into()
                 })
             );
         }
@@ -7526,7 +7526,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, last.y)),
         Some(Action::Copy {
             text: command.trim_end_matches('\n').into(),
-            label: "Copied tool message".into(),
+            label: "Copied message".into(),
         })
     );
     let full_screen = log_screen(&view, 100, 48, now);
@@ -7534,7 +7534,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         double_click_text(&mut view, &full_screen, "printf longer"),
         Some(Action::Copy {
             text: format!("{command}\n{{\n  \"timeout\": 1000\n}}\n\nrunning 3 tests\n..."),
-            label: "Copied tool message".into(),
+            label: "Copied message".into(),
         })
     );
     let screen = full_screen
@@ -8156,14 +8156,14 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
             text: body.into(),
-            label: "Copied assistant message".into()
+            label: "Copied message".into()
         })
     );
     assert_eq!(
         double_click_text(&mut view, &open, "Assistant"),
         Some(Action::Copy {
             text: body.into(),
-            label: "Copied assistant message".into()
+            label: "Copied message".into()
         })
     );
 }
@@ -8199,7 +8199,7 @@ fn double_click_log_detail_copies_the_message() {
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
             text: view.log[6].body.clone(),
-            label: "Copied assistant message".into(),
+            label: "Copied message".into(),
         }),
     );
 }
@@ -8541,7 +8541,7 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
         view.finish_text_selection(x + source.replace('\t', "    ").len() as u16, y),
         Some(Action::Copy {
             text: source.into(),
-            label: "Copied tool message".into()
+            label: "Copied message".into()
         })
     );
     view.begin_text_selection(x + 2, y);
@@ -8554,7 +8554,7 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
         view.finish_text_selection(x + 6, y),
         Some(Action::Copy {
             text: "\t".into(),
-            label: "Copied tool message".into()
+            label: "Copied message".into()
         })
     );
 }

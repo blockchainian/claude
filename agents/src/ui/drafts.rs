@@ -15,6 +15,7 @@ pub(crate) struct DraftSetup {
 
 pub(super) struct Draft {
     pub id: DraftId,
+    pub defaults: crate::tasks::TaskDefaults,
     pub setup: DraftSetup,
     pub input: prompt_box::PromptBox,
     pub name: Option<String>,
@@ -93,6 +94,37 @@ impl Session {
 impl View {
     pub(crate) fn set_input_choices(&mut self, choices: HashMap<ProviderId, InputChoices>) {
         self.input_choices = choices;
+        for index in 0..self.drafts.len() {
+            self.drafts[index].defaults = self.draft_defaults(&self.drafts[index].setup);
+        }
+    }
+
+    fn draft_defaults(&self, setup: &DraftSetup) -> crate::tasks::TaskDefaults {
+        let choices = self.input_choices.get(&setup.provider);
+        let model = setup
+            .model
+            .clone()
+            .or_else(|| choices?.defaults.model.clone());
+        let effort = setup.effort.clone().or_else(|| {
+            let choices = choices?;
+            choices
+                .model(model.as_deref()?)
+                .and_then(|model| model.default_effort.clone())
+                .or_else(|| {
+                    (model == choices.defaults.model)
+                        .then(|| choices.defaults.effort.clone())
+                        .flatten()
+                })
+        });
+        crate::tasks::TaskDefaults { model, effort }
+    }
+
+    pub(crate) fn set_draft_defaults(&mut self, cwd: &Path, defaults: crate::tasks::TaskDefaults) {
+        for draft in &mut self.drafts {
+            if draft.setup.cwd == cwd {
+                draft.defaults = defaults.clone();
+            }
+        }
     }
 
     pub(super) fn frozen_draft(&self) -> bool {
@@ -166,8 +198,10 @@ impl View {
             counter: self.next_draft,
         };
         self.next_draft += 1;
+        let defaults = self.draft_defaults(&setup);
         self.drafts.push(Draft {
             id,
+            defaults,
             setup,
             input: prompt_box::PromptBox::default(),
             name: None,
@@ -489,6 +523,7 @@ impl View {
             input.editor = line_edit::LineEdit::restore_input(&value.input);
             self.drafts.push(Draft {
                 id,
+                defaults: crate::tasks::TaskDefaults::default(),
                 setup: DraftSetup {
                     provider: key.provider,
                     cwd: value.cwd.clone(),

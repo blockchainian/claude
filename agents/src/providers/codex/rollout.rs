@@ -2736,7 +2736,7 @@ mod tests {
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
-                        agent_name(subject).to_owned()
+                        format!("← {}", agent_name(subject))
                     }
                 );
                 let input = vec![Section::Markdown {
@@ -2787,7 +2787,7 @@ mod tests {
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
-                        agent_name(subject).to_owned()
+                        format!("← {}", agent_name(subject))
                     }
                 );
                 let expected = vec![Section::Markdown {
@@ -3144,7 +3144,7 @@ mod perspective_tests {
         for (name, expected_left, expected_title) in [
             ("spawn_agent", "Spawn agent", "alpha"),
             ("wait_agent", "", "Wait agent"),
-            ("followup_task", "Followup task", "alpha"),
+            ("followup_task", "Followup task", "← alpha"),
         ] {
             let record: Value = records
                 .lines()

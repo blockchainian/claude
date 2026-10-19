@@ -106,6 +106,7 @@ pub struct ModelChoice {
 /// The models a provider's cache offers; empty when the provider has no cache to read.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputChoices {
+    pub defaults: crate::tasks::TaskDefaults,
     pub models: Vec<ModelChoice>,
     /// Short names, such as `opus`, mapped to the model id they stand for.
     pub aliases: HashMap<String, String>,

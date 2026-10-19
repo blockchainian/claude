@@ -103,9 +103,14 @@ fn terminal_codex_agent_message_bodies() {
             .unwrap();
         let column = line[..line.find(&label).unwrap()].width();
         tmux.mouse(0, column, row, true);
+        let detail_title = if subject == "demo_sub" {
+            subject.to_owned()
+        } else {
+            format!("← {subject}")
+        };
         let capture = tmux.capture_when(|capture| {
             capture.lines().any(|line| {
-                line.contains(subject)
+                line.contains(&detail_title)
                     && line.contains(if subject == "demo_sub" {
                         "Spawn agent"
                     } else if subject == "ux_probe" {
@@ -323,11 +328,20 @@ fn terminal_claude_agent_exchange() {
                         .lines()
                         .filter(|line| {
                             line.trim_start().starts_with("Message")
-                                && line.contains("translate-pdf")
+                                && line.contains("translate-pdf →")
                         })
                         .count()
                         == 2)
         });
+        if label == "hide-idle-teammates ← message" {
+            assert!(
+                detail.lines().any(|line| {
+                    line.trim_start().starts_with("Message")
+                        && line.contains("← hide-idle-teammates")
+                }),
+                "{detail}"
+            );
+        }
         captures.push_str(&format!("\n\n{detail}"));
     }
     let verdict = serde_json::json!({"verdict":"pass","provider":"claude","spawn":true,"outgoing":true,"incoming_merged":true,"details":true});

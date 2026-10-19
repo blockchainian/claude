@@ -1657,7 +1657,11 @@ pub(crate) mod tests {
                     }).unwrap_or(name);
                     assert_eq!(
                         call.detail_title,
-                        expected
+                        if name == "SendMessage" {
+                            format!("← {}", crate::log::agent::name(expected))
+                        } else {
+                            expected.to_owned()
+                        }
                     );
                     if let Some(message) = &call.agent_message {
                         assert_eq!(call.detail_left, message.label());
@@ -2242,6 +2246,16 @@ pub(crate) mod tests {
                 expected
             };
             assert_eq!(events[0].summary(), row_expected);
+            if let Some(call) = events[0].calls.first()
+                && let Some(message) = &call.agent_message
+                && let Some(author) = &message.author
+                && message.recipient.is_none()
+            {
+                assert_eq!(
+                    call.detail_title,
+                    format!("{} →", crate::log::agent::name(author))
+                );
+            }
             let record: Value = serde_json::from_str(line).unwrap();
             if record["type"] == "assistant" {
                 let len = file.as_file().metadata().unwrap().len();

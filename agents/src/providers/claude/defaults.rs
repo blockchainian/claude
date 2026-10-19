@@ -9,6 +9,14 @@ use std::{
 /// `ANTHROPIC_DEFAULT_MODEL` values Claude Code ignores.
 const IGNORED_DEFAULT_MODELS: [&str; 4] = ["default", "inherit", "opusplan", "haiku"];
 
+/// Claude Code's first-party account default and its model runtime's default effort.
+pub(super) fn builtin() -> TaskDefaults {
+    TaskDefaults {
+        model: Some("claude-opus-5-5".into()),
+        effort: Some("medium".into()),
+    }
+}
+
 struct SettingsFile {
     values: Map<String, Value>,
     user: bool,
@@ -62,7 +70,8 @@ pub(super) fn resolve(
             env("ANTHROPIC_DEFAULT_MODEL").filter(|value| {
                 !value.is_empty() && !IGNORED_DEFAULT_MODELS.contains(&value.as_str())
             })
-        });
+        })
+        .or_else(|| builtin().model);
     let mut effort = None;
     for file in &files {
         if let Some(level) = file.effort(model.as_deref())? {

@@ -320,6 +320,7 @@ impl ModelCatalog {
             .collect();
         listed.sort_by_key(|model| model.priority);
         self.choices = crate::providers::InputChoices {
+            defaults: crate::tasks::TaskDefaults::default(),
             models: listed
                 .into_iter()
                 .map(|model| crate::providers::ModelChoice {

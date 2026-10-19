@@ -124,7 +124,7 @@ fn structured_xml_tool_text_and_markdown_share_pretty_copy_sources() {
             view.finish_text_selection(end_x + 8, end_y + detail_y),
             Some(Action::Copy {
                 text: pretty,
-                label: "Copied tool message".into()
+                label: "Copied message".into()
             })
         );
     }

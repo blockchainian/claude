@@ -395,3 +395,106 @@ fn terminal_draft_name_blur_persists_without_enter() {
         r#"{{"verdict":"pass","blur_save":"pass","enter_save":"pass","immediate_json":"pass"}}"#
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_draft_defaults_and_inherited_choices() {
+    use sha2::{Digest, Sha256};
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    repository(&source, "main");
+    let mut checks = Vec::new();
+    for (settings, model, effort) in [
+        (None, "Opus 5.5", "medium"),
+        (
+            Some(
+                r#"{"model":"claude-fable-5-1","effortLevel":"high","modelSettings":{"claude-fable-5-1":{"effortLevel":"xhigh"}}}"#,
+            ),
+            "Fable 5.1",
+            "xhigh",
+        ),
+    ] {
+        for width in [120, 200] {
+            let (_directory, tmux, _) = start_probe_with_setup(
+                "draft-defaults",
+                &transcript_at(&source),
+                |directory| {
+                    let config = directory.join("claude");
+                    std::fs::write(config.join(".claude.json"),
+                        r#"{"oauthAccount":{"organizationUuid":"org-1","accountUuid":"ACCOUNT-1"}}"#).unwrap();
+                    let hash = Sha256::digest(b"account-1")
+                        .iter()
+                        .take(6)
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>();
+                    let cache = config.join("cache/model-catalog");
+                    std::fs::create_dir_all(&cache).unwrap();
+                    std::fs::write(
+                        cache.join(format!("org-1-{hash}-cc.json")),
+                        include_str!("../fixtures/claude-model-catalog.json"),
+                    )
+                    .unwrap();
+                    if let Some(settings) = settings {
+                        std::fs::write(config.join("settings.json"), settings).unwrap();
+                    }
+                },
+            );
+            tmux.run(&[
+                "resize-window",
+                "-t",
+                "probe",
+                "-x",
+                &width.to_string(),
+                "-y",
+                "50",
+            ]);
+            tmux.run(&["send-keys", "-t", "probe", "n"]);
+            for named in [false, true] {
+                let title = if named {
+                    tmux.run(&["send-keys", "-t", "probe", "-l", "Draft probe"]);
+                    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+                    "Draft probe"
+                } else {
+                    "New task"
+                };
+                for value in [model, effort] {
+                    let capture = tmux.capture_when(|capture| {
+                        capture.contains(title)
+                            && capture
+                                .lines()
+                                .any(|line| line.contains(model) && line.contains(effort))
+                    });
+                    let (row, line) = capture
+                        .lines()
+                        .enumerate()
+                        .find(|(_, line)| line.contains(model) && line.contains(effort))
+                        .unwrap();
+                    let column = line[..line.find(value).unwrap()].width();
+                    tmux.mouse(0, column, row, true);
+                    let picker = tmux.capture_when(|capture| {
+                        capture.contains("esc back") && capture.contains("enter select")
+                    });
+                    assert!(!picker.contains("Unknown"), "{picker}");
+                    assert!(!picker.contains("Default"), "{picker}");
+                    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+                    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+                    tmux.wait_for(|capture| {
+                        capture.contains(title)
+                            && !capture.contains("enter select")
+                            && capture
+                                .lines()
+                                .any(|line| line.contains(model) && line.contains(effort))
+                    });
+                }
+                checks.push(serde_json::json!({"width":width,"model":model,"effort":effort,"named":named,"clickable":true,"inherit":true}));
+            }
+        }
+    }
+    let verdict = serde_json::json!({"verdict":"pass","checks":checks});
+    std::fs::write(
+        std::env::temp_dir().join("agents-draft-defaults-verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}

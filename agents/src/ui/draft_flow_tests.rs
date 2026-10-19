@@ -220,7 +220,7 @@ fn rendered_draft_model_click_opens_and_double_click_applies_provider_choice() {
         .find(|(_, field)| *field == Field::Model)
         .unwrap()
         .0;
-    assert_eq!(buffer[(model.x, model.y)].symbol(), "U");
+    assert_eq!(buffer[(model.x, model.y)].symbol(), "O");
     assert_eq!(click(&mut view, model.x, model.y), None);
     assert_eq!(view.selector.as_ref().unwrap().field(), Field::Model);
     view.render_at(area, &mut buffer, Utc::now());
@@ -1032,5 +1032,103 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
         });
         view.set_sessions(vec![arrived], false);
         assert_eq!(save(&mut view), serde_json::json!([]));
+    }
+}
+
+#[test]
+fn draft_defaults_are_visible_clickable_and_can_be_selected_without_an_override() {
+    let (directory, mut view) = fixture();
+    view.add_draft(setup(directory.path()));
+    let area = Rect::new(0, 0, 180, 52);
+    for (field, expected) in [(Field::Model, "Opus 5.5"), (Field::Effort, "medium")] {
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let rect = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, target)| *target == field)
+            .unwrap()
+            .0;
+        let text = (rect.x..rect.right())
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect::<String>();
+        assert_eq!(text, expected);
+        assert_eq!(click(&mut view, rect.x, rect.y), None);
+        assert_eq!(view.selector.as_ref().unwrap().field(), field);
+        view.render_at(area, &mut buffer, Utc::now());
+        let rect = view
+            .viewport
+            .borrow()
+            .picker_rows
+            .iter()
+            .find(|(_, index)| *index == 0)
+            .unwrap()
+            .0;
+        let text = (rect.x..rect.right())
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect::<String>();
+        assert_eq!(text.trim(), expected);
+        key(&mut view, KeyCode::Home);
+        key(&mut view, KeyCode::Enter);
+        let draft = view.selected_draft().unwrap();
+        assert!(draft.setup.model.is_none());
+        assert!(draft.setup.effort.is_none());
+    }
+}
+
+#[test]
+fn draft_configured_defaults_survive_clearing_overrides() {
+    let (directory, mut view) = fixture();
+    let mut setup = setup(directory.path());
+    setup.model = Some("claude-fable-5-1".into());
+    setup.effort = Some("xhigh".into());
+    view.add_draft(setup);
+    for field in [Field::Model, Field::Effort] {
+        view.open_field(field);
+        key(&mut view, KeyCode::Home);
+        key(&mut view, KeyCode::Enter);
+    }
+    let buffer = render(&view);
+    let text = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Fable 5.1"), "{text}");
+    assert!(text.contains("xhigh"), "{text}");
+    assert!(view.selected_draft().unwrap().setup.model.is_none());
+    assert!(view.selected_draft().unwrap().setup.effort.is_none());
+}
+
+#[test]
+fn sessions_without_model_or_effort_have_no_border_controls() {
+    let (_directory, mut view) = fixture();
+    view.rows[view.selected].model = None;
+    view.rows[view.selected].effort = None;
+    render(&view);
+    assert!(
+        view.viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .all(|(_, field)| !matches!(field, Field::Model | Field::Effort))
+    );
+}
+
+#[test]
+fn named_drafts_keep_default_controls_without_overrides() {
+    let (directory, mut view) = fixture();
+    named_draft(&mut view, directory.path(), "default controls");
+    render(&view);
+    for field in [Field::Model, Field::Effort] {
+        assert!(
+            view.viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .any(|(_, target)| *target == field)
+        );
     }
 }

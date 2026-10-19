@@ -59,6 +59,7 @@ pub(super) enum SelectorKind {
     Effort {
         target: ControlTarget,
         values: Vec<String>,
+        labels: Vec<String>,
     },
 }
 
@@ -171,17 +172,8 @@ impl Selector {
                 .enumerate()
                 .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
                 .collect(),
-            SelectorKind::Effort { values, .. } => values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    ListRow::Choice(
-                        index,
-                        Line::from(super::formatting::effort_text(Some(value)).to_owned()),
-                    )
-                })
-                .collect(),
-            SelectorKind::Model { labels: values, .. } => values
+            SelectorKind::Effort { labels: values, .. }
+            | SelectorKind::Model { labels: values, .. } => values
                 .iter()
                 .enumerate()
                 .map(|(index, value)| ListRow::Choice(index, Line::from(value.clone())))
@@ -472,15 +464,22 @@ impl View {
         let Some(choices) = self.input_choices.get(&provider) else {
             return;
         };
-        let current_model = model.as_deref().and_then(|model| choices.model(model));
-        let (values, current) = match field {
+        let effective_model = self
+            .selected_draft()
+            .and_then(|draft| self.draft_model(draft))
+            .or(model.as_deref());
+        let current_model = effective_model.and_then(|model| choices.model(model));
+        let (mut values, current) = match field {
             Field::Model => (
                 choices
                     .models
                     .iter()
                     .map(|model| model.id.clone())
                     .collect::<Vec<_>>(),
-                current_model.map(|model| model.id.clone()),
+                model
+                    .as_deref()
+                    .and_then(|model| choices.model(model))
+                    .map(|model| model.id.clone()),
             ),
             _ => (
                 current_model
@@ -496,24 +495,47 @@ impl View {
                 },
             ),
         };
+        let default_label = self.selected_draft().and_then(|draft| match field {
+            Field::Model => draft
+                .defaults
+                .model
+                .as_deref()
+                .map(|model| self.model_text(provider, model)),
+            _ => self.draft_default_effort(draft).map(str::to_owned),
+        });
+        if default_label.is_some() {
+            values.insert(0, String::new());
+        }
         if values.is_empty() {
             return;
         }
         let selected = current
             .and_then(|current| values.iter().position(|value| *value == current))
             .unwrap_or_default();
+        let labels = values
+            .iter()
+            .map(|value| {
+                if value.is_empty() {
+                    default_label.clone().expect("draft default label")
+                } else if field == Field::Model {
+                    self.model_text(provider, value)
+                } else {
+                    value.clone()
+                }
+            })
+            .collect();
         let kind = if field == Field::Model {
-            let labels = values
-                .iter()
-                .map(|model| self.model_text(provider, model))
-                .collect();
             SelectorKind::Model {
                 target,
                 values,
                 labels,
             }
         } else {
-            SelectorKind::Effort { target, values }
+            SelectorKind::Effort {
+                target,
+                values,
+                labels,
+            }
         };
         self.selector = Some(Selector::new(kind, selected));
         self.focus_selector();
@@ -644,7 +666,7 @@ impl View {
                 None
             }
             SelectorKind::Model { target, values, .. }
-            | SelectorKind::Effort { target, values } => {
+            | SelectorKind::Effort { target, values, .. } => {
                 let value = values.get(index)?.clone();
                 let target = target.clone();
                 let model = matches!(selector.kind, SelectorKind::Model { .. });
@@ -653,9 +675,9 @@ impl View {
                     ControlTarget::Draft(id) => {
                         let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
                         if model {
-                            draft.setup.model = Some(value);
+                            draft.setup.model = (!value.is_empty()).then_some(value);
                         } else {
-                            draft.setup.effort = Some(value);
+                            draft.setup.effort = (!value.is_empty()).then_some(value);
                         }
                         self.draft_changed(id);
                         None
@@ -807,11 +829,11 @@ mod tests {
         let area = Rect::new(3, 2, 160, 40);
         view.open_field(Field::Model);
         assert!(!view.input_box.focused);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 0);
+        assert_eq!(view.selector.as_ref().unwrap().selected, 1);
         screen(&view, area);
-        let sonnet = row_of(&view, 2);
+        let sonnet = row_of(&view, 3);
         assert_eq!(click(&mut view, sonnet), None);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
+        assert_eq!(view.selector.as_ref().unwrap().selected, 3);
         let later = Instant::now() + Duration::from_secs(1);
         assert_eq!(view.flush_pending_click(later), None);
         assert_eq!(
@@ -828,7 +850,7 @@ mod tests {
             Some("claude-sonnet-5-5")
         );
         view.open_field(Field::Effort);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 1);
+        assert_eq!(view.selector.as_ref().unwrap().selected, 2);
         for code in [KeyCode::Char('j'), KeyCode::Down] {
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         }

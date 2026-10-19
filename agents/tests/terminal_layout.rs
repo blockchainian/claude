@@ -2563,7 +2563,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 .unwrap();
                 let expected = source["message"]["content"][0]["text"].as_str().unwrap();
                 tmux.wait_for(|capture| {
-                    capture.contains("Copied assistant message")
+                    capture.contains("Copied message")
                         && std::fs::read_to_string(directory.path().join("clipboard/text"))
                             .is_ok_and(|text| text == expected)
                 });

@@ -123,8 +123,8 @@ impl Message {
     pub fn route(&self) -> String {
         match (&self.author, &self.recipient) {
             (Some(author), Some(recipient)) => format!("{} → {}", name(author), name(recipient)),
-            (Some(author), None) => name(author).to_owned(),
-            (None, Some(recipient)) => name(recipient).to_owned(),
+            (Some(author), None) => format!("{} →", name(author)),
+            (None, Some(recipient)) => format!("← {}", name(recipient)),
             _ => String::new(),
         }
     }
@@ -260,6 +260,31 @@ pub fn merge(events: Vec<Event>) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn message_routes_keep_single_endpoint_direction() {
+        let record: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/codex-agent-messages/final-answer.jsonl"
+        ))
+        .unwrap();
+        let payload = &record["payload"];
+        let mut message = Message {
+            author: Some(payload["author"].as_str().unwrap().to_owned()),
+            recipient: Some(payload["recipient"].as_str().unwrap().to_owned()),
+            direction: Direction::Between,
+            kind: "FINAL_ANSWER".to_owned(),
+            content: Content::Text(payload["content"][0]["text"].as_str().unwrap().to_owned()),
+        };
+        assert_eq!(message.route(), "demo_sub → root");
+        message.direction = Direction::Incoming;
+        message.recipient = None;
+        assert_eq!(message.route(), "demo_sub →");
+        message.direction = Direction::Outgoing;
+        message.recipient = message.author.take();
+        assert_eq!(message.route(), "← demo_sub");
+        message.recipient = None;
+        assert_eq!(message.route(), "");
+    }
 
     #[test]
     fn real_agent_calls_share_the_message_model() {

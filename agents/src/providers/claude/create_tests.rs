@@ -79,7 +79,7 @@ fn write_settings(path: &Path, text: &str) {
 }
 
 #[test]
-fn task_defaults_use_the_saved_level_for_the_model_without_inventing_defaults() {
+fn task_defaults_use_the_saved_level_for_the_effective_model() {
     let config = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     // Shape of an actual Claude Code user settings payload.
@@ -99,7 +99,7 @@ fn task_defaults_use_the_saved_level_for_the_model_without_inventing_defaults() 
     assert_eq!(defaults.effort, None);
     fs::remove_file(config.path().join("settings.json")).unwrap();
     let defaults = resolve_defaults(config.path(), project.path(), &[]).unwrap();
-    assert_eq!(defaults.model, None);
+    assert_eq!(defaults.model.as_deref(), Some("claude-opus-5-5"));
     assert_eq!(defaults.effort, None);
 }
 
@@ -169,7 +169,7 @@ fn task_defaults_apply_claude_code_environment_variables() {
         &[("ANTHROPIC_DEFAULT_MODEL", "opusplan")],
     )
     .unwrap();
-    assert_eq!(defaults.model, None);
+    assert_eq!(defaults.model.as_deref(), Some("claude-opus-5-5"));
     write_settings(
         &config.path().join("settings.json"),
         r#"{"model":"claude-opus-5-5","modelSettings":{"claude-opus-5-5":{"effortLevel":"xhigh"}}}"#,
@@ -292,4 +292,26 @@ fn creation_parses_named_background_output() {
         stderr: Vec::new(),
     };
     assert_eq!(created_job(&output).unwrap(), "17935055");
+}
+
+#[test]
+fn unconfigured_task_uses_claude_codes_builtin_model_and_effort() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = ClaudeProvider::new(directory.path().into());
+    let defaults = provider.task_defaults(directory.path()).unwrap().unwrap();
+    assert_eq!(defaults.model.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(defaults.effort.as_deref(), Some("medium"));
+}
+
+#[test]
+fn builtin_model_uses_its_saved_effort_without_a_model_override() {
+    let directory = tempfile::tempdir().unwrap();
+    write_settings(
+        &directory.path().join("settings.json"),
+        r#"{"modelSettings":{"claude-opus-5-5":{"effortLevel":"xhigh"}}}"#,
+    );
+    let provider = ClaudeProvider::new(directory.path().into());
+    let defaults = provider.task_defaults(directory.path()).unwrap().unwrap();
+    assert_eq!(defaults.model.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(defaults.effort.as_deref(), Some("xhigh"));
 }
