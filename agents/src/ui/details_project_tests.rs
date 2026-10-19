@@ -11,6 +11,56 @@ fn visible(cell: &ratatui::buffer::Cell) -> &str {
 }
 
 #[test]
+fn prompt_cache_countdown_uses_error_style_before_wall_time() {
+    let now = DateTime::UNIX_EPOCH + Duration::days(20_000);
+    for seconds in [
+        None,
+        Some(-1),
+        Some(0),
+        Some(1),
+        Some(725),
+        Some(900),
+        Some(901),
+    ] {
+        for width in [149, 220] {
+            let mut view = fixture();
+            let selected = &mut view.rows[view.selected];
+            selected.started_at = Some(now - Duration::hours(2));
+            selected.cache_expires_at = seconds.map(|seconds| now + Duration::seconds(seconds));
+            let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
+            view.render_at(buf.area, &mut buf, now);
+            let y = (0..buf.area.height)
+                .find(|&y| {
+                    (0..width)
+                        .map(|x| visible(&buf[(x, y)]))
+                        .collect::<String>()
+                        .contains("2h 0m")
+                })
+                .unwrap();
+            let row = (0..width)
+                .map(|x| visible(&buf[(x, y)]))
+                .collect::<String>();
+            if let Some(seconds) = seconds.filter(|seconds| (1..=900).contains(seconds)) {
+                let countdown = formatting::format_duration(seconds);
+                let expected = format!("{countdown} · 2h 0m");
+                assert!(row.contains(&expected), "{width} {seconds}: {row}");
+                let x = row[..row.find(&expected).unwrap()].chars().count() as u16;
+                assert_eq!(buf[(x, y)].fg, style::error_style().fg.unwrap());
+                assert!(!buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+                let wall_x = x + countdown.len() as u16 + 3;
+                assert!(
+                    buf[(wall_x, y)]
+                        .modifier
+                        .contains(ratatui::style::Modifier::DIM)
+                );
+            } else {
+                assert!(!row.contains(" · 2h 0m"), "{seconds:?}: {row}");
+            }
+        }
+    }
+}
+
+#[test]
 fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
     for pr in [false, true] {
         for width in [80, 149, 150, 220] {

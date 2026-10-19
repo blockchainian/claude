@@ -632,6 +632,26 @@ impl View {
             .and_then(|session| session.started_at)
             .map(|at| format_duration((now - at).num_seconds()))
             .filter(fits);
+        let elapsed = elapsed.map(|elapsed| {
+            let mut spans = Vec::new();
+            if let Some(seconds) = session
+                .and_then(|session| session.cache_expires_at)
+                .map(|expires| expires - now)
+                .filter(|remaining| {
+                    *remaining >= chrono::Duration::seconds(1)
+                        && *remaining <= chrono::Duration::minutes(15)
+                })
+                .map(|remaining| remaining.num_seconds())
+            {
+                let countdown = format_duration(seconds);
+                if fits(&format!("{countdown} · {elapsed}")) {
+                    spans.push(Span::styled(countdown, style::error_style()));
+                    spans.push(" · ".dim());
+                }
+            }
+            spans.push(elapsed.dim());
+            Line::from(spans)
+        });
         let context = session
             .and_then(|_| self.selected_context_percent())
             .map(|percent| format!("{percent}%"))
@@ -639,8 +659,8 @@ impl View {
         let (left, right) = render_rule_ends(
             rule,
             0,
-            context.map(|text| text.dim()),
-            elapsed.map(|text| text.dim()),
+            context.map(|text| Line::from(text.dim())),
+            elapsed,
             buf,
         );
         let reserved = [left, right]
@@ -767,8 +787,8 @@ impl View {
         let (left_area, folder_area) = render_rule_ends(
             rule,
             label_width,
-            left,
-            Some(Span::styled(folder, style::time_style())),
+            left.map(Line::from),
+            Some(Line::from(Span::styled(folder, style::time_style()))),
             buf,
         );
         let mut viewport = self.viewport.borrow_mut();
@@ -1624,16 +1644,15 @@ fn rule(area: Rect, buf: &mut Buffer) {
 fn render_rule_ends(
     rule: Rect,
     center: u16,
-    left: Option<Span<'static>>,
-    right: Option<Span<'static>>,
+    left: Option<Line<'static>>,
+    right: Option<Line<'static>>,
     buf: &mut Buffer,
 ) -> (Option<Rect>, Option<Rect>) {
     // Each side keeps its corner cell, a space on both sides of its text and a rule cell before
     // the center.
     let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(4);
-    let mut place = |text: Option<Span<'static>>, from_left: bool| {
-        let style = text.as_ref()?.style;
-        let text = truncate_line_with_ellipsis_if_overflow(Line::from(text?), side);
+    let mut place = |text: Option<Line<'static>>, from_left: bool| {
+        let text = truncate_line_with_ellipsis_if_overflow(text?, side);
         let width = text.width() as u16;
         if width == 0 {
             return None;
@@ -1653,10 +1672,6 @@ fn render_rule_ends(
         buf[(padding, rule.y)]
             .set_symbol(symbol)
             .set_style(Style::default().dim());
-        let mut text = text;
-        for span in &mut text.spans {
-            span.style = style;
-        }
         text.render(area, buf);
         Some(area)
     };
@@ -1835,6 +1850,7 @@ mod wrapped_path_tests {
             prompt_at: None,
             turn_messages: 0,
             last_record_at: None,
+            cache_expires_at: None,
             model: None,
             effort: None,
             git_branch: None,

@@ -347,6 +347,7 @@ impl ModelCatalog {
 
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
     session.prompt_at = summary.prompt_at;
+    session.cache_expires_at = summary.cache_expires_at;
     session.detail_sources[..2].clone_from_slice(&summary.detail_sources[..2]);
     session.last_message = summary.last_message;
     session.last_message_at = summary.last_message_at;
@@ -439,6 +440,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         prompt_images: Vec::new(),
         queued: vec![],
         prompt_at: None,
+        cache_expires_at: None,
         turn_messages: 0,
         last_record_at: None,
         model: column(row, "model")?,

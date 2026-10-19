@@ -1084,6 +1084,7 @@ fn session(
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,
         last_record_at: summary.timestamp,
+        cache_expires_at: summary.cache_expires_at,
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,

@@ -16,6 +16,7 @@ const CHUNK: u64 = 64 * 1024;
 pub(super) struct Summary {
     pub tasks: Vec<SessionTask>,
     task_replay: TaskReplay,
+    prompt_cache: PromptCache,
     pub detail_sources: [Option<String>; 3],
     pub started_at: Option<DateTime<Utc>>,
     pub subagent_records: Vec<Value>,
@@ -43,6 +44,50 @@ pub(super) struct Summary {
     pub model_identities: HashMap<String, String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
+    pub cache_expires_at: Option<DateTime<Utc>>,
+}
+
+/// Replayed alongside task history so bounded tails retain the request and TTL.
+#[derive(Clone, Debug, Default)]
+struct PromptCache {
+    ttl: Option<chrono::Duration>,
+    input_at: Option<DateTime<Utc>>,
+    request_at: Option<DateTime<Utc>>,
+    message_id: Option<String>,
+}
+
+impl PromptCache {
+    fn record(&mut self, record: &Value, expires_at: &mut Option<DateTime<Utc>>) {
+        if record["type"] == "user" {
+            self.input_at = record["timestamp"]
+                .as_str()
+                .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+                .map(|at| at.with_timezone(&Utc));
+            return;
+        }
+        if record["type"] != "assistant" {
+            return;
+        }
+        let message_id = record["message"]["id"].as_str();
+        // Streamed blocks share an id; later blocks must keep the first anchor.
+        if message_id != self.message_id.as_deref() || self.request_at.is_none() {
+            self.request_at = self.input_at;
+            self.message_id = message_id.map(str::to_owned);
+        }
+        let creation = &record["message"]["usage"]["cache_creation"];
+        if creation["ephemeral_1h_input_tokens"]
+            .as_u64()
+            .is_some_and(|tokens| tokens > 0)
+        {
+            self.ttl = Some(chrono::Duration::hours(1));
+        } else if creation["ephemeral_5m_input_tokens"]
+            .as_u64()
+            .is_some_and(|tokens| tokens > 0)
+        {
+            self.ttl = Some(chrono::Duration::minutes(5));
+        }
+        *expires_at = self.request_at.zip(self.ttl).map(|(at, ttl)| at + ttl);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -179,6 +224,8 @@ fn read_history(
             .extend(previous.model_identities.clone());
         summary.tasks = previous.tasks.clone();
         summary.task_replay = previous.task_replay.clone();
+        summary.prompt_cache = previous.prompt_cache.clone();
+        summary.cache_expires_at = previous.cache_expires_at;
     }
     if previous.is_none() {
         // Model attachments occur near the start, outside the bounded message tail.
@@ -209,6 +256,9 @@ fn read_history(
             && (sidechains || record["isSidechain"] != true)
         {
             summary.task_replay.record(&record, &mut summary.tasks);
+            summary
+                .prompt_cache
+                .record(&record, &mut summary.cache_expires_at);
             if let Some((id, name)) = model_identity(&record) {
                 summary.model_identities.insert(id, name);
             }
@@ -932,6 +982,115 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
 pub(super) mod tests {
     use super::*;
     use std::io::Write;
+
+    fn cache_records() -> Vec<Value> {
+        include_str!("../../../tests/fixtures/prompt-cache/claude.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    fn write_cache_record(file: &mut tempfile::NamedTempFile, record: &Value) {
+        writeln!(file, "{record}").unwrap();
+    }
+
+    fn cached_expiry(file: &tempfile::NamedTempFile, previous: Option<&Summary>) -> Summary {
+        read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            previous,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn prompt_cache_uses_request_input_instead_of_stream_completion() {
+        let records = cache_records();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in &records {
+            write_cache_record(&mut file, record);
+        }
+        let first = cached_expiry(&file, None);
+        let expiry = DateTime::parse_from_rfc3339("2026-10-06T17:39:12.595Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(first.cache_expires_at, Some(expiry));
+        let mut streamed = records[1].clone();
+        streamed["timestamp"] = Value::from("2026-10-06T16:45:29.554Z");
+        write_cache_record(&mut file, &streamed);
+        assert_eq!(
+            cached_expiry(&file, Some(&first)).cache_expires_at,
+            Some(expiry)
+        );
+        assert_eq!(cached_expiry(&file, None).cache_expires_at, Some(expiry));
+    }
+
+    #[test]
+    fn prompt_cache_retains_ttl_across_tool_results_and_bounded_reads() {
+        let records = cache_records();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in &records {
+            write_cache_record(&mut file, record);
+        }
+        writeln!(file, "{}", " ".repeat(CHUNK as usize * 3)).unwrap();
+        let mut input: Value = include_str!("../../../tests/fixtures/claude-todos.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| {
+                record["type"] == "user"
+                    && record["message"]["content"]
+                        .as_array()
+                        .is_some_and(|blocks| {
+                            blocks.iter().any(|block| block["type"] == "tool_result")
+                        })
+            })
+            .unwrap();
+        input["timestamp"] = Value::from("2026-10-06T16:50:00Z");
+        write_cache_record(&mut file, &input);
+        let first = cached_expiry(&file, None);
+        let mut assistant = records[1].clone();
+        assistant["message"]["id"] = Value::from("msg_next_request");
+        assistant["timestamp"] = Value::from("2026-10-06T16:57:00Z");
+        assistant["message"]["usage"]["cache_creation"]["ephemeral_1h_input_tokens"] =
+            Value::from(0);
+        write_cache_record(&mut file, &assistant);
+        let expiry = DateTime::parse_from_rfc3339("2026-10-06T17:50:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            cached_expiry(&file, Some(&first)).cache_expires_at,
+            Some(expiry)
+        );
+        assert_eq!(cached_expiry(&file, None).cache_expires_at, Some(expiry));
+    }
+
+    #[test]
+    fn prompt_cache_requires_known_ttl_and_request_timestamp() {
+        let records = cache_records();
+        for (hour, five, input, expected) in [
+            (0, 0, true, None),
+            (0, 23, true, Some("2026-10-06T16:44:12.595Z")),
+            (12, 23, true, Some("2026-10-06T17:39:12.595Z")),
+            (12, 0, false, None),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            if input {
+                write_cache_record(&mut file, &records[0]);
+            }
+            let mut assistant = records[1].clone();
+            assistant["message"]["usage"]["cache_creation"]["ephemeral_1h_input_tokens"] =
+                Value::from(hour);
+            assistant["message"]["usage"]["cache_creation"]["ephemeral_5m_input_tokens"] =
+                Value::from(five);
+            write_cache_record(&mut file, &assistant);
+            assert_eq!(
+                cached_expiry(&file, None).cache_expires_at,
+                expected.map(|at| DateTime::parse_from_rfc3339(at)
+                    .unwrap()
+                    .with_timezone(&Utc))
+            );
+        }
+    }
 
     #[test]
     fn model_identity_survives_bounded_reads_and_cached_appends() {
