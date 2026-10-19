@@ -44,6 +44,8 @@ fn preferences_round_trip_and_corrupt_defaults() {
         theme: Some(PathBuf::from("custom.tmTheme")),
         light_theme: Some(PathBuf::from("light.tmTheme")),
         dark_theme: Some(PathBuf::from("dark.tmTheme")),
+        drafts: Vec::new(),
+        draft_notices: Vec::new(),
         usage_view: UsageView::Detailed,
         usage: HashMap::from([
             (ProviderId::Claude, usage(21.0, Some(1))),
@@ -222,4 +224,49 @@ fn missing_optional_usage_fields_stay_absent() {
     let codex = &stored["state"]["usage"]["weekly"]["codex"];
     assert!(codex.get("resets_at").is_none());
     assert!(codex.get("reset_credits").is_none());
+}
+
+fn draft_fixture(name: &str) -> StoredDraft {
+    serde_json::from_value(serde_json::json!({
+        "id":"draft-1-1", "provider":"claude", "name":name,
+        "input":{"text":"half typed", "images":["/tmp/image.png"]},
+        "cwd":"/tmp", "repository_confirmed":true,
+        "branch":{"existing":"main"}, "model":"opus", "effort":"high",
+        "job":null, "error":null, "updated_at":"2026-10-18T09:00:00Z"
+    }))
+    .unwrap()
+}
+
+#[test]
+fn drafts_round_trip_drop_unnamed_and_malformed_without_losing_other_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = Preferences {
+        pinned: vec!["claude:kept".parse().unwrap()],
+        ..Preferences::default()
+    };
+    preferences
+        .usage
+        .insert(ProviderId::Claude, usage(21.0, Some(1)));
+    preferences.save(dir.path()).unwrap();
+    preferences.drafts = vec![draft_fixture("Fix login"), draft_fixture("")];
+    preferences.save_drafts(dir.path()).unwrap();
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.drafts, vec![draft_fixture("Fix login")]);
+    let destination = dir.path().join("agents.json");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    document["state"]["drafts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id":"broken"}));
+    fs::write(&destination, serde_json::to_vec(&document).unwrap()).unwrap();
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.drafts, vec![draft_fixture("Fix login")]);
+    assert_eq!(loaded.draft_notices.len(), 1);
+    assert_eq!(loaded.pinned, preferences.pinned);
+    assert_eq!(loaded.usage, preferences.usage);
+    loaded.save_usage_view(dir.path()).unwrap();
+    let after: serde_json::Value =
+        serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    assert_eq!(after["state"]["drafts"], document["state"]["drafts"]);
 }

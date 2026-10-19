@@ -9,6 +9,44 @@ pub(super) struct ImageSpan {
 }
 
 impl LineEdit {
+    pub(in crate::ui) fn stored_input(&self) -> crate::state::StoredDraftInput {
+        self.preserve_images();
+        crate::state::StoredDraftInput {
+            text: self.text.clone(),
+            images: self.image_paths(),
+        }
+    }
+
+    pub(in crate::ui) fn restore_input(input: &crate::state::StoredDraftInput) -> Self {
+        let mut edit = Self::default();
+        edit.set_text(&input.text);
+        let mut offset = 0;
+        for (index, path) in input.images.iter().enumerate() {
+            let label = format!("[Image #{}]", index + 1);
+            let Some(position) = edit.text[offset..].find(&label) else {
+                continue;
+            };
+            let start = offset + position;
+            let end = start + label.len();
+            match ImageAttachment::from_path(path) {
+                Ok(image) => {
+                    edit.images.push(ImageSpan {
+                        range: start..end,
+                        image,
+                    });
+                    offset = end;
+                }
+                Err(_) => {
+                    edit.text.replace_range(start..end, "");
+                    offset = start;
+                }
+            }
+        }
+        edit.end();
+        edit.relabel_images();
+        edit
+    }
+
     pub(in crate::ui) fn insert_image(&mut self, image: ImageAttachment) {
         self.delete_selection();
         let number = self.images.len() + 1;
@@ -145,5 +183,71 @@ impl LineEdit {
         });
         self.text.replace_range(range.clone(), text);
         range
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_draft_images_keep_paths_and_restore_text_positions() {
+        let mut edit = LineEdit::default();
+        edit.insert("before ");
+        edit.insert_image(
+            ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap(),
+        );
+        edit.insert(" middle ");
+        edit.insert_image(
+            ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap(),
+        );
+        edit.insert(" after");
+        let stored = edit.stored_input();
+        let paths = stored.images.clone();
+        drop(edit);
+        assert!(paths.iter().all(|path| path.is_file()));
+        let restored = LineEdit::restore_input(&stored);
+        assert_eq!(restored.text(), stored.text);
+        assert_eq!(restored.image_paths(), paths);
+        assert_eq!(restored.prompt_text(), "before  middle  after");
+        drop(restored);
+        std::fs::remove_file(&paths[0]).unwrap();
+        let restored = LineEdit::restore_input(&stored);
+        assert_eq!(restored.text(), "before  middle [Image #1] after");
+        assert_eq!(restored.image_paths(), vec![paths[1].clone()]);
+        drop(restored);
+        std::fs::remove_file(&paths[1]).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+    #[test]
+    fn stored_images_restore_after_inserting_an_attachment_before_another() {
+        let attach = || {
+            ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap()
+        };
+        let mut editor = LineEdit::default();
+        editor.insert("suffix");
+        editor.insert_image(attach());
+        editor.home();
+        editor.insert_image(attach());
+        let stored = editor.stored_input();
+        let restored = LineEdit::restore_input(&stored);
+        assert_eq!(restored.image_paths(), editor.image_paths());
+        assert_eq!(restored.text(), editor.text());
+        for path in stored.images {
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }

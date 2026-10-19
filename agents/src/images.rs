@@ -36,6 +36,20 @@ impl ImageAttachment {
         self.0.submitted.store(true, Ordering::Relaxed);
     }
 
+    /// Restores a persisted attachment without copying or taking ownership of its file.
+    pub(crate) fn from_path(path: &Path) -> io::Result<Self> {
+        if !path.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "attachment file is missing",
+            ));
+        }
+        Ok(Self(Arc::new(ImageFile {
+            path: tempfile::TempPath::try_from_path(path)?,
+            submitted: AtomicBool::new(true),
+        })))
+    }
+
     pub(crate) fn from_image(image: image::DynamicImage) -> io::Result<Self> {
         let file = tempfile::Builder::new()
             .prefix("agents-image-")

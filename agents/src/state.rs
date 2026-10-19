@@ -16,6 +16,55 @@ pub enum UsageView {
     Detailed,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DraftBranch {
+    Unchosen,
+    Existing(String),
+    New(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredDraftInput {
+    pub text: String,
+    pub images: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredDraft {
+    pub id: String,
+    pub provider: String,
+    pub name: String,
+    pub input: StoredDraftInput,
+    pub cwd: PathBuf,
+    pub repository_confirmed: bool,
+    pub branch: DraftBranch,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub job: Option<String>,
+    pub error: Option<String>,
+    #[serde(
+        serialize_with = "serialize_draft_time",
+        deserialize_with = "deserialize_draft_time"
+    )]
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn serialize_draft_time<S: serde::Serializer>(
+    time: &chrono::DateTime<chrono::Utc>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&time.to_rfc3339())
+}
+
+fn deserialize_draft_time<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<chrono::DateTime<chrono::Utc>, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
@@ -30,6 +79,8 @@ pub struct Preferences {
     pub dark_theme: Option<PathBuf>,
     pub usage_view: UsageView,
     pub usage: HashMap<ProviderId, WeeklyUsage>,
+    pub drafts: Vec<StoredDraft>,
+    pub draft_notices: Vec<String>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -72,6 +123,7 @@ struct StoredState {
     pinned: Vec<String>,
     usage_view: UsageView,
     usage: StoredUsage,
+    drafts: Vec<serde_json::Value>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -125,6 +177,8 @@ impl Default for Preferences {
             dark_theme: None,
             usage_view: UsageView::default(),
             usage: HashMap::new(),
+            drafts: Vec::new(),
+            draft_notices: Vec::new(),
         }
     }
 }
@@ -158,6 +212,20 @@ impl Preferences {
             weekly.reset_credits = value.reset_credits;
             usage.insert(provider, weekly);
         }
+        let mut drafts = Vec::new();
+        let mut draft_notices = Vec::new();
+        for (index, value) in stored.state.drafts.into_iter().enumerate() {
+            match serde_json::from_value::<StoredDraft>(value) {
+                Ok(draft)
+                    if !draft.name.trim().is_empty()
+                        && matches!(draft.provider.as_str(), "claude" | "codex") =>
+                {
+                    drafts.push(draft)
+                }
+                Ok(_) => draft_notices.push(format!("Dropped invalid draft {}", index + 1)),
+                Err(error) => draft_notices.push(format!("Dropped draft {}: {error}", index + 1)),
+            }
+        }
         Some(Self {
             worktree_root: stored.config.worktree_root,
             double_click_ms: stored.config.double_click_ms,
@@ -173,6 +241,8 @@ impl Preferences {
             dark_theme: stored.config.dark_theme,
             usage_view: stored.state.usage_view,
             usage,
+            drafts,
+            draft_notices,
         })
     }
 
@@ -182,6 +252,18 @@ impl Preferences {
                 self.pinned
                     .iter()
                     .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn save_drafts(&self, config_dir: &Path) -> io::Result<()> {
+        update(config_dir, |document| {
+            document["state"]["drafts"] = serde_json::to_value(
+                self.drafts
+                    .iter()
+                    .filter(|draft| !draft.name.trim().is_empty())
                     .collect::<Vec<_>>(),
             )?;
             Ok(())
@@ -230,6 +312,12 @@ impl Preferences {
                 state: StoredState {
                     pinned: self.pinned.iter().map(ToString::to_string).collect(),
                     usage_view: self.usage_view,
+                    drafts: self
+                        .drafts
+                        .iter()
+                        .filter(|draft| !draft.name.trim().is_empty())
+                        .map(serde_json::to_value)
+                        .collect::<Result<_, _>>()?,
                     usage: StoredUsage {
                         weekly: self
                             .usage
