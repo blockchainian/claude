@@ -656,6 +656,8 @@ mod tests {
         let screen = parser.complete().expect("completed question screen");
         assert!(prompt(&screen).is_some(), "{screen}");
         assert!(!left_input(&screen), "{screen}");
+        // A paste and Enter on a dialog would select its option.
+        assert!(!ready(&screen), "{screen}");
     }
 
     #[test]
