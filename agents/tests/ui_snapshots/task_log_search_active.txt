@@ -1,12 +1,12 @@
   Active 1                                                                              Inactive 0
 ──────────────────────────────────────────────────┬─────────────────── Working ─────────────────────
-                   /tmp/project                   │                Task log example
- ● Task log example        Working            now │                     Prompt
-                                                  │ Task log example
+                   /tmp/project                   │                     Prompt
+ ● Task log example        Working            now │ Task log example
                                                   │
                                                   │
                                                   │
-──────────────────────────────────────────────────┴─────────────────────────────────────── project╶─
+                                                  │
+──────────────────────────────────────────────────┴─────────────── Task log example ────── project╶─
  Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                        Also inspect the tests                              11:59:00

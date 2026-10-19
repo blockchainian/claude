@@ -34,6 +34,10 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                 .map(|x| visible(&buf[(x, folder.y)]))
                 .collect::<String>();
             assert!(!row.contains("Ready"), "{width}: {row}");
+            assert!(
+                row.contains(view.rows[view.selected].display_title()),
+                "{width}: {row}"
+            );
             assert!(!row.contains("hidden-branch"));
             assert_eq!(folder.right(), details.right() - u16::from(width < 150));
             assert_eq!(

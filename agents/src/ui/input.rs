@@ -547,6 +547,7 @@ impl View {
                 if matches!(
                     selector.kind,
                     draft_controls::SelectorKind::Repository { .. }
+                        | draft_controls::SelectorKind::Branch { .. }
                 ) {
                     self.pending_click = None;
                     return self.apply_choice(index);

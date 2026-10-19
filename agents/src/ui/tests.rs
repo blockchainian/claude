@@ -2457,7 +2457,7 @@ fn clicking_the_name_in_details_renames_at_the_panel_bottom() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let title = view.viewport.borrow().details_title;
-    assert_eq!(title.y, view.viewport.borrow().details.y);
+    assert_eq!(title.y, view.viewport.borrow().details.bottom());
     assert_eq!(
         (title.x..title.right())
             .map(|x| buf[(x, title.y)].symbol())
@@ -3397,9 +3397,14 @@ mod details_header {
             .to_owned()
     }
 
-    /// The task's name on the details panel's first row, under the status rule.
+    /// The rule under the details panel, which carries the task's name.
     fn name_row(view: &View, rule: Rect) -> Rect {
-        Rect::new(rule.x, view.viewport.borrow().details.y, rule.width, 1)
+        Rect::new(
+            rule.x,
+            view.viewport.borrow().details.bottom(),
+            rule.width,
+            1,
+        )
     }
 
     #[test]
@@ -3446,7 +3451,7 @@ mod details_header {
                         let header = label(&buf, rule);
                         assert!(!label(&buf, bottom).contains("Working"));
                         assert!(header.starts_with("Working"), "{header}");
-                        assert_eq!(label(&buf, name_row(&view, rule)), "Fix login bug");
+                        assert!(label(&buf, bottom).starts_with("Fix login bug"));
                         assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
                             assert!(header.ends_with(expected), "{header}");
@@ -3467,8 +3472,10 @@ mod details_header {
         for width in [112, 200] {
             let (buf, rule) = rule_at_width(&view, Utc::now(), width);
             assert_eq!(label(&buf, rule), "Working");
-            assert_eq!(label(&buf, name_row(&view, rule)), "Header task");
-            assert_eq!(name_row(&view, rule).y, rule.y + 1);
+            let bottom = label(&buf, name_row(&view, rule));
+            assert!(bottom.starts_with("Header task"), "{bottom}");
+            assert!(bottom.ends_with("project"), "{bottom}");
+            assert!(name_row(&view, rule).y > rule.y + 1);
         }
     }
 
@@ -3488,7 +3495,8 @@ mod details_header {
             let (buf, rule) = rule_at_width(&view, now, width);
             let header = label(&buf, name_row(&view, rule));
             assert!(header.starts_with('升'), "{header}");
-            assert!(header.ends_with("…"), "{header}");
+            assert!(header.contains("… ─"), "{header}");
+            assert!(header.ends_with("project"), "{header}");
             assert!(label(&buf, rule).starts_with("Working"));
         }
     }
@@ -3511,10 +3519,11 @@ mod details_header {
             view.set_sessions(vec![session("header", "Header task", status, 0)], false);
             let (buf, rule) = rule(&view, Utc::now());
             let name = name_row(&view, rule);
-            let header = label(&buf, name);
-            assert_eq!(header, "Header task");
-            let start = name.x + (name.width - header.width() as u16) / 2;
+            let header = "Header task";
+            assert!(label(&buf, name).starts_with(header));
+            let start = name.x - 2 + (name.width + 3 - (header.width() as u16 + 2)) / 2 + 1;
             let title = &buf[(start, name.y)];
+            assert_eq!(title.symbol(), "H");
             assert_eq!(title.fg, view.title_color(&session_key("header")));
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
@@ -3567,7 +3576,8 @@ mod details_header {
         let (buf, rule) = rule(&view, Utc::now());
         let header = label(&buf, name_row(&view, rule));
         let rendered = queued_details(row, 15);
-        assert!(header.ends_with('…'), "{header}");
+        assert!(header.contains("… ─"), "{header}");
+        assert!(header.ends_with("project"), "{header}");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
@@ -3610,7 +3620,15 @@ mod details_header {
                     .collect::<String>();
                 assert!(!bottom_text.contains("Working"));
                 assert!(bottom_text.contains("project"));
-                assert_eq!(label(&buf, name_row(&view, top)), "Task log example");
+                let title_start = (usize::from(segment) - " Task log example ".len()) / 2 - 2;
+                assert_eq!(
+                    bottom_text
+                        .chars()
+                        .skip(title_start)
+                        .take(" Task log example ".len())
+                        .collect::<String>(),
+                    " Task log example "
+                );
                 for x in time_end - 6..time_end {
                     let cell = &buf[(x, top.y)];
                     assert!(cell.modifier.contains(Modifier::DIM));
@@ -3618,7 +3636,6 @@ mod details_header {
                 }
                 assert!(label(&buf, top).ends_with(" 3h 12m"));
                 assert!(!bottom_text.contains("3h 12m"));
-                assert!(!bottom_text.contains("Task log example"));
                 assert!(!label(&buf, top).contains("Task log example"));
                 if !layout.log.is_empty() {
                     let strip = &buf[(layout.list.right() - 1, bottom)];
@@ -6729,11 +6746,14 @@ mod subagent_rows {
             .nth(usize::from(layout.header.y + 1))
             .unwrap();
         assert!(!header.contains("Check files"), "{header}");
-        let name = rendered.lines().nth(usize::from(layout.details.y)).unwrap();
-        assert!(name.contains("Check files"), "{name}");
+        let bottom = rendered
+            .lines()
+            .nth(usize::from(view.viewport.borrow().details.bottom()))
+            .unwrap();
+        assert!(bottom.contains("Check files"), "{bottom}");
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("child-model"));
-        assert!(!rendered.contains("Needs attention"));
+        assert!(!rendered.contains("Needs input"));
         let (x, y) = rendered_cell(&rendered, "Review results");
         click_mouse(
             &mut view,
@@ -9407,10 +9427,7 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
             .map(|x| buf[(x, layout.header.y + 1)].symbol())
             .collect();
         assert!(top.contains(" Working "), "{top}");
-        let name: String = (layout.details.x..layout.details.right())
-            .map(|x| buf[(x, layout.details.y)].symbol())
-            .collect();
-        assert_eq!(name.trim(), "Task log example");
+        assert!(bottom.contains(" Task log example "), "{bottom}");
     }
 }
 

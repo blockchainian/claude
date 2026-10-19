@@ -1,14 +1,14 @@
   Active 3                                                                                                  Inactive 0
 ────────────────────────────────────────────────────────────┬───────────────────────── Ready ───────────────────────────
-                        /tmp/project                        │                        Parent task
- ○ Parent task                       Ready           2m ago │                        Background
- ├─ ○ Review results                 Ready              now │ ────────────────────── Check files ──────────────────────
- └─ ● Check files                    Working         1m ago │
-                                                            │                          Prompt
+                        /tmp/project                        │                        Background
+ ○ Parent task                       Ready           2m ago │ ────────────────────── Check files ──────────────────────
+ ├─ ○ Review results                 Ready              now │
+ └─ ● Check files                    Working         1m ago │                          Prompt
                                                             │ Parent task
                                                             │
                                                             │
-────────────────────────────────────────────────────────────┴───────────────────────────────────────────────── project╶─
+                                                            │
+────────────────────────────────────────────────────────────┴────────────────────── Parent task ────────────── project╶─
  Parent task ❯
 ─╴parent-model ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 

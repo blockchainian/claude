@@ -508,7 +508,7 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     let (x, y) = position(&buffer, "╴main ");
     click(&mut app, x + 1, y);
     let buffer = draw(&mut app, 180);
-    let (x, y) = position(&buffer, "New branch");
+    let (x, y) = position(&buffer, "New branch name");
     click(&mut app, x, y);
     assert!(
         app.view
@@ -524,7 +524,7 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(rendered.contains("╴main "), "{rendered}");
-    assert!(rendered.contains("New task ❯"), "{rendered}");
+    assert!(rendered.contains("New prompt ❯"), "{rendered}");
     assert!(!rendered.contains("New branch"), "{rendered}");
     assert!(!rendered.contains("paste-route-proof"), "{rendered}");
     let output = Command::new("git")
@@ -930,7 +930,7 @@ fn wide_border_labels_stay_in_their_columns() {
         assert!(!bottom.contains("Working"));
         assert!(segment(&buffer, details.clone(), 1).ends_with(" 2m 0s"));
         let title_prefix: String = app.sessions[0].display_title().chars().take(8).collect();
-        assert!(segment(&buffer, details.clone(), 2).contains(&title_prefix));
+        assert!(bottom.contains(&title_prefix));
         assert!(!segment(&buffer, details.clone(), 1).contains(&title_prefix));
         assert!(segment(&buffer, tasks.clone(), 1).chars().all(|c| c == '─'));
         assert!(segment(&buffer, log.clone(), 1).chars().all(|c| c == '─'));

@@ -421,20 +421,8 @@ impl View {
             details.height = details.height.saturating_sub(1);
             Some(row(layout.details, details.height, 1))
         };
-        // The task's name takes the panel's first row; the sections scroll below it.
-        let panel = details;
-        let name_row = (!details.is_empty()
-            && (self.selected_row().is_some() || self.selected_draft().is_some()))
-        .then(|| {
-            details = row(panel, 1, panel.height - 1);
-            row(panel, 0, 1)
-        });
         if !details.is_empty() {
             self.render_details(details, buf, now);
-        }
-        if let Some(name_row) = name_row {
-            self.render_details_name(name_row, buf);
-            self.viewport.borrow_mut().details = panel;
         }
         {
             let mut viewport = self.viewport.borrow_mut();
@@ -497,7 +485,7 @@ impl View {
                     now,
                 );
             }
-            self.render_branch_rule(Rect::new(left, details_rule.y, right - left, 1), buf);
+            self.render_title_rule(Rect::new(left, details_rule.y, right - left, 1), buf);
         }
         let mut separators = vec![];
         if layout.gap.width > 1 {
@@ -647,38 +635,23 @@ impl View {
         Clear.render(label, buf);
         line(header, label, buf);
     }
-    /// Centers the selected task's name, or a new task's label, on the details panel's first
-    /// row; a click on a task's name renames it.
-    fn render_details_name(&self, row: Rect, buf: &mut Buffer) {
-        let session = self.selected_row();
-        let (title, title_style) = match session {
-            Some(session) => (
-                session.display_title().to_owned(),
-                self.title_style(&session.id).bold(),
-            ),
-            None => ("New task".to_owned(), Style::default().bold()),
-        };
-        let title = truncate_line_with_ellipsis_if_overflow(
-            Line::from(Span::styled(title, title_style)),
-            usize::from(row.width),
-        );
-        let width = (title.width() as u16).min(row.width);
-        let area = Rect::new(row.x + row.width.saturating_sub(width) / 2, row.y, width, 1);
-        line(title, area, buf);
-        self.viewport.borrow_mut().details_title = if session.is_some() {
-            area
-        } else {
-            Rect::default()
-        };
-    }
-    /// The pull request, or a new task's branch, on the left and the project folder's name on
-    /// the right of the rule under the details panel.
-    fn render_branch_rule(&self, rule: Rect, buf: &mut Buffer) {
+    /// Centers the selected task's name, or a new task's label, on the rule under the details
+    /// panel, a space apart on each side; a click on a task's name renames it. The pull request,
+    /// or a new task's branch, on the left and the project folder's name on the right flank it.
+    fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
         let session = self.selected_row();
         let draft = self.selected_draft();
-        let cwd = match (session, draft) {
-            (Some(session), _) => &session.cwd,
-            (None, Some(draft)) => &draft.setup.cwd,
+        let (title, title_style, cwd) = match (session, draft) {
+            (Some(session), _) => (
+                session.display_title().to_owned(),
+                self.title_style(&session.id).bold(),
+                &session.cwd,
+            ),
+            (None, Some(draft)) => (
+                "New task".to_owned(),
+                Style::default().bold(),
+                &draft.setup.cwd,
+            ),
             (None, None) => return,
         };
         // The left corner is a joint, or the separator that keeps going down beside the prompt.
@@ -706,9 +679,41 @@ impl View {
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
+        // The title stays centered on the whole rule, so the wider side label's width is kept
+        // clear on both sides, plus the corner, one rule cell and a space on each side.
+        let side = left
+            .as_ref()
+            .map_or(0, |span| span.width())
+            .max(folder.width());
+        let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
+        let title = if width <= 1 {
+            Line::from(Span::styled("…", title_style))
+        } else {
+            truncate_line_with_ellipsis_if_overflow(
+                Line::from(Span::styled(title, title_style)),
+                width,
+            )
+        };
+        let mut label = truncate_line_to_width(title, width.max(1));
+        label.spans.insert(0, " ".into());
+        label.spans.push(" ".into());
+        let label_width = (label.width() as u16).min(rule.width);
+        let label_area = Rect::new(
+            rule.x + rule.width.saturating_sub(label_width) / 2,
+            rule.y,
+            label_width,
+            1,
+        );
+        Clear.render(label_area, buf);
+        line(label, label_area, buf);
+        self.viewport.borrow_mut().details_title = if session.is_some() {
+            label_area.inner(Margin::new(1, 0))
+        } else {
+            Rect::default()
+        };
         let (left_area, folder_area) = render_rule_ends(
             rule,
-            0,
+            label_width,
             left,
             Some(Span::styled(folder, style::time_style())),
             buf,
@@ -1789,7 +1794,7 @@ mod branch_input_tests {
                     assert_eq!(cell.bg, Color::Reset, "{text:?} column {x}");
                     // The empty input shows its placeholder dimmed.
                     let placeholder = text.is_empty()
-                        && (rect.x..rect.x + "New branch".len() as u16).contains(&x);
+                        && (rect.x..rect.x + "New branch name".len() as u16).contains(&x);
                     assert_eq!(
                         cell.modifier.is_empty(),
                         !placeholder,

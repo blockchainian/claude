@@ -21,8 +21,8 @@ pub(super) enum ControlTarget {
 }
 
 /// The list the details panel shows to choose a new task's repository or branch, or a task's
-/// model or effort, and the input naming a new task. Repository clicks apply immediately; other
-/// lists apply on double click or Enter. A right click or Esc cancels.
+/// model or effort, and the input naming a new task. Repository and branch clicks apply
+/// immediately; other lists apply on double click or Enter. A right click or Esc cancels.
 pub(super) struct Selector {
     pub kind: SelectorKind,
     pub selected: usize,
@@ -58,7 +58,7 @@ pub(super) enum SelectorKind {
     },
 }
 
-const NEW_BRANCH: &str = "New branch";
+const NEW_BRANCH: &str = "New branch name";
 const NEW_TASK: &str = "New task";
 
 impl Selector {
@@ -776,14 +776,13 @@ mod tests {
         git(&repository, &["branch", "feature/a"]);
         repository
     }
-    /// The details panel's rows below its first, which names the new task.
     fn panel_rows(view: &View, area: Rect) -> Vec<String> {
         let rendered = screen(view, area);
         let details = view.viewport.borrow().details;
         rendered
             .lines()
-            .skip(usize::from(details.y) + 1)
-            .take(usize::from(details.height) - 1)
+            .skip(usize::from(details.y))
+            .take(usize::from(details.height))
             .map(|line| {
                 line.chars()
                     .skip(usize::from(details.x))
@@ -808,7 +807,7 @@ mod tests {
         assert_eq!(view.selector.as_ref().unwrap().selected, 2);
         let rows = panel_rows(&view, area);
         assert_eq!(rows[..2], ["feature/a", "main"]);
-        assert_eq!(rows.last().map(String::as_str), Some("New branch"));
+        assert_eq!(rows.last().map(String::as_str), Some("New branch name"));
         assert!(!rows.contains(&"Create new branch".to_owned()));
         let input = view.viewport.borrow().details_input;
         assert_eq!(input.y, view.viewport.borrow().details.bottom() - 1);
@@ -894,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_rows_apply_on_double_click_or_enter_never_on_a_single_click() {
+    fn a_single_click_on_a_branch_row_applies_it_like_a_repository() {
         let directory = tempfile::tempdir().unwrap();
         let repository = repository(directory.path());
         let mut view = draft_view(&repository, directory.path());
@@ -902,32 +901,23 @@ mod tests {
         let area = Rect::new(0, 0, 160, 40);
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         screen(&view, area);
-        let feature = row_of(&view, 0);
-        assert_eq!(click(&mut view, feature), None);
-        assert_eq!(view.selector.as_ref().unwrap().selected, 0);
-        assert_eq!(
-            view.flush_pending_click(Instant::now() + Duration::from_secs(1)),
-            None
-        );
-        assert_eq!(view.drafts[0].step, Step::Branch);
-        assert_eq!(view.drafts[0].branch_choice, None);
-        assert!(matches!(
-            view.selector.as_ref().unwrap().kind,
-            SelectorKind::Branch { .. }
-        ));
-        // A click on the input row selects it without applying anything.
+        // A click on the input row only selects it.
         let input = row_of(&view, 2);
         assert_eq!(click(&mut view, input), None);
-        view.flush_pending_click(Instant::now() + Duration::from_secs(1));
         assert_eq!(view.selector.as_ref().unwrap().selected, 2);
         assert_eq!(view.drafts[0].step, Step::Branch);
+        let feature = row_of(&view, 0);
         assert_eq!(click(&mut view, feature), None);
-        assert_eq!(click(&mut view, feature), None);
+        assert!(view.pending_click_in(Instant::now()).is_none());
         assert_eq!(
             view.drafts[0].branch_choice,
             Some(BranchChoice::Existing("feature/a".into()))
         );
         assert_eq!(view.drafts[0].step, Step::Name);
+        assert!(matches!(
+            view.selector.as_ref().unwrap().kind,
+            SelectorKind::Name { .. }
+        ));
         // Outside the flow, the branch field on the rule applies and returns to the prompt.
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -936,8 +926,7 @@ mod tests {
         assert_eq!(view.selector.as_ref().unwrap().selected, 0);
         screen(&view, area);
         let main = row_of(&view, 1);
-        click(&mut view, main);
-        click(&mut view, main);
+        assert_eq!(click(&mut view, main), None);
         assert_eq!(view.drafts[0].branch_choice, None);
         assert!(view.selector.is_none());
         assert!(view.input_box.focused);

@@ -569,7 +569,7 @@ fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay(
 fn new_task_takes_its_prompt_then_its_name_at_the_details_bottom() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
-    assert_eq!(view.input_label(), "New task");
+    assert_eq!(view.input_label(), "New prompt");
     // An empty prompt stays on the prompt step.
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(view.selected_draft().unwrap().step, Step::Prompt);
@@ -636,7 +636,7 @@ fn new_task_takes_its_prompt_then_its_name_at_the_details_bottom() {
         .collect::<String>();
     assert!(!screen.contains("Creating"), "{screen}");
     assert!(!screen.contains("waiting for session"), "{screen}");
-    assert!(!screen.contains("New task ❯"), "{screen}");
+    assert!(!screen.contains("New prompt ❯"), "{screen}");
     view.input_box.history.borrow().iter().for_each(|entry| {
         assert_ne!(entry.text(), "改 Claude Code 的颜色");
     });

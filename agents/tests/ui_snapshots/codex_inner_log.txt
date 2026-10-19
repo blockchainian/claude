@@ -1,8 +1,8 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │            Task log example            │                                   type (1)
- ● Task log example         Working     │                 Prompt                 │       Apply patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms
-                                        │ Task log example                       │                               Claude ask claude                          28s
+              /tmp/project              │                 Prompt                 │                                   type (1)
+ ● Task log example         Working     │ Task log example                       │       Apply patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms
+                                        │                                        │                               Claude ask claude                          28s
                                         │                                        │                                   Extension                               1s
                                         │                                        │                                   Imageview
                                         │                                        │
@@ -10,7 +10,7 @@
                                         │                                        │
                                         │                                        │
                                         │                                        │
-────────────────────────────────────────┴─────────────────────────────── project╶┴──────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────┴─────────── Task log example ── project╶┴──────────────────────────────────────────────────────────────────────────────
  Task log example ❯
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Imageview
