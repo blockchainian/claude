@@ -294,3 +294,13 @@ fn failed_draft_drops_its_title_editor() {
     view.draft_created(id, Err(std::io::Error::other("failed")));
     assert!(view.title_editor().is_none());
 }
+
+#[test]
+fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
+    let (_directory, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    assert!(view.mouse_focus == Panel::TaskList);
+    for code in [KeyCode::Char('r'), KeyCode::Esc, KeyCode::Char('/')] {
+        view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+    assert!(view.searching);
+}

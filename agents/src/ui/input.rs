@@ -592,6 +592,7 @@ impl View {
                 if !self.defer_click(ClickTarget::Title(id)) {
                     return None;
                 }
+                self.mouse_focus = Panel::Details;
                 return self.begin_rename();
             }
             if let Some(cwd) = self.heading_at(position) {
@@ -987,7 +988,6 @@ impl View {
         self.rename_target = Some(id);
         self.name_target = None;
         self.input_box.focused = false;
-        self.mouse_focus = Panel::Details;
         self.search.clear();
         self.searching = false;
         None

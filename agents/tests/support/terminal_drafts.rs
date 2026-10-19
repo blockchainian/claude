@@ -218,6 +218,8 @@ fn terminal_task_names_edit_on_details_rule() {
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| title_rule_position(capture, "New task").is_none());
     save_title_capture(&tmux, "04-new-task-cancelled");
+    // A cancelled draft leaves Active selected; the fixture task is Inactive.
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
 
     let original = "Codex manager 停止时线程处理";
     let capture = tmux.capture_when(|capture| capture.contains(original));
