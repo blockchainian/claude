@@ -15,7 +15,7 @@ pub(super) fn tool_hidden(name: &str) -> bool {
     )
 }
 
-use crate::providers::tool::{Format, Input, Subject, Summary};
+use crate::providers::tool::{Format, Input, Subject};
 
 const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
     subjects: &[
@@ -51,15 +51,6 @@ const RULES: crate::providers::tool::Rules = crate::providers::tool::Rules {
         ("Skill", Input::Arguments, Format::Text),
     ],
     expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
-    activities: &[
-        ("AskUserQuestion", Summary::Questions),
-        ("request_user_input", Summary::Questions),
-        ("Agent", Summary::AgentActivity),
-        ("Task", Summary::TaskActivity),
-        ("SendMessage", Summary::Recipient),
-        ("WebFetch", Summary::WebFetch),
-        ("Skill", Summary::Description),
-    ],
 };
 
 #[derive(Clone, Copy)]
@@ -94,16 +85,42 @@ pub(super) fn tool_kind(name: &str) -> Kind {
     }
 }
 
-pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
-    let name = block["name"].as_str()?;
-    if tool_hidden(name) {
-        return None;
+/// Reuses the backward log parser, including result lookup and merged tool rows.
+#[derive(Default)]
+pub(super) struct ActivityLog {
+    log: Log,
+    ready: bool,
+}
+
+impl ActivityLog {
+    pub fn record(&mut self, record: serde_json::Value) {
+        if self.ready {
+            return;
+        }
+        self.log.record(record, usize::MAX);
+        self.ready = self
+            .log
+            .entries
+            .iter()
+            .position(|entry| !entry.event.calls.is_empty())
+            .is_some_and(|index| self.log.batch != Some(index));
     }
-    if let Some(summary) = crate::providers::tool::summary(name, &block["input"], &RULES) {
-        return Some(summary);
+
+    pub fn ready(&self) -> bool {
+        self.ready
     }
-    let (name, subject, _) = crate::providers::tool::presentation(name, &block["input"], &RULES);
-    Some(subject.unwrap_or(name))
+
+    pub fn finish(self) -> io::Result<Option<Event>> {
+        if let Some(error) = self.log.error {
+            return Err(error);
+        }
+        Ok(self
+            .log
+            .entries
+            .into_iter()
+            .find(|entry| !entry.event.calls.is_empty())
+            .map(|entry| entry.event))
+    }
 }
 
 /// When an event stops occupying the session: a tool's or answered question's result, otherwise its start.
@@ -1659,12 +1676,6 @@ pub(crate) mod tests {
             .filter(|call| call.name.starts_with("mcp__"))
         {
             assert!(!call.title.contains("mcp__"));
-            let block = records
-                .iter()
-                .map(|record| &record["message"]["content"][0])
-                .find(|block| block["id"] == call.id)
-                .unwrap();
-            assert_eq!(tool_activity(block).unwrap(), call.detail_title);
         }
     }
 
@@ -2029,20 +2040,45 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn questions_use_headers_in_log_and_question_texts_in_activity() {
+    fn real_activity_uses_the_latest_log_event() {
+        for fixture in [
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl"),
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl"),
+            include_str!("../../../tests/fixtures/claude-questions-pending.jsonl"),
+            include_str!("../../../tests/fixtures/claude-manager-detach-name.jsonl"),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for line in fixture.lines() {
+                writeln!(file, "{line}").unwrap();
+                let events = tail_session(file.path(), usize::MAX, true).unwrap();
+                let Some(event) = events.iter().rev().find(|event| !event.calls.is_empty()) else {
+                    continue;
+                };
+                let summary = super::super::transcript::read_subagent(
+                    file.path(),
+                    file.as_file().metadata().unwrap().len(),
+                )
+                .unwrap();
+                let activity = summary.activity.unwrap();
+                assert_eq!(activity.label, event.body);
+                assert_eq!(activity.kind, event.kind);
+                assert_eq!(activity.at, event.started_at);
+                assert_eq!(
+                    summary.detail_sources[0].as_deref(),
+                    event.calls.first().map(|call| call.id.as_str())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn questions_use_the_same_headers_in_log_and_activity() {
         for fixture in [
             include_str!("../../../tests/fixtures/claude-questions-pending.jsonl"),
             include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
         ] {
             let record: serde_json::Value =
                 serde_json::from_str(fixture.lines().next().unwrap()).unwrap();
-            let expected = record["message"]["content"][0]["input"]["questions"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|question| question["question"].as_str().unwrap())
-                .collect::<Vec<_>>()
-                .join(" · ");
             let mut file = tempfile::NamedTempFile::new().unwrap();
             write!(file, "{fixture}").unwrap();
             let events = tail(file.path(), 8).unwrap();
@@ -2064,27 +2100,14 @@ pub(crate) mod tests {
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
             let activity = summary.activity.unwrap();
-            assert_eq!(activity.label, expected);
+            assert_eq!(activity.label, events[0].body);
             assert_eq!(activity.kind, Kind::Assistant);
         }
     }
 
     #[test]
     fn real_tool_details_match_log_and_latest_activity() {
-        let expected = [
-            "mkdir, cd, ls, wc, head",
-            "找那个会话",
-            "To (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
-            "To (team-lead) Report: /tmp/research",
-            "SubagentHandback",
-            "WebFetch code.claude.com/docs/en/hooks",
-            "cd, ls, sed, wc",
-            "cd, cat, wc, sed",
-        ];
-        for (line, expected) in include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
-            .lines()
-            .zip(expected)
-        {
+        for line in include_str!("../../../tests/fixtures/claude-tool-details.jsonl").lines() {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             writeln!(file, "{line}").unwrap();
             let events = tail_session(file.path(), 8, true).unwrap();
@@ -2109,7 +2132,7 @@ pub(crate) mod tests {
             assert_eq!(events[0].calls[0].name, block["name"].as_str().unwrap());
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
-            assert_eq!(summary.activity.unwrap().label, expected);
+            assert_eq!(summary.activity.unwrap().label, events[0].body);
         }
     }
 
@@ -2143,7 +2166,7 @@ pub(crate) mod tests {
             if record["type"] == "assistant" {
                 let len = file.as_file().metadata().unwrap().len();
                 let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
-                assert_eq!(summary.activity.unwrap().label, expected);
+                assert_eq!(summary.activity.unwrap().label, events[0].body);
             }
         }
     }
@@ -2155,7 +2178,7 @@ pub(crate) mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         for (mut record, tool_name, expected) in [
-            (records[0].clone(), "Task", "Task (reviewer) Review files"),
+            (records[0].clone(), "Task", "Review files"),
             (records[1].clone(), "SubagentHandback", "SubagentHandback"),
         ] {
             let block = &mut record["message"]["content"][0];
@@ -2185,21 +2208,8 @@ pub(crate) mod tests {
                 .unwrap(),
         )
         .unwrap();
-        for (name, label) in [
-            ("Agent", "Agent"),
-            ("Task", "Task"),
-            ("SendMessage", "SendMessage"),
-            ("SubagentHandback", "SubagentHandback"),
-        ] {
+        for name in ["Agent", "Task", "SendMessage", "SubagentHandback"] {
             for participant in ["reviewer", " "] {
-                let expected = match (name, participant.trim().is_empty()) {
-                    ("Agent", false) => "reviewer",
-                    ("Agent", true) => "Agent",
-                    ("Task", false) => "Task (reviewer)",
-                    ("SendMessage", false) => "To (reviewer)",
-                    ("SendMessage", true) => "To",
-                    _ => label,
-                };
                 let mut record = record.clone();
                 let block = &mut record["message"]["content"][0];
                 block["name"] = name.into();
@@ -2218,7 +2228,7 @@ pub(crate) mod tests {
                     file.as_file().metadata().unwrap().len(),
                 )
                 .unwrap();
-                assert_eq!(summary.activity.unwrap().label, expected);
+                assert_eq!(summary.activity.unwrap().label, row_expected);
             }
         }
     }
@@ -2243,11 +2253,11 @@ pub(crate) mod tests {
             file.as_file().metadata().unwrap().len(),
         )
         .unwrap();
-        assert_eq!(summary.activity.unwrap().label, "To No conflicts");
+        assert_eq!(summary.activity.unwrap().label, "SendMessage");
     }
 
     #[test]
-    fn bash_blank_description_keeps_name_in_log_and_subject_in_activity() {
+    fn bash_blank_description_keeps_the_same_name_and_subject() {
         let mut record: Value = serde_json::from_str(
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
                 .lines()
@@ -2265,7 +2275,7 @@ pub(crate) mod tests {
             file.as_file().metadata().unwrap().len(),
         )
         .unwrap();
-        assert_eq!(summary.activity.unwrap().label, "cd, ls, sed, wc");
+        assert_eq!(summary.activity.unwrap().label, events[0].body);
     }
 
     #[test]

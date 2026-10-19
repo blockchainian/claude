@@ -658,7 +658,11 @@ fn read_messages(
     let mut images = super::images::PromptImages::default();
     let mut image_error = None;
     let mut ask_error = None;
+    let mut activity = super::log::ActivityLog::default();
     walk_records(file, start, bytes, sidechains, |record| {
+        if !descriptions_only {
+            activity.record(record.clone());
+        }
         if record["type"] == "assistant" {
             if !model_found && let Some(model) = assistant_model(&record) {
                 summary.model = Some(model);
@@ -765,33 +769,6 @@ fn read_messages(
                     .map(str::to_owned);
             }
         }
-        // The latest visible tool call, finished or not; the panel shows it while it
-        // is newer than the last reply.
-        if summary.activity.is_none()
-            && record["type"] == "assistant"
-            && let Some(at) = at
-            && let Some(blocks) = record["message"]["content"].as_array()
-            && let Some((kind, label)) = blocks
-                .iter()
-                .rev()
-                .filter(|block| block["type"] == "tool_use")
-                .find_map(|block| {
-                    super::log::tool_activity(block).map(|label| {
-                        summary.detail_sources[0] = block["id"].as_str().map(str::to_owned);
-                        (
-                            super::log::tool_kind(block["name"].as_str().unwrap()),
-                            label,
-                        )
-                    })
-                })
-        {
-            summary.activity = Some(Activity {
-                exit_code: None,
-                kind,
-                label: label.to_owned(),
-                at,
-            });
-        }
         if summary.last_message.is_none()
             && record["type"] == "assistant"
             && let Some(message) = content_text(&record, true)
@@ -805,7 +782,7 @@ fn read_messages(
             && effort_found
             && absorbed.is_none()
             && summary.last_message.is_some()
-            && summary.activity.is_some()
+            && activity.ready()
             && quiet_point
             && background.requested.is_empty()
             && background.pending.is_empty()
@@ -819,6 +796,18 @@ fn read_messages(
     }
     if let Some(error) = image_error {
         return Err(error);
+    }
+    if let Some(event) = activity.finish()? {
+        summary.detail_sources[0] = event.calls.first().map(|call| call.id.clone());
+        summary.activity = Some(Activity {
+            exit_code: match event.calls.as_slice() {
+                [call] => call.exit_code,
+                _ => None,
+            },
+            kind: event.kind,
+            label: event.body,
+            at: event.started_at,
+        });
     }
     summary.completed_background = background.completed.clone();
     summary.queued = queued_prompts(operations);
@@ -1743,8 +1732,6 @@ pub(super) mod tests {
                         assistant["message"]["content"] = serde_json::json!([
                             {"type": "tool_use", "id": "bash", "name": "Bash", "input": {"description": "Run checks"}}
                         ]);
-                        let bash_at: DateTime<Utc> =
-                            assistant["timestamp"].as_str().unwrap().parse().unwrap();
                         let tool = serde_json::json!({"type": "tool_use", "id": "task", "name": name,
                             "input": {"description": description}});
                         if same_record {
@@ -1766,23 +1753,19 @@ pub(super) mod tests {
                         }
                         .unwrap();
                         let activity = summary.activity.unwrap();
-                        if name == "TaskStop" {
-                            assert_eq!(activity.label, name);
-                            assert_eq!(
-                                activity.at,
-                                assistant["timestamp"]
-                                    .as_str()
-                                    .unwrap()
-                                    .parse::<DateTime<Utc>>()
-                                    .unwrap()
-                            );
-                        } else {
-                            assert_eq!(
-                                activity.label, "Run checks",
-                                "{name}, sidechain={sidechain}, same_record={same_record}"
-                            );
-                            assert_eq!(activity.at, bash_at);
-                        }
+                        let events =
+                            super::super::log::tail_session(file.path(), usize::MAX, sidechain)
+                                .unwrap();
+                        let event = events
+                            .iter()
+                            .rev()
+                            .find(|event| !event.calls.is_empty())
+                            .unwrap();
+                        assert_eq!(
+                            activity.label, event.body,
+                            "{name}, sidechain={sidechain}, same_record={same_record}"
+                        );
+                        assert_eq!(activity.at, event.started_at);
                     }
                 }
             }
@@ -1800,11 +1783,29 @@ pub(super) mod tests {
         ]);
         write_tool_traffic(&mut file, 3 * CHUNK as usize);
         let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-        assert_eq!(summary.activity.unwrap().label, "Read");
+        assert_eq!(
+            summary.activity.unwrap().label,
+            super::super::log::tail(file.path(), usize::MAX)
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|event| !event.calls.is_empty())
+                .unwrap()
+                .body
+        );
         assert_eq!(summary.last_message_at, read_fixture().last_message_at);
         writeln!(file, "{assistant}").unwrap();
         let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-        assert_eq!(summary.activity.unwrap().label, "中".repeat(CHUNK as usize));
+        assert_eq!(
+            summary.activity.unwrap().label,
+            super::super::log::tail(file.path(), usize::MAX)
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|event| !event.calls.is_empty())
+                .unwrap()
+                .body
+        );
         writeln!(
             file,
             "{}",
@@ -1817,7 +1818,16 @@ pub(super) mod tests {
         user["message"]["content"] = "Next turn".into();
         writeln!(file, "{user}").unwrap();
         let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-        assert_eq!(summary.activity.unwrap().label, "中".repeat(CHUNK as usize));
+        assert_eq!(
+            summary.activity.unwrap().label,
+            super::super::log::tail(file.path(), usize::MAX)
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|event| !event.calls.is_empty())
+                .unwrap()
+                .body
+        );
         assert!(summary.last_message_at.is_some());
     }
 

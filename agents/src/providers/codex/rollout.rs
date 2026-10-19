@@ -51,7 +51,6 @@ const TOOL_RULES: crate::providers::tool::Rules = crate::providers::tool::Rules 
         ("Skill", Input::Arguments, Format::Text),
     ],
     expanded: &[("AskUserQuestion", true), ("request_user_input", true)],
-    activities: &[],
 };
 
 #[derive(Clone, Copy)]

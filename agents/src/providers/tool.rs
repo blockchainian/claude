@@ -118,21 +118,10 @@ pub(crate) enum Format {
     Markdown,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum Summary {
-    Questions,
-    Recipient,
-    WebFetch,
-    AgentActivity,
-    TaskActivity,
-    Description,
-}
-
 pub(crate) struct Rules {
     pub subjects: &'static [(&'static str, Subject)],
     pub inputs: &'static [(&'static str, Input, Format)],
     pub expanded: &'static [(&'static str, bool)],
-    pub activities: &'static [(&'static str, Summary)],
 }
 
 const MCP_RULES: Rules = Rules {
@@ -161,7 +150,6 @@ const MCP_RULES: Rules = Rules {
         ),
     ],
     expanded: &[],
-    activities: &[],
 };
 
 fn find<T: Copy>(name: &str, table: &[(&str, T)]) -> Option<T> {
@@ -182,51 +170,6 @@ fn recipient(input: &Value) -> Option<&str> {
 
 pub(crate) fn expanded(name: &str, rules: &Rules) -> bool {
     find(name, rules.expanded).unwrap_or(true)
-}
-
-pub(crate) fn summary(name: &str, input: &Value, rules: &Rules) -> Option<String> {
-    let mode = find(name, rules.activities)?;
-    let description = || text(input, "description").unwrap_or(name).to_owned();
-    let participant = |field, message| crate::log::participant_text(text(input, field), message);
-    let first_detail = || {
-        ["description", "file_path", "prompt", "query", "message"]
-            .into_iter()
-            .find_map(|field| text(input, field))
-            .unwrap_or("")
-    };
-    Some(match mode {
-        Summary::Questions => question_texts(input).join(" · "),
-        Summary::AgentActivity => match text(input, "name") {
-            Some(_) => [text(input, "name"), text(input, "description")]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · "),
-            None => description(),
-        },
-        Summary::TaskActivity => match text(input, "name") {
-            Some(_) => format!("{name} {}", participant("name", first_detail()))
-                .trim_end()
-                .to_owned(),
-            None => description(),
-        },
-        Summary::Recipient => {
-            let message = text(input, "summary")
-                .or_else(|| text(input, "message").and_then(|text| text.lines().next()))
-                .unwrap_or("");
-            format!("To {}", crate::log::participant_text(recipient(input), message))
-                .trim_end()
-                .to_owned()
-        }
-        Summary::WebFetch => {
-            let url = text(input, "url").unwrap_or("");
-            let address = url.split_once("://").map_or(url, |(_, address)| address);
-            format!("{name} {}", address.split(['?', '#']).next().unwrap_or(""))
-                .trim_end()
-                .to_owned()
-        }
-        Summary::Description => description(),
-    })
 }
 
 /// A human description stands alone; otherwise the display name heads its subject.
@@ -561,7 +504,6 @@ mod tests {
             )],
             inputs: &[],
             expanded: &[],
-            activities: &[],
         };
         let input = &records[0]["message"]["content"][0]["input"];
         let content = &records[1]["message"]["content"][0]["content"];
@@ -628,7 +570,6 @@ mod tests {
             subjects: &[],
             inputs: &[],
             expanded: &[],
-            activities: &[],
         };
         for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
             let (name, subject, input) = super::presentation(name, &call["input"], &rules);
