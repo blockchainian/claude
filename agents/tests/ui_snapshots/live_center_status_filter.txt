@@ -7,6 +7,6 @@
                     │
                     │
                     │
-                    ├─────── … ── pro…╶─
+                    ├─── Unloaded … ────
  Unloaded tas ❯
  ? help  esc Previous  ↑/↓ move  enter…

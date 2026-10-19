@@ -101,6 +101,7 @@ pub fn input_choices(config_dir: &Path, version: Option<&str>) -> InputChoices {
                 }
             })
             .collect(),
+        display_names: Default::default(),
         aliases: config
             .provider_alias_targets
             .into_iter()

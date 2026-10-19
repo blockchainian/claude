@@ -144,7 +144,7 @@ impl Selector {
         match &self.kind {
             SelectorKind::Repository { dir, entries, .. } => {
                 let mut rows = vec![ListRow::Text(Line::from(
-                    super::formatting::format_directory_display(dir).dim(),
+                    super::formatting::format_directory_display(dir, None).dim(),
                 ))];
                 rows.extend(entries.iter().enumerate().map(|(index, entry)| {
                     let text = match entry {
@@ -163,13 +163,21 @@ impl Selector {
                 .enumerate()
                 .map(|(index, branch)| ListRow::Choice(index, Line::from(branch.clone())))
                 .collect(),
-            SelectorKind::Model { labels: values, .. } | SelectorKind::Effort { values, .. } => {
-                values
-                    .iter()
-                    .enumerate()
-                    .map(|(index, value)| ListRow::Choice(index, Line::from(value.clone())))
-                    .collect()
-            }
+            SelectorKind::Effort { values, .. } => values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    ListRow::Choice(
+                        index,
+                        Line::from(super::formatting::effort_text(Some(value)).to_owned()),
+                    )
+                })
+                .collect(),
+            SelectorKind::Model { labels: values, .. } => values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| ListRow::Choice(index, Line::from(value.clone())))
+                .collect(),
         }
     }
 }

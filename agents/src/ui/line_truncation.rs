@@ -143,7 +143,11 @@ pub(super) fn abbreviate_path(
 /// Shrinks a path's directory components from the left until it fits, keeping
 /// the last component whole even when it still does not fit.
 fn abbreviate_directories(path: &str, max_width: usize) -> String {
-    let path = super::formatting::format_directory_display(std::path::Path::new(path));
+    let path = if path.is_empty() {
+        String::new()
+    } else {
+        super::formatting::format_directory_display(std::path::Path::new(path), None)
+    };
     if display_width(&path) <= max_width {
         return path;
     }

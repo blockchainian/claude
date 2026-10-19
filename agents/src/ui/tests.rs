@@ -1101,7 +1101,6 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
-        model_label: None,
         model: None,
         effort: None,
         git_branch: None,
@@ -1933,12 +1932,12 @@ fn group_headers_have_no_count() {
                     };
                     headers += 1;
                     let expected = if pinned {
-                        "Pinned"
+                        "Pinned".to_owned()
                     } else {
                         match grouping {
-                            Grouping::Project => "/tmp/project",
-                            Grouping::Status => view.rows[*index].status.label(),
-                            Grouping::Model => view.rows[*index].model_name(),
+                            Grouping::Project => "/tmp/project".to_owned(),
+                            Grouping::Status => view.rows[*index].status.label().to_owned(),
+                            Grouping::Model => view.session_model_text(&view.rows[*index]).unwrap(),
                         }
                     };
                     let heading = (0..area.width)
@@ -2858,7 +2857,7 @@ fn details_folder_and_pr_use_rule_styles_and_keep_links() {
         assert_eq!(folder.y, y);
         assert_eq!(pr.y, y);
         assert!(pr.right() < folder.x);
-        for (offset, symbol) in "project".chars().enumerate() {
+        for (offset, symbol) in "/tmp/project".chars().enumerate() {
             let cell = &buf[(folder.x + offset as u16, y)];
             assert_eq!(cell.symbol(), symbol.to_string());
             assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
@@ -2906,12 +2905,19 @@ fn log_model_and_effort_use_dim_style_and_picker_targets() {
             for human_name in [None, Some("Opus 5.5")] {
                 let mut row = session("model", "Model task", SessionStatus::Inactive, 120);
                 row.model = Some("claude-opus-5-5".into());
-                row.model_label = human_name.map(str::to_owned);
+
                 row.effort = Some("medium".into());
                 row.transcript = Some("/tmp/model.jsonl".into());
                 let mut view = test_view(Grouping::Project, use_colors);
                 view.status_filter = 1;
                 view.set_sessions(vec![row], false);
+                if let Some(label) = human_name {
+                    view.input_choices
+                        .entry(ProviderId::Claude)
+                        .or_default()
+                        .display_names
+                        .insert("claude-opus-5-5".into(), label.into());
+                }
                 let area = Rect::new(0, 0, width, 40);
                 let mut buf = Buffer::empty(area);
                 view.render(area, &mut buf);
@@ -5863,9 +5869,10 @@ fn task_log_event_count_follows_height() {
 mod details_scroll;
 
 #[test]
-fn details_status_uses_only_the_last_folder_component() {
+fn details_status_uses_the_shared_home_directory_display() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
-    task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
+    let directory = PathBuf::from(std::env::var_os("HOME").unwrap()).join("Code/task");
+    task.cwd = directory.clone();
     let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
     let rendered = screen(&view, 200, 30);
@@ -5873,15 +5880,12 @@ fn details_status_uses_only_the_last_folder_component() {
     let (rect, path) = viewport
         .details_links
         .iter()
-        .find(|(_, path)| path.ends_with("agents-panel"))
+        .find(|(_, path)| **path == directory)
         .unwrap();
     assert_eq!(rect.y, viewport.details.bottom());
-    assert_eq!(
-        path,
-        &PathBuf::from("/Users/visitor/Code/.worktrees/agents-panel")
-    );
+    assert_eq!(path, &directory);
     let rule = rendered.lines().nth(rect.y as usize).unwrap();
-    assert!(rule.contains("agents-panel"));
+    assert!(rule.contains("~/Code/task"), "{rule}");
     assert!(!rule.contains("/Users/"));
 }
 
@@ -9659,7 +9663,7 @@ fn log_border_fields_keep_click_actions_without_jumping() {
 }
 
 #[test]
-fn log_border_omits_model_and_effort_it_cannot_read() {
+fn log_border_shows_placeholders_for_missing_model_and_effort() {
     let (mut view, now) = log_fixture();
     let row = &mut view.rows[view.selected];
     row.background_job = Some(crate::model::BackgroundJob {
@@ -9668,7 +9672,6 @@ fn log_border_omits_model_and_effort_it_cannot_read() {
     });
     row.process.as_mut().unwrap().label = Some("bg".into());
     row.model = None;
-    row.model_label = None;
     row.effort = None;
     let config = tempfile::tempdir().unwrap();
     crate::providers::claude::write_fixture_cache(config.path());
@@ -9678,8 +9681,8 @@ fn log_border_omits_model_and_effort_it_cannot_read() {
         crate::providers::Provider::input_choices(&provider),
     )]));
     let screen = log_screen(&view, 100, 45, now);
-    assert!(!screen.contains("Unknown"), "{screen}");
-    assert!(view.viewport.borrow().field_targets.is_empty());
+    assert!(screen.contains("Unknown · Default"), "{screen}");
+    assert_eq!(view.viewport.borrow().field_targets.len(), 2);
 }
 
 #[test]
@@ -10284,4 +10287,87 @@ fn task_header_weekly_usage_live_accounts() {
         .unwrap();
     }
     assert!(errors.is_empty(), "{}", errors.join("; "));
+}
+
+#[test]
+fn session_models_group_by_catalog_display_name_and_effort_has_a_default() {
+    let config = tempfile::tempdir().unwrap();
+    crate::providers::claude::write_fixture_cache(config.path());
+    let provider = crate::providers::claude::ClaudeProvider::new(config.path().into());
+    let choices = crate::providers::Provider::input_choices(&provider);
+    let model = choices.model("opus").unwrap().id.clone();
+    let mut view = test_view(Grouping::Model, false);
+    view.set_input_choices(HashMap::from([(ProviderId::Claude, choices)]));
+    let mut first = session("catalog", "Catalog", SessionStatus::Ready, 0);
+    first.model = Some(model.clone());
+    let mut second = first.clone();
+    second.id = session_key("alias");
+    second.model = Some(format!("{model}[1m]"));
+    view.set_sessions(vec![first, second], false);
+    assert!(view.same_group(Grouping::Model, 0, 1));
+    assert_eq!(
+        view.session_model_text(&view.rows[0]),
+        view.session_model_text(&view.rows[1])
+    );
+    let rendered = screen(&view, 160, 40);
+    assert!(rendered.contains("Default"), "{rendered}");
+}
+
+#[test]
+fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("models_cache.json"),
+        include_str!("../../tests/fixtures/codex-models-cache.json"),
+    )
+    .unwrap();
+    let provider = crate::providers::codex::CodexProvider::new(
+        directory.path().into(),
+        directory.path().join("manager"),
+    );
+    let mut row = session("settings", "Settings", SessionStatus::Ready, 0);
+    row.id.provider = ProviderId::Codex;
+    row.transcript = Some(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex-interaction/parent.jsonl"),
+    );
+    let mut reader = crate::providers::log_reader(&row).unwrap();
+    let events = reader.refresh(usize::MAX).unwrap().events;
+    let event = events
+        .iter()
+        .find(|event| event.calls.iter().any(|call| call.model_settings.is_some()))
+        .unwrap();
+    let mut view = test_view(Grouping::Model, false);
+    view.set_input_choices(HashMap::from([(
+        ProviderId::Codex,
+        crate::providers::Provider::input_choices(&provider),
+    )]));
+    let call = event
+        .calls
+        .iter()
+        .find(|call| call.model_settings.is_some())
+        .unwrap();
+    let settings = call.model_settings.as_ref().unwrap();
+    assert_eq!(settings.model.as_deref(), Some("gpt-6.1-sol"));
+    assert!(!call.detail_title.contains("GPT-6.1-Sol"));
+    let display = view.display_event(event);
+    assert!(
+        display
+            .calls
+            .iter()
+            .any(|call| call.detail_title.contains("GPT-6.1-Sol · low"))
+    );
+    let mut missing = event.clone();
+    for call in &mut missing.calls {
+        if let Some(settings) = &mut call.model_settings {
+            settings.effort = None;
+        }
+    }
+    let display = view.display_event(&missing);
+    assert!(
+        display
+            .calls
+            .iter()
+            .any(|call| call.detail_title.contains("GPT-6.1-Sol · Default"))
+    );
 }

@@ -256,3 +256,40 @@ fn nested_rows_align_status_and_time_columns() {
         }
     }
 }
+
+#[test]
+fn child_box_and_task_list_share_the_first_line_title() {
+    let mut view = tree();
+    let record: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/codex-subagents/rollout.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let title = crate::log::agent::name(
+        record["payload"]["source"]["subagent"]["thread_spawn"]["agent_path"]
+            .as_str()
+            .unwrap(),
+    );
+    let child = view
+        .rows
+        .iter_mut()
+        .find(|row| row.id.id == "child")
+        .unwrap();
+    child.title = format!("{title}\nHidden second line");
+    child.status = SessionStatus::Working;
+    let area = Rect::new(0, 0, 200, 55);
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, Utc::now());
+    let text = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(text.matches(title).count(), 2, "{text}");
+    assert!(!text.contains("Hidden second line"));
+}

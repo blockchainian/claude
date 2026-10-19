@@ -3,9 +3,9 @@ use super::formatting::{format_log_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
 use crate::log::{Event, Kind};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 
-const CLOCK_FORMAT: &str = "%H:%M:%S";
+pub(super) const CLOCK_FORMAT: &str = "%H:%M:%S";
 pub(super) const CLOCK_WIDTH: usize = 8;
 
 /// Rows above the scrolling sections: the top rule.
@@ -16,8 +16,28 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 }
 
 impl View {
+    /// Resolve recorded agent settings with the same catalog as session borders and pickers.
+    pub(super) fn display_event<'a>(&self, event: &'a Event) -> std::borrow::Cow<'a, Event> {
+        if !event.calls.iter().any(|call| call.model_settings.is_some()) {
+            return std::borrow::Cow::Borrowed(event);
+        }
+        let mut display = event.clone();
+        for call in &mut display.calls {
+            if let Some(settings) = &call.model_settings {
+                let model = self.model_text(
+                    settings.provider,
+                    settings.model.as_deref().unwrap_or_default(),
+                );
+                let effort = super::formatting::effort_text(settings.effort.as_deref());
+                call.detail_title
+                    .push_str(&format!(" · {model} · {effort}"));
+            }
+        }
+        std::borrow::Cow::Owned(display)
+    }
+
     pub(super) fn detail_text(&self, event: &Event) -> String {
-        open_text(event)
+        open_text(&self.display_event(event))
     }
 
     fn selected_detail_layout(
@@ -27,8 +47,9 @@ impl View {
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> DetailLayout {
+        let display = self.display_event(event);
         let sections =
-            super::tool_detail::detail(event, String::new(), Style::new().dim()).sections;
+            super::tool_detail::detail(&display, String::new(), Style::new().dim()).sections;
         detail_parts_layout(event, columns, cwd, now, sections)
     }
 
@@ -781,7 +802,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
 
 fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
     match *time {
-        RowTime::Clock(at) => at.with_timezone(&Local).format(CLOCK_FORMAT).to_string(),
+        RowTime::Clock(at) => super::formatting::clock_text(at),
         RowTime::Settled(duration) => format_log_duration(duration),
         RowTime::Running(start) if now - start < chrono::Duration::microseconds(500) => {
             "0ms".into()
@@ -1299,9 +1320,10 @@ fn display_paths(event: &Event, cwd: &std::path::Path) -> (String, Vec<std::ops:
     let mut end = 0;
     for range in &tool_paths(event, cwd) {
         text.push_str(&collapse_whitespace(&event.body[end..range.start]));
-        let path = super::formatting::format_directory_display(std::path::Path::new(
-            &event.body[range.clone()],
-        ));
+        let path = super::formatting::format_directory_display(
+            std::path::Path::new(&event.body[range.clone()]),
+            None,
+        );
         ranges.push(text.len()..text.len() + path.len());
         text.push_str(&path);
         end = range.end;

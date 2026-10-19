@@ -1071,10 +1071,6 @@ fn session(
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,
         last_record_at: summary.timestamp,
-        model_label: summary
-            .model
-            .as_ref()
-            .and_then(|id| summary.model_identities.get(id).cloned()),
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,
@@ -1130,8 +1126,14 @@ mod tests {
             std::fs::write(&path, transcript).unwrap();
             let len = std::fs::metadata(&path).unwrap().len();
             let summary = transcript::read(&path, len).unwrap();
-            let session = session("model-identity".into(), summary, Some(path), Utc::now());
-            assert_eq!(session.model_label.as_deref(), label);
+            assert_eq!(
+                summary
+                    .model
+                    .as_ref()
+                    .and_then(|id| summary.model_identities.get(id))
+                    .map(String::as_str),
+                label
+            );
         }
     }
 

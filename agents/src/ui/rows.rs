@@ -53,7 +53,10 @@ impl View {
             match self.grouping {
                 Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
                     .directory()
-                    .map_or_else(|| "No directory".to_owned(), format_directory_display),
+                    .map_or_else(
+                        || format_directory_display(Path::new(""), None),
+                        |path| format_directory_display(path, None),
+                    ),
                 Grouping::Status => self.rows[self.group_index(index).unwrap()]
                     .status
                     .label()

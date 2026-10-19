@@ -3,26 +3,37 @@ use chrono::{DateTime, Utc};
 use std::io::{Read, Seek, SeekFrom};
 
 impl View {
-    /// A session's model as the screen names it: the name its provider recorded, else the
-    /// provider's name for its id; `None` when the session reports no model.
+    /// The session model, resolved through the same catalog as the picker.
     pub(super) fn session_model_text(&self, session: &Session) -> Option<String> {
-        match (session.model_label.as_deref(), session.model.as_deref()) {
-            (Some(label), _) => Some(label.to_owned()),
-            (None, Some(model)) if !model.is_empty() => {
-                Some(self.model_text(session.id.provider, model))
-            }
-            _ => None,
-        }
+        Some(self.model_text(
+            session.id.provider,
+            session.model.as_deref().unwrap_or_default(),
+        ))
     }
 
     /// A model id or alias as the screen names it: its provider's name for it, else itself.
     pub(super) fn model_text(&self, provider: ProviderId, model: &str) -> String {
+        if model.is_empty() {
+            return "Unknown".into();
+        }
         self.input_choices
             .get(&provider)
             .and_then(|choices| choices.label(model))
             .unwrap_or(model)
             .to_owned()
     }
+}
+
+pub(super) fn clock_text(at: DateTime<Utc>) -> String {
+    at.with_timezone(&chrono::Local)
+        .format(super::log::CLOCK_FORMAT)
+        .to_string()
+}
+
+pub(super) fn effort_text(effort: Option<&str>) -> &str {
+    effort
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Default")
 }
 
 pub(super) fn tail_lines(path: &Path, count: usize) -> Vec<String> {
@@ -54,17 +65,34 @@ pub(super) fn tail_lines(path: &Path, count: usize) -> Vec<String> {
     read_tail().unwrap_or_default()
 }
 
-pub(super) fn format_directory_display(path: &Path) -> String {
-    if let Some(home) = std::env::var_os("HOME")
+pub(super) fn format_directory_display(path: &Path, width: Option<usize>) -> String {
+    let directory = if path.as_os_str().is_empty() {
+        "No directory".to_owned()
+    } else if let Some(home) = std::env::var_os("HOME")
         && let Ok(relative) = path.strip_prefix(Path::new(&home))
     {
-        return if relative.as_os_str().is_empty() {
-            "~".into()
+        if relative.as_os_str().is_empty() {
+            "~".to_owned()
         } else {
             format!("~/{}", relative.display())
-        };
+        }
+    } else {
+        path.display().to_string()
+    };
+    let Some(width) = width else {
+        return directory;
+    };
+    let abbreviated = super::line_truncation::abbreviate_path(&directory, width, None);
+    if abbreviated.width() <= width {
+        return abbreviated;
     }
-    path.display().to_string()
+    // If even shortened parents do not fit, keep the folder recognizable.
+    let tail = path
+        .file_name()
+        .map(|name| format!("…/{}", name.to_string_lossy()))
+        .unwrap_or(directory);
+    super::line_truncation::truncate_line_with_ellipsis_if_overflow(Line::from(tail), width)
+        .to_string()
 }
 pub(super) fn format_relative_time(reference: DateTime<Utc>, ts: Option<DateTime<Utc>>) -> String {
     let Some(ts) = ts else {
@@ -83,17 +111,11 @@ pub(super) fn format_relative_time(reference: DateTime<Utc>, ts: Option<DateTime
         format!("{}d ago", seconds / 86400)
     }
 }
-pub(super) fn format_session_duration(seconds: i64) -> String {
+pub(super) fn format_duration(seconds: i64) -> String {
     let seconds = seconds.max(0);
     if seconds >= 86400 {
         format!("{}d {}h", seconds / 86400, seconds % 86400 / 3600)
-    } else {
-        format_duration(seconds)
-    }
-}
-
-pub(super) fn format_duration(seconds: i64) -> String {
-    if seconds < 60 {
+    } else if seconds < 60 {
         format!("{seconds}s")
     } else if seconds < 3600 {
         format!("{}m {}s", seconds / 60, seconds % 60)
@@ -170,6 +192,7 @@ mod tests {
             (1_999_999_999, "1s"),
             (60_000_000_000, "1m 0s"),
             (3_600_000_000_000, "1h 0m"),
+            (93_780_000_000_000, "1d 2h"),
         ] {
             assert_eq!(
                 format_log_duration(chrono::Duration::nanoseconds(nanos)),
@@ -179,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn durations_keep_hours_and_zero_subfields() {
+    fn durations_use_days_and_zero_subfields() {
         for (seconds, expected) in [
             (0, "0s"),
             (45, "45s"),
@@ -189,7 +212,8 @@ mod tests {
             (3599, "59m 59s"),
             (3600, "1h 0m"),
             (4200, "1h 10m"),
-            (93780, "26h 3m"),
+            (93780, "1d 2h"),
+            (-5, "0s"),
         ] {
             assert_eq!(format_duration(seconds), expected);
         }

@@ -109,11 +109,10 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
                 assert!(!actual.contains("messages"));
             }
             let pr_x = left;
-            let folder_x = right - if width >= 150 { 7 } else { 8 };
-            assert_eq!(
-                row_text(buffer, status_y, folder_x, folder_x + 7),
-                "project"
-            );
+            let folder_x = (left..right)
+                .find(|&x| cell_text(buffer, x, status_y) == "/")
+                .unwrap();
+            assert!(row_text(buffer, status_y, folder_x, right).contains('/'));
             assert_eq!(row_text(buffer, status_y, pr_x, pr_x + 3), "#13");
             assert!(
                 buffer[(folder_x, status_y)]

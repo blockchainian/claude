@@ -1,6 +1,4 @@
-use super::formatting::{
-    format_duration, format_relative_time, format_session_duration, tail_lines,
-};
+use super::formatting::{format_duration, format_relative_time, tail_lines};
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
 use ratatui::widgets::{Block, Borders};
@@ -626,7 +624,7 @@ impl View {
         // The status stays centered on the whole rule, so the time's width is kept clear on both sides.
         let mut reserved = 0;
         if let Some(at) = session.and_then(|session| session.started_at) {
-            let elapsed = format_session_duration((now - at).num_seconds());
+            let elapsed = format_duration((now - at).num_seconds());
             // Keep a status cell, its spaces and the rule cells and corners around it.
             if usize::from(rule.width) >= 2 * (elapsed.width() + 2) + 7 {
                 let (_, area) = render_rule_ends(rule, 0, None, Some(elapsed.dim()), buf);
@@ -676,10 +674,9 @@ impl View {
         if buf[(rule.x, rule.y)].symbol() == "│" {
             buf[(rule.x, rule.y)].set_symbol("├");
         }
-        let folder = cwd.file_name().map_or_else(
-            || cwd.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        );
+        let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
+        let folder_width = folder_width.min(usize::from(rule.width / 3));
+        let folder = super::formatting::format_directory_display(cwd, Some(folder_width));
         let left = match (session, draft) {
             (Some(session), _) => session
                 .pr
@@ -781,21 +778,17 @@ impl View {
     /// Groups the model and effort on the left; each value opens its own picker.
     fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
         let (model, effort) = match (self.selected_row(), self.selected_draft()) {
-            (Some(session), _) => (self.session_model_text(session), session.effort.clone()),
+            (Some(session), _) => (
+                self.session_model_text(session),
+                Some(super::formatting::effort_text(session.effort.as_deref()).to_owned()),
+            ),
             // A new task shows its defaults too, so both stay clickable.
             (None, Some(draft)) => (
                 Some(draft.setup.model.as_deref().map_or_else(
-                    || "Default".to_owned(),
+                    || self.model_text(draft.setup.provider, ""),
                     |model| self.model_text(draft.setup.provider, model),
                 )),
-                Some(
-                    draft
-                        .setup
-                        .effort
-                        .as_deref()
-                        .unwrap_or("Default")
-                        .to_owned(),
-                ),
+                Some(super::formatting::effort_text(draft.setup.effort.as_deref()).to_owned()),
             ),
             (None, None) => return,
         };
@@ -1320,7 +1313,7 @@ impl View {
                             .map(|at| format_duration((now - at).num_seconds().max(0)))
                     });
                     render_background_box(
-                        &child.title,
+                        child.display_title(),
                         elapsed.as_deref(),
                         body.into_iter().collect(),
                         item_area,
@@ -1706,7 +1699,6 @@ mod wrapped_path_tests {
             prompt_at: None,
             turn_messages: 0,
             last_record_at: None,
-            model_label: None,
             model: None,
             effort: None,
             git_branch: None,

@@ -115,11 +115,6 @@ impl CodexProvider {
         let mut sessions = Vec::new();
         for row in rows {
             if let Some(mut session) = row.map_err(io::Error::other)? {
-                session.model_label = session
-                    .model
-                    .as_ref()
-                    .and_then(|slug| models.labels.get(slug))
-                    .cloned();
                 if let Some(pid) = live.get(&session.id.id) {
                     session.process = Some(Process {
                         pid: *pid,
@@ -128,11 +123,12 @@ impl CodexProvider {
                     });
                 }
                 if let Some(link) = manager.get(&session.id.id) {
+                    let native_agent = session.parent.is_some();
                     session.parent = Some(link.parent.clone());
                     if session.name.is_none() {
                         session.name = link.name.clone();
                     }
-                    if let Some(name) = &session.name {
+                    if !native_agent && let Some(name) = &session.name {
                         session.title = name.clone();
                     }
                 }
@@ -218,25 +214,16 @@ impl CodexProvider {
 #[derive(Default)]
 struct ModelCatalog {
     modified: Option<SystemTime>,
-    labels: HashMap<String, String>,
     /// The models Codex lists in its picker, by priority.
     choices: crate::providers::InputChoices,
 }
 
 impl ModelCatalog {
-    fn display_name(&self, slug: &str) -> String {
-        self.labels
-            .get(slug)
-            .cloned()
-            .unwrap_or_else(|| slug.to_owned())
-    }
-
     fn refresh(&mut self, path: &Path) -> io::Result<()> {
         let modified = match std::fs::metadata(path) {
             Ok(metadata) => metadata.modified()?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.modified = None;
-                self.labels.clear();
                 self.choices = crate::providers::InputChoices::default();
                 return Ok(());
             }
@@ -286,39 +273,15 @@ impl ModelCatalog {
                 })
                 .collect(),
             aliases: HashMap::new(),
+            display_names: catalog
+                .models
+                .into_iter()
+                .map(|model| (model.slug, model.display_name))
+                .collect(),
         };
-        self.labels = catalog
-            .models
-            .into_iter()
-            .map(|model| (model.slug, model.display_name))
-            .collect();
         self.modified = Some(modified);
         Ok(())
     }
-}
-
-/// Uses the same cached catalog names as the session model label.
-pub(super) fn model_display_name(slug: &str) -> io::Result<String> {
-    static CATALOG: std::sync::OnceLock<Mutex<(PathBuf, ModelCatalog)>> =
-        std::sync::OnceLock::new();
-    let home = match std::env::var_os("CODEX_HOME").filter(|value| !value.is_empty()) {
-        Some(home) => PathBuf::from(home),
-        None => PathBuf::from(
-            std::env::var_os("HOME")
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unset"))?,
-        )
-        .join(".codex"),
-    };
-    let path = home.join("models_cache.json");
-    let mut cached = CATALOG
-        .get_or_init(|| Mutex::new((PathBuf::new(), ModelCatalog::default())))
-        .lock()
-        .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?;
-    if cached.0 != path {
-        *cached = (path.clone(), ModelCatalog::default());
-    }
-    cached.1.refresh(&path)?;
-    Ok(cached.1.display_name(slug))
 }
 
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
@@ -384,7 +347,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         .and_then(|spawn| spawn.get("agent_path"))
         .and_then(|path| path.as_str());
     let title = if let Some(path) = agent_path {
-        path.rsplit('/').next().unwrap_or_default().to_owned()
+        crate::log::agent::name(path).to_owned()
     } else {
         column::<String>(row, "title")?
             .filter(|s| !s.is_empty())
@@ -417,7 +380,6 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
-        model_label: None,
         model: column(row, "model")?,
         effort: column(row, "reasoning_effort")?,
         git_branch: column(row, "git_branch")?,

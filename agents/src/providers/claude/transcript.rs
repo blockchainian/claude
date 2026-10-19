@@ -961,8 +961,13 @@ pub(super) mod tests {
                 read_cached
             };
             let first = read(file.path(), file.as_file().metadata().unwrap().len(), None).unwrap();
-            let session = super::super::session("test".into(), first.clone(), None, Utc::now());
-            assert_eq!(session.model_label.as_deref(), Some(label));
+            assert_eq!(
+                first
+                    .model_identities
+                    .get(first.model.as_ref().unwrap())
+                    .map(String::as_str),
+                Some(label)
+            );
             writeln!(file, "{messages}").unwrap();
             let appended = read(
                 file.path(),
@@ -970,8 +975,13 @@ pub(super) mod tests {
                 Some(&first),
             )
             .unwrap();
-            let session = super::super::session("test".into(), appended, None, Utc::now());
-            assert_eq!(session.model_label.as_deref(), Some(label));
+            assert_eq!(
+                appended
+                    .model_identities
+                    .get(appended.model.as_ref().unwrap())
+                    .map(String::as_str),
+                Some(label)
+            );
         }
     }
 
@@ -993,8 +1003,13 @@ pub(super) mod tests {
                 previous.as_ref(),
             )
             .unwrap();
-            let session = super::super::session("test".into(), summary.clone(), None, Utc::now());
-            assert_eq!(session.model_label.as_deref(), Some(label));
+            assert_eq!(
+                summary
+                    .model_identities
+                    .get(summary.model.as_ref().unwrap())
+                    .map(String::as_str),
+                Some(label)
+            );
             previous = Some(summary);
         }
         let summary = previous.unwrap();

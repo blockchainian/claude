@@ -495,11 +495,7 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                     title_style: label_style,
                     time: call
                         .started_at
-                        .map(|at| {
-                            at.with_timezone(&chrono::Local)
-                                .format("%H:%M:%S")
-                                .to_string()
-                        })
+                        .map(super::formatting::clock_text)
                         .or_else(|| call.duration.map(super::formatting::format_log_duration)),
                     meta_style: Style::new().dim(),
                 },

@@ -870,7 +870,10 @@ impl View {
                 self.project_groups[left].key() == self.project_groups[right].key()
             }
             Grouping::Status => self.rows[left].status == self.rows[right].status,
-            Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
+            Grouping::Model => {
+                self.session_model_text(&self.rows[left])
+                    == self.session_model_text(&self.rows[right])
+            }
         }
     }
     fn matches_search(&self, s: &Session) -> bool {
@@ -926,7 +929,7 @@ impl View {
             Grouping::Status => visible.sort_by_key(|index| self.rows[*index].status),
             Grouping::Model => visible.sort_by_key(|index| {
                 (
-                    self.rows[*index].model_name(),
+                    self.session_model_text(&self.rows[*index]),
                     session_order(&self.rows[*index]),
                 )
             }),

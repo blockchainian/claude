@@ -962,9 +962,11 @@ fn model_catalog_labels_refresh_only_when_modified() {
     db.execute("UPDATE threads SET model='gpt-6.1-sol'", [])
         .unwrap();
     let label = |provider: &mut CodexProvider| {
-        provider.refresh(1).sessions[0]
-            .model_label
-            .clone()
+        let session = provider.refresh(1).sessions.remove(0);
+        provider
+            .input_choices()
+            .label(session.model.as_deref().unwrap())
+            .map(str::to_owned)
     };
     assert_eq!(label(&mut provider), None);
     let path = dir.path().join("models_cache.json");
@@ -1042,6 +1044,49 @@ fn collaboration_and_session_models_share_cached_display_names() {
     std::fs::write(&path, include_str!("../../../tests/fixtures/codex-models-cache.json")).unwrap();
     let mut catalog = ModelCatalog::default();
     catalog.refresh(&path).unwrap();
-    assert_eq!(catalog.display_name("gpt-6.1-sol"), "GPT-6.1-Sol");
-    assert_eq!(catalog.display_name("unknown-model"), "unknown-model");
+    assert_eq!(catalog.choices.label("gpt-6.1-sol"), Some("GPT-6.1-Sol"));
+    assert_eq!(catalog.choices.label("unknown-model"), None);
+}
+
+#[test]
+fn native_agent_title_keeps_its_recorded_path_when_a_manager_link_names_it() {
+    let (dir, mut provider) = fixture();
+    let meta: serde_json::Value = serde_json::from_str(
+        include_str!("../../../tests/fixtures/codex-subagents/rollout.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let manager = dir.path().join("manager");
+    std::fs::create_dir_all(manager.join("threads")).unwrap();
+    std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+    std::fs::write(
+        manager.join("threads/thread-12.json"),
+        include_str!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+    )
+    .unwrap();
+    std::fs::write(
+        manager.join("claude-parent/state.json"),
+        include_str!("../../../tests/fixtures/codex-manager/attached-state.json"),
+    )
+    .unwrap();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute(
+        "UPDATE threads SET source=?, name=NULL WHERE id='thread-12'",
+        [meta["payload"]["source"].to_string()],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO thread_spawn_edges VALUES ('thread-0','thread-12','running')",
+        [],
+    )
+    .unwrap();
+    let sessions = provider.refresh(1).sessions;
+    let child = sessions
+        .iter()
+        .find(|session| session.id.id == "thread-12")
+        .unwrap();
+    assert_eq!(child.display_title(), "provider_adapters");
+    assert_eq!(child.name.as_deref(), Some("Managed worker"));
 }

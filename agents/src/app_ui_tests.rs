@@ -454,7 +454,7 @@ fn rendered_draft_controls_apply_model_and_cancel_effort_through_app() {
         cwd: directory.path().to_owned(),
     }));
     let buffer = draw(&mut app, 180);
-    let ((x, y), _) = row_ends(&buffer, "Default");
+    let ((x, y), _) = row_ends(&buffer, "Unknown");
     click(&mut app, x, y);
     let buffer = draw(&mut app, 180);
     let (x, y) = position(&buffer, "Haiku 5.5");

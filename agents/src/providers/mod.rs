@@ -109,6 +109,8 @@ pub struct InputChoices {
     pub models: Vec<ModelChoice>,
     /// Short names, such as `opus`, mapped to the model id they stand for.
     pub aliases: HashMap<String, String>,
+    /// Catalog names, including models unavailable for selection.
+    pub display_names: HashMap<String, String>,
 }
 
 impl InputChoices {
@@ -121,7 +123,12 @@ impl InputChoices {
 
     /// The provider's own name for the model `name` names, by id or alias.
     pub fn label(&self, name: &str) -> Option<&str> {
-        self.model(name).map(|model| model.label.as_str())
+        let id = name.split('[').next().unwrap_or(name);
+        let id = self.aliases.get(id).map_or(id, String::as_str);
+        self.display_names
+            .get(id)
+            .map(String::as_str)
+            .or_else(|| self.model(name).map(|model| model.label.as_str()))
     }
 }
 

@@ -101,8 +101,6 @@ pub struct Session {
     pub turn_messages: usize,
     pub last_record_at: Option<DateTime<Utc>>,
     pub model: Option<String>,
-    /// The model's human-readable name, such as "Opus 5.5", when the transcript names it.
-    pub model_label: Option<String>,
     pub effort: Option<String>,
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
@@ -176,13 +174,6 @@ impl Session {
         self.activity
             .as_ref()
             .filter(|activity| self.last_message_at.is_none_or(|at| activity.at > at))
-    }
-
-    pub fn model_name(&self) -> &str {
-        self.model
-            .as_deref()
-            .filter(|model| !model.is_empty())
-            .unwrap_or("Unknown")
     }
 }
 

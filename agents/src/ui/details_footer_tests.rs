@@ -78,7 +78,13 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
                     .join("tests/fixtures/claude-model-identity.jsonl"),
             );
             selected.model = Some("claude-opus-5-5".into());
-            selected.model_label = label.map(str::to_owned);
+            if let Some(label) = label {
+                view.input_choices
+                    .entry(ProviderId::Claude)
+                    .or_default()
+                    .display_names
+                    .insert("claude-opus-5-5".into(), label.into());
+            }
             selected.effort = Some("high".into());
             let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
             let layout = view.center_layout(buf.area);
@@ -126,15 +132,14 @@ fn model_effort_border_groups_optional_values_and_right_aligns_new() {
     for width in [80, 149, 150, 220] {
         for (model, effort, expected) in [
             (Some("Opus"), Some("high"), "Opus · high"),
-            (Some("Opus"), None, "Opus"),
-            (None, Some("high"), "high"),
-            (None, None, ""),
+            (Some("Opus"), None, "Opus · Default"),
+            (None, Some("high"), "Unknown · high"),
+            (None, None, "Unknown · Default"),
         ] {
             for unseen in [0, 3] {
                 let mut view = fixture();
                 let selected = &mut view.rows[view.selected];
                 selected.model = model.map(str::to_owned);
-                selected.model_label = model.map(str::to_owned);
                 selected.effort = effort.map(str::to_owned);
                 view.log = super::log_fixture().0.log;
                 view.select_log_event(Some(0));
@@ -153,11 +158,7 @@ fn model_effort_border_groups_optional_values_and_right_aligns_new() {
                 if !expected.is_empty() {
                     assert!(line.starts_with(expected), "{line}");
                 }
-                assert_eq!(
-                    line.contains('·'),
-                    model.is_some() && effort.is_some(),
-                    "{line}"
-                );
+                assert_eq!(line.contains('·'), true, "{line}");
                 if unseen == 0 {
                     assert!(viewport.log_jump.is_empty());
                 } else {

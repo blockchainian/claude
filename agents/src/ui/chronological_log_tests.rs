@@ -291,7 +291,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
             let (_dir, mut view, events) = fixture();
             view.set_log(events);
             view.select_log_event(Some(3));
-            view.rows[view.selected].model_label =
+            view.rows[view.selected].model =
                 Some("provider/model-with-a-very-long-display-name".into());
             view.rows[view.selected].effort = Some("a-very-long-effort-label".into());
             view.viewport.borrow_mut().log_unseen = unseen;

@@ -197,7 +197,7 @@ fn rendered_draft_model_click_opens_and_double_click_applies_provider_choice() {
         .find(|(_, field)| *field == Field::Model)
         .unwrap()
         .0;
-    assert_eq!(buffer[(model.x, model.y)].symbol(), "D");
+    assert_eq!(buffer[(model.x, model.y)].symbol(), "U");
     assert_eq!(click(&mut view, model.x, model.y), None);
     assert_eq!(view.selector.as_ref().unwrap().field(), Field::Model);
     view.render_at(area, &mut buffer, Utc::now());
@@ -237,8 +237,13 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
         started_at: None,
     });
     view.rows[view.selected].effort = Some("high".into());
-    view.rows[view.selected].model_label = Some("Opus 5.5".into());
-    let model_name = view.rows[view.selected].model_label.clone().unwrap();
+    let model_id = view.rows[view.selected].model.clone().unwrap();
+    view.input_choices
+        .entry(ProviderId::Claude)
+        .or_default()
+        .display_names
+        .insert(model_id, "Opus 5.5".into());
+    let model_name = "Opus 5.5";
     for width in [149, 150, 200] {
         let area = Rect::new(0, 0, width, 60);
         let mut buffer = Buffer::empty(area);
@@ -291,7 +296,6 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
 fn model_group_heading_and_log_border_show_the_catalog_name() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].model = Some("claude-opus-5-5".into());
-    view.rows[view.selected].model_label = None;
     view.grouping = crate::model::Grouping::Model;
     let buffer = render(&view);
     let text = (0..buffer.area.height)
@@ -326,7 +330,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
     row.model = Some("claude-opus-5-5".into());
     for effort in [Some("medium"), None] {
         view.rows[view.selected].effort = effort.map(str::to_owned);
-        // Providers without effort choices show only the model.
+        // Missing effort remains visible even when the picker has no choices.
         if effort.is_none() {
             for model in &mut view
                 .input_choices
@@ -354,12 +358,9 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                 1,
             );
             let total = rule.width.saturating_sub(4);
-            let available = if effort.is_some() {
-                total.saturating_sub(6.min(total / 2) + 3)
-            } else {
-                total
-            };
-            let show_effort = effort.is_some() && available > 0;
+            let effort_width = effort.unwrap_or("Default").len() as u16;
+            let available = total.saturating_sub(effort_width.min(total / 2) + 3);
+            let show_effort = available > 0;
             // The catalog's name for `claude-opus-5-5`.
             let name = "Opus 5.5";
             let name_width = available.min(name.len() as u16);
@@ -378,7 +379,10 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             let targets = view.viewport.borrow().field_targets.clone();
             let y = rule.y;
             let effort_start = start + name_width + 3;
-            let effort_width = rule.right().saturating_sub(2 + effort_start).min(6);
+            let effort_width = rule
+                .right()
+                .saturating_sub(2 + effort_start)
+                .min(effort_width);
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
@@ -410,7 +414,11 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
                             .contains(ratatui::style::Modifier::DIM)
                     );
                     assert_eq!(click(&mut view, x, y), None);
-                    assert_eq!(view.selector.as_ref().unwrap().field(), field);
+                    if field == Field::Effort && effort.is_none() {
+                        assert!(view.selector.is_none());
+                    } else {
+                        assert_eq!(view.selector.as_ref().unwrap().field(), field);
+                    }
                     key(&mut view, KeyCode::Esc);
                 }
             }
@@ -562,7 +570,10 @@ fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay(
         .find(|(_, field)| *field == Field::Directory)
         .unwrap()
         .0;
-    assert_eq!(buffer[(folder.x, folder.y)].symbol(), "b");
+    let directory = (folder.x..folder.right())
+        .map(|x| buffer[(x, folder.y)].symbol())
+        .collect::<String>();
+    assert!(directory.ends_with("/b"), "{directory}");
     assert!(view.viewport.borrow().details_links.is_empty());
     assert_eq!(click(&mut view, folder.x, folder.y), None);
     let selector = view.selector.as_ref().unwrap();

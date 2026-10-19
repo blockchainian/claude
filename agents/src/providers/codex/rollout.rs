@@ -1599,13 +1599,11 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     if item["type"] == "SubAgentActivity" && item["kind"] == "started" {
                         call.agent_thread_id = item["agent_thread_id"].as_str().map(str::to_owned);
                         call.agent_path = item["agent_path"].as_str().map(str::to_owned);
-                        if let Some(model) = item["model"].as_str() {
-                            call.detail_title
-                                .push_str(&format!(" · {}", super::model_display_name(model)?));
-                        }
-                        if let Some(effort) = item["reasoning_effort"].as_str() {
-                            call.detail_title.push_str(&format!(" · {effort}"));
-                        }
+                        call.model_settings = Some(crate::log::ModelSettings {
+                            provider: crate::providers::ProviderId::Codex,
+                            model: item["model"].as_str().map(str::to_owned),
+                            effort: item["reasoning_effort"].as_str().map(str::to_owned),
+                        });
                     } else if item["type"] == "CollabAgentToolCall" {
                         let start = item_time(completion, "started_at_ms")?;
                         let end = item_time(completion, "completed_at_ms")?;
