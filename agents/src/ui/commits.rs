@@ -195,15 +195,6 @@ mod tests {
             cache().entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked,
             Some(checked)
         );
-        // Age the completed miss so the real lookup exercises expiry without waiting.
-        assert_eq!(RETRY_AFTER, Duration::from_secs(5));
-        cache()
-            .entries
-            .lock()
-            .unwrap()
-            .get_mut(&(dir.path().into(), sha.clone()))
-            .unwrap()
-            .checked = Some(checked - RETRY_AFTER);
         let url = loop {
             if let Some(url) = target(dir.path(), &sha) {
                 break url;
