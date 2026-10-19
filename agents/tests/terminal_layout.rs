@@ -2767,3 +2767,38 @@ fn terminal_manager_detach_result_name() {
     std::fs::write(&path, capture).unwrap();
     println!("{}", serde_json::json!({"verdict":"pass", "capture":path}));
 }
+
+#[test]
+#[ignore = "requires tmux and local Claude account authentication; reads live weekly usage"]
+fn terminal_weekly_usage_on_model_rule() {
+    let (_directory, tmux, _transcript) = start_probe("weekly-usage");
+    for width in [120, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        let capture = tmux.capture_when(|capture| {
+            capture.lines().any(|line| line.width() == width as usize)
+                && capture.lines().any(|line| {
+                    line.contains("claude-opus-5-5 · medium · weekly ") && line.contains("% left")
+                })
+        });
+        let row = capture
+            .lines()
+            .find(|line| line.contains(" · weekly "))
+            .unwrap();
+        assert!(!row.contains("Model:"), "{row}");
+        assert!(row.contains('─'), "model must stay on the rule: {row}");
+        println!(
+            "{}",
+            serde_json::json!({
+                "verdict": "passed", "width": width, "line": row.trim(),
+            })
+        );
+    }
+}
