@@ -3,6 +3,7 @@ use crate::state::UsageView;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    style::Style,
     text::{Line, Span},
     widgets::Widget,
 };
@@ -45,6 +46,15 @@ fn provider_details(usage: &WeeklyUsage, left: bool) -> String {
     parts.into_iter().flatten().collect::<Vec<_>>().join(", ")
 }
 
+/// The style of a provider's name and number: the error color once more than 95% is used.
+fn text_style(usage: &WeeklyUsage) -> Style {
+    if 100 - usage.left_percent() > 95 {
+        super::style::error_style()
+    } else {
+        Style::default()
+    }
+}
+
 fn half_width(width: u16, available: [u16; 2]) -> u16 {
     let budget = if width >= super::render::WIDE_LAYOUT_COLUMNS {
         width / 2
@@ -85,17 +95,15 @@ fn compact_provider(
         format!("{partial}{full}")
     };
     let empty = Span::raw(" ".repeat(usize::from(limit) - dots.div_ceil(2)));
-    let (number_style, bar_style) = if used > 95 {
-        (super::style::error_style(), super::style::error_style())
+    let style = text_style(usage);
+    let bar_style = if used > 95 {
+        style
     } else {
-        (
-            ratatui::style::Style::default(),
-            super::style::timeline_style(use_colors),
-        )
+        super::style::timeline_style(use_colors)
     };
-    let number = Span::styled(format!("{used}%"), number_style);
+    let number = Span::styled(format!("{used}%"), style);
     let bar = Span::styled(bar, bar_style);
-    let label = Span::raw(name.to_owned());
+    let label = Span::styled(name.to_owned(), style);
     let gap = Span::raw(if dots == 0 { "" } else { " " });
     let empty = if dots == 0 {
         Span::raw(" ".repeat(usize::from(limit) + 1))
@@ -216,12 +224,13 @@ pub(super) fn render(
         target = Some(target.map_or(side, |target| target.union(side)));
         let details = texts[i].as_ref().unwrap();
         let gap = " ".repeat(usize::from(half - widths[i] - names[i].len() as u16 - 2));
-        let text = if i == 0 {
-            format!(" {details}{gap}{} ", names[i])
+        let name = Span::styled(names[i], text_style(usage[i].unwrap()));
+        let spans = if i == 0 {
+            vec![Span::raw(format!(" {details}{gap}")), name, Span::raw(" ")]
         } else {
-            format!(" {}{gap}{details} ", names[i])
+            vec![Span::raw(" "), name, Span::raw(format!("{gap}{details} "))]
         };
-        Line::from(text).render(side, buf);
+        Line::from(spans).render(side, buf);
     }
     if usage.iter().all(Option::is_some) {
         Line::from("·").render(Rect::new(center, area.y, 1, 1), buf);
@@ -326,6 +335,34 @@ mod tests {
             assert!(!bar.is_empty());
             for cell in bar {
                 assert_eq!(cell.fg == ratatui::style::Color::Red, red, "{used}");
+            }
+        }
+    }
+
+    #[test]
+    fn provider_names_use_error_color_above_95_percent() {
+        for view in [UsageView::Compact, UsageView::Detailed] {
+            for (used, red) in [(95.0, false), (96.0, true)] {
+                let usage = WeeklyUsage::from_used_percent(used, None).unwrap();
+                let area = Rect::new(0, 0, 200, 1);
+                let mut buf = Buffer::empty(area);
+                render(area, &[], [Some(&usage); 2], view, true, &mut buf).unwrap();
+                let row = buf
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>();
+                for name in ["Claude", "Codex"] {
+                    let start = row.find(name).unwrap();
+                    let start = row[..start].chars().count();
+                    for cell in &buf.content[start..start + name.len()] {
+                        assert_eq!(
+                            cell.fg == ratatui::style::Color::Red,
+                            red,
+                            "{view:?}, {used}, {name}"
+                        );
+                    }
+                }
             }
         }
     }
