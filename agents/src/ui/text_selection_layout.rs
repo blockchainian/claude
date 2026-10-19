@@ -7,6 +7,11 @@ use unicode_width::UnicodeWidthStr;
 
 pub(super) type CellMap = (Range<u16>, Range<usize>);
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static MAP_LINES_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone)]
 struct Token {
     text: String,
@@ -25,6 +30,8 @@ pub(super) fn map_lines_in(
     markdown: bool,
     cwd: Option<&std::path::Path>,
 ) -> Vec<Vec<CellMap>> {
+    #[cfg(test)]
+    MAP_LINES_CALLS.set(MAP_LINES_CALLS.get() + 1);
     let mut tokens = source_tokens(source, markdown);
     if let Some(cwd) = cwd {
         for range in super::paths::text_paths(source, cwd) {
