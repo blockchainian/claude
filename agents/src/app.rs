@@ -171,18 +171,31 @@ struct PendingLog {
 /// A new task's directory and branch: the repository's current branch, or none outside git.
 pub(crate) fn draft_location(cwd: PathBuf) -> io::Result<(PathBuf, String)> {
     let cwd = std::fs::canonicalize(cwd)?;
-    let output = Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(&cwd).output()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .output()?;
     if !output.status.success() {
         if cwd.ancestors().any(|path| path.join(".git").exists()) {
-            return Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
+            return Err(io::Error::other(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            ));
         }
         return Ok((cwd, String::new()));
     }
-    let output = Command::new("git").args(["symbolic-ref", "--short", "HEAD"]).current_dir(&cwd).output()?;
+    let output = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(&cwd)
+        .output()?;
     if !output.status.success() {
-        return Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
+        return Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
     }
-    let branch = String::from_utf8(output.stdout).map_err(io::Error::other)?.trim().to_owned();
+    let branch = String::from_utf8(output.stdout)
+        .map_err(io::Error::other)?
+        .trim()
+        .to_owned();
     Ok((cwd, branch))
 }
 
@@ -195,7 +208,9 @@ impl App {
         view.usage_view = preferences.usage_view;
         view.set_pinned(&preferences.pinned);
         view.set_drafts(&preferences.drafts);
-        if !preferences.draft_notices.is_empty() { view.set_notice(Some(preferences.draft_notices.join("; "))); }
+        if !preferences.draft_notices.is_empty() {
+            view.set_notice(Some(preferences.draft_notices.join("; ")));
+        }
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
@@ -768,6 +783,8 @@ impl App {
         let Ok(changed) = series.update(path, session.id.provider) else {
             return;
         };
+        self.view
+            .set_context_usage(&session.id, series.context_percent());
         if changed || self.view.usage_session() != Some(&session.id) {
             self.view.set_usage(&session.id, series.bins.clone());
         }
@@ -779,7 +796,9 @@ impl App {
         result: io::Result<Option<crate::providers::WeeklyUsage>>,
     ) {
         if let Ok(Some(usage)) = &result {
-            let saved = self.preferences.save_usage(&self.config_dir, provider, usage);
+            let saved = self
+                .preferences
+                .save_usage(&self.config_dir, provider, usage);
             self.report_save(saved);
         }
         self.hub.weekly_usage_complete(provider, result);

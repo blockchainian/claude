@@ -2941,9 +2941,9 @@ fn terminal_context_usage_on_details_border() {
             .is_some_and(|row| row.contains("╴26% "))
     });
     let border = capture.lines().nth(1).unwrap();
-    assert!(border.contains("Ready"), "{capture}");
+    assert!(border.contains("Inactive"), "{capture}");
     assert!(
-        border.find("26%").unwrap() < border.find("Ready").unwrap(),
+        border.find("26%").unwrap() < border.find("Inactive").unwrap(),
         "{capture}"
     );
     let result = serde_json::json!({"verdict":"passed", "border":border});

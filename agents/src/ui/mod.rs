@@ -85,6 +85,7 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     (
         "Active",
         &[
+            SessionStatus::New,
             SessionStatus::Working,
             SessionStatus::Ready,
             SessionStatus::NeedsInput,
@@ -229,7 +230,9 @@ pub struct View {
     startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
     selected_draft: Option<crate::model::DraftId>,
-    next_draft: crate::model::DraftId,
+    next_draft: u64,
+    drafts_dirty: bool,
+    draft_jobs_pending: bool,
     input_choices: HashMap<ProviderId, crate::providers::InputChoices>,
     pub(crate) provider_names: Vec<(ProviderId, &'static str)>,
     pub(crate) weekly_usage: HashMap<ProviderId, crate::providers::WeeklyUsage>,
@@ -298,6 +301,8 @@ pub struct View {
     panels_task: Option<SessionKey>,
     /// The panels of each task the user left, by task.
     task_panels: HashMap<SessionKey, TaskPanels>,
+    /// The context percentage of the task the app read last.
+    context_usage: Option<(SessionKey, u64)>,
     /// The usage bins of the task the app read last.
     usage: Option<(
         SessionKey,
@@ -384,6 +389,8 @@ impl View {
             drafts: Vec::new(),
             selected_draft: None,
             next_draft: 1,
+            drafts_dirty: false,
+            draft_jobs_pending: false,
             input_choices: HashMap::new(),
             provider_names: Vec::new(),
             weekly_usage: HashMap::new(),
@@ -430,6 +437,7 @@ impl View {
             panels_task: None,
             task_panels: HashMap::new(),
             usage: None,
+            context_usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
             activity: std::collections::BTreeSet::new(),
         }
@@ -454,7 +462,16 @@ impl View {
     }
 
     pub(crate) fn attach_image(&mut self, image: crate::images::ImageAttachment) {
+        if self.frozen_draft() {
+            return;
+        }
         if self.pasting_prompt() {
+            if self
+                .selected_draft()
+                .is_some_and(|draft| draft.name.is_some())
+            {
+                image.preserve();
+            }
             self.input_box.editor.insert_image(image);
         }
     }
@@ -468,6 +485,9 @@ impl View {
     }
 
     pub(crate) fn handle_paste(&mut self, text: &str) {
+        if self.frozen_draft() {
+            return;
+        }
         if self.confirm_dialog.is_some() || self.help {
             return;
         }
@@ -624,6 +644,8 @@ impl View {
 
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
+        sessions.retain(|session| self.draft_of(&session.id).is_none());
+        sessions.extend(self.draft_rows());
         let had_sessions = !self.rows.is_empty();
         let selected = self.selected_id().cloned();
         if self.attention_selection.is_some() && self.attention_selection != selected {
@@ -671,6 +693,9 @@ impl View {
         }
         self.reconcile_attention(selected.as_ref(), status_filter, had_sessions);
         self.reconcile_drafts();
+        if std::mem::take(&mut self.draft_jobs_pending) {
+            self.repair_draft_jobs();
+        }
         self.show_selected_panels();
     }
 
@@ -687,7 +712,10 @@ impl View {
             .filter(|row| row.status == SessionStatus::NeedsInput)
             .map(|row| row.id.clone())
             .collect();
-        if self.selected_draft.is_some() {
+        if self
+            .selected_draft()
+            .is_some_and(|draft| draft.name.is_none())
+        {
             self.waiting_sessions = waiting;
             return;
         }
@@ -851,7 +879,10 @@ impl View {
         self.selected_row().map(|s| &s.id)
     }
     fn selected_row(&self) -> Option<&Session> {
-        if self.selected_draft.is_some() {
+        if self
+            .selected_draft()
+            .is_some_and(|draft| draft.name.is_none())
+        {
             return None;
         }
         self.rows
@@ -1015,9 +1046,28 @@ impl View {
     }
 
     fn set_selected(&mut self, selected: usize) {
+        if self.selected == selected
+            && self
+                .selected_draft()
+                .is_some_and(|draft| draft.name.is_some())
+        {
+            return;
+        }
         self.leave_draft();
         self.selected = selected;
+        self.selected_draft = self
+            .rows
+            .get(selected)
+            .and_then(|row| self.draft_of(&row.id))
+            .map(|draft| draft.id);
         self.show_selected_panels();
+        if let Some(id) = self.selected_draft {
+            if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
+                self.input_box = std::mem::take(&mut draft.input);
+            }
+            self.mouse_focus = Panel::Prompt;
+            self.focus_input();
+        }
     }
 
     /// Keeps the details and log panels with their task: saves what the task the user left
@@ -1115,7 +1165,11 @@ impl View {
     }
 
     fn reconcile_selection(&mut self) {
-        if self.selected_draft.is_some() && self.status_filter == 0 {
+        if self
+            .selected_draft()
+            .is_some_and(|draft| draft.name.is_none())
+            && self.status_filter == 0
+        {
             return;
         }
         let visible = self.selectable_indices();
@@ -1173,6 +1227,7 @@ impl View {
     fn status_indicator(status: SessionStatus) -> Span<'static> {
         match status {
             SessionStatus::NeedsInput => "●".red(),
+            SessionStatus::New => "○".cyan(),
             SessionStatus::Working => "●".green(),
             SessionStatus::Ready => "○".cyan(),
             SessionStatus::Inactive => "○".dim(),
