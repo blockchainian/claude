@@ -157,8 +157,8 @@ struct Viewport {
     log_detail_key: Option<u64>,
     /// The wheel direction that selected the entry, until its layout starts it at that end.
     log_detail_entry: Option<bool>,
-    /// The wheel direction the selected entry's title holds one report against.
-    log_detail_title_hold: Option<bool>,
+    /// The wheel direction the selected entry's title holds reports against, and how many remain.
+    log_detail_title_hold: Option<(bool, usize)>,
     log_detail_saved: HashMap<u64, DetailsScroll>,
     /// The selected event's layout, cached until its content or size changes.
     log_detail_layout: Option<log::DetailLayout>,

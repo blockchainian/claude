@@ -2,6 +2,8 @@ use super::*;
 
 /// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
+/// Wheel reports a scrollable log entry's title holds before the wheel moves past it.
+const TITLE_HOLD_WHEELS: usize = 2;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
@@ -935,7 +937,7 @@ impl View {
         self.scroll_content_rows(forward, over_log, row, 1, false)
     }
 
-    /// With `wheel`, a scrollable log entry holds one report at its title in the direction of travel.
+    /// With `wheel`, a scrollable log entry's title holds reports in the direction of travel.
     fn scroll_content_rows(
         &mut self,
         forward: bool,
@@ -954,12 +956,17 @@ impl View {
         let mut viewport = self.viewport.borrow_mut();
         if over_log && over_log_detail {
             let title_hold = viewport.log_detail_title_hold.take();
-            if wheel && title_hold == Some(forward) && viewport.log_detail_max > 0 {
+            if let Some((direction, left)) = title_hold
+                && wheel
+                && direction == forward
+                && viewport.log_detail_max > 0
+            {
+                viewport.log_detail_title_hold = (left > 1).then_some((direction, left - 1));
                 true
             } else if viewport.log_detail_state.scroll_rows(forward, row, rows) {
                 viewport.log_detail_scroll = viewport.log_detail_state.position();
                 if wheel && !forward && viewport.log_detail_scroll == 0 {
-                    viewport.log_detail_title_hold = Some(false);
+                    viewport.log_detail_title_hold = Some((false, TITLE_HOLD_WHEELS));
                 }
                 true
             } else {
@@ -969,7 +976,7 @@ impl View {
                 if wheel && self.log_selected != selected {
                     let mut viewport = self.viewport.borrow_mut();
                     viewport.log_detail_entry = Some(forward);
-                    viewport.log_detail_title_hold = forward.then_some(true);
+                    viewport.log_detail_title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
                 }
                 false
             }

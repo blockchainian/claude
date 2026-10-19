@@ -376,9 +376,11 @@ fn log_scroll_wheel_pauses_at_title_before_changing_event() {
     );
     panel(&view, now);
     assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
-    wheel(&mut view, false);
-    panel(&view, now);
-    assert_eq!(view.log_selected, Some(1), "the title holds one wheel");
+    for _ in 0..2 {
+        wheel(&mut view, false);
+        panel(&view, now);
+        assert_eq!(view.log_selected, Some(1), "the title holds two wheels");
+    }
     wheel(&mut view, false);
     assert_eq!(view.log_selected, Some(0));
 }
@@ -448,13 +450,15 @@ fn log_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_onc
         panel(&view, now);
         assert_eq!(view.log_selected, Some(1));
         assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
-        wheel(&mut view, true);
-        panel(&view, now);
-        assert_eq!(
-            view.viewport.borrow().log_detail_scroll,
-            0,
-            "the title holds one wheel"
-        );
+        for _ in 0..2 {
+            wheel(&mut view, true);
+            panel(&view, now);
+            assert_eq!(
+                view.viewport.borrow().log_detail_scroll,
+                0,
+                "the title holds two wheels"
+            );
+        }
         let max = view.viewport.borrow().log_detail_max;
         while view.viewport.borrow().log_detail_scroll < max {
             wheel(&mut view, true);
@@ -483,9 +487,11 @@ fn log_scroll_wheel_entering_from_below_starts_at_bottom() {
         panel(&view, now);
         assert_eq!(view.log_selected, Some(1));
     }
-    wheel(&mut view, false);
-    panel(&view, now);
-    assert_eq!(view.log_selected, Some(1), "the title holds one wheel");
+    for _ in 0..2 {
+        wheel(&mut view, false);
+        panel(&view, now);
+        assert_eq!(view.log_selected, Some(1), "the title holds two wheels");
+    }
     wheel(&mut view, false);
     assert_eq!(view.log_selected, Some(0));
 }
