@@ -197,3 +197,133 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
         }
     }
 }
+
+#[test]
+fn duration_toggle_keeps_event_and_search_order() {
+    let (_dir, mut view) = fixture();
+    view.mouse_focus = Panel::LogList;
+    let mut events: Vec<_> = view.log.iter().cycle().take(4).cloned().collect();
+    for (index, event) in events.iter_mut().enumerate() {
+        event.kind = crate::log::Kind::Tool;
+        event.completed_time = true;
+        event.ended_at = Some(event.started_at);
+        event.duration = Some(chrono::Duration::seconds([30, 10, 20, 10][index]));
+        event.body = if index % 2 == 0 {
+            "duration target"
+        } else {
+            "duration other"
+        }
+        .into();
+    }
+    view.set_log(events);
+    view.select_log_event(Some(0));
+    let selected = view.visible_log_event().cloned();
+    key(&mut view, KeyCode::Char('t'));
+    assert_eq!(
+        view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
+        [1, 3, 2, 0]
+    );
+    assert_eq!(view.visible_log_event(), selected.as_ref());
+    key(&mut view, KeyCode::Char('/'));
+    for c in "target".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert_eq!(
+        view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
+        [2, 0]
+    );
+    key(&mut view, KeyCode::Esc);
+    assert_eq!(
+        view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
+        [1, 3, 2, 0]
+    );
+    key(&mut view, KeyCode::Char('t'));
+    assert_eq!(
+        view.shown_log_events().map(|(i, _)| i).collect::<Vec<_>>(),
+        [0, 1, 2, 3]
+    );
+    assert_eq!(view.visible_log_event(), selected.as_ref());
+}
+
+#[test]
+fn duration_keys_include_messages_none_ties_and_running_update_time() {
+    let (_dir, mut view) = fixture();
+    let now = Utc::now();
+    let mut events: Vec<_> = view.log.iter().cycle().take(7).cloned().collect();
+    for (i, event) in events.iter_mut().enumerate() {
+        event.kind = crate::log::Kind::Tool;
+        event.started_at = now - chrono::Duration::seconds(20 - i as i64);
+        event.previous_end = None;
+        event.completed_time = true;
+        event.ended_at = Some(event.started_at);
+        event.duration = Some(chrono::Duration::seconds(10));
+    }
+    events[0].duration = None;
+    events[2].kind = crate::log::Kind::User;
+    events[2].previous_end = Some(events[2].started_at - chrono::Duration::seconds(3));
+    events[3].kind = crate::log::Kind::Assistant;
+    events[3].previous_end = Some(events[3].started_at - chrono::Duration::seconds(2));
+    // Claude spans use previous_end even without Event.duration.
+    events[4].completed_time = false;
+    events[4].duration = None;
+    events[4].previous_end = Some(events[4].started_at - chrono::Duration::seconds(1));
+    events[5].duration = None;
+    events[6].completed_time = false;
+    events[6].duration = None;
+    events[6].ended_at = None;
+    events[6].previous_end = Some(now - chrono::Duration::seconds(5));
+    let selected = view.selected;
+    view.rows[selected].process = Some(crate::model::Process {
+        pid: 123,
+        label: None,
+        started_at: Some(now),
+    });
+    view.rows[selected].status = SessionStatus::Working;
+    key(&mut view, KeyCode::Tab);
+    view.set_log(events);
+    view.last_update = now;
+    view.mouse_focus = Panel::LogList;
+    key(&mut view, KeyCode::Char('t'));
+    assert_eq!(view.log_order, [0, 5, 4, 3, 2, 6, 1]);
+    assert_eq!(
+        view.log_redraw_in(now + chrono::Duration::seconds(30)),
+        None
+    );
+    let before = view.log_order.clone();
+    let area = Rect::new(0, 0, 100, 10);
+    let mut first = Buffer::empty(area);
+    view.render_log(area, &mut first, now);
+    let mut later = Buffer::empty(area);
+    view.render_log(area, &mut later, now + chrono::Duration::seconds(30));
+    assert_eq!(first, later, "duration rows only tick on updates");
+    assert_eq!(before, view.log_order);
+    let row = view.shown_position(6).unwrap() as u16;
+    let text: String = (0..100).map(|x| first[(x, row)].symbol()).collect();
+    assert!(text.trim_end().ends_with("5s"), "{text}");
+    assert!(view.shown_position(6).unwrap() < view.shown_position(1).unwrap());
+    view.log_search.query.set_text("no matching row");
+    view.rematch_log();
+    assert_eq!(view.matching_log_count(), 0);
+    view.log_search.clear();
+    view.rematch_log();
+    assert_eq!(view.log_order, before);
+}
+
+#[test]
+fn duration_empty_toggle_and_top_navigation_do_not_page() {
+    let (_dir, mut view) = fixture();
+    view.set_log(Vec::new());
+    view.mouse_focus = Panel::LogList;
+    key(&mut view, KeyCode::Char('t'));
+    assert_eq!(view.log_sort, LogSort::Duration);
+    assert!(view.log_order.is_empty());
+    assert_eq!(view.log_selected, None);
+    key(&mut view, KeyCode::Char('t'));
+    assert_eq!(view.log_sort, LogSort::Time);
+    let (_other, mut view) = fixture();
+    view.mouse_focus = Panel::LogList;
+    key(&mut view, KeyCode::Char('t'));
+    view.select_log_event(Some(0));
+    view.move_log_selection(false);
+    assert_eq!(view.log_pending_older, 0);
+}

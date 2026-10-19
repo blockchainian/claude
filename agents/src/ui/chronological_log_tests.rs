@@ -363,3 +363,60 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
         }
     }
 }
+
+#[test]
+fn duration_updates_preserve_screen_row_and_follow_slowest() {
+    let (_dir, mut view, mut events) = fixture();
+    for (i, event) in events.iter_mut().enumerate() {
+        event.kind = crate::log::Kind::Tool;
+        event.completed_time = true;
+        event.ended_at = Some(event.started_at);
+        event.duration = Some(chrono::Duration::seconds(10 + i as i64));
+    }
+    view.set_log(events[..8].to_vec());
+    view.mouse_focus = Panel::LogList;
+    view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+    view.select_log_event(Some(5));
+    view.viewport.borrow_mut().log_scroll = 4;
+    draw(&view);
+    let screen_row = view.log_selected.unwrap() - view.log_scroll();
+    events[8].duration = Some(chrono::Duration::seconds(1));
+    view.set_log(events[..9].to_vec());
+    draw(&view);
+    assert_eq!(
+        view.shown_log_events()
+            .nth(view.log_selected.unwrap())
+            .unwrap()
+            .0,
+        5
+    );
+    assert_eq!(view.log_selected.unwrap() - view.log_scroll(), screen_row);
+    // Replacing the same row can also move it down, reducing the scroll.
+    events[8].duration = Some(chrono::Duration::seconds(50));
+    view.set_log(events[..9].to_vec());
+    draw(&view);
+    assert_eq!(view.log_selected.unwrap() - view.log_scroll(), screen_row);
+    assert_eq!(view.viewport.borrow().log_unseen, 0);
+    let area = Rect::new(0, 5, 100, 1);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 6));
+    view.render_log_jump(area, &mut buf);
+    assert!(view.viewport.borrow().log_jump.is_empty());
+    assert!(
+        !(0..100)
+            .map(|x| buf[(x, 5)].symbol())
+            .collect::<String>()
+            .contains("New")
+    );
+    view.show_newest_log();
+    events[9].duration = Some(chrono::Duration::seconds(100));
+    view.set_log(events[..10].to_vec());
+    assert_eq!(view.visible_log_event(), Some(&events[9]));
+    assert!(view.following_log());
+    view.apply_log_update(crate::log::Update {
+        events: events[..3].to_vec(),
+        reset: true,
+        ..Default::default()
+    });
+    assert_eq!(view.log_sort, LogSort::Duration);
+    assert_eq!(view.log_order, [0, 1, 2]);
+}

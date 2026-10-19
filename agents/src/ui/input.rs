@@ -64,7 +64,7 @@ impl View {
                             || event.calls.iter().any(|call| call.id == source)
                     })
                 {
-                    let index = self.shown_log_events().position(|(index, _)| index == full);
+                    let index = self.shown_position(full);
                     self.log_background_return = None;
                     self.select_log_event(index);
                 }
@@ -680,7 +680,7 @@ impl View {
                     .contains(position)
                     .then(|| usize::from(mouse.row - viewport.log.y))
                     .and_then(|row| viewport.log_rows.get(row))
-                    .and_then(|&full| self.shown_log_events().position(|(index, _)| index == full))
+                    .and_then(|&full| self.shown_position(full))
             };
             if let Some(event) = event {
                 self.log_background_return = None;
@@ -1419,6 +1419,29 @@ impl View {
         }
         if key.code == KeyCode::Esc && self.selected_draft.is_some() {
             self.confirm_draft_delete();
+            return None;
+        }
+        if plain
+            && key.code == KeyCode::Char('t')
+            && (self.mouse_focus == Panel::LogList || self.log_list_focused)
+        {
+            let following = self.following_log();
+            let full = self
+                .log_selected
+                .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+            self.log_sort = match self.log_sort {
+                LogSort::Time => LogSort::Duration,
+                LogSort::Duration => LogSort::Time,
+            };
+            self.prepare_log_search();
+            self.log_selected = full.and_then(|full| self.shown_position(full));
+            self.log_pending_older = 0;
+            self.viewport.borrow_mut().log_unseen = 0;
+            if following {
+                self.viewport.borrow_mut().log_scroll = self.log_max_scroll();
+            } else {
+                self.reveal_log_selection();
+            }
             return None;
         }
         match navigation.unwrap_or(key.code) {
