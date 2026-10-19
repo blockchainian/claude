@@ -163,6 +163,7 @@ pub(crate) enum Output {
     Fetch,
     Empty,
     Hidden,
+    Agent,
     Wait,
 }
 
@@ -177,6 +178,7 @@ pub(crate) enum TaskAction {
 #[derive(Clone, Copy)]
 pub(crate) struct ToolRule {
     pub name: &'static str,
+    pub aliases: &'static [&'static str],
     pub subject: Option<Subject>,
     pub input: Option<(Input, Format)>,
     pub output: Option<Output>,
@@ -189,6 +191,7 @@ pub(crate) struct ToolRule {
 
 const DEFAULT_RULE: ToolRule = ToolRule {
     name: "",
+    aliases: &[],
     subject: None,
     input: None,
     output: None,
@@ -276,23 +279,16 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         question: true,
         ..DEFAULT_RULE
     },
+    // Message owns spawn names and prompt bodies. Other input fields, including
+    // subagent_type, run_in_background and isolation, are intentionally not displayed.
     ToolRule {
         name: "Agent",
-        subject: Some(Subject::Field("description")),
-        input: Some((Input::Field("prompt"), Format::Markdown)),
-        output: Some(Output::Markdown),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "Task",
-        subject: Some(Subject::Field("description")),
-        input: Some((Input::Field("prompt"), Format::Markdown)),
+        aliases: &["Task"],
+        output: Some(Output::Agent),
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "spawn_agent",
-        subject: Some(Subject::Field("task_name")),
-        input: Some((Input::Field("message"), Format::Markdown)),
         output: Some(Output::Hidden),
         ..DEFAULT_RULE
     },
@@ -416,7 +412,7 @@ pub(crate) fn rule(name: &str) -> &'static ToolRule {
     let name = tool_name(name);
     TOOL_RULES
         .iter()
-        .find(|rule| rule.name == name)
+        .find(|rule| rule.name == name || rule.aliases.contains(&name.as_str()))
         .unwrap_or(&DEFAULT_RULE)
 }
 
@@ -711,9 +707,20 @@ pub(crate) fn text_output(text: &str, mode: Option<Output>, input: &Value) -> Ve
     )
 }
 
+/// Only recorded launch states suppress an agent's result body.
+pub(crate) fn output_hidden(mode: Option<Output>, value: &Value) -> bool {
+    match mode {
+        Some(Output::Hidden) => true,
+        Some(Output::Agent) => value["isAsync"] == true
+            || matches!(value["status"].as_str(), Some("async_launched" | "teammate_spawned")),
+        _ => false,
+    }
+}
+
 pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_>) -> Vec<Section> {
     match mode {
-        Some(Output::Hidden | Output::Empty) if !result.error => return Vec::new(),
+        _ if !result.error && output_hidden(mode, result.value) => return Vec::new(),
+        Some(Output::Empty) if !result.error => return Vec::new(),
         Some(Output::Wait) if !result.error => {
             let value = serde_json::from_str::<Value>(result.text).unwrap_or(Value::Null);
             let text = if value["timed_out"] == true {
@@ -754,7 +761,7 @@ pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_
         return generic();
     }
     match mode {
-        Some(Output::Markdown) => vec![Section::Markdown {
+        Some(Output::Markdown | Output::Agent) => vec![Section::Markdown {
             label: "output".to_owned(),
             text: result.text.to_owned(),
         }],
@@ -1014,6 +1021,16 @@ fn label_section(section: Section) -> Vec<Section> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn agent_and_task_share_the_spawn_rule() {
+        assert!(std::ptr::eq(super::rule("Agent"), super::rule("Task")));
+        for name in ["Agent", "Task", "spawn_agent"] {
+            let rule = super::rule(name);
+            assert!(rule.subject.is_none());
+            assert!(rule.input.is_none());
+        }
+    }
+
+    #[test]
     fn tool_declarations_are_unique_and_keep_captured_agent_fields() {
         let mut names = std::collections::HashSet::new();
         for rule in super::TOOL_RULES {
@@ -1041,6 +1058,12 @@ mod tests {
                 format!("collaboration.{name}"),
                 format!("functions.collaboration.{name}"),
             ] {
+                if name == "spawn_agent" {
+                    let message = crate::log::agent::tool_message(&raw, &input).unwrap();
+                    assert_eq!(message.recipient.as_deref(), Some(subject));
+                    assert_eq!(message.content.text(), input["message"].as_str().unwrap());
+                    continue;
+                }
                 let (_, actual, sections) = super::presentation(&raw, &input);
                 assert_eq!(actual.as_deref(), Some(subject));
                 assert_eq!(

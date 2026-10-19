@@ -28,9 +28,10 @@ impl View {
                     settings.provider,
                     settings.model.as_deref().unwrap_or_default(),
                 );
-                let effort = super::formatting::effort_text(settings.effort.as_deref());
-                call.detail_title
-                    .push_str(&format!(" · {model} · {effort}"));
+                call.detail_title.push_str(&format!(" · {model}"));
+                if let Some(effort) = settings.effort.as_deref().filter(|effort| !effort.is_empty()) {
+                    call.detail_title.push_str(&format!(" · {effort}"));
+                }
             }
         }
         std::borrow::Cow::Owned(display)

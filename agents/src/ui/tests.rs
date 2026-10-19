@@ -1,3 +1,5 @@
+#[path = "spawn_agent_tests.rs"]
+mod spawn_agent_tests;
 #[path = "task_navigation_tests.rs"]
 mod task_navigation_tests;
 
@@ -9739,10 +9741,10 @@ fn claude_agent_display_from_real_records() {
         ),
         (
             "toolu_01X69UrWoFVNnNKno4yavSre",
-            "Spawn agent",
+            "Spawn agent 接手边框和标题行改动",
             "feature:ux-implementer",
         ),
-        ("toolu_01YMEgiGEMc9cjoePq6j2E69", "Spawn agent", "fork"),
+        ("toolu_01YMEgiGEMc9cjoePq6j2E69", "Spawn agent 滚动条挪到最右边", "fork"),
     ] {
         let event = events
             .iter()
@@ -9762,7 +9764,7 @@ fn claude_agent_display_from_real_records() {
             "{screen}"
         );
         assert!(!label.is_empty());
-        let description = event.calls[0].detail_title.clone();
+        let description = view.display_event(event).calls[0].detail_title.clone();
         assert!(
             rows[header]
                 .replace(' ', "")
@@ -10407,7 +10409,7 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         display
             .calls
             .iter()
-            .any(|call| call.detail_title.contains("GPT-6.1-Sol · Default"))
+            .any(|call| call.detail_title.ends_with("GPT-6.1-Sol"))
     );
 }
 

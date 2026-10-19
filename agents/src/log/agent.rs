@@ -35,6 +35,7 @@ pub struct Message {
 struct Route {
     tool: &'static str,
     recipient: &'static str,
+    recipient_fallback: Option<&'static str>,
     body: &'static str,
     kind: &'static str,
 }
@@ -43,36 +44,42 @@ const AGENT_ROUTES: &[Route] = &[
     Route {
         tool: "Agent",
         recipient: "name",
+        recipient_fallback: Some("description"),
         body: "prompt",
         kind: "SPAWN_AGENT",
     },
     Route {
         tool: "Task",
         recipient: "name",
+        recipient_fallback: Some("description"),
         body: "prompt",
         kind: "SPAWN_AGENT",
     },
     Route {
         tool: "spawn_agent",
         recipient: "task_name",
+        recipient_fallback: None,
         body: "message",
         kind: "SPAWN_AGENT",
     },
     Route {
         tool: "SendMessage",
         recipient: "to",
+        recipient_fallback: None,
         body: "message",
         kind: "MESSAGE",
     },
     Route {
         tool: "send_message",
         recipient: "target",
+        recipient_fallback: None,
         body: "message",
         kind: "MESSAGE",
     },
     Route {
         tool: "followup_task",
         recipient: "target",
+        recipient_fallback: None,
         body: "message",
         kind: "FOLLOWUP_TASK",
     },
@@ -82,9 +89,11 @@ pub fn tool_message(name: &str, input: &Value) -> Option<Message> {
     let route = AGENT_ROUTES
         .iter()
         .find(|route| Some(route.tool) == name.rsplit('.').next())?;
-    let recipient = input[route.recipient]
+    let recipient = |field: &str| input[field]
         .as_str()
         .filter(|s| !s.trim().is_empty() && !s.starts_with("uds:"));
+    let recipient = recipient(route.recipient)
+        .or_else(|| route.recipient_fallback.and_then(recipient));
     Some(Message {
         author: None,
         recipient: recipient.map(str::to_owned),

@@ -23,7 +23,7 @@ WebFetch                                                                    http
                                                             authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
                                                             WebFetch.
 Agent toolu_01Jh2saBdGuVcXWa4bGuH4sW — 120 columns
-Spawn agent
+Spawn agent                                          写工具详情计划
 
   Write an implementation plan for a feature in the agents Rust TUI session dashboard, at agents/agents (git
   worktree on branch agents-panel; read agents/AGENTS.md and agents/AGENTS.md first). The plan will be run by
@@ -86,19 +86,8 @@ Spawn agent
   • UX verification: find the project's scripted probe for the log panel if one exists (grep for probe scripts
     under agents/ or tests/); state it in the plan, or say none exists.
   • Keep it minimal; no line numbers; only what the implementer can't work out or would get wrong.
-                                                            ↓
-  Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of
-  it, including the agentId below, into a user-facing reply.) agentId: ac13a6560b46f8db6 (internal ID - do not
-  mention to user. Use SendMessage with to: 'ac13a6560b46f8db6', summary: '<5-10 word recap>' to continue this
-  agent.) The agent is working in the background. You will be notified automatically when it completes. You
-  know nothing about its results until that notification arrives — do not report, assume, or predict them;
-  continue other work or respond to the user in the meantime. Do not duplicate this agent's work — avoid
-  working with the same files or topics it is using. output_file:
-  tmp/agents/00000000-0000-4000-8000-000000000000/tasks/ac13a6560b46f8db6.output Do NOT Read or tail this file
-  via the shell tool — it is the full subagent JSONL transcript and reading it will overflow your context. If
-  the user asks for progress, say the agent is still running; you'll get a completion notification.
 Agent toolu_01Jh2saBdGuVcXWa4bGuH4sW — 200 columns
-Spawn agent
+Spawn agent                                                                                  写工具详情计划
 
                                                          Write an implementation plan for a feature in the agents Rust TUI session dashboard,
                                                          at agents/agents (git worktree on branch agents-panel; read agents/AGENTS.md and
@@ -177,20 +166,6 @@ Spawn agent
                                                            exists.
                                                          • Keep it minimal; no line numbers; only what the implementer can't work out or would
                                                            get wrong.
-                                                                                                    ↓
-                                                         Async agent launched successfully. (This tool result is internal metadata — never
-                                                         quote or paste any part of it, including the agentId below, into a user-facing reply.)
-                                                         agentId: ac13a6560b46f8db6 (internal ID - do not mention to user. Use SendMessage with
-                                                         to: 'ac13a6560b46f8db6', summary: '<5-10 word recap>' to continue this agent.) The
-                                                         agent is working in the background. You will be notified automatically when it
-                                                         completes. You know nothing about its results until that notification arrives — do not
-                                                         report, assume, or predict them; continue other work or respond to the user in the
-                                                         meantime. Do not duplicate this agent's work — avoid working with the same files or
-                                                         topics it is using. output_file:
-                                                         tmp/agents/00000000-0000-4000-8000-000000000000/tasks/ac13a6560b46f8db6.output Do NOT
-                                                         Read or tail this file via the shell tool — it is the full subagent JSONL transcript
-                                                         and reading it will overflow your context. If the user asks for progress, say the
-                                                         agent is still running; you'll get a completion notification.
 Skill toolu_01TesFHhZyZ1rwVBQTYjD8c7 — 120 columns
 Skill                                            secrets:secrets-manager
 

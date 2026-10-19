@@ -539,7 +539,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     let mut call = ToolCall {
         agent_message: None,
         started_at: None,
-        hide_output: false,
+        hide_output: result.is_some_and(|result| !result.error && tool::output_hidden(mode, &result.value)),
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
@@ -556,6 +556,15 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         duration: None,
     };
     call.agent_message = crate::log::agent::tool_message(name, input);
+    if call.agent_message.as_ref().is_some_and(|message| message.kind == "SPAWN_AGENT") {
+        let model = result.and_then(|result| result.value["resolvedModel"].as_str())
+            .or_else(|| input["model"].as_str());
+        call.model_settings = model.map(|model| crate::log::ModelSettings {
+            provider: crate::providers::ProviderId::Claude,
+            model: Some(model.to_owned()),
+            effort: None,
+        });
+    }
     crate::log::agent::present(&mut call);
     crate::providers::tool::annotate(&mut call);
     call
@@ -1581,7 +1590,10 @@ pub(crate) mod tests {
                     };
                     let input = &block["input"];
                     let call = super::tool_call(name, input, None);
-                    assert_eq!(call.detail_title, input[subject].as_str().unwrap_or(if name == "Agent" || name == "Task" { "" } else { name }));
+                    let expected = input[subject].as_str().or_else(|| {
+                        matches!(name, "Agent" | "Task").then(|| input["description"].as_str()).flatten()
+                    }).unwrap_or(name);
+                    assert_eq!(call.detail_title, expected);
                     if let Some(message) = &call.agent_message {
                         assert_eq!(call.detail_left, message.label());
                     } else { assert_eq!(
@@ -1682,7 +1694,7 @@ pub(crate) mod tests {
                 .find(|call| call.name == "Agent")
                 .unwrap()
                 .detail_title,
-            ""
+            "写工具详情计划"
         );
         assert_eq!(
             calls
@@ -2090,6 +2102,34 @@ pub(crate) mod tests {
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
             assert_eq!(summary.activity.unwrap().label, events[0].summary());
         }
+    }
+
+    #[test]
+    fn captured_agent_request_preserves_input_model_until_resolved() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let request = include_str!("../../../tests/fixtures/claude-agent-launch.jsonl").lines().next().unwrap();
+        std::fs::write(file.path(), request).unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        let call = &events.iter().find(|event| !event.calls.is_empty()).unwrap().calls[0];
+        assert_eq!(call.model_settings.as_ref().unwrap().model.as_deref(), Some("sonnet"));
+        assert!(call.output.is_none());
+    }
+
+    #[test]
+    fn captured_agent_launch_uses_description_and_resolved_model() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), include_str!("../../../tests/fixtures/claude-agent-launch.jsonl")).unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        let event = events.iter().find(|event| !event.calls.is_empty()).unwrap();
+        let call = &event.calls[0];
+        assert_eq!(event.summary(), "Spawn agent 查 Claude 前台转后台");
+        assert_eq!(call.detail_title, "查 Claude 前台转后台");
+        let settings = call.model_settings.as_ref().unwrap();
+        assert_eq!(settings.provider, crate::providers::ProviderId::Claude);
+        assert_eq!(settings.model.as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(settings.effort, None);
+        assert!(call.hide_output);
+        assert!(call.output.as_ref().unwrap().is_empty());
     }
 
     #[test]
