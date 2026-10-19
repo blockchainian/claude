@@ -5363,15 +5363,15 @@ fn selected_log_row_preserves_foreground_and_adds_bold() {
                             view.rematch_log();
                         }
                         let area = Rect::new(0, 0, width, 60);
+                        let log = view.center_layout(area).log;
                         view.log_selected = None;
                         for index in 0..2 {
                             let mut baseline = Buffer::empty(area);
                             view.log_selected = None;
-                            view.render_at(area, &mut baseline, now);
-                            let log = view.viewport.borrow().log;
+                            view.render_log(log, &mut baseline, now);
                             view.select_fixture_event(Some(view.log[index].clone()));
                             let mut selected = Buffer::empty(area);
-                            view.render_at(area, &mut selected, now);
+                            view.render_log(log, &mut selected, now);
                             let y = log.y + index as u16;
                             for x in log.x - 1..=log.right() {
                                 let before = &baseline[(x, y)];
