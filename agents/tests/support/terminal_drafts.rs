@@ -90,7 +90,7 @@ fn terminal_repository_browser_applies_single_clicks() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_submitted_draft_closes_while_git_continues_and_failure_shows_notice() {
+fn terminal_submitted_draft_stays_new_while_git_continues_and_failure_keeps_prompt() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source");
@@ -122,19 +122,26 @@ sys.exit(1)
         &transcript_at(&source),
         |directory| {
             std::fs::write(directory.join("claude/agents.json"), serde_json::to_vec(
-                &serde_json::json!({"worktree_root": root.path().join("trees"), "grouping":"project", "pinned":[]})
+                &serde_json::json!({"config":{"worktree_root": root.path().join("trees"), "grouping":"project"}, "state":{"pinned":[]}})
             ).unwrap()).unwrap();
         },
     );
     begin_named_draft(&tmux, "background task");
     tmux.run(&["send-keys", "-t", "probe", "-l", "background prompt"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .any(|line| line.split('│').any(|part| part.trim() == ".."))
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     let branches = tmux.capture_when(|capture| capture.contains("Create new branch"));
     assert!(branches.contains("background task ❯"), "{branches}");
     assert!(
-        !branches.contains("background task ❯ background prompt"),
+        branches.contains("background task ❯ background prompt"),
         "{branches}"
     );
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| capture.contains("New branch ❯"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "feature/async"]);
@@ -142,7 +149,12 @@ sys.exit(1)
     let capture = tmux.capture_when(|capture| {
         !capture.contains("Create new branch") && !capture.contains("New branch ❯")
     });
-    assert!(!capture.contains("background task ❯"), "{capture}");
+    assert!(
+        capture.contains("background task ❯ background prompt"),
+        "{capture}"
+    );
+    // Choosing the branch returns to the prompt; only this Enter starts git.
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     assert!(
         !capture.contains("Creating") && !capture.contains("Sending"),
         "{capture}"
@@ -151,15 +163,25 @@ sys.exit(1)
     while !started.exists() {
         assert!(
             std::time::Instant::now() < deadline,
-            "git hook did not start"
+            "git hook did not start: {}",
+            tmux.run(&["capture-pane", "-t", "probe", "-p"])
         );
         std::thread::sleep(Duration::from_millis(50));
     }
     tmux.run(&["send-keys", "-t", "probe", "-l", "still editable"]);
-    tmux.wait_for(|capture| capture.contains("❯ still editable"));
+    let frozen = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    assert!(
+        frozen.contains("background task ❯ background prompt"),
+        "{frozen}"
+    );
+    assert!(frozen.contains("new"), "{frozen}");
+    assert!(!frozen.contains("still editable"), "{frozen}");
     assert!(!release.exists());
     std::fs::write(&release, "").unwrap();
-    tmux.wait_for(|capture| capture.contains("Preparing worktree"));
+    tmux.wait_for(|capture| {
+        capture.contains("probe checkout rejected")
+            && capture.contains("background task ❯ background prompt")
+    });
     println!(r#"{{"background_git":"pass","prompt_restored":"pass","failure_notice":"pass"}}"#);
 }
 
@@ -207,11 +229,17 @@ fn terminal_task_names_edit_on_details_rule() {
     assert_title_caret(&tmux, "就地任务", 6);
     save_title_capture(&tmux, "02-new-task-name");
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .any(|line| line.split('│').any(|part| part.trim() == ".."))
+    });
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| capture.contains("就地任务 ❯"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "draft prompt"]);
     tmux.wait_for(|capture| capture.contains("就地任务 ❯ draft prompt"));
     save_title_capture(&tmux, "03-new-task-prompt");
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    delete_named_draft(&tmux);
     tmux.wait_for(|capture| !capture.contains("就地任务 ❯"));
     tmux.run(&["send-keys", "-t", "probe", "n"]);
     assert_title_caret(&tmux, "New task", 0);

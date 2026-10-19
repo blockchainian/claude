@@ -36,7 +36,7 @@ fn terminal_prompt_mouse_click_places_caret() {
     tmux.mouse(0, edge + 3, row + 1, true);
     tmux.run(&["send-keys", "-t", "probe", "-l", "x"]);
     tmux.wait_for(|capture| capture.contains("No xreply needed."));
-    tmux.run(&["send-keys", "-t", "probe", "C-c"]);
+    tmux.run(&["send-keys", "-t", "probe", "End", "C-u"]);
     tmux.run(&["send-keys", "-t", "probe", "-l", "写工具详情计划"]);
     tmux.wait_for(|capture| capture.contains("写工具详情计划"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -67,7 +67,7 @@ fn terminal_prompt_mouse_click_places_caret() {
     ]);
     tmux.run(&["send-keys", "-t", "probe", "-l", "查"]);
     tmux.wait_for(|capture| capture.contains("写查详情计划"));
-    tmux.run(&["send-keys", "-t", "probe", "C-c"]);
+    tmux.run(&["send-keys", "-t", "probe", "End", "C-u"]);
     tmux.run(&[
         "send-keys",
         "-t",
@@ -85,10 +85,18 @@ fn terminal_prompt_mouse_click_places_caret() {
         .lines()
         .position(|line| line.contains("No reply needed."))
         .unwrap();
+    // Draft row age changes while typing; compare the prompt surface itself.
+    let prompt_surface = |capture: &str| {
+        capture
+            .lines()
+            .skip_while(|line| !(line.contains("Mouse probe") && line.contains('─')))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     tmux.mouse(64, x, row, false);
-    tmux.wait_for(|capture| capture != before);
+    tmux.wait_for(|capture| prompt_surface(capture) != prompt_surface(&before));
     tmux.mouse(65, x, row, false);
-    tmux.wait_for(|capture| capture == before);
+    tmux.wait_for(|capture| prompt_surface(capture) == prompt_surface(&before));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let path = std::env::temp_dir().join("agents-prompt-mouse-tmux.txt");
     std::fs::write(&path, capture).unwrap();
