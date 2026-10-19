@@ -19,7 +19,7 @@ Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from 
 
 ## Install
 
-### Agent command center
+### Agent Command Center
 
 ```sh
 cargo install --locked --git https://github.com/blockchainian/claude agents
