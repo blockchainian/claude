@@ -503,13 +503,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↓ 1 New");
     let label = " ↓ 1 New ".width() as u16;
-    assert_eq!(
-        (jump.0, jump.1),
-        (
-            rect.right() + 2 - label,
-            rect.y - 1
-        )
-    );
+    assert_eq!((jump.0, jump.1), (rect.right() + 2 - label, rect.y - 1));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
     assert_eq!(buf[jump].fg, Color::Reset);
@@ -624,12 +618,7 @@ fn mouse_log_selection_tracks_selected_session_identity() {
     assert_eq!(view.visible_log_event(), view.log.get(view.log.len() - 2));
     let id = view.selected_id().unwrap().to_owned();
     let mut rows = view.rows.clone();
-    rows.push(session(
-        "recent",
-        "Recent",
-        SessionStatus::NeedsInput,
-        -7200,
-    ));
+    rows.push(session("recent", "Recent", SessionStatus::Working, -7200));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(view.log_selected, selected);
@@ -845,12 +834,7 @@ fn details_scroll_tracks_session_identity_across_refreshes() {
     view.scroll_content_row(true, false, rect.y);
     let id = view.selected_id().unwrap().to_owned();
     let mut rows = view.rows.clone();
-    rows.push(session(
-        "recent",
-        "Recent",
-        SessionStatus::NeedsInput,
-        -7200,
-    ));
+    rows.push(session("recent", "Recent", SessionStatus::Working, -7200));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(
@@ -1343,6 +1327,271 @@ fn refresh_follows_selected_inactive_task_to_active() {
             assert_eq!(view.selected_id(), Some(&task.id));
         }
     }
+}
+
+#[test]
+fn needs_input_preempts_and_returns_to_selected_task() {
+    for status in [SessionStatus::Working, SessionStatus::Inactive] {
+        let mut view = test_view(Grouping::Project, false);
+        let original = session("original", "Original", status, 300);
+        let mut waiting = session("waiting", "Waiting", SessionStatus::Working, 60);
+        view.set_sessions(vec![original.clone(), waiting.clone()], false);
+        if status == SessionStatus::Inactive {
+            key(&mut view, KeyCode::Tab);
+        }
+        view.select(
+            view.rows
+                .iter()
+                .position(|row| row.id == original.id)
+                .unwrap(),
+        );
+
+        waiting.status = SessionStatus::NeedsInput;
+        view.set_sessions(vec![original.clone(), waiting.clone()], false);
+        assert_eq!(view.selected_id(), Some(&waiting.id));
+        assert_eq!(view.status_filter, 0);
+        assert!(screen(&view, 120, 24).contains("Waiting"));
+
+        waiting.status = SessionStatus::Working;
+        view.set_sessions(vec![original.clone(), waiting], false);
+        assert_eq!(view.selected_id(), Some(&original.id));
+        assert_eq!(view.status_filter, tab_for_status(status));
+    }
+}
+
+#[test]
+fn needs_input_queue_handles_longest_wait_first_without_interrupting() {
+    let mut view = test_view(Grouping::Project, false);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let mut first = session("first", "First", SessionStatus::Working, 120);
+    let mut second = session("second", "Second", SessionStatus::Working, 60);
+    let mut arriving = session("arriving", "Arriving", SessionStatus::Working, 600);
+    view.set_sessions(
+        vec![
+            original.clone(),
+            first.clone(),
+            second.clone(),
+            arriving.clone(),
+        ],
+        false,
+    );
+    view.select(
+        view.rows
+            .iter()
+            .position(|row| row.id == original.id)
+            .unwrap(),
+    );
+
+    first.status = SessionStatus::NeedsInput;
+    second.status = SessionStatus::NeedsInput;
+    view.set_sessions(
+        vec![
+            original.clone(),
+            second.clone(),
+            first.clone(),
+            arriving.clone(),
+        ],
+        false,
+    );
+    assert_eq!(view.selected_id(), Some(&first.id));
+
+    arriving.status = SessionStatus::NeedsInput;
+    view.set_sessions(
+        vec![
+            original.clone(),
+            second.clone(),
+            first.clone(),
+            arriving.clone(),
+        ],
+        false,
+    );
+    assert_eq!(view.selected_id(), Some(&first.id));
+
+    first.status = SessionStatus::Working;
+    view.set_sessions(
+        vec![
+            original.clone(),
+            second.clone(),
+            first.clone(),
+            arriving.clone(),
+        ],
+        false,
+    );
+    assert_eq!(view.selected_id(), Some(&arriving.id));
+    arriving.status = SessionStatus::Working;
+    view.set_sessions(
+        vec![
+            original.clone(),
+            second.clone(),
+            first.clone(),
+            arriving.clone(),
+        ],
+        false,
+    );
+    assert_eq!(view.selected_id(), Some(&second.id));
+    second.status = SessionStatus::Working;
+    view.set_sessions(vec![original.clone(), second, first, arriving], false);
+    assert_eq!(view.selected_id(), Some(&original.id));
+}
+
+#[test]
+fn needs_input_manual_selection_cancels_until_another_task_starts_waiting() {
+    let mut view = test_view(Grouping::Project, false);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let mut first = session("first", "First", SessionStatus::Working, 120);
+    let mut second = session("second", "Second", SessionStatus::Working, 60);
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    view.select(
+        view.rows
+            .iter()
+            .position(|row| row.id == original.id)
+            .unwrap(),
+    );
+    first.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&first.id));
+
+    view.select(
+        view.rows
+            .iter()
+            .position(|row| row.id == original.id)
+            .unwrap(),
+    );
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&original.id));
+    second.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&first.id));
+    view.select(
+        view.rows
+            .iter()
+            .position(|row| row.id == original.id)
+            .unwrap(),
+    );
+    first.status = SessionStatus::Working;
+    view.set_sessions(vec![original.clone(), first, second], false);
+    assert_eq!(view.selected_id(), Some(&original.id));
+}
+
+#[test]
+fn needs_input_queue_uses_question_time_before_session_update() {
+    use crate::providers::{Provider, claude::ClaudeProvider};
+    let directory = tempfile::tempdir().unwrap();
+    let project = directory.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../tests/fixtures/claude-questions-pending.jsonl"),
+    )
+    .unwrap();
+    let mut provider = ClaudeProvider::new(directory.path().into());
+    let mut question = provider.refresh(1).sessions.remove(0);
+    let since = question.ask.as_ref().unwrap().since;
+    question.status = SessionStatus::Working;
+    question.updated_at = since + Duration::seconds(120);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let mut permission = session("permission", "Permission", SessionStatus::Working, 60);
+    permission.updated_at = since + Duration::seconds(60);
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(
+        vec![original.clone(), permission.clone(), question.clone()],
+        false,
+    );
+    view.select(
+        view.rows
+            .iter()
+            .position(|row| row.id == original.id)
+            .unwrap(),
+    );
+
+    question.status = SessionStatus::NeedsInput;
+    permission.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original, permission, question.clone()], false);
+    assert_eq!(view.selected_id(), Some(&question.id));
+}
+
+#[test]
+fn needs_input_skips_hidden_children_and_search_mismatches() {
+    for excluded in ["hidden", "child", "search"] {
+        let mut view = test_view(Grouping::Project, false);
+        let original = session("original", "Visible original", SessionStatus::Ready, 300);
+        let mut waiting = session("waiting", "Visible waiting", SessionStatus::Working, 60);
+        match excluded {
+            "hidden" => {
+                view.hidden.insert(waiting.id.clone());
+            }
+            "child" => waiting.parent = Some(original.id.clone()),
+            "search" => {
+                view.search.set_text("original");
+            }
+            _ => unreachable!(),
+        }
+        view.set_sessions(vec![original.clone(), waiting.clone()], false);
+        waiting.status = SessionStatus::NeedsInput;
+        view.set_sessions(vec![original.clone(), waiting], false);
+        assert_eq!(view.selected_id(), Some(&original.id), "{excluded}");
+        assert!(view.attention_selection.is_none());
+    }
+}
+
+#[test]
+fn needs_input_does_not_interrupt_draft_or_manually_selected_waiting_task() {
+    for draft in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut view = test_view(Grouping::Project, false);
+        let current = session("current", "Current", SessionStatus::NeedsInput, 300);
+        let mut arriving = session("arriving", "Arriving", SessionStatus::Working, 600);
+        view.set_sessions(vec![current.clone()], false);
+        view.select(
+            view.rows
+                .iter()
+                .position(|row| row.id == current.id)
+                .unwrap(),
+        );
+        let selected_draft = draft.then(|| {
+            view.add_draft(DraftSetup {
+                provider: ProviderId::Claude,
+                cwd: directory.path().into(),
+                model: None,
+                effort: None,
+                branch: String::new(),
+            })
+        });
+        arriving.status = SessionStatus::NeedsInput;
+        view.set_sessions(vec![current.clone(), arriving.clone()], false);
+        assert_eq!(view.selected_draft, selected_draft);
+        if !draft {
+            assert_eq!(view.selected_id(), Some(&current.id));
+        }
+        assert!(view.attention_selection.is_none());
+        assert!(view.waiting_sessions.contains(&arriving.id));
+    }
+}
+
+#[test]
+fn needs_input_missing_interrupted_task_uses_fallback() {
+    let mut view = test_view(Grouping::Project, false);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let fallback = session("fallback", "Fallback", SessionStatus::Ready, 240);
+    let mut waiting = session("waiting", "Waiting", SessionStatus::Working, 60);
+    view.set_sessions(
+        vec![original.clone(), fallback.clone(), waiting.clone()],
+        false,
+    );
+    view.select(
+        view.rows
+            .iter()
+            .position(|row| row.id == original.id)
+            .unwrap(),
+    );
+    waiting.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original, fallback.clone(), waiting.clone()], false);
+    assert_eq!(view.selected_id(), Some(&waiting.id));
+
+    waiting.status = SessionStatus::Working;
+    view.set_sessions(vec![fallback.clone(), waiting], false);
+    assert_eq!(view.selected_id(), Some(&fallback.id));
+    assert_eq!(view.selected, view.fallback_selection());
 }
 
 #[test]
@@ -6576,7 +6825,10 @@ mod subagent_actions {
             view.searching = true;
             view.search.set_text("Parent task");
             let before = subagent_rows::screen(&view, 120, 30);
-            assert_eq!(view.handle_key(event), Some(Action::Unsupported("Terminal")));
+            assert_eq!(
+                view.handle_key(event),
+                Some(Action::Unsupported("Terminal"))
+            );
             assert!(view.searching);
             assert_eq!(view.search.text(), "Parent task");
             assert_eq!(subagent_rows::screen(&view, 120, 30), before);
@@ -8554,7 +8806,10 @@ fn log_new_button_keeps_right_alignment_and_target() {
             assert_eq!(latest.right() - 1, layout.log.right());
             assert_eq!(latest.y, border_y);
             let label = format!(" ↓ {unseen} New ");
-            assert_eq!(rendered_cell(&screen, label.trim_end()), (latest.x, latest.y));
+            assert_eq!(
+                rendered_cell(&screen, label.trim_end()),
+                (latest.x, latest.y)
+            );
             let row = screen.lines().nth(usize::from(border_y)).unwrap();
             assert_eq!(row.chars().next(), Some('─'));
             drop(viewport);

@@ -38,8 +38,8 @@ mod rows;
 mod selection_tabs;
 mod shell_commands;
 mod shortcut_help;
-mod style;
 mod structured_text;
+mod style;
 mod terminal_panel;
 mod text_selection;
 mod text_selection_layout;
@@ -128,6 +128,10 @@ struct Viewport {
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
+    /// The details panel's bottom input row: a new task's branch or name, or a rename.
+    details_input: Rect,
+    /// The selected task's name on the details panel's first row.
+    details_title: Rect,
     confirm_options: Vec<(Rect, bool)>,
     /// Index of the first visible event in the chronological shown log.
     log_scroll: usize,
@@ -245,6 +249,9 @@ pub struct View {
     project_groups: Vec<ProjectGroup>,
     selected: usize,
     selection_history: Vec<(SessionKey, usize)>,
+    interrupted_selection: Option<(SessionKey, usize)>,
+    attention_selection: Option<SessionKey>,
+    waiting_sessions: HashSet<SessionKey>,
     grouping: Grouping,
     use_colors: bool,
     pinned: Vec<SessionKey>,
@@ -379,6 +386,9 @@ impl View {
             project_groups: Vec::new(),
             selected: usize::MAX,
             selection_history: Vec::new(),
+            interrupted_selection: None,
+            attention_selection: None,
+            waiting_sessions: HashSet::new(),
             grouping,
             use_colors,
             pinned: Vec::new(),
@@ -426,7 +436,6 @@ impl View {
     pub(crate) fn pasting_prompt(&self) -> bool {
         self.confirm_dialog.is_none()
             && !self.help
-            && !self.selector.as_ref().is_some_and(Selector::editing)
             && self.input_box.focused
             && !self.input_box.searching_history()
             && self.input_disabled().is_none()
@@ -442,14 +451,11 @@ impl View {
         if self.confirm_dialog.is_some() || self.help {
             return;
         }
-        if let Some(Selector {
-            kind:
-                draft_controls::SelectorKind::Branch {
-                    editor: Some(editor),
-                    ..
-                },
-            ..
-        }) = &mut self.selector
+        if let Some(editor) = self
+            .selector
+            .as_mut()
+            .filter(|_| !self.input_box.focused)
+            .and_then(Selector::active_editor)
         {
             editor.insert(text);
             return;
@@ -483,13 +489,8 @@ impl View {
     }
 
     fn input_label(&self) -> String {
-        if let Some(draft) = self.selected_draft() {
-            return if draft.name.is_some() {
-                "New prompt"
-            } else {
-                "New task"
-            }
-            .into();
+        if self.selected_draft().is_some() {
+            return "New task".into();
         }
         self.selected_row()
             .map(|session| session.display_title().to_owned())
@@ -603,7 +604,12 @@ impl View {
 
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
+        let had_sessions = !self.rows.is_empty();
         let selected = self.selected_id().cloned();
+        if self.attention_selection.is_some() && self.attention_selection != selected {
+            self.attention_selection = None;
+            self.interrupted_selection = None;
+        }
         let selected_parent = self.selected_row().and_then(|s| s.parent.clone());
         let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;
@@ -643,8 +649,86 @@ impl View {
         if self.status_filter != status_filter && self.selected_id() == selected.as_ref() {
             self.remember_selection();
         }
+        self.reconcile_attention(selected.as_ref(), status_filter, had_sessions);
         self.reconcile_drafts();
         self.show_selected_panels();
+    }
+
+    /// Follows waiting tasks until the queue is empty or the user chooses another task.
+    fn reconcile_attention(
+        &mut self,
+        selected: Option<&SessionKey>,
+        selected_tab: usize,
+        had_sessions: bool,
+    ) {
+        let waiting: HashSet<_> = self
+            .rows
+            .iter()
+            .filter(|row| row.status == SessionStatus::NeedsInput)
+            .map(|row| row.id.clone())
+            .collect();
+        if self.selected_draft.is_some() {
+            self.waiting_sessions = waiting;
+            return;
+        }
+        let tab = self.status_filter;
+        self.status_filter = 0;
+        let mut queue: Vec<_> = self
+            .selectable_indices()
+            .into_iter()
+            .filter(|&index| {
+                self.rows.get(index).is_some_and(|row| {
+                    row.status == SessionStatus::NeedsInput && row.parent.is_none()
+                })
+            })
+            .collect();
+        queue.sort_by_key(|&index| {
+            let row = &self.rows[index];
+            (
+                row.ask.as_ref().map_or(row.updated_at, |ask| ask.since),
+                row.id.clone(),
+            )
+        });
+        self.status_filter = tab;
+        let starts_waiting = had_sessions
+            && queue
+                .iter()
+                .any(|&index| !self.waiting_sessions.contains(&self.rows[index].id));
+        self.waiting_sessions = waiting;
+        if let Some(id) = &self.attention_selection {
+            if queue.iter().any(|&index| &self.rows[index].id == id) {
+                return;
+            }
+        } else {
+            if !starts_waiting
+                || self
+                    .selected_row()
+                    .is_some_and(|row| row.status == SessionStatus::NeedsInput)
+            {
+                return;
+            }
+            self.interrupted_selection = selected.cloned().map(|id| (id, selected_tab));
+        }
+        if let Some(&index) = queue.first() {
+            self.status_filter = 0;
+            self.attention_selection = Some(self.rows[index].id.clone());
+            self.set_selected(index);
+        } else {
+            self.attention_selection = None;
+            if let Some((id, tab)) = self.interrupted_selection.take() {
+                self.status_filter = tab;
+                let index = self
+                    .selectable_indices()
+                    .into_iter()
+                    .find(|&index| self.rows.get(index).is_some_and(|row| row.id == id))
+                    .unwrap_or_else(|| self.fallback_selection());
+                self.set_selected(index);
+            } else {
+                self.set_selected(self.fallback_selection());
+            }
+        }
+        self.remember_selection();
+        self.viewport.get_mut().scroll = 0;
     }
 
     pub fn set_loading(&mut self, loading: bool) {
