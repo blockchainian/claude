@@ -547,7 +547,7 @@ fn column_of(row: &str, needle: &str) -> Option<usize> {
 }
 
 #[test]
-fn log_detail_footer_shows_the_scrolled_off_title_before_the_time_column() {
+fn log_detail_footer_shows_the_scrolled_off_title() {
     for width in [100, 160] {
         let (mut view, _) = fixture(true);
         let rows = screen_rows(&view, width, 40);
@@ -561,6 +561,7 @@ fn log_detail_footer_shows_the_scrolled_off_title_before_the_time_column() {
             .to_owned();
         assert!(!title.is_empty(), "{}", rows.join("\n"));
         assert!(!footer.contains(&title), "title on screen: {footer}");
+        let title_x = column_of(&rows[detail_y + 1], &title).unwrap();
         let time_x = view
             .viewport
             .borrow()
@@ -577,11 +578,18 @@ fn log_detail_footer_shows_the_scrolled_off_title_before_the_time_column() {
             "hints stay: {scrolled}"
         );
         let x = column_of(scrolled, &title).unwrap_or_else(|| panic!("{scrolled}"));
-        assert_eq!(
-            x + title.width() + 2,
-            time_x,
-            "the footer title ends before the time column: {scrolled}"
-        );
+        if width >= super::render::WIDE_LAYOUT_COLUMNS {
+            assert_eq!(
+                x, title_x,
+                "wide layouts center the footer title: {scrolled}"
+            );
+        } else {
+            assert_eq!(
+                x + title.width() + 2,
+                time_x,
+                "narrow layouts end it before the time column: {scrolled}"
+            );
+        }
         assert!(scrolled[..].chars().skip(time_x).all(|c| c == ' '));
 
         detail_wheel(&mut view, false);

@@ -458,6 +458,7 @@ impl View {
                 columns,
                 inset(layout.footer),
                 self.center_footer_hints().width() as u16,
+                area.width >= WIDE_LAYOUT_COLUMNS,
                 buf,
             );
         }
