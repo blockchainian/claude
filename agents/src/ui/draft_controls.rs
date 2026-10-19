@@ -229,6 +229,7 @@ impl View {
             },
             selected,
         ));
+        self.set_active_panel(Panel::Details);
     }
 
     /// Runs the field rule only for a wizard transition.
@@ -326,6 +327,7 @@ impl View {
             },
             selected,
         ));
+        self.set_active_panel(Panel::Details);
         true
     }
 
@@ -353,6 +355,7 @@ impl View {
         }
         self.rename_target = None;
         self.name_target = Some(id);
+        self.set_active_panel(Panel::Details);
     }
 
     /// Branch picks finish their selector; only wizard picks advance the rule.
@@ -544,6 +547,7 @@ impl View {
         let mut selector = Selector::new(kind, current.unwrap_or_default());
         selector.current = current;
         self.selector = Some(selector);
+        self.set_active_panel(Panel::Details);
     }
 
     /// Keeps an unapplied branch name when leaving its selector.

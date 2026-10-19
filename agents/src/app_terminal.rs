@@ -126,6 +126,12 @@ impl App {
     /// still selected, closes unselected or exited programs, and fits the selected
     /// terminal to the panel.
     pub(super) fn sync_terminal(&mut self) {
+        if self.terminal.as_ref().is_some_and(|terminal| {
+            self.view.selected_id() != Some(&terminal.id)
+        }) {
+            self.close_terminal();
+            return;
+        }
         let waiting = self.waiting_terminal();
         let Some(terminal) = &mut self.terminal else {
             if let Some(id) = self.terminal_task.take()
@@ -147,7 +153,7 @@ impl App {
             }
             return;
         };
-        if terminal.closed() || self.view.selected_id() != Some(&terminal.id) {
+        if terminal.closed() {
             self.close_terminal();
             return;
         }
@@ -677,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_for_a_prompt_preserves_the_active_panel() {
+    fn waiting_for_a_prompt_activates_prompt_once() {
         let (_directory, mut app, _id) = fixture();
         draw(&mut app);
         let session = &mut app.sessions[0];
@@ -695,11 +701,53 @@ mod tests {
         app.view.set_sessions(app.sessions.clone(), false);
         app.sync_terminal();
         assert!(app.terminal.is_none());
-        assert!(!app.view.pasting_prompt());
+        assert!(app.view.pasting_prompt());
         app.handle_event(crossterm::event::Event::Key(
-            crossterm::event::KeyCode::Char('/').into(),
+            crossterm::event::KeyCode::Char('x').into(),
         ));
-        assert!(draw(&mut app).contains("Search ❯"));
+        assert!(draw(&mut app).contains("x"));
+        app.handle_event(crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('w'),
+                crossterm::event::KeyModifiers::CONTROL,
+            ),
+        ));
+        app.handle_event(crossterm::event::Event::Key(
+            crossterm::event::KeyCode::Char('k').into(),
+        ));
+        assert!(!app.view.pasting_prompt());
+        app.sync_terminal();
+        assert!(!app.view.pasting_prompt());
+    }
+
+    #[test]
+    fn queued_wait_opens_prompt_after_closing_previous_terminal() {
+        let (directory, mut app, id) = fixture();
+        draw(&mut app);
+        attach(&mut app, id, &directory.path().join("pid"));
+        let mut waiting = app.sessions[0].clone();
+        waiting.id.id = "queued-wait".into();
+        waiting.status = SessionStatus::Working;
+        waiting.process = Some(crate::model::Process {
+            pid: 1,
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        waiting.background_job = Some(crate::model::BackgroundJob {
+            id: "queued-job".into(),
+            needs: Some("Reply".into()),
+            awaits_prompt: true,
+        });
+        app.sessions.push(waiting);
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.sessions[1].status = SessionStatus::NeedsInput;
+        app.view.set_sessions(app.sessions.clone(), false);
+        assert_eq!(app.view.selected_id(), Some(&app.sessions[1].id));
+        app.sync_terminal();
+        assert!(app.terminal.is_none());
+        app.sync_terminal();
+        assert!(app.view.pasting_prompt());
+        finish_close(&mut app);
     }
 
     #[test]

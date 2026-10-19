@@ -120,8 +120,7 @@ fn model_families_preserve_first_appearance_and_model_order() {
         let len = values.len();
         let original = selector.selected;
         screen(&view, Rect::new(0, 0, 160, 50));
-        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-        view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        assert_eq!(view.active_panel, Panel::Details);
         for index in (original + 1..len).chain(0..=original) {
             view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             assert_eq!(view.selector.as_ref().unwrap().selected, index);

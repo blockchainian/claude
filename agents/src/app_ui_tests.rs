@@ -534,7 +534,7 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
         KeyCode::Char('w'),
         KeyModifiers::CONTROL,
     )));
-    key(&mut app, KeyCode::Char('l'));
+    key(&mut app, KeyCode::Char('k'));
     app.handle_event(Event::Paste("branch flow task".into()));
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Enter);

@@ -80,7 +80,16 @@ impl Questions {
 
 impl View {
     pub(super) fn sync_questions(&mut self) {
+        let previous = self
+            .panels_task
+            .as_ref()
+            .and_then(|id| self.questions.visible(id).map(|view| view.ask().clone()));
         self.questions.sync(&self.rows);
+        if let Some(question) = self.active_question()
+            && previous.as_ref() != Some(question.ask())
+        {
+            self.set_active_panel(Panel::Prompt);
+        }
     }
 
     pub(super) fn active_question(&self) -> Option<&QuestionView> {
@@ -312,6 +321,27 @@ mod tests {
         view.set_sessions(vec![row], false);
         view.set_active_panel(Panel::Prompt);
         view
+    }
+
+    #[test]
+    fn appearing_question_activates_prompt_once_and_answers_without_clicking() {
+        let mut view = fixture();
+        let mut row = view.rows[0].clone();
+        let ask = row.ask.take();
+        row.status = SessionStatus::Working;
+        view.set_sessions(vec![row.clone()], false);
+        view.set_active_panel(Panel::Details);
+        row.status = SessionStatus::NeedsInput;
+        row.ask = ask;
+        view.set_sessions(vec![row.clone()], false);
+        assert_eq!(view.active_panel, Panel::Prompt);
+        assert!(matches!(
+            view.handle_key(KeyCode::Char('1').into()),
+            Some(Action::AnswerQuestions { .. })
+        ));
+        view.set_active_panel(Panel::Details);
+        view.set_sessions(vec![row], false);
+        assert_eq!(view.active_panel, Panel::Details);
     }
 
     #[test]

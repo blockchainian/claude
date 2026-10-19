@@ -218,6 +218,7 @@ impl View {
         self.status_filter = 0;
         self.select_draft(id);
         self.open_name(id);
+        self.set_active_panel(Panel::Prompt);
         id
     }
 

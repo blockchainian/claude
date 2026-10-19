@@ -595,6 +595,7 @@ impl View {
         if self.input_disabled().is_none() {
             self.dismiss_selector();
             self.name_target = None;
+            self.set_active_panel(Panel::Prompt);
         }
     }
 

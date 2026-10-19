@@ -13,6 +13,7 @@ impl View {
     /// Shows `screen` in the log detail panel.
     pub fn show_terminal(&mut self, id: SessionKey, screen: Screen) {
         self.terminal = Some((id, screen));
+        self.set_active_panel(Panel::Output);
     }
 
     pub fn hide_terminal(&mut self) {

@@ -1367,6 +1367,7 @@ impl View {
         let title = session.display_title().to_owned();
         self.rename.set_text(&title);
         self.rename_target = Some(id);
+        self.set_active_panel(Panel::Details);
         self.name_target = None;
         self.search.clear();
         self.searching = false;

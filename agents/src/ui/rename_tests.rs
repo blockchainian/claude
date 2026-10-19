@@ -59,6 +59,7 @@ fn manager_child_rename_opens_dialog_and_emits_action() {
         None
     );
     assert_eq!(view.rename_target.as_ref(), Some(&id));
+    assert_eq!(view.active_panel, Panel::Details);
     view.set_active_panel(Panel::Details);
     view.rename.set_text("  Manager child renamed  ");
     assert_eq!(

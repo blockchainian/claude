@@ -214,6 +214,8 @@ fn save_title_capture(tmux: &Tmux, name: &str) {
 fn terminal_task_names_edit_on_details_rule() {
     let (_directory, tmux, _transcript) = start_probe("inline-task-name");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+    tmux.run(&["send-keys", "-t", "probe", "k"]);
     assert_title_caret(&tmux, "New task", 0);
     save_title_capture(&tmux, "01-new-task-placeholder");
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
@@ -236,18 +238,22 @@ fn terminal_task_names_edit_on_details_rule() {
     });
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| capture.contains("就地任务 ❯"));
+    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+    tmux.run(&["send-keys", "-t", "probe", "j"]);
     tmux.run(&["send-keys", "-t", "probe", "-l", "draft prompt"]);
     tmux.wait_for(|capture| capture.contains("就地任务 ❯ draft prompt"));
     save_title_capture(&tmux, "03-new-task-prompt");
     delete_named_draft(&tmux);
     tmux.wait_for(|capture| !capture.contains("就地任务 ❯"));
     tmux.run(&["send-keys", "-t", "probe", "n"]);
+    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+    tmux.run(&["send-keys", "-t", "probe", "k"]);
     assert_title_caret(&tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| title_rule_position(capture, "New task").is_none());
     save_title_capture(&tmux, "04-new-task-cancelled");
-    // A cancelled draft leaves Active selected; the fixture task is Inactive.
-    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    // A cancelled draft leaves Active selected; choose the fixture task in Inactive.
+    tmux.mouse(0, 195, 0, true);
 
     let original = "Codex manager 停止时线程处理";
     let capture = tmux.capture_when(|capture| capture.contains(original));
@@ -360,6 +366,8 @@ fn terminal_draft_name_blur_persists_without_enter() {
         let (directory, tmux, _transcript) =
             start_probe(if blur { "name-blur" } else { "name-enter" });
         tmux.run(&["send-keys", "-t", "probe", "n"]);
+        tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+        tmux.run(&["send-keys", "-t", "probe", "k"]);
         assert_title_caret(&tmux, "New task", 0);
         tmux.run(&["send-keys", "-t", "probe", "-l", "Persistent terminal name"]);
         assert_title_caret(&tmux, "Persistent terminal name", 24);

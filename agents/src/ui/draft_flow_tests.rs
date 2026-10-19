@@ -741,7 +741,7 @@ fn border_branch_and_model_picks_never_create_with_everything_filled() {
     );
     view.open_field(Field::Model);
     assert_eq!(view.apply_choice(0), None);
-    assert!(view.prompt_focused());
+    assert_eq!(view.active_panel, Panel::Details);
     assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(!view.selected_draft().unwrap().working);
 }
@@ -751,6 +751,7 @@ fn border_repository_keeps_prompt_and_same_repository_keeps_branch() {
     let (directory, mut view) = git_draft();
     view.open_field(Field::Branch);
     assert_eq!(view.apply_choice(0), None);
+    view.set_active_panel(Panel::Prompt);
     view.handle_paste("half prompt");
     view.open_field(Field::Directory);
     let selected = view.selector.as_ref().unwrap().selected;
@@ -758,7 +759,7 @@ fn border_repository_keeps_prompt_and_same_repository_keeps_branch() {
         panic!("repository pick");
     };
     assert!(view.name_target.is_none());
-    assert!(view.prompt_focused());
+    assert_eq!(view.active_panel, Panel::Details);
     assert_eq!(view.input_box.editor.text(), "half prompt");
     let subdirectory = cwd.join("subdir");
     std::fs::create_dir(&subdirectory).unwrap();
@@ -767,6 +768,7 @@ fn border_repository_keeps_prompt_and_same_repository_keeps_branch() {
         view.selected_draft().unwrap().branch,
         DraftBranch::Existing("feature/x".into())
     );
+    view.set_active_panel(Panel::Prompt);
     let action = key(&mut view, KeyCode::Enter);
     assert!(
         matches!(action, Some(Action::CreateTask { branch: Some(crate::tasks::BranchChoice::Existing(ref name)), .. }) if name == "feature/x")
@@ -779,6 +781,7 @@ fn changing_repository_resets_branch_and_next_prompt_enter_opens_branch_list() {
     let (directory, mut view) = git_draft();
     view.open_field(Field::Branch);
     view.apply_choice(0);
+    view.set_active_panel(Panel::Prompt);
     view.handle_paste("half prompt");
     let other = directory.path().join("other");
     std::fs::create_dir(&other).unwrap();
@@ -845,7 +848,7 @@ fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
             Some("original")
         );
         assert!(view.name_target.is_none());
-        assert!(view.active_panel == Panel::Details);
+        assert_eq!(view.active_panel, Panel::Prompt);
     }
 }
 
@@ -997,6 +1000,7 @@ fn checked_out_branch_is_an_explicit_choice_without_a_worktree_request() {
         view.selected_draft().unwrap().branch,
         DraftBranch::Existing("main".into())
     );
+    view.set_active_panel(Panel::Prompt);
     view.handle_paste("run here");
     assert!(matches!(
         key(&mut view, KeyCode::Enter),
@@ -1014,6 +1018,7 @@ fn wizard_same_root_repository_pick_keeps_side_branch_from_a_subdirectory() {
     let draft = &mut view.drafts[0];
     draft.setup.cwd = subdirectory;
     draft.repository_confirmed = false;
+    view.set_active_panel(Panel::Prompt);
     view.handle_paste("kept prompt");
     key(&mut view, KeyCode::Enter);
     assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
@@ -1028,6 +1033,7 @@ fn wizard_same_root_repository_pick_keeps_side_branch_from_a_subdirectory() {
         DraftBranch::Existing("feature/x".into())
     );
     assert!(!view.drafts[0].working);
+    view.set_active_panel(Panel::Prompt);
     assert!(matches!(
         key(&mut view, KeyCode::Enter),
         Some(Action::CreateTask { .. })
@@ -1590,7 +1596,7 @@ fn assert_name_prompt_click(name: &str) {
     if name.is_empty() {
         key(&mut view, KeyCode::Enter);
         assert!(view.name_target.is_some());
-        assert!(view.active_panel == Panel::Prompt);
+        assert_eq!(view.active_panel, Panel::Details);
     }
 }
 

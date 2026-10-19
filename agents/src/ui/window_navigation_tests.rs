@@ -198,7 +198,7 @@ fn window_navigation_real_terminal_probe() {
         let (mut view, now) = log_fixture();
         view.rows[0].process = None;
         view.show_terminal(session_key("log"), terminal.screen.clone());
-        view.set_active_panel(Panel::Output);
+        assert_eq!(view.active_panel, Panel::Output);
         log_screen(&view, width, 45, now);
         assert_eq!(chord(&mut view, 'l'), None);
         assert!(view.active_panel == Panel::Output); // no panel to the right
@@ -241,11 +241,13 @@ fn window_navigation_real_terminal_probe() {
 }
 
 #[test]
-fn task_and_editor_updates_preserve_the_active_panel() {
+fn opening_editors_activates_them_but_updates_preserve_activation() {
     let (mut view, _) = log_fixture();
+    view.rows[view.selected].process = None;
     view.set_active_panel(Panel::Details);
     view.prepare_prompt();
-    assert!(view.active_panel == Panel::Details);
+    assert_eq!(view.active_panel, Panel::Prompt);
+    view.set_active_panel(Panel::Details);
     view.select_log_event(Some(0));
     assert!(view.active_panel == Panel::Details);
     view.set_sessions(view.rows.clone(), false);
@@ -257,9 +259,12 @@ fn task_and_editor_updates_preserve_the_active_panel() {
         effort: None,
         branch: String::new(),
     });
-    assert!(view.active_panel == Panel::Details);
+    assert_eq!(view.active_panel, Panel::Prompt);
     view.close_selector();
-    assert!(view.active_panel == Panel::Details);
+    assert_eq!(view.active_panel, Panel::Details);
+    view.set_active_panel(Panel::Output);
+    view.open_name(view.selected_draft.unwrap());
+    assert_eq!(view.active_panel, Panel::Details);
 }
 
 #[test]
