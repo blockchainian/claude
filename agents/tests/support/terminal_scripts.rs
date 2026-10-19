@@ -93,3 +93,80 @@ fn terminal_write_file_colors() {
         path.display()
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_shell_file_read_colors() {
+    for provider in ["claude", "codex"] {
+        for (command, highlighted) in [
+            ("sed -n '10,80p' src/foo.rs", true),
+            ("sed -n 1,5p a.rs | grep x", false),
+        ] {
+            let body = "let answer = \"file-read-highlight\";";
+            let name = format!("file-read-{provider}-{highlighted}");
+            let (_directory, tmux) = if provider == "claude" {
+                let mut records: Vec<serde_json::Value> =
+                    include_str!("../fixtures/transcript.jsonl")
+                        .lines()
+                        .map(|line| serde_json::from_str(line).unwrap())
+                        .collect();
+                let mut calls: Vec<serde_json::Value> =
+                    include_str!("../fixtures/claude-tool-calls.jsonl")
+                        .lines()
+                        .take(2)
+                        .map(|line| serde_json::from_str(line).unwrap())
+                        .collect();
+                calls[0]["message"]["content"][0]["input"]["command"] = command.into();
+                calls[1]["toolUseResult"]["stdout"] = body.into();
+                calls[1]["toolUseResult"]["stderr"] = "".into();
+                calls[1]["message"]["content"][0]["content"] = body.into();
+                records.extend(calls);
+                let transcript = records
+                    .iter()
+                    .map(|record| format!("{record}\n"))
+                    .collect::<String>();
+                let (directory, tmux, _) = start_probe_with_transcript(&name, &transcript);
+                (directory, tmux)
+            } else {
+                let mut record = include_str!("../fixtures/codex-tool-calls.jsonl")
+                    .lines()
+                    .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                    .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+                    .unwrap();
+                record["payload"]["item"]["command"][2] = command.into();
+                record["payload"]["item"]["aggregated_output"] = body.into();
+                terminal_codex_exit::start_codex_probe(&name, &format!("{record}\n"))
+            };
+            tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "50"]);
+            tmux.run(&["send-keys", "-t", "probe", "End"]);
+            let capture = tmux.capture_when(|capture| capture.contains(body));
+            let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+            let parser = captured_screen(&colored, 200, 50);
+            let (row, line) = capture
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(body))
+                .unwrap();
+            let color = |needle| {
+                parser
+                    .screen()
+                    .cell(
+                        row as u16,
+                        line[..line.find(needle).unwrap()].width() as u16,
+                    )
+                    .unwrap()
+                    .fgcolor()
+            };
+            assert_eq!(
+                color("answer") != color("file-read-highlight"),
+                highlighted,
+                "{provider}: {capture}"
+            );
+            let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
+            std::fs::write(&path, colored).unwrap();
+            let verdict = serde_json::json!({"verdict": "pass", "provider": provider, "highlighted": highlighted, "capture": path});
+            std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
+            println!("{verdict}");
+        }
+    }
+}

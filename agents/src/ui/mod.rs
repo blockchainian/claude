@@ -14,7 +14,7 @@ mod chronological_log_tests;
 mod content;
 mod detail_model;
 mod details_scroll;
-mod highlight;
+pub(crate) mod highlight;
 mod hints;
 mod hyperlink;
 mod input;

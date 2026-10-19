@@ -179,7 +179,7 @@ const EXTENSION_ALIASES: [(&str, &str); 4] = [
 ];
 
 /// The syntax for a language token such as "bash" or a file extension such as "rs".
-fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
+pub(crate) fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
     let set = syntax_set();
     let lang = lang.trim();
     if lang.is_empty() {

@@ -726,8 +726,13 @@ pub(crate) fn text_output(text: &str, mode: Option<Output>, input: &Value) -> Ve
 pub(crate) fn output_hidden(mode: Option<Output>, value: &Value) -> bool {
     match mode {
         Some(Output::Hidden) => true,
-        Some(Output::Agent) => value["isAsync"] == true
-            || matches!(value["status"].as_str(), Some("async_launched" | "teammate_spawned")),
+        Some(Output::Agent) => {
+            value["isAsync"] == true
+                || matches!(
+                    value["status"].as_str(),
+                    Some("async_launched" | "teammate_spawned")
+                )
+        }
         _ => false,
     }
 }
@@ -997,8 +1002,63 @@ fn question_sections(input: &Value) -> Vec<Section> {
     sections
 }
 
-/// Add explicit headings for separately reported stderr output.
+fn shell_read_path(command: &str) -> Option<String> {
+    let words = shell_summary::single_words(command)?;
+    let words: Vec<_> = words.iter().map(String::as_str).collect();
+    let path = match words.as_slice() {
+        ["cat" | "head" | "tail", path] => *path,
+        ["head" | "tail", "-n", count, path]
+            if !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            *path
+        }
+        ["sed", "-n", range, path] => {
+            let range = range.strip_suffix('p')?;
+            let mut addresses = range.split(',');
+            let address = |value: &str| {
+                value == "$"
+                    || (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            };
+            if !address(addresses.next()?)
+                || addresses.next().is_some_and(|value| !address(value))
+                || addresses.next().is_some()
+            {
+                return None;
+            }
+            *path
+        }
+        _ => return None,
+    };
+    (!path.is_empty() && !path.starts_with('-')).then(|| path.to_owned())
+}
+
+fn highlight_shell_output(call: &mut ToolCall) {
+    if !matches!(rule(&call.name).output, Some(Output::Shell)) {
+        return;
+    }
+    let Some(path) = call.input.iter().find_map(|section| match section {
+        Section::Shell { text, .. } => shell_read_path(text),
+        _ => None,
+    }) else {
+        return;
+    };
+    for section in call.output.iter_mut().flatten() {
+        if let Section::Text { label, text } = section
+            && matches!(label.as_str(), "stdout" | "output")
+        {
+            let code = file_code_section(label, &path, text);
+            if let Section::Code { lang, .. } = &code
+                && crate::ui::highlight::find_syntax(lang).is_some()
+            {
+                *section = code;
+            }
+        }
+    }
+}
+
+/// Highlight shell file reads and add headings for separately reported stderr output.
 pub(super) fn annotate(call: &mut ToolCall) {
+    highlight_shell_output(call);
     if !call.is_error {
         match rule(&call.name).output {
             Some(Output::Hidden) => call.hide_output = true,
@@ -1035,6 +1095,51 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shell_read_path_accepts_only_one_literal_file() {
+        for (command, path) in [
+            ("sed -n '10,80p' src/foo.rs", "src/foo.rs"),
+            ("sed -n '1,$p' src/foo.rs", "src/foo.rs"),
+            ("cat 'foo bar.py'", "foo bar.py"),
+            ("head foo.ts", "foo.ts"),
+            ("head -n 50 foo.ts", "foo.ts"),
+            ("tail -n 20 foo.go", "foo.go"),
+            ("cat 'foo;bar.rs'", "foo;bar.rs"),
+        ] {
+            assert_eq!(
+                super::shell_read_path(command).as_deref(),
+                Some(path),
+                "{command}"
+            );
+        }
+        for command in [
+            "sed -n 1,5p a.rs | grep x",
+            "cat a.rs&&pwd",
+            "cat a.rs;pwd",
+            "cat a.rs > output",
+            "cat a.rs 2>/dev/null",
+            "cat < a.rs",
+            "cat a.rs &",
+            "cat a.rs\npwd",
+            "cat a.rs b.rs",
+            "cat -n a.rs",
+            "cat *.rs",
+            "cat $FILE.rs",
+            "cat $(pwd)/a.rs",
+            "cat `pwd`/a.rs",
+            "cat a{,b}.rs",
+            "cat \"$FILE.rs\"",
+            "cat '' a.rs",
+            "cat ''",
+            "head -n nope a.rs",
+            "sed -n '1p;2p' a.rs",
+            "sed -n '1,2,3p' a.rs",
+            "cat 'a.rs",
+        ] {
+            assert_eq!(super::shell_read_path(command), None, "{command}");
+        }
+    }
+
     #[test]
     fn claude_client_text_is_markdown_and_follows_the_list_tool_name() {
         for source in [

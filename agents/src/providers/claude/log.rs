@@ -561,7 +561,8 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     let mut call = ToolCall {
         agent_message: None,
         started_at: None,
-        hide_output: result.is_some_and(|result| !result.error && tool::output_hidden(mode, &result.value)),
+        hide_output: result
+            .is_some_and(|result| !result.error && tool::output_hidden(mode, &result.value)),
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
@@ -578,8 +579,13 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         duration: None,
     };
     call.agent_message = crate::log::agent::tool_message(name, input);
-    if call.agent_message.as_ref().is_some_and(|message| message.kind == "SPAWN_AGENT") {
-        let model = result.and_then(|result| result.value["resolvedModel"].as_str())
+    if call
+        .agent_message
+        .as_ref()
+        .is_some_and(|message| message.kind == "SPAWN_AGENT")
+    {
+        let model = result
+            .and_then(|result| result.value["resolvedModel"].as_str())
             .or_else(|| input["model"].as_str());
         call.model_settings = model.map(|model| crate::log::ModelSettings {
             provider: crate::providers::ProviderId::Claude,
@@ -1652,9 +1658,14 @@ pub(crate) mod tests {
                     };
                     let input = &block["input"];
                     let call = super::tool_call(name, input, None);
-                    let expected = input[subject].as_str().or_else(|| {
-                        matches!(name, "Agent" | "Task").then(|| input["description"].as_str()).flatten()
-                    }).unwrap_or(name);
+                    let expected = input[subject]
+                        .as_str()
+                        .or_else(|| {
+                            matches!(name, "Agent" | "Task")
+                                .then(|| input["description"].as_str())
+                                .flatten()
+                        })
+                        .unwrap_or(name);
                     assert_eq!(
                         call.detail_title,
                         if name == "SendMessage" {
@@ -1902,6 +1913,40 @@ pub(crate) mod tests {
         let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
         assert_ne!(agent.detail_title, "Agent");
         assert!(matches!(&agent.input[0], Section::Markdown { .. }));
+    }
+
+    #[test]
+    fn shell_file_reads_highlight_stdout() {
+        for (command, highlighted) in [
+            ("sed -n '10,80p' src/foo.rs", true),
+            ("cat 'src/foo bar.rs'", true),
+            ("head -n 50 src/foo.rs", true),
+            ("tail src/foo.rs", true),
+            ("cat foo.unknown-language", false),
+            ("sed -n 1,5p a.rs | grep x", false),
+        ] {
+            let mut records: Vec<Value> =
+                include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+                    .lines()
+                    .take(2)
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            records[0]["message"]["content"][0]["input"]["command"] = command.into();
+            records[1]["toolUseResult"]["stdout"] = "fn main() {}".into();
+            records[1]["toolUseResult"]["stderr"] = "diagnostic".into();
+            records[1]["message"]["content"][0]["content"] = "fn main() {}".into();
+            let events = events_from(records);
+            let output = events[0].calls[0].output.as_ref().unwrap();
+            if highlighted {
+                assert_eq!(output[0], code_section("stdout", "rs", "fn main() {}"));
+            } else {
+                assert!(matches!(&output[0], Section::Text { .. }));
+            }
+            assert!(matches!(&output[1], Section::Label(label) if label == "stderr"));
+            assert!(
+                matches!(&output[2], Section::Text { label, text } if label == "stderr" && text == "diagnostic")
+            );
+        }
     }
 
     #[test]
@@ -2198,18 +2243,32 @@ pub(crate) mod tests {
     #[test]
     fn captured_agent_request_preserves_input_model_until_resolved() {
         let file = tempfile::NamedTempFile::new().unwrap();
-        let request = include_str!("../../../tests/fixtures/claude-agent-launch.jsonl").lines().next().unwrap();
+        let request = include_str!("../../../tests/fixtures/claude-agent-launch.jsonl")
+            .lines()
+            .next()
+            .unwrap();
         std::fs::write(file.path(), request).unwrap();
         let events = tail(file.path(), usize::MAX).unwrap();
-        let call = &events.iter().find(|event| !event.calls.is_empty()).unwrap().calls[0];
-        assert_eq!(call.model_settings.as_ref().unwrap().model.as_deref(), Some("sonnet"));
+        let call = &events
+            .iter()
+            .find(|event| !event.calls.is_empty())
+            .unwrap()
+            .calls[0];
+        assert_eq!(
+            call.model_settings.as_ref().unwrap().model.as_deref(),
+            Some("sonnet")
+        );
         assert!(call.output.is_none());
     }
 
     #[test]
     fn captured_agent_launch_uses_description_and_resolved_model() {
         let file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), include_str!("../../../tests/fixtures/claude-agent-launch.jsonl")).unwrap();
+        std::fs::write(
+            file.path(),
+            include_str!("../../../tests/fixtures/claude-agent-launch.jsonl"),
+        )
+        .unwrap();
         let events = tail(file.path(), usize::MAX).unwrap();
         let event = events.iter().find(|event| !event.calls.is_empty()).unwrap();
         let call = &event.calls[0];

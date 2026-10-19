@@ -2034,6 +2034,49 @@ mod tests {
     }
 
     #[test]
+    fn shell_file_reads_highlight_stdout() {
+        let record = tool_records()
+            .into_iter()
+            .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        for (command, highlighted) in [
+            ("sed -n '10,80p' src/foo.rs", true),
+            ("cat 'src/foo bar.rs'", true),
+            ("head -n 50 src/foo.rs", true),
+            ("tail src/foo.rs", true),
+            ("cat foo.unknown-language", false),
+            ("sed -n 1,5p a.rs | grep x", false),
+        ] {
+            let mut record = record.clone();
+            record["payload"]["item"]["command"][2] = command.into();
+            record["payload"]["item"]["aggregated_output"] = "fn main() {}".into();
+            let file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file.as_file(), "{record}").unwrap();
+            let events = tail(file.path(), 20).unwrap();
+            let output = events[0].calls[0].output.as_ref().unwrap();
+            if highlighted {
+                assert_eq!(
+                    output[0],
+                    tool::code_section("output", "rs", "fn main() {}")
+                );
+            } else {
+                assert!(matches!(&output[0], Section::Text { .. }));
+            }
+            let payload = serde_json::json!({
+                "type": "function_call", "name": "exec_command", "call_id": "shell",
+                "arguments": serde_json::json!({"cmd": command}).to_string(),
+            });
+            let call = response_tool_call(&payload, Some("Exit code 0\nfn main() {}"));
+            let section = &call.output.as_ref().unwrap()[0];
+            if highlighted {
+                assert_eq!(section, &tool::code_section("output", "rs", "fn main() {}"));
+            } else {
+                assert!(matches!(section, Section::Text { .. }));
+            }
+        }
+    }
+
+    #[test]
     fn shell_response_titles_use_command_subject_and_shell_detail() {
         let record = tool_records()
             .into_iter()
@@ -3394,9 +3437,7 @@ mod prompt_cache_tests {
 
     #[test]
     fn prompt_cache_starts_at_turn_start_instead_of_response_completion() {
-        let expected = "2026-10-19T07:24:18.845Z"
-            .parse::<DateTime<Utc>>()
-            .unwrap();
+        let expected = "2026-10-19T07:24:18.845Z".parse::<DateTime<Utc>>().unwrap();
         assert_eq!(request_prefix(2).cache_expires_at, Some(expected));
     }
 
@@ -3405,9 +3446,7 @@ mod prompt_cache_tests {
         let first = request_prefix(2).cache_expires_at;
         assert_eq!(request_prefix(3).cache_expires_at, first);
         assert_eq!(request_prefix(4).cache_expires_at, first);
-        let expected = "2026-10-19T07:24:24.225Z"
-            .parse::<DateTime<Utc>>()
-            .unwrap();
+        let expected = "2026-10-19T07:24:24.225Z".parse::<DateTime<Utc>>().unwrap();
         assert_eq!(request_prefix(5).cache_expires_at, Some(expected));
         assert_eq!(request_prefix(7).cache_expires_at, Some(expected));
     }

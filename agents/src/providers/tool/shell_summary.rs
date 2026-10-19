@@ -262,8 +262,17 @@ fn simple(words: &[String], out: &mut Groups, depth: usize) -> Option<()> {
     Some(())
 }
 
+pub(super) fn single_words(input: &str) -> Option<Vec<String>> {
+    scan(input, &mut Groups::default(), 0, true)?;
+    shlex::split(input)
+}
+
 // Scan shell words, preserving quoted scripts and separating only shell operators.
 fn shell(input: &str, out: &mut Groups, depth: usize) -> Option<()> {
+    scan(input, out, depth, false)
+}
+
+fn scan(input: &str, out: &mut Groups, depth: usize, single: bool) -> Option<()> {
     if depth > 64 {
         return None;
     }
@@ -277,6 +286,31 @@ fn shell(input: &str, out: &mut Groups, depth: usize) -> Option<()> {
     let mut heredocs: Vec<(String, bool)> = Vec::new();
     while i < chars.len() {
         let c = chars[i];
+        if single
+            && ((quote.is_none()
+                && matches!(
+                    c,
+                    ';' | '&'
+                        | '|'
+                        | '<'
+                        | '>'
+                        | '('
+                        | ')'
+                        | '{'
+                        | '}'
+                        | '*'
+                        | '?'
+                        | '['
+                        | ']'
+                        | '~'
+                        | '#'
+                        | '\n'
+                        | '\r'
+                ))
+                || (quote != Some('\'') && matches!(c, '$' | '`')))
+        {
+            return None;
+        }
         if quote.is_none()
             && c == '<'
             && chars.get(i + 1) == Some(&'<')
