@@ -1222,32 +1222,22 @@ struct FittedBody {
 }
 
 fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
-    let listed;
-    let event = if event.sender.is_some() || event.kind == Kind::Agent {
-        // Peer rows keep their one-line Markdown interpretation; open bodies keep blocks.
-        let body = if event.kind == Kind::Agent {
-            collapse_whitespace(event.body.trim())
-        } else {
-            event.body.clone()
-        };
-        listed = Event {
-            body: crate::log::participant_text(event.sender.as_deref(), &body),
-            paths: event
-                .paths
-                .iter()
-                .map(|range| {
-                    let offset = event.sender.as_deref().map_or(0, |sender| {
-                        crate::log::participant_text(Some(sender), "").len() + 1
-                    });
-                    range.start + offset..range.end + offset
+    let listed = Event {
+        body: event.summary(),
+        sender: None,
+        paths: event.paths.iter().map(|range| {
+            let offset = if crate::log::agent::summary(event).is_some() {
+                0
+            } else {
+                event.sender.as_deref().map_or(0, |sender| {
+                    crate::log::participant_text(Some(sender), "").len() + 1
                 })
-                .collect(),
-            ..event.clone()
-        };
-        &listed
-    } else {
-        event
+            };
+            range.start + offset..range.end + offset
+        }).collect(),
+        ..event.clone()
     };
+    let event = &listed;
     let body_style = super::style::log_styles(&event.kind).1;
     if is_prose(&event.kind) {
         // Markdown blocks end at line breaks, so they are kept until rendering.

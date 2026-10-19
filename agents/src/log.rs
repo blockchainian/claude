@@ -79,6 +79,31 @@ pub struct SourceRecord {
 }
 
 impl Event {
+    /// The shared row summary, before Markdown rendering and width-dependent fitting.
+    pub fn summary(&self) -> String {
+        if let Some(summary) = agent::summary(self) {
+            return summary;
+        }
+        let body = if self.kind == Kind::Agent {
+            self.body.split_whitespace().collect::<Vec<_>>().join(" ")
+        } else {
+            self.body.clone()
+        };
+        participant_text(self.sender.as_deref(), &body)
+    }
+
+    pub fn activity(&self) -> crate::model::Activity {
+        crate::model::Activity {
+            exit_code: match self.calls.as_slice() {
+                [call] => call.exit_code,
+                _ => None,
+            },
+            kind: self.kind.clone(),
+            label: self.summary(),
+            at: self.started_at,
+        }
+    }
+
     #[cfg(test)]
     pub fn raw_text(&self) -> std::io::Result<String> {
         use std::io::{BufRead, Seek};
