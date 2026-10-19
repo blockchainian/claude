@@ -56,6 +56,48 @@ function variableIdentifier(path) {
   return path.isReferencedIdentifier() || path.isBindingIdentifier();
 }
 
+function splitExportDeclarations(source, ast, result) {
+  const edits = [];
+  const exported = new Map();
+  traverse(ast, {
+    ExportNamedDeclaration(path) {
+      if (path.node.declaration) {
+        exported.set(path.node, Object.values(path.getBindingIdentifiers()).sort((a, b) => a.start - b.start));
+      }
+    },
+  });
+  let index = 0;
+  for (const node of ast.program.body) {
+    const declaration = node.type === 'ExportNamedDeclaration' && node.declaration;
+    const next = result.program.body[index + 1];
+    if (declaration && result.program.body[index]?.type === declaration.type &&
+        next?.type === 'ExportNamedDeclaration' && !next.declaration && !next.source) {
+      // Reproduce only rename's export syntax edits. The existing comparisons
+      // still check every declaration byte and every exported binding target.
+      const identifiers = exported.get(node);
+      const prefix = /^export\s*/.exec(source.slice(node.start))[0];
+      edits.push({ start: node.start, end: node.start + prefix.length, text: '' });
+      edits.push({ start: declaration.end, end: declaration.end, text: `\nexport { ${identifiers.map(id => id.name).join(', ')} };` });
+      index++;
+    }
+    index++;
+  }
+  if (!edits.length) return { source, ast };
+  let text = '';
+  let offset = 0;
+  for (const edit of edits) {
+    text += source.slice(offset, edit.start) + edit.text;
+    offset = edit.end;
+  }
+  text += source.slice(offset);
+  return { source: text, ast: parse(text, { sourceType: 'module' }) };
+}
+
+function header(source) {
+  // Only line comments and blank lines between them belong to the header.
+  return /^(?:[\t ]*\/\/[^\r\n]*(?:\r\n|\r|\n|$))(?:(?:[\t ]*(?:\r\n|\r|\n))*[\t ]*\/\/[^\r\n]*(?:\r\n|\r|\n|$))*/.exec(source)?.[0] ?? '';
+}
+
 function analyze(source, ast) {
   const bindings = new Set();
   const variables = new Map();
@@ -146,10 +188,7 @@ function analyze(source, ast) {
     offset = edit.end;
   }
   text += source.slice(offset);
-  // Include the full leading comment run and its whitespace, including block comments.
-  const first = ast.program.directives[0] ?? ast.program.body[0];
-  const header = source.slice(0, first?.start ?? source.length);
-  return { globals, constReassigned, earlyUse, structure, references, text, header };
+  return { globals, constReassigned, earlyUse, structure, references, text };
 }
 
 /** Returns null on success, otherwise a single-line rejection reason. */
@@ -170,7 +209,8 @@ export function checkRewrite(before, after) {
   let a;
   let b;
   try {
-    a = analyze(before, original);
+    const normalized = splitExportDeclarations(before, original, result);
+    a = analyze(normalized.source, normalized.ast);
     b = analyze(after, result);
   } catch (error) {
     return `SCOPE_ANALYSIS_FAILED ${String(error.message).split(/[\r\n]/)[0]}`;
@@ -179,7 +219,7 @@ export function checkRewrite(before, after) {
   if (globals.length) return `NEW_GLOBALS ${globals.join(',')}`;
   if (b.constReassigned > a.constReassigned) return 'CONST_REASSIGNED';
   if (b.earlyUse > a.earlyUse) return 'EARLY_USE';
-  if (a.header !== b.header) return 'HEADER_CHANGED';
+  if (header(before) !== header(after)) return 'HEADER_CHANGED';
   if (a.structure !== b.structure || a.text !== b.text) return 'STRUCTURE_OR_TEXT_CHANGED';
   if (JSON.stringify(a.references) !== JSON.stringify(b.references)) return 'BINDING_CHANGED';
   return null;
