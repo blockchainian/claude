@@ -48,7 +48,7 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
     let mut app = app(directory.path());
     let first = draw(&mut app, 200);
     assert!(first.contains("21%") && first.contains("16%"), "{first}");
-    assert!(first.contains("21% Claude · Codex 16%"));
+    assert!(first.contains("Claude · Codex"));
     // Loading cached values does not schedule or throttle the first account requests.
     assert_eq!(app.hub.weekly_usage_jobs(Instant::now()).len(), 2);
     let start = first[..first.find('⣿').unwrap()].width() as u16;
@@ -72,7 +72,7 @@ fn weekly_usage_first_frame_click_persistence_and_immediate_refresh() {
     let claude_reset: chrono::DateTime<chrono::Utc> = "2026-10-23T16:00:00Z".parse().unwrap();
     let codex_reset: chrono::DateTime<chrono::Utc> = "2026-10-25T08:33:00Z".parse().unwrap();
     let expected = format!(
-        "Claude resets {}, 1 credit · Codex resets {}, 2 credits",
+        "resets {}, 1 credit Claude · Codex resets {}, 2 credits",
         claude_reset
             .with_timezone(&chrono::Local)
             .format("%a %H:%M"),

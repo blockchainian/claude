@@ -52,7 +52,11 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
             "2 credits"
         };
         assert!(
-            detailed.contains(&format!("{name} resets {time}, {credits}")),
+            detailed.contains(&if name == "Claude" {
+                format!("resets {time}, {credits} {name}")
+            } else {
+                format!("{name} resets {time}, {credits}")
+            }),
             "{detailed}"
         );
     }
@@ -165,7 +169,7 @@ fn assert_centered(line: &str, width: usize) {
 
 fn assert_compact(line: &str, width: usize) {
     assert_centered(line, width);
-    assert!(line.contains("21% Claude · Codex 16%"), "{line}");
+    assert!(line.contains("Claude · Codex"), "{line}");
     assert!(
         !line.contains("reset") && !line.contains("credit"),
         "{line}"
@@ -180,7 +184,7 @@ fn assert_compact(line: &str, width: usize) {
 fn assert_detailed(line: &str, width: usize) {
     assert_centered(line, width);
     assert!(
-        line.contains("Claude resets ") && line.contains("Codex resets "),
+        line.contains("Claude · Codex resets ") && line.contains("resets "),
         "{line}"
     );
     assert!(!line.contains('%') && !line.contains('█'), "{line}");

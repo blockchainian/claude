@@ -10092,20 +10092,20 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
                 .iter()
                 .find(|(_, f)| *f == Field::WeeklyUsage)
                 .map(|(r, _)| *r);
-            if mode == crate::state::UsageView::Compact && width <= 40 {
+            if width <= 40 {
                 assert!(target.is_none(), "{width}: {text}");
                 assert!(!text.contains('%'));
                 continue;
             }
-            let target = target.unwrap();
+            let target = target.unwrap_or_else(|| panic!("{width}, {mode:?}: {text}"));
             assert!(
                 viewport
                     .tabs
                     .iter()
-                    .all(|(_, tab)| target.right() <= tab.x || target.x >= tab.right())
+                    .all(|(_, tab)| target.right() < tab.x || target.x > tab.right())
             );
             if mode == crate::state::UsageView::Compact {
-                assert!(text.contains("21% Claude · Codex 5%"), "{text}");
+                assert!(text.contains("⣿ Claude · Codex ⣿"), "{text}");
                 assert!(text.contains("Claude · Codex"), "{text}");
                 assert!(text.contains("21%") && text.contains("5%"), "{text}");
                 let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
@@ -10135,12 +10135,29 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
         std::fs::write(&path, &snapshot).unwrap();
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+    let mut view = weekly_usage_view();
+    view.usage_view = crate::state::UsageView::Detailed;
+    view.weekly_usage
+        .get_mut(&ProviderId::Claude)
+        .unwrap()
+        .reset_credits = Some(1);
+    view.weekly_usage
+        .get_mut(&ProviderId::Codex)
+        .unwrap()
+        .reset_credits = Some(2);
+    let snapshot = weekly_header(&view, 160).trim_end().to_owned() + "\n";
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots/details_weekly_usage_detailed.txt");
+    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }
 
 #[test]
 fn task_header_weekly_usage_symmetric_bars_and_styles() {
     for width in [200, 160, 150, 149, 80] {
-        for used in [0.0, 5.0, 21.0, 50.0, 95.0, 96.0, 100.0] {
+        for used in [0.0, 5.0, 21.0, 50.0, 95.0, 96.0, 99.0, 100.0] {
             for colors in [false, true] {
                 let mut view = weekly_usage_view();
                 view.use_colors = colors;
@@ -10169,36 +10186,60 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                     assert_eq!(buffer[(gap, y)].bg, buffer[(width / 2, y)].bg);
                 }
                 let half = (target.width - 1) / 2;
-                // Both bars grow toward the midline and stop before the percentage.
                 let number = format!("{used:.0}%");
-                let capacity = half - 1 - 6 - 1 - number.len() as u16 - 1;
+                let capacity = half - 8;
                 let dots = (f64::from(capacity * 2) * used / 100.0).round() as u16;
                 let center = width / 2;
                 assert_eq!(buffer[(center, y)].symbol(), "·");
-                let left_number = center - 1 - 6 - 1 - number.len() as u16;
-                let right_number = center + 2 + 5 + 1;
-                let left_bar = left_number - 1 - capacity;
-                let right_bar_end = right_number + number.len() as u16 + 1 + capacity;
-                for dot in 0..capacity * 2 {
-                    let left_x = left_bar + dot / 2;
-                    let right_x = right_bar_end - 1 - dot / 2;
-                    let left_bit = if dot % 2 == 0 { 0x47 } else { 0xb8 };
-                    let right_bit = if dot % 2 == 0 { 0xb8 } else { 0x47 };
-                    for (x, bit) in [(left_x, left_bit), (right_x, right_bit)] {
+                let mut starts = [0; 2];
+                for (side, label_width) in [(0, 6), (1, 5)] {
+                    let limit = half - label_width - 3 - number.len() as u16;
+                    let visible = dots.min(limit * 2);
+                    let cells = visible.div_ceil(2);
+                    let anchor = if side == 0 { center - 9 } else { center + 8 };
+                    starts[side] = if side == 0 {
+                        anchor + 1 - cells - 1 - number.len() as u16
+                    } else {
+                        anchor + cells + 1
+                    };
+                    for dot in 0..visible {
+                        let x = if side == 0 {
+                            anchor - dot / 2
+                        } else {
+                            anchor + dot / 2
+                        };
+                        let bit = if (dot % 2 == 0) == (side == 0) {
+                            0xb8
+                        } else {
+                            0x47
+                        };
                         let cell = &buffer[(x, y)];
                         let bits = cell.symbol().chars().next().unwrap() as u32;
-                        let on = (0x2800..=0x28ff).contains(&bits) && (bits - 0x2800) & bit == bit;
-                        assert_eq!(on, dot < dots, "{width}, {used}, {dot}, {x}");
-                        if on {
-                            assert_eq!(
-                                cell.style(),
-                                buffer[(0, y)].style().patch(style::timeline_style(colors))
-                            );
-                        } else if dot / 2 >= dots.div_ceil(2) {
-                            assert_eq!(cell.symbol(), " ");
-                        }
+                        assert!((0x2800..=0x28ff).contains(&bits));
+                        assert_eq!((bits - 0x2800) & bit, bit, "{width}, {used}, {dot}");
+                        assert_eq!(
+                            cell.style(),
+                            buffer[(0, y)].style().patch(style::timeline_style(colors))
+                        );
+                    }
+                    if visible % 2 == 1 {
+                        let x = if side == 0 {
+                            anchor + 1 - cells
+                        } else {
+                            anchor + cells - 1
+                        };
+                        assert_eq!(buffer[(x, y)].symbol(), if side == 0 { "⢸" } else { "⡇" });
+                    }
+                    let outside = if side == 0 {
+                        target.x..starts[side]
+                    } else {
+                        starts[side] + number.len() as u16..target.right()
+                    };
+                    for x in outside {
+                        assert_eq!(buffer[(x, y)].symbol(), " ");
                     }
                 }
+                let [left_number, right_number] = starts;
                 for start in [left_number, right_number] {
                     for (i, c) in number.chars().enumerate() {
                         let cell = &buffer[(start + i as u16, y)];
@@ -10214,10 +10255,7 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                 let text = (0..width)
                     .map(|x| buffer[(x, y)].symbol())
                     .collect::<String>();
-                assert!(
-                    text.contains(&format!("{number} Claude · Codex {number}")),
-                    "{text}"
-                );
+                assert!(text.contains("Claude · Codex"), "{text}");
             }
         }
     }
@@ -10281,12 +10319,12 @@ fn task_header_weekly_usage_details_and_compact_reset() {
     for width in [160, 80] {
         let text = weekly_header(&view, width);
         assert_eq!(text.matches("97%").count(), 2, "{text}");
-        assert!(text.contains("97% Claude · Codex 97%"));
+        assert!(text.contains("Claude · Codex"));
         assert!(!text.contains("credit") && !text.contains("until") && !text.contains("resets"));
         view.usage_view = crate::state::UsageView::Detailed;
         let text = weekly_header(&view, width);
         if width == 160 {
-            assert!(text.contains("1 credit · Codex resets"), "{text}");
+            assert!(text.contains("1 credit Claude · Codex resets"), "{text}");
             assert!(text.contains("2 credits"));
             assert_eq!(text.chars().nth(usize::from(width / 2)), Some('·'));
         } else {

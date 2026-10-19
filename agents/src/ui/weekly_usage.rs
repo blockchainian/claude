@@ -28,30 +28,46 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
     text
 }
 
+fn detailed_provider_text(name: &str, usage: &WeeklyUsage, left: bool) -> String {
+    let text = provider_text(name, usage, UsageView::Detailed);
+    let details = text[name.len()..].trim_start_matches([' ', ',']);
+    if details.is_empty() {
+        name.to_owned()
+    } else if left {
+        format!("{details} {name}")
+    } else {
+        format!("{name} {details}")
+    }
+}
+
 fn compact_provider(
     name: &str,
     usage: &WeeklyUsage,
     bar_width: u16,
+    available: u16,
     left: bool,
     use_colors: bool,
 ) -> Line<'static> {
     let used = 100 - usage.left_percent();
-    let dots = (f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize;
+    let number_width = format!("{used}%").len() as u16;
+    let limit = available - name.len() as u16 - number_width - 3;
+    let dots = ((f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize)
+        .min(usize::from(limit * 2));
     // Fill all four dot rows, mirrored at half-cell precision.
     let full = "⣿".repeat(dots / 2);
     let partial = if dots.is_multiple_of(2) {
         ""
     } else if left {
-        "⡇"
-    } else {
         "⢸"
+    } else {
+        "⡇"
     };
     let bar = if left {
-        format!("{full}{partial}")
-    } else {
         format!("{partial}{full}")
+    } else {
+        format!("{full}{partial}")
     };
-    let empty = Span::raw(" ".repeat(usize::from(bar_width) - dots.div_ceil(2)));
+    let empty = Span::raw(" ".repeat(usize::from(limit) - dots.div_ceil(2)));
     let number = Span::styled(
         format!("{used}%"),
         if used > 95 {
@@ -64,10 +80,10 @@ fn compact_provider(
     let label = Span::raw(name.to_owned());
     if left {
         Line::from(vec![
-            bar,
             empty,
-            Span::raw(" "),
             number,
+            Span::raw(" "),
+            bar,
             Span::raw(" "),
             label,
             Span::raw(" "),
@@ -77,10 +93,10 @@ fn compact_provider(
             Span::raw(" "),
             label,
             Span::raw(" "),
-            number,
-            Span::raw(" "),
-            empty,
             bar,
+            Span::raw(" "),
+            number,
+            empty,
         ])
     }
 }
@@ -125,17 +141,25 @@ pub(super) fn render(
         if text_widths.iter().any(|width| *width > half) {
             return None;
         }
-        let bar_width = half - text_widths.into_iter().max().unwrap();
+        // Both providers use the same full-scale length, up to the outer edge.
+        let bar_width = half.saturating_sub(
+            names
+                .iter()
+                .map(|name| name.len() as u16 + 2)
+                .max()
+                .unwrap(),
+        );
         for i in 0..2 {
             if let Some(usage) = usage[i] {
-                let width = text_widths[i] + bar_width;
+                let width = half;
                 let side = Rect::new(
                     if i == 0 { center - width } else { center + 1 },
                     area.y,
                     width,
                     1,
                 );
-                compact_provider(names[i], usage, bar_width, i == 0, use_colors).render(side, buf);
+                compact_provider(names[i], usage, bar_width, half, i == 0, use_colors)
+                    .render(side, buf);
             }
         }
         if usage.iter().all(Option::is_some) {
@@ -144,13 +168,13 @@ pub(super) fn render(
         return Some(Rect::new(center - half, area.y, half * 2 + 1, 1));
     }
     let texts = std::array::from_fn::<_, 2, _>(|i| {
-        usage[i].map(|usage| provider_text(names[i], usage, view))
+        usage[i].map(|usage| detailed_provider_text(names[i], usage, i == 0))
     });
     let widths = texts.each_ref().map(|text| {
         text.as_ref()
             .map_or(0, |text| Line::from(text.as_str()).width() as u16)
     });
-    if (0..2).any(|i| usage[i].is_some() && widths[i] + 1 > available[i]) {
+    if (0..2).any(|i| usage[i].is_some() && widths[i] + 2 > available[i]) {
         return None;
     }
     let mut target = Rect::new(center, area.y, 1, 1);
@@ -189,6 +213,44 @@ pub(super) fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detailed_labels_stay_next_to_center() {
+        let reset = "2026-10-23T16:00:00Z".parse().unwrap();
+        let time = chrono::DateTime::<chrono::Utc>::from(reset)
+            .with_timezone(&chrono::Local)
+            .format("%a %H:%M")
+            .to_string();
+        for resets_at in [None, Some(reset)] {
+            for reset_credits in [None, Some(0), Some(1), Some(2)] {
+                let usage = WeeklyUsage {
+                    used_percent: 21.0,
+                    resets_at,
+                    reset_credits,
+                };
+                let mut extras = if resets_at.is_some() {
+                    format!("resets {time}")
+                } else {
+                    String::new()
+                };
+                if let Some(count) = reset_credits.filter(|n| *n > 0) {
+                    if !extras.is_empty() {
+                        extras.push_str(", ");
+                    }
+                    extras.push_str(&format!(
+                        "{count} credit{}",
+                        if count == 1 { "" } else { "s" }
+                    ));
+                }
+                let expected = if extras.is_empty() {
+                    "Claude".to_owned()
+                } else {
+                    format!("{extras} Claude")
+                };
+                assert_eq!(detailed_provider_text("Claude", &usage, true), expected);
+            }
+        }
+    }
 
     #[test]
     fn weekly_usage_rounds_reset_to_nearest_minute() {
