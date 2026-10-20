@@ -7,6 +7,11 @@ use crate::session_terminal::SessionTerminal;
 
 impl App {
     pub(super) fn open_terminal(&mut self, id: SessionKey) {
+        self.restore_terminal(id);
+        self.view.focus_terminal();
+    }
+
+    fn restore_terminal(&mut self, id: SessionKey) {
         let restoring = self.view.terminal_requested();
         self.close_terminal();
         let Some(session) = self.session(&id) else {
@@ -144,10 +149,10 @@ impl App {
             if let Some(id) = self.terminal_task.take()
                 && self.view.selected_id() == Some(&id)
             {
-                self.open_terminal(id);
+                self.restore_terminal(id);
             } else if self.view.terminal_requested() {
                 if let Some(id) = self.view.selected_id().cloned() {
-                    self.open_terminal(id);
+                    self.restore_terminal(id);
                 }
             } else if let Some(id) = waiting {
                 let awaits_prompt = self.session(&id).is_some_and(|session| {
@@ -787,6 +792,101 @@ mod tests {
         app.sessions[0].cwd = directory.path().join("removed-project");
         app.sync_terminal();
         assert!(draw(&mut app).contains("Directory no longer exists:"));
+    }
+
+    #[test]
+    fn restored_terminal_o_enters_terminal() {
+        restored_terminal_activation(crossterm::event::KeyCode::Char('o'));
+    }
+
+    #[test]
+    fn restored_terminal_enter_enters_terminal() {
+        restored_terminal_activation(crossterm::event::KeyCode::Enter);
+    }
+
+    #[test]
+    fn restored_terminal_right_enters_terminal() {
+        restored_terminal_activation(crossterm::event::KeyCode::Right);
+    }
+
+    fn restored_terminal_activation(key: crossterm::event::KeyCode) {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+        let (directory, mut app, id) = fixture();
+        app.sessions[0].cwd = directory.path().to_owned();
+        // Attach to a unique nonexistent job: the real provider and PTY run without
+        // resuming a user session or sending a prompt.
+        app.sessions[0].process = Some(crate::model::Process {
+            pid: std::process::id(),
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        app.sessions[0].background_job = Some(crate::model::BackgroundJob {
+            id: uuid::Uuid::new_v4().to_string(),
+            needs: None,
+            awaits_prompt: false,
+        });
+        let mut other = app.sessions[0].clone();
+        other.id.id = "terminal-other".into();
+        app.sessions.push(other);
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.handle_event(Event::Key(KeyCode::Home.into()));
+        assert_eq!(app.view.selected_id(), Some(&id));
+        draw(&mut app);
+
+        app.handle_event(Event::Key(KeyCode::Char('o').into()));
+        assert_eq!(
+            app.terminal.as_ref().map(|terminal| &terminal.id),
+            Some(&id)
+        );
+        assert!(
+            app.view.terminal_paste("").is_some(),
+            "initial open must focus EventDetail"
+        );
+        draw(&mut app);
+        for direction in ['k', 'k', 'k', 'k', 'h'] {
+            app.handle_event(Event::Key(KeyEvent::new(
+                KeyCode::Char('w'),
+                KeyModifiers::CONTROL,
+            )));
+            app.handle_event(Event::Key(KeyCode::Char(direction).into()));
+        }
+        app.handle_event(Event::Key(KeyCode::Down.into()));
+        assert_ne!(
+            app.view.selected_id(),
+            Some(&id),
+            "list navigation must leave A"
+        );
+        app.sync_terminal();
+        assert!(app.terminal.is_none());
+        finish_close(&mut app);
+
+        app.handle_event(Event::Key(KeyCode::Home.into()));
+        assert_eq!(app.view.selected_id(), Some(&id));
+        draw(&mut app);
+        app.sync_terminal();
+        assert_eq!(
+            app.terminal.as_ref().map(|terminal| &terminal.id),
+            Some(&id)
+        );
+        assert!(
+            app.view.terminal_paste("").is_none(),
+            "automatic reopen must leave focus in list"
+        );
+
+        app.handle_event(Event::Key(key.into()));
+        // An explicit open may wait for its previous client to finish closing.
+        finish_close(&mut app);
+        app.sync_terminal();
+        let shown = app.terminal.as_ref().map(|terminal| &terminal.id) == Some(&id);
+        let focused = app.view.terminal_paste("").is_some();
+        app.close_terminal();
+        finish_close(&mut app);
+        assert!(shown, "explicit open must restore the terminal");
+        assert!(
+            focused,
+            "explicit {key:?} must focus EventDetail after automatic reopen"
+        );
     }
 
     #[test]

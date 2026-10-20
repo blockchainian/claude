@@ -276,14 +276,18 @@ impl LineEdit {
         }
         self.cursor = self.caret_boundary(self.cursor, true);
     }
+    /// Deletes what Ctrl+E would move over.
     pub(super) fn kill_to_end(&mut self) {
-        self.preferred_column = None;
-        self.replace_images(self.cursor..self.text.len(), "");
+        let start = self.cursor;
+        self.line_end();
+        self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
+    /// Deletes what Ctrl+A would move over.
     pub(super) fn kill_to_start(&mut self) {
-        self.replace_images(0..self.cursor, "");
-        self.home();
+        let end = self.cursor;
+        self.line_start();
+        self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(super) fn kill_word_back(&mut self) {
@@ -526,6 +530,31 @@ mod tests {
         for cursor in ["one".len(), "one\r\ntwo".len(), e.text.len(), e.text.len()] {
             control(&mut e, 'e');
             assert_eq!(e.cursor, cursor);
+        }
+    }
+
+    #[test]
+    fn kill_to_start_removes_one_line_at_a_time() {
+        let mut e = edit("one\ntwo\nthree");
+        e.set_cursor("one\ntwo\nth".len());
+        for (text, cursor) in [
+            ("one\ntwo\nree", "one\ntwo\n".len()),
+            ("one\nree", "one\n".len()),
+            ("ree", 0),
+            ("ree", 0),
+        ] {
+            e.kill_to_start();
+            assert_eq!((e.text(), e.cursor), (text, cursor));
+        }
+    }
+
+    #[test]
+    fn kill_to_end_removes_one_line_at_a_time() {
+        let mut e = edit("one\ntwo\nthree");
+        e.set_cursor(1);
+        for text in ["o\ntwo\nthree", "o\nthree", "o", "o"] {
+            e.kill_to_end();
+            assert_eq!((e.text(), e.cursor), (text, 1));
         }
     }
 

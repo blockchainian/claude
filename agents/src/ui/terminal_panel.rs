@@ -41,6 +41,13 @@ impl View {
         self.event_detail.mode == super::task_ui::EventDetailMode::Terminal
     }
 
+    /// Focuses an explicitly opened terminal, including one waiting for its client to close.
+    pub(crate) fn focus_terminal(&mut self) {
+        if self.terminal_requested() {
+            self.set_active_panel(Panel::EventDetail);
+        }
+    }
+
     /// The rows and columns a terminal gets in the event detail panel, below its top rule.
     pub fn terminal_size(&self) -> Option<(u16, u16)> {
         let viewport = self.viewport.borrow();

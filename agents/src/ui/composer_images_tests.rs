@@ -105,11 +105,13 @@ fn failed_image_send_restores_attachments_beside_the_next_draft() {
     assert_eq!(prompt.editor.prompt_text(), "first \nnext ");
     assert_eq!(prompt.editor.image_paths(), vec![first, next]);
     key(&mut prompt.editor, KeyCode::Home, KeyModifiers::NONE);
-    key(
-        &mut prompt.editor,
-        KeyCode::Char('k'),
-        KeyModifiers::CONTROL,
-    );
+    for _ in 0..2 {
+        key(
+            &mut prompt.editor,
+            KeyCode::Char('k'),
+            KeyModifiers::CONTROL,
+        );
+    }
     assert!(prompt.editor.image_paths().is_empty());
 }
 
