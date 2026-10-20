@@ -201,9 +201,10 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
       metrics.sent_at = Date.now();
       metrics.in_flight = ++inFlight;
       metrics.queued = queued() + queue.length + Math.max(0, active - inFlight);
-      // Keep the deadline active through the entire response, including SSE consumption.
-      const timer = setTimeout(() => stream.destroy(new Error('Request timed out.')), timeoutMs);
-      stream.once('close', () => { clearTimeout(timer); reject(new Error('Request closed.')); });
+      // Fails a request whose stream stays silent for timeoutMs, including during SSE consumption;
+      // long outputs that keep streaming are allowed to finish.
+      stream.setTimeout(timeoutMs, () => stream.destroy(new Error('Request timed out.')));
+      stream.once('close', () => reject(new Error('Request closed.')));
       stream.on('error', reject);
       stream.once('response', responseHeaders => {
         metrics.headers_at = Date.now();

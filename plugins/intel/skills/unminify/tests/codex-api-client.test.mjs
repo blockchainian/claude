@@ -158,6 +158,16 @@ test('a timed out stream leaves concurrent requests and its shared session usabl
   assert(attempts.every(event => event.status === 200 && event.duration_ms >= 20));
 });
 
+test('a response that keeps streaming outlives the timeout, which measures only idle time', async t => {
+  const f = await fixture(t, async (req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (let i = 0; i < 8; i++) { res.write(': heartbeat\n\n'); await delay(20); }
+    res.end(`data: ${JSON.stringify(completion())}\n\ndata: [DONE]\n\n`);
+  });
+  assert.deepEqual(await f.client({ timeoutMs: 80 }).respond(request), { output: 'hello', usage });
+  assert.equal(f.logs.length, 1);
+});
+
 test('SSE completion, usage, request shape and safe per-attempt metrics', async t => {
   const f = await fixture(t, (req, res, body) => {
     assert.equal(req.url, '/responses');
