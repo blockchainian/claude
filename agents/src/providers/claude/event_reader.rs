@@ -102,20 +102,33 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     }
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
+    let mut records = Vec::new();
+    crate::jsonl::read_lines_back(&mut file, len, |offset, line| {
+        if let Ok(record) = serde_json::from_slice::<serde_json::Value>(line)
+            && (sidechains || record["isSidechain"] != true)
+        {
+            records.push((offset, record));
+        }
+        true
+    })?;
+    let turns = crate::activity::EventTurns::new(
+        crate::providers::ProviderId::Claude,
+        records
+            .iter()
+            .rev()
+            .map(|(offset, record)| (*offset, record)),
+    );
     let mut event_panel = EventReader {
         path: Some(path.to_path_buf()),
+        turns: Some(turns),
         ..EventReader::default()
     };
-    crate::jsonl::read_lines_back(&mut file, len, |offset, line| {
-        let Ok(record) = serde_json::from_slice::<serde_json::Value>(line) else {
-            return true;
-        };
-        if !sidechains && record["isSidechain"] == true {
-            return true;
-        }
+    for (offset, record) in records {
         event_panel.offset = offset;
-        event_panel.record(record, count)
-    })?;
+        if !event_panel.record(record, count) {
+            break;
+        }
+    }
     if let Some(error) = event_panel.error {
         return Err(error);
     }
@@ -134,7 +147,25 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     }
     let events = crate::event::agent::merge(events);
     let skip = events.len().saturating_sub(count);
-    Ok(events.into_iter().skip(skip).collect())
+    let preceding = skip.checked_sub(1).and_then(|index| events[index].turn);
+    Ok(clip_turn_start(
+        events.into_iter().skip(skip).collect(),
+        preceding,
+    ))
+}
+
+/// A returned page cannot draw a turn's start when the preceding event belongs to it.
+fn clip_turn_start(mut events: Vec<Event>, preceding: Option<crate::event::Turn>) -> Vec<Event> {
+    if let Some(previous) = preceding {
+        for event in &mut events {
+            if let Some(turn) = &mut event.turn
+                && turn.id == previous.id
+            {
+                turn.started = false;
+            }
+        }
+    }
+    events
 }
 
 /// Retains decoded records and parsed rows between file notifications.
@@ -201,10 +232,24 @@ impl Reader {
             })
             .map_or(start, |entry| start.min(entry.offset));
         let retained = self.entries.partition_point(|entry| entry.offset < start);
-        let replaced = self.entries.len() - retained;
+        let turns = crate::activity::EventTurns::new(
+            crate::providers::ProviderId::Claude,
+            self.records
+                .iter()
+                .map(|(offset, record)| (*offset, record)),
+        );
+        let changed = self
+            .entries
+            .iter()
+            .position(|entry| entry.event.turn != turns.at(entry.offset));
+        let replaced = self.entries.len() - changed.map_or(retained, |index| index.min(retained));
         self.entries.truncate(retained);
+        for entry in &mut self.entries {
+            entry.event.turn = turns.at(entry.offset);
+        }
         let mut event_panel = EventReader {
             path: Some(self.path.clone()),
+            turns: Some(turns),
             ..EventReader::default()
         };
         for (offset, record) in self
@@ -436,12 +481,18 @@ impl Reader {
             .saturating_sub(appended);
         self.boundary.capture(&mut file, metadata.len())?;
         Ok(crate::event::Update {
-            events: crate::event::agent::merge(
+            events: clip_turn_start(
+                crate::event::agent::merge(
+                    self.entries
+                        .iter()
+                        .skip(self.entries.len() - self.shown)
+                        .map(|entry| entry.event.clone())
+                        .collect(),
+                ),
                 self.entries
-                    .iter()
-                    .skip(self.entries.len() - self.shown)
-                    .map(|entry| entry.event.clone())
-                    .collect(),
+                    .len()
+                    .checked_sub(self.shown + 1)
+                    .and_then(|index| self.entries[index].event.turn),
             ),
             prepended: if reset { 0 } else { prepended },
             appended: if reset { self.shown } else { appended },
@@ -462,6 +513,8 @@ impl crate::event::Reader for Reader {
 
 #[derive(Default)]
 struct EventReader {
+    turns: Option<crate::activity::EventTurns>,
+    turn: Option<crate::event::Turn>,
     path: Option<PathBuf>,
     offset: u64,
     companions: std::collections::HashMap<String, Vec<crate::event::SourceRecord>>,
@@ -630,6 +683,12 @@ impl EventReader {
     }
 
     fn record_result(&mut self, record: serde_json::Value, count: usize) -> io::Result<bool> {
+        let turn = self.turns.as_ref().and_then(|turns| turns.at(self.offset));
+        if turn.map(|turn| turn.id) != self.turn.map(|turn| turn.id) {
+            self.batch = None;
+            self.assistant = None;
+        }
+        self.turn = turn;
         self.images.record(&record);
         if record["turnCompanion"] == true
             && let Some(id) = record["promptId"].as_str()
@@ -993,6 +1052,7 @@ impl EventReader {
         self.entries.push(Entry {
             offset: self.offset,
             event: Event {
+                turn: self.turn,
                 completed_time: false,
                 background: false,
                 source: None,
@@ -1066,6 +1126,7 @@ impl EventReader {
             Entry {
                 offset: self.offset,
                 event: Event {
+                    turn: self.turn,
                     completed_time: false,
                     background: false,
                     source: None,
@@ -1229,6 +1290,72 @@ pub(super) fn prompt_body(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn turn_groups_keep_queued_steering_in_the_running_turn() {
+        let fixture = include_str!("../../../tests/fixtures/turn-groups/claude-steer.jsonl");
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file().write_all(fixture.as_bytes()).unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        assert!(events.len() >= 4);
+        let turn = events[0].turn.expect("prompt starts a turn");
+        assert!(turn.started && turn.complete);
+        assert!(events.iter().all(|event| event.turn == Some(turn)));
+        assert!(events.iter().any(|event| event.kind == Kind::QueuedUser));
+        let tail = tail(file.path(), 2).unwrap();
+        assert_eq!(tail.len(), 2);
+        assert!(tail.iter().all(|event| {
+            event
+                .turn
+                .is_some_and(|part| part.id == turn.id && !part.started && part.complete)
+        }));
+    }
+
+    #[test]
+    fn turn_groups_refresh_completion_without_an_event_row() {
+        let fixture = include_str!("../../../tests/fixtures/turn-groups/claude-steer.jsonl");
+        let split = fixture.rfind('\n').unwrap();
+        let split = fixture[..split].rfind('\n').unwrap() + 1;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file()
+            .write_all(&fixture.as_bytes()[..split])
+            .unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let running = reader.refresh(usize::MAX).unwrap();
+        assert!(
+            running
+                .events
+                .iter()
+                .all(|event| event.turn.is_some_and(|turn| !turn.complete))
+        );
+        file.as_file()
+            .write_all(&fixture.as_bytes()[split..])
+            .unwrap();
+        let finished = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(finished.events.len(), running.events.len());
+        assert!(
+            finished
+                .events
+                .iter()
+                .all(|event| event.turn.is_some_and(|turn| turn.complete))
+        );
+        assert!(finished.replaced > 0);
+    }
+
+    #[test]
+    fn turn_groups_notification_wakes_without_a_user_row() {
+        let fixture = include_str!("../../../tests/fixtures/turn-groups/claude-wakeup.jsonl");
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file().write_all(fixture.as_bytes()).unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        assert!(!events.is_empty());
+        assert!(events.iter().all(|event| event.kind != Kind::User));
+        assert!(
+            events
+                .iter()
+                .all(|event| event.turn.is_some_and(|turn| turn.started && turn.complete))
+        );
+    }
+
     #[test]
     fn detach_subject_uses_result_name() {
         let records = include_str!("../../../tests/fixtures/claude-manager-detach-name.jsonl")
@@ -3269,7 +3396,11 @@ pub(crate) mod tests {
             };
             assert_eq!(pair[1].previous_end, end);
         }
-        assert_eq!(tail(file.path(), 2).unwrap(), events[5..]);
+        let mut expected_tail = events[5..].to_vec();
+        for event in &mut expected_tail {
+            event.turn.as_mut().unwrap().started = false;
+        }
+        assert_eq!(tail(file.path(), 2).unwrap(), expected_tail);
         assert!(tail(file.path(), 0).unwrap().is_empty());
     }
     #[test]
@@ -3338,6 +3469,10 @@ pub(crate) mod tests {
             assert_eq!(actual.raw_text().unwrap(), expected.raw_text().unwrap());
             actual.source_records.clear();
             expected.source_records.clear();
+            // The same transcript fragment occupies different byte positions in these files.
+            if let (Some(actual), Some(expected)) = (&mut actual.turn, expected.turn) {
+                actual.id = expected.id;
+            }
         }
         assert_eq!(actual, expected);
     }

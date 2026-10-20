@@ -133,6 +133,33 @@ impl View {
                     super::style::cursor_style(),
                 );
             }
+            if self.event_list.sort != EventSort::Duration
+                && let Some(turn) = event.turn
+            {
+                let position = start + index;
+                let same_turn = |other: usize| {
+                    matching.get(other).is_some_and(|(_, event)| {
+                        event.turn.is_some_and(|other| other.id == turn.id)
+                    })
+                };
+                let previous = position.checked_sub(1).is_some_and(same_turn);
+                let next = same_turn(position + 1);
+                if previous || next {
+                    let bracket = if !previous && turn.started {
+                        0
+                    } else if !next && turn.complete {
+                        2
+                    } else {
+                        1
+                    };
+                    let position = (area.right(), area.y + index as u16);
+                    if buf.area.contains(position.into()) {
+                        buf[position]
+                            .set_symbol(super::tool_detail::SHELL_BRACKET[bracket])
+                            .set_style(super::tool_detail::bracket_style());
+                    }
+                }
+            }
             rows.push(event_index);
             drawn_links.extend(links);
         }
@@ -1784,6 +1811,7 @@ pub(super) mod event_markdown {
     #[test]
     fn tool_without_calls_has_no_body_below_its_title() {
         let event = &Event {
+            turn: None,
             source: None,
             completed_time: false,
             background: false,
@@ -1836,6 +1864,7 @@ pub(super) mod event_markdown {
         let area = Rect::new(0, 0, width + 10, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
+            turn: None,
             source: None,
             completed_time: false,
             background: false,
@@ -2144,6 +2173,7 @@ pub(super) mod event_markdown {
         let body = format!("改了 src/ui/log.rs 和 {}，已发送", report.display());
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
+                turn: None,
                 source: None,
                 completed_time: false,
                 background: false,
@@ -2663,3 +2693,7 @@ mod event_detail_regression_tests;
 #[cfg(test)]
 #[path = "event_path_tests.rs"]
 mod path_tests;
+
+#[cfg(test)]
+#[path = "turn_group_tests.rs"]
+mod turn_group_tests;

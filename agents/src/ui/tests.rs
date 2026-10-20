@@ -4465,6 +4465,7 @@ fn event_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
+        turn: None,
         source: None,
         completed_time: false,
         background: false,
@@ -4963,7 +4964,13 @@ fn dashboard_screen_padding_is_one_cell() {
             assert_eq!(buf[(width - 1, y)].symbol() == "─", rule, "row {y}");
             if !rule {
                 assert_eq!(buf[(0, y)].symbol(), " ", "row {y}");
-                assert_eq!(buf[(width - 1, y)].symbol(), " ", "row {y}");
+                let right = buf[(width - 1, y)].symbol();
+                assert!(
+                    right == " "
+                        || (layout.event_panel.y..layout.event_panel.bottom()).contains(&y)
+                            && ["┌", "│", "└"].contains(&right),
+                    "row {y}: {right}"
+                );
             }
         }
         let prompt_y = layout.prompt.y;
@@ -5073,7 +5080,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
             let row: String = (0..width)
                 .map(|x| cell_text(buf[(x, y)].symbol()))
                 .collect();
-            let event_panel: String = (left..width)
+            let event_panel: String = (left..width - 1)
                 .map(|x| cell_text(buf[(x, y)].symbol()))
                 .collect();
             assert!(
@@ -5359,7 +5366,10 @@ fn task_event_background_record_has_no_marker_and_keeps_its_time() {
                 .find(|row| row.replace(' ', "").contains("等用量图颜色线程"))
                 .unwrap_or_else(|| panic!("{rendered}"));
             assert!(!row.contains(" *"), "{row}");
-            assert!(row.ends_with(expected_time), "{row}");
+            assert!(
+                row.trim_end_matches(['┌', '│', '└']).trim_end().ends_with(expected_time),
+                "{row}"
+            );
         }
     }
 }
@@ -5827,6 +5837,7 @@ fn task_event_right_aligns_mixed_width_times_and_centers_content() {
 fn task_event_shows_only_visible_events_and_hides_without_selection() {
     let (mut view, now) = event_fixture();
     let first = crate::event::Event {
+        turn: None,
         source: None,
         completed_time: false,
         background: false,

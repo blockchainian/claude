@@ -31,8 +31,17 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
+/// Transcript turn containing a row, including whether its boundaries are known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Turn {
+    pub id: u64,
+    pub started: bool,
+    pub complete: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
+    pub turn: Option<Turn>,
     /// Identity of the transcript record that produced this event.
     pub source: Option<String>,
     /// Completed tools use their recorded duration or completion clock.

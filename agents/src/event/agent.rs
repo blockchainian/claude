@@ -236,7 +236,8 @@ pub fn can_merge(previous: &Event, event: &Event) -> bool {
     else {
         return false;
     };
-    previous.kind == event.kind
+    previous.turn == event.turn
+        && previous.kind == event.kind
         && !event.calls.is_empty()
         && previous.calls.iter().chain(&event.calls).all(|call| {
             call.agent_message

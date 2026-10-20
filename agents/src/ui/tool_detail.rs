@@ -348,11 +348,15 @@ fn shell_part(source: String, prefix: usize) -> Part {
     Part::new(source, Body::Shell(commands))
 }
 
-const SHELL_BRACKET: [&str; 3] = [
+pub(super) const SHELL_BRACKET: [&str; 3] = [
     ratatui::symbols::border::PLAIN.top_left,
     ratatui::symbols::border::PLAIN.vertical_left,
     ratatui::symbols::border::PLAIN.bottom_left,
 ];
+
+pub(super) fn bracket_style() -> Style {
+    Style::new().fg(ratatui::style::Color::Reset).dim()
+}
 
 /// Shell chains carry display-only brackets; unchained rows reserve the same two cells.
 fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec<Line<'static>> {
@@ -385,7 +389,7 @@ fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec
                     0,
                     Span::styled(
                         format!("{bracket} "),
-                        Style::new().fg(ratatui::style::Color::Reset).dim(),
+                        bracket_style(),
                     ),
                 );
             }
@@ -707,6 +711,7 @@ mod tests {
 
     fn event(calls: Vec<ToolCall>) -> Event {
         Event {
+            turn: None,
             source: None,
             completed_time: false,
             background: false,

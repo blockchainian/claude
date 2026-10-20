@@ -800,6 +800,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         Vec::new()
     };
     Ok(Some(Event {
+        turn: None,
         completed_time: true,
         background: false,
         source: None,
@@ -1246,6 +1247,21 @@ impl Reader {
         if parsed_bytes > parsed_before_older {
             replaced = replaced.max(old_shown);
         }
+        if changed || parsed_bytes > 0 {
+            let turns = crate::activity::EventTurns::new(
+                crate::providers::ProviderId::Codex,
+                self.records
+                    .iter()
+                    .map(|(offset, record)| (*offset, record)),
+            );
+            for (offset, event) in &mut self.entries {
+                let turn = turns.at(*offset);
+                if event.turn != turn {
+                    replaced = replaced.max(old_shown);
+                    event.turn = turn;
+                }
+            }
+        }
         let shown = self
             .entries
             .len()
@@ -1257,9 +1273,20 @@ impl Reader {
         };
         self.shown = shown;
         let skip = self.entries.len() - shown;
+        let cut_turn = skip
+            .checked_sub(1)
+            .and_then(|index| self.entries[index].1.turn.map(|turn| turn.id));
         let events = self.entries[skip..]
             .iter()
-            .map(|(_, event)| event.clone())
+            .map(|(_, event)| {
+                let mut event = event.clone();
+                if let Some(turn) = &mut event.turn
+                    && Some(turn.id) == cut_turn
+                {
+                    turn.started = false;
+                }
+                event
+            })
             .collect();
         self.boundary.capture(&mut file, metadata.len())?;
         Ok(crate::event::Update {
@@ -1407,6 +1434,10 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         .filter(|record| record["type"] == "session_meta")
         .and_then(|record| record["payload"]["agent_path"].as_str())
         .unwrap_or("/root");
+    let turns = crate::activity::EventTurns::new(
+        crate::providers::ProviderId::Codex,
+        records.iter().map(|(offset, record)| (*offset, record)),
+    );
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
@@ -1461,6 +1492,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             return Ok(true);
         }
         if let Some(mut event) = completed_tool(record)? {
+            event.turn = turns.at(offset);
             event.source = Some(source(record, offset));
             event.source_records = source_records;
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
@@ -1697,6 +1729,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         entries.push((
             offset,
             Event {
+                turn: turns.at(offset),
                 completed_time: kind == Kind::Tool
                     && !calls.iter().any(|call| call.agent_path.is_some()),
                 background: false,
@@ -1751,10 +1784,120 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         previous_end = Some(entry.ended_at.unwrap_or(entry.started_at));
     }
     let skip = entries.len().saturating_sub(count);
-    Ok(entries.into_iter().skip(skip).collect())
+    let cut_turn = skip
+        .checked_sub(1)
+        .and_then(|index| entries[index].1.turn.map(|turn| turn.id));
+    Ok(entries
+        .into_iter()
+        .skip(skip)
+        .map(|(offset, mut event)| {
+            if let Some(turn) = &mut event.turn
+                && Some(turn.id) == cut_turn
+            {
+                turn.started = false;
+            }
+            (offset, event)
+        })
+        .collect())
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn turn_groups_mark_a_page_without_the_prompt_as_partial() {
+        let records: Vec<_> = include_str!("../../../tests/fixtures/codex-rollout.jsonl")
+            .lines()
+            .enumerate()
+            .skip(3)
+            .map(|(offset, line)| (offset as u64, serde_json::from_str(line).unwrap()))
+            .collect();
+        let entries = events(&fixture(), &records, usize::MAX).unwrap();
+        assert_eq!(entries.len(), 1);
+        let turn = entries[0].1.turn.expect("partial turn marker");
+        assert!(!turn.started && turn.complete);
+        assert!(entries.iter().all(|(_, event)| event.turn == Some(turn)));
+    }
+
+    #[test]
+    fn turn_groups_hide_the_start_when_the_returned_page_cuts_a_turn() {
+        let mut reader = Reader::new(fixture(), false);
+        let update = reader.refresh(1).unwrap();
+        assert_eq!(update.events.len(), 1);
+        assert!(update.events.iter().all(|event| {
+            event
+                .turn
+                .is_some_and(|turn| !turn.started && turn.complete)
+        }));
+        let expanded = reader.refresh(2).unwrap();
+        assert!(
+            expanded
+                .events
+                .iter()
+                .all(|event| { event.turn.is_some_and(|turn| turn.started && turn.complete) })
+        );
+    }
+
+    #[test]
+    fn turn_groups_follow_real_root_turn_records() {
+        let mut reader = Reader::new(fixture(), false);
+        let update = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(update.events.len(), 2);
+        let turn = update.events[0].turn.expect("root turn marker");
+        assert_eq!(turn.id, 0);
+        assert!(turn.started && turn.complete);
+        assert!(update.events.iter().all(|event| event.turn == Some(turn)));
+    }
+
+    #[test]
+    fn turn_groups_close_existing_events_on_boundary_only_append() {
+        use std::io::Write;
+        let fixture = include_str!("../../../tests/fixtures/codex-rollout.jsonl");
+        let lines: Vec<_> = fixture.lines().collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", lines[..lines.len() - 1].join("\n")).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let running = reader.refresh(usize::MAX).unwrap();
+        assert!(running.events.iter().all(|event| {
+            event
+                .turn
+                .is_some_and(|turn| turn.started && !turn.complete)
+        }));
+        writeln!(file, "{}", lines.last().unwrap()).unwrap();
+        let finished = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(finished.events.len(), running.events.len());
+        assert_eq!(finished.appended, 0);
+        assert_eq!(finished.replaced, running.events.len());
+        assert!(
+            finished
+                .events
+                .iter()
+                .all(|event| { event.turn.is_some_and(|turn| turn.started && turn.complete) })
+        );
+        assert_eq!(
+            finished.events[0].turn.unwrap().id,
+            running.events[0].turn.unwrap().id
+        );
+    }
+
+    #[test]
+    fn turn_groups_keep_identity_when_appending_records() {
+        use std::io::Write;
+        let fixture = include_str!("../../../tests/fixtures/codex-rollout.jsonl");
+        let lines: Vec<_> = fixture.lines().collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", lines[..4].join("\n")).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        let initial = reader.refresh(usize::MAX).unwrap();
+        let turn = initial.events[0].turn.expect("root turn marker");
+        writeln!(file, "{}", lines[4..7].join("\n")).unwrap();
+        let updated = reader.refresh(usize::MAX).unwrap();
+        assert!(updated.events.iter().all(|event| event.turn == Some(turn)));
+        assert!(
+            updated
+                .events
+                .iter()
+                .any(|event| event.kind == Kind::Assistant)
+        );
+    }
     #[test]
     fn real_activity_uses_the_latest_event() {
         let fixture = include_str!("../../../tests/fixtures/codex-latest-activity.jsonl");

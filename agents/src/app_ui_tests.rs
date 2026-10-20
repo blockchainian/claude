@@ -86,7 +86,7 @@ fn row_ends(buffer: &ratatui::buffer::Buffer, text: &str) -> ((u16, u16), (u16, 
 }
 
 fn event_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
-    let separators: Vec<_> = (0..buffer.area.width)
+    let separators: Vec<_> = (0..buffer.area.width - 1)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
     let (_, prompt) = position(buffer, "❯");
@@ -140,7 +140,7 @@ fn wheel(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
 }
 
 fn assert_event_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
-    let separators: Vec<_> = (0..buffer.area.width)
+    let separators: Vec<_> = (0..buffer.area.width - 1)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
     let task_row = (2..position(buffer, "❯").1)
@@ -894,7 +894,7 @@ fn new_key_without_selection_prepares_the_startup_repository() {
     let rendered = lines(&buffer).join("\n");
     assert!(rendered.contains("New task"), "{rendered}");
     let (title_x, title_y) = position(&buffer, "New task");
-    let separators: Vec<_> = (0..buffer.area.width)
+    let separators: Vec<_> = (0..buffer.area.width - 1)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
     assert_eq!(separators.len(), 2);
@@ -959,7 +959,7 @@ fn wide_border_labels_stay_in_their_columns() {
     for width in [150, 200] {
         let buffer = draw(&mut app, width);
         let rendered = lines(&buffer);
-        let separators: Vec<_> = (0..width)
+        let separators: Vec<_> = (0..width - 1)
             .filter(|&x| buffer[(x, 2)].symbol() == "│")
             .collect();
         assert_eq!(separators.len(), 2);
@@ -1129,14 +1129,14 @@ fn app_event_padding_and_clicks_follow_real_transcript_rows() {
             let (_directory, mut app) = fixture_with_double_click_ms(20);
             select_archive(&mut app);
             let buffer = draw(&mut app, width);
-            let separators: Vec<_> = (0..width)
+            let separators: Vec<_> = (0..width - 1)
                 .filter(|&x| buffer[(x, 2)].symbol() == "│")
                 .collect();
             let left = if width == 200 { separators[1] + 2 } else { 1 };
             let (x, y) = event_position(&buffer, "⏺ Ran 4 stop hooks");
             assert_eq!(x, left);
             assert_eq!(
-                (left..width).rfind(|&x| buffer[(x, y)].symbol() != " "),
+                (left..width - 1).rfind(|&x| buffer[(x, y)].symbol() != " "),
                 Some(width - 2)
             );
             click(&mut app, if edge { width - 2 } else { left }, y);

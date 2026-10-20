@@ -762,6 +762,7 @@ fn last_prose_event_row_ticks_each_second_under_a_minute() {
     let started_at = chrono::Utc::now();
     app.view.event_session = Some(app.sessions[0].id.clone());
     app.view.event_panel = vec![crate::event::Event {
+        turn: None,
         completed_time: false,
         background: false,
         source: None,
