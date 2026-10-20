@@ -75,7 +75,7 @@ async function fixture(t) {
       refreshUrl: `${baseUrl}/oauth/token`, retryDelayMs: 1 }) };
   return { root, read, journal, controls, lines,
     write: files => Promise.all(Object.entries(files).map(([file, source]) => writeFile(join(root, file), source))),
-    run: () => run({ dirs: [root], concurrency: 1, contextTokens: 500 }, dependencies) };
+    run: () => run({ paths: [root], concurrency: 1, contextTokens: 500 }, dependencies) };
 }
 
 for (const code of ['USAGE_LIMIT', 'AUTH']) test(`${code} follows imports only in done files and resumes byte-identically`, async t => {

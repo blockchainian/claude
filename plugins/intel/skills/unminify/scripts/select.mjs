@@ -57,10 +57,11 @@ function analyze(source) {
   return { source, ast, bindings, owners, contexts, references, usedNames, exports };
 }
 
-/** Paths are relative to the enclosing Git root; ignore rules to their own file. */
-export async function listFiles(dir, { ignoreFile, onParse } = {}) {
-  dir = await realpath(dir);
-  const root = (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: dir })).stdout.trim();
+/** Selects a file or a directory's files; paths are relative to the enclosing Git root, ignore rules to their own file. */
+export async function listFiles(target, { ignoreFile, onParse } = {}) {
+  target = await realpath(target);
+  const isDirectory = (await stat(target)).isDirectory();
+  const root = (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: isDirectory ? target : path.dirname(target) })).stdout.trim();
   const rulesFile = ignoreFile ? await realpath(ignoreFile) : path.join(root, '.ignore');
   let rules = '';
   try { rules = await readFile(rulesFile, 'utf8'); }
@@ -71,23 +72,25 @@ export async function listFiles(dir, { ignoreFile, onParse } = {}) {
     return relative !== '' && !relative.startsWith('../') && matcher.ignores(relative);
   };
   const files = [];
+  async function select(file) {
+    if (!/\.m?js$/.test(file) || ignored(file)) return;
+    const source = await readFile(file, 'utf8');
+    const startedAt = Date.now(), started = performance.now();
+    try { parseSource(source); }
+    catch (error) { if (error instanceof SyntaxError) return; throw error; }
+    onParse?.(path.relative(root, file).split(path.sep).join('/'), startedAt, performance.now() - started);
+    files.push(path.relative(root,file).split(path.sep).join('/'));
+  }
   async function walk(folder) {
     for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a,b)=>a.name.localeCompare(b.name))) {
       const file = path.join(folder, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== '.git' && !ignored(file + path.sep)) await walk(file);
-      } else if (entry.isFile() && /\.m?js$/.test(entry.name) && !ignored(file)) {
-        const source = await readFile(file, 'utf8');
-        const startedAt = Date.now(), started = performance.now();
-        try { parseSource(source); }
-        catch (error) { if (error instanceof SyntaxError) continue; throw error; }
-        onParse?.(path.relative(root, file).split(path.sep).join('/'), startedAt, performance.now() - started);
-        files.push(path.relative(root,file).split(path.sep).join('/'));
-      }
+      } else if (entry.isFile()) await select(file);
     }
   }
-  if (!(await stat(dir)).isDirectory()) throw new TypeError('Expected a directory');
-  await walk(dir);
+  if (isDirectory) await walk(target);
+  else await select(target);
   return files.sort();
 }
 

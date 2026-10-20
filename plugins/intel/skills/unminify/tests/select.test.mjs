@@ -122,7 +122,7 @@ test('render applies resolved outer names before replacing batch names', () => {
   const renames = new Map(plan.stages[0].flatMap(b=>b.keys).map(k=>[k,`resolved_${bs.get(k).identifier.name}`]));
   assert.ok(plan.stages[1].some(b=>renderBatch(source,b,renames).context.includes('resolved_')));
 });
-test('ignore uses repository root and gitignore directory, glob, negation, comments', async () => {
+test('ignore uses repository root and gitignore directory, glob, negation, comments, for directories and files', async () => {
   const root = await mkdtemp(path.join(tmpdir(),'unminify-select-'));
   try {
     execFileSync('git',['init',root],{stdio:'ignore'});
@@ -133,6 +133,9 @@ test('ignore uses repository root and gitignore directory, glob, negation, comme
     await writeFile(path.join(root,'.ignore'),'# comment\nvendor/\n*.min.*\n!allow.min.mjs\n');
     const selected = await listFiles(path.join(root,'src'),{});
     assert.deepEqual(selected,['src/allow.min.mjs','src/keep.js']);
+    for (const [file, expected] of [['src/keep.js',['src/keep.js']],['src/drop.min.js',[]],['src/bad.js',[]],['src/text.txt',[]]]) {
+      assert.deepEqual(await listFiles(path.join(root,file),{}),expected,file);
+    }
     await writeFile(path.join(root,'src/custom.ignore'),'*.js\n!keep.js\n');
     assert.deepEqual(await listFiles(path.join(root,'src'),{ignoreFile:path.join(root,'src/custom.ignore')}),['src/allow.min.mjs','src/keep.js']);
   } finally { await rm(root,{recursive:true,force:true}); }

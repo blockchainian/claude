@@ -48,7 +48,7 @@ async function fixture(t, count) {
 
 test('hundreds of files bound planning through writeback while filling request slots and resuming', { timeout: 120_000 }, async t => {
   const target = await fixture(t, 200);
-  const summary = await run({ dirs: [target.root], concurrency: 2 }, target.deps);
+  const summary = await run({ paths: [target.root], concurrency: 2 }, target.deps);
   assert.equal(summary.exitCode, 0);
   assert.equal(summary.completed, 200);
   assert.equal(target.peak, 2);
@@ -62,14 +62,14 @@ test('hundreds of files bound planning through writeback while filling request s
   assert.equal(active.size, 0);
   assert(peak <= 4, `at most twice request concurrency may retain plans; saw ${peak}`);
   const requests = target.requests;
-  const replay = await run({ dirs: [target.root], concurrency: 2 }, target.deps);
+  const replay = await run({ paths: [target.root], concurrency: 2 }, target.deps);
   assert.equal(replay.skipped, 200);
   assert.equal(target.requests, requests);
 });
 
 test('finished files detach cached ASTs even when callers retain their batch objects', async t => {
   const target = await fixture(t, 2);
-  assert.equal((await run({ dirs: [target.root], concurrency: 1 }, target.deps)).exitCode, 0);
+  assert.equal((await run({ paths: [target.root], concurrency: 1 }, target.deps)).exitCode, 0);
   for (const { source, stages } of target.plans) {
     const totals = {};
     withTimings(totals, () => select.renderBatch(source, stages.flat()[0]));
