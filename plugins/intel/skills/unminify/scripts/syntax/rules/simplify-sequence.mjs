@@ -83,7 +83,6 @@ export default {
     function declaration(path, inFor = false) {
       const node = path.node, prefix = [], pending = [];
       if (!['var', 'let', 'const'].includes(node.kind)) return null;
-      if (context.fragment && Object.keys(path.getBindingIdentifiers()).some(name => path.scope.getBinding(name)?.scope.path.isProgram())) return null;
       const names = new Set(Object.keys(path.getBindingIdentifiers()));
       let changed = !inFor && node.declarations.length > 1;
       for (const d of node.declarations) {
@@ -161,7 +160,7 @@ export default {
             for (const edit of edits) context.replace(edit, edit.text);
             return;
           }
-          // The shared checker owns the proof of fragment declaration placement.
+          // The shared checker proves fragment binding kinds and evaluation order.
           // Check the batch first; only a rejected batch needs per-statement checks.
           if (preservesFragment(render({ start: 0, end: context.source.length }))) {
             for (const edit of edits) context.replace(edit, edit.text);
