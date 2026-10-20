@@ -11,18 +11,19 @@ import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
 const defaults = { concurrency: 20, maxInputTokens: 100000, minSymbolLength: 4 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const help = 'unminify <path>... [--ignore <file>] [--concurrency 20] [--max-input-tokens 100000] [--min-symbol-length 4]';
+const help = 'unminify <path>... [--ignore <file>] [--chunks <file>] [--chunk-siblings] [--concurrency 20] [--max-input-tokens 100000] [--min-symbol-length 4]';
 
 export function parseArgs(args) {
   const options = { ...defaults };
-  const flags = { '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--max-input-tokens': 'maxInputTokens', '--min-symbol-length': 'minSymbolLength' };
+  const flags = { '--chunks': 'chunks', '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--max-input-tokens': 'maxInputTokens', '--min-symbol-length': 'minSymbolLength' };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
+    if (arg === '--chunk-siblings') { options.chunkSiblings = true; continue; }
     if (arg.startsWith('-')) {
       const key = flags[arg], value = args[++index];
       if (!key || !value || value.startsWith('--')) throw new Error(`invalid option: ${arg}\n${help}`);
-      if (key === 'ignoreFile') options[key] = resolve(value);
+      if (key === 'ignoreFile' || key === 'chunks') options[key] = resolve(value);
       else {
         if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) throw new Error(`${arg} must be a positive integer`);
         options[key] = Number(value);
@@ -30,6 +31,7 @@ export function parseArgs(args) {
     } else (options.paths ??= []).push(resolve(arg));
   }
   if (!options.paths) throw new Error(help);
+  if (options.chunkSiblings && !options.chunks) throw new Error('--chunk-siblings requires --chunks');
   return options;
 }
 
@@ -79,6 +81,9 @@ export async function run(options, dependencies) {
   let api, namer;
   try {
     api = dependencies ?? await modules();
+    if (settings.chunkSiblings && !settings.chunks) throw new Error('--chunk-siblings requires --chunks');
+    const chunkDriver = settings.chunks
+      ? await (await import('./chunk-run.mjs')).createChunkRun(root, settings) : null;
     const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');
     // Overlapping paths list a file once.
     const listed = new Set();
@@ -91,6 +96,7 @@ export async function run(options, dependencies) {
     const files = [...listed];
     const fragmentContext = loadFragmentContext(root, files);
     const { fragments } = fragmentContext;
+    chunkDriver?.select(files, fragments);
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
     summary.files = files.length;
     selectionEnd(); selectionEnd = null;
@@ -116,6 +122,7 @@ export async function run(options, dependencies) {
     // Finish every syntax write before creating any rename plan or request.
     if (api.runSyntaxFile) {
       for (const file of files) {
+        if (chunkDriver?.files.has(file)) continue;
         const endSyntax = phase('syntax', file);
         try { emit(api.runSyntaxFile(root, file, { fragment: fragments.has(file), fragmentContext })); }
         finally { endSyntax(); }
@@ -244,12 +251,16 @@ export async function run(options, dependencies) {
     }
     try {
       // Keep a second window ready while request slots drain or files write back.
-      const fileConcurrency = Math.min(files.length, settings.concurrency * 2);
+      const tasks = chunkDriver ? [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))] : files;
+      const fileConcurrency = Math.min(tasks.length, settings.concurrency * 2);
       let nextFile = 0;
       async function worker() {
-        while (nextFile < files.length) {
-          const file = files[nextFile++];
-          try { await processFile(file); }
+        while (nextFile < tasks.length) {
+          const task = tasks[nextFile++], file = typeof task === 'string' ? task : task.id;
+          try {
+            if (typeof task === 'string') await processFile(task);
+            else await chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext });
+          }
           catch (error) {
             summary.exitCode = 1;
             emit({ file, status: 'interrupted', reason: error.message });
@@ -259,12 +270,13 @@ export async function run(options, dependencies) {
       await Promise.all(Array.from({ length: fileConcurrency }, worker));
       const endImports = phase('followImports');
       let changes;
+      const chunkImports = chunkDriver?.importOptions(journals);
       try {
         changes = await api.followImports(sources, (file, task) => {
           const end = phase('followImports', file);
-          try { return withTimings(fileMetrics.get(file).cpu_ms, task); }
+          try { return fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task(); }
           finally { end(); }
-        }, fragments);
+        }, fragments, chunkImports);
       }
       finally {
         endImports();
@@ -272,6 +284,7 @@ export async function run(options, dependencies) {
           if (!changes?.has(metrics.file) || !journals.get(metrics.file)?.done) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
         }
       }
+      chunkImports?.apply(sources, emit, summary);
       for (const [file, after] of changes) {
         if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
         // Unfinished journals retain batch positions and the original source fingerprint.

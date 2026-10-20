@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/blockchainian/claude/plugins/intel/skills/unminify/chunks.schema.json",
+  "title": "unminify chunks",
+  "description": "Files that share one program scope because they were split from one bundler chunk. unminify renames a chunk's top-level names once and applies each rename to every file of that chunk.",
+  "type": "object",
+  "required": ["version", "chunks"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "Format version.",
+      "const": 1
+    },
+    "chunks": {
+      "description": "Each file appears in at most one chunk. Files in no chunk are processed as standalone files.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "files"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Unique chunk name, used in logs and journals, e.g. the chunk file name.",
+            "type": "string",
+            "minLength": 1
+          },
+          "files": {
+            "description": "Paths relative to the directory containing this manifest, using forward slashes.",
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "version": 1,
+      "chunks": [
+        {
+          "id": "chunk-bpv43c1t.js",
+          "files": [
+            "src/context/toastStore.js",
+            "src/context/toasts.js",
+            "src/ink/ink.js"
+          ]
+        }
+      ]
+    }
+  ]
+}
