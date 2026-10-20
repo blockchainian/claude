@@ -132,10 +132,15 @@ impl View {
         let padding = u16::from(area.height >= 3);
         let viewport = row(area, 0, area.height - padding);
         let height = usize::from(viewport.height);
+        // Session reordering moves the cursor's row without moving the viewport.
+        let reveal = state.task_selection.as_ref() != self.selected_id()
+            || self.selected == usize::MAX
+            || state.page_height != height;
+        state.task_selection = self.selected_id().cloned();
         state.page_height = height;
         let mut start = state.scroll.min(entries.len().saturating_sub(height));
         state.task_scroll_max = entries.len().saturating_sub(height);
-        if !dragging && selected <= start {
+        if reveal && !dragging && selected <= start {
             start = if height > 1
                 && selected > 0
                 && matches!(entries[selected - 1], CenterRow::Group(_))
@@ -145,7 +150,7 @@ impl View {
                 selected
             };
         }
-        if !dragging && selected >= start + height {
+        if reveal && !dragging && selected >= start + height {
             start = selected.saturating_add(/*rhs*/ 1).saturating_sub(height);
         }
         state.scroll = start;

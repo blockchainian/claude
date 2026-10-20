@@ -681,6 +681,23 @@ impl View {
             .or(self.log_selected);
         let selected_full = selected_index
             .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+        let reset_selected = selected_full.filter(|_| update.reset).and_then(|full| {
+            let selected = &self.log[full];
+            update
+                .events
+                .iter()
+                .position(|event| match (&selected.source, &event.source) {
+                    (Some(left), Some(right)) => left == right,
+                    (None, None) => match (selected.calls.first(), event.calls.first()) {
+                        (Some(left), Some(right)) => left.id == right.id,
+                        (None, None) => {
+                            selected.kind == event.kind && selected.started_at == event.started_at
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                })
+        });
         let selected_order = (self.log_sort == LogSort::Duration
             && self.selecting_list(text_selection::Panel::LogList))
         .then(|| {
@@ -710,8 +727,11 @@ impl View {
             .filter(|(full, _)| *full < update.prepended)
             .count();
         let len = self.matching_log_count();
-        self.log_selected = if update.reset || following {
+        let reset_selected = reset_selected.and_then(|full| self.shown_position(full));
+        self.log_selected = if following {
             len.checked_sub(1)
+        } else if update.reset {
+            reset_selected.or_else(|| len.checked_sub(1))
         } else {
             selected_full.and_then(|full| {
                 let full = full.saturating_add(update.prepended);
@@ -744,7 +764,7 @@ impl View {
         self.cancel_detail_selection();
         self.viewport.borrow_mut().log_detail_layout = None;
         let max_scroll = self.log_max_scroll();
-        if update.reset {
+        if update.reset && (following || reset_selected.is_none()) {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_scroll = max_scroll;
             viewport.log_unseen = 0;
@@ -752,7 +772,7 @@ impl View {
         } else if !following || self.mouse_press.is_some() {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_scroll = viewport.log_scroll.saturating_add_signed(shift);
-            if self.log_sort == LogSort::Time {
+            if self.log_sort == LogSort::Time && !update.reset {
                 viewport.log_unseen += added;
             }
             drop(viewport);

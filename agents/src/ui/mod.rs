@@ -133,6 +133,7 @@ struct Overlay {
 #[derive(Default)]
 struct Viewport {
     scroll: usize,
+    task_selection: Option<SessionKey>,
     page_height: usize,
     tabs: Vec<(usize, Rect)>,
     tab_bar: Rect,
@@ -630,9 +631,10 @@ impl View {
         };
         target.state = prompt_box::SendState::Ready;
         target.submitting = true;
-        // A new prompt takes the log back to its newest event and keeps following it.
+        // Explicit input keeps this task selected when its waiting status clears.
         if prompt && self.selected_id() == Some(id) {
-            self.show_newest_log();
+            self.attention_selection = None;
+            self.interrupted_selection = None;
         }
     }
 
@@ -1123,6 +1125,7 @@ impl View {
             return;
         }
         self.leave_draft();
+        self.viewport.get_mut().task_selection = None;
         self.selected = selected;
         self.selected_draft = self
             .rows

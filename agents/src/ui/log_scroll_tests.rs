@@ -90,6 +90,39 @@ fn wheel(view: &mut View, forward: bool) {
 }
 
 #[test]
+fn sending_preserves_scrolled_log_detail_after_append() {
+    for images in [false, true] {
+        let (mut view, now) = fixture(true);
+        panel(&view, now);
+        for _ in 0..3 {
+            wheel(&mut view, true);
+            panel(&view, now);
+        }
+        let before = panel(&view, now);
+        let scroll = view.viewport.borrow().log_detail_scroll;
+        assert!(scroll > 0);
+        let id = view.selected_id().unwrap().clone();
+        let input = if images {
+            crate::providers::SessionInput::PromptWithImages {
+                text: "next".into(),
+                images: Vec::new(),
+            }
+        } else {
+            crate::providers::SessionInput::Prompt("next".into())
+        };
+        view.prepare_prompt();
+        view.input_sending(&id, &input);
+        view.input_complete(&id, &input, Ok(()));
+        let mut events = view.log.clone();
+        events.push(events.last().unwrap().clone());
+        view.set_log(events);
+        assert_eq!(view.log_selected, Some(1));
+        assert_eq!(view.viewport.borrow().log_detail_scroll, scroll);
+        assert_eq!(panel(&view, now), before);
+    }
+}
+
+#[test]
 fn log_scroll_short_content_moves_one_event_per_wheel() {
     let (mut view, now) = fixture(false);
     panel(&view, now);

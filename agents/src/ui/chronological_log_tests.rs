@@ -93,21 +93,152 @@ fn chronological_rows_follow_appends_at_bottom() {
 }
 
 #[test]
-fn sending_a_prompt_returns_the_log_to_live_tail() {
+fn sending_a_prompt_preserves_the_log_view_through_refresh() {
     let (_dir, mut view, events) = fixture();
     view.set_log(events[..8].to_vec());
     draw(&view);
-    view.navigate_log(KeyCode::Home);
+    view.select_log_event(Some(2));
+    view.viewport.borrow_mut().log_scroll = 1;
+    view.viewport.borrow_mut().log_detail_scroll = 3;
     draw(&view);
     assert!(!view.following_log());
     let id = view.selected_id().unwrap().clone();
-    view.input_sending(&id, &crate::providers::SessionInput::Prompt("next".into()));
+    view.prepare_prompt();
+    view.handle_paste("next");
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(Action::SendPrompt {
+            id: id.clone(),
+            text: "next".into()
+        })
+    );
+    let input = crate::providers::SessionInput::Prompt("next".into());
+    let task_scroll = view.viewport.borrow().scroll;
+    view.input_sending(&id, &input);
     draw(&view);
-    assert!(view.following_log());
+    assert!(!view.following_log());
+    assert_eq!(view.log_selected, Some(2));
+    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 3);
+    view.input_complete(&id, &input, Ok(()));
+    let mut rows = view.rows.clone();
+    rows[view.selected].status = SessionStatus::Working;
+    rows[view.selected].updated_at = Utc::now();
+    view.set_sessions(rows, false);
     view.set_log(events[..10].to_vec());
     draw(&view);
-    assert_eq!(view.viewport.borrow().log_rows, vec![6, 7, 8, 9]);
-    assert_eq!(view.viewport.borrow().log_unseen, 0);
+    assert_eq!(view.selected_id(), Some(&id));
+    assert_eq!(view.viewport.borrow().scroll, task_scroll);
+    assert_eq!(view.log_selected, Some(2));
+    assert_eq!(view.visible_log_event(), Some(&events[2]));
+    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 3);
+    assert_eq!(view.viewport.borrow().log_unseen, 2);
+}
+
+#[test]
+fn transcript_reset_preserves_the_selected_event() {
+    let (_dir, mut view, _) = fixture();
+    let path = view.selected_row().unwrap().transcript.clone().unwrap();
+    let mut reader = crate::providers::claude::log::Reader::new(path.clone(), true);
+    view.apply_log_update(reader.refresh(usize::MAX).unwrap());
+    draw(&view);
+    assert!(view.log.len() > 4);
+    view.select_log_event(Some(2));
+    view.viewport.borrow_mut().log_scroll = 1;
+    view.viewport.borrow_mut().log_detail_scroll = 3;
+    let selected = view.visible_log_event().unwrap().clone();
+    // Replacing the file causes the real reader to replay the same transcript.
+    let replacement = path.with_extension("replacement");
+    std::fs::copy(&path, &replacement).unwrap();
+    std::fs::rename(replacement, path).unwrap();
+    let update = reader.refresh(usize::MAX).unwrap();
+    assert!(update.reset);
+    view.apply_log_update(update);
+    draw(&view);
+    assert_eq!(view.visible_log_event(), Some(&selected));
+    assert_eq!(view.log_selected, Some(2));
+    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 3);
+}
+
+#[test]
+fn sending_a_prompt_keeps_existing_live_tail() {
+    for selection in [None, Some(7)] {
+        let (_dir, mut view, events) = fixture();
+        view.set_log(events[..8].to_vec());
+        draw(&view);
+        view.log_selected = selection;
+        let id = view.selected_id().unwrap().clone();
+        view.input_sending(&id, &crate::providers::SessionInput::Prompt("next".into()));
+        view.set_log(events[..10].to_vec());
+        draw(&view);
+        view.assert_log_tail();
+    }
+}
+
+#[test]
+fn sending_refresh_preserves_task_selection_and_scroll_after_reordering() {
+    let (_dir, mut view, _) = fixture();
+    let template = view.rows[0].clone();
+    let rows = (0..16)
+        .map(|i| {
+            let mut row = template.clone();
+            row.id.id = format!("task-{i}");
+            row.status = SessionStatus::Ready;
+            row.updated_at = template.updated_at + chrono::Duration::seconds(i);
+            row
+        })
+        .collect();
+    view.set_sessions(rows, false);
+    let selected = view
+        .rows
+        .iter()
+        .position(|row| row.id.id == "task-8")
+        .unwrap();
+    view.select(selected);
+    let area = Rect::new(0, 0, 80, 5);
+    view.render_center_rows(area, &mut Buffer::empty(area), Utc::now());
+    let scroll = view.viewport.borrow().scroll;
+    assert!(scroll > 0);
+    let id = view.selected_id().unwrap().clone();
+    view.input_sending(&id, &crate::providers::SessionInput::Prompt("next".into()));
+    let mut rows = view.rows.clone();
+    rows[view.selected].status = SessionStatus::Working;
+    rows[view.selected].updated_at = Utc::now();
+    view.set_sessions(rows, false);
+    view.render_center_rows(area, &mut Buffer::empty(area), Utc::now());
+    assert_eq!(view.selected_id(), Some(&id));
+    assert_eq!(view.viewport.borrow().scroll, scroll);
+}
+
+#[test]
+fn sending_to_attention_task_keeps_that_task_when_it_starts_working() {
+    let (_dir, mut view, events) = fixture();
+    let mut original = view.rows[0].clone();
+    original.status = SessionStatus::Ready;
+    view.set_sessions(vec![original.clone()], false);
+    let mut waiting = original.clone();
+    waiting.id.id = "waiting-task".into();
+    waiting.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), waiting.clone()], false);
+    assert_eq!(view.attention_selection.as_ref(), Some(&waiting.id));
+    assert_eq!(view.selected_id(), Some(&waiting.id));
+    view.set_log(events[..8].to_vec());
+    view.select_log_event(Some(2));
+    view.viewport.borrow_mut().log_scroll = 1;
+    view.viewport.borrow_mut().log_detail_scroll = 3;
+    view.prepare_prompt();
+    view.input_sending(
+        &waiting.id,
+        &crate::providers::SessionInput::Prompt("next".into()),
+    );
+    waiting.status = SessionStatus::Working;
+    view.set_sessions(vec![original, waiting.clone()], false);
+    assert_eq!(view.selected_id(), Some(&waiting.id));
+    assert_eq!(view.log_selected, Some(2));
+    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 3);
 }
 
 #[test]
