@@ -90,9 +90,15 @@ local-step times include nested work and phase totals can overlap.
 
 ## Tests
 
-Run `npm run test:intel` from the marketplace root. The unminify end-to-end check calls the real
-model with the user's Codex login and is not part of the suite; pass it sample files kept outside
-this repository:
+Run `npm run test:intel` from the marketplace root. The unminify real-model test is skipped
+unless `UNMINIFY_E2E=1`. Run its authored small JavaScript modules with the current Codex login:
+
+```sh
+npm run test:intel:unminify:e2e
+```
+
+It checks syntax checkpoints, binding safety, preserved exports, renamed imports and execution.
+To inspect a real-model run on your own sample files, use:
 
 ```sh
 node plugins/intel/skills/unminify/scripts/e2e.mjs <sample.js>...
