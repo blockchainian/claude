@@ -191,3 +191,13 @@ test('a real function fits exactly at both planning boundaries', () => {
   assert.ok(allBatches(planFile(functionSource,{...options,maxIds:count-1,contextBytes:budget})).length>1);
   assert.ok(allBatches(planFile(functionSource,{...options,maxIds:count,contextBytes:budget-1})).length>1);
 });
+
+test('request placeholder offsets reserve names across detached contexts', () => {
+  const source = 'const v3 = 10; function operation(a) { return a + v3; }\n//' + 'x'.repeat(300);
+  const { stages } = planFile(source, { contextBytes: 200 });
+  const batch = stages[1][0];
+  const payload = renderBatch(source, batch, new Map(), { placeholderOffset: 1, placeholderCount: 3 });
+  assert.deepEqual(Object.keys(payload.placeholders), ['v2']);
+  assert.match(payload.context, /v2 \+ _context\d+/);
+  assert.doesNotMatch(payload.context, /\bv3\b/);
+});

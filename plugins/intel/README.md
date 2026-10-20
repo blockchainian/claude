@@ -65,13 +65,20 @@ path.
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
+Unminify greedily packs pending batches within each file and stage, bounded by `--max-ids`
+(default 60) and `--context-bytes` (default 8000, including separators). Oversized original
+batches travel alone; top-level naming still finishes before function naming, and resume
+journals keep the original batch IDs.
+
 Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
 `.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
 performance summaries to `.unminify/performance.jsonl` in the target Git root. Telemetry
 contains no credentials or source text. Analyze the latest run locally with
 `node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo>`; optional `--run-id <id>`,
 `--window-seconds 10` and `--slow-files 10` select the run, window size and slow-file count.
-The JSON report includes windowed throughput, concurrency, latency and 429 counts, phase
+The JSON report and run summary include model HTTP-attempt count and median/mean names per
+request (retries included); attempt logs list batch IDs and name count. The report also includes
+windowed throughput, concurrency, latency and 429 counts, phase
 elapsed times and slow files. Summary latency/throughput include refresh HTTP attempts;
 local-step times include nested work and phase totals can overlap.
 
