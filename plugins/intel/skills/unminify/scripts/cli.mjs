@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadFragmentIndex } from './fragments.mjs';
+import { loadFragmentContext } from './fragments.mjs';
 import { randomUUID } from 'node:crypto';
 import { packBatches } from './pack.mjs';
 import { withTimings, timed, intervalMs, requestStats } from './timing.mjs';
@@ -89,7 +89,8 @@ export async function run(options, dependencies) {
       })) listed.add(file);
     }
     const files = [...listed];
-    const fragments = loadFragmentIndex(root, files);
+    const fragmentContext = loadFragmentContext(root, files);
+    const { fragments } = fragmentContext;
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
     summary.files = files.length;
     selectionEnd(); selectionEnd = null;
@@ -116,7 +117,7 @@ export async function run(options, dependencies) {
     if (api.runSyntaxFile) {
       for (const file of files) {
         const endSyntax = phase('syntax', file);
-        try { emit(api.runSyntaxFile(root, file, { fragment: fragments.has(file) })); }
+        try { emit(api.runSyntaxFile(root, file, { fragment: fragments.has(file), fragmentContext })); }
         finally { endSyntax(); }
       }
     }

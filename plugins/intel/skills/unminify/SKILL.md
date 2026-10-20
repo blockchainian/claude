@@ -35,7 +35,10 @@ Never print credentials.
 Before planning any names, the command restores numeric `void` expressions and minified
 booleans in every selected file. Only converted source ranges are replaced; surrounding
 text stays byte-identical. Fragment files retain their program bindings and declaration
-layout, and keep numeric `void` expressions when chunk-wide global identity is unknown.
+layout. Their numeric `void` expressions are restored only when the Git-root binding
+index (or the supplied input set outside Git) contains no program binding named
+`undefined`, and the current file passes binding and dynamic-scope checks. Direct
+API calls without index context retain numeric `void` in fragments.
 
 The command selects parseable `.js`/`.mjs` files, asks for names of non-import bindings shorter than `--min-symbol-length`,
 resolves naming conflicts, checks each completed file and writes it atomically. Top-level
