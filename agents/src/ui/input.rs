@@ -95,31 +95,48 @@ impl View {
         let click = self.pending_click.take().expect("click is due");
         match click.target {
             ClickTarget::Event { .. } | ClickTarget::ListBorder { .. } => None,
-            ClickTarget::TaskDetails {
-                session, source, ..
-            } => {
-                if self.selected_id() == Some(&session)
-                    && let Some(source) = source
-                    && let Some((full, _)) =
-                        self.event_panel
-                            .iter()
-                            .enumerate()
-                            .rev()
-                            .find(|(_, event)| {
-                                event.source.as_ref() == Some(&source)
-                                    || event.calls.iter().any(|call| call.id == source)
-                            })
-                {
-                    let index = self.shown_position(full);
-                    self.event_list.background_return = None;
-                    self.select_event(index);
-                }
-                None
-            }
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
             ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
-            ClickTarget::Background(_) | ClickTarget::Title(_) => None,
+            ClickTarget::TaskDetails { .. }
+            | ClickTarget::Background(_)
+            | ClickTarget::Title(_) => None,
         }
+    }
+
+    /// Double click on a task details body: select the event it came from, or copy a body no
+    /// event backs, such as a queued prompt or the task list.
+    fn activate_task_details(&mut self, target: ClickTarget) -> Option<Action> {
+        let ClickTarget::TaskDetails {
+            session,
+            source,
+            text,
+            label,
+        } = target
+        else {
+            return None;
+        };
+        let Some(source) = source else {
+            return Some(Action::Copy {
+                text,
+                label: label.into(),
+            });
+        };
+        if self.selected_id() == Some(&session)
+            && let Some((full, _)) = self
+                .event_panel
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, event)| {
+                    event.source.as_ref() == Some(&source)
+                        || event.calls.iter().any(|call| call.id == source)
+                })
+        {
+            let index = self.shown_position(full);
+            self.event_list.background_return = None;
+            self.select_event(index);
+        }
+        None
     }
 
     fn defer_click(&mut self, target: ClickTarget) -> bool {
@@ -518,6 +535,32 @@ impl View {
             .then_some(target)
     }
 
+    /// The task details body under `position` and the event its text came from.
+    fn task_details_target(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
+        let viewport = self.viewport.borrow();
+        if !viewport.task_details.contains(position) {
+            return None;
+        }
+        let (_, text, label) = viewport
+            .task_details_copy
+            .iter()
+            .find(|(rows, _, _)| rows.contains(&position.y))?;
+        let session = self.selected_row()?;
+        let source = match *label {
+            "Copied last activity" => session.task_details_sources[0].clone(),
+            "Copied update" => session.task_details_sources[1].clone(),
+            "Copied prompt" if *text == session.prompt => session.task_details_sources[2].clone(),
+            "Copied prompt" | "Copied tasks" => None,
+            _ => return None,
+        };
+        Some(ClickTarget::TaskDetails {
+            session: session.id.clone(),
+            source,
+            text: text.clone(),
+            label,
+        })
+    }
+
     fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
         let viewport = self.viewport.borrow();
         if viewport.task_details_title.contains(position)
@@ -539,26 +582,8 @@ impl View {
         if let Some(path) = self.link_at(position) {
             return Some(ClickTarget::Link(path));
         }
-        if viewport.task_details.contains(position)
-            && let Some((_, text, label)) = viewport
-                .task_details_copy
-                .iter()
-                .find(|(rows, _, _)| rows.contains(&position.y))
-            && let Some(session) = self.selected_row()
-        {
-            let source = match *label {
-                "Copied last activity" => session.task_details_sources[0].clone(),
-                "Copied update" => session.task_details_sources[1].clone(),
-                "Copied prompt" => session.task_details_sources[2].clone(),
-                "Copied tasks" => None,
-                _ => return None,
-            };
-            return Some(ClickTarget::TaskDetails {
-                session: session.id.clone(),
-                source,
-                text: text.clone(),
-                label,
-            });
+        if let Some(target) = self.task_details_target(position) {
+            return Some(target);
         }
         if let Some(border) = viewport
             .output_borders
@@ -996,17 +1021,10 @@ impl View {
                 };
                 if has_double {
                     if self.defer_click(ClickTarget::Link(target)) {
-                        let viewport = self.viewport.borrow();
-                        if viewport.task_details.contains(position) {
-                            return viewport
-                                .task_details_copy
-                                .iter()
-                                .find(|(rows, _, _)| rows.contains(&mouse.row))
-                                .map(|(_, text, label)| Action::Copy {
-                                    text: text.clone(),
-                                    label: (*label).into(),
-                                });
+                        if let Some(target) = self.task_details_target(position) {
+                            return self.activate_task_details(target);
                         }
+                        let viewport = self.viewport.borrow();
                         if viewport.event_panel.contains(position) {
                             drop(viewport);
                             return None;
@@ -1098,15 +1116,10 @@ impl View {
                 } else if let Some(target @ ClickTarget::TaskDetails { .. }) =
                     self.click_target_at(position)
                 {
-                    let ClickTarget::TaskDetails { text, label, .. } = &target else {
-                        unreachable!()
-                    };
-                    let action = Action::Copy {
-                        text: text.clone(),
-                        label: (*label).into(),
-                    };
                     if self.defer_click(target) {
-                        return Some(action);
+                        return self
+                            .task_details_target(position)
+                            .and_then(|target| self.activate_task_details(target));
                     }
                 } else if self.viewport.borrow().event_text.area.contains(position)
                     && let Some(session) = self.selected_id().cloned()

@@ -9611,17 +9611,17 @@ mod task_details_group_tests;
 mod task_details_order;
 
 #[test]
-fn task_details_activity_single_click_selects_source_and_double_click_copies() {
+fn task_details_activity_double_click_selects_source() {
     task_details_click_selects_source(7, "Copied last activity");
 }
 
 #[test]
-fn task_details_update_single_click_selects_source_and_double_click_copies() {
+fn task_details_update_double_click_selects_source() {
     task_details_click_selects_source(6, "Copied update");
 }
 
 #[test]
-fn task_details_prompt_single_click_selects_source_and_double_click_copies() {
+fn task_details_prompt_double_click_selects_source() {
     task_details_click_selects_source(0, "Copied prompt");
 }
 
@@ -9662,37 +9662,23 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
         .start;
     let x = view.viewport.borrow().task_details.x;
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+    let previous = view.event_panel[1].clone();
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
         None
     );
+    assert_eq!(view.visible_event(), Some(&previous), "{label}\n{rendered}");
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(view.visible_event(), Some(&expected), "{label}\n{rendered}");
     event_screen(&view, 160, 45, now);
     assert!(view.viewport.borrow().event_rows.contains(&index));
     assert_eq!(view.visible_event() == view.event_panel.last(), index == 7);
-    let previous = view.event_panel[1].clone();
-    view.select_fixture_event(Some(previous.clone()));
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(
-        click_mouse(&mut view, click),
-        Some(Action::Copy {
-            text: expected.body.clone(),
-            label: label.into(),
-        })
-    );
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + view.double_click_interval),
-        None
-    );
-    assert_eq!(view.visible_event(), Some(&previous));
     view.set_event(Vec::new());
     event_screen(&view, 160, 45, now);
     assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + view.double_click_interval),
-        None
-    );
+    assert_eq!(click_mouse(&mut view, click), None);
     assert!(view.event_list.cursor.is_none());
 }
 
