@@ -209,9 +209,76 @@ test('temporary rate limits retry rather than terminally exhausting the client',
     if (calls === 1) { res.writeHead(429); res.end(JSON.stringify({ error: { code: 'rate_limit_exceeded' } })); }
     else send(res);
   });
-  const c = f.client();
+  const c = f.client({ rateLimitDelayMs: 20 });
   await c.respond(request); await c.respond(request);
   assert.equal(calls, 3);
+});
+
+test('429 pauses all concurrent and queued calls, extends the shared deadline and preserves retries', async t => {
+  const attempts = new Map(), arrivals = [], pauses = [];
+  let initial = 0, release;
+  const ready = new Promise(resolve => { release = resolve; });
+  const f = await fixture(t, async (req, res, body) => {
+    const id = Number(body.instructions);
+    const attempt = (attempts.get(id) ?? 0) + 1;
+    attempts.set(id, attempt);
+    arrivals.push({ id, attempt, at: performance.now() });
+    if (attempt === 1 && id < 3) {
+      if (++initial === 3) release();
+      await ready;
+      if (id === 1) await delay(30);
+      if (id === 2) { await delay(45); return send(res); }
+    }
+    if (id < 2 && attempt <= 5 && !(id === 0 && attempt === 2)) {
+      const seconds = id === 1 && attempt === 1 ? 0.09 : 0.06;
+      const start = performance.now();
+      pauses.push({ start, end: start + seconds * 1000 });
+      res.writeHead(429, { 'retry-after': String(seconds) });
+      res.flushHeaders();
+      // Pausing starts at the headers, even if the error body arrives later.
+      if (id === 0 && attempt === 1) await delay(50);
+      return res.end(JSON.stringify({ detail: 'Rate limit exceeded' }));
+    }
+    if (id === 0 && [2, 6, 7].includes(attempt)) {
+      res.writeHead(503); return res.end();
+    }
+    send(res);
+  });
+  const c = f.client({ concurrency: 3 });
+  const results = await Promise.all(Array.from({ length: 12 }, (_, id) =>
+    c.respond({ ...request, instructions: String(id) })));
+  assert(results.every(result => result.output === 'hello'));
+  assert.equal(attempts.get(0), 8);
+  assert.equal(attempts.get(1), 6);
+  // All initial streams arrived before these two pauses; later waves can have
+  // streams already in flight when a peer's 429 reaches the server.
+  const violations = arrivals.filter(({ id, attempt, at }) => !(id < 3 && attempt === 1)
+    && pauses.slice(0, 2).some(({ start, end }) => at >= start && at < end));
+  assert.deepEqual(violations, [], 'no new requests reach the server during any shared pause');
+  assert.equal(f.logs.filter(event => event.status === 429).length, 9);
+  assert(f.logs.filter(event => event.status === 429).every(event => event.rate_headers['retry-after']));
+  assert.equal(f.logs.length, arrivals.length);
+});
+
+test('missing or invalid retry-after uses the configured default pause', async t => {
+  for (const header of [undefined, 'invalid']) {
+    const arrivals = [];
+    let pausedAt;
+    const f = await fixture(t, (req, res) => {
+      arrivals.push(performance.now());
+      if (arrivals.length === 1) {
+        pausedAt = performance.now();
+        res.writeHead(429, header === undefined ? {} : { 'retry-after': header });
+        res.end(JSON.stringify({ detail: 'Rate limit exceeded' }));
+      } else send(res);
+    });
+    const c = f.client({ concurrency: 1, rateLimitDelayMs: 40 });
+    const results = await Promise.all([c.respond(request), c.respond(request)]);
+    assert(results.every(result => result.output === 'hello'));
+    assert.equal(arrivals.length, 3);
+    assert(arrivals.slice(1).every(at => at >= pausedAt + 40));
+    assert.equal(f.logs.filter(event => event.status === 429).length, 1);
+  }
 });
 
 test('optional schema parses JSON and retries rejected asynchronous validation', async t => {
@@ -368,6 +435,33 @@ test('usage exhaustion stops queued and subsequent requests', async t => {
   assert(results.every(r => r.status === 'rejected' && r.reason.code === 'USAGE_LIMIT'));
   await assert.rejects(c.respond(request), { code: 'USAGE_LIMIT' });
   assert.equal(calls, 1);
+});
+
+test('usage exhaustion immediately wakes calls waiting on the shared rate limit', { timeout: 1000 }, async t => {
+  let limited;
+  const paused = new Promise(resolve => { limited = resolve; });
+  let calls = 0;
+  const f = await fixture(t, async (req, res, body) => {
+    calls++;
+    if (body.instructions === 'quota') {
+      await paused;
+      res.writeHead(429, { 'retry-after': '39' });
+      res.end(JSON.stringify({ error: { type: 'usage_limit_reached' } }));
+    } else {
+      res.writeHead(429, { 'retry-after': '39' });
+      res.end(JSON.stringify({ detail: 'Rate limit exceeded' }));
+    }
+  });
+  const c = f.client({ concurrency: 2, log: event => {
+    f.logs.push(event);
+    if (event.status === 429) limited();
+  } });
+  const results = await Promise.allSettled([c.respond(request),
+    c.respond({ ...request, instructions: 'quota' }), c.respond(request)]);
+  assert(results.every(result => result.status === 'rejected' && result.reason.code === 'USAGE_LIMIT'));
+  await assert.rejects(c.respond(request), { code: 'USAGE_LIMIT' });
+  assert.equal(calls, 2);
+  assert.equal(f.logs.length, 2);
 });
 
 test('quota errors in SSE stop further requests', async t => {

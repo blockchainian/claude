@@ -102,9 +102,11 @@ async function consume(response, metrics) {
  */
 export function createCodexClient({ concurrency = 20, codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'),
   log = () => {}, baseUrl = 'https://chatgpt.com/backend-api/codex',
-  refreshUrl = 'https://auth.openai.com/oauth/token', timeoutMs = 120_000, retryDelayMs = 500 } = {}) {
+  refreshUrl = 'https://auth.openai.com/oauth/token', timeoutMs = 120_000, retryDelayMs = 500,
+  rateLimitDelayMs = 60_000 } = {}) {
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('Invalid concurrency.');
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(retryDelayMs) || retryDelayMs < 0)
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(retryDelayMs) || retryDelayMs < 0
+    || !Number.isFinite(rateLimitDelayMs) || rateLimitDelayMs <= 0)
     throw new Error('Invalid request timing.');
   const authPath = resolve(codexHome, 'auth.json');
   const endpoint = `${baseUrl.replace(/\/$/, '')}/responses`;
@@ -112,6 +114,25 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
   let terminal, accepting = true, active = 0;
   const queue = [], drain = [];
   const sessions = new Map(), connections = new Set();
+  let pausedUntil = 0, pauseWait;
+  const stopped = new AbortController();
+
+  function stop(error) {
+    terminal = error;
+    stopped.abort();
+    return error;
+  }
+  async function waitForRateLimit() {
+    if (terminal) throw terminal;
+    if (performance.now() >= pausedUntil) return;
+    if (!pauseWait) pauseWait = (async () => {
+      while (performance.now() < pausedUntil) {
+        await delay(Math.min(pausedUntil - performance.now(), 2_147_483_647), undefined,
+          { signal: stopped.signal });
+      }
+    })().catch(error => { throw terminal ?? error; }).finally(() => { pauseWait = undefined; });
+    await pauseWait;
+  }
 
   function remember(auth) {
     for (const value of [auth.OPENAI_API_KEY, ...Object.values(auth.tokens ?? {})])
@@ -171,6 +192,12 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
         }
         metrics.status = responseHeaders[':status'];
         metrics.rate_headers = rateHeaders(Object.entries(responseHeaders), secrets);
+        if (url === endpoint && metrics.status === 429) {
+          const value = responseHeaders['retry-after'];
+          const seconds = typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : NaN;
+          const waitMs = Number.isFinite(seconds * 1000) ? seconds * 1000 : rateLimitDelayMs;
+          pausedUntil = Math.max(pausedUntil, performance.now() + waitMs);
+        }
         resolve({ status: metrics.status, ok: metrics.status >= 200 && metrics.status < 300, body: stream });
       });
       stream.end(payload);
@@ -300,6 +327,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
         const reason = refreshReason(auth);
         if (reason) auth = await refresh(auth, reason);
         for (;;) {
+          await waitForRateLimit();
           if (terminal) throw terminal;
           const result = await logged('model', async metrics => {
             let response;
@@ -312,7 +340,8 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
                 let error;
                 try { error = JSON.parse(await responseText(response)).error; } catch { /* Only structured codes classify quota errors. */ }
                 if (hasQuotaError(error)) throw quotaError();
-                if (response.status >= 500 || response.status === 429) throw retryError(`Responses HTTP ${response.status}.`);
+                if (response.status === 429) return { rateLimited: true };
+                if (response.status >= 500) throw retryError(`Responses HTTP ${response.status}.`);
                 throw new Error(`Responses HTTP ${response.status}.`);
               }
               const text = await consume(response, metrics);
@@ -325,18 +354,19 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
               }
               return { output, usage: metrics.usage };
             } catch (error) {
-              if (error.code === 'USAGE_LIMIT') { terminal = error; throw error; }
+              if (error.code === 'USAGE_LIMIT') throw stop(error);
               if (error.retryable || /^Responses HTTP \d+\.$/.test(error.message)) throw error;
               throw retryError('Responses network or stream failure.');
             } finally { if (response?.body) response.body.close(constants.NGHTTP2_CANCEL); }
           });
+          if (result.rateLimited) continue;
           if (!result.unauthorized) return result;
           if (recovered) throw authError();
           recovered = true;
           auth = await refresh(auth, 'unauthorized_recovery');
         }
       } catch (error) {
-        if (['AUTH', 'USAGE_LIMIT'].includes(error.code)) { terminal = error; throw error; }
+        if (['AUTH', 'USAGE_LIMIT'].includes(error.code)) throw stop(error);
         if (!error.retryable || attempt === 3) throw new Error(error.message);
         await delay(retryDelayMs * 2 ** attempt);
       }
