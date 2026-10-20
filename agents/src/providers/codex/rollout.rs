@@ -1,7 +1,9 @@
 use crate::event::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::text::printable;
-use crate::providers::tool::{self, Output, list_title, tool_kind};
+#[cfg(test)]
+use crate::providers::tool::Output;
+use crate::providers::tool::{self, list_title, tool_kind};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -22,7 +24,7 @@ fn output_sections(text: &str, mode: Option<Output>) -> Vec<Section> {
 
 const CHUNK: u64 = 64 * 1024;
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct Summary {
     pub prompt_at: Option<DateTime<Utc>>,
     pub cache_expires_at: Option<DateTime<Utc>>,
@@ -37,9 +39,13 @@ pub(super) struct Summary {
     pub tasks: Vec<SessionTask>,
 }
 
-/// Retains the last complete plan while reading only appended transcript lines.
+/// Reuses a file generation's decoded records, summary and last complete plan.
 #[derive(Default)]
 pub(super) struct Tasks {
+    #[cfg(test)]
+    parsed_bytes: u64,
+    reader: Option<Reader>,
+    summary: Option<Summary>,
     offset: u64,
     identity: Option<(u64, u64)>,
     tasks: Vec<SessionTask>,
@@ -76,11 +82,95 @@ fn questions(input: &Value) -> io::Result<Vec<crate::ask::Question>> {
 
 impl Tasks {
     pub(super) fn summary(&mut self, path: &Path) -> io::Result<Summary> {
-        let mut result = summary(path)?;
-        result.tasks = self.read(path)?;
+        let result = self.refresh_summary(path);
+        if result.is_err() {
+            self.reader = None;
+            self.summary = None;
+            self.tasks.clear();
+            self.offset = 0;
+        }
+        result
+    }
+
+    fn refresh_summary(&mut self, path: &Path) -> io::Result<Summary> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::metadata(path)?;
+        if let Some(reader) = &self.reader
+            && reader.identity == Some((metadata.dev(), metadata.ino()))
+            && reader.observed_len == metadata.len()
+            && reader.modified == Some(metadata.modified()?)
+            && let Some(summary) = &self.summary
+        {
+            return Ok(summary.clone());
+        }
+        let reader = self
+            .reader
+            .get_or_insert_with(|| Reader::new(path.to_owned(), false));
+        let update = reader.read_summary()?;
+        #[cfg(test)]
+        {
+            self.parsed_bytes += update.parsed_bytes;
+        }
+        if update.reset {
+            self.tasks.clear();
+            self.offset = 0;
+        }
+        let start = reader
+            .records
+            .partition_point(|(offset, _)| *offset < self.offset);
+        for (offset, record) in &reader.records[start..] {
+            if *offset >= reader.read {
+                continue;
+            }
+            let payload = &record["payload"];
+            if record["type"] == "response_item"
+                && payload["type"] == "function_call"
+                && payload["name"]
+                    .as_str()
+                    .is_some_and(|name| tool::rule(name).task == Some(tool::TaskAction::Plan))
+            {
+                self.tasks = plan_tasks(payload)?;
+            }
+        }
+        self.offset = reader.read;
+        self.identity = reader.identity;
+        let latest = latest_activity_records(path, &reader.records, reader.metadata.as_ref())?;
+        let mut result = summary_records(
+            reader
+                .records
+                .iter()
+                .rev()
+                .map(|(offset, record)| (record, *offset)),
+            latest.as_ref(),
+        )?;
+        result.tasks = self.tasks.clone();
+        self.summary = Some(result.clone());
         Ok(result)
     }
 
+    pub(super) fn first_prompt(
+        &mut self,
+        prompt: &str,
+    ) -> io::Result<(Vec<Image>, Option<String>)> {
+        let reader = self
+            .reader
+            .as_ref()
+            .ok_or_else(|| io::Error::other("Codex summary is not loaded"))?;
+        Ok(if reader.history_start.is_some() {
+            (Vec::new(), None)
+        } else {
+            first_prompt_records(
+                reader
+                    .records
+                    .iter()
+                    .map(|(offset, record)| (*offset, record)),
+                &reader.line_ends,
+                prompt,
+            )
+        })
+    }
+
+    #[cfg(test)]
     fn read(&mut self, path: &Path) -> io::Result<Vec<SessionTask>> {
         use std::os::unix::fs::MetadataExt;
         let mut file = File::open(path)?;
@@ -150,13 +240,23 @@ fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
 }
 
 /// Read the subagent boundary from the first session metadata record.
-fn history_start(file: &mut File) -> io::Result<Option<u64>> {
+fn read_metadata(file: &mut File) -> io::Result<Option<Value>> {
     file.seek(SeekFrom::Start(0))?;
     let mut line = Vec::new();
     io::BufReader::new(file).read_until(b'\n', &mut line)?;
-    let Ok(record) = serde_json::from_slice::<Value>(&line) else {
-        return Ok(None);
-    };
+    Ok(serde_json::from_slice(&line).ok())
+}
+
+#[cfg(test)]
+fn history_start(file: &mut File) -> io::Result<Option<u64>> {
+    read_metadata(file)?
+        .as_ref()
+        .map(history_from_record)
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn history_from_record(record: &Value) -> io::Result<Option<u64>> {
     if record["type"] != "session_meta" {
         return Ok(None);
     }
@@ -182,6 +282,7 @@ fn inherited(record: &Value, start: Option<u64>) -> bool {
 }
 
 /// Walk complete JSON records newest first, retaining records spanning chunks.
+#[cfg(test)]
 fn walk(path: &Path, mut visit: impl FnMut(Value, u64) -> io::Result<bool>) -> io::Result<()> {
     let mut file = File::open(path)?;
     let history = history_start(&mut file)?;
@@ -455,6 +556,7 @@ fn response_tool_name(payload: &Value) -> String {
     }
 }
 
+#[cfg(test)]
 fn tool_body(payload: &Value) -> Option<String> {
     let name = payload["name"].as_str()?;
     // Wrapper calls are represented by their completed inner items.
@@ -822,6 +924,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
 
 /// Read only through the SQLite prompt and its following completed item.
 /// Prompt text itself comes from SQLite; rollout records supply attachments.
+#[cfg(test)]
 pub(super) fn first_prompt(
     path: &Path,
     first_user_message: &str,
@@ -876,7 +979,94 @@ pub(super) fn first_prompt(
     Ok((Vec::new(), None))
 }
 
+fn first_prompt_records<'a>(
+    records: impl IntoIterator<Item = (u64, &'a Value)>,
+    line_ends: &HashMap<u64, u64>,
+    first_user_message: &str,
+) -> (Vec<Image>, Option<String>) {
+    let mut records = records.into_iter();
+    while let Some((offset, record)) = records.next() {
+        if (record["type"] == "session_meta"
+            && record["payload"]
+                .get("subagent_history_start_ordinal")
+                .is_some())
+            || completed_user(record)
+        {
+            return (Vec::new(), None);
+        }
+        let payload = &record["payload"];
+        if record["type"] != "response_item"
+            || payload["type"] != "message"
+            || payload["role"] != "user"
+            || is_context_message(payload)
+        {
+            continue;
+        }
+        let prompt = user_prompt(&payload["content"]);
+        if !prompt
+            .body()
+            .is_some_and(|text| text.chars().take(512).eq(first_user_message.chars()))
+        {
+            continue;
+        }
+        let images = if prompt.attachments.is_empty() {
+            Vec::new()
+        } else {
+            let completed = records
+                .next()
+                .filter(|(next, _)| line_ends.get(&offset) == Some(next))
+                .map(|(_, record)| record)
+                .filter(|record| completed_user(record));
+            prompt_images(&prompt, payload, completed)
+        };
+        return (images, Some(source(record, offset)));
+    }
+    (Vec::new(), None)
+}
+
+/// Uses the already decoded tail, expanding only until the last call is paired.
+fn latest_activity_records(
+    path: &Path,
+    records: &[(u64, Value)],
+    metadata: Option<&Value>,
+) -> io::Result<Option<Event>> {
+    let mut start = records.partition_point(|(offset, _)| {
+        *offset
+            < records
+                .last()
+                .map_or(0, |(offset, _)| offset.saturating_sub(CHUNK))
+    });
+    let mut requested = 16;
+    loop {
+        let entries = events_with_context(path, &records[start..], usize::MAX, None, metadata)?;
+        if start == 0
+            || (entries.len() > requested && !missing_assistant_context(&records[start..]))
+        {
+            if let Some((index, (_, event))) = entries
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, (_, event))| !event.calls.is_empty())
+                && (index > 0 || start == 0)
+            {
+                return Ok(Some(event.clone()));
+            }
+            if start == 0 {
+                return Ok(None);
+            }
+            requested = entries.len().saturating_add(16);
+        }
+        let target = records[start].0.saturating_sub(CHUNK);
+        let next = records[..start]
+            .partition_point(|(offset, _)| *offset < target)
+            .min(start - 1);
+        debug_assert!(next < start, "summary tail did not advance");
+        start = next;
+    }
+}
+
 /// Read the same parsed rows as the event list, including call/result and message pairing.
+#[cfg(test)]
 fn latest_activity(path: &Path) -> io::Result<Option<Event>> {
     let mut reader = Reader::new(path.to_path_buf(), false);
     let mut requested = 16;
@@ -899,9 +1089,26 @@ fn latest_activity(path: &Path) -> io::Result<Option<Event>> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
+    let latest = latest_activity(path)?;
+    let mut records = Vec::new();
+    walk(path, |record, offset| {
+        records.push((offset, record));
+        Ok(true)
+    })?;
+    summary_records(
+        records.iter().map(|(offset, record)| (record, *offset)),
+        latest.as_ref(),
+    )
+}
+
+fn summary_records<'a>(
+    records: impl IntoIterator<Item = (&'a Value, u64)>,
+    latest: Option<&Event>,
+) -> io::Result<Summary> {
     let mut summary = Summary::default();
-    if let Some(event) = latest_activity(path)? {
+    if let Some(event) = latest {
         summary.task_details_sources[0] = event.source.clone();
         summary.activity = Some(event.activity());
     }
@@ -914,9 +1121,9 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut cache_response_id = None;
     let mut cache_request_at = None;
     let mut cache_resolved = false;
-    walk(path, |record, offset| {
-        let Some(at) = timestamp(&record) else {
-            return Ok(true);
+    for (record, offset) in records {
+        let Some(at) = timestamp(record) else {
+            continue;
         };
         summary.updated_at.get_or_insert(at);
         let payload = &record["payload"];
@@ -990,11 +1197,11 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                 _ => {}
             }
         }
-        let message = assistant_text(&record)?;
-        let message_source = assistant_source(&record, offset);
+        let message = assistant_text(record)?;
+        let message_source = assistant_source(record, offset);
         // Both stored forms share a message id. A turn can contain several
         // replies, so only the completion for the selected id can replace it.
-        let selected_completion = completed_assistant(&record)
+        let selected_completion = completed_assistant(record)
             && message_source.is_some()
             && message_source == summary.task_details_sources[1];
         let resolves_source = !message_source_closed
@@ -1006,25 +1213,80 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             summary.task_details_sources[1] = message_source.clone();
             summary.last_message = Some(printable(text));
             summary.last_message_at = Some(at);
-            message_pending_completion = message_source.is_some() && !completed_assistant(&record);
+            message_pending_completion = message_source.is_some() && !completed_assistant(record);
         }
         // Completion notifications repeat the reply but have no event row. Keep
         // the identity of the latest message record in that turn instead.
         if summary.task_details_sources[1].is_none() && !message_source_closed && message.is_some()
         {
-            summary.task_details_sources[1] = assistant_source(&record, offset);
+            summary.task_details_sources[1] = assistant_source(record, offset);
         }
-        Ok(!(boundary
+        if boundary
             && cache_resolved
             && summary.prompt_at.is_some()
             && summary.last_message.is_some()
             && summary.activity.is_some()
             && !message_pending_completion
-            && (summary.task_details_sources[1].is_some() || message_source_closed)))
-    })?;
+            && (summary.task_details_sources[1].is_some() || message_source_closed)
+        {
+            break;
+        }
+    }
     summary.cache_expires_at = cache_request_at.map(|at| at + chrono::Duration::minutes(30));
     summary.pending_questions = pending.into_iter().rev().flatten().collect();
     Ok(summary)
+}
+
+/// Retain only fields read by summary, event pairing and first-prompt selection.
+/// Raw response bodies and injected context can repeat the whole conversation.
+fn summary_record(mut record: Value) -> Value {
+    if record["type"] == "session_meta" {
+        return record;
+    }
+    let payload = &record["payload"];
+    let context = record["type"] == "response_item"
+        && payload["type"] == "message"
+        && payload["role"] == "user"
+        && is_context_message(payload);
+    let keep_payload = event_candidate(&record)
+        || matches!(
+            (record["type"].as_str(), payload["type"].as_str()),
+            (
+                Some("response_item"),
+                Some("function_call_output" | "custom_tool_call_output")
+            ) | (
+                Some("event_msg"),
+                Some("task_started" | "task_complete" | "agent_message")
+            )
+        )
+        || matches!(
+            payload["item"]["type"].as_str(),
+            Some("SubAgentActivity" | "CollabAgentToolCall")
+        );
+    let cache = record["type"] == "event_msg" && payload["type"] == "raw_response_completed";
+    if let Some(payload) = record.get_mut("payload").and_then(Value::as_object_mut) {
+        if context {
+            payload.retain(|key, _| {
+                matches!(
+                    key.as_str(),
+                    "type" | "role" | "internal_chat_message_metadata_passthrough"
+                )
+            });
+            if let Some(metadata) = payload
+                .get_mut("internal_chat_message_metadata_passthrough")
+                .and_then(Value::as_object_mut)
+            {
+                metadata.retain(|key, _| key == "content_item_kinds");
+            }
+        } else if !keep_payload {
+            payload.retain(|key, _| key == "type" || (cache && key == "response_id"));
+        }
+    }
+    if let Some(record) = record.as_object_mut() {
+        record
+            .retain(|key, _| matches!(key.as_str(), "type" | "timestamp" | "ordinal" | "payload"));
+    }
+    record
 }
 
 /// Parsed rollout records and the byte range retained for backward paging.
@@ -1032,6 +1294,7 @@ pub(crate) struct Reader {
     path: PathBuf,
     identity: Option<(u64, u64)>,
     history_start: Option<u64>,
+    metadata: Option<Value>,
     observed_len: u64,
     modified: Option<std::time::SystemTime>,
     oldest: u64,
@@ -1039,6 +1302,7 @@ pub(crate) struct Reader {
     pending_offset: Option<u64>,
     pending_bytes: Vec<u8>,
     records: Vec<(u64, Value)>,
+    line_ends: HashMap<u64, u64>,
     entries: Vec<(u64, Event)>,
     dependencies: HashMap<String, u64>,
     latest_prompt: Option<u64>,
@@ -1052,6 +1316,7 @@ impl Reader {
             path,
             identity: None,
             history_start: None,
+            metadata: None,
             observed_len: 0,
             modified: None,
             oldest: 0,
@@ -1059,6 +1324,7 @@ impl Reader {
             pending_offset: None,
             pending_bytes: Vec::new(),
             records: Vec::new(),
+            line_ends: HashMap::new(),
             entries: Vec::new(),
             dependencies: HashMap::new(),
             latest_prompt: None,
@@ -1067,7 +1333,101 @@ impl Reader {
         }
     }
 
-    fn dependency(&mut self, record: &Value, offset: u64) -> u64 {
+    /// The session summary and plan share one decoded forward stream.
+    fn read_summary(&mut self) -> io::Result<crate::event::Update> {
+        use std::os::unix::fs::MetadataExt;
+        let mut file = File::open(&self.path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        let modified = metadata.modified()?;
+        let reset = self.identity != Some(identity)
+            || metadata.len() < self.observed_len
+            || (metadata.len() == self.observed_len && self.modified != Some(modified))
+            || !self.boundary.matches(&mut file)?;
+        if reset {
+            self.history_start = None;
+            self.metadata = None;
+            self.line_ends.clear();
+            self.records.clear();
+            self.read = 0;
+            self.pending_offset = None;
+            self.pending_bytes.clear();
+        }
+        let pending = self.pending_offset.take();
+        let pending_bytes = std::mem::take(&mut self.pending_bytes);
+        let mut pending_record = pending.and_then(|offset| {
+            self.records.last().filter(|(last, _)| *last == offset)?;
+            self.records.pop().map(|(_, record)| record)
+        });
+        let mut offset = self.read;
+        let mut parsed_bytes = 0;
+        let mut invalid_history = None;
+        self.read = crate::jsonl::read_lines(&mut file, self.read, |line| {
+            let record = if pending == Some(offset) && line == pending_bytes {
+                pending_record.take()
+            } else {
+                parsed_bytes += line.len() as u64 + 1;
+                serde_json::from_slice::<Value>(line).ok()
+            };
+            if let Some(record) = record {
+                if offset == 0 {
+                    self.metadata = Some(record.clone());
+                    match history_from_record(&record) {
+                        Ok(history) => self.history_start = history,
+                        Err(error) => invalid_history = Some(error),
+                    }
+                }
+                if !inherited(&record, self.history_start) {
+                    self.line_ends
+                        .insert(offset, offset + line.len() as u64 + 1);
+                    self.records.push((offset, summary_record(record)));
+                }
+            }
+            offset += line.len() as u64 + 1;
+        })?;
+        if let Some(error) = invalid_history {
+            return Err(error);
+        }
+        parsed_bytes += self.read_pending(&mut file)?;
+        if let Some((offset, record)) = self.records.last()
+            && Some(*offset) == self.pending_offset
+        {
+            self.line_ends.insert(*offset, metadata.len());
+            if *offset == 0 {
+                self.metadata = Some(record.clone());
+                self.history_start = history_from_record(record)?;
+            }
+        }
+        if let Some((offset, record)) = self.records.last_mut()
+            && Some(*offset) == self.pending_offset
+        {
+            *record = summary_record(std::mem::take(record));
+        }
+        self.records
+            .retain(|(_, record)| !inherited(record, self.history_start));
+        self.identity = Some(identity);
+        self.modified = Some(modified);
+        self.observed_len = metadata.len();
+        self.boundary.capture(&mut file, self.read)?;
+        Ok(crate::event::Update {
+            reset,
+            parsed_bytes,
+            events: Vec::new(),
+            appended: 0,
+            replaced: 0,
+            prepended: 0,
+            oldest_offset: 0,
+            read_offset: self.read,
+        })
+    }
+
+    fn dependency(
+        entries: &[(u64, Event)],
+        dependencies: &mut HashMap<String, u64>,
+        latest_prompt: &mut Option<u64>,
+        record: &Value,
+        offset: u64,
+    ) -> u64 {
         let payload = &record["payload"];
         let mut affected = offset;
         if record["type"] == "response_item"
@@ -1081,7 +1441,7 @@ impl Reader {
                         )
                     })
                     .is_some_and(|message| message.kind == "MESSAGE"))
-            && let Some((previous_offset, previous)) = self.entries.last()
+            && let Some((previous_offset, previous)) = entries.last()
             && previous.calls.first().is_some_and(|call| {
                 call.agent_message
                     .as_ref()
@@ -1098,16 +1458,21 @@ impl Reader {
         .into_iter()
         .flatten()
         {
-            affected = affected.min(*self.dependencies.entry(id.to_owned()).or_insert(offset));
+            affected = affected.min(
+                *dependencies
+                    .entry(id.to_owned())
+                    .and_modify(|previous| *previous = (*previous).min(offset))
+                    .or_insert(offset),
+            );
         }
         if completed_user(record) {
-            affected = affected.min(self.latest_prompt.unwrap_or(offset));
+            affected = affected.min(latest_prompt.unwrap_or(offset));
         }
         if record["type"] == "response_item"
             && payload["type"] == "message"
             && payload["role"] == "user"
         {
-            self.latest_prompt = Some(offset);
+            *latest_prompt = Some(latest_prompt.map_or(offset, |previous| previous.max(offset)));
         }
         affected
     }
@@ -1147,7 +1512,13 @@ impl Reader {
         let mut replaced = 0;
         if reset {
             self.identity = Some(identity);
-            self.history_start = history_start(&mut file)?;
+            self.metadata = read_metadata(&mut file)?;
+            self.history_start = self
+                .metadata
+                .as_ref()
+                .map(history_from_record)
+                .transpose()?
+                .flatten();
             self.read = crate::jsonl::complete_end(&mut file)?;
             self.oldest = self.read;
             self.records.clear();
@@ -1157,12 +1528,31 @@ impl Reader {
             self.shown = 0;
             self.pending_offset = None;
             parsed_bytes += self.read_pending(&mut file)?;
-            self.entries = events(&self.path, &self.records, usize::MAX)?;
+            self.entries = events_with_context(
+                &self.path,
+                &self.records,
+                usize::MAX,
+                None,
+                self.metadata.as_ref(),
+            )?;
         } else if changed && metadata.len() > self.read {
+            if self.read == 0 {
+                self.metadata = read_metadata(&mut file)?;
+                self.history_start = self
+                    .metadata
+                    .as_ref()
+                    .map(history_from_record)
+                    .transpose()?
+                    .flatten();
+            }
             let pending = self.pending_offset.take();
             let pending_bytes = std::mem::take(&mut self.pending_bytes);
-            let pending_record =
-                pending.and_then(|_| self.records.last().map(|(_, record)| record.clone()));
+            let mut pending_record = pending.and_then(|offset| {
+                self.records
+                    .last()
+                    .filter(|(last_offset, _)| *last_offset == offset)?;
+                self.records.pop().map(|(_, record)| record)
+            });
             let mut reused = 0;
             if let Some(pending) = pending {
                 self.records.truncate(
@@ -1174,8 +1564,8 @@ impl Reader {
             let mut incoming = Vec::new();
             let end = crate::jsonl::read_lines(&mut file, self.read, |line| {
                 if pending == Some(offset) && line == pending_bytes {
-                    if let Some(record) = &pending_record {
-                        incoming.push((offset, record.clone()));
+                    if let Some(record) = pending_record.take() {
+                        incoming.push((offset, record));
                         reused += line.len() as u64;
                     }
                 } else if let Ok(record) = serde_json::from_slice::<Value>(line) {
@@ -1188,12 +1578,24 @@ impl Reader {
             incoming.retain(|(_, record)| !inherited(record, self.history_start));
             let mut affected = pending.unwrap_or(end);
             for (offset, record) in &incoming {
-                affected = affected.min(self.dependency(record, *offset));
+                affected = affected.min(Self::dependency(
+                    &self.entries,
+                    &mut self.dependencies,
+                    &mut self.latest_prompt,
+                    record,
+                    *offset,
+                ));
             }
             self.records.extend(incoming);
             parsed_bytes += self.read_pending(&mut file)?;
-            if let Some((offset, record)) = self.records.last().cloned() {
-                affected = affected.min(self.dependency(&record, offset));
+            if let Some((offset, record)) = self.records.last() {
+                affected = affected.min(Self::dependency(
+                    &self.entries,
+                    &mut self.dependencies,
+                    &mut self.latest_prompt,
+                    record,
+                    *offset,
+                ));
             }
             let prefix = self
                 .entries
@@ -1201,7 +1603,13 @@ impl Reader {
             let start = self
                 .records
                 .partition_point(|(offset, _)| *offset < affected);
-            let mut suffix = events(&self.path, &self.records[start..], usize::MAX)?;
+            let mut suffix = events_with_context(
+                &self.path,
+                &self.records[start..],
+                usize::MAX,
+                None,
+                self.metadata.as_ref(),
+            )?;
             if let Some((_, previous)) = prefix
                 .checked_sub(1)
                 .and_then(|index| self.entries.get(index))
@@ -1216,37 +1624,100 @@ impl Reader {
             self.entries.extend(suffix);
         }
         let parsed_before_older = parsed_bytes;
+        let mut context_minimum = 0;
         while self.oldest > 0
             && (self.entries.len() <= requested || missing_assistant_context(&self.records))
         {
             let end = self.oldest;
-            let target = end.saturating_sub(CHUNK);
             let mut older = Vec::new();
-            let mut oldest = end;
-            crate::jsonl::read_lines_back(&mut file, end, |offset, line| {
-                oldest = offset;
-                parsed_bytes += line.len() as u64 + 1;
-                if let Ok(record) = serde_json::from_slice::<Value>(line) {
-                    if inherited(&record, self.history_start) {
-                        oldest = 0;
-                        return false;
+            let mut candidates = 0usize;
+            // Delay context scans until enough candidates have arrived. If pairing or
+            // merging needs another batch, double its record range to bound rescans.
+            loop {
+                let end = self.oldest;
+                let target = end.saturating_sub(CHUNK);
+                let mut oldest = end;
+                crate::jsonl::read_lines_back(&mut file, end, |offset, line| {
+                    oldest = offset;
+                    parsed_bytes += line.len() as u64 + 1;
+                    if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                        if inherited(&record, self.history_start) {
+                            oldest = 0;
+                            return false;
+                        }
+                        candidates += usize::from(event_candidate(&record));
+                        older.push((offset, record));
                     }
-                    older.push((offset, record));
+                    offset > target
+                })?;
+                self.oldest = oldest;
+                if oldest == 0
+                    || (candidates > requested.saturating_sub(self.entries.len())
+                        && older.len() + self.records.len() >= context_minimum)
+                {
+                    break;
                 }
-                offset > target
-            })?;
-            self.oldest = oldest;
+            }
             older.reverse();
+            let added = older.len();
+            let mut selected: HashSet<_> = older.iter().map(|(offset, _)| *offset).collect();
+            let completed: HashSet<_> = older
+                .iter()
+                .filter_map(|(_, record)| {
+                    let item = &record["payload"]["item"];
+                    (record["type"] == "event_msg" && record["payload"]["type"] == "item_completed")
+                        .then(|| item["id"].as_str())
+                        .flatten()
+                        .map(str::to_owned)
+                })
+                .collect();
             older.append(&mut self.records);
             self.records = older;
-            self.entries = events(&self.path, &self.records, usize::MAX)?;
-            self.dependencies.clear();
-            self.latest_prompt = None;
-            // Rebuild dependency positions only when the retained range expands backward.
-            for index in 0..self.records.len() {
-                let (offset, record) = self.records[index].clone();
-                self.dependency(&record, offset);
+            // A completion can precede the raw record that it supplies. Repair
+            // those existing rows and all members of their merged message group.
+            for (offset, record) in &self.records[added..] {
+                let payload = &record["payload"];
+                if [payload["id"].as_str(), payload["call_id"].as_str()]
+                    .into_iter()
+                    .flatten()
+                    .any(|id| completed.contains(id))
+                {
+                    selected.insert(*offset);
+                }
             }
+            self.entries.retain(|(offset, event)| {
+                if selected.contains(offset)
+                    || event
+                        .source_records
+                        .iter()
+                        .any(|record| selected.contains(&record.offset))
+                {
+                    selected.extend(event.source_records.iter().map(|record| record.offset));
+                    false
+                } else {
+                    true
+                }
+            });
+            let incoming = events_with_context(
+                &self.path,
+                &self.records,
+                usize::MAX,
+                Some(&selected),
+                self.metadata.as_ref(),
+            )?;
+            self.entries.extend(incoming);
+            merge_entries(&self.records, &mut self.entries);
+            for (offset, record) in &self.records[..added] {
+                Self::dependency(
+                    &self.entries,
+                    &mut self.dependencies,
+                    &mut self.latest_prompt,
+                    record,
+                    *offset,
+                );
+            }
+            context_minimum = self.records.len().saturating_mul(2);
+            debug_assert!(self.oldest < end);
         }
         if parsed_bytes > parsed_before_older {
             replaced = replaced.max(old_shown);
@@ -1304,6 +1775,49 @@ impl Reader {
             read_offset: self.read,
         })
     }
+}
+
+fn event_candidate(record: &Value) -> bool {
+    let payload = &record["payload"];
+    matches!(
+        (record["type"].as_str(), payload["type"].as_str()),
+        (
+            Some("response_item"),
+            Some("message" | "agent_message" | "function_call" | "custom_tool_call")
+        ) | (Some("event_msg"), Some("turn_aborted" | "item_completed"))
+    )
+}
+
+fn merge_entries(records: &[(u64, Value)], entries: &mut Vec<(u64, Event)>) {
+    entries.sort_by_key(|(offset, _)| *offset);
+    let turns = crate::activity::EventTurns::new(
+        crate::providers::ProviderId::Codex,
+        records.iter().map(|(offset, record)| (*offset, record)),
+    );
+    let offsets: HashMap<_, _> = entries
+        .iter_mut()
+        .map(|(offset, event)| {
+            event.turn = turns.at(*offset);
+            (event.source.clone(), *offset)
+        })
+        .collect();
+    let events = crate::event::agent::merge(
+        std::mem::take(entries)
+            .into_iter()
+            .map(|(_, event)| event)
+            .collect(),
+    );
+    let mut previous_end = None;
+    *entries = events
+        .into_iter()
+        .map(|mut event| {
+            event.source_records.sort_by_key(|record| record.offset);
+            event.source_records.dedup();
+            event.previous_end = previous_end;
+            previous_end = Some(event.ended_at.unwrap_or(event.started_at));
+            (offsets[&event.source], event)
+        })
+        .collect();
 }
 
 /// A page starting inside a reply must include its completion or turn boundary.
@@ -1429,10 +1943,37 @@ fn memory_notes(item: &Value) -> io::Result<Vec<crate::event::Note>> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    static EVENT_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn events_selected(
+    path: &Path,
+    records: &[(u64, Value)],
+    count: usize,
+    selected: &HashSet<u64>,
+) -> io::Result<Vec<(u64, Event)>> {
+    let metadata = read_metadata(&mut File::open(path)?)?;
+    events_with_context(path, records, count, Some(selected), metadata.as_ref())
+}
+
+#[cfg(test)]
 fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec<(u64, Event)>> {
-    let mut metadata = String::new();
-    io::BufReader::new(File::open(path)?).read_line(&mut metadata)?;
-    let metadata = serde_json::from_str::<Value>(&metadata).ok();
+    let metadata = read_metadata(&mut File::open(path)?)?;
+    events_with_context(path, records, count, None, metadata.as_ref())
+}
+
+/// Converts selected records while borrowing every retained record for pairing and deduplication.
+/// Selected entries stay unmerged so callers can combine them with retained entries first.
+fn events_with_context<'a>(
+    path: &Path,
+    records: &'a [(u64, Value)],
+    count: usize,
+    selected: Option<&HashSet<u64>>,
+    metadata: Option<&Value>,
+) -> io::Result<Vec<(u64, Event)>> {
     let sender = metadata
         .as_ref()
         .filter(|record| record["type"] == "session_meta")
@@ -1462,12 +2003,12 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             completed_messages.insert(id, (*offset, record));
         }
     }
-    let mut visit = |record: &Value, offset: u64| -> io::Result<bool> {
+    let mut visit = |record: &'a Value, offset: u64| -> io::Result<bool> {
         let Some(at) = timestamp(record) else {
             return Ok(true);
         };
         if completed_user(record) {
-            completed_prompt = Some((offset, record.clone()));
+            completed_prompt = Some((offset, record));
             return Ok(true);
         }
         let mut images = Vec::new();
@@ -1488,6 +2029,67 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
             })
             .unwrap_or(record);
         let payload = &record["payload"];
+        if selected.is_some_and(|selected| !selected.contains(&offset)) {
+            match (record["type"].as_str(), payload["type"].as_str()) {
+                (
+                    Some("response_item"),
+                    Some("function_call_output" | "custom_tool_call_output"),
+                ) => {
+                    if let Some(id) = payload["call_id"].as_str() {
+                        results.insert(id.to_owned(), (at, &payload["output"], offset));
+                    }
+                }
+                (Some("response_item"), Some("function_call" | "custom_tool_call")) => {
+                    if payload["name"]
+                        .as_str()
+                        .is_some_and(|name| !tool::rule(name).wrapper && !tool::tool_hidden(name))
+                        && let Some(id) = payload["call_id"].as_str()
+                        && seen.insert(id.to_owned())
+                    {
+                        results.remove(id);
+                    }
+                }
+                (Some("response_item"), Some("message"))
+                    if (payload["role"] == "user" && !is_context_message(payload))
+                        || payload["role"] == "assistant" =>
+                {
+                    if payload["role"] == "user" {
+                        completed_prompt.take();
+                    }
+                    let content = &payload["content"];
+                    let has_text = content.as_str().is_some_and(|text| !text.trim().is_empty())
+                        || content.as_array().is_some_and(|blocks| {
+                            blocks.iter().any(|block| {
+                                block["text"]
+                                    .as_str()
+                                    .is_some_and(|text| !text.trim().is_empty())
+                            })
+                        });
+                    if has_text && let Some(id) = payload["id"].as_str() {
+                        seen.insert(id.to_owned());
+                    }
+                }
+                (Some("event_msg"), Some("item_completed"))
+                    if matches!(
+                        payload["item"]["type"].as_str(),
+                        Some(
+                            "AgentMessage"
+                                | "CommandExecution"
+                                | "FileChange"
+                                | "McpToolCall"
+                                | "Extension"
+                                | "ImageView"
+                        )
+                    ) =>
+                {
+                    seen.insert(required_text(&payload["item"], "id")?.to_owned());
+                }
+                _ => {}
+            }
+            return Ok(true);
+        }
+        #[cfg(test)]
+        EVENT_CONVERSIONS.with(|count| count.set(count.get() + 1));
         if matches!(
             payload["item"]["type"].as_str(),
             Some("SubAgentActivity" | "CollabAgentToolCall")
@@ -1508,24 +2110,15 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
             (Some("response_item"), Some("function_call_output" | "custom_tool_call_output")) => {
                 if let Some(id) = payload["call_id"].as_str() {
-                    let output = if let Some(text) = payload["output"].as_str() {
-                        text.to_owned()
-                    } else {
-                        payload["output"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter(|block| block["type"] == "input_text")
-                            .filter_map(|block| block["text"].as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    };
-                    results.insert(id.to_owned(), (at, output, offset));
+                    results.insert(id.to_owned(), (at, &payload["output"], offset));
                 }
                 return Ok(true);
             }
             (Some("response_item"), Some("function_call" | "custom_tool_call")) => {
-                if tool_body(payload).is_none() {
+                if !payload["name"]
+                    .as_str()
+                    .is_some_and(|name| !tool::rule(name).wrapper && !tool::tool_hidden(name))
+                {
                     return Ok(true);
                 }
                 if let Some(id) = payload["call_id"].as_str()
@@ -1535,7 +2128,22 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 }
                 let ended = payload["call_id"]
                     .as_str()
-                    .and_then(|id| results.remove(id));
+                    .and_then(|id| results.remove(id))
+                    .map(|(at, output, offset)| {
+                        let text = if let Some(text) = output.as_str() {
+                            text.to_owned()
+                        } else {
+                            output
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter(|block| block["type"] == "input_text")
+                                .filter_map(|block| block["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        };
+                        (at, text, offset)
+                    });
                 let mut call =
                     response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
                 if let Some(message) = &mut call.agent_message {
@@ -1698,7 +2306,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     images = prompt_images(
                         &prompt,
                         payload,
-                        completed.as_ref().map(|(_, record)| record),
+                        completed.as_ref().map(|(_, record)| *record),
                     );
                     prompt.body()
                 } else {
@@ -1775,11 +2383,14 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         .iter()
         .map(|(offset, event)| (event.source.clone(), *offset))
         .collect();
-    let mut entries: Vec<_> =
+    let mut entries: Vec<_> = if selected.is_none() {
         crate::event::agent::merge(entries.into_iter().map(|(_, event)| event).collect())
             .into_iter()
             .map(|event| (offsets[&event.source], event))
-            .collect();
+            .collect()
+    } else {
+        entries
+    };
     let mut previous_end = None;
     for (_, entry) in &mut entries {
         entry.source_records.sort_by_key(|record| record.offset);
@@ -3749,5 +4360,335 @@ mod prompt_cache_tests {
     #[test]
     fn prompt_cache_requires_a_completed_request() {
         assert_eq!(request_prefix(1).cache_expires_at, None);
+    }
+}
+
+#[cfg(test)]
+mod summary_cache_tests {
+    #[test]
+    fn summary_cache_keeps_only_observed_fields_of_context_and_raw_responses() {
+        use super::*;
+        let text = include_str!("../../../tests/fixtures/codex-latest-activity.jsonl");
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), text).unwrap();
+        let mut tasks = Tasks::default();
+        assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+        let records = &tasks.reader.as_ref().unwrap().records;
+        assert!(
+            records
+                .iter()
+                .any(|(_, record)| record["payload"]["type"] == "raw_response_completed")
+        );
+        for (_, record) in records {
+            if record["payload"]["type"] == "raw_response_completed" {
+                assert!(record["payload"].as_object().unwrap().len() <= 2);
+            } else if record["type"] == "turn_context" {
+                assert!(record["payload"].as_object().unwrap().len() <= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn summary_tail_advances_past_a_record_larger_than_a_page() {
+        use super::*;
+        use std::io::Write;
+        let text = include_str!("../../../tests/fixtures/codex-rollout.jsonl");
+        let mut context: Value = serde_json::from_str(text.lines().nth(1).unwrap()).unwrap();
+        let content = context["payload"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .repeat(1024);
+        context["payload"]["content"][0]["text"] = content.into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{context}\n{}", text.lines().next().unwrap()).unwrap();
+        let mut tasks = Tasks::default();
+        assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+    }
+
+    use super::*;
+    use std::io::Write;
+
+    fn expected(path: &Path) -> Summary {
+        let mut result = summary(path).unwrap();
+        result.tasks = Tasks::default().read(path).unwrap();
+        result
+    }
+
+    #[test]
+    fn summaries_parse_real_fixture_once_across_appends_and_unchanged_refreshes() {
+        for text in [
+            include_str!("../../../tests/fixtures/codex-rollout.jsonl"),
+            include_str!("../../../tests/fixtures/codex-todos.jsonl"),
+            include_str!("../../../tests/fixtures/codex-latest-activity.jsonl"),
+            include_str!("../../../tests/fixtures/codex-input/default-pending.jsonl"),
+            include_str!("../../../tests/fixtures/codex-input/default-answered.jsonl"),
+            include_str!("../../../tests/fixtures/codex-subagents/rollout.jsonl"),
+            include_str!("../../../tests/fixtures/prompt-cache/codex-requests.jsonl"),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut tasks = Tasks::default();
+            for line in text.split_inclusive('\n') {
+                file.write_all(line.as_bytes()).unwrap();
+                assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+                let parsed = tasks.parsed_bytes;
+                assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+                assert_eq!(
+                    tasks.parsed_bytes, parsed,
+                    "unchanged file was parsed again"
+                );
+            }
+            assert_eq!(tasks.parsed_bytes, text.len() as u64);
+        }
+    }
+
+    #[test]
+    fn summary_errors_remain_errors_on_unchanged_retries() {
+        let text = include_str!("../../../tests/fixtures/codex-todos.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut tasks = Tasks::default();
+        file.write_all(text.as_bytes()).unwrap();
+        tasks.summary(file.path()).unwrap();
+        let mut invalid: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        let mut args: Value =
+            serde_json::from_str(invalid["payload"]["arguments"].as_str().unwrap()).unwrap();
+        args["plan"][0]["status"] = "invalid".into();
+        invalid["payload"]["arguments"] = args.to_string().into();
+        writeln!(file, "{invalid}").unwrap();
+        for _ in 0..2 {
+            assert!(tasks.summary(file.path()).is_err());
+        }
+    }
+
+    #[test]
+    fn summary_reads_subagent_metadata_after_an_empty_initial_refresh() {
+        let text = include_str!("../../../tests/fixtures/codex-subagents/rollout.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut tasks = Tasks::default();
+        tasks.summary(file.path()).unwrap();
+        for bytes in text.as_bytes().chunks(137) {
+            file.write_all(bytes).unwrap();
+            assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+        }
+    }
+
+    #[test]
+    fn prompt_attachments_recheck_paths_and_keep_physical_line_pairing() {
+        let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/codex-images/fallback.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let mut completed = records[1].clone();
+        let image = tempfile::NamedTempFile::new().unwrap();
+        completed["payload"]["item"]["content"][1]["path"] = image.path().to_str().unwrap().into();
+        let prompt = user_prompt(&records[0]["payload"]["content"])
+            .body()
+            .unwrap();
+        let prompt: String = prompt.chars().take(512).collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}\n{completed}", records[0]).unwrap();
+        let mut tasks = Tasks::default();
+        tasks.summary(file.path()).unwrap();
+        assert_eq!(tasks.first_prompt(&prompt).unwrap().0.len(), 1);
+        image.close().unwrap();
+        assert!(tasks.first_prompt(&prompt).unwrap().0.is_empty());
+        std::fs::write(
+            file.path(),
+            format!("{}\ninvalid json\n{completed}\n", records[0]),
+        )
+        .unwrap();
+        let image = tempfile::NamedTempFile::new().unwrap();
+        completed["payload"]["item"]["content"][1]["path"] = image.path().to_str().unwrap().into();
+        std::fs::write(
+            file.path(),
+            format!("{}\ninvalid json\n{completed}\n", records[0]),
+        )
+        .unwrap();
+        tasks.summary(file.path()).unwrap();
+        assert_eq!(
+            tasks.first_prompt(&prompt).unwrap(),
+            first_prompt(file.path(), &prompt).unwrap()
+        );
+    }
+
+    #[test]
+    fn summary_cache_resets_on_truncate_replace_and_same_length_rewrite() {
+        let text = include_str!("../../../tests/fixtures/codex-rollout.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(text.as_bytes()).unwrap();
+        let mut tasks = Tasks::default();
+        assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+        std::fs::write(
+            file.path(),
+            text.replace("Checks passed.", "Checks failed."),
+        )
+        .unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+        std::fs::write(file.path(), text.lines().next().unwrap()).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+        let mut replacement =
+            tempfile::NamedTempFile::new_in(file.path().parent().unwrap()).unwrap();
+        replacement.write_all(text.as_bytes()).unwrap();
+        replacement.persist(file.path()).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+    }
+}
+
+#[cfg(test)]
+mod paging_tests {
+    #[test]
+    fn expanding_pages_reuse_previously_converted_real_events() {
+        use super::*;
+        use std::io::Write;
+        fn ids(value: &mut Value, suffix: usize) {
+            match value {
+                Value::Object(object) => {
+                    for (key, value) in object {
+                        if matches!(key.as_str(), "id" | "call_id" | "turn_id" | "root_turn_id") {
+                            if let Some(text) = value.as_str() {
+                                *value = format!("{text}-{suffix}").into();
+                            }
+                        } else {
+                            ids(value, suffix);
+                        }
+                    }
+                }
+                Value::Array(values) => {
+                    for value in values {
+                        ids(value, suffix);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for suffix in 0..80 {
+            for line in include_str!("../../../tests/fixtures/codex-rollout.jsonl").lines() {
+                let mut record: Value = serde_json::from_str(line).unwrap();
+                ids(&mut record, suffix);
+                writeln!(file, "{record}").unwrap();
+            }
+        }
+        let mut reader = Reader::new(file.path().to_owned(), false);
+        EVENT_CONVERSIONS.with(|count| count.set(0));
+        for requested in [1, 20, 40, 80, usize::MAX] {
+            let update = reader.refresh(requested).unwrap();
+            let converted = EVENT_CONVERSIONS.with(|count| count.get());
+            assert!(
+                converted <= reader.records.len(),
+                "converted {converted} records for {} retained records",
+                reader.records.len()
+            );
+            let before = converted;
+            assert_eq!(update.events, tail(file.path(), requested).unwrap());
+            EVENT_CONVERSIONS.with(|count| count.set(before));
+        }
+    }
+
+    #[test]
+    fn backwards_paging_converts_each_record_once() {
+        use super::*;
+        use std::io::Write;
+        let text = include_str!("../../../tests/fixtures/codex-rollout.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for _ in 0..80 {
+            file.write_all(text.as_bytes()).unwrap();
+        }
+        let mut reader = Reader::new(file.path().to_owned(), false);
+        EVENT_CONVERSIONS.with(|count| count.set(0));
+        let update = reader.refresh(usize::MAX).unwrap();
+        let converted = EVENT_CONVERSIONS.with(|count| count.get());
+        assert!(
+            converted <= reader.records.len(),
+            "converted {converted} records for {} retained records",
+            reader.records.len()
+        );
+        assert_eq!(update.events, tail(file.path(), usize::MAX).unwrap());
+    }
+
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn backward_pages_match_full_real_rollouts_across_record_boundaries() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        for name in [
+            "codex-rollout.jsonl",
+            "codex-agent-exchange.jsonl",
+            "codex-agent-messages/sequence.jsonl",
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for line in std::fs::read_to_string(root.join(name)).unwrap().lines() {
+                let mut record: Value = serde_json::from_str(line).unwrap();
+                // Keep the captured payload intact and put adjacent records in separate pages.
+                record["paging_padding"] = "x".repeat(CHUNK as usize).into();
+                writeln!(file, "{record}").unwrap();
+            }
+            let expected = tail(file.path(), usize::MAX).unwrap();
+            let mut reader = Reader::new(file.path().to_path_buf(), false);
+            reader.refresh(1).unwrap();
+            let expanded = reader.refresh(usize::MAX).unwrap();
+            assert_eq!(expanded.events, expected, "{name}");
+            assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn completing_pending_record_reuses_its_owned_value() {
+        let fixture = include_str!("../../../tests/fixtures/codex-rollout.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture.trim_end().as_bytes()).unwrap();
+        let mut reader = Reader::new(file.path().to_path_buf(), false);
+        reader.refresh(usize::MAX).unwrap();
+        assert!(reader.pending_offset.is_some());
+        file.write_all(b"\n").unwrap();
+        let completed = reader.refresh(usize::MAX).unwrap();
+        assert_eq!(completed.events, tail(file.path(), usize::MAX).unwrap());
+        assert_eq!(completed.parsed_bytes, 1);
+        assert!(reader.pending_offset.is_none());
+    }
+}
+
+#[cfg(test)]
+mod selective_event_tests {
+    use super::*;
+
+    #[test]
+    fn selected_events_match_full_events_without_converting_context_records() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        for fixture in ["codex-rollout.jsonl", "codex-tool-calls.jsonl"] {
+            let path = root.join(fixture);
+            let records: Vec<_> = std::fs::read_to_string(&path)
+                .unwrap()
+                .lines()
+                .enumerate()
+                .map(|(offset, line)| (offset as u64, serde_json::from_str(line).unwrap()))
+                .collect();
+            let full = events(&path, &records, usize::MAX).unwrap();
+            assert!(!full.is_empty());
+            for (offset, expected) in full {
+                EVENT_CONVERSIONS.with(|count| count.set(0));
+                let selected = HashSet::from([offset]);
+                let mut actual = events_selected(&path, &records, usize::MAX, &selected).unwrap();
+                assert_eq!(actual.len(), 1, "{fixture} offset {offset}");
+                let mut expected = expected;
+                // Retained and selected entries receive their shared predecessor after combining.
+                expected.previous_end = None;
+                actual[0].1.previous_end = None;
+                assert_eq!(
+                    actual,
+                    vec![(offset, expected)],
+                    "{fixture} offset {offset}"
+                );
+                assert_eq!(EVENT_CONVERSIONS.with(std::cell::Cell::get), 1);
+            }
+            EVENT_CONVERSIONS.with(|count| count.set(0));
+            assert!(
+                events_selected(&path, &records, usize::MAX, &HashSet::new())
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(EVENT_CONVERSIONS.with(std::cell::Cell::get), 0);
+        }
     }
 }

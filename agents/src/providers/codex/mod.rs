@@ -279,7 +279,10 @@ impl CodexProvider {
             if let Some(summary) = summary {
                 if let Some(path) = session.transcript.as_deref() {
                     (session.prompt_images, session.task_details_sources[2]) =
-                        rollout::first_prompt(path, &session.prompt)?;
+                        tasks
+                            .get_mut(path)
+                            .expect("summary cache entry")
+                            .first_prompt(&session.prompt)?;
                 }
                 if let Some((call, since)) = &summary.pending_question_call {
                     pending.push((
