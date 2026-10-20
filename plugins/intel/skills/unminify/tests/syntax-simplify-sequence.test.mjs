@@ -116,12 +116,12 @@ test('keeps expression-only syntax valid when it becomes a statement', () => {
 });
 test('fragments allow splitting declarations and expressions in evaluation order', () => {
   for (const [source, expected] of [
-    ['var a=(mark(), value), b=2;', 'mark(); var a = value; var b=2;'],
-    ['let a=(mark(), value);', 'mark(); let a = value;'],
-    ['for (var a=(mark(), value); ready;) {}', 'mark(); for (var a = (value); ready;) {}'],
-    ['mark(), done(); var a=2;', 'mark(); done(); var a=2;'],
-    ['if (ready) { mark(), done(); var shared=2; }', 'if (ready) { mark(); done(); var shared=2; }'],
-    ['if (mark(), ready) var shared=2;', 'mark(); if (ready) var shared=2;'],
+    ['var a=(mark(), value), b=2;', 'mark();\nvar a = value;\nvar b=2;'],
+    ['let a=(mark(), value);', 'mark();\nlet a = value;'],
+    ['for (var a=(mark(), value); ready;) {}', 'mark();\nfor (var a = (value); ready;) {}'],
+    ['mark(), done(); var a=2;', 'mark();\ndone(); var a=2;'],
+    ['if (ready) { mark(), done(); var shared=2; }', 'if (ready) { mark();\ndone(); var shared=2; }'],
+    ['if (mark(), ready) var shared=2;', 'mark();\nif (ready) var shared=2;'],
   ]) assert.equal(run(source, true), expected);
 });
 test('fragment declaration splitting preserves names, kinds and evaluation order', () => {
@@ -138,7 +138,7 @@ test('fragments still simplify complete function scopes and trailing expressions
 });
 test('detects unbound-export fragments without an explicit fragment option', () => {
   const source = 'var shared=(mark(), value), sibling=2; export { missing };';
-  assert.equal(run(source), 'mark(); var shared = value; var sibling=2; export { missing };');
+  assert.equal(run(source), 'mark();\nvar shared = value;\nvar sibling=2; export { missing };');
 });
 test('preserves actual initializer evaluation order', () => {
   const source = 'const events=[]; function mark(s){events.push(s);return 1;} for(var a=mark("first"), b=(mark("prefix"),mark("middle")), c=(mark("later"),mark("last"));false;){} JSON.stringify(events);';
@@ -147,7 +147,7 @@ test('preserves actual initializer evaluation order', () => {
   assert.equal(runInNewContext(run(source)), expected);
 });
 test('preserves bytes outside replacement intervals and unchanged text', () => {
-  assert.equal(run('// keep\r\n  first(), second(); /* tail */\r\n'), '// keep\r\n  first(); second(); /* tail */\r\n');
+  assert.equal(run('// keep\r\n  first(), second(); /* tail */\r\n'), '// keep\r\n  first();\r\n  second(); /* tail */\r\n');
   const source = '// exact\r\nfunction  f ( ) { return  value; } /* end */\r\n';
   assert.equal(run(source), source);
   for (const unchanged of ['((start(), finish()));', '(value);', 'function inspect(){return;}', 'throw fault;', 'switch(key){}']) assert.equal(run(unchanged), unchanged);

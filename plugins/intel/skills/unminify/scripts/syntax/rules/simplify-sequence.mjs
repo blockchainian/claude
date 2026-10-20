@@ -177,8 +177,12 @@ export default {
           if (!eligible(path)) return;
           const result = split(path);
           if (!result) return;
-          const text = result.join(' ');
-          replace(path.node, path.parentPath.isIfStatement() && result.length > 1 ? `{ ${text} }` : text);
+          const lineStart = context.source.lastIndexOf('\n', path.node.start - 1) + 1;
+          const indent = context.source.slice(lineStart, path.node.start).match(/^[\t ]*/)[0];
+          const newline = context.source.includes('\r\n') ? '\r\n' : '\n';
+          const text = result.join(newline + indent);
+          replace(path.node, path.parentPath.isIfStatement() && result.length > 1
+            ? `{${newline}${indent}${text}${newline}${indent}}` : text);
         },
       },
     };
