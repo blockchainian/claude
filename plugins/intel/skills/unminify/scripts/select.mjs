@@ -25,7 +25,7 @@ export function releasePlan(stages) {
   for (const stage of stages) for (const batch of stage) batchAnalyses.delete(batch);
 }
 
-function analyze(source) {
+function analyze(source, options) {
   const ast = parseSource(source);
   const bindings = new Map();
   let fragment;
@@ -33,7 +33,7 @@ function analyze(source) {
   const owners = new Map([[ownerKey(ast.program), ast.program]]);
   const contexts = new Map(), references = new WeakMap(), usedNames = new Set(), exports = new Map();
   traverse(ast, {
-    Program(p) { ({ fragment } = fragmentFacts(p)); },
+    Program(p) { ({ fragment } = fragmentFacts(p, options)); },
     enter(p) {
       if (!isOwner(p)) return;
       owners.set(ownerKey(p.node), p.node);
@@ -104,11 +104,11 @@ function ownerChain(binding) {
 }
 
 /** Binding keys and scope ranges are Babel start/end: UTF-16 indices, NOT bytes. */
-export function planFile(source, { minSymbolLength = 4, maxInputTokens = 100000 } = {}) {
+export function planFile(source, { minSymbolLength = 4, maxInputTokens = 100000, fragment = false } = {}) {
   for (const [name, value] of Object.entries({ minSymbolLength, maxInputTokens })) {
     if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${name} must be a positive integer`);
   }
-  const analysis = analyze(source);
+  const analysis = analyze(source, { fragment });
   const { ast, bindings } = analysis;
   const remember = stages => {
     function fit(batch) {

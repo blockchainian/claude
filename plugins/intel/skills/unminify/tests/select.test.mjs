@@ -25,8 +25,7 @@ test('placeholder rendering preserves same-name labels and jump targets', () => 
   e: while (++n < e_length) {
     for (const x of e) { if (x) continue e; }
   }
-}
-export {};`;
+}`;
   for (const jump of ['continue', 'break']) {
     const source = code.replace('continue e;', `${jump} e;`);
     for (const batch of allBatches(planFile(source, options))) {
@@ -46,7 +45,7 @@ test('a small file keeps all candidates and the complete body in one batch', () 
   }
   return d;
 }
-console.log(a([1, 5, 9], 4)); export {};`;
+console.log(a([1, 5, 9], 4));`;
   const plan = planFile(code, options);
   assert.equal(plan.stages.length, 1);
   assert.equal(allBatches(plan).length, 1);
@@ -155,7 +154,7 @@ test('render handles shorthand, destructuring, exports and preexisting placehold
   }
 });
 test('module and function ranges starting at zero remain distinguishable', () => {
-  const code = 'function f(e) { return e; } export {};';
+  const code = 'function f(e) { return e; }';
   const plan = planFile(code,{...options,maxInputTokens:estimateInputTokens(renderBatch(code, planFile(code).stages[0][0])) - 1});
   assert.equal(plan.stages[0].length,1);
   assert.equal(plan.stages[1].length,1);
@@ -175,7 +174,7 @@ test('budget contexts retain every selected binding, including classes and neste
   }
 });
 test('resolved names cannot collide with intermediate names during rendering', () => {
-  const code = 'let a=1,b=2;function f(e){return a+b+e} export {};';
+  const code = 'let a=1,b=2;function f(e){return a+b+e}';
   const bs = bindings(code);
   const key = name => [...bs].find(([,b])=>b.identifier.name===name)[0];
   const batch = planFile(code,{...options,maxInputTokens:estimateInputTokens(renderBatch(code, planFile(code).stages[0][0])) - 1}).stages[1][0];
@@ -188,7 +187,6 @@ test('a real function fits exactly at the complete input token boundary', () => 
     if (!functionSource && p.node.params.length >= 2 && p.node.end-p.node.start<250) functionSource=source.slice(p.node.start,p.node.end);
   } });
   assert.ok(functionSource);
-  functionSource += '\nexport {};';
   const count=bindings(functionSource).size;
   const budget=estimateInputTokens(renderBatch(functionSource,planFile(functionSource).stages[0][0]));
   const exact=planFile(functionSource,{...options,maxInputTokens:budget});
@@ -199,7 +197,7 @@ test('a real function fits exactly at the complete input token boundary', () => 
 });
 
 test('request placeholder offsets reserve names across detached contexts', () => {
-  const source = 'const v3 = 10; function operation(a) { return a + v3; }\nconsole.log(' + JSON.stringify('x '.repeat(300)) + '); export {};';
+  const source = 'const v3 = 10; function operation(a) { return a + v3; }\nconsole.log(' + JSON.stringify('x '.repeat(300)) + ');';
   const { stages } = planFile(source, { maxInputTokens: 120 });
   const batch = stages[1][0];
   const payload = renderBatch(source, batch, new Map(), { placeholderOffset: 1, placeholderCount: 3 });
