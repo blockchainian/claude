@@ -1,4 +1,5 @@
 import { timed } from './timing.mjs';
+import { isLexicalIdentifier } from './identifiers.mjs';
 import { readFile, readdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -15,19 +16,40 @@ const parseSource = source => timed('parse', () => parse(source, { sourceType: '
 const bytes = code => Buffer.byteLength(code, 'utf8');
 const inside = (node, container) => node.start >= container.start && node.end <= container.end;
 const isOwner = p => p.isFunction() || p.isClass();
+// Batches keep their file analysis alive only while their plan is in use.
+const batchAnalyses = new WeakMap();
 
 function analyze(source) {
   const ast = parseSource(source);
   const bindings = new Map();
   const ownerKey = node => `${node.type}:${node.start}:${node.end}`;
   const owners = new Map([[ownerKey(ast.program), ast.program]]);
+  const contexts = new Map(), references = new WeakMap(), usedNames = new Set(), exports = new Map();
   traverse(ast, {
-    enter(p) { if (isOwner(p)) owners.set(ownerKey(p.node), p.node); },
+    enter(p) {
+      if (!isOwner(p)) return;
+      owners.set(ownerKey(p.node), p.node);
+      let context = p.node;
+      for (let parent = p.parentPath; parent; parent = parent.parentPath) {
+        if (parent.isClass()) context = parent.node;
+      }
+      contexts.set(p.node, context);
+    },
+    Identifier(p) {
+      usedNames.add(p.node.name);
+      if (!isLexicalIdentifier(p)) return;
+      const binding = p.scope.getBinding(p.node.name);
+      if (binding) references.set(p.node, binding.identifier.start);
+    },
+    ExportNamedDeclaration(p) {
+      if (p.node.declaration) exports.set(p.node.start,
+        Object.values(p.get('declaration').getOuterBindingIdentifiers()).map(id => ({ key: id.start, name: id.name })));
+    },
     Scope(p) {
       for (const binding of Object.values(p.scope.bindings)) bindings.set(binding.identifier.start, binding);
     },
   });
-  return { ast, bindings, owners };
+  return { source, ast, bindings, owners, contexts, references, usedNames, exports };
 }
 
 /** Paths are relative to the enclosing Git root; ignore rules to their own file. */
@@ -75,14 +97,19 @@ export function planFile(source, { shortLen = 3, maxIds = 60, contextBytes = 800
   for (const [name, value] of Object.entries({ shortLen, maxIds, contextBytes })) {
     if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${name} must be a positive integer`);
   }
-  const { ast, bindings } = analyze(source);
+  const analysis = analyze(source);
+  const { ast, bindings } = analysis;
+  const remember = stages => {
+    for (const batch of stages.flat()) batchAnalyses.set(batch, analysis);
+    return { stages };
+  };
   const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length <= shortLen)
     .sort((a,b)=>a.identifier.start-b.identifier.start);
   if (bytes(source) <= contextBytes && candidates.length <= maxIds) {
-    return { stages: [candidates.length ? [{
+    return remember([candidates.length ? [{
       id: `Program:${ast.program.start}:${ast.program.end}:${contextBytes}:${candidates[0].identifier.start}:file`,
       keys: candidates.map(b=>b.identifier.start),
-    }] : []] };
+    }] : []]);
   }
   const stages = [[], []];
   const groups = new Map();
@@ -137,7 +164,7 @@ export function planFile(source, { shortLen = 3, maxIds = 60, contextBytes = 800
     flush();
   }
   for (const [owner, items] of groups) emit(owner, items, owner === ast.program ? 0 : 1);
-  return { stages };
+  return remember(stages);
 }
 
 function printContext(node) {
@@ -149,21 +176,18 @@ function printContext(node) {
 }
 
 export function renderBatch(source, batch, renames = new Map()) {
-  const { ast, bindings, owners } = analyze(source);
+  const analysis = batchAnalyses.get(batch) ?? analyze(source);
+  if (analysis.source !== source) throw new Error('Batch source changed');
+  const { bindings, owners, contexts, references, usedNames, exports } = analysis;
   const [type, rawStart, rawEnd, rawBudget] = batch.id.split(':');
   const start = Number(rawStart), end = Number(rawEnd), budget = Number(rawBudget);
   const owner = owners.get(`${type}:${start}:${end}`);
   if (!owner || owner.end !== end || !Number.isSafeInteger(budget) || budget < 1) throw new Error('Invalid batch range');
-  let contextOwner = owner;
   // Private names and super require their actual enclosing class in a detached batch.
-  traverse(ast, { enter(p) {
-    if (p.node !== owner) return;
-    for (let parent = p.parentPath; parent; parent = parent.parentPath) {
-      if (parent.isClass()) contextOwner = parent.node;
-    }
-  } });
+  const context = contexts.get(owner) ?? owner;
   const placeholders = {};
   const targets = new Map(renames);
+  for (const key of targets.keys()) if (!bindings.has(key)) throw new Error(`Unknown binding key: ${key}`);
   for (const [index, key] of batch.keys.entries()) {
     if (!bindings.has(key)) throw new Error(`Unknown binding key: ${key}`);
     placeholders[`v${index+1}`] = key;
@@ -171,44 +195,68 @@ export function renderBatch(source, batch, renames = new Map()) {
   }
   // Reserve placeholder names even when the source already has a binding named v1.
   const reserved = new Set(Object.keys(placeholders));
-  const batchKeys = new Set(batch.keys);
-  for (const [key, b] of bindings) if (!batchKeys.has(key) && reserved.has(targets.get(key) ?? b.identifier.name)) {
-    targets.set(key, b.scope.generateUidIdentifier('context').name);
-  }
-  const finalNames = new Set(targets.values());
-  const pending = [];
-  for (const [key, name] of targets) {
-    const b = bindings.get(key);
-    if (!b) throw new Error(`Unknown binding key: ${key}`);
-    let temp;
-    do { temp = b.scope.generateUidIdentifier('binding').name; } while (finalNames.has(temp));
-    b.scope.rename(b.identifier.name, temp);
-    pending.push([b.scope, temp, name]);
-  }
-  for (const [scope, temp, name] of pending) scope.rename(temp, name);
-
-  if (batch.id.endsWith(':file')) return { context: printContext(owner), placeholders };
-
-  const selected = batch.keys.map(key=>bindings.get(key).identifier);
-  const containsKey = node => selected.some(id=>inside(id,node));
-  // A detached function keeps its declaration header, so sibling context stays legal.
-  traverse(ast, { enter(p) {
-    if (!isOwner(p) || p.node === owner || !inside(p.node,contextOwner)) return;
-    if (owner.type !== 'Program' && !containsKey(p.node) && p.node !== contextOwner) {
-      if (p.isClass()) p.node.body.body = [];
-      else if (p.node.body.type === 'BlockStatement') p.node.body.body = [];
-      else p.node.body = { type:'UnaryExpression',operator:'void',prefix:true,argument:{type:'NumericLiteral',value:0} };
-      p.skip();
+  const batchKeys = new Set(batch.keys), finalNames = new Set(targets.values());
+  const contextNames = new Map();
+  let suffix = 0;
+  function nameFor(key) {
+    const name = targets.get(key) ?? bindings.get(key).identifier.name;
+    if (batchKeys.has(key) || !reserved.has(name)) return name;
+    if (!contextNames.has(key)) {
+      let replacement;
+      do { replacement = `_context${++suffix}`; } while (usedNames.has(replacement) || finalNames.has(replacement));
+      contextNames.set(key, replacement);
     }
-  } });
+    return contextNames.get(key);
+  }
+  const selected = batch.keys.map(key => bindings.get(key).identifier);
+  const containsKey = node => selected.some(id => inside(id, node));
+  const wholeFile = batch.id.endsWith(':file');
+  // Copy syntax only from the selected context. Cached scopes and nodes stay immutable.
+  function copy(node) {
+    const result = { ...node };
+    // A detached function keeps its declaration header, so sibling context stays legal.
+    const stub = !wholeFile && owner.type !== 'Program' && node !== owner && node !== context
+      && owners.has(`${node.type}:${node.start}:${node.end}`) && !containsKey(node);
+    for (const [key, value] of Object.entries(node)) {
+      if (stub && key === 'body') {
+        if (node.type.startsWith('Class')) result.body = { ...value, body: [] };
+        else if (value.type === 'BlockStatement') result.body = { ...value, body: [] };
+        else result.body = { type: 'UnaryExpression', operator: 'void', prefix: true, argument: { type: 'NumericLiteral', value: 0 } };
+      } else if (Array.isArray(value)) {
+        const items = !wholeFile && node.type === 'Program' && key === 'body'
+          ? value.filter(item => item.type.startsWith('Import') || containsKey(item)) : value;
+        result[key] = items.map(item => item?.type ? copy(item) : item);
+      } else if (value?.type) result[key] = copy(value);
+    }
+    const bindingKey = references.get(node);
+    if (bindingKey !== undefined) result.name = nameFor(bindingKey);
+    if (result.type === 'ObjectProperty' && result.shorthand) {
+      const value = result.value.type === 'AssignmentPattern' ? result.value.left : result.value;
+      if (result.key.name !== value.name) {
+        result.shorthand = false;
+        if (result.extra) result.extra = { ...result.extra, shorthand: false };
+      }
+    }
+    if (result.type === 'Program') result.body = result.body.flatMap(statement => {
+      const exported = exports.get(statement.start);
+      if (!exported || !exported.some(({ key, name }) => nameFor(key) !== name)) return [statement];
+      return [statement.declaration, { type: 'ExportNamedDeclaration', declaration: null, source: null,
+        specifiers: exported.map(({ key, name }) => ({ type: 'ExportSpecifier',
+          local: { type: 'Identifier', name: nameFor(key) }, exported: { type: 'Identifier', name } })) }];
+    });
+    return result;
+  }
+  const contextOwner = copy(context);
+  if (wholeFile) return { context: printContext(contextOwner), placeholders };
+  const ast = { type: 'File', program: contextOwner.type === 'Program' ? contextOwner
+    : { type: 'Program', sourceType: 'module', body: [contextOwner] } };
   if (owner.type === 'Program') {
-    owner.body = owner.body.filter(node=>node.type.startsWith('Import') || containsKey(node));
     // Preserve implementation prefixes, shortening the longest function body first.
     const bodies = [];
-    traverse(ast, { Function(p) {
+    traverse(ast, { noScope: true, Function(p) {
       if (p.node.body.type === 'BlockStatement' && !containsKey(p.node.body)) bodies.push(p.node.body);
     } });
-    while (bytes(printContext(owner)) > budget) {
+    while (bytes(printContext(contextOwner)) > budget) {
       const longest = bodies.filter(body=>body.body.length)
         .sort((a,b)=>bytes(printContext(b))-bytes(printContext(a)))[0];
       if (!longest) break;
@@ -218,6 +266,7 @@ export function renderBatch(source, batch, renames = new Map()) {
   if (bytes(printContext(contextOwner)) > budget) {
     // Retain the declaration heads if a flat body cannot fit the byte target.
     traverse(ast, {
+      noScope: true,
       BlockStatement(p) {
         if (inside(p.node,contextOwner)) p.node.body = p.node.body.filter(containsKey);
       },
