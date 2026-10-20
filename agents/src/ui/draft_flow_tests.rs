@@ -1833,7 +1833,10 @@ fn resumable_session_settings_dispatch_only_a_changed_value() {
 #[test]
 fn new_draft_starts_in_name_editor() {
     let (directory, mut view) = fixture();
-    assert!(matches!(key(&mut view, KeyCode::Char('n')), Some(Action::NewDraft { .. })));
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('n')),
+        Some(Action::NewDraft { .. })
+    ));
     let id = view.add_draft(setup(directory.path()));
     assert_eq!(view.active_panel, Panel::Details);
     assert_eq!(view.name_target, Some(id));
@@ -1846,7 +1849,10 @@ fn new_draft_starts_in_name_editor() {
 fn wizard_finishes_at_empty_prompt_and_enter_creates() {
     let (directory, mut view) = git_draft();
     view.set_active_panel(Panel::TaskList);
-    assert!(matches!(key(&mut view, KeyCode::Char('n')), Some(Action::NewDraft { .. })));
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('n')),
+        Some(Action::NewDraft { .. })
+    ));
     let id = view.add_draft(setup(directory.path()));
     view.handle_paste("wizard");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
@@ -1861,5 +1867,75 @@ fn wizard_finishes_at_empty_prompt_and_enter_creates() {
     assert!(view.input_box.editor.text().is_empty());
     assert!(view.selector.is_none());
     view.handle_paste("build it");
-    assert!(matches!(key(&mut view, KeyCode::Enter), Some(Action::CreateTask { request, .. }) if request.prompt == "build it"));
+    assert!(
+        matches!(key(&mut view, KeyCode::Enter), Some(Action::CreateTask { request, .. }) if request.prompt == "build it")
+    );
+}
+
+#[test]
+fn saved_new_branch_row_shows_name_and_reopens_prefilled() {
+    for mouse in [false, true] {
+        let (_directory, mut view) = git_draft();
+        view.open_field(Field::Branch);
+        let index = view.selector.as_ref().unwrap().len() - 1;
+        key(&mut view, KeyCode::End);
+        key(&mut view, KeyCode::Enter);
+        view.handle_paste("foo");
+        key(&mut view, KeyCode::Enter);
+        assert_eq!(
+            view.selected_draft().unwrap().branch,
+            DraftBranch::New("foo".into())
+        );
+        view.open_field(Field::Branch);
+        let buffer = render(&view);
+        let row = view
+            .viewport
+            .borrow()
+            .picker_rows
+            .iter()
+            .find(|(_, choice)| *choice == index)
+            .unwrap()
+            .0;
+        let text: String = (row.x..row.right())
+            .map(|x| cell_text(buffer[(x, row.y)].symbol()))
+            .collect();
+        assert_eq!(text.trim(), "foo");
+        if mouse {
+            click(&mut view, row.x, row.y);
+        } else {
+            key(&mut view, KeyCode::Enter);
+        }
+        assert_eq!(
+            view.selector
+                .as_ref()
+                .unwrap()
+                .branch_editor()
+                .unwrap()
+                .text(),
+            "foo"
+        );
+        let buffer = render(&view);
+        let text: String = (row.x..row.right())
+            .map(|x| cell_text(buffer[(x, row.y)].symbol()))
+            .collect();
+        assert!(text.contains("New branch ❯ foo"), "{text}");
+        view.handle_paste("discard");
+        key(&mut view, KeyCode::Esc);
+        assert!(!view.selector.as_ref().unwrap().input_active());
+        key(&mut view, KeyCode::Enter);
+        assert_eq!(
+            view.selector
+                .as_ref()
+                .unwrap()
+                .branch_editor()
+                .unwrap()
+                .text(),
+            "foo"
+        );
+        key(&mut view, KeyCode::Enter);
+        assert_eq!(
+            view.selected_draft().unwrap().branch,
+            DraftBranch::New("foo".into())
+        );
+    }
 }

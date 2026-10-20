@@ -427,6 +427,7 @@ impl View {
         if let Some(Selector {
             kind:
                 SelectorKind::Branch {
+                    draft,
                     editor,
                     editing: true,
                     ..
@@ -435,6 +436,14 @@ impl View {
         }) = &mut self.selector
         {
             editor.clear();
+            if let Some(DraftBranch::New(name)) = self
+                .drafts
+                .iter()
+                .find(|item| item.id == *draft)
+                .map(|draft| &draft.branch)
+            {
+                editor.set_text(name);
+            }
             if let Some(Selector {
                 kind: SelectorKind::Branch { editing, .. },
                 ..
@@ -785,8 +794,21 @@ impl View {
                 render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
                 self.viewport.borrow_mut().details_input = row;
             } else {
+                let label = match &selector.kind {
+                    SelectorKind::Branch { draft, .. } => match &self
+                        .drafts
+                        .iter()
+                        .find(|item| item.id == *draft)
+                        .expect("branch selector draft exists")
+                        .branch
+                    {
+                        DraftBranch::New(name) => name.as_str(),
+                        _ => NEW_BRANCH,
+                    },
+                    _ => unreachable!("branch control"),
+                };
                 super::navigation::render_list(
-                    &[ListRow::Choice(index, Line::from(NEW_BRANCH))],
+                    &[ListRow::Choice(index, Line::from(label.to_owned()))],
                     selector.selected,
                     &Cell::new(0),
                     row,
