@@ -1,21 +1,12 @@
 use std::{
     path::Path,
-    process::Command,
     time::{Duration, Instant},
 };
 
-struct Tmux(String);
+#[path = "support/tmux.rs"]
+mod tmux;
+use tmux::Tmux;
 impl Tmux {
-    fn run(&self, args: &[&str]) -> String {
-        let output = Command::new("tmux")
-            .env_remove("NO_COLOR")
-            .args(["-L", &self.0])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    }
     fn wait(&self, ready: impl Fn(&str) -> bool) -> String {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -34,14 +25,6 @@ impl Tmux {
         self.run(&["send-keys", "-t", "probe", key]);
     }
 }
-impl Drop for Tmux {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.0, "kill-server"])
-            .output();
-    }
-}
-
 #[test]
 #[ignore = "requires tmux"]
 fn enhanced_keys_newlines_and_vertical_caret_in_tmux() {
@@ -62,10 +45,8 @@ fn failed_send_shows_its_reason_in_red_in_tmux() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-send-failed-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-send-failed-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",
@@ -165,10 +146,8 @@ fn probe(format: &str) {
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
     let output = directory.path().join("terminal.raw");
-    let tmux = Tmux(format!("agents-composer-{format}-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-composer-{format}-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

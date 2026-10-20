@@ -120,10 +120,8 @@ fn start_codex_mcp_probe(fixture: &str) -> (tempfile::TempDir, Tmux) {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-mcp-codex-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-mcp-codex-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

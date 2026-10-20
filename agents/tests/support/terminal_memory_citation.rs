@@ -29,10 +29,8 @@ fn terminal_codex_memory_citation_body() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-memory-citation-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-memory-citation-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

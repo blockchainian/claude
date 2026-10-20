@@ -39,10 +39,8 @@ fn terminal_codex_agent_message_bodies() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-message-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-message-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",
@@ -202,10 +200,8 @@ fn terminal_codex_collaboration_navigation() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-collaboration-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-collaboration-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

@@ -1,22 +1,12 @@
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
-struct Tmux(String);
+#[path = "support/tmux.rs"]
+mod tmux;
+use tmux::Tmux;
 
 impl Tmux {
-    fn run(&self, args: &[&str]) -> String {
-        let output = Command::new("tmux")
-            .env_remove("NO_COLOR")
-            .args(["-L", &self.0])
-            .args(args)
-            .output()
-            .expect("tmux must be installed for the terminal probe");
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    }
-
     fn wait_for(&self, ready: impl Fn(&str) -> bool) {
         self.capture_when(ready);
     }
@@ -51,14 +41,6 @@ impl Tmux {
             &format!("{press}{release}"),
         ]);
         std::thread::sleep(Duration::from_millis(200));
-    }
-}
-
-impl Drop for Tmux {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.0, "kill-server"])
-            .output();
     }
 }
 
@@ -103,10 +85,8 @@ fn terminal_spawn_agent_claude_receipt_and_model() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-spawn-settings-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-spawn-settings-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

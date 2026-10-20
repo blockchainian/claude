@@ -1,9 +1,12 @@
+#[path = "support/tmux.rs"]
+mod tmux;
+use tmux::Tmux;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 struct Probe {
-    socket: String,
+    tmux: Tmux,
     deadline: Instant,
     output: PathBuf,
     _directory: tempfile::TempDir,
@@ -15,14 +18,7 @@ impl Probe {
             Instant::now() < self.deadline,
             "terminal probe deadline exceeded"
         );
-        let output = Command::new("tmux")
-            .env_remove("NO_COLOR")
-            .args(["-L", &self.socket])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
+        self.tmux.run(args)
     }
 
     fn capture(&self) -> String {
@@ -112,7 +108,7 @@ impl Probe {
             .expect("AGENTS_PROBE_BIN must name the source build");
         let binary = Path::new(&binary).canonicalize().unwrap();
         let probe = Self {
-            socket: format!("agents-turn-groups-{name}-{}", std::process::id()),
+            tmux: Tmux::new(format!("agents-turn-groups-{name}-{}", std::process::id())),
             deadline,
             output: output.to_path_buf(),
             _directory: directory,
@@ -144,14 +140,6 @@ impl Probe {
         });
         probe.key("Tab");
         probe
-    }
-}
-
-impl Drop for Probe {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.socket, "kill-server"])
-            .output();
     }
 }
 

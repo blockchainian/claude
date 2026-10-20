@@ -64,10 +64,8 @@ fn terminal_summary_styles_match_across_all_three_surfaces() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-summary-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-summary-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

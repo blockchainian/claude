@@ -147,6 +147,12 @@ impl View {
 
 #[cfg(test)]
 mod tests {
+    mod tmux {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/tmux.rs"
+        ));
+    }
     use super::*;
     use crate::ui::{Action, Grouping, View};
     use crossterm::event::{KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -407,31 +413,11 @@ mod tests {
     #[test]
     #[ignore = "requires tmux; isolated real terminal surface, never consumes credits"]
     fn reset_credit_terminal_probe() {
-        use std::{
-            process::Command,
-            time::{Duration as StdDuration, Instant},
-        };
+        use std::time::{Duration as StdDuration, Instant};
         let directory = tempfile::tempdir().unwrap();
         let verdict = directory.path().join("verdict.json");
-        let socket = format!("agents-reset-credit-{}", std::process::id());
-        struct Server(String);
-        impl Drop for Server {
-            fn drop(&mut self) {
-                let _ = Command::new("tmux")
-                    .args(["-L", &self.0, "kill-server"])
-                    .output();
-            }
-        }
-        let _server = Server(socket.clone());
-        let run = |args: &[&str]| -> String {
-            let output = Command::new("tmux")
-                .args(["-L", &socket])
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "{output:?}");
-            String::from_utf8(output.stdout).unwrap()
-        };
+        let server = tmux::Tmux::new(format!("agents-reset-credit-{}", std::process::id()));
+        let run = |args: &[&str]| server.run(args);
         let executable = std::env::current_exe().unwrap();
         run(&[
             "new-session",

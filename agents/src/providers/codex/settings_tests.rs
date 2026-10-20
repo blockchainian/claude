@@ -1,3 +1,11 @@
+mod tmux {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/tmux.rs"
+    ));
+}
+use tmux::Tmux;
+
 use super::*;
 
 #[test]
@@ -158,65 +166,48 @@ fn settings_real_codex_thread() {
     );
 }
 
-fn terminal_settings_walk(home: &Path, id: &str, before: &str, after: &str) {
-    use std::time::{Duration, Instant};
-    use unicode_width::UnicodeWidthStr;
+use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr;
 
-    struct Tmux(String);
-    impl Tmux {
-        fn run(&self, args: &[&str]) -> String {
-            let output = Command::new("tmux")
-                .env_remove("NO_COLOR")
-                .args(["-L", &self.0])
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "{output:?}");
-            String::from_utf8(output.stdout).unwrap()
-        }
-        fn wait(&self, ready: impl Fn(&str) -> bool) -> String {
-            let deadline = Instant::now() + Duration::from_secs(20);
-            loop {
-                let screen = self.run(&["capture-pane", "-t", "probe", "-p"]);
-                if ready(&screen) {
-                    return screen;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "terminal settings deadline: {screen}"
-                );
-                std::thread::sleep(Duration::from_millis(50));
+impl Tmux {
+    fn wait(&self, ready: impl Fn(&str) -> bool) -> String {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let screen = self.run(&["capture-pane", "-t", "probe", "-p"]);
+            if ready(&screen) {
+                return screen;
             }
-        }
-        fn click(&self, text: &str, border: bool) {
-            let screen = self.wait(|screen| {
-                screen
-                    .lines()
-                    .any(|line| line.contains('─') == border && line.contains(text))
-            });
-            let (row, line) = screen
-                .lines()
-                .enumerate()
-                .find(|(_, line)| line.contains('─') == border && line.contains(text))
-                .unwrap();
-            let column = line[..line.find(text).unwrap()].width();
-            let click = format!(
-                "\x1b[<0;{};{}M\x1b[<0;{};{}m",
-                column + 1,
-                row + 1,
-                column + 1,
-                row + 1
+            assert!(
+                Instant::now() < deadline,
+                "terminal settings deadline: {screen}"
             );
-            self.run(&["send-keys", "-t", "probe", "-l", &click]);
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
-    impl Drop for Tmux {
-        fn drop(&mut self) {
-            let _ = Command::new("tmux")
-                .args(["-L", &self.0, "kill-server"])
-                .output();
-        }
+    fn click(&self, text: &str, border: bool) {
+        let screen = self.wait(|screen| {
+            screen
+                .lines()
+                .any(|line| line.contains('─') == border && line.contains(text))
+        });
+        let (row, line) = screen
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains('─') == border && line.contains(text))
+            .unwrap();
+        let column = line[..line.find(text).unwrap()].width();
+        let click = format!(
+            "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+            column + 1,
+            row + 1,
+            column + 1,
+            row + 1
+        );
+        self.run(&["send-keys", "-t", "probe", "-l", &click]);
     }
+}
+
+fn terminal_settings_walk(home: &Path, id: &str, before: &str, after: &str) {
     let directory = tempfile::tempdir().unwrap();
     let claude = directory.path().join("claude");
     std::fs::create_dir(&claude).unwrap();
@@ -227,10 +218,8 @@ fn terminal_settings_walk(home: &Path, id: &str, before: &str, after: &str) {
         .parent()
         .unwrap()
         .join("agents");
-    let tmux = Tmux(format!("agents-settings-{id}"));
+    let tmux = Tmux::new(format!("agents-settings-{id}"));
     tmux.run(&[
-        "-f",
-        "/dev/null",
         "new-session",
         "-d",
         "-s",

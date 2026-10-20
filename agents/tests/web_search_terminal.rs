@@ -1,22 +1,12 @@
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
 
-struct Tmux(String);
+#[path = "support/tmux.rs"]
+mod tmux;
+use tmux::Tmux;
 
 impl Tmux {
-    fn run(&self, args: &[&str]) -> String {
-        let output = Command::new("tmux")
-            .env_remove("NO_COLOR")
-            .args(["-L", &self.0])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    }
-
     fn capture_when(&self, ready: impl Fn(&str) -> bool, evidence: &Path) -> String {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -47,14 +37,6 @@ impl Tmux {
                 row + 1
             ),
         ]);
-    }
-}
-
-impl Drop for Tmux {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.0, "kill-server"])
-            .output();
     }
 }
 
@@ -96,12 +78,8 @@ fn web_search_details_and_browser_link() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux_config = directory.path().join("tmux.conf");
-    std::fs::write(&tmux_config, "set -g default-terminal tmux-256color\n").unwrap();
-    let tmux = Tmux(format!("agents-web-search-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-web-search-{}", std::process::id()));
     tmux.run(&[
-        "-f",
-        tmux_config.to_str().unwrap(),
         "new-session",
         "-d",
         "-s",

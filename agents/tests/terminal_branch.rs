@@ -1,28 +1,11 @@
 use std::{
     path::PathBuf,
-    process::Command,
     time::{Duration, Instant},
 };
 
-struct Terminal(String);
-impl Terminal {
-    fn run(&self, args: &[&str]) -> String {
-        let output = Command::new("tmux")
-            .args(["-L", &self.0])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    }
-}
-impl Drop for Terminal {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.0, "kill-server"])
-            .output();
-    }
-}
+#[path = "support/tmux.rs"]
+mod tmux;
+use tmux::Tmux;
 
 #[test]
 #[ignore = "requires tmux, AGENTS_BRANCH_TRANSCRIPT and AGENTS_PROBE_BIN"]
@@ -36,7 +19,7 @@ fn installed_background_branch_border() {
     std::fs::copy(&transcript, project.join(transcript.file_name().unwrap())).unwrap();
     let codex = directory.path().join("codex");
     std::fs::create_dir(&codex).unwrap();
-    let tmux = Terminal(format!("agents-branch-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-branch-{}", std::process::id()));
     tmux.run(&[
         "new-session",
         "-d",
