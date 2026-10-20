@@ -91,8 +91,11 @@ export default {
         exit(path) {
           const { left, right, operator } = path.node;
           if (!operators.has(operator)) return;
-          // Fragment visitors cannot prove whether another slice binds a global constant.
-          if ((context.fragment || dynamicScope) && (globalConstant(left, path) || globalConstant(right, path))) return;
+          for (const operand of [path.get('left'), path.get('right')]) {
+            if (!globalConstant(operand.node, operand)) continue;
+            const reference = operand.isUnaryExpression() ? operand.get('argument') : operand;
+            if (dynamicScope || !context.isIntrinsicGlobal(reference, reference.node.name)) return;
+          }
           if (!literalLike(left, path) || literalLike(right, path)) return;
           const leftText = rendered(left);
           const rightText = needsExpressionParens(right) ? `(${rendered(right)})` : rendered(right);

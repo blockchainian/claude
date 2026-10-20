@@ -66,14 +66,14 @@ test('FlipComparisons keeps compact return and throw tokens separate', () => {
   assert.equal(run('function inspect(){return!0===value;} function fail(){throw!1<value;}'), 'function inspect(){return value===!0;} function fail(){throw value>!1;}');
 });
 
-test('FlipComparisons retains fragment global constant reads without visitor-level binding proof', () => {
+test('FlipComparisons allows fragment global constant comparisons with indexed binding proof', () => {
   for (const name of ['undefined', 'NaN', 'Infinity']) {
     const source = `var shared = ${name} === value; export { missing };`;
     assert.equal(run(source, { fragment: true }), source);
     const shadowed = indexFragmentContext([['piece.js', source], ['binding.js', `let ${name};`]]);
     assert.equal(run(source, { fragment: true, fragmentContext: shadowed }), source);
     const clear = indexFragmentContext([['piece.js', source], ['binding.js', 'let unrelated;']]);
-    assert.equal(run(source, { fragment: true, fragmentContext: clear }), source);
+    assert.equal(run(source, { fragment: true, fragmentContext: clear }), `var shared = value === ${name}; export { missing };`);
     assert.equal(run(`var shared = 5 === ${name};`, { fragment: true, fragmentContext: clear }), `var shared = 5 === ${name};`);
   }
   assert.equal(run('var shared = -Infinity < value;', { fragment: true }), 'var shared = -Infinity < value;');
@@ -94,5 +94,33 @@ test('FlipComparisons keeps expression statements valid when moving object, func
   for (const expression of ['{}', 'function () {}', 'class {}', '{}.size', 'function () {}()', '{}.size + delta', '{}.size++']) {
     assert.equal(run(`3 === ${expression};`), `(${expression}) === 3;`);
     assert.equal(run(`3 === ${expression} === result;`), `(${expression}) === 3 === result;`);
+  }
+});
+
+test('FlipComparisons uses indexed intrinsic evidence for both operand directions in fragments', () => {
+  const fragmentContext = indexFragmentContext([['other.js', 'const ceiling = 42;']]);
+  for (const constant of ['undefined', 'NaN', 'Infinity', '-Infinity']) {
+    assert.equal(run(`const match = ${constant} !== fetchValue();`, { fragment: true, fragmentContext }), `const match = fetchValue() !== ${constant};`);
+    assert.equal(run(`let match = ${constant} >= fetchValue();`, { fragment: true, fragmentContext }), `let match = fetchValue() <= ${constant};`);
+    const pair = `consume(12 === ${constant});`;
+    assert.equal(run(pair, { fragment: true, fragmentContext }), pair);
+    const source = `consume(${constant} === fetchValue());`;
+    assert.equal(run(source, { fragment: true }), source);
+  }
+});
+
+test('FlipComparisons retains indexed shadowed, dynamically rebound and locally bound constants', () => {
+  for (const name of ['undefined', 'NaN', 'Infinity']) {
+    const source = `consume(${name} === fetchValue());`;
+    for (const binding of [`const ${name} = sentinel;`, `import { bound as ${name} } from "remote";`]) {
+      const fragmentContext = indexFragmentContext([['other.js', binding]]);
+      assert.equal(run(source, { fragment: true, fragmentContext }), source);
+    }
+    const fragmentContext = indexFragmentContext([['other.js', 'let elsewhere;']]);
+    for (const prefix of ['with (record) {}', 'eval(script);', `eval("var ${name} = 42");`, `function inspect(${name}) { consume(${name} === fetchValue()); }`]) {
+      const input = prefix.startsWith('function') ? prefix : `${prefix} ${source}`;
+      assert.equal(run(input, { fragment: true, fragmentContext }), input);
+    }
+    assert.equal(run(`function inspect(${name}) {} ${source}`, { fragment: true, fragmentContext }), `function inspect(${name}) {} consume(fetchValue() === ${name});`);
   }
 });
