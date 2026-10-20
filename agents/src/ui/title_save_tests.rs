@@ -233,3 +233,113 @@ fn attention_returns_to_parked_title_without_submitting() {
         assert_eq!(view.take_pending_action(), None);
     }
 }
+
+fn key(view: &mut View, code: KeyCode) -> Option<Action> {
+    view.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+fn click_task_row(view: &mut View, id: &SessionKey) {
+    let area = Rect::new(0, 0, 200, 50);
+    view.render(area, &mut Buffer::empty(area));
+    let entry = view
+        .center_rows(&view.selectable_indices(), view.grouping)
+        .iter()
+        .position(|row| matches!(row, super::navigation::CenterRow::Task(index) if &view.rows[*index].id == id))
+        .unwrap();
+    let viewport = view.viewport.borrow();
+    let x = viewport.list_rows.x + 2;
+    let y = viewport.list_rows.y + (entry - viewport.first_entry) as u16;
+    drop(viewport);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        assert_eq!(view.handle_mouse(mouse(kind, x, y)), None);
+    }
+}
+
+#[test]
+fn task_return_routes_restore_parked_title_and_caret() {
+    for route in [
+        "mouse", "previous", "tab", "backtab", "enter", "right", "down", "details", "prompt",
+        "events", "detail",
+    ] {
+        let (_dir, mut view, first, _) = editing_title(200);
+        view.rename.set_text("AlphaBeta");
+        for _ in 0..4 {
+            key(&mut view, KeyCode::Left);
+        }
+        let caret = view.rename.window(80).1;
+        let second = view
+            .rows
+            .iter()
+            .find(|row| row.id != first)
+            .unwrap()
+            .id
+            .clone();
+        view.set_active_panel(Panel::TaskList);
+        view.select(view.rows.iter().position(|row| row.id == second).unwrap());
+        if route == "mouse" {
+            click_task_row(&mut view, &first);
+        } else if route == "previous" {
+            assert_eq!(key(&mut view, KeyCode::Esc), None);
+        } else {
+            view.select(view.rows.iter().position(|row| row.id == first).unwrap());
+            assert_eq!(view.active_panel, Panel::TaskList);
+            let area = Rect::new(0, 0, 200, 50);
+            view.render(area, &mut Buffer::empty(area));
+            match route {
+                "tab" => {
+                    assert_eq!(key(&mut view, KeyCode::Tab), None);
+                }
+                "backtab" => {
+                    assert_eq!(key(&mut view, KeyCode::BackTab), None);
+                }
+                "enter" => {
+                    assert_eq!(key(&mut view, KeyCode::Enter), None);
+                }
+                "right" | "down" => {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    key(
+                        &mut view,
+                        KeyCode::Char(if route == "right" { 'l' } else { 'j' }),
+                    );
+                }
+                _ => {
+                    let viewport = view.viewport.borrow();
+                    let rect = match route {
+                        "details" => viewport.task_details,
+                        "prompt" => viewport.prompt,
+                        "events" => viewport.event_panel,
+                        "detail" => viewport.event_detail,
+                        _ => unreachable!(),
+                    };
+                    let x = rect.x + 3;
+                    let y = rect.y + 3.min(rect.height.saturating_sub(1));
+                    drop(viewport);
+                    for kind in [
+                        MouseEventKind::Down(MouseButton::Left),
+                        MouseEventKind::Up(MouseButton::Left),
+                    ] {
+                        assert_eq!(view.handle_mouse(mouse(kind, x, y)), None);
+                    }
+                }
+            }
+        }
+        assert_eq!(view.selected_id(), Some(&first), "{route}");
+        assert_eq!(view.active_panel, Panel::TaskDetails, "{route}");
+        assert_eq!(view.rename.text(), "AlphaBeta", "{route}");
+        assert_eq!(view.rename.window(80).1, caret, "{route}");
+        assert_eq!(key(&mut view, KeyCode::Char('X')), None);
+        assert_eq!(view.rename.text(), "AlphaXBeta", "{route}");
+    }
+}

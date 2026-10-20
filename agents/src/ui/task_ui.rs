@@ -8,7 +8,8 @@ use crate::{event::Event, model::EventSort};
 
 #[derive(Default)]
 pub(super) struct TaskUi {
-    pub focus: Focus,
+    /// None until the task has owned the keyboard.
+    pub focus: Option<Focus>,
     pub event_list: EventList,
     pub event_detail: EventDetail,
     pub task_details: TaskDetails,

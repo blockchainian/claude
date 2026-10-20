@@ -19,7 +19,8 @@ impl View {
                 .panels_task
                 .as_ref()
                 .and_then(|key| self.task_uis.get(key))
-                .map_or(Focus::Prompt, |ui| ui.focus),
+                .and_then(|ui| ui.focus)
+                .unwrap_or_default(),
             Panel::Prompt if self.active_question().is_some() => Focus::Question,
             Panel::Prompt => Focus::Prompt,
             Panel::TaskDetails if self.selector.as_ref().is_some_and(|s| s.input_active()) => {
@@ -35,7 +36,17 @@ impl View {
         }
     }
 
+    /// Enters a task selected by list browsing without replacing its parked focus.
+    pub(super) fn enter_task(&mut self) -> bool {
+        if !self.task_entry_pending || self.help || self.confirm_dialog.is_some() {
+            return false;
+        }
+        self.restore_task_focus(self.task_focus());
+        true
+    }
+
     pub(super) fn restore_task_focus(&mut self, focus: Focus) {
+        self.task_entry_pending = false;
         let panel = match focus {
             Focus::Prompt | Focus::Question => Panel::Prompt,
             Focus::Title | Focus::Branch | Focus::Selector | Focus::TaskDetails => {
@@ -64,7 +75,7 @@ impl View {
             && let Some(key) = self.panels_task.clone()
         {
             let focus = self.task_focus();
-            self.task_uis.entry(key).or_default().focus = focus;
+            self.task_uis.entry(key).or_default().focus = Some(focus);
         }
         if self.searching
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -73,6 +84,9 @@ impl View {
         }
         // Cleanup may activate another panel; the requested destination takes precedence.
         self.active_panel = panel;
+        if panel != Panel::TaskList {
+            self.task_entry_pending = false;
+        }
     }
 
     /// Saves the title and closes its editor; unchanged session names stay local.
@@ -169,6 +183,9 @@ impl View {
             .map(|(panel, _)| panel);
         drop(v);
         if let Some(panel) = target {
+            if source == Panel::TaskList && self.enter_task() {
+                return;
+            }
             self.set_active_panel(panel);
         }
     }

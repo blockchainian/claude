@@ -312,6 +312,13 @@ impl View {
                 });
         }
         if let Some(panel) = panel {
+            if panel != Panel::TaskList
+                && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && self.enter_task()
+            {
+                self.mouse_panel = Some((MouseButton::Left, Some(self.active_panel)));
+                return None;
+            }
             self.set_active_panel(panel);
         }
         if let Some(action) = self.overlay_mouse(mouse) {
@@ -1080,6 +1087,7 @@ impl View {
                         last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
+                    self.enter_task();
                     if double {
                         return None;
                     }
@@ -1319,6 +1327,9 @@ impl View {
         self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {
+        if self.enter_task() {
+            return None;
+        }
         if self.selected_draft.is_some() {
             return Some(Action::Unsupported("Terminal"));
         }
@@ -1702,6 +1713,9 @@ impl View {
             return None;
         }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            if self.enter_task() {
+                return None;
+            }
             self.set_filter(1 - self.status_filter);
             return None;
         }

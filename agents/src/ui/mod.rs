@@ -244,6 +244,8 @@ pub(crate) use crate::model::EventSort;
 pub struct View {
     /// The single keyboard destination; selection and scroll positions do not own focus.
     active_panel: Panel,
+    /// A browsed task has a parked focus to resume on entry.
+    task_entry_pending: bool,
     /// Actions created by panel changes outside keyboard and mouse handlers.
     pending_actions: Vec<Action>,
     window_prefix: Option<KeyEvent>,
@@ -381,6 +383,7 @@ impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             active_panel: Panel::TaskList,
+            task_entry_pending: false,
             pending_actions: Vec::new(),
             window_prefix: None,
             terminal: None,
@@ -792,6 +795,7 @@ impl View {
                 return;
             }
         }
+        self.restore_task_focus(self.task_focus());
         self.remember_selection();
         self.viewport.get_mut().scroll = 0;
     }
@@ -1113,11 +1117,18 @@ impl View {
             return;
         }
         self.park_event_list();
-        let task_list_focused = self.active_panel == Panel::TaskList
-            && self.attention_selection.as_ref().is_none_or(|id| {
-                selected.as_ref().and_then(draft_controls::TaskKey::session) != Some(id)
-            });
-        let focus = self.task_focus();
+        let task_list_focused = self.active_panel == Panel::TaskList;
+        let restores_task = selected
+            .as_ref()
+            .is_some_and(|id| self.task_uis.get(id).is_some_and(|ui| ui.focus.is_some()));
+        let focus = if task_list_focused {
+            self.panels_task
+                .as_ref()
+                .and_then(|key| self.task_uis.get(key))
+                .and_then(|ui| ui.focus)
+        } else {
+            Some(self.task_focus())
+        };
         let title = self.title_editing().then(|| std::mem::take(&mut self.rename));
         self.rename_target = None;
         self.name_target = None;
@@ -1177,7 +1188,7 @@ impl View {
         self.event_detail.scroll.get_mut().restoring = true;
         self.pending_click = None;
         if !task_list_focused {
-            self.restore_task_focus(shown.focus);
+            self.restore_task_focus(shown.focus.unwrap_or_default());
         }
         self.sync_questions();
         if task_list_focused {
@@ -1187,6 +1198,7 @@ impl View {
             self.task_uis.entry(key.clone()).or_default().focus = shown.focus;
         }
         self.panels_task = selected;
+        self.task_entry_pending = task_list_focused && restores_task;
     }
 
     /// Selects the row the user chose.
@@ -1229,6 +1241,7 @@ impl View {
                 self.status_filter = candidate;
                 if self.selectable_indices().contains(&index) {
                     self.set_selected(index);
+                    self.enter_task();
                     self.remember_selection();
                     self.viewport.get_mut().scroll = 0;
                     return;
