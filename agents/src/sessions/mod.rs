@@ -1,10 +1,12 @@
 //! Merged session snapshots and filesystem notifications.
 
+mod refresh;
 mod watcher;
+pub use refresh::{Refresh, RefreshRequest};
 mod weekly_usage;
 
 use crate::model::SessionStatus;
-use crate::providers::{Capabilities, Provider, ProviderId, Snapshot};
+use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
 use std::collections::{HashMap, HashSet};
 use std::{
     io,
@@ -130,11 +132,42 @@ impl Hub {
         self.pages = self.pages.saturating_add(1);
     }
 
+    pub fn session_source(&self) -> Refresh {
+        Refresh::new(Self::new(
+            self.providers.iter().map(|p| p.session_source()).collect(),
+        ))
+    }
+
+    pub fn pages(&self) -> usize {
+        self.pages
+    }
+
+    pub fn refresh_paths(&mut self, paths: &[PathBuf], previous: Snapshot) -> Snapshot {
+        let Some(affected) = refresh::affected_sessions(paths, &previous.sessions) else {
+            return self.refresh();
+        };
+        self.refresh_selected(Some((&affected, &previous)))
+    }
+
     pub fn refresh(&mut self) -> Snapshot {
+        self.refresh_selected(None)
+    }
+
+    fn refresh_selected(&mut self, changed: Option<(&HashSet<SessionKey>, &Snapshot)>) -> Snapshot {
         let mut snapshots: Vec<_> = self
             .providers
             .iter_mut()
-            .map(|provider| provider.discover(self.pages))
+            .map(|provider| match changed {
+                None => provider.discover(self.pages),
+                Some((affected, previous)) => {
+                    let ids = affected
+                        .iter()
+                        .filter(|id| id.provider == provider.id())
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    provider.refresh_sessions(self.pages, &ids, &previous.sessions)
+                }
+            })
             .collect();
         let mut frontier: Vec<_> = snapshots
             .iter()
@@ -176,7 +209,31 @@ impl Hub {
             self.providers
                 .iter_mut()
                 .zip(snapshots)
-                .map(|(provider, snapshot)| provider.enrich(snapshot)),
+                .map(|(provider, snapshot)| {
+                    let Some((affected, previous)) = changed else {
+                        return provider.enrich(snapshot);
+                    };
+                    let mut cached = Vec::new();
+                    let mut details = Vec::new();
+                    for session in snapshot.sessions {
+                        if !affected.contains(&session.id)
+                            && let Some(before) = previous
+                                .sessions
+                                .iter()
+                                .find(|before| before.id == session.id)
+                        {
+                            cached.push(before.clone());
+                        } else {
+                            details.push(session);
+                        }
+                    }
+                    let mut updated = provider.enrich(Snapshot {
+                        sessions: details,
+                        has_more: snapshot.has_more,
+                    });
+                    updated.sessions.extend(cached);
+                    updated
+                }),
         )
     }
 }

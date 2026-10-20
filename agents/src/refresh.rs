@@ -1,5 +1,6 @@
 //! Fixed-window filesystem debounce and periodic liveness refreshes.
 
+use crate::sessions::RefreshRequest;
 use std::time::{Duration, Instant};
 
 pub const FALLBACK_INTERVAL: Duration = Duration::from_secs(5);
@@ -10,6 +11,7 @@ pub struct RefreshSchedule {
     periodic: Instant,
     changed: Option<Instant>,
     interval: Duration,
+    request: Option<RefreshRequest>,
 }
 
 impl RefreshSchedule {
@@ -18,11 +20,41 @@ impl RefreshSchedule {
             periodic: now + interval,
             changed: None,
             interval,
+            request: None,
         }
     }
 
     pub fn changed(&mut self, now: Instant) {
+        self.paths_changed(now, RefreshRequest::Full);
+    }
+
+    pub fn paths_changed(&mut self, now: Instant, request: RefreshRequest) {
         self.changed.get_or_insert(now + DEBOUNCE);
+        if let Some(pending) = &mut self.request {
+            pending.merge(request);
+        } else {
+            self.request = Some(request);
+        }
+    }
+
+    pub fn take_due(&mut self, now: Instant) -> Option<RefreshRequest> {
+        if !self.due(now) {
+            return None;
+        }
+        let request = if now >= self.periodic {
+            RefreshRequest::Full
+        } else {
+            self.request
+                .take()
+                .expect("filesystem deadline has a refresh request")
+        };
+        if matches!(request, RefreshRequest::Full) {
+            self.refreshed(now);
+        } else {
+            self.changed = None;
+            self.request = None;
+        }
+        Some(request)
     }
 
     pub fn timeout(&self, now: Instant) -> Duration {
@@ -47,6 +79,7 @@ impl RefreshSchedule {
     pub fn refreshed(&mut self, now: Instant) {
         self.periodic = now + self.interval;
         self.changed = None;
+        self.request = None;
     }
 }
 
@@ -85,6 +118,25 @@ mod tests {
         assert!(schedule.due(start + POLLING_INTERVAL));
         schedule.refreshed(start + POLLING_INTERVAL);
         assert_eq!(schedule.timeout(start + POLLING_INTERVAL), POLLING_INTERVAL);
+    }
+
+    #[test]
+    fn targeted_refreshes_keep_the_full_liveness_deadline() {
+        let start = Instant::now();
+        let mut schedule = RefreshSchedule::new(start, FALLBACK_INTERVAL);
+        for second in 1..5 {
+            let now = start + Duration::from_secs(second);
+            let request = RefreshRequest::paths(vec!["session.jsonl".into()]);
+            schedule.paths_changed(now, request);
+            assert!(matches!(
+                schedule.take_due(now + DEBOUNCE),
+                Some(RefreshRequest::Paths(_))
+            ));
+        }
+        assert_eq!(
+            schedule.take_due(start + FALLBACK_INTERVAL),
+            Some(RefreshRequest::Full)
+        );
     }
 }
 

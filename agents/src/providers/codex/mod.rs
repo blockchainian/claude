@@ -665,6 +665,10 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 }
 
 impl Provider for CodexProvider {
+    fn session_source(&self) -> Box<dyn Provider> {
+        Box::new(Self::new(self.home.clone(), self.manager_home.clone()))
+    }
+
     fn display_name(&self) -> &'static str {
         "Codex"
     }

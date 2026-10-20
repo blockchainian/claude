@@ -243,7 +243,19 @@ pub trait ScreenInput {
     fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
 }
 
-pub trait Provider {
+pub trait Provider: Send {
+    /// Creates a session reader with independent caches and the same provider configuration.
+    fn session_source(&self) -> Box<dyn Provider>;
+    /// Discovers the history page while reusing unrelated session details.
+    fn refresh_sessions(
+        &mut self,
+        pages: usize,
+        _sessions: &[SessionKey],
+        _previous: &[Session],
+    ) -> Snapshot {
+        self.discover(pages)
+    }
+
     /// Prepares provider integrations when the dashboard starts.
     fn setup(&mut self) -> io::Result<()> {
         Ok(())

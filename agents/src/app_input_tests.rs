@@ -315,7 +315,14 @@ fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
     )
     .unwrap();
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    db.execute_batch("BEGIN EXCLUSIVE").unwrap();
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    assert!(
+        app.pending_inputs.contains(&id),
+        "stop remains pending until its refresh is applied"
+    );
+    db.execute_batch("COMMIT").unwrap();
+    app.finish_refreshes();
     assert!(!app.pending_inputs.contains(&id));
     let area = ratatui::layout::Rect::new(0, 0, 120, 30);
     let mut buffer = ratatui::buffer::Buffer::empty(area);

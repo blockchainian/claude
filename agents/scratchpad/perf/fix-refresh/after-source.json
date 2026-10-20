@@ -1,0 +1,22 @@
+{
+  "base": "9af4e1ee35473c94e6441de5e792f32ddab09c74",
+  "patch": "own-code.patch",
+  "files": [
+    "agents/src/app.rs",
+    "agents/src/providers/mod.rs",
+    "agents/src/providers/claude/mod.rs",
+    "agents/src/providers/codex/mod.rs",
+    "agents/src/refresh.rs",
+    "agents/src/sessions/mod.rs",
+    "agents/src/app_input_tests.rs",
+    "agents/src/app_live_tests.rs",
+    "agents/src/providers/claude/app_tests.rs",
+    "agents/src/app_ui_tests.rs",
+    "agents/src/app_refresh.rs",
+    "agents/src/app_refresh_tests.rs",
+    "agents/src/sessions/refresh.rs"
+  ],
+  "patch_sha256": "09a31248bc6a2d2efcfa38b59c3f2fcb6781ce9258b76dbd21a8f7cb6458b8cb",
+  "binary": "after-agents",
+  "binary_sha256": "05590f3efda8e66397296748849212906642c9f215000845ea85f7dff63d71c7"
+}

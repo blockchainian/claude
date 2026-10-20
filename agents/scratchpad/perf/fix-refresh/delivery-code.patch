@@ -1,0 +1,1288 @@
+diff --git a/agents/src/app.rs b/agents/src/app.rs
+index 1cf384b8..bcc98a9f 100644
+--- a/agents/src/app.rs
++++ b/agents/src/app.rs
+@@ -45,7 +45,12 @@ enum Input {
+         result: io::Result<crate::providers::ResetCreditRedemption>,
+     },
+     Terminal(io::Result<Event>),
+-    Filesystem(notify::Result<()>),
++    Filesystem(notify::Result<notify::Event>),
++    Sessions {
++        refresh: Box<crate::sessions::Refresh>,
++        generation: u64,
++        result: io::Result<Snapshot>,
++    },
+     EventsLoaded {
+         token: u64,
+         reader: Box<dyn crate::event::Reader>,
+@@ -133,6 +138,7 @@ pub struct App {
+     pending_inputs: std::collections::HashSet<SessionKey>,
+     config_dir: PathBuf,
+     hub: Hub,
++    session_refresh: SessionRefresh,
+     preferences: Preferences,
+     view: View,
+     clipboard: crate::clipboard::Clipboard,
+@@ -237,11 +243,13 @@ impl App {
+         }
+         view.provider_names = hub.display_names();
+         let (sender, receiver) = mpsc::channel();
++        let session_refresh = SessionRefresh::new(hub.session_source());
+         Self {
+             sender,
+             receiver,
+             pending_inputs: std::collections::HashSet::new(),
+             hub,
++            session_refresh,
+             config_dir,
+             preferences,
+             view,
+@@ -306,7 +314,7 @@ impl App {
+             .map_err(notify::Error::io)
+             .and_then(|roots| {
+                 crate::sessions::watch(&roots, move |event| {
+-                    let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
++                    let _ = filesystem.send(Input::Filesystem(event));
+                 })
+             });
+         let mut watcher = match watch {
+@@ -331,7 +339,7 @@ impl App {
+             crossterm::event::EnableThemeChangeReports,
+             MouseReports::Enable
+         )?;
+-        self.refresh();
++        self.request_refresh();
+         let mut selection_tick = Instant::now();
+         loop {
+             let persist = self.view.take_question_action();
+@@ -345,9 +353,8 @@ impl App {
+             self.view.expire_messages(Instant::now());
+             self.refresh_weekly_usage();
+             self.view.present_reset_credit();
+-            if schedule.due(Instant::now()) {
+-                self.refresh();
+-                schedule.refreshed(Instant::now());
++            if let Some(request) = schedule.take_due(Instant::now()) {
++                self.request_sessions(request);
+             }
+             self.view.set_cell_aspect(cell_aspect());
+             self.sync_terminal();
+@@ -485,8 +492,20 @@ impl App {
+                         return Ok(true);
+                     }
+                 }
+-                Input::Filesystem(Ok(())) if watcher.is_some() => {
+-                    schedule.changed(Instant::now());
++                Input::Sessions {
++                    refresh,
++                    generation,
++                    result,
++                } => {
++                    self.finish_sessions(*refresh, generation, result)?;
++                }
++                Input::Filesystem(Ok(event)) if watcher.is_some() => {
++                    let request = if event.need_rescan() {
++                        crate::sessions::RefreshRequest::Full
++                    } else {
++                        crate::sessions::RefreshRequest::paths(event.paths)
++                    };
++                    schedule.paths_changed(Instant::now(), request);
+                 }
+                 Input::Filesystem(Err(error)) if watcher.is_some() => {
+                     self.view
+@@ -527,14 +546,16 @@ impl App {
+                     Err(error) => self.view.draft_worktree_created(draft_key, Err(error)),
+                 },
+                 Input::Sent { id, input, result } => {
+-                    self.pending_inputs.remove(&id);
+                     if matches!(input, SessionInput::Interrupt) {
+-                        self.refresh();
+-                        self.view.stop_complete(&id, result.is_ok());
++                        let generation = self.request_refresh();
++                        self.session_refresh
++                            .stops
++                            .push((generation, id, result.is_ok()));
+                         if let Err(error) = result {
+                             self.input_error(&input, error.to_string());
+                         }
+                     } else {
++                        self.pending_inputs.remove(&id);
+                         self.view.input_complete(&id, &input, result);
+                     }
+                 }
+@@ -966,8 +987,7 @@ impl App {
+         }
+     }
+ 
+-    fn refresh(&mut self) {
+-        let Snapshot { sessions, has_more } = self.hub.refresh();
++    fn apply_sessions(&mut self, Snapshot { sessions, has_more }: Snapshot) {
+         self.unpin_inactive(&sessions);
+         for session in &sessions {
+             if session.status == SessionStatus::Inactive
+@@ -1242,7 +1262,7 @@ impl App {
+ 
+     fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
+         self.view.unhide(id);
+-        self.refresh();
++        self.request_refresh();
+         if let Err(error) = result {
+             self.view
+                 .set_notice(Some(format!("Cannot archive: {error}")));
+@@ -1254,11 +1274,11 @@ impl App {
+             Ok(()) => {
+                 let saved = self.preferences.forget_task(&self.config_dir, id);
+                 self.report_save(saved);
+-                self.refresh();
++                self.request_refresh();
+             }
+             Err(error) => {
+                 self.view.unhide(id);
+-                self.refresh();
++                self.request_refresh();
+                 self.view
+                     .set_notice(Some(format!("Cannot delete: {error}")));
+             }
+@@ -1367,7 +1387,7 @@ impl App {
+             Action::ShowMore => {
+                 self.hub.show_more();
+                 self.view.set_loading(true);
+-                self.refresh();
++                self.request_refresh();
+             }
+             Action::Resume(id) => {
+                 if let Some(session) = self.session(&id) {
+@@ -1393,7 +1413,9 @@ impl App {
+                 if let Some(session) = self.session(&id) {
+                     if session.transcript.is_some() {
+                         match self.hub.provider(id.provider).rename(&session, &name) {
+-                            Ok(()) => self.refresh(),
++                            Ok(()) => {
++                                self.request_refresh();
++                            }
+                             Err(error) => self
+                                 .view
+                                 .set_notice(Some(format!("Cannot rename: {error}"))),
+@@ -1405,19 +1427,8 @@ impl App {
+                 }
+             }
+             Action::Delete(id) => {
+-                self.refresh();
+-                if let Some(session) = self.session(&id) {
+-                    if !session.can_resume() {
+-                        return false;
+-                    }
+-                    if session.transcript.is_none() {
+-                        self.view.set_notice(Some("Nothing to delete".into()));
+-                    } else {
+-                        self.delete(session);
+-                    }
+-                } else {
+-                    self.view.set_notice(Some("Nothing to delete".into()));
+-                }
++                let generation = self.request_refresh();
++                self.session_refresh.deletes.push((generation, id));
+             }
+             Action::Archive(id) => {
+                 if let Some(session) = self.session(&id) {
+@@ -1552,6 +1563,10 @@ impl crossterm::Command for MouseReports {
+     }
+ }
+ 
++#[path = "app_refresh.rs"]
++mod session_refresh;
++use session_refresh::SessionRefresh;
++
+ #[path = "app_keyboard.rs"]
+ mod keyboard;
+ 
+@@ -1642,3 +1657,7 @@ mod reset_credit_tests;
+ #[cfg(test)]
+ #[path = "app_transcript_tests.rs"]
+ mod transcript_tests;
++
++#[cfg(test)]
++#[path = "app_refresh_tests.rs"]
++mod refresh_tests;
+diff --git a/agents/src/app_input_tests.rs b/agents/src/app_input_tests.rs
+index 56e6e56b..e97b7bac 100644
+--- a/agents/src/app_input_tests.rs
++++ b/agents/src/app_input_tests.rs
+@@ -315,7 +315,14 @@ fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
+     )
+     .unwrap();
+     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
++    db.execute_batch("BEGIN EXCLUSIVE").unwrap();
+     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
++    assert!(
++        app.pending_inputs.contains(&id),
++        "stop remains pending until its refresh is applied"
++    );
++    db.execute_batch("COMMIT").unwrap();
++    app.finish_refreshes();
+     assert!(!app.pending_inputs.contains(&id));
+     let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+     let mut buffer = ratatui::buffer::Buffer::empty(area);
+diff --git a/agents/src/app_live_tests.rs b/agents/src/app_live_tests.rs
+index 24d08e81..460701dd 100644
+--- a/agents/src/app_live_tests.rs
++++ b/agents/src/app_live_tests.rs
+@@ -26,16 +26,14 @@ pub(crate) fn action(app: &mut App, action: Action) {
+ /// Deletes the session and waits for the worker to finish.
+ pub(crate) fn delete(app: &mut App, id: SessionKey) {
+     action(app, Action::Delete(id.clone()));
+-    let event = app
+-        .receiver
+-        .recv_timeout(Duration::from_secs(120))
+-        .expect("provider delete deadline");
++    let event = app.next_input(Duration::from_secs(120));
+     assert!(
+         matches!(&event, Input::Deleted { id: deleted, .. } if deleted == &id),
+         "expected real provider deletion"
+     );
+     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
++    app.finish_refreshes();
+ }
+ 
+ /// Selects the session with the keyboard, as a user does.
+diff --git a/agents/src/app_ui_tests.rs b/agents/src/app_ui_tests.rs
+index dc3de641..93b03ee6 100644
+--- a/agents/src/app_ui_tests.rs
++++ b/agents/src/app_ui_tests.rs
+@@ -1243,6 +1243,7 @@ fn task_tabs_inactive_starts_with_ten_then_reveals_next_page() {
+     assert!(rendered.contains("Show more"), "{rendered}");
+     key(&mut app, KeyCode::End);
+     key(&mut app, KeyCode::Enter);
++    app.finish_refreshes();
+     assert_eq!(app.sessions.len(), 20);
+     assert!(
+         lines(&draw(&mut app, 160))
+@@ -1251,6 +1252,7 @@ fn task_tabs_inactive_starts_with_ten_then_reveals_next_page() {
+     );
+     key(&mut app, KeyCode::End);
+     key(&mut app, KeyCode::Enter);
++    app.finish_refreshes();
+     assert_eq!(app.sessions.len(), 23);
+     let rendered = lines(&draw(&mut app, 160)).join("\n");
+     assert!(rendered.contains("Inactive 23"));
+@@ -1506,6 +1508,7 @@ fn archive_success_keeps_active_tab_and_releases_hidden_task() {
+     let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
++    app.finish_refreshes();
+     draw(&mut app, 120);
+     assert!(
+         app.view.selected_id().is_none(),
+diff --git a/agents/src/providers/claude/app_tests.rs b/agents/src/providers/claude/app_tests.rs
+index c971a6bf..fc7c6695 100644
+--- a/agents/src/providers/claude/app_tests.rs
++++ b/agents/src/providers/claude/app_tests.rs
+@@ -1168,6 +1168,7 @@ fn manager_thread_mutations_reach_app_provider_paths() {
+             .unwrap();
+         assert!(child.parent.is_some() && child.can_resume());
+         app.hub = Hub::new(vec![Box::new(provider)]);
++        app.session_refresh = SessionRefresh::new(app.hub.session_source());
+         app.sessions.push(child.clone());
+         let action = match operation {
+             "archive" => Action::Archive(child.id),
+@@ -1175,6 +1176,9 @@ fn manager_thread_mutations_reach_app_provider_paths() {
+             _ => unreachable!(),
+         };
+         assert!(!app.handle_action(Some(action)));
++        if operation == "delete" {
++            app.finish_refreshes();
++        }
+         if operation == "archive" {
+             let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+             assert!(matches!(&event, Input::Archived { result: Err(_), .. }));
+@@ -1309,14 +1313,12 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
+     assert!(!key(&mut app, KeyCode::Backspace));
+     assert!(!key(&mut app, KeyCode::Down));
+     assert!(!key(&mut app, KeyCode::Enter));
++    let event = app.next_input(Duration::from_secs(10));
+     assert_ne!(app.view.selected_id(), Some(&target.id));
+-    let event = app
+-        .receiver
+-        .recv_timeout(Duration::from_secs(10))
+-        .expect("delete deadline");
+     assert!(matches!(&event, Input::Deleted { id, result: Ok(()) } if id == &target.id));
+     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
++    app.finish_refreshes();
+     assert!(!path.exists());
+     assert!(!children.exists());
+     assert!(app.session(&target.id).is_none());
+diff --git a/agents/src/providers/claude/mod.rs b/agents/src/providers/claude/mod.rs
+index a02eba1d..9a693d7b 100644
+--- a/agents/src/providers/claude/mod.rs
++++ b/agents/src/providers/claude/mod.rs
+@@ -364,6 +364,28 @@ impl ClaudeProvider {
+     }
+ 
+     fn snapshot(&mut self, pages: usize) -> Snapshot {
++        self.snapshot_sessions(pages, None, &[])
++    }
++
++    fn snapshot_sessions(
++        &mut self,
++        pages: usize,
++        selected: Option<&[SessionKey]>,
++        previous: &[Session],
++    ) -> Snapshot {
++        let cached = |id: &str| {
++            if selected.is_some_and(|ids| !ids.iter().any(|key| key.id == id)) {
++                previous
++                    .iter()
++                    .find(|session| {
++                        session.id.provider == ProviderId::Claude && session.id.id == id
++                    })
++                    .cloned()
++            } else {
++                None
++            }
++        };
++        let mut unchanged = Vec::new();
+         self.list_transcripts();
+         let jobs = registry::background_jobs(&self.config_dir);
+         // Claude Code writes a transcript only after the first prompt, and
+@@ -387,6 +409,10 @@ impl ClaudeProvider {
+                 .session_id
+                 .as_deref()
+                 .expect("live entries have session ids");
++            if let Some(session) = cached(id) {
++                unchanged.push(session);
++                continue;
++            }
+             let (summary, path, modified) = self.summary(id);
+             self.background.observe(id, &summary);
+             let custom_title = summary.custom_title.clone();
+@@ -481,6 +507,10 @@ impl ClaudeProvider {
+             .iter()
+             .filter(|(_, parent)| live_ids.contains(&parent.id))
+         {
++            if let Some(session) = cached(&file.id) {
++                unchanged.push(session);
++                continue;
++            }
+             if let Some(child) = self.subagent(file, parent.clone(), true) {
+                 children.push(child);
+             }
+@@ -510,10 +540,18 @@ impl ClaudeProvider {
+                 if live_ids.contains(&parent.id) {
+                     continue;
+                 }
++                if let Some(session) = cached(&file.id) {
++                    unchanged.push(session);
++                    continue;
++                }
+                 if let Some(child) = self.subagent(&file, parent, false) {
+                     children.push(child);
+                 }
+             } else {
++                if let Some(session) = cached(&file.id) {
++                    unchanged.push(session);
++                    continue;
++                }
+                 let (summary, path, modified) = self.summary(&file.id);
+                 self.background.observe(&file.id, &summary);
+                 sessions.push(session(file.id, summary, path, modified));
+@@ -555,6 +593,7 @@ impl ClaudeProvider {
+                 }
+             }
+         }
++        sessions.extend(unchanged);
+         Snapshot { sessions, has_more }
+     }
+ 
+@@ -736,6 +775,21 @@ fn subagent_files(transcript: &Path) -> Vec<Transcript> {
+ }
+ 
+ impl Provider for ClaudeProvider {
++    fn session_source(&self) -> Box<dyn Provider> {
++        let mut source = Self::new(self.config_dir.clone());
++        source.ask_user_question = self.ask_user_question.clone();
++        Box::new(source)
++    }
++
++    fn refresh_sessions(
++        &mut self,
++        pages: usize,
++        sessions: &[SessionKey],
++        previous: &[Session],
++    ) -> Snapshot {
++        self.snapshot_sessions(pages, Some(sessions), previous)
++    }
++
+     fn display_name(&self) -> &'static str {
+         "Claude"
+     }
+diff --git a/agents/src/providers/codex/mod.rs b/agents/src/providers/codex/mod.rs
+index b5494c1d..c778cafe 100644
+--- a/agents/src/providers/codex/mod.rs
++++ b/agents/src/providers/codex/mod.rs
+@@ -665,6 +665,10 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
+ }
+ 
+ impl Provider for CodexProvider {
++    fn session_source(&self) -> Box<dyn Provider> {
++        Box::new(Self::new(self.home.clone(), self.manager_home.clone()))
++    }
++
+     fn display_name(&self) -> &'static str {
+         "Codex"
+     }
+diff --git a/agents/src/providers/mod.rs b/agents/src/providers/mod.rs
+index 8cdec7fa..c9678e23 100644
+--- a/agents/src/providers/mod.rs
++++ b/agents/src/providers/mod.rs
+@@ -243,7 +243,19 @@ pub trait ScreenInput {
+     fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
+ }
+ 
+-pub trait Provider {
++pub trait Provider: Send {
++    /// Creates a session reader with independent caches and the same provider configuration.
++    fn session_source(&self) -> Box<dyn Provider>;
++    /// Discovers the history page while reusing unrelated session details.
++    fn refresh_sessions(
++        &mut self,
++        pages: usize,
++        _sessions: &[SessionKey],
++        _previous: &[Session],
++    ) -> Snapshot {
++        self.discover(pages)
++    }
++
+     /// Prepares provider integrations when the dashboard starts.
+     fn setup(&mut self) -> io::Result<()> {
+         Ok(())
+diff --git a/agents/src/refresh.rs b/agents/src/refresh.rs
+index 28a5b476..3f28bb2c 100644
+--- a/agents/src/refresh.rs
++++ b/agents/src/refresh.rs
+@@ -1,5 +1,6 @@
+ //! Fixed-window filesystem debounce and periodic liveness refreshes.
+ 
++use crate::sessions::RefreshRequest;
+ use std::time::{Duration, Instant};
+ 
+ pub const FALLBACK_INTERVAL: Duration = Duration::from_secs(5);
+@@ -10,6 +11,7 @@ pub struct RefreshSchedule {
+     periodic: Instant,
+     changed: Option<Instant>,
+     interval: Duration,
++    request: Option<RefreshRequest>,
+ }
+ 
+ impl RefreshSchedule {
+@@ -18,11 +20,41 @@ impl RefreshSchedule {
+             periodic: now + interval,
+             changed: None,
+             interval,
++            request: None,
+         }
+     }
+ 
+     pub fn changed(&mut self, now: Instant) {
++        self.paths_changed(now, RefreshRequest::Full);
++    }
++
++    pub fn paths_changed(&mut self, now: Instant, request: RefreshRequest) {
+         self.changed.get_or_insert(now + DEBOUNCE);
++        if let Some(pending) = &mut self.request {
++            pending.merge(request);
++        } else {
++            self.request = Some(request);
++        }
++    }
++
++    pub fn take_due(&mut self, now: Instant) -> Option<RefreshRequest> {
++        if !self.due(now) {
++            return None;
++        }
++        let request = if now >= self.periodic {
++            RefreshRequest::Full
++        } else {
++            self.request
++                .take()
++                .expect("filesystem deadline has a refresh request")
++        };
++        if matches!(request, RefreshRequest::Full) {
++            self.refreshed(now);
++        } else {
++            self.changed = None;
++            self.request = None;
++        }
++        Some(request)
+     }
+ 
+     pub fn timeout(&self, now: Instant) -> Duration {
+@@ -47,6 +79,7 @@ impl RefreshSchedule {
+     pub fn refreshed(&mut self, now: Instant) {
+         self.periodic = now + self.interval;
+         self.changed = None;
++        self.request = None;
+     }
+ }
+ 
+@@ -86,6 +119,25 @@ mod tests {
+         schedule.refreshed(start + POLLING_INTERVAL);
+         assert_eq!(schedule.timeout(start + POLLING_INTERVAL), POLLING_INTERVAL);
+     }
++
++    #[test]
++    fn targeted_refreshes_keep_the_full_liveness_deadline() {
++        let start = Instant::now();
++        let mut schedule = RefreshSchedule::new(start, FALLBACK_INTERVAL);
++        for second in 1..5 {
++            let now = start + Duration::from_secs(second);
++            let request = RefreshRequest::paths(vec!["session.jsonl".into()]);
++            schedule.paths_changed(now, request);
++            assert!(matches!(
++                schedule.take_due(now + DEBOUNCE),
++                Some(RefreshRequest::Paths(_))
++            ));
++        }
++        assert_eq!(
++            schedule.take_due(start + FALLBACK_INTERVAL),
++            Some(RefreshRequest::Full)
++        );
++    }
+ }
+ 
+ #[cfg(test)]
+diff --git a/agents/src/sessions/mod.rs b/agents/src/sessions/mod.rs
+index 59981b0b..c151c305 100644
+--- a/agents/src/sessions/mod.rs
++++ b/agents/src/sessions/mod.rs
+@@ -1,10 +1,12 @@
+ //! Merged session snapshots and filesystem notifications.
+ 
++mod refresh;
+ mod watcher;
++pub use refresh::{Refresh, RefreshRequest};
+ mod weekly_usage;
+ 
+ use crate::model::SessionStatus;
+-use crate::providers::{Capabilities, Provider, ProviderId, Snapshot};
++use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
+ use std::collections::{HashMap, HashSet};
+ use std::{
+     io,
+@@ -130,11 +132,42 @@ impl Hub {
+         self.pages = self.pages.saturating_add(1);
+     }
+ 
++    pub fn session_source(&self) -> Refresh {
++        Refresh::new(Self::new(
++            self.providers.iter().map(|p| p.session_source()).collect(),
++        ))
++    }
++
++    pub fn pages(&self) -> usize {
++        self.pages
++    }
++
++    pub fn refresh_paths(&mut self, paths: &[PathBuf], previous: Snapshot) -> Snapshot {
++        let Some(affected) = refresh::affected_sessions(paths, &previous.sessions) else {
++            return self.refresh();
++        };
++        self.refresh_selected(Some((&affected, &previous)))
++    }
++
+     pub fn refresh(&mut self) -> Snapshot {
++        self.refresh_selected(None)
++    }
++
++    fn refresh_selected(&mut self, changed: Option<(&HashSet<SessionKey>, &Snapshot)>) -> Snapshot {
+         let mut snapshots: Vec<_> = self
+             .providers
+             .iter_mut()
+-            .map(|provider| provider.discover(self.pages))
++            .map(|provider| match changed {
++                None => provider.discover(self.pages),
++                Some((affected, previous)) => {
++                    let ids = affected
++                        .iter()
++                        .filter(|id| id.provider == provider.id())
++                        .cloned()
++                        .collect::<Vec<_>>();
++                    provider.refresh_sessions(self.pages, &ids, &previous.sessions)
++                }
++            })
+             .collect();
+         let mut frontier: Vec<_> = snapshots
+             .iter()
+@@ -176,7 +209,31 @@ impl Hub {
+             self.providers
+                 .iter_mut()
+                 .zip(snapshots)
+-                .map(|(provider, snapshot)| provider.enrich(snapshot)),
++                .map(|(provider, snapshot)| {
++                    let Some((affected, previous)) = changed else {
++                        return provider.enrich(snapshot);
++                    };
++                    let mut cached = Vec::new();
++                    let mut details = Vec::new();
++                    for session in snapshot.sessions {
++                        if !affected.contains(&session.id)
++                            && let Some(before) = previous
++                                .sessions
++                                .iter()
++                                .find(|before| before.id == session.id)
++                        {
++                            cached.push(before.clone());
++                        } else {
++                            details.push(session);
++                        }
++                    }
++                    let mut updated = provider.enrich(Snapshot {
++                        sessions: details,
++                        has_more: snapshot.has_more,
++                    });
++                    updated.sessions.extend(cached);
++                    updated
++                }),
+         )
+     }
+ }
+diff --git a/agents/src/app_refresh.rs b/agents/src/app_refresh.rs
+new file mode 100644
+index 00000000..fccd7047
+--- /dev/null
++++ b/agents/src/app_refresh.rs
+@@ -0,0 +1,195 @@
++use super::*;
++use crate::sessions::{Refresh, RefreshRequest};
++
++pub(super) struct SessionRefresh {
++    idle: Option<Refresh>,
++    pending: Option<RefreshRequest>,
++    generation: u64,
++    pub stops: Vec<(u64, SessionKey, bool)>,
++    pub deletes: Vec<(u64, SessionKey)>,
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn refresh_burst_runs_once_then_runs_one_merged_request() {
++        let home = tempfile::tempdir().unwrap();
++        let mut app = App::new(Hub::new(Vec::new()), home.path().into());
++        assert_eq!(app.request_refresh(), 1);
++        for index in 0..50 {
++            app.request_sessions(RefreshRequest::paths(vec![PathBuf::from(format!(
++                "{index}.jsonl"
++            ))]));
++        }
++        assert!(app.session_refresh.idle.is_none());
++        assert!(
++            matches!(&app.session_refresh.pending, Some(RefreshRequest::Paths(paths)) if paths.len() == 50)
++        );
++        app.request_refresh();
++        assert_eq!(app.session_refresh.pending, Some(RefreshRequest::Full));
++        let Input::Sessions {
++            refresh,
++            generation,
++            result,
++        } = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap()
++        else {
++            panic!("expected the initial real Hub refresh");
++        };
++        assert_eq!(generation, 1);
++        app.finish_sessions(*refresh, generation, result).unwrap();
++        assert!(app.session_refresh.pending.is_none());
++        assert!(app.session_refresh.idle.is_none());
++        let Input::Sessions {
++            refresh,
++            generation,
++            result,
++        } = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap()
++        else {
++            panic!("expected one merged Hub refresh");
++        };
++        assert_eq!(generation, 52);
++        app.finish_sessions(*refresh, generation, result).unwrap();
++        assert!(app.session_refresh.idle.is_some());
++        assert!(app.session_refresh.pending.is_none());
++        assert!(app.receiver.try_recv().is_err());
++    }
++}
++
++impl SessionRefresh {
++    pub fn new(refresh: Refresh) -> Self {
++        Self {
++            idle: Some(refresh),
++            pending: None,
++            generation: 0,
++            stops: Vec::new(),
++            deletes: Vec::new(),
++        }
++    }
++}
++
++impl App {
++    pub(super) fn request_refresh(&mut self) -> u64 {
++        self.request_sessions(RefreshRequest::Full)
++    }
++
++    pub(super) fn request_sessions(&mut self, request: RefreshRequest) -> u64 {
++        self.session_refresh.generation += 1;
++        if let Some(pending) = &mut self.session_refresh.pending {
++            pending.merge(request);
++        } else {
++            self.session_refresh.pending = Some(request);
++        }
++        self.start_session_refresh();
++        self.session_refresh.generation
++    }
++
++    fn start_session_refresh(&mut self) {
++        let Some(mut refresh) = self.session_refresh.idle.take() else {
++            return;
++        };
++        let Some(request) = self.session_refresh.pending.take() else {
++            self.session_refresh.idle = Some(refresh);
++            return;
++        };
++        let generation = self.session_refresh.generation;
++        let pages = self.hub.pages();
++        let sender = self.sender.clone();
++        // The worker owns its caches. UI actions never wait on a refresh lock, and
++        // shutdown drops the receiver without joining a potentially blocked reader.
++        thread::Builder::new()
++            .name("agents-refresh".into())
++            .spawn(move || {
++                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++                    refresh.run(pages, request)
++                }))
++                .map_err(|_| io::Error::other("Session refresh panicked"));
++                let _ = sender.send(Input::Sessions {
++                    refresh: Box::new(refresh),
++                    generation,
++                    result,
++                });
++            })
++            .expect("Cannot start session refresh worker");
++    }
++
++    pub(super) fn finish_sessions(
++        &mut self,
++        refresh: Refresh,
++        generation: u64,
++        result: io::Result<Snapshot>,
++    ) -> io::Result<()> {
++        self.session_refresh.idle = Some(refresh);
++        self.apply_sessions(result?);
++        let stops = std::mem::take(&mut self.session_refresh.stops);
++        for (requested, id, success) in stops {
++            if requested <= generation {
++                self.pending_inputs.remove(&id);
++                self.view.stop_complete(&id, success);
++            } else {
++                self.session_refresh.stops.push((requested, id, success));
++            }
++        }
++        let deletes = std::mem::take(&mut self.session_refresh.deletes);
++        for (requested, id) in deletes {
++            if requested <= generation {
++                self.delete_after_refresh(id);
++            } else {
++                self.session_refresh.deletes.push((requested, id));
++            }
++        }
++        self.start_session_refresh();
++        Ok(())
++    }
++
++    fn delete_after_refresh(&mut self, id: SessionKey) {
++        if let Some(session) = self.session(&id) {
++            if !session.can_resume() {
++                return;
++            }
++            if session.transcript.is_some() {
++                self.delete(session);
++                return;
++            }
++        }
++        self.view.set_notice(Some("Nothing to delete".into()));
++    }
++
++    /// Applies completed real-provider refreshes for synchronous fixture assertions.
++    #[cfg(test)]
++    pub(super) fn refresh(&mut self) {
++        self.request_refresh();
++        self.finish_refreshes();
++    }
++
++    #[cfg(test)]
++    pub(super) fn finish_refreshes(&mut self) {
++        let mut schedule = RefreshSchedule::new(Instant::now(), FALLBACK_INTERVAL);
++        while self.session_refresh.idle.is_none() {
++            let input = self.receiver.recv_timeout(Duration::from_secs(30)).unwrap();
++            self.handle_inputs(input, &mut None, &mut schedule).unwrap();
++        }
++    }
++
++    #[cfg(test)]
++    pub(super) fn next_input(&mut self, timeout: Duration) -> Input {
++        let deadline = Instant::now() + timeout;
++        loop {
++            let input = self
++                .receiver
++                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
++                .unwrap();
++            if let Input::Sessions {
++                refresh,
++                generation,
++                result,
++            } = input
++            {
++                self.finish_sessions(*refresh, generation, result).unwrap();
++            } else {
++                return input;
++            }
++        }
++    }
++}
+diff --git a/agents/src/app_refresh_tests.rs b/agents/src/app_refresh_tests.rs
+new file mode 100644
+index 00000000..eb8ff7c1
+--- /dev/null
++++ b/agents/src/app_refresh_tests.rs
+@@ -0,0 +1,281 @@
++use super::*;
++use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
++use ratatui::backend::TestBackend;
++
++fn claude_home() -> tempfile::TempDir {
++    let home = tempfile::tempdir().unwrap();
++    let project = home.path().join("projects/project");
++    std::fs::create_dir_all(&project).unwrap();
++    for index in 1..=2 {
++        std::fs::write(
++            project.join(format!("00000000-0000-0000-0000-{index:012}.jsonl")),
++            include_bytes!("../tests/fixtures/transcript.jsonl"),
++        )
++        .unwrap();
++    }
++    home
++}
++
++fn claude_hub(home: &std::path::Path) -> Hub {
++    Hub::new(vec![Box::new(
++        crate::providers::claude::ClaudeProvider::new(home.into()),
++    )])
++}
++
++#[test]
++fn filesystem_refresh_updates_only_the_affected_session() {
++    use std::io::Write;
++    let home = claude_home();
++    let mut hub = claude_hub(home.path());
++    let before = hub.refresh();
++    let target = before.sessions[0].transcript.clone().unwrap();
++    let unaffected = before.sessions[1].clone();
++    for session in &before.sessions {
++        writeln!(
++            std::fs::OpenOptions::new()
++                .append(true)
++                .open(session.transcript.as_ref().unwrap())
++                .unwrap(),
++            "{}",
++            serde_json::json!({"type": "custom-title", "customTitle": "Changed title", "sessionId": session.id.id})
++        )
++        .unwrap();
++    }
++    let after = hub.refresh_paths(&[target], before);
++    assert_eq!(after.sessions.len(), 2);
++    let updated = after
++        .sessions
++        .iter()
++        .find(|s| s.id != unaffected.id)
++        .unwrap();
++    assert_eq!(updated.title, "Changed title");
++    assert_eq!(
++        after
++            .sessions
++            .iter()
++            .find(|s| s.id == unaffected.id)
++            .unwrap(),
++        &unaffected,
++        "an unrelated transcript must not be refreshed"
++    );
++}
++
++#[test]
++fn refresh_allows_first_frame_input_and_exit_while_sqlite_is_locked() {
++    let home = tempfile::tempdir().unwrap();
++    let db = rusqlite::Connection::open(home.path().join("state_5.sqlite")).unwrap();
++    db.execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
++        .unwrap();
++    db.execute_batch("BEGIN EXCLUSIVE").unwrap();
++    // A real database lock bounds the blocked reader without substituting a provider.
++    let (release, locked) = mpsc::channel();
++    let owner = thread::spawn(move || {
++        let _ = locked.recv_timeout(Duration::from_millis(800));
++        db.execute_batch("COMMIT").unwrap();
++    });
++    let mut app = App::new(
++        Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
++            home.path().into(),
++            home.path().join("manager"),
++        ))]),
++        home.path().into(),
++    );
++    let start = Instant::now();
++    app.request_refresh();
++    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
++    app.draw(&mut terminal).unwrap();
++    let mut schedule = RefreshSchedule::new(Instant::now(), FALLBACK_INTERVAL);
++    assert!(
++        app.handle_inputs(
++            Input::Terminal(Ok(Event::Key(KeyEvent::new(
++                KeyCode::Char('c'),
++                KeyModifiers::CONTROL,
++            )))),
++            &mut None,
++            &mut schedule,
++        )
++        .unwrap()
++    );
++    let receiver = std::mem::replace(&mut app.receiver, mpsc::channel().1);
++    drop(app);
++    let elapsed = start.elapsed();
++    let _ = release.send(());
++    owner.join().unwrap();
++    assert!(matches!(
++        receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
++        Input::Sessions { .. }
++    ));
++    assert!(elapsed < Duration::from_millis(300), "{elapsed:?}");
++}
++
++#[test]
++fn unknown_filesystem_path_discovers_new_sessions() {
++    let home = claude_home();
++    let mut hub = claude_hub(home.path());
++    let before = hub.refresh();
++    let path = home
++        .path()
++        .join("projects/project/00000000-0000-0000-0000-000000000003.jsonl");
++    std::fs::write(&path, include_bytes!("../tests/fixtures/transcript.jsonl")).unwrap();
++    let after = hub.refresh_paths(&[path], before);
++    assert_eq!(after.sessions.len(), 3);
++}
++
++#[test]
++fn targeted_refresh_keeps_the_history_page_budget_with_subagents() {
++    let home = claude_home();
++    let project = home.path().join("projects/project");
++    let parent = project.join("00000000-0000-0000-0000-000000000001.jsonl");
++    let children = parent.with_extension("").join("subagents");
++    std::fs::create_dir_all(&children).unwrap();
++    for index in 0..13 {
++        let path = children.join(format!("agent-{index:016x}.jsonl"));
++        std::fs::write(&path, include_bytes!("../tests/fixtures/subagent.jsonl")).unwrap();
++        std::fs::File::open(path)
++            .unwrap()
++            .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(index))
++            .unwrap();
++    }
++    let mut hub = claude_hub(home.path());
++    let before = hub.refresh();
++    assert_eq!(before.sessions.len(), 10);
++    assert!(
++        before
++            .sessions
++            .iter()
++            .any(|s| s.transcript.as_ref() == Some(&parent))
++    );
++    let after = hub.refresh_paths(&[parent], before);
++    let expected = hub.refresh();
++    assert_eq!(after.sessions, expected.sessions);
++    assert_eq!(after.has_more, expected.has_more);
++}
++
++#[test]
++fn targeted_refresh_backfills_a_removed_history_row() {
++    let home = claude_home();
++    let project = home.path().join("projects/project");
++    for index in 3..=12 {
++        std::fs::write(
++            project.join(format!("00000000-0000-0000-0000-{index:012}.jsonl")),
++            include_bytes!("../tests/fixtures/transcript.jsonl"),
++        )
++        .unwrap();
++    }
++    let mut hub = claude_hub(home.path());
++    let before = hub.refresh();
++    let path = before.sessions[0].transcript.clone().unwrap();
++    std::fs::remove_file(&path).unwrap();
++    let after = hub.refresh_paths(&[path], before);
++    let expected = hub.refresh();
++    assert_eq!(after.sessions, expected.sessions);
++    assert_eq!(after.has_more, expected.has_more);
++}
++
++#[test]
++fn subagent_file_change_does_not_refresh_its_parent_row() {
++    use std::io::Write;
++    let home = claude_home();
++    let parent = home
++        .path()
++        .join("projects/project/00000000-0000-0000-0000-000000000001.jsonl");
++    let children = parent.with_extension("").join("subagents");
++    std::fs::create_dir_all(&children).unwrap();
++    let child = children.join("agent-abf695d5995bd43ab.jsonl");
++    std::fs::write(&child, include_bytes!("../tests/fixtures/subagent.jsonl")).unwrap();
++    let mut hub = claude_hub(home.path());
++    let before = hub.refresh();
++    let parent_before = before
++        .sessions
++        .iter()
++        .find(|s| s.transcript.as_ref() == Some(&parent))
++        .unwrap()
++        .clone();
++    writeln!(std::fs::OpenOptions::new().append(true).open(&parent).unwrap(), "{}", serde_json::json!({"type": "custom-title", "customTitle": "Unrelated parent edit", "sessionId": parent_before.id.id})).unwrap();
++    let after = hub.refresh_paths(&[child], before);
++    assert_eq!(
++        after
++            .sessions
++            .iter()
++            .find(|s| s.id == parent_before.id)
++            .unwrap(),
++        &parent_before
++    );
++}
++
++#[test]
++fn codex_filesystem_refresh_leaves_unrelated_rows_unchanged() {
++    let home = tempfile::tempdir().unwrap();
++    let db = rusqlite::Connection::open(home.path().join("state_5.sqlite")).unwrap();
++    db.execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
++        .unwrap();
++    let ids: Vec<String> = db
++        .prepare("SELECT id FROM threads")
++        .unwrap()
++        .query_map([], |row| row.get(0))
++        .unwrap()
++        .collect::<rusqlite::Result<_>>()
++        .unwrap();
++    for id in ids {
++        let path = home.path().join(format!("{id}.jsonl"));
++        std::fs::write(
++            &path,
++            include_bytes!("../tests/fixtures/codex-thread-clock.jsonl"),
++        )
++        .unwrap();
++        db.execute(
++            "UPDATE threads SET rollout_path=?1 WHERE id=?2",
++            rusqlite::params![path.to_str().unwrap(), id],
++        )
++        .unwrap();
++    }
++    let mut hub = Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
++        home.path().into(),
++        home.path().join("manager"),
++    ))]);
++    let before = hub.refresh();
++    let target = before.sessions[0].clone();
++    let unaffected = before.sessions[1].clone();
++    db.execute(
++        "UPDATE threads SET title='Changed title' WHERE id=?1 OR id=?2",
++        [&target.id.id, &unaffected.id.id],
++    )
++    .unwrap();
++    let after = hub.refresh_paths(&[target.transcript.unwrap()], before);
++    assert_eq!(
++        after
++            .sessions
++            .iter()
++            .find(|s| s.id == target.id)
++            .unwrap()
++            .title,
++        "Changed title"
++    );
++    assert_eq!(
++        after
++            .sessions
++            .iter()
++            .find(|s| s.id == unaffected.id)
++            .unwrap(),
++        &unaffected
++    );
++}
++
++#[test]
++fn filesystem_input_keeps_paths_through_the_debounce() {
++    let home = claude_home();
++    let mut app = App::new(claude_hub(home.path()), home.path().into());
++    let mut watcher = Some(crate::sessions::watch(&[], |_| {}).unwrap());
++    let now = Instant::now();
++    let mut schedule = RefreshSchedule::new(now, FALLBACK_INTERVAL);
++    let path = home
++        .path()
++        .join("projects/project/00000000-0000-0000-0000-000000000001.jsonl");
++    let event = notify::Event::new(notify::EventKind::Any).add_path(path.clone());
++    app.handle_inputs(Input::Filesystem(Ok(event)), &mut watcher, &mut schedule)
++        .unwrap();
++    assert_eq!(
++        schedule.take_due(now + Duration::from_millis(100)),
++        Some(crate::sessions::RefreshRequest::paths(vec![path]))
++    );
++}
+diff --git a/agents/src/sessions/refresh.rs b/agents/src/sessions/refresh.rs
+new file mode 100644
+index 00000000..42587aff
+--- /dev/null
++++ b/agents/src/sessions/refresh.rs
+@@ -0,0 +1,144 @@
++use super::*;
++
++#[derive(Debug, PartialEq, Eq)]
++pub enum RefreshRequest {
++    Full,
++    Paths(HashSet<PathBuf>),
++}
++
++impl RefreshRequest {
++    pub fn paths(paths: Vec<PathBuf>) -> Self {
++        if paths.is_empty() {
++            Self::Full
++        } else {
++            Self::Paths(paths.into_iter().collect())
++        }
++    }
++
++    pub fn merge(&mut self, request: Self) {
++        match (self, request) {
++            (Self::Paths(paths), Self::Paths(more)) => paths.extend(more),
++            (pending, _) => *pending = Self::Full,
++        }
++    }
++}
++
++/// Owns provider caches for the refresh worker, separate from UI action handles.
++pub struct Refresh {
++    hub: Hub,
++    snapshot: Option<Snapshot>,
++}
++
++impl Refresh {
++    pub(super) fn new(hub: Hub) -> Self {
++        Self {
++            hub,
++            snapshot: None,
++        }
++    }
++
++    pub fn run(&mut self, pages: usize, request: RefreshRequest) -> Snapshot {
++        let changed_pages = self.hub.pages != pages;
++        self.hub.pages = pages;
++        let snapshot = match (request, self.snapshot.take()) {
++            (RefreshRequest::Paths(paths), Some(previous)) if !changed_pages => self
++                .hub
++                .refresh_paths(&paths.into_iter().collect::<Vec<_>>(), previous),
++            _ => self.hub.refresh(),
++        };
++        self.snapshot = Some(Snapshot {
++            sessions: snapshot.sessions.clone(),
++            has_more: snapshot.has_more,
++        });
++        snapshot
++    }
++}
++
++pub(super) fn affected_sessions(
++    paths: &[PathBuf],
++    sessions: &[crate::model::Session],
++) -> Option<HashSet<SessionKey>> {
++    if paths.is_empty() {
++        return None;
++    }
++    let mut selected = HashSet::new();
++    for path in paths {
++        let exact: Vec<_> = sessions
++            .iter()
++            .filter(|session| session.transcript.as_deref() == Some(path.as_path()))
++            .map(|session| session.id.clone())
++            .collect();
++        // A transcript identifies its row before any ancestor identifies its parent.
++        if !exact.is_empty() {
++            selected.extend(exact);
++            continue;
++        }
++        let mut closest = None;
++        let mut owners = HashSet::new();
++        for session in sessions {
++            let by_name = path.components().rev().position(|part| {
++                part.as_os_str().to_str().is_some_and(|name| {
++                    matches_id(name, &session.id.id)
++                        || session
++                            .background_job
++                            .as_ref()
++                            .is_some_and(|job| matches_id(name, &job.id))
++                })
++            });
++            let by_directory = session.transcript.as_deref().and_then(|file| {
++                let directory = file.with_extension("");
++                path.starts_with(&directory)
++                    .then(|| path.components().count() - directory.components().count())
++            });
++            let registry = path
++                .parent()
++                .and_then(Path::file_name)
++                .is_some_and(|name| name == "sessions")
++                && session.process.as_ref().is_some_and(|process| {
++                    path.file_stem().and_then(|stem| stem.to_str())
++                        == Some(process.pid.to_string().as_str())
++                });
++            let Some(distance) = [by_name, by_directory, registry.then_some(0)]
++                .into_iter()
++                .flatten()
++                .min()
++            else {
++                continue;
++            };
++            if closest.is_none_or(|best| distance < best) {
++                closest = Some(distance);
++                owners.clear();
++            }
++            if closest == Some(distance) {
++                owners.insert(session.id.clone());
++            }
++        }
++        if owners.is_empty() {
++            return None;
++        }
++        selected.extend(owners);
++    }
++    loop {
++        let before = selected.len();
++        for session in sessions {
++            if session
++                .parent
++                .as_ref()
++                .is_some_and(|parent| selected.contains(parent))
++            {
++                selected.insert(session.id.clone());
++            }
++        }
++        if selected.len() == before {
++            break;
++        }
++    }
++    Some(selected)
++}
++
++fn matches_id(name: &str, id: &str) -> bool {
++    name == id
++        || name
++            .strip_prefix(id)
++            .is_some_and(|suffix| suffix.starts_with('.'))
++}

@@ -1243,6 +1243,7 @@ fn task_tabs_inactive_starts_with_ten_then_reveals_next_page() {
     assert!(rendered.contains("Show more"), "{rendered}");
     key(&mut app, KeyCode::End);
     key(&mut app, KeyCode::Enter);
+    app.finish_refreshes();
     assert_eq!(app.sessions.len(), 20);
     assert!(
         lines(&draw(&mut app, 160))
@@ -1251,6 +1252,7 @@ fn task_tabs_inactive_starts_with_ten_then_reveals_next_page() {
     );
     key(&mut app, KeyCode::End);
     key(&mut app, KeyCode::Enter);
+    app.finish_refreshes();
     assert_eq!(app.sessions.len(), 23);
     let rendered = lines(&draw(&mut app, 160)).join("\n");
     assert!(rendered.contains("Inactive 23"));
@@ -1506,6 +1508,7 @@ fn archive_success_keeps_active_tab_and_releases_hidden_task() {
     let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    app.finish_refreshes();
     draw(&mut app, 120);
     assert!(
         app.view.selected_id().is_none(),

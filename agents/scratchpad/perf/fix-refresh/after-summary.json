@@ -1,0 +1,261 @@
+{
+  "status": "final",
+  "source_head": "9af4e1ee35473c94e6441de5e792f32ddab09c74",
+  "own_patch_sha256": "09a31248bc6a2d2efcfa38b59c3f2fcb6781ce9258b76dbd21a8f7cb6458b8cb",
+  "binary": "/Users/satoshi/Code/.worktrees/agents-panel/agents/scratchpad/perf/fix-refresh/after-agents",
+  "binary_sha256": "05590f3efda8e66397296748849212906642c9f215000845ea85f7dff63d71c7",
+  "measurement_cwd": "/Users/satoshi/Code/.worktrees/agents-panel/agents/scratchpad/perf/fix-refresh/verify/agents",
+  "first_footer_frame_ms": [
+    359.02,
+    60.79,
+    53.58
+  ],
+  "first_session_row_ms": [
+    1555.08,
+    1274.69,
+    1252.73
+  ],
+  "first_footer_frame": {
+    "n": 3,
+    "p50_ms": 60.79,
+    "p80_ms": 359.02,
+    "p99_ms": 359.02,
+    "max_ms": 359.02
+  },
+  "first_session_row": {
+    "n": 3,
+    "p50_ms": 1274.69,
+    "p80_ms": 1555.08,
+    "p99_ms": 1555.08,
+    "max_ms": 1555.08
+  },
+  "all_actions": {
+    "first_ms": {
+      "n": 150,
+      "p50_ms": 38.37,
+      "p80_ms": 58.87,
+      "p99_ms": 83.01,
+      "max_ms": 108.97
+    },
+    "settle_ms": {
+      "n": 150,
+      "p50_ms": 48.24,
+      "p80_ms": 70.3,
+      "p99_ms": 303.08,
+      "max_ms": 2502.12
+    }
+  },
+  "grouped_actions": {
+    "keys": {
+      "first_ms": {
+        "n": 60,
+        "p50_ms": 41.36,
+        "p80_ms": 58.87,
+        "p99_ms": 108.97,
+        "max_ms": 108.97
+      },
+      "settle_ms": {
+        "n": 60,
+        "p50_ms": 50.46,
+        "p80_ms": 72.78,
+        "p99_ms": 303.08,
+        "max_ms": 303.08
+      }
+    },
+    "clicks": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 37.44,
+        "p80_ms": 64.44,
+        "p99_ms": 82.63,
+        "max_ms": 82.63
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 50.05,
+        "p80_ms": 70.3,
+        "p99_ms": 141.4,
+        "max_ms": 141.4
+      }
+    },
+    "wheels": {
+      "first_ms": {
+        "n": 60,
+        "p50_ms": 34.73,
+        "p80_ms": 57.12,
+        "p99_ms": 78.62,
+        "max_ms": 78.62
+      },
+      "settle_ms": {
+        "n": 60,
+        "p50_ms": 45.84,
+        "p80_ms": 66.61,
+        "p99_ms": 2502.12,
+        "max_ms": 2502.12
+      }
+    }
+  },
+  "by_action": {
+    "key-task-down": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 33.36,
+        "p80_ms": 47.68,
+        "p99_ms": 78.25,
+        "max_ms": 78.25
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 43.38,
+        "p80_ms": 57.85,
+        "p99_ms": 303.08,
+        "max_ms": 303.08
+      }
+    },
+    "key-task-up": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 49.46,
+        "p80_ms": 67.04,
+        "p99_ms": 108.97,
+        "max_ms": 108.97
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 55.57,
+        "p80_ms": 75.86,
+        "p99_ms": 164.46,
+        "max_ms": 164.46
+      }
+    },
+    "click-task": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 37.44,
+        "p80_ms": 64.44,
+        "p99_ms": 82.63,
+        "max_ms": 82.63
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 50.05,
+        "p80_ms": 70.3,
+        "p99_ms": 141.4,
+        "max_ms": 141.4
+      }
+    },
+    "wheel-task-down": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 29.63,
+        "p80_ms": 45.82,
+        "p99_ms": 64.83,
+        "max_ms": 64.83
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 38.55,
+        "p80_ms": 62.37,
+        "p99_ms": 138.14,
+        "max_ms": 138.14
+      }
+    },
+    "wheel-task-up": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 36.03,
+        "p80_ms": 60.75,
+        "p99_ms": 78.62,
+        "max_ms": 78.62
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 45.98,
+        "p80_ms": 71.8,
+        "p99_ms": 2502.12,
+        "max_ms": 2502.12
+      }
+    }
+  },
+  "actions_without_output": 0,
+  "clicks_target_different_row": true,
+  "click_response_n": 30,
+  "click_response_bytes_min": 8404,
+  "startup_ctrl_c_ms": [
+    105.46,
+    103.81,
+    102.84
+  ],
+  "idle_ctrl_c_ms": 110.35,
+  "exit_samples": [
+    {
+      "ctrl_c_at_s": 0.4061,
+      "exit_ms": 105.46,
+      "exited": true,
+      "wait_status": 0,
+      "exit_code": 0,
+      "pty_eof": true,
+      "sample_returncode": 0,
+      "refresh_in_overlapping_sample": true,
+      "refresh_on_main_thread": false,
+      "refresh_on_worker_thread": true,
+      "refresh_threads": [
+        "330 Thread_158337457: agents-refresh"
+      ],
+      "sample_exists": true
+    },
+    {
+      "ctrl_c_at_s": 0.4053,
+      "exit_ms": 103.81,
+      "exited": true,
+      "wait_status": 0,
+      "exit_code": 0,
+      "pty_eof": true,
+      "sample_returncode": 0,
+      "refresh_in_overlapping_sample": true,
+      "refresh_on_main_thread": false,
+      "refresh_on_worker_thread": true,
+      "refresh_threads": [
+        "355 Thread_158338204: agents-refresh"
+      ],
+      "sample_exists": true
+    },
+    {
+      "ctrl_c_at_s": 0.4047,
+      "exit_ms": 102.84,
+      "exited": true,
+      "wait_status": 0,
+      "exit_code": 0,
+      "pty_eof": true,
+      "sample_returncode": 0,
+      "refresh_in_overlapping_sample": true,
+      "refresh_on_main_thread": false,
+      "refresh_on_worker_thread": true,
+      "refresh_threads": [
+        "358 Thread_158338621: agents-refresh"
+      ],
+      "sample_exists": true
+    }
+  ],
+  "tmux_created": false,
+  "settle_limit_hit_rows": [
+    {
+      "action_number": 150,
+      "action": "wheel-task-up",
+      "sent_at_s": 66.7415,
+      "first_ms": 1.99,
+      "settle_ms": 2502.12,
+      "bytes": 20855
+    }
+  ],
+  "percentile_policy": "nearest rank; all 150 actions included, including observation-limit tails",
+  "timing_notes": {
+    "first_ms": "first PTY read that brings cumulative response above six bytes, after terminal decoding; not frame acknowledgement",
+    "settle_ms": "last output before 60 ms quiet, observed for at most 2.5 s; an observation-limit tail is not a completed settle"
+  },
+  "verification": {
+    "all_modes_complete": true,
+    "all_150_actions_responded": true,
+    "all_three_samples_show_refresh_only_on_worker": true
+  }
+}

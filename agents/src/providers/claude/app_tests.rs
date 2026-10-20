@@ -1168,6 +1168,7 @@ fn manager_thread_mutations_reach_app_provider_paths() {
             .unwrap();
         assert!(child.parent.is_some() && child.can_resume());
         app.hub = Hub::new(vec![Box::new(provider)]);
+        app.session_refresh = SessionRefresh::new(app.hub.session_source());
         app.sessions.push(child.clone());
         let action = match operation {
             "archive" => Action::Archive(child.id),
@@ -1175,6 +1176,9 @@ fn manager_thread_mutations_reach_app_provider_paths() {
             _ => unreachable!(),
         };
         assert!(!app.handle_action(Some(action)));
+        if operation == "delete" {
+            app.finish_refreshes();
+        }
         if operation == "archive" {
             let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
             assert!(matches!(&event, Input::Archived { result: Err(_), .. }));
@@ -1309,14 +1313,12 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
     assert!(!key(&mut app, KeyCode::Backspace));
     assert!(!key(&mut app, KeyCode::Down));
     assert!(!key(&mut app, KeyCode::Enter));
+    let event = app.next_input(Duration::from_secs(10));
     assert_ne!(app.view.selected_id(), Some(&target.id));
-    let event = app
-        .receiver
-        .recv_timeout(Duration::from_secs(10))
-        .expect("delete deadline");
     assert!(matches!(&event, Input::Deleted { id, result: Ok(()) } if id == &target.id));
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    app.finish_refreshes();
     assert!(!path.exists());
     assert!(!children.exists());
     assert!(app.session(&target.id).is_none());

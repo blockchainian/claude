@@ -45,7 +45,12 @@ enum Input {
         result: io::Result<crate::providers::ResetCreditRedemption>,
     },
     Terminal(io::Result<Event>),
-    Filesystem(notify::Result<()>),
+    Filesystem(notify::Result<notify::Event>),
+    Sessions {
+        refresh: Box<crate::sessions::Refresh>,
+        generation: u64,
+        result: io::Result<Snapshot>,
+    },
     EventsLoaded {
         token: u64,
         reader: Box<dyn crate::event::Reader>,
@@ -133,6 +138,7 @@ pub struct App {
     pending_inputs: std::collections::HashSet<SessionKey>,
     config_dir: PathBuf,
     hub: Hub,
+    session_refresh: SessionRefresh,
     preferences: Preferences,
     view: View,
     clipboard: crate::clipboard::Clipboard,
@@ -237,11 +243,13 @@ impl App {
         }
         view.provider_names = hub.display_names();
         let (sender, receiver) = mpsc::channel();
+        let session_refresh = SessionRefresh::new(hub.session_source());
         Self {
             sender,
             receiver,
             pending_inputs: std::collections::HashSet::new(),
             hub,
+            session_refresh,
             config_dir,
             preferences,
             view,
@@ -306,7 +314,7 @@ impl App {
             .map_err(notify::Error::io)
             .and_then(|roots| {
                 crate::sessions::watch(&roots, move |event| {
-                    let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
+                    let _ = filesystem.send(Input::Filesystem(event));
                 })
             });
         let mut watcher = match watch {
@@ -331,7 +339,7 @@ impl App {
             crossterm::event::EnableThemeChangeReports,
             MouseReports::Enable
         )?;
-        self.refresh();
+        self.request_refresh();
         let mut selection_tick = Instant::now();
         loop {
             let persist = self.view.take_question_action();
@@ -345,9 +353,8 @@ impl App {
             self.view.expire_messages(Instant::now());
             self.refresh_weekly_usage();
             self.view.present_reset_credit();
-            if schedule.due(Instant::now()) {
-                self.refresh();
-                schedule.refreshed(Instant::now());
+            if let Some(request) = schedule.take_due(Instant::now()) {
+                self.request_sessions(request);
             }
             self.view.set_cell_aspect(cell_aspect());
             self.sync_terminal();
@@ -485,8 +492,20 @@ impl App {
                         return Ok(true);
                     }
                 }
-                Input::Filesystem(Ok(())) if watcher.is_some() => {
-                    schedule.changed(Instant::now());
+                Input::Sessions {
+                    refresh,
+                    generation,
+                    result,
+                } => {
+                    self.finish_sessions(*refresh, generation, result)?;
+                }
+                Input::Filesystem(Ok(event)) if watcher.is_some() => {
+                    let request = if event.need_rescan() {
+                        crate::sessions::RefreshRequest::Full
+                    } else {
+                        crate::sessions::RefreshRequest::paths(event.paths)
+                    };
+                    schedule.paths_changed(Instant::now(), request);
                 }
                 Input::Filesystem(Err(error)) if watcher.is_some() => {
                     self.view
@@ -527,14 +546,16 @@ impl App {
                     Err(error) => self.view.draft_worktree_created(draft_key, Err(error)),
                 },
                 Input::Sent { id, input, result } => {
-                    self.pending_inputs.remove(&id);
                     if matches!(input, SessionInput::Interrupt) {
-                        self.refresh();
-                        self.view.stop_complete(&id, result.is_ok());
+                        let generation = self.request_refresh();
+                        self.session_refresh
+                            .stops
+                            .push((generation, id, result.is_ok()));
                         if let Err(error) = result {
                             self.input_error(&input, error.to_string());
                         }
                     } else {
+                        self.pending_inputs.remove(&id);
                         self.view.input_complete(&id, &input, result);
                     }
                 }
@@ -966,8 +987,7 @@ impl App {
         }
     }
 
-    fn refresh(&mut self) {
-        let Snapshot { sessions, has_more } = self.hub.refresh();
+    fn apply_sessions(&mut self, Snapshot { sessions, has_more }: Snapshot) {
         self.unpin_inactive(&sessions);
         for session in &sessions {
             if session.status == SessionStatus::Inactive
@@ -1242,7 +1262,7 @@ impl App {
 
     fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
         self.view.unhide(id);
-        self.refresh();
+        self.request_refresh();
         if let Err(error) = result {
             self.view
                 .set_notice(Some(format!("Cannot archive: {error}")));
@@ -1254,11 +1274,11 @@ impl App {
             Ok(()) => {
                 let saved = self.preferences.forget_task(&self.config_dir, id);
                 self.report_save(saved);
-                self.refresh();
+                self.request_refresh();
             }
             Err(error) => {
                 self.view.unhide(id);
-                self.refresh();
+                self.request_refresh();
                 self.view
                     .set_notice(Some(format!("Cannot delete: {error}")));
             }
@@ -1367,7 +1387,7 @@ impl App {
             Action::ShowMore => {
                 self.hub.show_more();
                 self.view.set_loading(true);
-                self.refresh();
+                self.request_refresh();
             }
             Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
@@ -1393,7 +1413,9 @@ impl App {
                 if let Some(session) = self.session(&id) {
                     if session.transcript.is_some() {
                         match self.hub.provider(id.provider).rename(&session, &name) {
-                            Ok(()) => self.refresh(),
+                            Ok(()) => {
+                                self.request_refresh();
+                            }
                             Err(error) => self
                                 .view
                                 .set_notice(Some(format!("Cannot rename: {error}"))),
@@ -1405,19 +1427,8 @@ impl App {
                 }
             }
             Action::Delete(id) => {
-                self.refresh();
-                if let Some(session) = self.session(&id) {
-                    if !session.can_resume() {
-                        return false;
-                    }
-                    if session.transcript.is_none() {
-                        self.view.set_notice(Some("Nothing to delete".into()));
-                    } else {
-                        self.delete(session);
-                    }
-                } else {
-                    self.view.set_notice(Some("Nothing to delete".into()));
-                }
+                let generation = self.request_refresh();
+                self.session_refresh.deletes.push((generation, id));
             }
             Action::Archive(id) => {
                 if let Some(session) = self.session(&id) {
@@ -1552,6 +1563,10 @@ impl crossterm::Command for MouseReports {
     }
 }
 
+#[path = "app_refresh.rs"]
+mod session_refresh;
+use session_refresh::SessionRefresh;
+
 #[path = "app_keyboard.rs"]
 mod keyboard;
 
@@ -1642,3 +1657,7 @@ mod reset_credit_tests;
 #[cfg(test)]
 #[path = "app_transcript_tests.rs"]
 mod transcript_tests;
+
+#[cfg(test)]
+#[path = "app_refresh_tests.rs"]
+mod refresh_tests;

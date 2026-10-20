@@ -364,6 +364,28 @@ impl ClaudeProvider {
     }
 
     fn snapshot(&mut self, pages: usize) -> Snapshot {
+        self.snapshot_sessions(pages, None, &[])
+    }
+
+    fn snapshot_sessions(
+        &mut self,
+        pages: usize,
+        selected: Option<&[SessionKey]>,
+        previous: &[Session],
+    ) -> Snapshot {
+        let cached = |id: &str| {
+            if selected.is_some_and(|ids| !ids.iter().any(|key| key.id == id)) {
+                previous
+                    .iter()
+                    .find(|session| {
+                        session.id.provider == ProviderId::Claude && session.id.id == id
+                    })
+                    .cloned()
+            } else {
+                None
+            }
+        };
+        let mut unchanged = Vec::new();
         self.list_transcripts();
         let jobs = registry::background_jobs(&self.config_dir);
         // Claude Code writes a transcript only after the first prompt, and
@@ -387,6 +409,10 @@ impl ClaudeProvider {
                 .session_id
                 .as_deref()
                 .expect("live entries have session ids");
+            if let Some(session) = cached(id) {
+                unchanged.push(session);
+                continue;
+            }
             let (summary, path, modified) = self.summary(id);
             self.background.observe(id, &summary);
             let custom_title = summary.custom_title.clone();
@@ -481,6 +507,10 @@ impl ClaudeProvider {
             .iter()
             .filter(|(_, parent)| live_ids.contains(&parent.id))
         {
+            if let Some(session) = cached(&file.id) {
+                unchanged.push(session);
+                continue;
+            }
             if let Some(child) = self.subagent(file, parent.clone(), true) {
                 children.push(child);
             }
@@ -510,10 +540,18 @@ impl ClaudeProvider {
                 if live_ids.contains(&parent.id) {
                     continue;
                 }
+                if let Some(session) = cached(&file.id) {
+                    unchanged.push(session);
+                    continue;
+                }
                 if let Some(child) = self.subagent(&file, parent, false) {
                     children.push(child);
                 }
             } else {
+                if let Some(session) = cached(&file.id) {
+                    unchanged.push(session);
+                    continue;
+                }
                 let (summary, path, modified) = self.summary(&file.id);
                 self.background.observe(&file.id, &summary);
                 sessions.push(session(file.id, summary, path, modified));
@@ -555,6 +593,7 @@ impl ClaudeProvider {
                 }
             }
         }
+        sessions.extend(unchanged);
         Snapshot { sessions, has_more }
     }
 
@@ -736,6 +775,21 @@ fn subagent_files(transcript: &Path) -> Vec<Transcript> {
 }
 
 impl Provider for ClaudeProvider {
+    fn session_source(&self) -> Box<dyn Provider> {
+        let mut source = Self::new(self.config_dir.clone());
+        source.ask_user_question = self.ask_user_question.clone();
+        Box::new(source)
+    }
+
+    fn refresh_sessions(
+        &mut self,
+        pages: usize,
+        sessions: &[SessionKey],
+        previous: &[Session],
+    ) -> Snapshot {
+        self.snapshot_sessions(pages, Some(sessions), previous)
+    }
+
     fn display_name(&self) -> &'static str {
         "Claude"
     }

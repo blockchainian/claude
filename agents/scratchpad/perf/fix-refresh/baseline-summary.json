@@ -1,0 +1,180 @@
+{
+  "source_head": "9af4e1ee35473c94e6441de5e792f32ddab09c74",
+  "binary": "/private/tmp/agents-refresh-baseline-target/release/agents",
+  "binary_sha256": "eb62ecdf04265520d6513c6f76a197bc09daab040df00b49e06ce065c1b4ec09",
+  "measurement_cwd": "/Users/satoshi/Code/.worktrees/agents-panel/agents/scratchpad/perf/fix-refresh/baseline/agents",
+  "first_footer_frame_ms": [
+    2156.48,
+    2038.26,
+    3260.84
+  ],
+  "first_session_row_ms": [
+    2152.12,
+    2034.27,
+    3255.81
+  ],
+  "all_actions": {
+    "first_ms": {
+      "n": 150,
+      "p50_ms": 34.03,
+      "p80_ms": 64.24,
+      "p99_ms": 678.94,
+      "max_ms": 823.08
+    },
+    "settle_ms": {
+      "n": 150,
+      "p50_ms": 38.19,
+      "p80_ms": 69.68,
+      "p99_ms": 692.71,
+      "max_ms": 828.48
+    }
+  },
+  "grouped_actions": {
+    "keys": {
+      "first_ms": {
+        "n": 60,
+        "p50_ms": 33.75,
+        "p80_ms": 61.9,
+        "p99_ms": 823.08,
+        "max_ms": 823.08
+      },
+      "settle_ms": {
+        "n": 60,
+        "p50_ms": 38.16,
+        "p80_ms": 67.03,
+        "p99_ms": 828.48,
+        "max_ms": 828.48
+      }
+    },
+    "clicks": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 34.26,
+        "p80_ms": 66.63,
+        "p99_ms": 678.94,
+        "max_ms": 678.94
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 39.78,
+        "p80_ms": 71.25,
+        "p99_ms": 692.71,
+        "max_ms": 692.71
+      }
+    },
+    "wheels": {
+      "first_ms": {
+        "n": 60,
+        "p50_ms": 33.53,
+        "p80_ms": 64.24,
+        "p99_ms": 624.01,
+        "max_ms": 624.01
+      },
+      "settle_ms": {
+        "n": 60,
+        "p50_ms": 37.26,
+        "p80_ms": 69.55,
+        "p99_ms": 680.23,
+        "max_ms": 680.23
+      }
+    }
+  },
+  "by_action": {
+    "key-task-down": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 33.75,
+        "p80_ms": 52.45,
+        "p99_ms": 823.08,
+        "max_ms": 823.08
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 40.74,
+        "p80_ms": 63.86,
+        "p99_ms": 828.48,
+        "max_ms": 828.48
+      }
+    },
+    "key-task-up": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 33.54,
+        "p80_ms": 61.9,
+        "p99_ms": 628.82,
+        "max_ms": 628.82
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 36.64,
+        "p80_ms": 67.03,
+        "p99_ms": 634.33,
+        "max_ms": 634.33
+      }
+    },
+    "click-task": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 34.26,
+        "p80_ms": 66.63,
+        "p99_ms": 678.94,
+        "max_ms": 678.94
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 39.78,
+        "p80_ms": 71.25,
+        "p99_ms": 692.71,
+        "max_ms": 692.71
+      }
+    },
+    "wheel-task-down": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 32.93,
+        "p80_ms": 48.49,
+        "p99_ms": 624.01,
+        "max_ms": 624.01
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 38.03,
+        "p80_ms": 54.46,
+        "p99_ms": 680.23,
+        "max_ms": 680.23
+      }
+    },
+    "wheel-task-up": {
+      "first_ms": {
+        "n": 30,
+        "p50_ms": 33.53,
+        "p80_ms": 64.63,
+        "p99_ms": 528.86,
+        "max_ms": 528.86
+      },
+      "settle_ms": {
+        "n": 30,
+        "p50_ms": 36.28,
+        "p80_ms": 69.55,
+        "p99_ms": 575.0,
+        "max_ms": 575.0
+      }
+    }
+  },
+  "actions_without_output": 0,
+  "clicks_target_different_row": true,
+  "click_response_n": 30,
+  "click_response_bytes_min": 6306,
+  "startup_ctrl_c_ms": [
+    1215.86,
+    1115.66,
+    1113.85
+  ],
+  "idle_ctrl_c_ms": 109.12,
+  "refresh_in_exit_samples": [
+    true,
+    true,
+    true
+  ],
+  "tmux_created": false
+}

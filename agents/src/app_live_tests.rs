@@ -26,16 +26,14 @@ pub(crate) fn action(app: &mut App, action: Action) {
 /// Deletes the session and waits for the worker to finish.
 pub(crate) fn delete(app: &mut App, id: SessionKey) {
     action(app, Action::Delete(id.clone()));
-    let event = app
-        .receiver
-        .recv_timeout(Duration::from_secs(120))
-        .expect("provider delete deadline");
+    let event = app.next_input(Duration::from_secs(120));
     assert!(
         matches!(&event, Input::Deleted { id: deleted, .. } if deleted == &id),
         "expected real provider deletion"
     );
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    app.finish_refreshes();
 }
 
 /// Selects the session with the keyboard, as a user does.
