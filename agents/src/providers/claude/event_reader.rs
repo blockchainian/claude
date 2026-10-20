@@ -121,6 +121,9 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     let mut event_panel = EventReader {
         path: Some(path.to_path_buf()),
         turns: Some(turns),
+        delivered: prompt_deliveries(records.iter().rev())
+            .into_values()
+            .collect(),
         ..EventReader::default()
     };
     for (offset, record) in records {
@@ -166,6 +169,65 @@ fn clip_turn_start(mut events: Vec<Event>, preceding: Option<crate::event::Turn>
         }
     }
     events
+}
+
+/// Pairs each delivered human prompt with the oldest pending enqueue of identical text.
+fn prompt_deliveries<'a>(
+    records: impl IntoIterator<Item = &'a (u64, serde_json::Value)>,
+) -> std::collections::HashMap<u64, u64> {
+    let mut pending: std::collections::HashMap<&str, std::collections::VecDeque<u64>> =
+        std::collections::HashMap::new();
+    let mut absorbed = std::collections::HashMap::new();
+    let mut deliveries = std::collections::HashMap::new();
+    for (offset, record) in records {
+        if record["type"] == "queue-operation" {
+            if let Some(text) = record["content"].as_str() {
+                if record["operation"] == "enqueue" {
+                    pending.entry(text).or_default().push_back(*offset);
+                } else if record["operation"] == "remove"
+                    && record["reason"] == "absorbed_mid_turn"
+                    && let Some(id) = record["commandUuid"].as_str()
+                    && let Some(enqueue) = pending.get_mut(text).and_then(|queue| queue.pop_front())
+                {
+                    absorbed.insert(id, enqueue);
+                }
+            }
+        } else if super::images::queued_prompt(record).is_some() {
+            if let Some(enqueue) = record["attachment"]["source_uuid"]
+                .as_str()
+                .and_then(|id| absorbed.remove(id))
+            {
+                deliveries.insert(*offset, enqueue);
+            }
+        } else if record["type"] == "user"
+            && record["isMeta"] != true
+            && record["isCompactSummary"] != true
+            && let Some(text) = prompt_text(&record["message"]["content"])
+            && is_prompt_text(record, &text)
+            && !wrapped_message(&text)
+                .is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session))
+            && let Some(enqueue) = pending
+                .get_mut(text.as_str())
+                .and_then(|queue| queue.pop_front())
+        {
+            deliveries.insert(*offset, enqueue);
+        }
+    }
+    deliveries
+}
+
+fn prompt_text(content: &serde_json::Value) -> Option<String> {
+    content.as_str().map(str::to_owned).or_else(|| {
+        Some(
+            content
+                .as_array()?
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    })
 }
 
 /// Retains decoded records and parsed rows between file notifications.
@@ -250,6 +312,9 @@ impl Reader {
         let mut event_panel = EventReader {
             path: Some(self.path.clone()),
             turns: Some(turns),
+            delivered: prompt_deliveries(self.records.iter())
+                .into_values()
+                .collect(),
             ..EventReader::default()
         };
         for (offset, record) in self
@@ -285,14 +350,8 @@ impl Reader {
         let mut key = None;
         let mut requests = std::collections::HashMap::new();
         let mut prompts = std::collections::HashMap::new();
-        let mut queued = std::collections::HashMap::new();
+        let deliveries = prompt_deliveries(self.records.iter().chain(appended.iter()));
         for (offset, record) in &self.records {
-            if record["type"] == "queue-operation"
-                && record["operation"] == "enqueue"
-                && let Some(text) = record["content"].as_str()
-            {
-                queued.entry(text).or_insert(*offset);
-            }
             if record["type"] == "assistant" {
                 let next = record["message"]["id"]
                     .as_str()
@@ -322,24 +381,9 @@ impl Reader {
             }
         }
         let mut start = group.unwrap_or(self.read_offset);
-        for (_, record) in appended {
-            if super::images::queued_prompt(record).is_some()
-                && let Some(id) = record["attachment"]["source_uuid"].as_str()
-                && let Some(text) =
-                    self.records
-                        .iter()
-                        .chain(appended.iter())
-                        .rev()
-                        .find_map(|(_, removal)| {
-                            (removal["type"] == "queue-operation"
-                                && removal["operation"] == "remove"
-                                && removal["commandUuid"] == id)
-                                .then(|| removal["content"].as_str())
-                                .flatten()
-                        })
-                && let Some(offset) = queued.get(text)
-            {
-                start = start.min(*offset);
+        for (offset, record) in appended {
+            if let Some(enqueue) = deliveries.get(offset) {
+                start = start.min(*enqueue);
             }
             for block in record["message"]["content"]
                 .as_array()
@@ -527,6 +571,7 @@ struct EventReader {
     offset: u64,
     companions: std::collections::HashMap<String, Vec<crate::event::SourceRecord>>,
     images: super::images::PromptImages,
+    delivered: std::collections::HashSet<u64>,
     error: Option<io::Error>,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
@@ -772,17 +817,7 @@ impl EventReader {
                         }
                     }
                 }
-                let text = content.as_str().map(str::to_owned).or_else(|| {
-                    Some(
-                        content
-                            .as_array()?
-                            .iter()
-                            .filter(|b| b["type"] == "text")
-                            .filter_map(|b| b["text"].as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                });
+                let text = prompt_text(content);
                 let wrapped = text.as_deref().and_then(wrapped_message);
                 let is_peer = wrapped
                     .as_ref()
@@ -858,7 +893,21 @@ impl EventReader {
                     }
                 }
             }
+            Some("attachment") if super::images::queued_prompt(&record).is_some() => {
+                let prompt = super::images::queued_prompt(&record).unwrap();
+                if let Some(text) = prompt_text(prompt) {
+                    let body = prompt_body(&text);
+                    let images = self.images.take(&record, &body)?;
+                    self.push(Kind::User, body, at);
+                    let event = &mut self.entries.last_mut().unwrap().event;
+                    event.source = record["uuid"].as_str().map(str::to_owned);
+                    event.images = images;
+                }
+            }
             Some("queue-operation") if record["operation"] == "enqueue" => {
+                if self.delivered.contains(&self.offset) {
+                    return Ok(!self.ready(count));
+                }
                 if let Some(text) = record["content"].as_str() {
                     if self.notification(text, at, record["uuid"].as_str()) {
                         return Ok(!self.ready(count));
@@ -1299,6 +1348,75 @@ pub(super) fn prompt_body(text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     #[test]
+    fn dequeued_prompt_uses_delivery_position_and_time_in_incremental_and_tail_reads() {
+        let fixture = include_str!("../../../tests/fixtures/claude-queued-dequeue.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = Reader::new(file.path().into(), false);
+        let mut loaded = Vec::new();
+        for line in fixture.split_inclusive('\n') {
+            file.write_all(line.as_bytes()).unwrap();
+            let update = reader.refresh(20).unwrap();
+            if update.reset || update.prepended > 0 || update.appended > 0 || update.replaced > 0 {
+                loaded = update.events;
+            }
+            assert_eq!(loaded, tail(file.path(), 20).unwrap());
+        }
+        let prompts: Vec<_> = loaded
+            .iter()
+            .filter(|event| matches!(event.kind, Kind::User | Kind::QueuedUser))
+            .collect();
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].kind, Kind::User);
+        assert_eq!(
+            prompts[0].started_at,
+            "2026-10-20T19:47:03.044Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(loaded.last().unwrap(), prompts[0]);
+        assert_eq!(tail(file.path(), 1).unwrap(), vec![prompts[0].clone()]);
+    }
+
+    #[test]
+    fn dequeued_prompts_match_pending_text_in_fifo_order() {
+        let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/claude-queued-dequeue.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut later = records[0].clone();
+        later["timestamp"] = json!("2026-10-20T19:47:01.000Z");
+        let mut unrelated = records[0].clone();
+        unrelated["content"] = json!("Still waiting");
+        for record in [&records[0], &unrelated, &later, &records[2], &records[6]] {
+            writeln!(file, "{record}").unwrap();
+        }
+        let events = tail(file.path(), 20).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].body, "Still waiting");
+        assert_eq!(events[1].kind, Kind::QueuedUser);
+        assert_eq!(
+            events[1].started_at,
+            "2026-10-20T19:47:01.000Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(events[2].kind, Kind::User);
+        let mut reader = Reader::new(file.path().into(), false);
+        assert_eq!(reader.refresh(20).unwrap().events, events);
+        writeln!(file, "{}", records[6]).unwrap();
+        assert_eq!(
+            reader.refresh(20).unwrap().events,
+            tail(file.path(), 20).unwrap()
+        );
+        assert_eq!(
+            tail(file.path(), 20)
+                .unwrap()
+                .iter()
+                .filter(|e| e.kind == Kind::QueuedUser)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn turn_groups_keep_queued_steering_in_the_running_turn() {
         let fixture = include_str!("../../../tests/fixtures/turn-groups/claude-steer.jsonl");
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -1308,7 +1426,16 @@ pub(crate) mod tests {
         let turn = events[0].turn.expect("prompt starts a turn");
         assert!(turn.started && turn.complete);
         assert!(events.iter().all(|event| event.turn == Some(turn)));
-        assert!(events.iter().any(|event| event.kind == Kind::QueuedUser));
+        let steering = events
+            .iter()
+            .find(|event| event.body == "说的是起一个，不是七个。")
+            .unwrap();
+        assert_eq!(steering.kind, Kind::User);
+        assert_eq!(
+            steering.started_at,
+            "2026-10-20T02:59:09.229Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert!(events.iter().all(|event| event.kind != Kind::QueuedUser));
         let tail = tail(file.path(), 2).unwrap();
         assert_eq!(tail.len(), 2);
         assert!(tail.iter().all(|event| {
@@ -1565,12 +1692,16 @@ pub(crate) mod tests {
                 enqueued.push(record.clone());
             }
             let update = reader.refresh(usize::MAX).unwrap();
-                let changed = update.reset || update.prepended > 0 || update.appended > 0 || update.replaced > 0;
-                if changed {
-                    loaded = update.events;
-                } else {
-                    assert!(update.events.is_empty(), "unchanged updates carry no event copies");
-                }
+            let changed =
+                update.reset || update.prepended > 0 || update.appended > 0 || update.replaced > 0;
+            if changed {
+                loaded = update.events;
+            } else {
+                assert!(
+                    update.events.is_empty(),
+                    "unchanged updates carry no event copies"
+                );
+            }
             if record["type"] != "queue-operation" {
                 assert_eq!(update.appended, 0, "delivery must not append a row");
             }
@@ -1757,11 +1888,17 @@ pub(crate) mod tests {
             for line in fixture.split_inclusive('\n') {
                 file.write_all(line.as_bytes()).unwrap();
                 let update = reader.refresh(usize::MAX).unwrap();
-                let changed = update.reset || update.prepended > 0 || update.appended > 0 || update.replaced > 0;
+                let changed = update.reset
+                    || update.prepended > 0
+                    || update.appended > 0
+                    || update.replaced > 0;
                 if changed {
                     loaded = update.events;
                 } else {
-                    assert!(update.events.is_empty(), "unchanged updates carry no event copies");
+                    assert!(
+                        update.events.is_empty(),
+                        "unchanged updates carry no event copies"
+                    );
                 }
                 assert_eq!(loaded, super::tail(file.path(), usize::MAX).unwrap());
                 assert_eq!(update.parsed_bytes, line.len() as u64);
@@ -1999,7 +2136,15 @@ pub(crate) mod tests {
         writeln!(file, "{delivery}").unwrap();
         let events = reader.refresh(20).unwrap().events;
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, Kind::QueuedUser);
+        assert_eq!(events[0].kind, Kind::User);
+        assert_eq!(
+            events[0].started_at,
+            delivery["timestamp"]
+                .as_str()
+                .unwrap()
+                .parse::<DateTime<Utc>>()
+                .unwrap()
+        );
         assert_eq!(events[0].body, text);
         assert_eq!(events[0].images.len(), 1);
         assert_eq!(events[0].images[0].label, "[Image #1]");
