@@ -53,13 +53,13 @@ pub(super) struct Link {
     pub parent: SessionKey,
     pub name: Option<String>,
     pub needs_input: bool,
+    pub detached: bool,
 }
 
 #[derive(Deserialize)]
 struct Supervisor {
     #[serde(rename = "sessionId")]
     session_id: String,
-    pid: u32,
 }
 
 #[derive(Deserialize)]
@@ -90,7 +90,7 @@ fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
     }
 }
 
-pub(super) fn links(home: &Path, claude_config: &Path) -> io::Result<HashMap<String, Link>> {
+pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
     let entries = match fs::read_dir(home.join("threads")) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
@@ -106,15 +106,6 @@ pub(super) fn links(home: &Path, claude_config: &Path) -> io::Result<HashMap<Str
         let Some(supervisor) = read::<Supervisor>(&path)? else {
             continue;
         };
-        let parent_id = match crate::processes::parent_pid(supervisor.pid) {
-            Some(pid) => read::<super::super::claude::registry::Entry>(
-                &claude_config.join("sessions").join(format!("{pid}.json")),
-            )?
-            .and_then(|entry| entry.session_id)
-            .filter(|id| !id.is_empty()),
-            None => None,
-        }
-        .unwrap_or_else(|| supervisor.session_id.clone());
         let session_id = supervisor.session_id;
         if !states.contains_key(&session_id) {
             let dir = home.join(&session_id);
@@ -126,13 +117,14 @@ pub(super) fn links(home: &Path, claude_config: &Path) -> io::Result<HashMap<Str
                         entry.map(|entry| entry.file_name().to_string_lossy().into_owned())
                     })
                     .collect::<io::Result<Vec<_>>>()?;
-                for thread in state.threads.into_iter().filter(|thread| !thread.detached) {
+                for thread in state.threads {
                     let prefix = format!("{}.ask.", thread.id);
-                    let needs_input = !thread.waiting.is_empty()
-                        || files
-                            .iter()
-                            .any(|name| name.starts_with(&prefix) && name.ends_with(".json"));
-                    threads.insert(thread.id, (thread.name, needs_input));
+                    let needs_input = !thread.detached
+                        && (!thread.waiting.is_empty()
+                            || files
+                                .iter()
+                                .any(|name| name.starts_with(&prefix) && name.ends_with(".json")));
+                    threads.insert(thread.id, (thread.name, needs_input, thread.detached));
                 }
             }
             states.insert(session_id.clone(), threads);
@@ -140,16 +132,17 @@ pub(super) fn links(home: &Path, claude_config: &Path) -> io::Result<HashMap<Str
         let Some(id) = path.file_stem().and_then(|id| id.to_str()) else {
             continue;
         };
-        if let Some((name, needs_input)) = states[&session_id].get(id) {
+        if let Some((name, needs_input, detached)) = states[&session_id].get(id) {
             links.insert(
                 id.to_owned(),
                 Link {
                     parent: SessionKey {
                         provider: ProviderId::Claude,
-                        id: parent_id,
+                        id: session_id.clone(),
                     },
                     name: name.clone().filter(|name| !name.trim().is_empty()),
                     needs_input: *needs_input,
+                    detached: *detached,
                 },
             );
         }
@@ -215,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn follows_current_claude_session_for_every_thread_and_falls_back() {
+    fn stored_parent_survives_live_claude_session_changes_and_exit() {
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path().join("manager");
         let config = directory.path().join("claude");
@@ -257,22 +250,62 @@ mod tests {
             )
             .unwrap();
         }
-        let current = links(&home, &config).unwrap();
+        let current = links(&home).unwrap();
         entry["sessionId"] = "claude-after-another-clear".into();
         fs::write(&registry, entry.to_string()).unwrap();
-        let after_clear = links(&home, &config).unwrap();
+        let after_clear = links(&home).unwrap();
         fs::remove_file(&registry).unwrap();
-        let missing_registry = links(&home, &config).unwrap();
+        let missing_registry = links(&home).unwrap();
         fs::write(&registry, entry.to_string()).unwrap();
         child.kill().unwrap();
         child.wait().unwrap();
-        let exited = links(&home, &config).unwrap();
+        let exited = links(&home).unwrap();
         for id in ["thread-12", "thread-13"] {
-            assert_eq!(current[id].parent.id, "claude-current");
-            assert_eq!(after_clear[id].parent.id, "claude-after-another-clear");
+            assert_eq!(current[id].parent.id, "claude-parent");
+            assert_eq!(after_clear[id].parent.id, "claude-parent");
             assert_eq!(missing_registry[id].parent.id, "claude-parent");
             assert_eq!(exited[id].parent.id, "claude-parent");
             assert_eq!(current[id].name.as_deref(), Some("Managed worker"));
         }
+    }
+
+    #[test]
+    fn detached_threads_keep_stored_parent_without_pending_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let supervisor: Supervisor = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-manager/inactive-tree-supervisor.json"
+        ))
+        .unwrap();
+        let state: State = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-manager/inactive-tree-state.json"
+        ))
+        .unwrap();
+        let id = &state.threads[0].id;
+        let session = home.join(&supervisor.session_id);
+        fs::create_dir_all(&session).unwrap();
+        fs::create_dir_all(home.join("threads")).unwrap();
+        fs::write(
+            session.join("state.json"),
+            include_bytes!("../../../tests/fixtures/codex-manager/inactive-tree-state.json"),
+        )
+        .unwrap();
+        fs::write(
+            home.join(format!("threads/{id}.json")),
+            include_bytes!("../../../tests/fixtures/codex-manager/inactive-tree-supervisor.json"),
+        )
+        .unwrap();
+        let check = || {
+            let links = links(home).unwrap();
+            let link = links.get(id).expect("detached thread retains its parent");
+            assert_eq!(link.parent.provider, ProviderId::Claude);
+            assert_eq!(link.parent.id, supervisor.session_id);
+            assert_eq!(link.name, state.threads[0].name);
+            assert!(!link.needs_input);
+        };
+        check();
+        // A stale request file cannot make a detached thread need input.
+        fs::write(session.join(format!("{id}.ask.stale.json")), b"{}").unwrap();
+        check();
     }
 }

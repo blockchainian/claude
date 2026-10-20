@@ -505,6 +505,24 @@ fn archived_manager_threads_still_need_detach() {
 }
 
 #[test]
+fn archived_detached_manager_thread_does_not_need_detaching_again() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "detached");
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute("UPDATE threads SET archived=1 WHERE id='thread-0'", [])
+        .unwrap();
+    let snapshot = provider.snapshot(0).unwrap();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id.id == "thread-0")
+        .unwrap();
+    assert!(session.archived && session.parent.is_some());
+    provider.archive(session).unwrap()().unwrap();
+}
+
+#[test]
 fn manager_waiting_and_asks_override_rollout_status_and_clear() {
     let (dir, mut provider) = fixture();
     let session = manager_fixture(dir.path(), &mut provider, "attached");
@@ -559,7 +577,7 @@ fn manager_waiting_and_asks_override_rollout_status_and_clear() {
 }
 
 #[test]
-fn manager_detached_missing_and_reassigned_records_do_not_nest() {
+fn manager_detached_records_nest_but_missing_and_reassigned_records_do_not() {
     let (dir, mut provider) = fixture();
     let session = manager_fixture(dir.path(), &mut provider, "detached");
     let snapshot = provider.snapshot(1).unwrap();
@@ -570,7 +588,8 @@ fn manager_detached_missing_and_reassigned_records_do_not_nest() {
             .find(|s| s.id.id == "thread-0")
             .unwrap()
             .parent
-            .is_none()
+            .as_ref()
+            .is_some_and(|parent| parent.id == "claude-parent")
     );
     let session = {
         std::fs::remove_file(session.join("state.json")).unwrap();

@@ -6916,13 +6916,16 @@ mod subagent_rows {
     }
 
     #[test]
-    fn inactive_status_column_omits_non_inactive_ancestor_labels() {
+    fn inactive_ancestors_keep_their_own_status_and_time() {
         for provider in [ProviderId::Claude, ProviderId::Codex] {
             for status in [SessionStatus::Working, SessionStatus::Ready] {
                 let mut parent = session("parent", "Parent task", status, 120);
                 parent.id.provider = provider;
+                let reference: chrono::DateTime<Utc> = "2026-10-13T12:00:00Z".parse().unwrap();
+                parent.updated_at = reference - Duration::minutes(2);
                 let mut child = session("child", "Finished child", SessionStatus::Inactive, 60);
                 child.id.provider = provider;
+                child.updated_at = reference - Duration::minutes(1);
                 child.parent = Some(parent.id.clone());
                 let mut view = test_view(Grouping::Project, false);
                 view.set_sessions(vec![parent, child], false);
@@ -6946,13 +6949,23 @@ mod subagent_rows {
                     .find(|line| line.contains("Parent task"))
                     .unwrap();
                 assert!(
-                    !parent_line
+                    parent_line
                         .split('│')
                         .next()
                         .unwrap()
                         .contains(status.label()),
                     "{inactive}"
                 );
+                assert!(parent_line.contains("2m ago"), "{inactive}");
+                assert_eq!(ids(&view), ["parent", "child"]);
+                if provider == ProviderId::Claude && status == SessionStatus::Working {
+                    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/ui_snapshots/inactive_working_parent.txt");
+                    if std::env::var_os("UPDATE_INACTIVE_TREE_SNAPSHOT").is_some() {
+                        std::fs::write(&path, &inactive).unwrap();
+                    }
+                    assert_eq!(inactive, std::fs::read_to_string(path).unwrap());
+                }
                 let child_line = inactive
                     .lines()
                     .find(|line| line.contains("Finished child"))

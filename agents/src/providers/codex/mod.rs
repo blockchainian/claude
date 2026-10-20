@@ -92,7 +92,7 @@ impl CodexProvider {
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
-        let manager = manager::links(&self.manager_home, &super::claude::config_dir())?;
+        let manager = manager::links(&self.manager_home)?;
         let names = indexed_names(&self.home)?;
         let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
@@ -783,7 +783,10 @@ impl Provider for CodexProvider {
         let id = session.id.id.clone();
         let archived = session.archived;
         Ok(Box::new(move || {
-            if manager::links(&manager_home, &config)?.contains_key(&id) {
+            if manager::links(&manager_home)?
+                .get(&id)
+                .is_some_and(|link| !link.detached)
+            {
                 let mut client = app_server::Client::connect(&home)?;
                 app_server::thread::stop(&mut client, &id)?;
                 let output =
