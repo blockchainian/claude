@@ -324,6 +324,7 @@ struct Segment {
     lines: Option<&'static LazyLock<Regex>>,
     kind: Kind,
     blank: bool,
+    known: Option<String>,
     no_match_exit: Option<i64>,
 }
 impl Segment {
@@ -333,6 +334,7 @@ impl Segment {
             lines: None,
             kind: Kind::Plain,
             blank: false,
+            known: None,
             no_match_exit: None,
         }
     }
@@ -370,15 +372,15 @@ fn allowed(args: &str, flags: &[&str]) -> bool {
     true
 }
 
-fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, bool)> {
+fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, Option<String>)> {
     let number = |s: &str| s.parse::<usize>().ok();
     Some(match rule {
-        Count::Fixed(n) => (Some(n), false),
-        Count::Number => (Some(number(arg)?), false),
+        Count::Fixed(n) => (Some(n), None),
+        Count::Number => (Some(number(arg)?), None),
         Count::Range => {
             let range = arg.strip_suffix('p')?;
             if range == "$" {
-                (Some(1), false)
+                (Some(1), None)
             } else if let Some((a, b)) = range.split_once(',') {
                 let a = number(a)?.checked_sub(1)?;
                 (
@@ -387,11 +389,11 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, bool)> {
                     } else {
                         Some(number(b)?.checked_sub(a).filter(|n| *n > 0)?)
                     },
-                    false,
+                    None,
                 )
             } else {
                 number(range)?.checked_sub(1)?;
-                (Some(1), false)
+                (Some(1), None)
             }
         }
         Count::Files => {
@@ -399,7 +401,7 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, bool)> {
             if names.iter().any(|s| s.is_empty() || s.starts_with('-')) {
                 return None;
             }
-            (Some(names.len() + usize::from(names.len() > 1)), false)
+            (Some(names.len() + usize::from(names.len() > 1)), None)
         }
         Count::Echo => {
             let args: Vec<_> = if arg.is_empty() {
@@ -411,10 +413,7 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, bool)> {
                 return None;
             }
             let output = format!("{}\n", args.join(" "));
-            (
-                Some(output.lines().count()),
-                output.chars().all(|c| c == '\n'),
-            )
+            (Some(output.lines().count()), Some(output))
         }
         Count::Printf => {
             let mut words = arg.split('\0');
@@ -422,10 +421,7 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, bool)> {
             if !output.is_empty() && !output.ends_with('\n') {
                 return None;
             }
-            (
-                Some(output.lines().count()),
-                output.chars().all(|c| c == '\n'),
-            )
+            (Some(output.lines().count()), Some(output))
         }
     })
 }
@@ -474,15 +470,15 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
             Content::Diff => Kind::Diff,
             Content::Plain | Content::Inherit | Content::Verbatim => Kind::Plain,
         };
-        let mut blank = false;
+        let mut known = None;
         let size = match row.length {
             Length::Silent => Size::Silent,
             Length::Unknown => Size::Unknown,
             Length::Exact(c) | Length::AtMost(c) => {
-                let Some((n, b)) = count(c, arg, files) else {
+                let Some((n, output)) = count(c, arg, files) else {
                     continue;
                 };
-                blank = b;
+                known = output;
                 match (row.length, n) {
                     (Length::Exact(_), Some(n)) => Size::Exact(n),
                     (_, Some(n)) => Size::AtMost(n),
@@ -495,7 +491,8 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
                 size,
                 lines: row.lines,
                 kind,
-                blank,
+                blank: known.as_ref().is_some_and(|s| s.chars().all(|c| c == '\n')),
+                known,
                 no_match_exit: row.no_match_exit,
             },
             matches!(row.content, Content::Verbatim),
@@ -644,6 +641,10 @@ fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
             (size, Size::Unknown) => size.clone(),
             _ => Size::Unknown,
         };
+        // Only a verbatim filter preserves a producer's complete known output.
+        if !verbatim {
+            segment.known = None;
+        }
         segment.no_match_exit = None;
     }
     segment
@@ -739,6 +740,101 @@ fn block(segments: &[Segment], count: usize, truncated: bool) -> Option<&Segment
     Some(first)
 }
 
+type Span = (usize, usize, Option<usize>);
+
+struct Splitter<'a> {
+    segments: &'a [Segment],
+    lines: &'a [&'a str],
+    markers: &'a [usize],
+    truncated: bool,
+    spans: Vec<Span>,
+}
+
+impl Splitter<'_> {
+    fn split(&mut self, commands: std::ops::Range<usize>, output: std::ops::Range<usize>) {
+        let (mut i, mut j, mut lo, mut hi) =
+            (commands.start, commands.end, output.start, output.end);
+        let markers: Vec<_> = self
+            .markers
+            .iter()
+            .copied()
+            .filter(|m| output.contains(m))
+            .collect();
+        let front = markers.first().copied().unwrap_or(hi);
+        let back = markers.last().map_or(lo, |m| m + 1);
+        while i < j {
+            let Some(next) = boundary(&self.segments[i], self.lines, lo, front.min(hi), true)
+            else {
+                break;
+            };
+            self.spans.push((lo, next, Some(i)));
+            lo = next;
+            i += 1;
+        }
+        while j > i {
+            let Some(next) = boundary(&self.segments[j - 1], self.lines, back.max(lo), hi, false)
+            else {
+                break;
+            };
+            self.spans.push((next, hi, Some(j - 1)));
+            hi = next;
+            j -= 1;
+        }
+
+        // Only unique complete matches can anchor a command inside this block.
+        // All anchors must agree with command order, including non-overlap.
+        let mut anchors = Vec::new();
+        for index in i..j {
+            let segment = &self.segments[index];
+            let Some(known) = segment.known.as_ref().filter(|_| !segment.blank) else {
+                continue;
+            };
+            let expected: Vec<_> = known.split_inclusive('\n').collect();
+            if expected.is_empty() || expected.len() > hi - lo {
+                continue;
+            }
+            let mut matches = self.lines[lo..hi]
+                .windows(expected.len())
+                .enumerate()
+                .filter(|(_, actual)| {
+                    actual
+                        .iter()
+                        .zip(&expected)
+                        .all(|(a, b)| a.trim_end_matches('\n') == b.trim_end_matches('\n'))
+                });
+            if let Some((offset, _)) = matches.next()
+                && matches.next().is_none()
+            {
+                anchors.push((index, lo + offset, lo + offset + expected.len()));
+            }
+        }
+        if !anchors.is_empty() && anchors.windows(2).all(|pair| pair[0].2 <= pair[1].1) {
+            for (index, start, end) in anchors {
+                self.split(i..index, lo..start);
+                self.spans.push((start, end, Some(index)));
+                i = index + 1;
+                lo = end;
+            }
+            self.split(i..j, lo..hi);
+            return;
+        }
+
+        let chosen = block(&self.segments[i..j], hi - lo, self.truncated).map(|s| {
+            self.segments
+                .iter()
+                .position(|v| std::ptr::eq(s, v))
+                .unwrap()
+        });
+        let mut at = lo;
+        for marker in markers.into_iter().filter(|m| *m >= lo && *m < hi) {
+            self.spans.push((at, marker, chosen));
+            self.spans.push((marker, marker + 1, None));
+            at = marker + 1;
+        }
+        self.spans.push((at, hi, chosen));
+    }
+}
+
 // The shared splitter keeps OR lists together. Track their optional right-hand
 // sides here; any asynchronous list invalidates the complete output stream.
 fn alternatives(source: &str) -> Option<Vec<&str>> {
@@ -787,6 +883,7 @@ pub(super) fn sections(
             if index > 0 {
                 segment.size = Size::Unknown;
                 segment.lines = None;
+                segment.known = None;
             }
             segments.push(segment);
         }
@@ -804,6 +901,7 @@ pub(super) fn sections(
         for s in &mut segments {
             if matches!(s.size, Size::Silent | Size::Exact(_)) {
                 s.size = Size::Unknown;
+                s.known = None;
             }
         }
     }
@@ -869,35 +967,15 @@ pub(super) fn sections(
         })
         .collect();
     let truncated = !markers.is_empty() || prefix > 0;
-    let (mut i, mut j, mut lo, mut hi) = (0, segments.len(), 0, lines.len());
-    let front = markers.first().copied().unwrap_or(hi);
-    let back = markers.last().map_or(0, |m| m + 1);
-    let mut spans = Vec::new();
-    while i < j {
-        let Some(next) = boundary(&segments[i], &lines, lo, front.min(hi), true) else {
-            break;
-        };
-        spans.push((lo, next, Some(i)));
-        lo = next;
-        i += 1;
-    }
-    while j > i {
-        let Some(next) = boundary(&segments[j - 1], &lines, back.max(lo), hi, false) else {
-            break;
-        };
-        spans.push((next, hi, Some(j - 1)));
-        hi = next;
-        j -= 1;
-    }
-    let chosen = block(&segments[i..j], hi - lo, truncated)
-        .map(|s| segments.iter().position(|v| std::ptr::eq(s, v)).unwrap());
-    let mut at = lo;
-    for marker in markers.into_iter().filter(|m| *m >= lo && *m < hi) {
-        spans.push((at, marker, chosen));
-        spans.push((marker, marker + 1, None));
-        at = marker + 1;
-    }
-    spans.push((at, hi, chosen));
+    let mut splitter = Splitter {
+        segments: &segments,
+        lines: &lines,
+        markers: &markers,
+        truncated,
+        spans: Vec::new(),
+    };
+    splitter.split(0..segments.len(), 0..lines.len());
+    let mut spans = splitter.spans;
     spans.sort_by_key(|s| (s.0, s.1));
     let mut output = Vec::new();
     if prefix > 0 {

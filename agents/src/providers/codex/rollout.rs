@@ -2875,7 +2875,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_multiple_file_reads_with_mixed_languages_stay_plain() {
+    fn shell_known_separator_keeps_mixed_language_block_plain() {
         let mut record = tool_records()
             .into_iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2890,10 +2890,17 @@ mod tests {
         let output = events[0].calls[0].output.as_ref().unwrap();
         assert_eq!(
             output,
-            &vec![Section::Text {
-                label: "output".into(),
-                text: stdout.into(),
-            }]
+            &vec![
+                tool::code_section("output", "rs", "fn main() {}\n"),
+                Section::Text {
+                    label: "output".into(),
+                    text: "---\n".into(),
+                },
+                Section::Text {
+                    label: "output".into(),
+                    text: "print('ready')\n[package]\nname = \"agents\"".into(),
+                },
+            ]
         );
     }
 

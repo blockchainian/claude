@@ -91,6 +91,30 @@ BOUNDARY_CASES = [
 ]
 
 
+# Both reads can end before their requested range. Their separator must be found
+# by its complete content rather than inferred from either read's line limit.
+KNOWN_OUTPUT_CASES = [
+    [('sed -n 1,10000p agents/src/main.rs', 'rs'),
+     ('echo ----', None),
+     ('sed -n 1,10000p agents/src/main.rs', 'rs')],
+    [('sed -n 1,10000p agents/themes/build.py', 'py'),
+     ("printf 'python-end\\nrust-start\\n'", None),
+     ('sed -n 1,10000p agents/src/main.rs', 'rs')],
+]
+
+# These separators cannot establish a reliable boundary: a file repeats the
+# text, or the separator contains only empty lines. Check colors without
+# requiring any highlighter to resolve the ambiguous file spans.
+AMBIGUOUS_OUTPUT_CASES = [
+    [('sed -n 1,10000p agents/src/main.rs', 'rs'),
+     ("echo 'mod activity;'", None),
+     ('sed -n 1,10000p agents/src/main.rs', 'rs')],
+    [('sed -n 1,10000p agents/src/main.rs', 'rs'),
+     ('echo', None),
+     ('sed -n 1,10000p agents/src/main.rs', 'rs')],
+]
+
+
 def execute_case(stages, provider):
     """Run stages separately, preserving cd state and && short-circuiting."""
     cwd = ROOT
@@ -135,10 +159,11 @@ def generate(args):
     records = [execute_case(stages, provider)
                for provider in ('claude', 'codex') for stages in CASES]
     for provider in ('claude', 'codex'):
-        for stages in PIPELINE_CASES + BOUNDARY_CASES:
+        for stages in PIPELINE_CASES + BOUNDARY_CASES + KNOWN_OUTPUT_CASES:
             record = execute_case(stages, provider)
             record['minimum_highlighted'] = sum(s['end'] - s['start'] for s in record['expected'])
             records.append(record)
+        records.extend(execute_case(stages, provider) for stages in AMBIGUOUS_OUTPUT_CASES)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('w') as output:
         for record in records:

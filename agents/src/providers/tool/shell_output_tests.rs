@@ -175,6 +175,52 @@ fn shell_output_command_table() {
         (
             "head -n 1 a.rs; echo separator; head -n 1 b.py",
             "a\nseparator\nb",
+            &[(0, 1, "rs"), (2, 3, "py")],
+        ),
+        (
+            "cd agents && sed -n 60,160p src/providers/codex/mod.rs; echo ----; sed -n 290,420p src/providers/claude/mod.rs",
+            "fn a() {}\n----\nfn b() {}\n",
+            &[(0, 1, "rs"), (2, 3, "rs")],
+        ),
+        (
+            "sed -n 1,100p a.py; printf '%s\\n' ---- next; sed -n 1,100p b.rs",
+            "print(1)\n----\nnext\nfn b() {}\n",
+            &[(0, 1, "py"), (3, 4, "rs")],
+        ),
+        (
+            "cat a.rs; echo ----; cat b.rs",
+            "fn a() {}\n----\n----\nfn b() {}\n",
+            &[],
+        ),
+        ("cat a.rs; echo; cat b.rs", "fn a() {}\n\nfn b() {}\n", &[]),
+        (
+            "cat a.rs; echo ----; cat b.rs",
+            "fn a() {}\nfn b() {}\n",
+            &[],
+        ),
+        (
+            "cat a.py; printf '%s\\n' ---- next; cat b.rs",
+            "print(1)\n----\nother\nnext\nfn b() {}\n",
+            &[],
+        ),
+        (
+            "cat a.py; echo first; cat b.rs; echo second; cat c.py",
+            "print(1)\nsecond\nfn b() {}\nfirst\nprint(2)\n",
+            &[],
+        ),
+        (
+            "cat a.py; echo first; cat b.rs; echo second; cat c.py",
+            "print(1)\nfirst\nfn b() {}\nsecond\nprint(2)\n",
+            &[(0, 1, "py"), (2, 3, "rs"), (4, 5, "py")],
+        ),
+        (
+            "cat a.py; echo first; cat b.rs; echo second; cat c.py",
+            "print(1)\nfirst\nfn b() {}\nsecond\nprint(2)\nfirst\n",
+            &[(0, 1, "py"), (2, 3, "rs"), (4, 6, "py")],
+        ),
+        (
+            "cat a.py; printf '%s\\n' first second; cat b.rs; echo second; cat c.py",
+            "print(1)\nfirst\nsecond\nfn b() {}\nprint(2)\n",
             &[],
         ),
         ("head -n 1 a.rs; ls", "a\nb", &[]),

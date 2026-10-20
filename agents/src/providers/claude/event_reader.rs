@@ -2115,7 +2115,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn shell_multiple_file_reads_with_mixed_languages_stay_plain() {
+    fn shell_known_separator_keeps_mixed_language_block_plain() {
         let mut records: Vec<Value> =
             include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
                 .lines()
@@ -2132,10 +2132,17 @@ pub(crate) mod tests {
         let output = events[0].calls[0].output.as_ref().unwrap();
         assert_eq!(
             output,
-            &vec![Section::Text {
-                label: "stdout".into(),
-                text: stdout.into(),
-            }]
+            &vec![
+                code_section("stdout", "rs", "fn main() {}\n"),
+                Section::Text {
+                    label: "stdout".into(),
+                    text: "---\n".into(),
+                },
+                Section::Text {
+                    label: "stdout".into(),
+                    text: "print('ready')\n[package]\nname = \"agents\"".into(),
+                },
+            ]
         );
     }
 
