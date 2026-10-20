@@ -87,11 +87,17 @@ export function report({ dir, runId, windowSeconds = 10, slowFiles = 10 }) {
     }
   }
   const phaseMs = Object.fromEntries(Object.entries(phaseIntervals).map(([phase, intervals]) => [phase, intervalMs(intervals)]));
-  const latestFiles = new Map();
-  for (const event of events) if (event.type === 'file_end') latestFiles.set(event.file, event);
-  const files = [...latestFiles.values()].map(event => ({ file: event.file,
-    total_ms: event.at - event.started_at, last_batch_at: event.last_batch_at,
-    written_at: event.written_at, cpu_ms: event.cpu_ms }));
+  const mainFiles = new Map(), importWrites = new Map();
+  for (const event of events) {
+    if (event.type !== 'file_end') continue;
+    if (event.phase === 'main') mainFiles.set(event.file, event);
+    else if (event.phase === 'followImports' && event.written_at !== null)
+      importWrites.set(event.file, { written_at: event.written_at });
+  }
+  const files = [...mainFiles.values()].map(event => ({ file: event.file,
+    started_at: event.started_at, total_ms: event.at - event.started_at, last_batch_at: event.last_batch_at,
+    written_at: event.written_at, cpu_ms: event.cpu_ms,
+    ...(importWrites.has(event.file) ? { followImports: importWrites.get(event.file) } : {}) }));
   files.sort((a, b) => b.total_ms - a.total_ms || a.file.localeCompare(b.file));
   return { run_id: start.run_id, total_ms: summary ? summary.total_ms : endedAt - start.at,
     phase_ms: summary ? summary.phase_ms : phaseMs, windows, slow_files: files.slice(0, slowFiles) };

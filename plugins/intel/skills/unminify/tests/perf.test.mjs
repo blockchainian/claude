@@ -16,7 +16,7 @@ import { createNamer } from '../scripts/model.mjs';
 const execute = promisify(execFile);
 const perfScript = new URL('../scripts/perf.mjs', import.meta.url);
 
-async function localRun(t) {
+async function localRun(t, multipleBatches = false) {
   const root = await mkdtemp(join(tmpdir(), 'unminify-perf-'));
   const codexHome = await mkdtemp(join(tmpdir(), 'unminify-perf-auth-'));
   t.after(async () => {
@@ -26,6 +26,11 @@ async function localRun(t) {
   execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
   await writeFile(join(root, 'sample.js'), 'export const a = 1; console.log(a);\n');
   await writeFile(join(root, 'consumer.js'), "import { a as b } from './sample.js'; console.log(b);\n");
+  if (multipleBatches) {
+    await rm(join(root, 'sample.js'));
+    await writeFile(join(root, 'a-sample.js'), "import { a as b } from './consumer.js'; const c = 1; console.log(b, c);\n");
+    await writeFile(join(root, 'consumer.js'), 'export const a = 1; const b = 2; const c = 3; const d = 4; console.log(a, b, c, d);\n');
+  }
   const token = `e30.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.local`;
   await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt',
     last_refresh: new Date().toISOString(), tokens: { access_token: token, account_id: 'local-test' } }));
@@ -49,8 +54,8 @@ async function localRun(t) {
         res.end(JSON.stringify({ detail: 'Rate limit exceeded' }));
         return;
       }
-      await delay(5);
-      const names = Object.fromEntries(Object.keys(request.text.format.schema.properties).map(key => [key, 'sampleCount']));
+      await delay(multipleBatches && attempts > 2 ? 150 : 5);
+      const names = Object.fromEntries(Object.keys(request.text.format.schema.properties).map(key => [key, multipleBatches ? `sampleCount${attempts}` : 'sampleCount']));
       // Responses completion envelope used by the local HTTP/2 client fixtures.
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(`data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed',
@@ -71,7 +76,7 @@ async function localRun(t) {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const dependencies = { ...select, ...rename, ...checks,
     createNamer: options => createNamer({ ...options, baseUrl, retryDelayMs: 1 }), output: () => {} };
-  const summary = await run({ dir: root, codexHome, concurrency: 1 }, dependencies);
+  const summary = await run({ dir: root, codexHome, concurrency: 1, ...(multipleBatches ? { maxIds: 1 } : {}) }, dependencies);
   assert.equal(summary.exitCode, 0);
   return { root, summary, codexHome, dependencies };
 }
@@ -106,7 +111,7 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   assert.equal(summary.max_in_flight, 1);
   assert.equal(summary.rate_limits, 1);
   assert.equal(summary.requests_per_minute, requests.length * 60000 / summary.total_ms);
-  const file = performance.findLast(record => record.type === 'file_end' && record.file === 'sample.js');
+  const file = performance.find(record => record.type === 'file_end' && record.phase === 'main' && record.file === 'sample.js');
   assert(file.started_at <= file.last_batch_at);
   assert(file.last_batch_at <= file.written_at);
   for (const step of ['parse', 'renderBatch', 'resolveNames', 'applyRenames', 'checkRewrite']) assert(file.cpu_ms[step] > 0, step);
@@ -117,7 +122,9 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   assert.deepEqual(sample.cpu_ms, file.cpu_ms);
   const consumerEnds = performance.filter(record => record.type === 'file_end' && record.file === 'consumer.js');
   assert.equal(consumerEnds.length, 2);
-  assert.equal(report.slow_files.find(row => row.file === 'consumer.js').written_at, consumerEnds.at(-1).written_at);
+  assert.equal(report.slow_files.find(row => row.file === 'consumer.js').written_at, consumerEnds[0].written_at);
+  assert.equal(report.slow_files.find(row => row.file === 'consumer.js').followImports.written_at, consumerEnds[1].written_at);
+  assert.equal(sample.followImports, undefined);
   const oneFile = JSON.parse((await execute(process.execPath, [perfScript.pathname, root, '--slow-files', '1'])).stdout);
   assert.equal(oneFile.slow_files.length, 1);
   const previous = report.run_id;
@@ -143,4 +150,28 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   assert.equal(await readFile(requestsPath, 'utf8'), partialRequests);
   await writeFile(perfPath, interrupted + '\n{}\n');
   await assert.rejects(execute(process.execPath, [perfScript.pathname, root]), error => /Invalid JSON/.test(error.stderr));
+});
+
+test('file duration ends at its main write while import writes are reported separately', async t => {
+  const { root, summary } = await localRun(t, true);
+  const performance = await records(join(root, '.unminify', 'performance.jsonl'));
+  const requests = await records(join(root, '.unminify', 'requests.jsonl'));
+  assert.equal(requests.filter(row => row.file === 'a-sample.js' && row.status === 200).length, 1);
+  assert.equal(requests.filter(row => row.file === 'consumer.js' && row.status === 200).length, 4);
+  const ends = performance.filter(row => row.type === 'file_end' && row.file === 'a-sample.js');
+  assert.equal(ends.length, 2);
+  const [main, imports] = ends;
+  assert(imports.written_at > main.written_at);
+  assert.match(await readFile(join(root, 'a-sample.js'), 'utf8'), /a as sampleCount3/);
+  const report = JSON.parse((await execute(process.execPath, [perfScript.pathname, root])).stdout);
+  const sample = report.slow_files.find(row => row.file === 'a-sample.js');
+  assert(sample.total_ms < summary.total_ms / 2, `${sample.total_ms} vs run ${summary.total_ms}`);
+  assert(Math.abs(sample.total_ms - (main.written_at - main.started_at)) <= 20);
+  assert.equal(sample.started_at, main.started_at);
+  assert.equal(sample.total_ms, main.at - main.started_at);
+  assert.equal(sample.written_at, main.written_at);
+  assert.equal(main.phase, 'main');
+  assert.equal(imports.phase, 'followImports');
+  assert.equal(sample.followImports.written_at, imports.written_at);
+  assert.equal(report.slow_files[0].file, 'consumer.js');
 });
