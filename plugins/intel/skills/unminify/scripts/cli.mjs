@@ -34,10 +34,10 @@ export function parseArgs(args) {
 }
 
 async function modules() {
-  const [select, rename, checks, model] = await Promise.all([
-    import('./select.mjs'), import('./rename.mjs'), import('./checks.mjs'), import('./model.mjs'),
+  const [select, rename, checks, model, syntax] = await Promise.all([
+    import('./select.mjs'), import('./rename.mjs'), import('./checks.mjs'), import('./model.mjs'), import('./syntax/stage.mjs'),
   ]);
-  return { ...select, ...rename, ...checks, ...model };
+  return { ...select, ...rename, ...checks, ...model, ...syntax };
 }
 
 // Callers may supply the documented module contracts to run without a model.
@@ -112,6 +112,14 @@ export async function run(options, dependencies) {
         summary.quota[header] = entry;
       }
     };
+    // Finish every syntax write before creating any rename plan or request.
+    if (api.runSyntaxFile) {
+      for (const file of files) {
+        const endSyntax = phase('syntax', file);
+        try { emit(api.runSyntaxFile(root, file, { fragment: fragments.has(file) })); }
+        finally { endSyntax(); }
+      }
+    }
     namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
       event(record) {
         event(record);
@@ -308,7 +316,7 @@ export async function run(options, dependencies) {
       summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
       if (!Object.keys(summary.quota).length) summary.quota = "没测到";
       summary.total_ms = endedAt - startedAt;
-      summary.phase_ms = Object.fromEntries(['selection_plan', 'model', 'followImports', 'check_write']
+      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), 'model', 'followImports', 'check_write']
         .map(key => [key, intervalMs(phases[key] ?? [])]));
       Object.assign(summary, requestStats(requests, pauses, summary.total_ms));
       event({ type: 'run_end', at: endedAt, total_ms: summary.total_ms });

@@ -1,0 +1,10 @@
+Wakaru
+https://github.com/pionxzh/wakaru
+Copyright Wakaru contributors.
+
+The unminify syntax pipeline and rules include JavaScript adaptations of Wakaru
+v1.14.0, licensed under the Apache License, Version 2.0. Adapted files identify
+this provenance in their headers. These adaptations use Babel and source-range
+edits, with additional fragment and checkpoint protection.
+
+The Apache-2.0 license is reproduced in licenses/wakaru-APACHE-2.0.txt.
