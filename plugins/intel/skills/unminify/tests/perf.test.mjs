@@ -76,7 +76,7 @@ async function localRun(t, multipleBatches = false) {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const dependencies = { ...select, ...rename, ...checks,
     createNamer: options => createNamer({ ...options, baseUrl, retryDelayMs: 1 }), output: () => {} };
-  const summary = await run({ dir: root, codexHome, concurrency: 1, ...(multipleBatches ? { contextTokens: 80 } : {}) }, dependencies);
+  const summary = await run({ dirs: [root], codexHome, concurrency: 1, ...(multipleBatches ? { contextTokens: 80 } : {}) }, dependencies);
   assert.equal(summary.exitCode, 0);
   return { root, summary, codexHome, dependencies };
 }
@@ -133,7 +133,7 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   const oneFile = JSON.parse((await execute(process.execPath, [perfScript.pathname, root, '--slow-files', '1'])).stdout);
   assert.equal(oneFile.slow_files.length, 1);
   const previous = report.run_id;
-  await run({ dir: root, codexHome }, dependencies);
+  await run({ dirs: [root], codexHome }, dependencies);
   const latest = JSON.parse((await execute(process.execPath, [perfScript.pathname, root])).stdout);
   assert.notEqual(latest.run_id, previous);
   assert.equal(latest.windows.reduce((sum, window) => sum + window.sent, 0), 0);

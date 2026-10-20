@@ -10,7 +10,7 @@ import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
 const defaults = { concurrency: 20, contextTokens: 100000, shortLen: 3 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const help = 'unminify <dir> [--ignore <file>] [--concurrency 20] [--context-tokens 100000] [--short-len 3]';
+const help = 'unminify <dir>... [--ignore <file>] [--concurrency 20] [--context-tokens 100000] [--short-len 3]';
 
 export function parseArgs(args) {
   const options = { ...defaults };
@@ -26,10 +26,9 @@ export function parseArgs(args) {
         if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) throw new Error(`${arg} must be a positive integer`);
         options[key] = Number(value);
       }
-    } else if (options.dir) throw new Error(`unexpected argument: ${arg}`);
-    else options.dir = resolve(arg);
+    } else (options.dirs ??= []).push(resolve(arg));
   }
-  if (!options.dir) throw new Error(help);
+  if (!options.dirs) throw new Error(help);
   return options;
 }
 
@@ -47,8 +46,8 @@ export async function run(options, dependencies) {
     if (!Number.isSafeInteger(settings[key]) || settings[key] < 1) throw new Error(`${key} must be a positive integer`);
   }
   const startedAt = Date.now(), runId = randomUUID();
-  const dir = resolve(settings.dir);
-  const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' }).trim();
+  const dirs = settings.dirs.map(dir => resolve(dir));
+  const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dirs[0], encoding: 'utf8' }).trim();
   const performancePath = join(root, '.unminify', 'performance.jsonl');
   const event = record => appendRecord(performancePath, { ...record, run_id: runId });
   event({ type: 'run_start', at: startedAt });
@@ -79,10 +78,15 @@ export async function run(options, dependencies) {
   try {
     api = dependencies ?? await modules();
     const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');
-    const files = await api.listFiles(dir, {
-      ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined,
-      onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
-    });
+    // Overlapping directories list a file once.
+    const listed = new Set();
+    for (const dir of dirs) {
+      for (const file of await api.listFiles(dir, {
+        ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined,
+        onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
+      })) listed.add(file);
+    }
+    const files = [...listed];
     const planOptions = { shortLen: settings.shortLen, contextTokens: settings.contextTokens };
     summary.files = files.length;
     selectionEnd(); selectionEnd = null;
