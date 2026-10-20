@@ -32,11 +32,11 @@ The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user'
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
 Never print credentials.
 
-Before planning any names, the command restores numeric `void` expressions and minified
-booleans in every selected file. Only converted source ranges are replaced; surrounding
-text stays byte-identical. Fragment files retain their program bindings and declaration
-layout. Their numeric `void` expressions are restored only when the Git-root binding
-index (or the supplied input set outside Git) contains no program binding named
+Before planning any names, the command runs all 13 first-batch syntax steps in registry
+order in every selected file. Only converted source ranges are replaced; surrounding
+text stays byte-identical. Fragment files retain program binding names, declaration kinds
+and evaluation order. Their numeric `void` expressions are restored only when the Git-root
+binding index (or the supplied input set outside Git) contains no program binding named
 `undefined`, and the current file passes binding and dynamic-scope checks. Direct
 API calls without index context retain numeric `void` in fragments.
 
