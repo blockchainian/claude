@@ -2392,7 +2392,7 @@ pub(crate) mod tests {
                 "找那个会话",
                 "hide-idle-teammates ← message",
                 "team-lead ← message",
-                "SubagentHandback",
+                "Report: /tmp/research",
                 "WebFetch https://code.claude.com/docs/en/hooks",
                 "cd, ls, sed, wc",
                 "cd, cat, wc, sed",
@@ -2401,7 +2401,12 @@ pub(crate) mod tests {
                 .lines()
                 .position(|candidate| candidate == line)
                 .unwrap();
-            assert_eq!(events[0].summary(), rows[index]);
+            let expected = if block["name"] == "SubagentHandback" {
+                block["input"]["message"].as_str().unwrap()
+            } else {
+                rows[index]
+            };
+            assert_eq!(events[0].summary(), expected);
             assert_eq!(events[0].calls[0].name, block["name"].as_str().unwrap());
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
@@ -2455,7 +2460,7 @@ pub(crate) mod tests {
     fn real_agent_names_in_event_and_activity() {
         let expected = [
             "reviewer · Review files",
-            "SubagentHandback",
+            "Checks passed.\nReport details.",
             "worker-id → message",
             "team-lead → message",
             "peer-session → message",
@@ -2494,7 +2499,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn undeclared_task_and_handback_use_tool_names_in_event_and_activity() {
+    fn task_and_handback_use_declared_titles_in_event_and_activity() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
@@ -2508,15 +2513,13 @@ pub(crate) mod tests {
             block["input"]["name"] = "reviewer".into();
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
-            let row_expected = record["message"]["content"][0]["input"]["description"]
-                .as_str()
-                .unwrap_or(tool_name);
+            let row_expected = record["message"]["content"][0]["input"]["message"].as_str();
             assert_eq!(
                 tail(file.path(), 1).unwrap()[0].summary(),
                 if tool_name == "Task" {
                     "Spawn agent reviewer"
                 } else {
-                    row_expected
+                    row_expected.unwrap()
                 }
             );
             let summary = super::super::transcript::read_subagent(
@@ -2627,7 +2630,7 @@ pub(crate) mod tests {
         let events = tail_session(file.path(), 8, true).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Tool);
-        assert!(events[0].body.starts_with("SubagentHandback"));
+        assert!(events[0].body.starts_with("SyntaxWarning 修好了"));
         assert!(events[0].ended_at.is_some());
     }
 

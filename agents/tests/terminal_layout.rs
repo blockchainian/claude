@@ -1,3 +1,5 @@
+#[path = "support/terminal_handback.rs"]
+mod terminal_handback;
 #[path = "support/terminal_task_details_borders.rs"]
 mod terminal_task_details_borders;
 

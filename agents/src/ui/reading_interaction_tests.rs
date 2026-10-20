@@ -304,7 +304,7 @@ fn event_detail_without_subject_centers_tool_name_without_duplicate_metadata() {
             screen
                 .lines()
                 .skip(usize::from(detail.y + 2))
-                .any(|line| line.contains("\"message\":"))
+                .any(|line| line.contains("Checks passed."))
         );
     }
 }

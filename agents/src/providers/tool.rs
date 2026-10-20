@@ -206,6 +206,13 @@ const DEFAULT_RULE: ToolRule = ToolRule {
 
 pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
+        name: "SubagentHandback",
+        input: Some((Input::Field("message"), Format::Markdown)),
+        output: Some(Output::Field("message", Format::Text)),
+        list_subject: true,
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "Read",
         subject: Some(Subject::Field("file_path")),
         input: Some((Input::Field(""), Format::Text)),

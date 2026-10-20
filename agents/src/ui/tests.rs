@@ -1,3 +1,5 @@
+#[path = "subagent_handback_tests.rs"]
+mod subagent_handback_tests;
 #[path = "web_search_tests.rs"]
 mod web_search_tests;
 #[path = "middle_paste_tests.rs"]
