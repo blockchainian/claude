@@ -245,7 +245,15 @@ impl View {
         };
         draft.working = false;
         match result {
-            Ok(job) => draft.job = Some(job),
+            Ok(job) => {
+                draft.job = Some(job);
+                let input = if self.selected_draft == Some(id) {
+                    &mut self.input_box
+                } else {
+                    &mut draft.input
+                };
+                input.editor.clear();
+            }
             Err(error) => draft.error = Some(error.to_string()),
         }
         self.draft_changed(id);
@@ -758,37 +766,106 @@ mod recovery_tests {
         view.set_active_panel(Panel::Prompt);
         id
     }
+    fn submitted(view: &mut View, path: &Path) -> DraftKey {
+        let draft = named(view, path, "Launching");
+        let setup = view
+            .drafts
+            .iter_mut()
+            .find(|entry| entry.id == draft)
+            .unwrap();
+        setup.repository_confirmed = true;
+        setup.setup.branch = "main".into();
+        setup.branch = DraftBranch::Existing("main".into());
+        view.handle_paste("submitted prompt");
+        view.attach_image(
+            crate::images::ImageAttachment::from_image(
+                image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+            )
+            .unwrap(),
+        );
+        let action = view.handle_key(KeyCode::Enter.into());
+        let Some(Action::CreateTask { request, .. }) = action else {
+            panic!("Enter must create the task: {action:?}");
+        };
+        assert_eq!(request.prompt, "submitted prompt");
+        assert_eq!(request.images.len(), 1);
+        assert!(!view.input_box.editor.is_empty());
+        draft
+    }
+
     #[test]
-    fn launched_draft_keeps_focus_prompt_and_caret() {
+    fn launched_draft_clears_prompt_and_keeps_focus() {
+        for parked in [false, true] {
+            for panel in [Panel::Prompt, Panel::EventDetail] {
+                let dir = tempfile::tempdir().unwrap();
+                let mut view = View::default();
+                view.set_capabilities(HashMap::from([(
+                    ProviderId::Claude,
+                    crate::providers::claude::ClaudeProvider::new(dir.path().into()).capabilities(),
+                )]));
+                let draft = submitted(&mut view, dir.path());
+                view.set_active_panel(panel);
+                if parked {
+                    named(&mut view, dir.path(), "Other");
+                }
+                view.draft_created(draft, Ok("launch-job".into()));
+                let stored = view.stored_drafts();
+                let saved = stored
+                    .iter()
+                    .find(|entry| entry.id == draft.to_string())
+                    .unwrap();
+                assert!(saved.input.text.is_empty());
+                assert!(saved.input.images.is_empty());
+                let mut row = session();
+                row.status = SessionStatus::Ready;
+                row.background_job = Some(crate::model::BackgroundJob {
+                    id: "launch-job".into(),
+                    needs: None,
+                    awaits_prompt: false,
+                });
+                let key = row.id.clone();
+                view.set_sessions(vec![row], false);
+                assert_eq!(view.selected_id(), Some(&key));
+                assert_eq!(view.selected_draft, None);
+                assert_eq!(view.active_panel, panel);
+                assert!(view.input_box.editor.is_empty());
+                assert!(view.input_box.editor.image_paths().is_empty());
+                assert!(
+                    !view
+                        .task_uis
+                        .contains_key(&draft_controls::TaskKey::Draft(draft))
+                );
+                // Park the session again to check the prompt saved in TaskUi too.
+                named(&mut view, dir.path(), "Park session");
+                let ui = &view.task_uis[&draft_controls::TaskKey::Session(key.clone())];
+                assert!(ui.prompt.editor.is_empty());
+                assert!(ui.prompt.editor.image_paths().is_empty());
+                view.select(view.rows.iter().position(|row| row.id == key).unwrap());
+                view.set_active_panel(Panel::Prompt);
+                assert!(view.input_disabled().is_none());
+                assert_eq!(view.handle_key(KeyCode::Enter.into()), None);
+            }
+        }
+    }
+
+    #[test]
+    fn failed_draft_keeps_submitted_text_and_images() {
         for parked in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let mut view = View::default();
-            let draft = named(&mut view, dir.path(), "Launching");
-            view.handle_paste("half prompt");
-            view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-            let caret = view.input_box.editor.cursor();
+            let draft = submitted(&mut view, dir.path());
+            let text = view.input_box.editor.text().to_owned();
+            let images = view.input_box.editor.image_paths();
             view.set_active_panel(Panel::EventDetail);
-            view.draft_created(draft, Ok("launch-job".into()));
             if parked {
                 named(&mut view, dir.path(), "Other");
             }
-            let mut row = session();
-            row.background_job = Some(crate::model::BackgroundJob {
-                id: "launch-job".into(),
-                needs: None,
-                awaits_prompt: false,
-            });
-            let key = row.id.clone();
-            view.set_sessions(vec![row], false);
-            assert_eq!(view.selected_id(), Some(&key));
+            view.draft_created(draft, Err(io::Error::other("creation failed")));
+            view.select_draft(draft);
             assert_eq!(view.active_panel, Panel::EventDetail);
-            assert_eq!(view.input_box.editor.text(), "half prompt");
-            assert_eq!(view.input_box.editor.cursor(), caret);
-            assert!(
-                !view
-                    .task_uis
-                    .contains_key(&draft_controls::TaskKey::Draft(draft))
-            );
+            assert_eq!(view.input_box.editor.text(), text);
+            assert_eq!(view.input_box.editor.image_paths(), images);
+            assert!(!view.selected_draft().unwrap().working);
         }
     }
 

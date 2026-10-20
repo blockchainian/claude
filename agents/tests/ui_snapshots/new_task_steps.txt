@@ -39,3 +39,17 @@ New branch ❯ feature/probe
  named task ❯ unfinished task
 ---
 Creation was interrupted
+
+
+
+
+
+
+
+
+
+
+---
+ ○ named task                                            New                now │
+                                                                                ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
+ named task ❯

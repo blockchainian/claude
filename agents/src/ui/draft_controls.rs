@@ -1236,6 +1236,14 @@ mod tests {
         let mut view = draft_view(&repository, directory.path());
         view.set_active_panel(Panel::TaskDetails);
         let area = Rect::new(0, 0, 160, 16);
+        let prompt_rows = |view: &View| {
+            screen(view, area)
+                .lines()
+                .filter(|line| line.contains("named task"))
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let mut states = Vec::new();
         states.push(panel_rows(&view, area).join("\n"));
         prompt_step(&mut view);
@@ -1245,19 +1253,19 @@ mod tests {
         states.push(panel_rows(&view, area).join("\n"));
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(view.selector.is_none());
-        states.push(
-            screen(&view, area)
-                .lines()
-                .filter(|line| line.contains("named task"))
-                .map(str::trim_end)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
+        states.push(prompt_rows(&view));
         view.draft_created(
             view.selected_draft.unwrap(),
             Err(std::io::Error::other("Creation was interrupted")),
         );
         states.push(panel_rows(&view, area).join("\n"));
+        view.set_active_panel(Panel::Prompt);
+        assert!(matches!(
+            view.handle_key(KeyCode::Enter.into()),
+            Some(Action::CreateTask { .. })
+        ));
+        view.draft_created(view.selected_draft.unwrap(), Ok("launch-job".into()));
+        states.push(prompt_rows(&view));
         let actual = states.join("\n---\n").trim_end().to_owned() + "\n";
         if std::env::var_os("UPDATE_DRAFT_SNAPSHOT").is_some() {
             std::fs::write("tests/ui_snapshots/new_task_steps.txt", &actual).unwrap();
