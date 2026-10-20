@@ -209,6 +209,7 @@ impl View {
             });
         }
         self.event_list.background = Some(crate::event::Event {
+            turn: None,
             kind: crate::event::Kind::Tool,
             source: None,
             completed_time: false,
