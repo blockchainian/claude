@@ -4,8 +4,8 @@
                                                                                                     ↓
                                                          已提交并推送 d8baebe62bffe87c775a43ebf7d1fe22bd53e23b，已安装。
 
-                                                         测试：cargo test 1031 通过；terminal_layout --ignored 34 通过；clippy 通过，仅有现有警
-                                                         告。
+                                                         测试：cargo test 1031 通过；terminal_layout --ignored 34 通过；clippy 通过，仅有现有
+                                                         警告。
 
                                                          安装版 tmux 抓取，去掉块外缩进：
 
@@ -30,14 +30,14 @@
                                              ↓
 已提交并推送 d8baebe62bffe87c775a43ebf7d1fe22bd53e23b，已安装。
 
-测试：cargo test 1031 通过；terminal_layout --ignored 34 通过；clippy 通过，仅
-有现有警告。
+测试：cargo test 1031 通过；terminal_layout --ignored 34 通过；clippy 通过，
+仅有现有警告。
 
 安装版 tmux 抓取，去掉块外缩进：
 
 200 列：
 
-Claude 图片链接                  codex-manager start                          1…
+Claude 图片链接                  codex-manager start                          …
 
 cwd: agents
 Implement workstream A of agents/scratchpad/links/plan.md (Claude provider:

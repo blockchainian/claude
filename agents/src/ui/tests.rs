@@ -5098,7 +5098,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
                 let viewport = view.viewport.borrow();
                 let index = viewport.event_rows[usize::from(y - viewport.event_panel.y)];
                 assert_eq!(viewport.event_list_text.area.x, left);
-                assert_eq!(viewport.event_list_text.area.right(), width - 1);
+                assert_eq!(viewport.event_list_text.area.right(), width - 2);
                 view.event_panel[index].clone()
             };
             let x = if edge { width - 2 } else { left };
@@ -5200,14 +5200,14 @@ fn task_event_time_column_and_ellipses_align_in_both_layouts() {
                 "width {width}"
             );
             assert_eq!(
-                text(event_panel.right() - 8, event_panel.right()),
+                text(event_panel.right() - 9, event_panel.right() - 1),
                 format!("{time:>8}")
             );
             assert_eq!(
-                text(event_panel.right() - 10, event_panel.right() - 8),
+                text(event_panel.right() - 11, event_panel.right() - 9),
                 "  "
             );
-            assert_eq!(buffer[(event_panel.right() - 11, y)].symbol(), "…");
+            assert_eq!(buffer[(event_panel.right() - 12, y)].symbol(), "…");
             assert_eq!(cell_text(buffer[(event_panel.x, y)].symbol()), "l");
         }
         view.scroll_content_row(true, true, top);
@@ -5541,8 +5541,8 @@ fn non_current_event_time_matches_unselected_task_and_task_details_times() {
     let mut event_panel = Buffer::empty(area);
     view.render_at(area, &mut event_panel, now);
     let y = view.center_layout(area).event_panel.y;
-    assert_ne!(event_panel[(98, y)].symbol(), " ");
-    assert_eq!(event_panel[(98, y)].style(), task_time.style());
+    assert_ne!(event_panel[(97, y)].symbol(), " ");
+    assert_eq!(event_panel[(97, y)].style(), task_time.style());
 
     view.rows[view.selected].last_message = Some("Reply".into());
     view.rows[view.selected].last_message_at = Some(now - Duration::minutes(1));
@@ -5713,8 +5713,8 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         );
     }
     for y in top..top + 4 {
-        assert_eq!(buf[(98, y)].fg, Color::Reset, "time row {y}");
-        assert_eq!(buf[(98, y)].modifier, Modifier::DIM, "time row {y}");
+        assert_eq!(buf[(97, y)].fg, Color::Reset, "time row {y}");
+        assert_eq!(buf[(97, y)].modifier, Modifier::DIM, "time row {y}");
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -5735,7 +5735,7 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         view.event_panel.first_mut().unwrap().previous_end = None;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let time = &buf[(98, top)];
+        let time = &buf[(97, top)];
         let time_style = super::style::event_time_style(&kind, false);
         assert_eq!(time_style, super::style::time_style());
         assert_eq!(time.fg, Color::Reset);
@@ -5752,7 +5752,7 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
             assert!(!cell.modifier.contains(Modifier::BOLD));
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
-        let time = &buf[(98, top + 4)];
+        let time = &buf[(97, top + 4)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
@@ -5769,9 +5769,9 @@ fn task_event_preserves_time_when_truncated() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     let y = view.center_layout(area).event_panel.bottom() - 2;
-    assert_eq!(buf[(88, y)].symbol(), "…");
-    assert_eq!(buf[(98, y)].fg, Color::Reset);
-    assert_eq!(buf[(98, y)].modifier, Modifier::DIM);
+    assert_eq!(buf[(87, y)].symbol(), "…");
+    assert_eq!(buf[(97, y)].fg, Color::Reset);
+    assert_eq!(buf[(97, y)].modifier, Modifier::DIM);
     for kind in [
         Kind::User,
         Kind::Assistant,
@@ -5827,7 +5827,7 @@ fn task_event_right_aligns_mixed_width_times_and_centers_content() {
     {
         assert_eq!(
             line[..line.find(time).unwrap()].chars().count() + time.len(),
-            99,
+            98,
             "times end at the same column"
         );
         let body = super::event_list::body_line(&view.event_panel[index], 88, &view.rows[0].cwd);
@@ -8338,7 +8338,7 @@ fn open_event_links_its_wrapped_path() {
         click_text(&mut view, &open, "another-long-directory"),
         Some(Action::OpenPath(path.into()))
     );
-    assert_eq!(click_text(&mut view, &open, "details"), None);
+    assert_eq!(click_text(&mut view, &open, "see"), None);
 }
 
 #[test]
@@ -8851,7 +8851,7 @@ fn open_view_scrollbar() {
     event_screen(&view, 100, 25, now);
     let area = view.viewport.borrow().event_text.area;
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
-    assert_eq!(area.right() + 11, layout.event_detail.right());
+    assert_eq!(area.right() + 12, layout.event_detail.right());
     let scrollbar_x = layout.event_detail.right() - 1;
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
@@ -9056,7 +9056,7 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
     assert!(open.contains("(no output)"));
     assert!(open.lines().any(|line| line.trim() == "↓"));
     let area = view.viewport.borrow().event_text.area;
-    assert_eq!(area.width, 88);
+    assert_eq!(area.width, 87);
     let lines: Vec<&str> = open.lines().collect();
     assert!(
         (area.top()..area.bottom()).all(|y| {

@@ -761,12 +761,12 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
                 let area = Rect::new(0, 0, 100, 4);
                 let mut buf = Buffer::empty(area);
                 view.render_event(area, &mut buf, now);
-                let time: String = (92..100).map(|x| buf[(x, 0)].symbol()).collect();
+                let time: String = (91..99).map(|x| buf[(x, 0)].symbol()).collect();
                 assert_eq!(time.trim(), expected, "{sort:?} {kind:?} {state} list");
                 let detail = Rect::new(0, 0, 100, 30);
                 let mut buf = Buffer::empty(detail);
                 view.render_event_detail(detail, &mut buf, now);
-                let time: String = (92..100).map(|x| buf[(x, 1)].symbol()).collect();
+                let time: String = (91..99).map(|x| buf[(x, 1)].symbol()).collect();
                 assert_eq!(time.trim(), expected, "{sort:?} {kind:?} {state} detail");
             }
         }
@@ -810,7 +810,7 @@ fn duration_running_rows_redraw_only_while_visible_and_keep_update_order() {
     );
     view.render_event(area, &mut buf, now + chrono::Duration::seconds(1));
     assert_eq!(view.event_order, order);
-    let time: String = (92..100).map(|x| buf[(x, 0)].symbol()).collect();
+    let time: String = (91..99).map(|x| buf[(x, 0)].symbol()).collect();
     assert_eq!(time.trim(), "11s");
     view.select_event(Some(0));
     view.render_event(area, &mut buf, now);

@@ -1,9 +1,9 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
               /tmp/project              │                 Prompt                 │                                   type · 1                                  │
- ● Task log example         Working     │ Task log example                       │       Apply patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms│
-                                        │                                        │                               claude ask claude                          28s│
-                                        │                                        │                                   Extension                               1s│
+ ● Task log example         Working     │ Task log example                       │      Apply patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms │
+                                        │                                        │                               claude ask claude                         28s │
+                                        │                                        │                                   Extension                              1s │
                                         │                                        │                                   ImageView                                 │
                                         │                                        │
                                         │                                        │

@@ -1,4 +1,4 @@
- Bash                                           Bash                                            35s
+ Bash                                           Bash                                           35s
 
                                          ┌ cat /workspace/a
                                          │ printf longer

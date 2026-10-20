@@ -62,6 +62,21 @@ impl Probe {
         }
     }
 
+    fn rows(&self, width: u16, height: u16) -> Vec<Vec<String>> {
+        let capture = self.capture();
+        let mut parser = vt100::Parser::new(height, width, 0);
+        for (y, row) in capture.lines().enumerate() {
+            parser.process(format!("\x1b[{};1H{row}", y + 1).as_bytes());
+        }
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| parser.screen().cell(y, x).unwrap().contents().to_owned())
+                    .collect()
+            })
+            .collect()
+    }
+
     fn key(&self, key: &str) {
         self.run(&["send-keys", "-t", "probe", key]);
     }
@@ -168,6 +183,29 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
             let bottom = edge.iter().position(|cell| cell == "┘").unwrap();
             assert!(bottom > top + 1);
             assert!(edge[top + 1..bottom].iter().all(|cell| cell == "│"));
+            let rows = probe.rows(width, 50);
+            for (row, glyph) in edge.iter().enumerate().take(bottom + 1).skip(top) {
+                assert_eq!(
+                    rows[row][usize::from(width) - 2],
+                    " ",
+                    "time/bracket gap: {width}, row {row}"
+                );
+                assert_ne!(
+                    rows[row][usize::from(width) - 3],
+                    " ",
+                    "time must end immediately before the gap: {width}, row {row}"
+                );
+                assert_eq!(rows[row][usize::from(width) - 1], *glyph);
+            }
+            std::fs::write(
+                output.join(format!("list-{width}.txt")),
+                rows[top..=bottom]
+                    .iter()
+                    .map(|row| row.concat())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+            .unwrap();
             // Click inside the event panel, outside the extra bracket column.
             probe.run(&[
                 "send-keys",
@@ -182,6 +220,40 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
                     top + 1
                 ),
             ]);
+            probe.wait(&format!("detail-{width}"), width, 50, |capture, _| {
+                capture
+                    .lines()
+                    .skip(bottom + 1)
+                    .any(|line| line.contains("19:59:00"))
+            });
+            let rows = probe.rows(width, 50);
+            let (detail_start, detail) = rows
+                .iter()
+                .enumerate()
+                .skip(bottom + 1)
+                .find(|(_, row)| row.concat().contains("19:59:00"))
+                .expect("clicked user event must display its timestamp in the detail title");
+            assert_eq!(
+                detail[usize::from(width) - 3],
+                "0",
+                "detail time ends two cells before the edge"
+            );
+            assert!(
+                detail[usize::from(width) - 2..]
+                    .iter()
+                    .all(|cell| cell.trim().is_empty()),
+                "detail right padding"
+            );
+            std::fs::write(
+                output.join(format!("detail-{width}.txt")),
+                rows[detail_start..]
+                    .iter()
+                    .take(6)
+                    .map(|row| row.concat())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+            .unwrap();
             probe.key("t");
             probe.wait(&format!("duration-{width}"), width, 50, |capture, edge| {
                 capture.contains("duration")
@@ -190,7 +262,7 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
                         .all(|cell| !["┐", "│", "┘"].contains(&cell.as_str()))
             });
             probe.key("t");
-            cases.push(serde_json::json!({"width":width,"complete_bracket":true,"duration_hides_bracket":true}));
+            cases.push(serde_json::json!({"width":width,"complete_bracket":true,"time_bracket_gap_cells":1,"detail_right_padding_cells":2,"duration_hides_bracket":true}));
         }
         drop(probe);
         let scroll_fixture = include_str!("fixtures/turn-groups/claude-scroll.jsonl");
@@ -204,6 +276,21 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
             !edge.iter().any(|cell| cell == "┘"),
             "running turn must stay open"
         );
+        let scrollbar_row = edge
+            .iter()
+            .position(|cell| cell == "▕")
+            .expect("short detail panel must retain its scrollbar at the terminal edge");
+        let rows = scroll.rows(112, 19);
+        assert_eq!(rows[scrollbar_row][111], "▕");
+        assert!(
+            rows[scrollbar_row][110].trim().is_empty(),
+            "scrollbar remains outside the extra time padding"
+        );
+        assert_ne!(
+            rows[scrollbar_row][109], " ",
+            "detail timestamp ends before the padding"
+        );
+        std::fs::write(output.join("scrollbar.txt"), rows[scrollbar_row].concat()).unwrap();
         let row = edge.iter().position(|cell| cell == "│").unwrap();
         scroll.run(&[
             "send-keys",
@@ -216,7 +303,7 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
         scroll.wait("scroll-top", 112, 19, |_, edge| {
             edge.iter().any(|cell| cell == "┐") && !edge.iter().any(|cell| cell == "┘")
         });
-        serde_json::json!({"verdict":"pass","cases":cases,"clipped_head_has_vertical":true,"running_has_no_bottom_corner":true,"scroll_to_head_restores_corner":true})
+        serde_json::json!({"verdict":"pass","cases":cases,"clipped_head_has_vertical":true,"running_has_no_bottom_corner":true,"scroll_to_head_restores_corner":true,"detail_scrollbar_column":111})
     });
     let verdict = match &outcome {
         Ok(result) => result.clone(),

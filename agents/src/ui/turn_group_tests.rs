@@ -34,7 +34,7 @@ fn real_prompt_and_response_have_an_open_turn_bracket() {
     assert_eq!(buffer[(panel.right(), panel.y + 1)].symbol(), "│");
     assert_eq!(
         view.viewport.borrow().event_list_text.area.right(),
-        panel.right()
+        panel.right() - 1
     );
     assert!(!panel.contains((panel.right(), panel.y).into()));
 }
@@ -136,4 +136,91 @@ fn search_draws_corners_on_visible_rows_and_leaves_input_unmarked() {
     assert_eq!(buffer[(79, 1)].symbol(), "┐");
     assert_eq!(buffer[(79, viewport.event_rows.len() as u16)].symbol(), "┘");
     assert_eq!(buffer[(79, 20)].symbol(), " ");
+}
+
+#[test]
+fn time_padding_keeps_clock_selection_and_brackets_apart() {
+    for width in [100, 149, 150, 200] {
+        for sort in [EventSort::Time, EventSort::Duration] {
+            let (_dir, mut view) = completed_fixture();
+            view.event_list.sort = sort;
+            view.prepare_event_search();
+            view.event_list.cursor = Some(0);
+            let area = Rect::new(0, 0, width, 60);
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, Utc::now());
+            let panel = view.viewport.borrow().event_panel;
+            let y = (panel.y..panel.bottom())
+                .find(|&y| buffer[(width - 3, y)].symbol() != " ")
+                .expect("visible clock");
+            let index = usize::from(y - panel.y);
+            view.event_list.cursor = Some(index);
+            view.render_at(area, &mut buffer, Utc::now());
+            let (_, time) = super::event_list::event_row_areas(panel);
+            assert_eq!(time.right(), width - 2, "width={width}");
+            assert_ne!(buffer[(time.right() - 1, y)].symbol(), " ");
+            assert_eq!(buffer[(width - 2, y)].symbol(), " ");
+            if sort == EventSort::Time {
+                assert!(["┐", "│", "┘"].contains(&buffer[(width - 1, y)].symbol()));
+            }
+            assert_eq!(buffer[(width - 2, y)].bg, buffer[(time.right() - 1, y)].bg);
+            assert_eq!(
+                view.viewport.borrow().event_list_text.area.right(),
+                time.right()
+            );
+            view.begin_text_selection(width - 2, y);
+            assert!(
+                view.text_selection.borrow().is_none(),
+                "padding is not text"
+            );
+            view.begin_text_selection(time.right() - 2, y);
+            assert!(
+                view.text_selection.borrow().is_some(),
+                "clock remains selectable"
+            );
+            view.extend_text_selection(width - 1, y);
+            view.render_at(area, &mut buffer, Utc::now());
+            assert!(
+                !buffer[(width - 2, y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::REVERSED)
+            );
+            assert!(
+                buffer[(time.right() - 1, y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::REVERSED)
+            );
+            let Some(Action::Copy { text, .. }) = view.finish_text_selection(width - 1, y) else {
+                panic!("clock copy");
+            };
+            assert_eq!(text.width(), 2);
+            assert!(!text.contains(['┐', '│', '┘']));
+        }
+    }
+}
+
+#[test]
+fn child_session_event_list_has_no_turn_brackets() {
+    let (_dir, mut view) = completed_fixture();
+    let mut parent = view.rows[view.selected].clone();
+    parent.id.id = "parent".into();
+    view.rows[view.selected].parent = Some(parent.id.clone());
+    view.rows.push(parent);
+    for provider in [
+        crate::providers::ProviderId::Claude,
+        crate::providers::ProviderId::Codex,
+    ] {
+        view.rows[view.selected].id.provider = provider;
+        view.event_session = view.selected_id().cloned();
+        for width in [100, 200] {
+            let buffer = draw(&view, width, 20);
+            assert!(!view.viewport.borrow().event_rows.is_empty());
+            assert!(
+                buffer
+                    .content
+                    .iter()
+                    .all(|cell| !["┐", "│", "┘"].contains(&cell.symbol()))
+            );
+        }
+    }
 }

@@ -158,7 +158,7 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
     view.event_list.cursor = None;
     let cwd = &view.selected_row().unwrap().cwd;
     for width in 11..100 {
-        let content_width = width - 10;
+        let content_width = width - 11;
         let mut expected = super::super::event_list::body_line(&event, content_width as usize, cwd);
         let indices = view.event_list.search.indices(&expected.to_string());
         let mut offset = 0;

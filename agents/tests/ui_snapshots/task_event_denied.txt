@@ -9,17 +9,17 @@
 ──────────────────────────────────────────────────┴╴project ────── Task log example ────────────────
  Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-                                       Please inspect the task                             11:58:00
-                                                echo                                            15s│
-                                                echo                                            10s│
-                                                Edit                                            10s│
+                                       Please inspect the task                            11:58:00
+                                                echo                                           15s │
+                                                echo                                           10s │
+                                                Edit                                           10s │
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                Edit                                            10s
+                                                Edit                                           10s
 
                                                   ↓
- Reason: The server-side auto mode classifier judged this action dangerous (it gave no e…
+ Reason: The server-side auto mode classifier judged this action dangerous (it gave no …
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  ? help  esc Previous  ↑/↓ move  enter Terminal  n new

@@ -1,5 +1,5 @@
 /tmp/tail.py
-Write                                                  tmp/tail.py                                              12:34:56
+Write                                                  tmp/tail.py                                             12:34:56
                                          import json, sys
                                          out = []
                                          for line in open(sys.argv[1]):
@@ -12,7 +12,7 @@ Write                                                  tmp/tail.py              
 "user": Indexed(29)
 
 /tmp/Dockerfile
-Write                                                tmp/Dockerfile                                             12:34:56
+Write                                                tmp/Dockerfile                                            12:34:56
                                                      FROM alpine
                                                      RUN echo hello
                                                             ↓
@@ -20,14 +20,14 @@ Write                                                tmp/Dockerfile             
 FROM: Indexed(23)
 
 /tmp/tail.unknown-syntax
-Write                                            tmp/tail.unknown-syntax                                        12:34:56
+Write                                            tmp/tail.unknown-syntax                                       12:34:56
                                                     import json, sys
                                                             ↓
                                                            ·•·
 import: Reset
 
 /tmp/no-extension
-Write                                               tmp/no-extension                                            12:34:56
+Write                                               tmp/no-extension                                           12:34:56
                                                     import json, sys
                                                             ↓
                                                            ·•·

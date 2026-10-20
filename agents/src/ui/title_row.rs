@@ -115,7 +115,7 @@ mod tests {
             assert_eq!(line.width(), usize::from(columns.text.width));
             assert!(!line.to_string().contains('─'));
             assert!(!line.to_string().contains("12s"));
-            assert_eq!(columns.time.right(), columns.panel.right());
+            assert_eq!(columns.time.right() + 1, columns.panel.right());
             assert_eq!(columns.time.x - columns.text.right(), 2);
             assert!(
                 line.spans

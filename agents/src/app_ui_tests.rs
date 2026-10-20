@@ -188,7 +188,7 @@ fn settled_zero_duration_leaves_the_time_column_empty_through_app() {
         select_archive(&mut app);
         let buffer = draw(&mut app, width);
         let (x, y) = event_position(&buffer, "Equal timestamp reply");
-        let right = width - 1;
+        let right = width - 2;
         assert_eq!(segment(&buffer, right - 8..right, y), "        ");
         assert_eq!(segment(&buffer, right - 10..right - 8, y), "  ");
         assert_eq!(buffer[(right - 11, y)].symbol(), "…");
@@ -1096,7 +1096,7 @@ fn event_rows_keep_fixed_content_and_right_aligned_times() {
         app.view.set_event(events.clone());
         let buffer = draw(&mut app, width);
         let (x, top) = event_position(&buffer, "long body");
-        let right = width - 1;
+        let right = width - 2;
         assert_eq!(
             x,
             if width < 150 {
@@ -1137,7 +1137,7 @@ fn app_event_padding_and_clicks_follow_real_transcript_rows() {
             assert_eq!(x, left);
             assert_eq!(
                 (left..width - 1).rfind(|&x| buffer[(x, y)].symbol() != " "),
-                Some(width - 2)
+                Some(width - 3)
             );
             click(&mut app, if edge { width - 2 } else { left }, y);
             wait_for_click(&mut app);
@@ -1152,7 +1152,7 @@ fn app_event_padding_and_clicks_follow_real_transcript_rows() {
             assert_eq!(buffer[(width - 1, event_detail_y)].symbol(), "▕");
             assert_eq!(
                 (1..width - 1).rfind(|&x| buffer[(x, event_detail_y)].symbol() != " "),
-                Some(width - 2)
+                Some(width - 3)
             );
             assert!(
                 lines(&buffer)[usize::from(event_detail_y)..]

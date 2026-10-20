@@ -264,11 +264,11 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
         area.right(),
         area.bottom(),
     ));
-    for _ in 0..10 {
+    for _ in 0..11 {
         assert!(view.tick_text_selection());
         render(&view);
     }
-    assert_eq!(view.event_detail.scroll.borrow().offset, 10);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 11);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.x,
@@ -276,7 +276,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
     ));
     assert!(view.tick_text_selection());
     render(&view);
-    assert_eq!(view.event_detail.scroll.borrow().offset, 9);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 10);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.right(),

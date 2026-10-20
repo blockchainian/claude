@@ -337,7 +337,8 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
             columns.time.width,
             super::super::event_list::CLOCK_WIDTH as u16
         );
-        assert_eq!(columns.time.right(), columns.panel.right());
+        assert_eq!(columns.time.right() + 1, columns.panel.right());
+        assert_eq!(columns.time.right(), width - 2);
         let clock = |y| {
             (columns.time.x..columns.time.right())
                 .map(|x| buf[(x, y)].symbol())
@@ -365,6 +366,9 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
                 .unwrap();
             let duration = title.time.as_ref().unwrap();
             assert_eq!(clock(row.y).trim(), duration);
+            for x in columns.time.right()..width {
+                assert_eq!(buf[(x, row.y)].symbol(), " ");
+            }
             assert_ne!(buf[(columns.time.right() - 1, row.y)].symbol(), " ");
             assert!(!title.line(columns).0.to_string().contains(duration));
         }

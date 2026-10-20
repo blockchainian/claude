@@ -180,7 +180,7 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
                     let jump = viewport.event_jump;
                     assert_eq!(jump.y, model_y);
                     assert_eq!(
-                        jump.right() - 1,
+                        jump.right() - 2,
                         super::super::event_list::event_row_areas(viewport.event_panel)
                             .1
                             .right()

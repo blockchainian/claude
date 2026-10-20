@@ -17,7 +17,7 @@ fn event_content_centers_short_rows_and_keeps_truncated_rows_and_clock() {
             view.set_event(vec![event]);
             let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 5));
             view.render_event(area, &mut buf, now);
-            let content_width = width - 10;
+            let content_width = width - 11;
             let fitted = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
                 Line::raw(text),
                 usize::from(content_width),
@@ -39,9 +39,9 @@ fn event_content_centers_short_rows_and_keeps_truncated_rows_and_clock() {
                 x += cell.symbol().width().max(1) as u16;
             }
             assert_eq!(actual, expected, "width {width}, {text}");
+            assert_eq!(buf[(area.right() - 11, area.y)].symbol(), " ");
             assert_eq!(buf[(area.right() - 10, area.y)].symbol(), " ");
-            assert_eq!(buf[(area.right() - 9, area.y)].symbol(), " ");
-            let cells = (area.right() - 8..area.right())
+            let cells = (area.right() - 9..area.right() - 1)
                 .map(|x| buf[(x, area.y)].clone())
                 .collect::<Vec<_>>();
             if let Some(expected) = &clock {
@@ -71,7 +71,7 @@ fn event_content_centered_links_click_and_underline_exactly_the_path() {
         view.render_at(area, &mut buf, now);
         let event_panel = view.viewport.borrow().event_panel;
         let start =
-            event_panel.x + (event_panel.width / 2 - 19 / 2).min(event_panel.width - 10 - 19);
+            event_panel.x + (event_panel.width / 2 - 19 / 2).min(event_panel.width - 11 - 19);
         let expected = Rect::new(start + 5, event_panel.y, 9, 1);
         let links = view.viewport.borrow().event_links.clone();
         assert!(links.contains(&(expected, target.clone())), "{links:?}");
@@ -107,7 +107,7 @@ fn event_content_centered_selection_copies_drawn_text() {
         view.set_event(vec![event]);
         let _ = event_screen(&view, width, 40, now);
         let event_panel = view.viewport.borrow().event_panel;
-        let x = event_panel.x + (event_panel.width / 2 - 9 / 2).min(event_panel.width - 10 - 9);
+        let x = event_panel.x + (event_panel.width / 2 - 9 / 2).min(event_panel.width - 11 - 9);
         view.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             x,
@@ -146,7 +146,7 @@ fn event_content_centered_search_highlights_the_shifted_match() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let event_panel = view.viewport.borrow().event_panel;
-        let x = event_panel.x + (event_panel.width / 2 - 9 / 2).min(event_panel.width - 10 - 9);
+        let x = event_panel.x + (event_panel.width / 2 - 9 / 2).min(event_panel.width - 11 - 9);
         for column in event_panel.x..event_panel.right() - 10 {
             assert_eq!(
                 buf[(column, event_panel.y)]
