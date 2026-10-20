@@ -76,7 +76,7 @@ async function localRun(t, multipleBatches = false) {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const dependencies = { ...select, ...rename, ...checks,
     createNamer: options => createNamer({ ...options, baseUrl, retryDelayMs: 1 }), output: () => {} };
-  const summary = await run({ paths: [root], codexHome, concurrency: 1, ...(multipleBatches ? { contextTokens: 80 } : {}) }, dependencies);
+  const summary = await run({ paths: [root], codexHome, concurrency: 1, ...(multipleBatches ? { maxInputTokens: 80 } : {}) }, dependencies);
   assert.equal(summary.exitCode, 0);
   return { root, summary, codexHome, dependencies };
 }

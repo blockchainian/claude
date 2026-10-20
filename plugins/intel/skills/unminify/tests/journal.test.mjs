@@ -12,15 +12,15 @@ async function workspace(t) {
 }
 test('batch records are durable and replaying a record is idempotent', async t => {
   const root = await workspace(t);
-  const journal = openJournal(root, 'lib/a.js', 'const a=1;', { shortLen: 3 });
+  const journal = openJournal(root, 'lib/a.js', 'const a=1;', { minSymbolLength: 4 });
   journal.batch('0:10', new Map([[6, 'answer']]));
   journal.batch('0:10', new Map([[6, 'answer']]));
-  const replay = openJournal(root, 'lib/a.js', 'const a=1;', { shortLen: 3 });
+  const replay = openJournal(root, 'lib/a.js', 'const a=1;', { minSymbolLength: 4 });
   assert.deepEqual(replay.batches.get('0:10'), { '6': 'answer' });
   assert.equal((await readFile(journal.path, 'utf8')).trim().split('\n').length, 2);
   assert.throws(() => replay.batch('0:10', new Map([[6, 'different']])), /conflicting/);
-  assert.throws(() => openJournal(root, 'lib/a.js', 'const b=1;', { shortLen: 3 }), /source changed/);
-  assert.throws(() => openJournal(root, 'lib/a.js', 'const a=1;', { shortLen: 2 }), /options changed/);
+  assert.throws(() => openJournal(root, 'lib/a.js', 'const b=1;', { minSymbolLength: 4 }), /source changed/);
+  assert.throws(() => openJournal(root, 'lib/a.js', 'const a=1;', { minSymbolLength: 2 }), /options changed/);
 });
 test('a killed append loses only its incomplete final line', async t => {
   const root = await workspace(t);

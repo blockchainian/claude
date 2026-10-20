@@ -101,8 +101,8 @@ function ownerChain(binding) {
 }
 
 /** Binding keys and scope ranges are Babel start/end: UTF-16 indices, NOT bytes. */
-export function planFile(source, { shortLen = 3, contextTokens = 100000 } = {}) {
-  for (const [name, value] of Object.entries({ shortLen, contextTokens })) {
+export function planFile(source, { minSymbolLength = 4, maxInputTokens = 100000 } = {}) {
+  for (const [name, value] of Object.entries({ minSymbolLength, maxInputTokens })) {
     if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${name} must be a positive integer`);
   }
   const analysis = analyze(source);
@@ -110,20 +110,20 @@ export function planFile(source, { shortLen = 3, contextTokens = 100000 } = {}) 
   const remember = stages => {
     function fit(batch) {
       batchAnalyses.set(batch, analysis);
-      if (estimateInputTokens(renderBatch(source, batch)) <= contextTokens || batch.keys.length === 1) return [batch];
+      if (estimateInputTokens(renderBatch(source, batch)) <= maxInputTokens || batch.keys.length === 1) return [batch];
       const middle = Math.ceil(batch.keys.length / 2);
       return [batch.keys.slice(0, middle), batch.keys.slice(middle)].flatMap(keys =>
         fit({ id: `${batch.id.split(':').slice(0, 4).join(':')}:${keys[0]}`, keys }));
     }
     return { stages: stages.map(stage => stage.flatMap(fit)) };
   };
-  const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length <= shortLen)
+  const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length < minSymbolLength)
     .sort((a,b)=>a.identifier.start-b.identifier.start);
   if (!candidates.length) return { stages: [[]] };
-  const whole = { id: `Program:${ast.program.start}:${ast.program.end}:${contextTokens}:${candidates[0].identifier.start}:file`,
+  const whole = { id: `Program:${ast.program.start}:${ast.program.end}:${maxInputTokens}:${candidates[0].identifier.start}:file`,
     keys: candidates.map(b=>b.identifier.start) };
   batchAnalyses.set(whole, analysis);
-  if (estimateInputTokens(renderBatch(source, whole)) <= contextTokens) return { stages: [[whole]] };
+  if (estimateInputTokens(renderBatch(source, whole)) <= maxInputTokens) return { stages: [[whole]] };
   const stages = [[], []];
   const groups = new Map();
   for (const b of candidates) {
@@ -134,11 +134,11 @@ export function planFile(source, { shortLen = 3, contextTokens = 100000 } = {}) 
   function emit(owner, items, stage) {
     if (!items.length) return;
     const size = countTokens(source.slice(owner.start,owner.end));
-    if (owner !== ast.program && size <= contextTokens) {
-      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${contextTokens}:${items[0].identifier.start}`, keys: items.map(b=>b.identifier.start) });
+    if (owner !== ast.program && size <= maxInputTokens) {
+      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${maxInputTokens}:${items[0].identifier.start}`, keys: items.map(b=>b.identifier.start) });
       return;
     }
-    if (owner !== ast.program && size > contextTokens) {
+    if (owner !== ast.program && size > maxInputTokens) {
       const local = [];
       const children = new Map();
       for (const b of items) {
@@ -163,13 +163,13 @@ export function planFile(source, { shortLen = 3, contextTokens = 100000 } = {}) 
     let chunk = [], used = 0, statements = new Set();
     function flush() {
       if (!chunk.length) return;
-      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${contextTokens}:${chunk[0]}`, keys: chunk });
+      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${maxInputTokens}:${chunk[0]}`, keys: chunk });
       chunk = []; used = 0; statements = new Set();
     }
     for (const b of items) {
       const statement = b.path.getStatementParent()?.node ?? b.path.node;
       const cost = statements.has(statement) ? countTokens(b.identifier.name) + 4 : countTokens(source.slice(statement.start,statement.end));
-      if (chunk.length && (used + cost > contextTokens)) flush();
+      if (chunk.length && (used + cost > maxInputTokens)) flush();
       chunk.push(b.identifier.start);
       statements.add(statement);
       used += cost;

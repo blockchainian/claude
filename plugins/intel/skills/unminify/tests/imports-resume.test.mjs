@@ -75,7 +75,7 @@ async function fixture(t) {
       refreshUrl: `${baseUrl}/oauth/token`, retryDelayMs: 1 }) };
   return { root, read, journal, controls, lines,
     write: files => Promise.all(Object.entries(files).map(([file, source]) => writeFile(join(root, file), source))),
-    run: () => run({ paths: [root], concurrency: 1, contextTokens: 500 }, dependencies) };
+    run: () => run({ paths: [root], concurrency: 1, maxInputTokens: 500 }, dependencies) };
 }
 
 for (const code of ['USAGE_LIMIT', 'AUTH']) test(`${code} follows imports only in done files and resumes byte-identically`, async t => {
@@ -120,7 +120,7 @@ test('a journal error still follows completed imports without changing the unfin
   const target = await fixture(t);
   const file = 'c-unfinished.mjs';
   await target.write(added);
-  openJournal(target.root, file, added[file], { shortLen: 3, contextTokens: 499 });
+  openJournal(target.root, file, added[file], { minSymbolLength: 4, maxInputTokens: 499 });
   const before = { source: await target.read(file), journal: await target.journal(file) };
   const summary = await target.run();
   assert.equal(summary.exitCode, 1);

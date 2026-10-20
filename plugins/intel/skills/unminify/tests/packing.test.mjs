@@ -17,7 +17,7 @@ import { openJournal } from '../scripts/journal.mjs';
 const encoder = getEncoding('o200k_base');
 const inputTokens = body => encoder.encode(body.instructions, [], []).length + encoder.encode(body.input[0].content[0].text, [], []).length;
 
-const planOptions = options => ({ shortLen: 3, contextTokens: 1000, ...options });
+const planOptions = options => ({ minSymbolLength: 4, maxInputTokens: 1000, ...options });
 const sourceWithFunctions = (count, padding = 17000) => `const a = 7;\n${Array.from({ length: count }, (_, index) =>
   `function calculateValue${index}(x) { const y = x + a; return y * 2; }`).join('\n')}\n/*${' padding'.repeat(Math.ceil(padding / 8))}*/\n`;
 const records = async path => (await readFile(path, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -78,9 +78,9 @@ function assertSchema(request, expectedCount) {
   for (const key of schema.required) assert.deepEqual(schema.properties[key], { type: 'string' });
 }
 
-for (const contextTokens of [1000, 1600]) test(`same-file small function batches share bounded requests (${contextTokens} tokens)`, async t => {
+for (const maxInputTokens of [1000, 1600]) test(`same-file small function batches share bounded requests (${maxInputTokens} tokens)`, async t => {
   const source = sourceWithFunctions(60);
-  const options = planOptions({ contextTokens });
+  const options = planOptions({ maxInputTokens });
   const stages = select.planFile(source, options).stages;
   assert.equal(stages.length, 2);
   assert.equal(stages[1].length, 60);
@@ -97,7 +97,7 @@ for (const contextTokens of [1000, 1600]) test(`same-file small function batches
     assert.equal(row.file, 'input.mjs');
     assert.equal(row.name_count, row.batch_ids.reduce((sum, id) => sum + batches.get(id).keys.length, 0));
     assert.equal(row.estimated_input_tokens, inputTokens(target.requests[index].body));
-    assert(row.estimated_input_tokens <= options.contextTokens);
+    assert(row.estimated_input_tokens <= options.maxInputTokens);
     assertSchema(target.requests[index], row.name_count);
     if (row.batch_ids.length > 1) {
       const first = select.renderBatch(source, batches.get(row.batch_ids[0])).context;
@@ -123,7 +123,7 @@ for (const contextTokens of [1000, 1600]) test(`same-file small function batches
     const context = (row.batch_ids.length === 1 ? `// Batch ${row.batch_ids[0]}\n` : '')
       + target.requests[index].context + `\n\n// Batch ${next.id}\n${extra.context}`;
     assert(encoder.encode(target.requests[index].body.instructions, [], []).length
-      + encoder.encode(`${prefix}\n\n${context}`, [], []).length > options.contextTokens,
+      + encoder.encode(`${prefix}\n\n${context}`, [], []).length > options.maxInputTokens,
     'the next batch exceeds the budget including prompt and separators');
   }
   const counts = logs.map(row => row.name_count).sort((a, b) => a - b);
@@ -138,7 +138,7 @@ for (const contextTokens of [1000, 1600]) test(`same-file small function batches
 
 test('large optional context is shortened and every request includes prompt overhead', async t => {
   const source = sourceWithFunctions(12, 0) + `function calculateLarge(z) { const q = "${'optional context '.repeat(1000)}"; return z + a + q; }`;
-  const options = planOptions({ contextTokens: 400 });
+  const options = planOptions({ maxInputTokens: 400 });
   const target = await fixture(t, source);
   const summary = await target.run(options);
   assert.equal(summary.exitCode, 0);
@@ -148,7 +148,7 @@ test('large optional context is shortened and every request includes prompt over
   assert(target.requests.every(request => !request.context.includes('optional context')), 'oversized optional initializer is removed');
   for (const [index, row] of logs.entries()) {
     assert.equal(row.estimated_input_tokens, inputTokens(target.requests[index].body));
-    assert(row.estimated_input_tokens <= options.contextTokens);
+    assert(row.estimated_input_tokens <= options.maxInputTokens);
     assertSchema(target.requests[index], row.name_count);
   }
   assert.equal(checks.checkRewrite(source, await readFile(join(target.root, 'input.mjs'), 'utf8')), null);
@@ -171,7 +171,7 @@ test('default budget keeps hundreds of small functions in a single request', asy
 
 test('quota interruption resumes only unrecorded original batch ids', async t => {
   const source = sourceWithFunctions(20);
-  const options = planOptions({ contextTokens: 500 });
+  const options = planOptions({ maxInputTokens: 500 });
   const stages = select.planFile(source, options).stages;
   const target = await fixture(t, source);
   target.controls.failAt = 3;
@@ -183,7 +183,7 @@ test('quota interruption resumes only unrecorded original batch ids', async t =>
   assert(accepted.every(row => !row.reason));
   const acceptedIds = new Set(accepted.map(row => row.id));
   const before = target.requests.length;
-  const changed = await target.run({ ...options, contextTokens: 501 });
+  const changed = await target.run({ ...options, maxInputTokens: 501 });
   assert.equal(changed.exitCode, 1);
   assert.equal(target.requests.length, before, 'option mismatch sends no request');
   target.controls.failAt = null;
@@ -203,7 +203,7 @@ test('quota interruption resumes only unrecorded original batch ids', async t =>
 
 test('placeholders from other packed batches cannot shadow imported context names', async t => {
   const source = `import { external as v3 } from 'external';\n${sourceWithFunctions(24).replaceAll('x + a', 'x + v3')}`;
-  const options = planOptions({ contextTokens: 500 });
+  const options = planOptions({ maxInputTokens: 500 });
   const target = await fixture(t, source);
   const summary = await target.run(options);
   assert.equal(summary.exitCode, 0);
@@ -252,7 +252,7 @@ test('single-batch requests preserve their original rendered context', async t =
 test('an irreducible batch over budget is rejected before HTTP and preserves source', async t => {
   const source = 'const a = 1; console.log(a);';
   const target = await fixture(t, source);
-  const summary = await target.run({ contextTokens: 1 });
+  const summary = await target.run({ maxInputTokens: 1 });
   assert.equal(summary.exitCode, 1);
   assert.equal(target.requests.length, 0);
   assert.equal(await readFile(join(target.root, 'input.mjs'), 'utf8'), source);
