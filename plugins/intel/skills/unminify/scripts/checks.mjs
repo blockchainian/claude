@@ -55,7 +55,7 @@ function splitExportDeclarations(source, ast, result) {
   traverse(ast, {
     ExportNamedDeclaration(path) {
       if (path.node.declaration) {
-        exported.set(path.node, Object.values(path.getBindingIdentifiers()).sort((a, b) => a.start - b.start));
+        exported.set(path.node, Object.values(path.getOuterBindingIdentifiers()).sort((a, b) => a.start - b.start));
       }
     },
   });
