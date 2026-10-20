@@ -204,44 +204,49 @@ export function followImports(files, withFile = (file, task) => task()) {
     return null;
   };
   for (const [file, source] of files) {
-    const analysis = withFile(file, () => analyze(source));
-    const exports = new Map();
-    const stars = [];
-    const imports = [];
-    const local = node => {
-      const binding = analysis.program.scope.getBinding(node.name);
-      return binding ? { file, key: binding.identifier.start } : null;
-    };
-    for (const node of analysis.ast.program.body) {
-      if (node.type === 'ImportDeclaration') {
-        const target = targetFile(file, node.source.value);
-        if (target === null) continue;
-        for (const specifier of node.specifiers) {
-          if (specifier.type === 'ImportNamespaceSpecifier') continue;
-          imports.push({ key: specifier.local.start, target, name: specifier.type === 'ImportDefaultSpecifier' ? 'default' : externalName(specifier.imported) });
-        }
-      } else if (node.type === 'ExportNamedDeclaration') {
-        if (node.declaration) {
-          for (const { binding } of analysis.bindings.values()) {
-            if (binding.scope === analysis.program.scope && binding.identifier.start >= node.declaration.start && binding.identifier.end <= node.declaration.end) exports.set(binding.identifier.name, { file, key: binding.identifier.start });
+    modules.set(file, withFile(file, () => {
+      const analysis = analyze(source);
+      const exports = new Map();
+      const stars = [];
+      const imports = [];
+      const local = node => {
+        const binding = analysis.program.scope.getBinding(node.name);
+        return binding ? { file, key: binding.identifier.start } : null;
+      };
+      for (const node of analysis.ast.program.body) {
+        if (node.type === 'ImportDeclaration') {
+          const target = targetFile(file, node.source.value);
+          if (target === null) continue;
+          for (const specifier of node.specifiers) {
+            if (specifier.type === 'ImportNamespaceSpecifier') continue;
+            imports.push({ key: specifier.local.start, target, name: specifier.type === 'ImportDefaultSpecifier' ? 'default' : externalName(specifier.imported) });
           }
+        } else if (node.type === 'ExportNamedDeclaration') {
+          if (node.declaration) {
+            for (const { binding } of analysis.bindings.values()) {
+              if (binding.scope === analysis.program.scope && binding.identifier.start >= node.declaration.start && binding.identifier.end <= node.declaration.end) exports.set(binding.identifier.name, { file, key: binding.identifier.start });
+            }
+          }
+          for (const specifier of node.specifiers) {
+            if (specifier.type !== 'ExportSpecifier') continue;
+            exports.set(externalName(specifier.exported), node.source
+              ? { target: targetFile(file, node.source.value), name: externalName(specifier.local) }
+              : local(specifier.local));
+          }
+        } else if (node.type === 'ExportDefaultDeclaration') {
+          const declaration = node.declaration;
+          if (declaration.type === 'Identifier') exports.set('default', local(declaration));
+          else if (declaration.id) exports.set('default', local(declaration.id));
+        } else if (node.type === 'ExportAllDeclaration') {
+          const target = targetFile(file, node.source.value);
+          if (target !== null) stars.push(target);
         }
-        for (const specifier of node.specifiers) {
-          if (specifier.type !== 'ExportSpecifier') continue;
-          exports.set(externalName(specifier.exported), node.source
-            ? { target: targetFile(file, node.source.value), name: externalName(specifier.local) }
-            : local(specifier.local));
-        }
-      } else if (node.type === 'ExportDefaultDeclaration') {
-        const declaration = node.declaration;
-        if (declaration.type === 'Identifier') exports.set('default', local(declaration));
-        else if (declaration.id) exports.set('default', local(declaration.id));
-      } else if (node.type === 'ExportAllDeclaration') {
-        const target = targetFile(file, node.source.value);
-        if (target !== null) stars.push(target);
       }
-    }
-    modules.set(file, { source, analysis, exports, stars, imports });
+      // Retain names and offsets across modules, never Babel nodes or scopes.
+      const bindings = new Map(Object.values(analysis.program.scope.bindings)
+        .map(binding => [binding.identifier.start, binding.identifier.name]));
+      return { source, bindings, exports, stars, imports };
+    }));
   }
   function findExport(file, name, seen = new Set()) {
     const token = JSON.stringify([file, name]);
@@ -275,7 +280,7 @@ export function followImports(files, withFile = (file, task) => task()) {
       const exported = findExport(imported.target, imported.name);
       if (!exported) continue;
       const names = plan(exported.file, branch);
-      const name = names.get(exported.key) ?? modules.get(exported.file).analysis.bindings.get(exported.key).name;
+      const name = names.get(exported.key) ?? modules.get(exported.file).bindings.get(exported.key);
       proposals.set(imported.key, name);
     }
     const names = withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals)));

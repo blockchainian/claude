@@ -72,7 +72,6 @@ export async function run(options, dependencies) {
       const metrics = { file, started_at: at, last_batch_at: null, written_at: null,
         cpu_ms: Object.fromEntries(['parse', 'planFile', 'renderBatch', 'resolveNames', 'applyRenames', 'checkRewrite'].map(key => [key, 0])) };
       fileMetrics.set(file, metrics);
-      event({ type: 'file_start', file, at });
     }
     return fileMetrics.get(file);
   }
@@ -128,6 +127,9 @@ export async function run(options, dependencies) {
     }
     async function processFile(file) {
       const metrics = fileMetricsFor(file);
+      metrics.started_at = Date.now();
+      event({ type: 'file_start', file, at: metrics.started_at });
+      let stages;
       return withTimings(metrics.cpu_ms, async () => {
         try {
           const path = join(root, file);
@@ -141,9 +143,9 @@ export async function run(options, dependencies) {
             emit({ file, status: 'skipped', previous: journal.done.status, ...(journal.done.reason ? { reason: journal.done.reason } : {}) });
             return;
           }
+          if (stop) throw stop;
           const renames = new Map();
           const endPlanning = phase('selection_plan', file);
-          let stages;
           try { ({ stages } = timed('planFile', () => api.planFile(source, planOptions))); }
           finally { endPlanning(); }
           const endModel = phase('model', file);
@@ -211,16 +213,28 @@ export async function run(options, dependencies) {
             summary.completed++;
             emit({ file, status: 'renamed', batches: stages.flat().length });
           } finally { endWriting(); }
-        } finally { event({ type: 'file_end', phase: 'main', ...metrics, at: Date.now() }); }
+        } finally {
+          if (stages) api.releasePlan?.(stages);
+          stages = undefined;
+          event({ type: 'file_end', phase: 'main', ...metrics, at: Date.now() });
+        }
       });
     }
     try {
-      const results = await Promise.allSettled(files.map(processFile));
-      for (let index = 0; index < results.length; index++) {
-        if (results[index].status !== 'rejected') continue;
-        summary.exitCode = 1;
-        emit({ file: files[index], status: 'interrupted', reason: results[index].reason.message });
+      // Keep a second window ready while request slots drain or files write back.
+      const fileConcurrency = Math.min(files.length, settings.concurrency * 2);
+      let nextFile = 0;
+      async function worker() {
+        while (nextFile < files.length) {
+          const file = files[nextFile++];
+          try { await processFile(file); }
+          catch (error) {
+            summary.exitCode = 1;
+            emit({ file, status: 'interrupted', reason: error.message });
+          }
+        }
       }
+      await Promise.all(Array.from({ length: fileConcurrency }, worker));
       const endImports = phase('followImports');
       let changes;
       try {
