@@ -1,10 +1,13 @@
 mod app_server;
+#[cfg(test)]
+mod ask_live_tests;
 mod background;
 #[cfg(test)]
 mod inner_tests;
 mod manager;
 #[cfg(test)]
 mod memory_tests;
+mod questions;
 pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;
@@ -42,6 +45,7 @@ pub struct CodexProvider {
     tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
     models: Mutex<ModelCatalog>,
     background: Mutex<background::Background>,
+    questions: Mutex<questions::Questions>,
 }
 
 impl CodexProvider {
@@ -52,6 +56,7 @@ impl CodexProvider {
             tasks: Mutex::new(HashMap::new()),
             models: Mutex::new(ModelCatalog::default()),
             background: Mutex::new(background::Background::default()),
+            questions: Mutex::new(questions::Questions::default()),
         }
     }
 
@@ -185,7 +190,8 @@ impl CodexProvider {
             .tasks
             .lock()
             .map_err(|_| io::Error::other("Codex task cache lock poisoned"))?;
-        for session in &mut sessions {
+        let mut pending = Vec::new();
+        for (index, session) in sessions.iter_mut().enumerate() {
             let summary = match session
                 .transcript
                 .as_deref()
@@ -201,6 +207,14 @@ impl CodexProvider {
                     (session.prompt_images, session.task_details_sources[2]) =
                         rollout::first_prompt(path, &session.prompt)?;
                 }
+                if let Some((call, since)) = &summary.pending_question_call {
+                    pending.push((
+                        index,
+                        call.clone(),
+                        *since,
+                        summary.pending_questions.clone(),
+                    ));
+                }
                 apply_rollout(session, summary);
             } else {
                 session.status = status(session.process.is_some(), false);
@@ -213,6 +227,7 @@ impl CodexProvider {
             }
         }
         self.background(&mut sessions)?;
+        self.questions(&mut sessions, pending)?;
         Ok(Snapshot { sessions, has_more })
     }
 
@@ -723,7 +738,7 @@ impl Provider for CodexProvider {
         Some(command)
     }
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
-        if !session.can_resume() || matches!(input, SessionInput::Answer { .. }) {
+        if !session.can_resume() {
             return None;
         }
         let home = self.home.clone();
@@ -762,7 +777,16 @@ impl Provider for CodexProvider {
                 SessionInput::SetEffort(effort) => {
                     app_server::thread::set_settings(&mut client, &id, None, Some(&effort))
                 }
-                SessionInput::Answer { .. } => Err(io::ErrorKind::Unsupported.into()),
+                SessionInput::Answer {
+                    ask,
+                    answer,
+                    transcript,
+                } => {
+                    if ask.session != key(id.clone()) {
+                        return Err(io::Error::other("Codex question session changed"));
+                    }
+                    app_server::thread::answer(&mut client, &id, &ask, &answer, &transcript)
+                }
             }
         }))
     }

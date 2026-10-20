@@ -166,6 +166,31 @@ pub(in crate::providers::codex) fn resume(client: &mut Client, thread_id: &str) 
     Ok(())
 }
 
+/// Rejoins a daemon-owned question and waits for its replay on this connection.
+pub(in crate::providers::codex) fn question(
+    client: &mut Client,
+    thread_id: &str,
+    call_id: &str,
+) -> io::Result<Option<super::ServerRequest>> {
+    resume(client, thread_id)?;
+    client.wait_question(thread_id, call_id, Duration::from_secs(2))
+}
+
+pub(in crate::providers::codex) fn answer(
+    client: &mut Client,
+    thread_id: &str,
+    ask: &crate::ask::Ask,
+    answer: &crate::ask::Answer,
+    transcript: &Path,
+) -> io::Result<()> {
+    let result = super::super::questions::encode(ask, answer)?;
+    let request = question(client, thread_id, &ask.id)?
+        .ok_or_else(|| io::Error::other("Codex question is no longer pending"))?;
+    let offset = std::fs::metadata(transcript)?.len();
+    client.respond(&request.id, &result)?;
+    super::super::questions::confirm(transcript, &ask.id, &result, offset)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingsParams<'a> {

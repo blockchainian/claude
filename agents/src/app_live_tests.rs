@@ -227,6 +227,7 @@ fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>) {
     let id = session.id.clone();
     app.sessions = vec![session.clone()];
     app.view.set_sessions(vec![session], false);
+    app.view.prepare_prompt();
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
     app.draw(&mut terminal).unwrap();
     let screen: String = terminal
@@ -298,5 +299,7 @@ fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>) {
     };
     assert!(result.is_ok(), "live dashboard answer failed: {result:?}");
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    let persist = app.view.take_question_action();
+    app.handle_action(persist);
     assert!(!app.pending_inputs.contains(&id));
 }

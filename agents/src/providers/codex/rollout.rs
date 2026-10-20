@@ -33,6 +33,7 @@ pub(super) struct Summary {
     pub updated_at: Option<DateTime<Utc>>,
     pub turn_ended: bool,
     pub pending_questions: Vec<crate::ask::Question>,
+    pub pending_question_call: Option<(String, DateTime<Utc>)>,
     pub tasks: Vec<SessionTask>,
 }
 
@@ -963,6 +964,9 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                         && !outputs.contains(id)
                         && let Some(args) = tool_arguments(payload)
                     {
+                        summary
+                            .pending_question_call
+                            .get_or_insert_with(|| (id.to_owned(), at));
                         pending.push(questions(&args)?);
                     }
                 }
@@ -3077,6 +3081,28 @@ mod tests {
                 assert_eq!(call.input, expected);
             }
         }
+    }
+
+    #[test]
+    fn daemon_question_metadata_matches_replayed_request() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-input");
+        let request: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-input/daemon-request.json"
+        ))
+        .unwrap();
+        let pending = summary(&root.join("daemon-pending.jsonl")).unwrap();
+        assert_eq!(
+            pending.pending_question_call,
+            Some((
+                request["params"]["itemId"].as_str().unwrap().to_owned(),
+                "2026-10-20T02:59:57.613Z".parse().unwrap(),
+            ))
+        );
+        assert_eq!(pending.pending_questions[0].id, "color");
+        let answered = summary(&root.join("daemon-answered.jsonl")).unwrap();
+        assert!(answered.pending_question_call.is_none());
+        assert!(answered.pending_questions.is_empty());
+        assert!(!answered.turn_ended);
     }
 
     #[test]

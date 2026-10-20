@@ -18,14 +18,15 @@ impl Questions {
     fn sync(&mut self, rows: &[Session]) {
         let answerable =
             |ask: &crate::ask::Ask| matches!(ask.kind, crate::ask::AskKind::Questions { .. });
-        let background = |row: &Session| {
-            row.is_live_background()
+        let can_answer = |row: &Session| {
+            row.id.provider == ProviderId::Codex
+                || row.is_live_background()
                 || (row.id.provider == ProviderId::Claude && row.background_job.is_some())
         };
         let pending = |id: &SessionKey| {
             rows.iter()
                 .find(|row| {
-                    &row.id == id && background(row) && row.status == SessionStatus::NeedsInput
+                    &row.id == id && can_answer(row) && row.status == SessionStatus::NeedsInput
                 })
                 .and_then(|row| row.ask.as_ref())
                 .filter(|ask| answerable(ask))
@@ -36,7 +37,7 @@ impl Questions {
         self.sending.retain(|id| pending(id).is_some());
         for row in rows {
             if row.status == SessionStatus::NeedsInput
-                && background(row)
+                && can_answer(row)
                 && let Some(ask) = &row.ask
                 && answerable(ask)
                 && !self.views.contains_key(&row.id)
