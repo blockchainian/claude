@@ -42,6 +42,8 @@ pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;
+mod task_ui;
+use task_ui::TaskUi;
 mod terminal_panel;
 pub(crate) mod text;
 mod text_selection;
@@ -223,14 +225,6 @@ struct BackgroundReturn {
     search: event_search::EventSearch,
 }
 
-/// What a task's details and event list panels showed when the user last left it.
-#[derive(Default)]
-struct TaskPanels {
-    input_box: prompt_box::PromptBox,
-    task_details_scroll: SectionScroll,
-    event_search: event_search::EventSearch,
-}
-
 /// Confirmation before a destructive provider action.
 struct ConfirmDialog {
     action: ConfirmAction,
@@ -345,7 +339,7 @@ pub struct View {
     /// The task whose details and event list panels are on screen.
     panels_task: Option<SessionKey>,
     /// The panels of each task the user left, by task.
-    task_panels: HashMap<SessionKey, TaskPanels>,
+    task_uis: HashMap<SessionKey, TaskUi>,
     /// The context percentage of the task the app read last.
     context_usage: Option<(SessionKey, u64)>,
     /// The usage bins of the task the app read last.
@@ -475,7 +469,7 @@ impl View {
             text_selection: RefCell::new(None),
             title_slots: RefCell::new(HashMap::new()),
             panels_task: None,
-            task_panels: HashMap::new(),
+            task_uis: HashMap::new(),
             usage: None,
             context_usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
@@ -608,10 +602,11 @@ impl View {
         if self.selected_id() == Some(id) {
             &mut self.input_box
         } else {
-            &mut self.task_panels.entry(id.clone()).or_default().input_box
+            &mut self.task_uis.entry(id.clone()).or_default().prompt
         }
     }
 
+    /// Marks input as sending while preserving the attention queue and return task.
     pub(crate) fn input_sending(
         &mut self,
         id: &SessionKey,
@@ -622,20 +617,13 @@ impl View {
             return;
         }
         let target = self.task_input(id);
-        let prompt = if let crate::providers::SessionInput::Prompt(text)
+        if let crate::providers::SessionInput::Prompt(text)
         | crate::providers::SessionInput::PromptWithImages { text, .. } = input
         {
             target.begin_send(text);
-            true
-        } else {
-            false
-        };
+        }
         target.state = prompt_box::SendState::Ready;
         target.submitting = true;
-        // Explicit input cancels the return to the interrupted task, but keeps the queue.
-        if prompt && self.selected_id() == Some(id) {
-            self.interrupted_selection = None;
-        }
     }
 
     pub(crate) fn input_complete(
@@ -714,7 +702,7 @@ impl View {
         self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
         let rows = &self.rows;
-        self.task_panels
+        self.task_uis
             .retain(|id, _| rows.iter().any(|session| &session.id == id));
         self.has_more = has_more;
         let mut selected_index = selected
@@ -1152,29 +1140,36 @@ impl View {
         self.selector = None;
         self.text_selection.borrow_mut().take();
         let viewport = self.viewport.get_mut();
-        let left = TaskPanels {
-            input_box: std::mem::take(&mut self.input_box),
-            task_details_scroll: std::mem::take(&mut viewport.task_details_scroll),
-            event_search: std::mem::take(&mut self.event_search),
+        let left = TaskUi {
+            prompt: std::mem::take(&mut self.input_box),
+            task_details: task_ui::TaskDetails {
+                scroll: std::mem::take(&mut viewport.task_details_scroll),
+                ..Default::default()
+            },
+            event_list: task_ui::EventList {
+                search: std::mem::take(&mut self.event_search),
+                ..Default::default()
+            },
+            ..Default::default()
         };
         if let Some(id) = self.panels_task.take() {
-            self.task_panels.insert(id, left);
+            self.task_uis.insert(id, left);
         }
         let mut shown = selected
             .as_ref()
-            .and_then(|id| self.task_panels.remove(id))
+            .and_then(|id| self.task_uis.remove(id))
             .unwrap_or_default();
-        if shown.task_details_scroll.left_keys.is_none() {
-            shown.task_details_scroll.left_keys =
-                Some(std::mem::take(&mut shown.task_details_scroll.keys));
+        if shown.task_details.scroll.left_keys.is_none() {
+            shown.task_details.scroll.left_keys =
+                Some(std::mem::take(&mut shown.task_details.scroll.keys));
         }
-        viewport.task_details_scroll = shown.task_details_scroll;
+        viewport.task_details_scroll = shown.task_details.scroll;
         viewport.event_scroll = 0;
         viewport.event_unseen = 0;
         viewport.event_detail_scroll = 0;
         viewport.event_detail_layout = None;
-        self.input_box = shown.input_box;
-        self.event_search = shown.event_search;
+        self.input_box = shown.prompt;
+        self.event_search = shown.event_list.search;
         self.event_selected = None;
         self.background_event = None;
         self.event_pending_older = 0;
