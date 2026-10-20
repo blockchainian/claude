@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -69,12 +69,24 @@ export function contracts(files = ['a.js'], controls = {}) {
 test('arguments enforce the fixed model and positive integer limits', () => {
   assert.equal(parseArgs(['src', '--concurrency', '2']).concurrency, 2);
   assert.equal(parseArgs(['src']).contextTokens, 100000);
+  assert.deepEqual(parseArgs(['src/a', '--concurrency', '2', 'src/b']).dirs.map(dir => dir.split('/').slice(-2).join('/')), ['src/a', 'src/b']);
   for (const args of [[], ['src', '--model', 'other'], ['src', '--max-ids', '60'], ['src', '--context-bytes', '8000'], ['src', '--context-tokens', '0'], ['src', '--short-len', '1.5'], ['src', '--ignore']]) assert.throws(() => parseArgs(args));
+});
+test('one run renames the files of every given directory once', async t => {
+  const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });
+  const deps = contracts();
+  const listed = [];
+  for (const dir of ['one', 'two']) await mkdir(join(root, dir));
+  deps.listFiles = async dir => { listed.push(dir); return dir.endsWith('one') ? ['a.js'] : ['a.js', 'b.js']; };
+  const result = await run({ dirs: [join(root, 'one'), join(root, 'two')] }, deps);
+  assert.deepEqual(listed, [join(root, 'one'), join(root, 'two')]);
+  assert.equal(result.files, 2);
+  assert.equal(result.completed, 2);
 });
 test('one shared namer, stage ordering, bounded concurrency, completion replay and usage', async t => {
   const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });
   const deps = contracts(['a.js', 'b.js']);
-  const result = await run({ dir: root, concurrency: 2 }, deps);
+  const result = await run({ dirs: [root], concurrency: 2 }, deps);
   assert.equal(result.exitCode, 0);
   assert.equal(result.requests, 4);
   assert.deepEqual(result.tokens, { input_tokens: 40, cached_input_tokens: 8, output_tokens: 12, reasoning_output_tokens: 4, total_tokens: 52 });
@@ -92,7 +104,7 @@ test('one shared namer, stage ordering, bounded concurrency, completion replay a
     assert(topReply < functionRequest);
   }
   const replay = contracts(['a.js', 'b.js']);
-  await run({ dir: root }, replay);
+  await run({ dirs: [root] }, replay);
   assert.equal(replay.calls, 0);
   assert.deepEqual(deps.events.at(-1), ['close', 0]);
 });
@@ -100,7 +112,7 @@ for (const code of ['AUTH', 'USAGE_LIMIT']) test(`${code} drains in-flight repli
   const files = ['a.js', 'b.js'];
   const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });
   const interrupted = contracts(files, { failAt: 4, code });
-  const result = await run({ dir: root, concurrency: 2 }, interrupted);
+  const result = await run({ dirs: [root], concurrency: 2 }, interrupted);
   assert.equal(result.exitCode, 1);
   assert.equal(interrupted.calls, 4);
   assert.equal(interrupted.peak, 2);
@@ -116,7 +128,7 @@ for (const code of ['AUTH', 'USAGE_LIMIT']) test(`${code} drains in-flight repli
   assert.deepEqual((await journal('a.js')).map(record => record.id), ['top', 'first', 'second']);
   assert.deepEqual((await journal('b.js')).map(record => record.id), ['top']);
   const resumed = contracts(files);
-  const resumedResult = await run({ dir: root }, resumed);
+  const resumedResult = await run({ dirs: [root] }, resumed);
   assert.equal(resumedResult.exitCode, 0);
   assert.equal(resumed.calls, 1);
   assert.deepEqual(resumed.events.filter(e => e[0] === 'request'), [
@@ -129,7 +141,7 @@ for (const code of ['AUTH', 'USAGE_LIMIT']) test(`${code} drains in-flight repli
 });
 test('SIGKILL after N replies resumes to byte-identical output', async t => {
   const root = await workspace(t);
-  const child = `import {run} from ${JSON.stringify(new URL('../scripts/cli.mjs', import.meta.url).href)}; import {contracts} from ${JSON.stringify(import.meta.url)}; await run({dir:${JSON.stringify(root)},concurrency:1},contracts(['a.js'],{killAt:2}));`;
+  const child = `import {run} from ${JSON.stringify(new URL('../scripts/cli.mjs', import.meta.url).href)}; import {contracts} from ${JSON.stringify(import.meta.url)}; await run({dirs:[${JSON.stringify(root)}],concurrency:1},contracts(['a.js'],{killAt:2}));`;
   // Keep the child isolated from node:test registrations.
   const fixture = join(root, 'contracts.mjs');
   await writeFile(fixture, `export ${contracts.toString()}`);
@@ -138,14 +150,14 @@ test('SIGKILL after N replies resumes to byte-identical output', async t => {
   assert.equal(killed.signal, 'SIGKILL', killed.stderr?.toString());
   assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'a b c');
   const resumed = contracts();
-  await run({ dir: root, concurrency: 1 }, resumed);
+  await run({ dirs: [root], concurrency: 1 }, resumed);
   assert.equal(resumed.calls, 1);
   assert.deepEqual(resumed.events.filter(e => e[0] === 'request'), [
     ['request', 'a.js', ['first', 'second'], { v1: 2, v2: 4 }],
   ]);
   assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
   const uninterrupted = await workspace(t);
-  await run({ dir: uninterrupted, concurrency: 1 }, contracts());
+  await run({ dirs: [uninterrupted], concurrency: 1 }, contracts());
   assert.deepEqual(await readFile(join(root, 'a.js')), await readFile(join(uninterrupted, 'a.js')));
 });
 test('rewrite failures preserve originals and import following is independently gated', async t => {
@@ -157,21 +169,21 @@ test('rewrite failures preserve originals and import following is independently 
     },
     checkRewrite(before, after) { return after === 'unsafe import' ? 'captured reference' : null; },
   });
-  const result = await run({ dir: root }, deps);
+  const result = await run({ dirs: [root] }, deps);
   assert.equal(result.exitCode, 1);
   assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
   assert.equal(await readFile(join(root, 'b.js'), 'utf8'), 'safe import');
   assert.match(deps.lines.join('\n'), /captured reference/);
   const rejectedRoot = await workspace(t);
-  await run({ dir: rejectedRoot }, contracts(['a.js'], { checkRewrite: () => 'bad binding' }));
+  await run({ dirs: [rejectedRoot] }, contracts(['a.js'], { checkRewrite: () => 'bad binding' }));
   assert.equal(await readFile(join(rejectedRoot, 'a.js'), 'utf8'), 'a b c');
 });
 
 test('completed rejected files remain visible as failures on resume', async t => {
   const root = await workspace(t);
-  await run({ dir: root }, contracts(['a.js'], { checkRewrite: () => 'bad binding' }));
+  await run({ dirs: [root] }, contracts(['a.js'], { checkRewrite: () => 'bad binding' }));
   const resumed = contracts();
-  const result = await run({ dir: root }, resumed);
+  const result = await run({ dirs: [root] }, resumed);
   assert.equal(resumed.calls, 0);
   assert.equal(result.rejected, 1);
   assert.equal(result.exitCode, 1);
