@@ -593,6 +593,8 @@ impl App {
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
+        let task = self.view.selected_id().cloned();
+        let selected_event = self.view.event_list.cursor;
         let action = match event {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
@@ -603,6 +605,13 @@ impl App {
             }
             _ => return false,
         };
+        // Explicit input changing the selected log returns the output to event details.
+        if self.view.terminal_requested()
+            && self.view.selected_id() == task.as_ref()
+            && self.view.event_list.cursor != selected_event
+        {
+            self.handle_action(Some(Action::CloseTerminal));
+        }
         self.handle_action(action)
     }
 
@@ -1454,7 +1463,9 @@ impl App {
                 self.report_save(saved);
             }
             Action::PersistSorting { id, sorting } => {
-                let saved = self.preferences.save_task_sort(&self.config_dir, &id, sorting);
+                let saved = self
+                    .preferences
+                    .save_task_sort(&self.config_dir, &id, sorting);
                 self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {

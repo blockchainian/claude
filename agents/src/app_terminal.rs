@@ -618,6 +618,108 @@ mod tests {
     }
 
     #[test]
+    fn selecting_another_event_closes_the_terminal() {
+        use crossterm::event::{
+            Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+
+        for input in ["wheel", "click", "Up", "Home", "PageUp"] {
+            let (directory, mut app, id) = fixture();
+            draw(&mut app);
+            super::super::event_search_tests::finish_search(&mut app);
+            let pid = attach(&mut app, id.clone(), &directory.path().join("pid"));
+            let area = ratatui::layout::Rect::new(0, 0, 120, 23);
+            app.view
+                .render(area, &mut ratatui::buffer::Buffer::empty(area));
+            assert!(app.view.terminal_requested());
+            let selected = app.view.event_list.cursor;
+            let mouse = |kind| {
+                Event::Mouse(MouseEvent {
+                    kind,
+                    column: 2,
+                    row: 11,
+                    modifiers: KeyModifiers::NONE,
+                })
+            };
+            match input {
+                "wheel" => {
+                    app.handle_event(mouse(MouseEventKind::ScrollUp));
+                }
+                "click" => {
+                    app.handle_event(mouse(MouseEventKind::Down(MouseButton::Left)));
+                    app.handle_event(mouse(MouseEventKind::Up(MouseButton::Left)));
+                }
+                _ => {
+                    // Move focus from the output to the log list without selecting a row.
+                    app.handle_event(Event::Key(KeyEvent::new(
+                        KeyCode::Char('w'),
+                        KeyModifiers::CONTROL,
+                    )));
+                    app.handle_event(Event::Key(KeyCode::Char('k').into()));
+                    let key = match input {
+                        "Up" => KeyCode::Up,
+                        "Home" => KeyCode::Home,
+                        "PageUp" => KeyCode::PageUp,
+                        _ => unreachable!(),
+                    };
+                    app.handle_event(Event::Key(key.into()));
+                }
+            }
+            assert_ne!(
+                app.view.event_list.cursor, selected,
+                "{input} must select another event"
+            );
+            assert!(
+                !app.view.terminal_requested(),
+                "{input} must restore event mode"
+            );
+            assert!(app.terminal.is_none(), "{input} must detach the terminal");
+            assert!(app.terminal_task.is_none());
+            assert!(app.closing_terminals.contains_key(&id));
+            assert!(!draw(&mut app).contains("READY"));
+            finish_close(&mut app);
+            assert_reaped(pid);
+        }
+    }
+
+    #[test]
+    fn following_new_events_and_navigation_at_the_boundary_keep_the_terminal() {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let (directory, mut app, id) = fixture();
+        draw(&mut app);
+        super::super::event_search_tests::finish_search(&mut app);
+        let pid = attach(&mut app, id.clone(), &directory.path().join("pid"));
+        let selected = app.view.event_list.cursor;
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-bg-metadata.jsonl");
+        let mut events = app.view.event_panel.clone();
+        events.extend(crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap());
+        app.view.set_event(events);
+        assert_ne!(
+            app.view.event_list.cursor, selected,
+            "new events must advance the followed selection"
+        );
+        assert!(app.view.terminal_requested());
+        assert!(app.terminal.is_some());
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+        )));
+        app.handle_event(Event::Key(KeyCode::Char('k').into()));
+        for key in [KeyCode::Down, KeyCode::End, KeyCode::PageDown] {
+            app.handle_event(Event::Key(key.into()));
+            assert!(
+                app.view.terminal_requested(),
+                "{key:?} did not change the selected event"
+            );
+            assert!(app.terminal.is_some());
+        }
+        app.close_terminal();
+        finish_close(&mut app);
+        assert_reaped(pid);
+    }
+
+    #[test]
     fn close_restores_events_before_a_stubborn_client_exits() {
         let (directory, mut app, id) = fixture();
         let event_panel = draw(&mut app);
