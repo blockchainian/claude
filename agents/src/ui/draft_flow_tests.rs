@@ -1989,3 +1989,46 @@ fn branch_editor_saves_when_details_loses_focus_without_advancing() {
         }
     }
 }
+
+#[test]
+fn panel_blur_does_not_reopen_name_or_save_twice() {
+    for target in [Panel::Prompt, Panel::TaskList, Panel::Output] {
+        for branch in [false, true] {
+            let (directory, mut view) = git_draft();
+            view.discard_selected_draft();
+            let id = view.add_draft(setup(directory.path()));
+            if branch {
+                view.open_field(Field::Branch);
+                key(&mut view, KeyCode::End);
+                key(&mut view, KeyCode::Enter);
+                view.handle_paste("foo");
+            } else {
+                view.handle_paste("saved title");
+            }
+            view.set_active_panel(target);
+            assert_eq!(view.active_panel, target);
+            assert!(view.name_target.is_none());
+            assert!(view.selector.is_none());
+            let updated = view.selected_draft().unwrap().updated_at;
+            view.set_active_panel(target);
+            view.set_active_panel(Panel::Details);
+            view.set_active_panel(target);
+            assert_eq!(view.selected_draft().unwrap().updated_at, updated);
+            assert_eq!(view.active_panel, target);
+            assert_eq!(view.selected_draft, Some(id));
+            assert!(view.take_pending_action().is_none());
+            if branch {
+                assert_eq!(
+                    view.selected_draft().unwrap().branch,
+                    DraftBranch::New("foo".into())
+                );
+                assert!(view.selected_draft().unwrap().name.is_none());
+            } else {
+                assert_eq!(
+                    view.selected_draft().unwrap().name.as_deref(),
+                    Some("saved title")
+                );
+            }
+        }
+    }
+}

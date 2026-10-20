@@ -378,7 +378,11 @@ impl View {
             DraftBranch::Existing(branch)
         };
         draft.repository_confirmed = true;
-        self.close_selector();
+        if advance {
+            self.close_selector();
+        } else {
+            self.dismiss_selector();
+        }
         self.drafts
             .iter_mut()
             .find(|draft| draft.id == id)

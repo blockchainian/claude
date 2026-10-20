@@ -4,22 +4,23 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 impl View {
     /// Panel interactions, editors and attention requests share this activation entry point.
     pub(super) fn set_active_panel(&mut self, panel: Panel) {
-        if panel != self.active_panel
-            && self.active_panel == Panel::Details
-            && self.title_editor().is_some()
-            && let Some(action) = self.save_title()
-        {
-            self.pending_actions.push(action);
+        if panel == self.active_panel {
+            return;
         }
-        if panel != self.active_panel && self.active_panel == Panel::Details {
+        if self.active_panel == Panel::Details {
             self.save_branch_editor();
+            if self.title_editor().is_some()
+                && let Some(action) = self.save_title()
+            {
+                self.pending_actions.push(action);
+            }
         }
-        if panel != self.active_panel
-            && (self.searching || self.log_search.editing || self.log_detail_search.editing)
+        if (self.searching || self.log_search.editing || self.log_detail_search.editing)
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         {
             self.pending_actions.push(action);
         }
+        // Cleanup may activate another panel; the requested destination takes precedence.
         self.active_panel = panel;
     }
 
@@ -32,7 +33,6 @@ impl View {
                 self.rename.clear();
             } else {
                 self.accept_draft_name();
-                self.close_selector();
             }
             return None;
         }
