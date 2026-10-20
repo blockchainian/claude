@@ -261,6 +261,30 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     assert!(response.starts_with("HTTP/1.1 200"));
     assert!(response.ends_with("\r\n\r\n"));
     assert!(server.pending().is_empty());
+    // A fresh hook takes precedence even if the view still holds the transcript request.
+    let mut stream = post(&server, &body);
+    let mut ask = await_pending(&server);
+    let AskKind::Questions { blocking, .. } = &mut ask.kind;
+    *blocking = false;
+    provider
+        .send(
+            &session,
+            crate::providers::SessionInput::Answer {
+                ask,
+                answer: Answer::default(),
+                transcript: "unused-while-hook-is-pending.jsonl".into(),
+            },
+        )
+        .unwrap()()
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let body: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        body["hookSpecificOutput"]["updatedInput"]["answers"],
+        json!({})
+    );
+    assert!(server.pending().is_empty());
 }
 
 #[test]

@@ -1,5 +1,7 @@
 //! Sends input through a temporary, screen-checked Claude attach client.
 
+mod question;
+
 use crate::providers::{ScreenInput, SessionInput};
 use std::fs::File;
 use std::io;
@@ -382,6 +384,14 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
+        if let SessionInput::Answer {
+            ask,
+            answer,
+            transcript,
+        } = input
+        {
+            return self.answer_question(&ask, &answer, &transcript);
+        }
         clear_left_input(self)?;
         self.wait_at("initial-ready", ready)?;
         match input {
@@ -413,10 +423,7 @@ impl Terminal {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
-            SessionInput::Answer { .. } => Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "Answers require AskUserQuestion",
-            )),
+            SessionInput::Answer { .. } => unreachable!("answers handled before prompt input"),
             SessionInput::Interrupt => self.write(b"\x1b"),
             SessionInput::SetModel(model) => {
                 let choices = super::models::input_choices(&super::config_dir(), None);

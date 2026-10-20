@@ -522,3 +522,190 @@ fn real_attach_clears_left_input_and_keeps_a_pending_question() {
         Err(panic) => std::panic::resume_unwind(panic),
     }
 }
+
+#[test]
+#[ignore = "starts a billable Claude background session in the trusted repository"]
+fn real_transcript_question_answer_after_hook_disconnect() {
+    let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let config = super::config_dir();
+    let preferences = tempfile::tempdir().unwrap();
+    let server = AskUserQuestion::bind(0, config.clone()).unwrap();
+    let settings = json!({"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":format!("http://127.0.0.1:{}/ask-user-question",server.port),"timeout":3600}]}]}}).to_string();
+    let input = json!({"questions":[
+        {"question":"Recovery color?","header":"Color","multiSelect":false,"options":[{"label":"Red","description":"Red choice"},{"label":"Blue","description":"Blue choice"}]},
+        {"question":"Recovery foods?","header":"Food","multiSelect":true,"options":[{"label":"Rice","description":"Rice choice"},{"label":"Beans","description":"Beans choice"}]},
+        {"question":"Recovery drink?","header":"Drink","multiSelect":false,"options":[{"label":"Tea","description":"Tea choice"},{"label":"Water","description":"Water choice"}]}
+    ]});
+    let prompt = format!(
+        "Use AskUserQuestion exactly once with exactly this input: {input}. Wait for my answer. After my answer reply RECOVERY_DONE. Do not edit files or use other tools."
+    );
+    let text = command(
+        cwd,
+        "claude",
+        &[
+            "--bg",
+            "--model",
+            "haiku",
+            "--effort",
+            "low",
+            "--tools",
+            "AskUserQuestion",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "{\"mcpServers\":{}}",
+            "--setting-sources",
+            "",
+            "--settings",
+            &settings,
+            &prompt,
+        ],
+    )
+    .unwrap();
+    let job = text
+        .split("backgrounded · ")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .trim()
+        .to_owned();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let ask = loop {
+            if let Some(ask) = server.pending().into_iter().next() {
+                break ask;
+            }
+            assert!(Instant::now() < deadline, "hook never arrived");
+            thread::sleep(Duration::from_millis(50));
+        };
+        drop(server);
+        let mut provider = ClaudeProvider::new(config.clone());
+        let session = loop {
+            if let Some(session) = provider
+                .snapshot(1)
+                .sessions
+                .into_iter()
+                .find(|session| session.id == ask.session)
+                && session.status == crate::model::SessionStatus::NeedsInput
+                && session.ask.as_ref().is_some_and(|ask| {
+                    matches!(
+                        ask.kind,
+                        crate::ask::AskKind::Questions {
+                            blocking: false,
+                            ..
+                        }
+                    )
+                })
+            {
+                break session;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "transcript question never became pending"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        let answer = crate::ask::Answer {
+            answers: [
+                (
+                    "Recovery color?".into(),
+                    crate::ask::QuestionAnswer {
+                        answers: vec![],
+                        other: Some("custom\nanswer ✓".into()),
+                    },
+                ),
+                (
+                    "Recovery foods?".into(),
+                    crate::ask::QuestionAnswer {
+                        answers: vec!["Beans".into(), "Rice".into()],
+                        other: Some("extra ✓".into()),
+                    },
+                ),
+            ]
+            .into(),
+        };
+        let mut app = dashboard::app(Box::new(provider), preferences.path().to_owned());
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
+            SessionInput::Answer {
+                ask: session.ask.clone().unwrap(),
+                answer,
+                transcript: session.transcript.clone().unwrap(),
+            },
+        );
+        let path = session.transcript.unwrap();
+        loop {
+            let records: Vec<Value> = fs::read_to_string(&path)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let answered = records.iter().find(|record| {
+                record["type"] == "user"
+                    && record["message"]["content"]
+                        .as_array()
+                        .is_some_and(|blocks| {
+                            blocks.iter().any(|block| {
+                                block["type"] == "tool_result" && block["tool_use_id"] == ask.id
+                            })
+                        })
+            });
+            if let Some(result) = answered {
+                assert_eq!(
+                    result["toolUseResult"]["answers"]["Recovery color?"],
+                    "custom\nanswer ✓"
+                );
+                assert_eq!(
+                    result["toolUseResult"]["answers"]["Recovery foods?"],
+                    "Beans, Rice, extra ✓"
+                );
+                assert!(
+                    result["toolUseResult"]["answers"]
+                        .get("Recovery drink?")
+                        .is_none()
+                );
+                if records.iter().any(|record| {
+                    record["type"] == "assistant"
+                        && record["message"]["content"]
+                            .as_array()
+                            .is_some_and(|blocks| {
+                                blocks.iter().any(|block| {
+                                    block["text"].as_str().is_some_and(|text| {
+                                        text.lines().any(|line| line == "RECOVERY_DONE")
+                                    })
+                                })
+                            })
+                }) {
+                    if let Some(directory) = std::env::var_os("AGENTS_CLAUDE_ASK_EVIDENCE") {
+                        let directory = PathBuf::from(directory);
+                        fs::create_dir_all(&directory).unwrap();
+                        fs::write(
+                            directory.join("native-tool-result.json"),
+                            serde_json::to_vec_pretty(result).unwrap(),
+                        )
+                        .unwrap();
+                        fs::write(
+                            directory.join("native-transcript.jsonl"),
+                            fs::read(&path).unwrap(),
+                        )
+                        .unwrap();
+                        fs::write(directory.join("native-verdict.json"), json!({"status":"passed","job":job,"session":session.id.id,"tool_use_id":ask.id,"continued":"RECOVERY_DONE"}).to_string()).unwrap();
+                    }
+                    break;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "answer and continued turn missing"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    }));
+    command(cwd, "claude", &["stop", &job]).unwrap();
+    command(cwd, "claude", &["rm", &job]).unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}

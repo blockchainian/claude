@@ -920,13 +920,22 @@ impl Provider for ClaudeProvider {
     }
 
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
-        if let SessionInput::Answer { ask, answer, .. } = input {
-            let ask_user_question = self.ask_user_question.clone();
-            return Some(Box::new(move || {
-                ask_user_question
-                    .ok_or_else(|| io::Error::other("Claude AskUserQuestion is unavailable"))?
-                    .answer(&ask, &answer)
-            }));
+        if let SessionInput::Answer { ask, answer, .. } = &input {
+            if ask.session != session.id {
+                return Some(Box::new(|| {
+                    Err(io::Error::other("Claude question session changed"))
+                }));
+            }
+            if let Some(server) = &self.ask_user_question
+                && let Some(pending) = server
+                    .pending()
+                    .into_iter()
+                    .find(|pending| pending.id == ask.id && pending.session == ask.session)
+            {
+                let server = server.clone();
+                let answer = answer.clone();
+                return Some(Box::new(move || server.answer(&pending, &answer)));
+            }
         }
         if !session.can_resume() {
             return None;

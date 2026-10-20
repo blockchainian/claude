@@ -218,7 +218,7 @@ fn parse_request(value: &Value) -> io::Result<(Ask, Value)> {
         Value::Array(source.clone()),
     ))
 }
-fn encode_answers(ask: &Ask, answer: &Answer) -> io::Result<BTreeMap<String, String>> {
+pub(super) fn encode_answers(ask: &Ask, answer: &Answer) -> io::Result<BTreeMap<String, String>> {
     let AskKind::Questions { questions, .. } = &ask.kind;
     if answer
         .answers
