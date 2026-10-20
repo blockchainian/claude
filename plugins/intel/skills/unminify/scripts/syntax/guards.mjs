@@ -3,7 +3,7 @@ import { parse } from '@babel/parser';
 import { isLexicalIdentifier } from '../identifiers.mjs';
 import traverseModule from '@babel/traverse';
 export const traverse = traverseModule.default ?? traverseModule;
-export const parseSyntax = source => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, createParenthesizedExpressions: true });
+export const parseSyntax = source => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, createParenthesizedExpressions: true, plugins: ['jsx'] });
 const unwrap = node => node?.type === 'ParenthesizedExpression' ? unwrap(node.expression) : node;
 function evalSource(node) {
   if (node?.type === 'StringLiteral') return node.value;
@@ -31,7 +31,8 @@ export function globalGuard(ast, fragment, fragmentContext) {
       else evals.push(source);
     },
   });
-  return name => (!fragment || (fragmentContext !== undefined && !fragmentContext.topLevelBindings.has(name)))
-    && !declared.has(name) && !withStatement && !unknownEval
+  // Existing references resolve at their scope; synthesis retains module-wide proof.
+  return (name, scope) => (!fragment || (fragmentContext !== undefined && !fragmentContext.topLevelBindings.has(name)))
+    && !(scope ? scope.getBinding(name) : declared.has(name)) && !withStatement && !unknownEval
     && !evals.some(source => new RegExp(`(^|[^a-zA-Z0-9_$])${name}($|[^a-zA-Z0-9_$])`).test(source));
 }
