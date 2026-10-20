@@ -38,9 +38,10 @@ fn terminal_message_text_shares_structured_layout() {
     let mut structured = 0;
     for pair in rows.windows(2) {
         for (start, _) in pair[0].match_indices("<plist version=\"1.0\">") {
-            if pair[1].match_indices("<dict>").any(|(child, _)| {
-                pair[1][..child].width() == pair[0][..start].width() + 2
-            }) {
+            if pair[1]
+                .match_indices("<dict>")
+                .any(|(child, _)| pair[1][..child].width() == pair[0][..start].width() + 2)
+            {
                 structured += 1;
             }
         }

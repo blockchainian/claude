@@ -31,7 +31,10 @@ fn claude_peer_exchange_preserves_text_and_known_fields() {
         assert_eq!(message.content.text(), event.body);
         assert_eq!(message.direction, super::agent::Direction::Incoming);
         assert_eq!(call.detail_left, "Message");
-        assert_eq!(call.detail_title, format!("{} →", event.sender.as_deref().unwrap()));
+        assert_eq!(
+            call.detail_title,
+            format!("{} →", event.sender.as_deref().unwrap())
+        );
         assert!(event.summary().ends_with(" → message"));
     }
 }
@@ -83,7 +86,10 @@ fn claude_outgoing_exchange_has_no_invented_sender_or_recipient() {
         assert_eq!(message.recipient.as_deref(), input["to"].as_str());
         assert_eq!(message.content.text(), input["message"].as_str().unwrap());
         assert_eq!(call.detail_left, "Message");
-        assert_eq!(call.detail_title, format!("← {}", input["to"].as_str().unwrap()));
+        assert_eq!(
+            call.detail_title,
+            format!("← {}", input["to"].as_str().unwrap())
+        );
         assert_eq!(
             events[0].summary(),
             format!("{} ← message", input["to"].as_str().unwrap())
@@ -97,8 +103,12 @@ fn ordinary_claude_prompts_are_not_agent_messages() {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl"),
         100,
         true,
-    ).unwrap();
-    let users: Vec<_> = events.iter().filter(|event| event.kind == super::Kind::User).collect();
+    )
+    .unwrap();
+    let users: Vec<_> = events
+        .iter()
+        .filter(|event| event.kind == super::Kind::User)
+        .collect();
     assert!(!users.is_empty());
     assert!(users.iter().all(|event| event.calls.is_empty()));
 }

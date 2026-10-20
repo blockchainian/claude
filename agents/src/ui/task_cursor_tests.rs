@@ -88,7 +88,12 @@ fn task_cursor_preserves_cell_colors_in_both_themes_and_color_modes() {
 fn needs_input_status_uses_the_attention_title_style() {
     let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
-        vec![session("waiting", "Waiting task", SessionStatus::NeedsInput, 120)],
+        vec![session(
+            "waiting",
+            "Waiting task",
+            SessionStatus::NeedsInput,
+            120,
+        )],
         false,
     );
     let area = Rect::new(0, 0, 80, 4);
@@ -96,7 +101,9 @@ fn needs_input_status_uses_the_attention_title_style() {
     view.render_center_rows(area, &mut buffer, Utc::now());
     let (x, y) = (area.top()..area.bottom())
         .find_map(|y| {
-            let row: String = (area.left()..area.right()).map(|x| buffer[(x, y)].symbol()).collect();
+            let row: String = (area.left()..area.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             row.find("Needs input")
                 .map(|byte| (u16::try_from(row[..byte].chars().count()).unwrap(), y))
         })

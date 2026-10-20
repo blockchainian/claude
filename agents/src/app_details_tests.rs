@@ -113,7 +113,10 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
             let folder_x = left;
             let folder = row_text(buffer, status_y, folder_x, pr_x);
             let folder = folder.split_whitespace().next().unwrap();
-            assert!("project".starts_with(folder.trim_end_matches('…')), "{width}: {folder}");
+            assert!(
+                "project".starts_with(folder.trim_end_matches('…')),
+                "{width}: {folder}"
+            );
             assert_eq!(row_text(buffer, status_y, pr_x, pr_x + 3), "#13");
             assert!(
                 buffer[(folder_x, status_y)]

@@ -107,7 +107,9 @@ impl Event {
             participant_prefix(self.sender.as_deref()).map_or(0, |prefix| prefix.len())
         };
         crate::model::Activity {
-            paths: self.paths.iter()
+            paths: self
+                .paths
+                .iter()
                 .map(|range| range.start + offset..range.end + offset)
                 .collect(),
             exit_code: match self.calls.as_slice() {

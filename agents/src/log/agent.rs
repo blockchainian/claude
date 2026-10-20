@@ -89,11 +89,13 @@ pub fn tool_message(name: &str, input: &Value) -> Option<Message> {
     let route = AGENT_ROUTES
         .iter()
         .find(|route| Some(route.tool) == name.rsplit('.').next())?;
-    let recipient = |field: &str| input[field]
-        .as_str()
-        .filter(|s| !s.trim().is_empty() && !s.starts_with("uds:"));
-    let recipient = recipient(route.recipient)
-        .or_else(|| route.recipient_fallback.and_then(recipient));
+    let recipient = |field: &str| {
+        input[field]
+            .as_str()
+            .filter(|s| !s.trim().is_empty() && !s.starts_with("uds:"))
+    };
+    let recipient =
+        recipient(route.recipient).or_else(|| route.recipient_fallback.and_then(recipient));
     Some(Message {
         author: None,
         recipient: recipient.map(str::to_owned),
@@ -112,11 +114,15 @@ pub fn name(path: &str) -> &str {
 impl Message {
     pub fn label(&self) -> String {
         const LABELS: &[(&str, &str)] = &[
-            ("MESSAGE", "Message"), ("NEW_TASK", "New task"),
-            ("FINAL_ANSWER", "Final answer"), ("SPAWN_AGENT", "Spawn agent"),
+            ("MESSAGE", "Message"),
+            ("NEW_TASK", "New task"),
+            ("FINAL_ANSWER", "Final answer"),
+            ("SPAWN_AGENT", "Spawn agent"),
             ("FOLLOWUP_TASK", "Followup task"),
         ];
-        LABELS.iter().find_map(|(kind, label)| (*kind == self.kind).then(|| (*label).to_owned()))
+        LABELS
+            .iter()
+            .find_map(|(kind, label)| (*kind == self.kind).then(|| (*label).to_owned()))
             .unwrap_or_else(|| crate::providers::tool::title_name(&self.kind))
     }
 

@@ -45,7 +45,11 @@ fn prompt_cache_countdown_precedes_wall_time_and_expiry_follows_status() {
                 let status = format!("{} {pause} ", View::status(&view.rows[view.selected]).0);
                 assert!(row.contains(&status), "{width} {seconds:?}: {row}");
                 let x = row[..row.find(pause).unwrap()].chars().count() as u16;
-                assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::BOLD));
+                assert!(
+                    buf[(x, y)]
+                        .modifier
+                        .contains(ratatui::style::Modifier::BOLD)
+                );
             } else {
                 assert!(!row.contains(pause), "{width} {seconds:?}: {row}");
             }

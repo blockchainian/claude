@@ -143,11 +143,7 @@ fn terminal_details_directory_precedes_title_and_branch() {
     let (_directory, tmux, _transcript) = start_probe_with_transcript("border-order", &transcript);
     let output = std::env::temp_dir().join("agents-border-order");
     std::fs::create_dir_all(&output).unwrap();
-    let existing = tmux.capture_when(|capture| {
-        capture
-            .lines()
-            .any(|line| line.contains("╴repo "))
-    });
+    let existing = tmux.capture_when(|capture| capture.lines().any(|line| line.contains("╴repo ")));
     std::fs::write(output.join("existing.txt"), &existing).unwrap();
     begin_named_draft(&tmux, "Border draft");
     let draft = tmux.capture_when(|capture| {
@@ -165,9 +161,7 @@ fn terminal_details_directory_precedes_title_and_branch() {
     assert!(border.find("Border draft").unwrap() < border.find("border-branch").unwrap());
     std::fs::write(output.join("draft.txt"), &draft).unwrap();
     let y = draft.lines().position(|line| line == border).unwrap();
-    let x = border[..border.find("repo").unwrap()]
-        .chars()
-        .count();
+    let x = border[..border.find("repo").unwrap()].chars().count();
     tmux.mouse(0, x, y, true);
     tmux.wait_for(|capture| {
         capture

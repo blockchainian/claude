@@ -1,5 +1,6 @@
 //! Provider-neutral question pages and their collected answer.
 use super::line_edit::LineEdit;
+use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::ask::{Answer, Ask, AskKind, Question, QuestionAnswer};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -9,7 +10,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
-use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use unicode_width::UnicodeWidthStr;
 
 pub(super) enum Outcome {
@@ -137,8 +137,7 @@ impl QuestionView {
             return REVIEW_ROWS.len();
         }
         self.questions().get(self.page).map_or(0, |question| {
-            question.options.len()
-                + usize::from(Self::other_row(question))
+            question.options.len() + usize::from(Self::other_row(question))
         })
     }
 
@@ -149,7 +148,11 @@ impl QuestionView {
         let page = &mut self.pages[self.page];
         page.focus = row;
         if !multi {
-            page.selected = if row < option_count { vec![row] } else { Vec::new() };
+            page.selected = if row < option_count {
+                vec![row]
+            } else {
+                Vec::new()
+            };
         }
     }
 
@@ -222,7 +225,8 @@ impl QuestionView {
         if self.editing() {
             match key.code {
                 KeyCode::Char(' ') | KeyCode::Enter
-                    if modifiers == KeyModifiers::NONE && self.pages[self.page].other.is_empty() =>
+                    if modifiers == KeyModifiers::NONE
+                        && self.pages[self.page].other.is_empty() =>
                 {
                     return self.choose(self.pages[self.page].focus);
                 }
@@ -911,7 +915,10 @@ mod tests {
         press(&mut view, KeyCode::Right);
         let review = screen(&view, 60, 14);
         assert!(review.contains("● First → Green"), "{review}");
-        assert!(review.contains("You have not answered all questions"), "{review}");
+        assert!(
+            review.contains("You have not answered all questions"),
+            "{review}"
+        );
         assert!(!review.contains("Review your answers"), "{review}");
         assert!(review.contains("› 1. Submit"), "{review}");
         let answer = submitted(press(&mut view, KeyCode::Enter));

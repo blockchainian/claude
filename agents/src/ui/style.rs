@@ -129,7 +129,9 @@ pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
 pub(super) fn log_body_style(kind: &crate::log::Kind, exit_code: Option<i64>) -> Style {
     let kind = if *kind == crate::log::Kind::Error && exit_code.is_some_and(|code| code != 0) {
         &crate::log::Kind::Tool
-    } else { kind };
+    } else {
+        kind
+    };
     log_styles(kind).1
 }
 

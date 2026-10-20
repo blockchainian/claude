@@ -206,7 +206,10 @@ fn terminal_codex_claude_client_text() {
             capture.contains(input_marker) && capture.contains(reply_marker)
         });
         assert!(!capture.contains("\"text\":"), "{capture}");
-        assert!(capture.matches(input_marker).count() >= 2, "list and detail: {capture}");
+        assert!(
+            capture.matches(input_marker).count() >= 2,
+            "list and detail: {capture}"
+        );
         save_mcp_capture(&tmux, "codex", tool);
     }
 }

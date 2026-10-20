@@ -30,7 +30,11 @@ mod tests {
         let text = printable(raw);
         assert!(raw.contains("\x1b[?2026"));
         assert!(!text.contains("[?2026"));
-        assert!(!text.chars().any(|c| c.is_control() && c != '\n' && c != '\t'));
+        assert!(
+            !text
+                .chars()
+                .any(|c| c.is_control() && c != '\n' && c != '\t')
+        );
         assert!(text.contains("Attaching…"));
     }
 }

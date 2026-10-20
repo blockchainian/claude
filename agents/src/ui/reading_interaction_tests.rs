@@ -286,8 +286,7 @@ fn detail_without_subject_centers_tool_name_without_duplicate_metadata() {
         let title = "SubagentHandback";
         assert_eq!(
             header[..header.rfind(title).unwrap()].width(),
-            usize::from(columns.panel.x)
-                + (usize::from(columns.panel.width) - title.width()) / 2
+            usize::from(columns.panel.x) + (usize::from(columns.panel.width) - title.width()) / 2
         );
         assert_eq!(header.matches(title).count(), 1);
         assert!(header[..header.find(title).unwrap()].trim().is_empty());

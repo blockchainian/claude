@@ -720,10 +720,7 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
             prefix: 0,
         }]
     );
-    assert_eq!(
-        call.output,
-        Some(Vec::new())
-    );
+    assert_eq!(call.output, Some(Vec::new()));
     assert_eq!(call.exit_code, None);
     assert_record_timing(event, &records("shell")[1]);
 }

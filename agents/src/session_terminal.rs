@@ -78,9 +78,8 @@ impl TerminalScreen {
     }
 
     pub fn loading_remaining(&self, now: Instant) -> Option<Duration> {
-        (!self.ready(now)).then(|| {
-            STARTUP_LIMIT.saturating_sub(now.saturating_duration_since(self.opened))
-        })
+        (!self.ready(now))
+            .then(|| STARTUP_LIMIT.saturating_sub(now.saturating_duration_since(self.opened)))
     }
 
     fn set_size(&mut self, rows: u16, cols: u16) {
