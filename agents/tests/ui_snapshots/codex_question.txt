@@ -12,7 +12,7 @@
       Choose red.
    2. Blue
       Choose blue.
- ↑/↓ move · Enter to confirm · Esc to close
+ ↑/↓ move · Enter to confirm · Esc to cancel
 ───────────────────────────────────────────────────╴gpt-6.1-sol · medium ───────────────────────────
 
 

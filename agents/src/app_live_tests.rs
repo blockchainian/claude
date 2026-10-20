@@ -214,10 +214,14 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
 }
 
 pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<String>>) {
-    answer(app, session, values);
+    answer(app, session, Some(values));
 }
 
-fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>) {
+pub(crate) fn reject_questions(app: &mut App, session: Session) {
+    answer(app, session, None);
+}
+
+fn answer(app: &mut App, session: Session, values: Option<Vec<Vec<String>>>) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     // Wide characters draw with a blank continuation cell, so compare text without spaces.
     let compact = |text: &str| text.split_whitespace().collect::<String>();
@@ -246,62 +250,68 @@ fn answer(app: &mut App, session: Session, values: Vec<Vec<String>>) {
     let key = |app: &mut App, code| {
         app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     };
-    for (question, answers) in questions.iter().zip(values) {
-        // Single-select choices move on by themselves; other pages move on to the next tab.
-        let moves_on = !question.multi && !answers.is_empty();
-        for answer in answers {
-            if let Some(note) = answer.strip_prefix("user_note: ") {
-                app.handle_event(Event::Key(KeyEvent::new(
-                    KeyCode::Char(char::from_digit(question.options.len() as u32 + 1, 10).unwrap()),
-                    KeyModifiers::NONE,
-                )));
-                app.handle_event(Event::Paste(note.to_owned()));
-                app.handle_event(Event::Key(KeyEvent::new(
-                    KeyCode::Enter,
-                    KeyModifiers::NONE,
-                )));
-            } else {
-                let n = question
-                    .options
-                    .iter()
-                    .position(|o| o.label == answer)
-                    .unwrap()
-                    + 1;
-                app.handle_event(Event::Key(KeyEvent::new(
-                    KeyCode::Char(char::from_digit(n as u32, 10).unwrap()),
-                    KeyModifiers::NONE,
-                )));
+    if let Some(values) = values {
+        for (question, answers) in questions.iter().zip(values) {
+            // Single-select choices move on by themselves; other pages move on to the next tab.
+            let moves_on = !question.multi && !answers.is_empty();
+            for answer in answers {
+                if let Some(note) = answer.strip_prefix("user_note: ") {
+                    app.handle_event(Event::Key(KeyEvent::new(
+                        KeyCode::Char(
+                            char::from_digit(question.options.len() as u32 + 1, 10).unwrap(),
+                        ),
+                        KeyModifiers::NONE,
+                    )));
+                    app.handle_event(Event::Paste(note.to_owned()));
+                    app.handle_event(Event::Key(KeyEvent::new(
+                        KeyCode::Enter,
+                        KeyModifiers::NONE,
+                    )));
+                } else {
+                    let n = question
+                        .options
+                        .iter()
+                        .position(|o| o.label == answer)
+                        .unwrap()
+                        + 1;
+                    app.handle_event(Event::Key(KeyEvent::new(
+                        KeyCode::Char(char::from_digit(n as u32, 10).unwrap()),
+                        KeyModifiers::NONE,
+                    )));
+                }
+            }
+            if !moves_on {
+                key(app, KeyCode::Right);
             }
         }
-        if !moves_on {
-            key(app, KeyCode::Right);
+        if questions.len() > 1 || questions.iter().any(|question| question.multi) {
+            key(app, KeyCode::Char('1'));
         }
-    }
-    if questions.len() > 1 || questions.iter().any(|question| question.multi) {
-        key(app, KeyCode::Char('1'));
+    } else {
+        key(app, KeyCode::Esc);
     }
     assert!(
         app.pending_inputs.contains(&id),
         "dashboard did not submit answer"
     );
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
-    // Terminal output and its close can arrive before the answer completes.
-    let event = loop {
+    // Handling an earlier input can also drain the queued send completion.
+    while app.pending_inputs.contains(&id) {
         let event = app
             .receiver
             .recv_timeout(Duration::from_secs(120))
             .expect("live answer deadline");
-        if matches!(event, Input::Sent { .. }) {
-            break event;
-        }
         app.handle_inputs(event, &mut None, &mut schedule).unwrap();
-    };
-    let Input::Sent { result, .. } = &event else {
-        unreachable!()
-    };
-    assert!(result.is_ok(), "live dashboard answer failed: {result:?}");
-    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    }
     let persist = app.view.take_question_action();
+    assert_eq!(
+        persist,
+        Some(Action::PersistQuestion {
+            id: id.clone(),
+            ask: None
+        }),
+        "dashboard answer must complete successfully"
+    );
     app.handle_action(persist);
     assert!(!app.pending_inputs.contains(&id));
 }

@@ -43,6 +43,8 @@ pub struct QuestionOption {
 /// Collected answers keyed by each question's opaque answer key.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Answer {
+    #[serde(default)]
+    pub rejected: bool,
     pub answers: BTreeMap<String, QuestionAnswer>,
 }
 

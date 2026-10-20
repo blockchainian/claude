@@ -168,3 +168,51 @@ fn real_ask_user_question_dashboard_answer_and_empty_response() {
     );
     assert!(server.pending().is_empty());
 }
+
+#[test]
+#[ignore = "starts billable Claude sessions; requires CLAUDE_CODE_OAUTH_TOKEN"]
+fn real_ask_user_question_dashboard_escape_clarifies() {
+    let mut live = Live::new();
+    let server = Arc::new(AskUserQuestion::bind(0, live.config.clone()).unwrap());
+    live.start(server.port);
+    let ask = until("real AskUserQuestion request never arrived", || {
+        server.pending().into_iter().next()
+    });
+    let mut provider = ClaudeProvider::new(live.config.clone());
+    provider.ask_user_question = Some(Arc::clone(&server));
+    let mut app = dashboard::app(Box::new(provider), live.root.path().to_owned());
+    let session = dashboard::session(&app, &ask.session.id);
+    dashboard::reject_questions(&mut app, session);
+    until("Claude did not continue after dashboard Esc", || {
+        let events = live.events(&ask.session.id);
+        let rejected = events.iter().position(|event| {
+            event["message"]["content"].as_array().is_some_and(|blocks| blocks.iter().any(|block| {
+                block["type"] == "tool_result" && block["tool_use_id"] == ask.id
+                    && block["is_error"] == true
+                    && block["content"].as_str().is_some_and(|text| text.starts_with("PreToolUse:AskUserQuestion hook error: The user wants to clarify these questions."))
+            }))
+        })?;
+        events[rejected + 1..].iter().find_map(|event| {
+            if event["type"] != "assistant" {
+                return None;
+            }
+            let texts: Vec<_> = event["message"]["content"]
+                .as_array()?
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .collect();
+            let text = texts.join("\n");
+            if text.is_empty() {
+                return None;
+            }
+            println!("Claude after dashboard Esc: {text}");
+            assert!(
+                text.to_lowercase().contains("clarif"),
+                "Claude should ask what to clarify: {text}"
+            );
+            Some(())
+        })
+    });
+    assert!(server.pending().is_empty());
+}

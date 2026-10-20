@@ -1004,9 +1004,17 @@ pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>)
 /// the answers its "Questions asked:" list reports; other errors keep their text.
 pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> {
     let text = text.strip_prefix("Error: ").unwrap_or(text);
-    let reason = text.strip_prefix("The user doesn't want to proceed with this tool use.")?;
-    let Some((_, said)) = reason.split_once("the user said:\n") else {
-        return Some("Rejected".to_owned());
+    let said = if let Some(reason) = text.strip_prefix("PreToolUse:AskUserQuestion hook error: ") {
+        if !reason.starts_with("The user wants to clarify these questions.") {
+            return None;
+        }
+        reason
+    } else {
+        let reason = text.strip_prefix("The user doesn't want to proceed with this tool use.")?;
+        let Some((_, said)) = reason.split_once("the user said:\n") else {
+            return Some("Rejected".to_owned());
+        };
+        said
     };
     if !said.starts_with("The user wants to clarify these questions.") {
         return Some(format!("Rejected\n\n{}", said.trim()));
@@ -1496,6 +1504,42 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hook_rejected_questions_show_chat_and_answers() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-questions-hook-rejected.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let questions = &records[0]["message"]["content"][0]["input"]["questions"];
+        let result = records[1]["message"]["content"][0]["content"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            super::rejected_answers(questions, result).as_deref(),
+            Some("Chat about this\n\nYou have not answered all questions")
+        );
+        assert_eq!(
+            super::rejected_answers(questions, records[1]["toolUseResult"].as_str().unwrap()),
+            super::rejected_answers(questions, result)
+        );
+        assert_eq!(
+            super::rejected_answers(
+                questions,
+                &result.replace("(No answer provided)", "Answer: Red")
+            )
+            .as_deref(),
+            Some("Chat about this\n\n● Color → Red")
+        );
+        assert_eq!(
+            super::rejected_answers(
+                questions,
+                "PreToolUse:AskUserQuestion hook error: unrelated error"
+            ),
+            None
+        );
+    }
+
     fn shell_output(command: &str, text: &str) -> Vec<crate::event::Section> {
         super::shell_output_sections(command, "stdout", text).unwrap_or_else(|| {
             vec![crate::event::Section::Text {

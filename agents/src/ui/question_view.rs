@@ -15,7 +15,6 @@ use unicode_width::UnicodeWidthStr;
 
 pub(super) enum Outcome {
     Submit(Answer),
-    Dismiss,
 }
 
 /// What a mouse position points at: the question tab row, or an option row.
@@ -132,7 +131,7 @@ impl QuestionView {
             ""
         };
         lines.push(Line::styled(
-            format!("{switch}↑/↓ move · Enter to confirm · Esc to close"),
+            format!("{switch}↑/↓ move · Enter to confirm · Esc to cancel"),
             Style::default().dim(),
         ));
         lines
@@ -204,9 +203,10 @@ impl QuestionView {
             .collect()
     }
 
-    fn submit(&self) -> Outcome {
+    fn submit(&self, rejected: bool) -> Outcome {
         Outcome::Submit(Answer {
             answers: self.answers(),
+            rejected,
         })
     }
 
@@ -228,7 +228,7 @@ impl QuestionView {
             self.review_focus = 0;
             None
         } else {
-            Some(self.submit())
+            Some(self.submit(false))
         }
     }
 
@@ -246,7 +246,7 @@ impl QuestionView {
             return None;
         }
         if key.code == KeyCode::Esc {
-            return Some(Outcome::Dismiss);
+            return Some(self.submit(true));
         }
         if self.pages.is_empty() {
             return None;
@@ -335,8 +335,8 @@ impl QuestionView {
     pub(super) fn choose(&mut self, index: usize) -> Option<Outcome> {
         if self.reviewing() {
             return match index {
-                0 => Some(self.submit()),
-                1 => Some(Outcome::Dismiss),
+                0 => Some(self.submit(false)),
+                1 => Some(self.submit(true)),
                 _ => None,
             };
         }
@@ -907,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn ask_view_other_reuses_editor_and_escape_never_answers() {
+    fn ask_view_other_reuses_editor_and_escape_rejects() {
         let mut view = QuestionView::new(fixture("Custom"));
         assert!(press(&mut view, KeyCode::Char('4')).is_none());
         view.paste("custom probe note!");
@@ -917,10 +917,12 @@ mod tests {
             answer.answers["Probe custom text?"].other.as_deref(),
             Some("custom probe note")
         );
-        assert!(matches!(
-            press(&mut view, KeyCode::Esc),
-            Some(Outcome::Dismiss)
-        ));
+        let answer = submitted(press(&mut view, KeyCode::Esc));
+        assert!(answer.rejected);
+        assert_eq!(
+            answer.answers["Probe custom text?"].other.as_deref(),
+            Some("custom probe note")
+        );
     }
 
     #[test]
@@ -1051,7 +1053,7 @@ mod tests {
         view.show_page(2);
         let review = screen(&view, 60, height);
         assert!(
-            review.lines().last().unwrap().ends_with("Esc to close"),
+            review.lines().last().unwrap().ends_with("Esc to cancel"),
             "{review}"
         );
     }
@@ -1120,10 +1122,9 @@ mod tests {
             "{review}"
         );
         assert!(press(&mut view, KeyCode::Down).is_none());
-        assert!(matches!(
-            press(&mut view, KeyCode::Char('2')),
-            Some(Outcome::Dismiss)
-        ));
+        let answer = submitted(press(&mut view, KeyCode::Char('2')));
+        assert!(answer.rejected);
+        assert_eq!(answer.answers["Probe second page?"].answers, ["Blue"]);
         let answer = submitted(press(&mut view, KeyCode::Char('1')));
         assert_eq!(
             answer.answers["Probe first page?"],

@@ -159,10 +159,6 @@ impl View {
     fn question_outcome(&mut self, id: SessionKey, outcome: Option<Outcome>) -> Option<Action> {
         let ask = self.questions.views[&id].ask().clone();
         match outcome? {
-            Outcome::Dismiss => {
-                self.questions.closed.insert(id, ask);
-                None
-            }
             Outcome::Submit(answer) => Some(Action::AnswerQuestions { ask, answer }),
         }
     }
@@ -567,7 +563,8 @@ mod tests {
             view.handle_key(KeyCode::Char('4').into());
             let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
             view.handle_paste(text);
-            let Some(Action::AnswerQuestions { answer, .. }) = view.handle_key(KeyCode::Enter.into())
+            let Some(Action::AnswerQuestions { answer, .. }) =
+                view.handle_key(KeyCode::Enter.into())
             else {
                 panic!("parked search blocked the active question")
             };
@@ -671,12 +668,51 @@ mod tests {
     #[test]
     fn ask_flow_escape_stays_closed_after_refresh() {
         let mut view = fixture();
-        assert!(
+        let Some(Action::AnswerQuestions { ask, answer }) =
             view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
-                .is_none()
+        else {
+            panic!("Esc should reject questions");
+        };
+        assert!(answer.rejected);
+        assert!(view.active_question().is_some());
+        let input = crate::providers::SessionInput::Answer {
+            ask: ask.clone(),
+            answer,
+            transcript: "probe.jsonl".into(),
+        };
+        view.input_sending(&ask.session, &input);
+        assert!(view.handle_key(KeyCode::Esc.into()).is_none());
+        view.input_complete(&ask.session, &input, Ok(()));
+        assert_eq!(
+            view.take_question_action(),
+            Some(Action::PersistQuestion {
+                id: ask.session.clone(),
+                ask: None,
+            })
         );
         view.set_sessions(view.rows.clone(), false);
-        assert!(!screen(&view, 100, 40).contains("Esc to close"));
+        assert!(view.active_question().is_none());
+    }
+
+    #[test]
+    fn ask_flow_cancel_row_rejects_selected_answers() {
+        for mouse in [false, true] {
+            let mut view = multi_fixture();
+            view.handle_key(KeyCode::Char('2').into());
+            view.handle_key(KeyCode::Right.into());
+            let action = if mouse {
+                let cancel = row_of(&screen(&view, 100, 40), "2. Cancel");
+                click(&mut view, 10, cancel)
+            } else {
+                view.handle_key(KeyCode::Down.into());
+                view.handle_key(KeyCode::Enter.into())
+            };
+            let Some(Action::AnswerQuestions { answer, .. }) = action else {
+                panic!("Cancel should reject questions");
+            };
+            assert!(answer.rejected);
+            assert_eq!(answer.answers["Probe single choice?"].answers, ["Green"]);
+        }
     }
 
     #[test]

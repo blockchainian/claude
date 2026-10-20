@@ -829,6 +829,11 @@ impl Provider for CodexProvider {
             {
                 app_server::thread::unarchive(&mut client, &id)?;
             }
+            if let SessionInput::Answer { ask, .. } = &input
+                && ask.session != key(id.clone())
+            {
+                return Err(io::Error::other("Codex question session changed"));
+            }
             match input {
                 SessionInput::Prompt(text) => {
                     app_server::thread::prompt(&mut client, &id, &text, &[])
@@ -837,12 +842,14 @@ impl Provider for CodexProvider {
                     app_server::thread::prompt(&mut client, &id, &text, &images)
                 }
                 SessionInput::Rename(_) => Err(io::ErrorKind::Unsupported.into()),
-                SessionInput::Interrupt => {
-                    match app_server::thread::running_turn(&mut client, &id)? {
-                        Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),
-                        None => Ok(()),
-                    }
-                }
+                SessionInput::Interrupt
+                | SessionInput::Answer {
+                    answer: crate::ask::Answer { rejected: true, .. },
+                    ..
+                } => match app_server::thread::running_turn(&mut client, &id)? {
+                    Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),
+                    None => Ok(()),
+                },
                 SessionInput::SetModel(model) => {
                     app_server::thread::set_settings(&mut client, &id, Some(&model), None)
                 }
@@ -853,12 +860,7 @@ impl Provider for CodexProvider {
                     ask,
                     answer,
                     transcript,
-                } => {
-                    if ask.session != key(id.clone()) {
-                        return Err(io::Error::other("Codex question session changed"));
-                    }
-                    app_server::thread::answer(&mut client, &id, &ask, &answer, &transcript)
-                }
+                } => app_server::thread::answer(&mut client, &id, &ask, &answer, &transcript),
             }
         }))
     }

@@ -101,6 +101,88 @@ fn rename_real_codex_thread() {
 }
 
 #[test]
+#[ignore = "requires the running shared Codex daemon and local auth; rejects a real question and deletes its throwaway thread"]
+fn reject_real_codex_question_interrupts_turn() {
+    let provider = CodexProvider::from_config().unwrap();
+    let (id, _cleanup) = throwaway_thread(&provider);
+    let mut owner = super::Client::connect(&provider.home).unwrap();
+    let _: Value = owner
+        .request("thread/resume", json!({"threadId": id}))
+        .unwrap();
+    let started: Value = owner.request("turn/start", json!({
+        "threadId": id,
+        "input": [{"type": "text", "text": "Call request_user_input immediately with one question: Pick a color? Options Red and Blue. Wait for the answer. Do not use any other tools."}],
+        "collaborationMode": {"mode": "plan", "settings": {"model": "gpt-6.1-sol", "reasoning_effort": "low", "developer_instructions": null}},
+    })).unwrap();
+    let turn = started["turn"]["id"].as_str().unwrap();
+    let session = stored_session(&provider, &id);
+    let transcript = session.transcript.clone().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let pending = loop {
+        let summary = rollout::summary(&transcript).unwrap();
+        if summary.pending_question_call.is_some() {
+            break summary;
+        }
+        assert!(Instant::now() < deadline, "question never appeared");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let (call, since) = pending.pending_question_call.unwrap();
+    let ask = crate::ask::Ask {
+        id: call.clone(),
+        session: session.id.clone(),
+        since,
+        kind: crate::ask::AskKind::Questions {
+            questions: pending.pending_questions,
+            blocking: true,
+        },
+    };
+    assert!(
+        super::thread::question(&mut owner, &id, &call)
+            .unwrap()
+            .is_some()
+    );
+    provider
+        .send(
+            &session,
+            SessionInput::Answer {
+                ask,
+                answer: crate::ask::Answer {
+                    rejected: true,
+                    ..Default::default()
+                },
+                transcript: transcript.clone(),
+            },
+        )
+        .unwrap()()
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let turns: Value = owner
+            .request(
+                "thread/turns/list",
+                json!({"threadId": id, "limit": 1, "sortDirection": "desc"}),
+            )
+            .unwrap();
+        assert_eq!(turns["data"][0]["id"], turn);
+        if turns["data"][0]["status"] == "interrupted" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "rejected question did not interrupt the turn"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for line in std::fs::read_to_string(transcript).unwrap().lines() {
+        let record: Value = serde_json::from_str(line).unwrap();
+        let payload = &record["payload"];
+        if payload["type"] == "function_call_output" && payload["call_id"] == call {
+            assert!(!payload["output"].as_str().unwrap().contains("\"answers\""));
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires the running shared Codex daemon and local auth; starts, interrupts, archives and deletes a real throwaway thread"]
 fn stop_and_archive_real_codex_thread() {
     stop_and_archive_thread(false);

@@ -22,6 +22,7 @@ fn answers_encode_labels_notes_and_unanswered_questions() {
     let text = q.text.clone();
     let labels: Vec<_> = q.options.iter().map(|o| o.label.clone()).collect();
     let answer = Answer {
+        rejected: false,
         answers: [(
             id,
             QuestionAnswer {
@@ -48,6 +49,7 @@ fn answer_encoding_rejects_invalid_values() {
     let id = questions[0].id.clone();
     for value in ["missing label", "Red\u{1b}"] {
         let answer = Answer {
+            rejected: false,
             answers: [(
                 id.clone(),
                 QuestionAnswer {
@@ -60,6 +62,7 @@ fn answer_encoding_rejects_invalid_values() {
         assert!(encode_answers(&ask, &answer).is_err());
     }
     let answer = Answer {
+        rejected: false,
         answers: [(
             id.clone(),
             QuestionAnswer {
@@ -76,6 +79,7 @@ fn answer_encoding_rejects_invalid_values() {
     let AskKind::Questions { questions, .. } = &mut ask.kind;
     questions[0].other = false;
     let answer = Answer {
+        rejected: false,
         answers: [(
             id,
             QuestionAnswer {
@@ -335,6 +339,7 @@ fn answers_encode_single_free_text_and_partial_question_sets() {
         ),
     ] {
         let answer = Answer {
+            rejected: false,
             answers: [
                 (
                     first.id.clone(),
@@ -356,6 +361,7 @@ fn answers_encode_single_free_text_and_partial_question_sets() {
         encode_answers(
             &ask,
             &Answer {
+                rejected: false,
                 answers: [("unknown".into(), QuestionAnswer::default())].into()
             }
         )
@@ -382,4 +388,83 @@ fn http_reader_rejects_wrong_routes_and_invalid_json() {
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
     }
     assert!(server.pending().is_empty());
+}
+
+#[test]
+fn hook_rejected_questions_return_native_clarification_feedback() {
+    let config = tempfile::tempdir().unwrap();
+    let job = config.path().join("jobs/recorded");
+    std::fs::create_dir_all(&job).unwrap();
+    std::fs::write(
+        job.join("state.json"),
+        include_str!("../../../tests/fixtures/claude-ask-user-question/background-state.json"),
+    )
+    .unwrap();
+    let server = AskUserQuestion::bind(0, config.path().to_owned()).unwrap();
+    let mut body = fixture();
+    let recorded: Vec<Value> =
+        include_str!("../../../tests/fixtures/claude-questions-hook-rejected.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    let first = recorded[0]["message"]["content"][0]["input"]["questions"][0].clone();
+    body["tool_input"]["questions"] = json!([first]);
+    let mut stream = post(&server, &body);
+    let ask = await_pending(&server);
+    server
+        .answer(
+            &ask,
+            &Answer {
+                rejected: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let decoded: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let reason = recorded[1]["message"]["content"][0]["content"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("PreToolUse:AskUserQuestion hook error: ")
+        .unwrap();
+    assert_eq!(
+        decoded,
+        json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
+    );
+    assert!(server.pending().is_empty());
+
+    body["tool_input"]["questions"][0]["multiSelect"] = true.into();
+    let mut second = body["tool_input"]["questions"][0].clone();
+    second["question"] = "Second?".into();
+    body["tool_input"]["questions"]
+        .as_array_mut()
+        .unwrap()
+        .push(second);
+    let mut stream = post(&server, &body);
+    let ask = await_pending(&server);
+    server
+        .answer(
+            &ask,
+            &Answer {
+                rejected: true,
+                answers: [(
+                    "Hook color?".into(),
+                    QuestionAnswer {
+                        answers: vec!["Red".into(), "Blue".into()],
+                        other: Some("my words".into()),
+                    },
+                )]
+                .into(),
+            },
+        )
+        .unwrap();
+    response.clear();
+    stream.read_to_string(&mut response).unwrap();
+    let decoded: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        decoded["hookSpecificOutput"]["permissionDecisionReason"],
+        reason.replace("(No answer provided)", "Answer: Red, Blue, my words")
+            + "\n- \"Second?\"\n  (No answer provided)"
+    );
 }

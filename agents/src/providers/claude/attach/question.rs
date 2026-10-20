@@ -69,6 +69,19 @@ fn focused(screen: &str, question: &Question) -> Option<usize> {
         })
 }
 
+fn chat_choice(screen: &str) -> Option<(usize, bool)> {
+    screen.lines().find_map(|line| {
+        let line = line.trim();
+        let selected = line.starts_with('❯');
+        let line = line.trim_start_matches('❯').trim();
+        let (number, label) = line.split_once('.')?;
+        if label.trim() != "Chat about this" {
+            return None;
+        }
+        Some((number.parse::<usize>().ok()?.checked_sub(1)?, selected))
+    })
+}
+
 impl Terminal {
     fn question_focus(&mut self, question: &Question, target: usize) -> io::Result<()> {
         loop {
@@ -125,74 +138,86 @@ impl Terminal {
                 screen != before && (review(screen) || questions.iter().any(|q| page(screen, q)))
             })?;
         }
-        for (index, question) in questions.iter().enumerate() {
-            self.wait_at("question-page", |screen| page(screen, question))?;
-            let value = answer
-                .answers
-                .get(&question.id)
-                .cloned()
-                .unwrap_or_default();
-            if question.multi {
-                // Clear selections before applying the dashboard's selection order.
-                for option in 0..=question.options.len() {
-                    match checked(&self.screen(), option) {
-                        Some(true) => {
-                            self.write((option + 1).to_string().as_bytes())?;
-                            self.wait_at("question-uncheck", |screen| {
-                                checked(screen, option) == Some(false)
-                            })?;
+        if answer.rejected {
+            let (target, _) = chat_choice(&self.screen())
+                .ok_or_else(|| self.unexpected("Claude Chat about this choice is missing"))?;
+            self.question_focus(&questions[0], target)?;
+            self.wait_at("question-chat-focused", |screen| {
+                chat_choice(screen).is_some_and(|(_, selected)| selected)
+            })?;
+            self.write(b"\r")?;
+        } else {
+            for (index, question) in questions.iter().enumerate() {
+                self.wait_at("question-page", |screen| page(screen, question))?;
+                let value = answer
+                    .answers
+                    .get(&question.id)
+                    .cloned()
+                    .unwrap_or_default();
+                if question.multi {
+                    // Clear selections before applying the dashboard's selection order.
+                    for option in 0..=question.options.len() {
+                        match checked(&self.screen(), option) {
+                            Some(true) => {
+                                self.write((option + 1).to_string().as_bytes())?;
+                                self.wait_at("question-uncheck", |screen| {
+                                    checked(screen, option) == Some(false)
+                                })?;
+                            }
+                            Some(false) => {}
+                            None => {
+                                return Err(self.unexpected("Claude question checkbox is missing"));
+                            }
                         }
-                        Some(false) => {}
-                        None => return Err(self.unexpected("Claude question checkbox is missing")),
                     }
                 }
-            }
-            for label in &value.answers {
-                let option = question
-                    .options
-                    .iter()
-                    .position(|option| &option.label == label)
-                    .ok_or_else(|| io::Error::other("Claude answer option is missing"))?;
-                self.write((option + 1).to_string().as_bytes())?;
-                if question.multi {
-                    self.wait_at("question-check", |screen| {
-                        checked(screen, option) == Some(true)
-                    })?;
+                for label in &value.answers {
+                    let option = question
+                        .options
+                        .iter()
+                        .position(|option| &option.label == label)
+                        .ok_or_else(|| io::Error::other("Claude answer option is missing"))?;
+                    self.write((option + 1).to_string().as_bytes())?;
+                    if question.multi {
+                        self.wait_at("question-check", |screen| {
+                            checked(screen, option) == Some(true)
+                        })?;
+                    }
                 }
-            }
-            if let Some(other) = &value.other {
-                if question.multi {
-                    self.question_focus(question, question.options.len())?;
-                } else {
-                    self.write((question.options.len() + 1).to_string().as_bytes())?;
-                }
-                self.wait_at("question-text", |screen| screen.contains("ctrl+g to edit"))?;
-                self.write(b"\x15")?;
-                self.paste(other)?;
-                self.wait_at("question-text-visible", |screen| {
-                    compact(screen).contains(&compact(other))
-                })?;
-                if question.multi {
-                    self.wait_at("question-text-accepted", |screen| {
-                        checked(screen, question.options.len()) == Some(true)
+                if let Some(other) = &value.other {
+                    if question.multi {
+                        self.question_focus(question, question.options.len())?;
+                    } else {
+                        self.write((question.options.len() + 1).to_string().as_bytes())?;
+                    }
+                    self.wait_at("question-text", |screen| screen.contains("ctrl+g to edit"))?;
+                    self.write(b"\x15")?;
+                    self.paste(other)?;
+                    self.wait_at("question-text-visible", |screen| {
+                        compact(screen).contains(&compact(other))
                     })?;
-                } else {
+                    if question.multi {
+                        self.wait_at("question-text-accepted", |screen| {
+                            checked(screen, question.options.len()) == Some(true)
+                        })?;
+                    } else {
+                        self.write(b"\r")?;
+                    }
+                }
+                if question.multi {
+                    self.question_focus(question, question.options.len() + 1)?;
                     self.write(b"\r")?;
+                } else if value.answers.is_empty() && value.other.is_none() {
+                    self.write(b"\x1b[C")?;
+                }
+                if let Some(next) = questions.get(index + 1) {
+                    self.wait_at("question-next", |screen| page(screen, next))?;
                 }
             }
-            if question.multi {
-                self.question_focus(question, question.options.len() + 1)?;
-                self.write(b"\r")?;
-            } else if value.answers.is_empty() && value.other.is_none() {
-                self.write(b"\x1b[C")?;
+            if questions.len() > 1 || questions.iter().any(|q| q.multi) {
+                self.wait_at("question-review", review)?;
+                self.write(b"1")?;
             }
-            if let Some(next) = questions.get(index + 1) {
-                self.wait_at("question-next", |screen| page(screen, next))?;
-            }
-        }
-        if questions.len() > 1 || questions.iter().any(|q| q.multi) {
-            self.wait_at("question-review", review)?;
-            self.write(b"1")?;
         }
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
@@ -225,6 +250,27 @@ impl Terminal {
                 return Err(error.into());
             }
             if let Some(record) = result {
+                if answer.rejected {
+                    let rejected = record["message"]["content"]
+                        .as_array()
+                        .is_some_and(|blocks| {
+                            blocks.iter().any(|block| {
+                                block["tool_use_id"] == ask.id
+                                    && block["is_error"] == true
+                                    && block["content"].as_str().is_some_and(|text| {
+                                        text.starts_with(
+                                            "The user doesn't want to proceed with this tool use.",
+                                        ) && text
+                                            .contains("The user wants to clarify these questions.")
+                                    })
+                            })
+                        });
+                    return if rejected {
+                        Ok(())
+                    } else {
+                        Err(io::Error::other("Claude question was not rejected"))
+                    };
+                }
                 let actual = &record["toolUseResult"]["answers"];
                 if *actual != serde_json::to_value(&expected)? {
                     return Err(io::Error::other(format!(
@@ -244,6 +290,21 @@ impl Terminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_native_question_selects_chat_about_this() {
+        let mut parser = OutputScreen::new();
+        parser.process(include_bytes!(
+            "../../../../tests/fixtures/claude-attach/question-chat.raw"
+        ));
+        let screen = parser.complete().unwrap();
+        assert_eq!(chat_choice(&screen), Some((3, false)));
+        parser.process(include_bytes!(
+            "../../../../tests/fixtures/claude-attach/question-chat-focused.raw"
+        ));
+        let screen = parser.complete().unwrap();
+        assert_eq!(chat_choice(&screen), Some((3, true)));
+    }
 
     #[test]
     fn captured_native_question_uses_dialog_text_instead_of_transcript_prompt() {

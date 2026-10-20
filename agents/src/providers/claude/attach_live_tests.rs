@@ -526,6 +526,16 @@ fn real_attach_clears_left_input_and_keeps_a_pending_question() {
 #[test]
 #[ignore = "starts a billable Claude background session in the trusted repository"]
 fn real_transcript_question_answer_after_hook_disconnect() {
+    transcript_question_after_hook_disconnect(false);
+}
+
+#[test]
+#[ignore = "starts a billable Claude background session in the trusted repository"]
+fn real_transcript_question_rejection_after_hook_disconnect() {
+    transcript_question_after_hook_disconnect(true);
+}
+
+fn transcript_question_after_hook_disconnect(rejected: bool) {
     let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let config = super::config_dir();
     let preferences = tempfile::tempdir().unwrap();
@@ -624,17 +634,22 @@ fn real_transcript_question_answer_after_hook_disconnect() {
                 ),
             ]
             .into(),
+            ..Default::default()
         };
         let mut app = dashboard::app(Box::new(provider), preferences.path().to_owned());
-        dashboard::send(
-            &mut app,
-            session.id.clone(),
-            SessionInput::Answer {
-                ask: session.ask.clone().unwrap(),
-                answer,
-                transcript: session.transcript.clone().unwrap(),
-            },
-        );
+        if rejected {
+            dashboard::reject_questions(&mut app, session.clone());
+        } else {
+            dashboard::send(
+                &mut app,
+                session.id.clone(),
+                SessionInput::Answer {
+                    ask: session.ask.clone().unwrap(),
+                    answer,
+                    transcript: session.transcript.clone().unwrap(),
+                },
+            );
+        }
         let path = session.transcript.unwrap();
         loop {
             let records: Vec<Value> = fs::read_to_string(&path)
@@ -653,6 +668,26 @@ fn real_transcript_question_answer_after_hook_disconnect() {
                         })
             });
             if let Some(result) = answered {
+                if rejected {
+                    let text = result["message"]["content"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|block| block["tool_use_id"] == ask.id)
+                        .unwrap();
+                    assert_eq!(text["is_error"], true);
+                    assert!(
+                        text["content"]
+                            .as_str()
+                            .unwrap()
+                            .contains("The user wants to clarify these questions.")
+                    );
+                    println!(
+                        "Native Claude rejected through dashboard Esc: {}",
+                        text["content"]
+                    );
+                    break;
+                }
                 assert_eq!(
                     result["toolUseResult"]["answers"]["Recovery color?"],
                     "custom\nanswer ✓"

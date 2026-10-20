@@ -11,4 +11,4 @@ Probe multiple choices?
   4. [ ] Type something.
 
 
-←/→ switch · ↑/↓ move · Enter to confirm · Esc to close
+←/→ switch · ↑/↓ move · Enter to confirm · Esc to cancel
