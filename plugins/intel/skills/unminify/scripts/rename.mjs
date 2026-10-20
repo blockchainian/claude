@@ -32,7 +32,7 @@ function parseSource(source) {
   return timed('parse', () => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, plugins: ['jsx'] }));
 }
 
-function analyze(source) {
+function analyze(source, options) {
   const ast = parseSource(source);
   const bindings = new Map();
   const scopes = new Set();
@@ -80,11 +80,11 @@ function analyze(source) {
     const b = intervals.get(inner);
     return a.start <= b.start && b.start < a.end;
   };
-  return { ast, bindings, globals, contains, program, jsxTags, ...fragmentFacts(program) };
+  return { ast, bindings, globals, contains, program, jsxTags, ...fragmentFacts(program, options) };
 }
 
-export function resolveNames(source, proposals) {
-  const { bindings, globals, contains, jsxTags, fragment } = analyze(source);
+export function resolveNames(source, proposals, options) {
+  const { bindings, globals, contains, jsxTags, fragment } = analyze(source, options);
   const byName = new Map();
   for (const record of bindings.values()) {
     if (!byName.has(record.name)) byName.set(record.name, new Set());
@@ -194,7 +194,7 @@ function externalName(node) {
   return node.name ?? node.value;
 }
 
-export function followImports(files, withFile = (file, task) => task()) {
+export function followImports(files, withFile = (file, task) => task(), fragments = new Set()) {
   const modules = new Map();
   const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
   const targetFile = (file, specifier) => {
@@ -207,7 +207,7 @@ export function followImports(files, withFile = (file, task) => task()) {
   };
   for (const [file, source] of files) {
     modules.set(file, withFile(file, () => {
-      const analysis = analyze(source);
+      const analysis = analyze(source, { fragment: fragments.has(file) });
       const exports = new Map();
       const stars = [];
       const imports = [];
@@ -289,7 +289,7 @@ export function followImports(files, withFile = (file, task) => task()) {
       const name = names.get(exported.key) ?? modules.get(exported.file).bindings.get(exported.key);
       proposals.set(imported.key, name);
     }
-    const names = withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals)));
+    const names = withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals, { fragment: fragments.has(file) })));
     resolved.set(file, names);
     return names;
   }

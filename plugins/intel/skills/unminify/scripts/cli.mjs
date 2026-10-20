@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { loadFragmentIndex } from './fragments.mjs';
 import { randomUUID } from 'node:crypto';
 import { packBatches } from './pack.mjs';
 import { withTimings, timed, intervalMs, requestStats } from './timing.mjs';
@@ -88,6 +89,7 @@ export async function run(options, dependencies) {
       })) listed.add(file);
     }
     const files = [...listed];
+    const fragments = loadFragmentIndex(root, files);
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
     summary.files = files.length;
     selectionEnd(); selectionEnd = null;
@@ -132,6 +134,7 @@ export async function run(options, dependencies) {
     }
     async function processFile(file) {
       const metrics = fileMetricsFor(file);
+      const fileOptions = { ...planOptions, fragment: fragments.has(file) };
       metrics.started_at = Date.now();
       event({ type: 'file_start', file, at: metrics.started_at });
       let stages;
@@ -152,7 +155,7 @@ export async function run(options, dependencies) {
           const renames = new Map();
           let batchFailed = false;
           const endPlanning = phase('selection_plan', file);
-          try { ({ stages } = timed('planFile', () => api.planFile(source, planOptions))); }
+          try { ({ stages } = timed('planFile', () => api.planFile(source, fileOptions))); }
           finally { endPlanning(); }
           const endModel = phase('model', file);
           try {
@@ -189,7 +192,7 @@ export async function run(options, dependencies) {
                     for (const { batch, payload: original } of parts) {
                       const proposals = new Map(renames);
                       for (const [placeholder, key] of Object.entries(original.placeholders)) proposals.set(key, response.names[placeholder]);
-                      const resolved = timed('resolveNames', () => api.resolveNames(source, proposals));
+                      const resolved = timed('resolveNames', () => api.resolveNames(source, proposals, fileOptions));
                       const names = new Map(batch.keys.filter(key => resolved.has(key)).map(key => [key, resolved.get(key)]));
                       // Persist each original batch before exposing it to later work.
                       journal.batch(batch.id, names);
@@ -206,9 +209,9 @@ export async function run(options, dependencies) {
           const endWriting = phase('check_write', file);
           try {
             // Recheck replayed journal proposals against the current file policy.
-            const resolved = timed('resolveNames', () => api.resolveNames(source, renames));
+            const resolved = timed('resolveNames', () => api.resolveNames(source, renames, fileOptions));
             const after = timed('applyRenames', () => api.applyRenames(source, resolved));
-            const reason = await timed('checkRewrite', () => api.checkRewrite(source, after));
+            const reason = await timed('checkRewrite', () => api.checkRewrite(source, after, fileOptions));
             if (reason !== null) {
               journal.complete(source, 'rejected', reason);
               summary.rejected++;
@@ -252,7 +255,7 @@ export async function run(options, dependencies) {
           const end = phase('followImports', file);
           try { return withTimings(fileMetrics.get(file).cpu_ms, task); }
           finally { end(); }
-        });
+        }, fragments);
       }
       finally {
         endImports();
@@ -269,7 +272,7 @@ export async function run(options, dependencies) {
         const endWriting = phase('check_write', file);
         try {
           const before = sources.get(file), journal = journals.get(file);
-          const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after)));
+          const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after, { fragment: fragments.has(file) })));
           if (reason !== null) {
             journal.rejectImports(reason);
             summary.rejected++;

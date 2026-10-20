@@ -92,7 +92,7 @@ function header(source) {
   return /^(?:[\t ]*\/\/[^\r\n]*(?:\r\n|\r|\n|$))(?:(?:[\t ]*(?:\r\n|\r|\n))*[\t ]*\/\/[^\r\n]*(?:\r\n|\r|\n|$))*/.exec(source)?.[0] ?? '';
 }
 
-function analyze(source, ast) {
+function analyze(source, ast, options) {
   let facts;
   const bindings = new Set();
   const variables = new Map();
@@ -100,7 +100,7 @@ function analyze(source, ast) {
   let constReassigned = 0;
   let earlyUse = 0;
   traverse(ast, {
-    Program(path) { facts = fragmentFacts(path); },
+    Program(path) { facts = fragmentFacts(path, options); },
     Scope(path) {
       for (const binding of Object.values(path.scope.bindings)) bindings.add(binding);
     },
@@ -188,7 +188,7 @@ function analyze(source, ast) {
 }
 
 /** Returns null on success, otherwise a single-line rejection reason. */
-export function checkRewrite(before, after) {
+export function checkRewrite(before, after, options) {
   let original;
   let result;
   try {
@@ -211,8 +211,8 @@ export function checkRewrite(before, after) {
   let b;
   try {
     const normalized = splitExportDeclarations(before, original, result);
-    a = analyze(normalized.source, normalized.ast);
-    b = analyze(after, result);
+    a = analyze(normalized.source, normalized.ast, options);
+    b = analyze(after, result, options);
   } catch (error) {
     return `SCOPE_ANALYSIS_FAILED ${String(error.message).split(/[\r\n]/)[0]}`;
   }
