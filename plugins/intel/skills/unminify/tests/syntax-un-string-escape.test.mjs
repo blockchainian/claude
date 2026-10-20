@@ -116,3 +116,20 @@ test('UnStringEscape returns no edits for unchanged text and is idempotent', () 
   const changed = run(String.raw`consume('\u03bb');`);
   assert.equal(run(changed), changed);
 });
+
+test('UnStringEscape preserves JSX attribute string spelling through the transform API', () => {
+  const source = String.raw`const badge = <Badge label="\u03bb" detail='\xE9' icon="\u{1F680}\uD83C\uDF0D" />;`;
+  for (const fragment of [false, true]) {
+    const result = transformSyntax(source, { rules: [rule], fragment });
+    assert.equal(result.source, source);
+    assert.deepEqual(result.steps, [{ name: 'UnStringEscape', edits: [] }]);
+  }
+});
+
+test('UnStringEscape decodes JSX expression strings while preserving attribute and text spelling', () => {
+  const source = String.raw`const badge = <Badge label="\u03bb" content={'\u03bb'}>{'\xE9'}<Part icon={'\u{1F680}\uD83C\uDF0D'} label='\xE9' />\u03bb</Badge>;`;
+  const expected = String.raw`const badge = <Badge label="\u03bb" content={'λ'}>{'é'}<Part icon={'🚀🌍'} label='\xE9' />\u03bb</Badge>;`;
+  for (const fragment of [false, true]) {
+    assert.equal(run(source, { fragment }), expected);
+  }
+});
