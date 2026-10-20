@@ -24,7 +24,10 @@ mod images;
 mod lazy_sessions_tests;
 mod peer;
 pub(super) mod registry;
+mod session_socket;
 mod settings;
+#[cfg(test)]
+mod socket_tests;
 mod subagents;
 mod transcript;
 mod weekly_usage;
@@ -1011,6 +1014,17 @@ impl Provider for ClaudeProvider {
         }
         let session = session.clone();
         let config = self.config_dir.clone();
+        if let SessionInput::Rename(name) = input {
+            return Some(Box::new(move || {
+                let process = session
+                    .process
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("This input requires a live Claude session"))?;
+                let mut client =
+                    session_socket::Client::connect(&config, process.pid, &session.id.id)?;
+                session_socket::session::set_name(&mut client, &name)
+            }));
+        }
         Some(Box::new(move || match &session.process {
             Some(process) if process.label.as_deref() == Some("bg") => {
                 let entry: registry::Entry = serde_json::from_slice(&fs::read(

@@ -1330,7 +1330,7 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
 }
 
 #[test]
-fn rename_without_attach_leaves_claude_files_untouched() {
+fn rename_without_socket_leaves_claude_files_untouched() {
     for foreground in [false, true] {
         let (_dir, mut app) = fixture();
         let mut target = app.sessions[0].clone();
@@ -1357,14 +1357,15 @@ fn rename_without_attach_leaves_claude_files_untouched() {
             input,
             SessionInput::Rename("Do not write this title".into())
         );
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            if foreground {
-                crate::providers::claude::FOREGROUND_SESSION
-            } else {
-                "This input requires a live background session"
-            },
-        );
+        let error = result.unwrap_err();
+        if foreground {
+            assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        } else {
+            assert_eq!(
+                error.to_string(),
+                "This input requires a live Claude session"
+            );
+        }
         assert!(
             std::fs::read(path).unwrap() == original,
             "rename modified the transcript"

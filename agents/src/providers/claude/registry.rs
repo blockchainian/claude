@@ -18,6 +18,7 @@ pub(in crate::providers) struct Entry {
     _version: Option<String>,
     pub kind: Option<String>,
     pub job_id: Option<String>,
+    pub messaging_socket_path: Option<std::path::PathBuf>,
     pub name: Option<String>,
     pub name_source: Option<String>,
     pub updated_at: Option<i64>,

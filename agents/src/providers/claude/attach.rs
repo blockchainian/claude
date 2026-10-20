@@ -35,9 +35,7 @@ pub(super) fn send(
                 image_path(path)?;
             }
         }
-        SessionInput::Rename(title) => {
-            rename_command(title)?;
-        }
+        SessionInput::Rename(_) => return Err(io::ErrorKind::Unsupported.into()),
         SessionInput::SetModel(value) | SessionInput::SetEffort(value) => {
             if value.is_empty() || value.chars().any(char::is_whitespace) {
                 return Err(io::Error::new(
@@ -121,16 +119,6 @@ fn validate_job_id(job_id: &str) -> io::Result<()> {
         ));
     }
     Ok(())
-}
-
-fn rename_command(title: &str) -> io::Result<String> {
-    if title.trim().is_empty() || title.chars().any(char::is_control) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid Claude title",
-        ));
-    }
-    Ok(format!("/rename {title}"))
 }
 
 fn input_lock_path(config_dir: &Path, job_id: &str) -> std::path::PathBuf {
@@ -450,10 +438,7 @@ impl Terminal {
             }
             SessionInput::Answer { .. } => unreachable!("answers handled before prompt input"),
             SessionInput::Interrupt => self.write(b"\x1b"),
-            SessionInput::Rename(title) => {
-                self.submit(&rename_command(&title)?)?;
-                self.wait_at("rename-accepted", actual_empty)
-            }
+            SessionInput::Rename(_) => Err(io::ErrorKind::Unsupported.into()),
             SessionInput::SetModel(model) => {
                 let choices = super::models::input_choices(&super::config_dir(), None);
                 let label = choices
@@ -638,31 +623,6 @@ fn known_dialog(screen: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rename_preserves_spaces_and_literal_special_characters() {
-        let title = "中文 task \"quoted\" 'single' $HOME `echo` /model haiku";
-        assert_eq!(rename_command(title).unwrap(), format!("/rename {title}"));
-    }
-
-    #[test]
-    fn rename_rejects_blank_names_and_terminal_controls_before_attach() {
-        for title in [
-            "",
-            "  ",
-            "one\ntwo",
-            "one\rtwo",
-            "one\ttwo",
-            "bad\u{1b}[201~",
-            "bad\u{1a}",
-        ] {
-            assert_eq!(
-                rename_command(title).unwrap_err().kind(),
-                io::ErrorKind::InvalidInput,
-                "{title:?}"
-            );
-        }
-    }
 
     #[test]
     fn attach_lock_is_outside_claude_config_and_is_scoped_by_config_and_job() {
