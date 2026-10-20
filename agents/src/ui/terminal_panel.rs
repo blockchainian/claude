@@ -10,10 +10,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 impl View {
-    /// Shows `screen` in the log detail panel.
+    /// Shows `screen` in the event detail panel.
     pub fn show_terminal(&mut self, id: SessionKey, screen: Screen) {
         self.terminal = Some((id, screen));
-        self.set_active_panel(Panel::Output);
+        self.set_active_panel(Panel::EventDetail);
     }
 
     pub fn hide_terminal(&mut self) {
@@ -21,11 +21,11 @@ impl View {
         self.viewport.borrow_mut().terminal = Rect::default();
     }
 
-    /// The rows and columns a terminal gets in the log detail panel, below its top rule.
+    /// The rows and columns a terminal gets in the event detail panel, below its top rule.
     pub fn terminal_size(&self) -> Option<(u16, u16)> {
         let viewport = self.viewport.borrow();
         let area = if viewport.terminal.is_empty() {
-            let detail = viewport.log_detail;
+            let detail = viewport.event_detail;
             Rect {
                 y: detail.y + 1,
                 height: detail.height.saturating_sub(1),
@@ -45,7 +45,7 @@ impl View {
 
     fn terminal_focused(&self) -> bool {
         self.confirm_dialog.is_none()
-            && self.active_panel == Panel::Output
+            && self.active_panel == Panel::EventDetail
             && self.shown_terminal().is_some()
     }
 
@@ -65,7 +65,7 @@ impl View {
     }
 
     /// Forwards mouse events over the terminal to its program as far as the program asked
-    /// for them; the right button always switches back to the log detail. Returns `None`
+    /// for them; the right button always switches back to the event detail. Returns `None`
     /// for events elsewhere.
     pub(super) fn terminal_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
         let area = self.viewport.borrow().terminal;
@@ -127,7 +127,7 @@ impl View {
                 area.y,
                 super::tool_detail::running_frame(now),
                 usize::from(area.width),
-                super::style::log_styles(&crate::log::Kind::Tool)
+                super::style::event_styles(&crate::event::Kind::Tool)
                     .1
                     .add_modifier(Modifier::DIM),
             );

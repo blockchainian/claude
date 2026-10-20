@@ -3,17 +3,18 @@ use super::*;
 const REJECTED: &str = include_str!("../../tests/fixtures/claude-questions-rejected.jsonl");
 const ANSWERED: &str = include_str!("../../tests/fixtures/claude-questions-answered.jsonl");
 
-fn question_event(fixture: &str) -> crate::log::Event {
+fn question_event(fixture: &str) -> crate::event::Event {
     use std::io::Write;
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(fixture.as_bytes()).unwrap();
-    crate::providers::claude::log::tail(file.path(), 10)
+    crate::providers::claude::event_reader::tail(file.path(), 10)
         .unwrap()
         .remove(0)
 }
 
-fn output(event: &crate::log::Event) -> &str {
-    let crate::log::Section::Text { text, .. } = &event.calls[0].output.as_ref().unwrap()[0] else {
+fn output(event: &crate::event::Event) -> &str {
+    let crate::event::Section::Text { text, .. } = &event.calls[0].output.as_ref().unwrap()[0]
+    else {
         panic!("question output is text")
     };
     text
@@ -37,17 +38,17 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
             .join(" · ");
         assert_eq!(event.calls[0].title, format!("AskUserQuestion {questions}"));
         assert_eq!(event.body, format!("AskUserQuestion {questions}"));
-        assert!(log::shows_calls(&event));
-        let (mut view, now) = log_fixture();
-        view.set_log(vec![event.clone()]);
+        assert!(event_list::shows_calls(&event));
+        let (mut view, now) = event_fixture();
+        view.set_event(vec![event.clone()]);
         view.select_fixture_event(Some(event.clone()));
-        let screen = log_screen(&view, 180, 60, now);
+        let screen = event_screen(&view, 180, 60, now);
         let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(
             compact.contains(&format!("AskUserQuestion{}", questions.replace(' ', ""))),
             "{screen}"
         );
-        let detail = tool_detail::detail(&event, String::new(), Style::new().dim());
+        let detail = tool_detail::event_detail_content(&event, String::new(), Style::new().dim());
         assert_eq!(
             detail.sections[0].title.left.as_deref(),
             Some("AskUserQuestion")
@@ -60,7 +61,7 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
                 .collect::<Vec<_>>(),
             title
         );
-        assert_eq!(event.calls[0].detail_title, title.join(" · "));
+        assert_eq!(event.calls[0].event_detail_title, title.join(" · "));
     }
 }
 
@@ -78,22 +79,22 @@ fn ask_question_input_is_a_copyable_numbered_list() {
             .collect::<Vec<_>>()
             .join("\n");
         let event = question_event(&fixture);
-        let parts = detail_parts(&event);
+        let parts = event_detail_parts(&event);
         let suffix = if multi { " (multi-select)" } else { "" };
         let expected = format!(
             "压缩摘要那条在 agents 里怎么处理？{suffix}\n1. 显示成压缩标记 (Recommended): 不当用户消息，日志里出一行“Conversation compacted”之类的系统行\n2. 直接隐藏: 日志里完全不显示这条"
         );
         assert_eq!(parts[0].source, expected);
         for width in [24, 180] {
-            let (mut view, now) = log_fixture();
-            view.set_log(vec![event.clone()]);
+            let (mut view, now) = event_fixture();
+            view.set_event(vec![event.clone()]);
             view.select_fixture_event(Some(event.clone()));
             let area = Rect::new(0, 0, width, 150);
-            view.viewport.borrow_mut().log_detail = area;
+            view.viewport.borrow_mut().event_detail = area;
             let mut buf = Buffer::empty(area);
-            view.render_log_detail(area, &mut buf, now);
+            view.render_event_detail(area, &mut buf, now);
             let viewport = view.viewport.borrow();
-            let region = &viewport.log_text;
+            let region = &viewport.event_text;
             let source = region
                 .sources
                 .iter()
@@ -117,7 +118,7 @@ fn ask_question_input_is_a_copyable_numbered_list() {
     }
 }
 
-fn with_result(fixture: &str, content: &str) -> crate::log::Event {
+fn with_result(fixture: &str, content: &str) -> crate::event::Event {
     let mut records: Vec<serde_json::Value> = fixture
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -153,7 +154,7 @@ fn ask_question_answers_list_headers_like_the_submit_tab() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(output(&event), expected);
-    assert!(log::open_text(&event).contains(output(&event)));
+    assert!(event_list::open_text(&event).contains(output(&event)));
 }
 
 #[test]
@@ -185,17 +186,17 @@ fn ask_question_rejections_list_what_was_answered() {
 #[test]
 fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
     for (fixture, name) in [
-        (REJECTED, "task_log_questions_rejected.txt"),
-        (ANSWERED, "task_log_questions_answered.txt"),
+        (REJECTED, "task_event_questions_rejected.txt"),
+        (ANSWERED, "task_event_questions_answered.txt"),
     ] {
         let event = question_event(fixture);
-        let (mut view, now) = log_fixture();
-        view.set_log(vec![event.clone()]);
+        let (mut view, now) = event_fixture();
+        view.set_event(vec![event.clone()]);
         view.select_fixture_event(Some(event.clone()));
         let area = Rect::new(0, 0, 140, 35);
-        view.viewport.borrow_mut().log_detail = area;
+        view.viewport.borrow_mut().event_detail = area;
         let mut buf = Buffer::empty(area);
-        view.render_log_detail(area, &mut buf, now);
+        view.render_event_detail(area, &mut buf, now);
         let screen = buf
             .content
             .chunks(usize::from(area.width))
@@ -212,7 +213,7 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/ui_snapshots")
             .join(name);
-        if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
             std::fs::write(&path, format!("{}\n", screen.trim_end())).unwrap();
         }
         assert_eq!(
@@ -220,11 +221,13 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
             std::fs::read_to_string(path).unwrap().trim_end()
         );
 
-        let parts = detail_parts(&event);
+        let parts = event_detail_parts(&event);
         let viewport = view.viewport.borrow();
-        let region = &viewport.log_text;
-        let columns =
-            super::super::detail_model::detail_columns(area, view.center_layout(area).log);
+        let region = &viewport.event_text;
+        let columns = super::super::event_detail::event_detail_columns(
+            area,
+            view.center_layout(area).event_panel,
+        );
         for row in &region.rows {
             assert_eq!(row.x, columns.text.x);
             assert!(
@@ -235,12 +238,12 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
         }
         assert_eq!(region.sources[1].text.trim_end(), parts[0].source);
         drop(viewport);
-        let screen = log_screen(&view, 180, 70, now);
+        let screen = event_screen(&view, 180, 70, now);
         assert_eq!(
             double_click_text(&mut view, &screen, "(Recommended)"),
             Some(Action::Copy {
-                text: log::open_text(&event),
-                label: log::copied_label(&event)
+                text: event_list::open_text(&event),
+                label: event_list::copied_label(&event)
             })
         );
     }

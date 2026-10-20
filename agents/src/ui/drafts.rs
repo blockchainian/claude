@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::DraftId;
+use crate::model::DraftKey;
 use crate::providers::InputChoices;
 use crate::state::{DraftBranch, StoredDraft};
 use std::io;
@@ -14,7 +14,7 @@ pub(crate) struct DraftSetup {
 }
 
 pub(super) struct Draft {
-    pub id: DraftId,
+    pub id: DraftKey,
     pub defaults: crate::tasks::TaskDefaults,
     pub setup: DraftSetup,
     pub input: prompt_box::PromptBox,
@@ -62,7 +62,7 @@ impl Session {
             name: Some(name.clone()),
             title: name,
             prompt: input.text().to_owned(),
-            detail_sources: [None, None, None],
+            task_details_sources: [None, None, None],
             prompt_images: Vec::new(),
             queued: Vec::new(),
             prompt_at: None,
@@ -154,7 +154,7 @@ impl View {
             .collect()
     }
 
-    pub(super) fn draft_changed(&mut self, id: DraftId) {
+    pub(super) fn draft_changed(&mut self, id: DraftKey) {
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             draft.updated_at = chrono::Utc::now();
             if draft.name.is_some() {
@@ -192,9 +192,9 @@ impl View {
         }
     }
 
-    pub(crate) fn add_draft(&mut self, setup: DraftSetup) -> DraftId {
+    pub(crate) fn add_draft(&mut self, setup: DraftSetup) -> DraftKey {
         self.leave_draft();
-        let id = DraftId {
+        let id = DraftKey {
             millis: chrono::Utc::now().timestamp_millis() as u64,
             counter: self.next_draft,
         };
@@ -223,7 +223,7 @@ impl View {
 
     pub(crate) fn draft_worktree_created(
         &mut self,
-        id: DraftId,
+        id: DraftKey,
         result: io::Result<(PathBuf, String)>,
     ) {
         let (cwd, branch) = match result {
@@ -239,7 +239,7 @@ impl View {
         self.draft_changed(id);
     }
 
-    pub(crate) fn draft_created(&mut self, id: DraftId, result: io::Result<String>) {
+    pub(crate) fn draft_created(&mut self, id: DraftKey, result: io::Result<String>) {
         let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) else {
             return;
         };
@@ -251,7 +251,7 @@ impl View {
         self.draft_changed(id);
     }
 
-    pub(crate) fn draft_directory_changed(&mut self, id: DraftId, cwd: PathBuf, branch: String) {
+    pub(crate) fn draft_directory_changed(&mut self, id: DraftKey, cwd: PathBuf, branch: String) {
         let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) else {
             return;
         };
@@ -281,7 +281,7 @@ impl View {
         self.draft_changed(id);
     }
 
-    pub(crate) fn draft_directory_failed(&mut self, id: DraftId, error: io::Error) {
+    pub(crate) fn draft_directory_failed(&mut self, id: DraftKey, error: io::Error) {
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             draft.continue_after_directory = false;
             draft.error = Some(error.to_string());
@@ -320,7 +320,7 @@ impl View {
         }
     }
 
-    fn remove_draft(&mut self, id: DraftId) {
+    fn remove_draft(&mut self, id: DraftKey) {
         if self
             .drafts
             .iter()
@@ -402,7 +402,7 @@ impl View {
         }
     }
 
-    pub(super) fn select_draft(&mut self, id: DraftId) {
+    pub(super) fn select_draft(&mut self, id: DraftKey) {
         if self.selected_draft == Some(id) {
             return;
         }
@@ -419,7 +419,7 @@ impl View {
         self.prepare_prompt();
     }
 
-    pub(super) fn submit_draft(&mut self, id: DraftId) {
+    pub(super) fn submit_draft(&mut self, id: DraftKey) {
         self.close_draft_selector(id);
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             draft.working = true;
@@ -501,7 +501,7 @@ impl View {
         self.drafts_dirty = true;
         for value in stored {
             let (Ok(id), Ok(key)) = (
-                value.id.parse::<DraftId>(),
+                value.id.parse::<DraftKey>(),
                 format!("{}:{}", value.provider, value.id).parse::<SessionKey>(),
             ) else {
                 self.set_notice(Some("Invalid draft identity".into()));
@@ -588,7 +588,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.handle_paste("probe");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
@@ -639,7 +639,7 @@ mod persistence_flow_tests {
             effort: None,
             branch: String::new(),
         });
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.handle_paste("Persistent task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view
@@ -704,7 +704,7 @@ mod recovery_tests {
             .sessions
             .remove(0)
     }
-    fn named(view: &mut View, path: &Path, name: &str) -> DraftId {
+    fn named(view: &mut View, path: &Path, name: &str) -> DraftKey {
         let id = view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
             cwd: path.into(),
@@ -712,7 +712,7 @@ mod recovery_tests {
             effort: None,
             branch: String::new(),
         });
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.handle_paste(name);
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
@@ -910,7 +910,7 @@ mod confirmation_attention_tests {
             effort: None,
             branch: String::new(),
         });
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.handle_paste("Keep this draft");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
@@ -946,7 +946,7 @@ mod confirmation_attention_tests {
             effort: None,
             branch: String::new(),
         });
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.handle_paste("Delete this draft");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();

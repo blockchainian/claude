@@ -89,9 +89,9 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
     })
 }
 /// Starts after repository selection, names the task and focuses its prompt.
-fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::model::DraftId {
+fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::model::DraftKey {
     let id = view.add_draft(setup(cwd));
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.name_target, Some(id));
     view.handle_paste(name);
     assert_eq!(key(view, KeyCode::Enter), None);
@@ -125,9 +125,9 @@ fn acknowledged_job_refresh_drops_its_draft_and_selects_real_session() {
     });
     arrived.updated_at = Utc::now();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     let selected = view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     assert_eq!(view.drafts.len(), 1);
     view.draft_created(selected, Ok("e772d00b".into()));
     let mut older = arrived.clone();
@@ -213,7 +213,7 @@ fn prompt_model_label_does_not_become_a_metadata_picker_target() {
 fn rendered_draft_model_click_opens_and_single_click_applies_provider_choice() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     let area = Rect::new(0, 0, 180, 52);
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
@@ -252,7 +252,7 @@ fn rendered_draft_model_click_opens_and_single_click_applies_provider_choice() {
 }
 
 #[test]
-fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts() {
+fn event_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
@@ -292,17 +292,24 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
                 .map(|x| buffer[(x, y)].symbol())
                 .collect::<String>()
         };
-        let log = view.viewport.borrow().log;
+        let event_panel = view.viewport.borrow().event_panel;
         assert_eq!(text(model.x, model.y, model.width), model_name);
         // The narrow layout starts them at the midline, under the task's folder.
         let gap = view.center_layout(area).gap;
-        assert_eq!(model.x, if width >= 150 { log.x } else { gap.x + 3 });
+        assert_eq!(
+            model.x,
+            if width >= 150 {
+                event_panel.x
+            } else {
+                gap.x + 3
+            }
+        );
         assert_eq!(
             model.y,
             if width >= 150 {
-                log.bottom()
+                event_panel.bottom()
             } else {
-                log.y - 1
+                event_panel.y - 1
             }
         );
         assert_eq!(effort.y, model.y);
@@ -323,7 +330,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
 }
 
 #[test]
-fn model_group_heading_and_log_border_show_the_catalog_name() {
+fn model_group_heading_and_event_border_show_the_catalog_name() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].model = Some("claude-opus-5-5".into());
     view.grouping = crate::model::Grouping::Model;
@@ -345,7 +352,7 @@ fn model_group_heading_and_log_border_show_the_catalog_name() {
     assert!(!text.contains("claude-opus-5-5"), "{text}");
 }
 #[test]
-fn log_model_targets_cover_only_visible_border_value_cells() {
+fn event_model_targets_cover_only_visible_border_value_cells() {
     let (_directory, mut view) = fixture();
     let row = &mut view.rows[view.selected];
     row.background_job = Some(crate::model::BackgroundJob {
@@ -365,7 +372,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             let frame = Rect::new(0, 0, width, 60);
             let mut buffer = Buffer::empty(frame);
             view.render_at(frame, &mut buffer, Utc::now());
-            let area = view.viewport.borrow().log;
+            let area = view.viewport.borrow().event_panel;
             let gap = view.center_layout(frame).gap;
             let rule_left = if width >= 150 {
                 area.x - 2
@@ -463,7 +470,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
 fn wizard_name_opens_repository_before_prompt() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     view.handle_paste("wizard task");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert!(matches!(
@@ -528,7 +535,7 @@ fn assert_field_click_cancels(field: Field) {
                     .unwrap()
                     .name = None;
                 view.open_name(id);
-                view.set_active_panel(Panel::Details);
+                view.set_active_panel(Panel::TaskDetails);
             }
             let draft = view.selected_draft().unwrap();
             let choices = (
@@ -540,7 +547,7 @@ fn assert_field_click_cancels(field: Field) {
             let prompt = view.input_box.editor.text().to_owned();
             let name_target = view.name_target;
             let name = view.rename.text().to_owned();
-            view.set_active_panel(Panel::Details);
+            view.set_active_panel(Panel::TaskDetails);
             let now = Utc::now();
             let area = Rect::new(0, 0, width, 50);
             let mut before = Buffer::empty(area);
@@ -621,13 +628,13 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
             let (directory, mut view) = git_draft();
             view.discard_selected_draft();
             view.add_draft(setup(directory.path()));
-            view.set_active_panel(Panel::Details);
+            view.set_active_panel(Panel::TaskDetails);
             view.handle_paste("branch task");
             assert_eq!(key(&mut view, KeyCode::Enter), None);
             assert!(!view.selected_draft().unwrap().repository_confirmed);
             if order != "branch" {
                 if order == "repository" {
-                    view.set_active_panel(Panel::Details);
+                    view.set_active_panel(Panel::TaskDetails);
                     key(&mut view, KeyCode::Esc);
                     assert!(view.selector.is_none());
                     assert!(view.confirm_dialog.is_none());
@@ -635,12 +642,12 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
                     click_field(&mut view, Field::Directory);
                 }
                 let selected = view.selector.as_ref().unwrap().selected;
-                let Some(Action::ChangeDraftDirectory { draft_id, cwd }) =
+                let Some(Action::ChangeDraftDirectory { draft_key, cwd }) =
                     view.apply_choice(selected)
                 else {
                     panic!("repository choice");
                 };
-                view.draft_directory_changed(draft_id, cwd, "main".into());
+                view.draft_directory_changed(draft_key, cwd, "main".into());
             }
             if order != "wizard" {
                 render(&view);
@@ -667,7 +674,7 @@ fn branch_and_repository_selection_orders_create_in_selected_repository() {
                 .0;
             assert_eq!(click(&mut view, row.x, row.y), None);
             if branch == "feature/new" {
-                view.set_active_panel(Panel::Details);
+                view.set_active_panel(Panel::TaskDetails);
                 view.handle_paste(branch);
                 assert_eq!(key(&mut view, KeyCode::Enter), None);
             }
@@ -711,7 +718,7 @@ fn prompt_enter_opens_missing_branch_and_wizard_pick_keeps_prompt() {
     view.handle_paste("half prompt");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(
         view.selected_draft().unwrap().branch,
@@ -739,7 +746,7 @@ fn border_branch_and_model_picks_never_create_with_everything_filled() {
     );
     view.open_field(Field::Model);
     assert_eq!(view.apply_choice(0), None);
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(!view.selected_draft().unwrap().working);
 }
@@ -753,15 +760,15 @@ fn border_repository_keeps_prompt_and_same_repository_keeps_branch() {
     view.handle_paste("half prompt");
     view.open_field(Field::Directory);
     let selected = view.selector.as_ref().unwrap().selected;
-    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected) else {
+    let Some(Action::ChangeDraftDirectory { draft_key, cwd }) = view.apply_choice(selected) else {
         panic!("repository pick");
     };
     assert!(view.name_target.is_none());
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.input_box.editor.text(), "half prompt");
     let subdirectory = cwd.join("subdir");
     std::fs::create_dir(&subdirectory).unwrap();
-    view.draft_directory_changed(draft_id, subdirectory, "main".into());
+    view.draft_directory_changed(draft_key, subdirectory, "main".into());
     assert_eq!(
         view.selected_draft().unwrap().branch,
         DraftBranch::Existing("feature/x".into())
@@ -803,7 +810,7 @@ fn wizard_selector_escape_only_closes_one_layer_and_then_confirms_delete() {
     for field in [Field::Directory, Field::Branch] {
         view.open_field(field);
         view.selector.as_mut().unwrap().origin = Origin::Wizard;
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert!(view.selector.is_none());
         view.set_active_panel(Panel::Prompt);
@@ -821,7 +828,7 @@ fn title_edit_prefills_and_escape_or_right_click_inside_keeps_original_name() {
     let id = named_draft(&mut view, directory.path(), "original");
     for right_click in [false, true] {
         view.open_name(id);
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         assert_eq!(view.rename.text(), "original");
         view.handle_paste(" changed");
         if right_click {
@@ -856,7 +863,7 @@ fn saving_existing_name_is_a_side_edit_and_does_not_create() {
     view.handle_paste("half prompt");
     let id = view.selected_draft.unwrap();
     view.open_name(id);
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.rename.set_text("renamed");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(
@@ -864,7 +871,7 @@ fn saving_existing_name_is_a_side_edit_and_does_not_create() {
         Some("renamed")
     );
     assert!(view.selector.is_none());
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.input_box.editor.text(), "half prompt");
 }
 
@@ -904,7 +911,7 @@ fn frozen_draft_ignores_second_submit_and_controls() {
 fn unnamed_repository_side_edit_keeps_typed_name_and_non_git_branch_is_noop() {
     let (directory, mut view) = fixture();
     let id = view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.handle_paste("half name");
     view.open_field(Field::Branch);
     assert!(view.selector.is_none());
@@ -964,7 +971,7 @@ fn wizard_repository_pick_confirms_then_result_opens_branch_without_creating() {
     let selector = view.selector.as_ref().unwrap();
     assert_eq!(selector.origin, Origin::Wizard);
     let selected = selector.selected;
-    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected) else {
+    let Some(Action::ChangeDraftDirectory { draft_key, cwd }) = view.apply_choice(selected) else {
         panic!("repository not preselected");
     };
     assert_eq!(
@@ -973,7 +980,7 @@ fn wizard_repository_pick_confirms_then_result_opens_branch_without_creating() {
     );
     assert!(view.selected_draft().unwrap().repository_confirmed);
     assert!(view.selected_draft().unwrap().continue_after_directory);
-    view.draft_directory_changed(draft_id, directory.path().into(), "main".into());
+    view.draft_directory_changed(draft_key, directory.path().into(), "main".into());
     assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
     assert!(matches!(
         view.selector.as_ref().map(|s| &s.kind),
@@ -1020,10 +1027,10 @@ fn wizard_same_root_repository_pick_keeps_side_branch_from_a_subdirectory() {
     key(&mut view, KeyCode::Enter);
     assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Wizard);
     let selected = view.selector.as_ref().unwrap().selected;
-    let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected) else {
+    let Some(Action::ChangeDraftDirectory { draft_key, cwd }) = view.apply_choice(selected) else {
         panic!("repository choice");
     };
-    view.draft_directory_changed(draft_id, cwd, "main".into());
+    view.draft_directory_changed(draft_key, cwd, "main".into());
     assert!(view.selector.is_none());
     assert_eq!(
         view.drafts[0].branch,
@@ -1043,7 +1050,7 @@ fn frozen_repository_results_and_double_click_title_use_draft_identity() {
     view.discard_selected_draft();
     let id = named_draft(&mut view, directory.path(), "original");
     render(&view);
-    let title = view.viewport.borrow().details_title;
+    let title = view.viewport.borrow().task_details_title;
     click(&mut view, title.x, title.y);
     click(&mut view, title.x, title.y);
     assert_eq!(view.name_target, Some(id));
@@ -1119,7 +1126,7 @@ fn repository_pick_before_naming_skips_repository_wizard_after_name() {
     let (directory, mut view) = git_draft();
     view.discard_selected_draft();
     let id = view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.handle_paste("name in progress");
     view.open_field(Field::Directory);
     let selected = view.selector.as_ref().unwrap().selected;
@@ -1158,7 +1165,7 @@ fn draft_name_saves_when_mouse_activates_another_panel() {
         for (x, y) in [(0, 0), (2, 5), (80, 5), (158, 38)] {
             let (directory, mut view) = fixture();
             let id = view.add_draft(setup(directory.path()));
-            view.set_active_panel(Panel::Details);
+            view.set_active_panel(Panel::TaskDetails);
             view.handle_paste("  Saved on blur  ");
             render(&view);
             assert!(!view.viewport.borrow().title_input.contains((x, y).into()));
@@ -1175,7 +1182,7 @@ fn draft_name_saves_when_mouse_activates_another_panel() {
                 row: y,
                 modifiers: KeyModifiers::NONE,
             });
-            if button == MouseButton::Middle && view.active_panel == Panel::Details {
+            if button == MouseButton::Middle && view.active_panel == Panel::TaskDetails {
                 assert_eq!(action, None);
                 assert_eq!(view.name_target, Some(id));
                 assert!(view.selector.is_none());
@@ -1192,7 +1199,7 @@ fn draft_name_saves_when_mouse_activates_another_panel() {
             }
             assert!(view.name_target.is_none());
             assert!(view.selector.is_none());
-            if button == MouseButton::Right && pressed_panel == Panel::Details {
+            if button == MouseButton::Right && pressed_panel == Panel::TaskDetails {
                 assert!(view.drafts.iter().all(|draft| draft.id != id));
                 assert_eq!(view.active_panel, Panel::TaskList);
             } else {
@@ -1218,7 +1225,7 @@ fn draft_name_saves_when_mouse_activates_another_panel() {
 fn draft_name_click_inside_and_empty_blur_do_not_accept_name() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.handle_paste("   ");
     render(&view);
     click(&mut view, 0, 0);
@@ -1237,7 +1244,7 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
         let (directory, mut view) = fixture();
         let mut arrived = view.rows[0].clone();
         let id = view.add_draft(setup(directory.path()));
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         assert!(view.stored_drafts().is_empty());
         view.handle_paste("Persistent name");
         render(&view);
@@ -1284,7 +1291,7 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
 fn draft_effort_choices_are_unique_and_select_the_effective_value() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     for effort in [None, Some("high")] {
         view.drafts[0].setup.effort = effort.map(str::to_owned);
         view.open_field(Field::Effort);
@@ -1309,7 +1316,7 @@ fn draft_model_choices_are_unique_and_select_the_effective_value() {
     .unwrap();
     let provider = crate::providers::claude::ClaudeProvider::new(config);
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.set_draft_defaults(
         directory.path(),
         provider.task_defaults(directory.path()).unwrap().unwrap(),
@@ -1348,7 +1355,7 @@ fn draft_model_choices_are_unique_and_select_the_effective_value() {
 fn selecting_draft_default_values_clears_overrides() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.drafts[0].setup.model = Some("claude-sonnet-5-5".into());
     view.drafts[0].setup.effort = Some("high".into());
     for (field, default) in [(Field::Model, "claude-opus-5-5"), (Field::Effort, "medium")] {
@@ -1414,7 +1421,7 @@ fn session_choices_select_reported_values_and_dispatch_only_changes() {
 fn draft_defaults_are_visible_clickable_and_can_be_selected_without_an_override() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     let area = Rect::new(0, 0, 180, 52);
     for (field, expected) in [(Field::Model, "Opus 5.5"), (Field::Effort, "medium")] {
         let mut buffer = Buffer::empty(area);
@@ -1461,10 +1468,10 @@ fn draft_configured_defaults_survive_clearing_overrides() {
     setup.model = Some("claude-fable-5-1".into());
     setup.effort = Some("xhigh".into());
     view.add_draft(setup);
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     for field in [Field::Model, Field::Effort] {
         view.open_field(field);
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         key(&mut view, KeyCode::Enter);
     }
     let buffer = render(&view);
@@ -1543,7 +1550,7 @@ fn assert_name_field_click(fields: &[Field], named: bool) {
             view.add_draft(setup(directory.path()))
         };
         view.open_name(id);
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.rename.set_text("Clicked name");
         render(&view);
         click_field(&mut view, field);
@@ -1555,11 +1562,11 @@ fn assert_name_field_click(fields: &[Field], named: bool) {
         assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Border);
         if field == Field::Directory {
             let selected = view.selector.as_ref().unwrap().selected;
-            let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = view.apply_choice(selected)
+            let Some(Action::ChangeDraftDirectory { draft_key, cwd }) = view.apply_choice(selected)
             else {
                 panic!("directory choice")
             };
-            view.draft_directory_changed(draft_id, cwd, "main".into());
+            view.draft_directory_changed(draft_key, cwd, "main".into());
             assert!(view.selector.is_none());
         }
     }
@@ -1578,7 +1585,7 @@ fn draft_empty_name_click_prompt_routes_keys_to_prompt() {
 fn assert_name_prompt_click(name: &str) {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.handle_paste(name);
     render(&view);
     let prompt = view.viewport.borrow().prompt;
@@ -1595,7 +1602,7 @@ fn assert_name_prompt_click(name: &str) {
     if name.is_empty() {
         key(&mut view, KeyCode::Enter);
         assert!(view.name_target.is_some());
-        assert_eq!(view.active_panel, Panel::Details);
+        assert_eq!(view.active_panel, Panel::TaskDetails);
     }
 }
 
@@ -1605,7 +1612,7 @@ fn draft_name_click_other_task_keeps_click() {
     view.grouping = Grouping::Status;
     let session = view.rows[0].id.clone();
     let id = view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.handle_paste("Leave draft");
     render(&view);
     let viewport = view.viewport.borrow();
@@ -1632,7 +1639,7 @@ fn draft_name_right_click_outside_cancels_rename() {
     let (_directory, mut view) = git_draft();
     let id = view.selected_draft.unwrap();
     view.open_name(id);
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.rename.set_text("Discard rename");
     render(&view);
     for kind in [
@@ -1842,7 +1849,7 @@ fn new_draft_starts_in_name_editor() {
         Some(Action::NewDraft { .. })
     ));
     let id = view.add_draft(setup(directory.path()));
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.name_target, Some(id));
     key(&mut view, KeyCode::Char('x'));
     assert_eq!(view.rename.text(), "x");
@@ -1945,7 +1952,7 @@ fn saved_new_branch_row_shows_name_and_reopens_prefilled() {
 }
 
 #[test]
-fn branch_editor_saves_when_details_loses_focus_without_advancing() {
+fn branch_editor_saves_when_task_details_loses_focus_without_advancing() {
     for exit in [0, 1, 2] {
         for name in ["  foo  ", "   "] {
             let (_directory, mut view) = git_draft();
@@ -1964,7 +1971,7 @@ fn branch_editor_saves_when_details_loses_focus_without_advancing() {
                     view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
                     key(&mut view, KeyCode::Char('j'));
                 }
-                _ => view.set_active_panel(Panel::Output),
+                _ => view.set_active_panel(Panel::EventDetail),
             }
             assert_eq!(
                 view.selected_draft().unwrap().branch,
@@ -1980,7 +1987,7 @@ fn branch_editor_saves_when_details_loses_focus_without_advancing() {
             assert_eq!(
                 view.active_panel,
                 if exit == 2 {
-                    Panel::Output
+                    Panel::EventDetail
                 } else {
                     Panel::Prompt
                 }
@@ -1991,7 +1998,7 @@ fn branch_editor_saves_when_details_loses_focus_without_advancing() {
 
 #[test]
 fn panel_blur_does_not_reopen_name_or_save_twice() {
-    for target in [Panel::Prompt, Panel::TaskList, Panel::Output] {
+    for target in [Panel::Prompt, Panel::TaskList, Panel::EventDetail] {
         for branch in [false, true] {
             let (directory, mut view) = git_draft();
             view.discard_selected_draft();
@@ -2010,7 +2017,7 @@ fn panel_blur_does_not_reopen_name_or_save_twice() {
             assert!(view.selector.is_none());
             let updated = view.selected_draft().unwrap().updated_at;
             view.set_active_panel(target);
-            view.set_active_panel(Panel::Details);
+            view.set_active_panel(Panel::TaskDetails);
             view.set_active_panel(target);
             assert_eq!(view.selected_draft().unwrap().updated_at, updated);
             assert_eq!(view.active_panel, target);

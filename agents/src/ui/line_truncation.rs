@@ -47,7 +47,7 @@ pub(crate) fn truncate_line_to_width(line: Line<'static>, max_width: usize) -> L
         let style = span.style;
         let text = span.content.as_ref();
         let mut end_idx = 0usize;
-        for (idx, grapheme) in text.grapheme_indices(/*is_extended*/ true) {
+        for (idx, grapheme) in text.grapheme_indices(true) {
             let grapheme_width = display_width(grapheme);
             if used + grapheme_width > max_width {
                 break;

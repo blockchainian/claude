@@ -176,13 +176,13 @@ fn terminal_codex_completed_subagent_calls() {
     tmux.mouse(0, column, row, true);
     let capture = tmux
         .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));
-    let log_surface = capture
+    let event_surface = capture
         .lines()
         .map(|line| line.chars().skip(80).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!log_surface.contains("SubAgentActivity"), "{capture}");
-    assert!(!log_surface.contains("CollabAgentToolCall"), "{capture}");
+    assert!(!event_surface.contains("SubAgentActivity"), "{capture}");
+    assert!(!event_surface.contains("CollabAgentToolCall"), "{capture}");
     let path = std::env::temp_dir().join("agents-codex-subagent-completed-tmux.txt");
     std::fs::write(&path, capture).unwrap();
     println!("{}", serde_json::json!({"verdict":"pass","capture":path}));

@@ -1,12 +1,12 @@
-//! The calls of an open tool row as the parts the log panel draws and copies.
+//! The calls of an open tool row as the parts the event list panel draws and copies.
 
 use super::content::{Block, Kind as ContentKind};
-use super::detail_model::{Detail, Group, Section as DetailSection, TitleRow};
+use super::event_detail::{EventDetailContent, Group, Section as EventDetailSection, TitleRow};
 use super::highlight;
 #[cfg(test)]
 use super::structured_text::json::{JSON_SCAN_BUDGET, json_lines};
 use super::structured_text::{self, Document};
-use crate::log::{Event, Kind, Section};
+use crate::event::{Event, Kind, Section};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 pub(super) struct Part {
     pub source: String,
     body: Body,
-    pub file_links: Vec<crate::log::FileLink>,
+    pub file_links: Vec<crate::event::FileLink>,
 }
 
 enum Body {
@@ -298,7 +298,7 @@ impl Part {
             Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
             Body::Arrow => {
                 let row = if width > 0 { "↓" } else { "" };
-                vec![Line::styled(row, super::style::log_jump_style())]
+                vec![Line::styled(row, super::style::event_jump_style())]
             }
             Body::Running => vec![Line::from(Span::styled(
                 running_frame(now),
@@ -440,8 +440,12 @@ fn shell_maps(
 }
 
 /// Build one titled section per message or tool call.
-pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
-    let sections = if super::log::shows_calls(event) {
+pub(super) fn event_detail_content(
+    event: &Event,
+    time: String,
+    meta_style: Style,
+) -> EventDetailContent {
+    let sections = if super::event_list::shows_calls(event) {
         let mut sections = parts(event);
         if let ([_], Some(section)) = (event.calls.as_slice(), sections.first_mut()) {
             if event.calls[0].started_at.is_none() {
@@ -478,28 +482,28 @@ pub(super) fn detail(event: &Event, time: String, meta_style: Style) -> Detail {
                 parts.push(part);
             }
         }
-        vec![DetailSection {
+        vec![EventDetailSection {
             title: TitleRow {
                 left: event.sender.clone(),
                 exit_code: None,
                 title: if event.kind == Kind::Tool {
                     event.body.clone()
                 } else {
-                    super::log::kind_label(&event.kind).into()
+                    super::event_list::kind_label(&event.kind).into()
                 },
-                title_style: super::style::log_styles(&event.kind).0,
+                title_style: super::style::event_styles(&event.kind).0,
                 time: Some(time),
                 meta_style,
             },
             groups: vec![Group { parts }],
         }]
     };
-    Detail { sections }
+    EventDetailContent { sections }
 }
 
 /// Choose the tool section's metadata and centered title together.
-fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
-    let mut left = call.detail_left.clone();
+fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
+    let mut left = call.event_detail_left.clone();
     if let Some(code) = call.exit_code.filter(|code| *code != 0) {
         if left.is_empty() {
             left = call.name.clone();
@@ -508,20 +512,20 @@ fn call_title(call: &crate::log::ToolCall) -> (Option<String>, String) {
     }
     (
         (!left.is_empty()).then_some(left),
-        call.detail_title.clone(),
+        call.event_detail_title.clone(),
     )
 }
 
 /// One section per call; arrows are independent alignment groups.
-fn parts(event: &Event) -> Vec<DetailSection> {
-    let label_style = super::style::log_styles(&event.kind).0;
-    let error_style = super::style::log_styles(&Kind::Error).0;
+fn parts(event: &Event) -> Vec<EventDetailSection> {
+    let label_style = super::style::event_styles(&event.kind).0;
+    let error_style = super::style::event_styles(&Kind::Error).0;
     event
         .calls
         .iter()
         .flat_map(|call| {
             let (left, title) = call_title(call);
-            let mut sections = vec![DetailSection {
+            let mut sections = vec![EventDetailSection {
                 title: TitleRow {
                     left,
                     exit_code: call.exit_code.filter(|code| *code != 0),
@@ -530,7 +534,7 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                     time: call
                         .started_at
                         .map(super::formatting::clock_text)
-                        .or_else(|| call.duration.map(super::formatting::format_log_duration)),
+                        .or_else(|| call.duration.map(super::formatting::format_event_duration)),
                     meta_style: Style::new().dim(),
                 },
                 groups: Vec::new(),
@@ -546,7 +550,7 @@ fn parts(event: &Event) -> Vec<DetailSection> {
                         let parts = std::mem::take(&mut input);
                         let previous = sections.last_mut().expect("call has a section");
                         previous.groups.push(Group { parts });
-                        sections.push(DetailSection {
+                        sections.push(EventDetailSection {
                             title: TitleRow {
                                 left: None,
                                 exit_code: None,
@@ -697,7 +701,7 @@ pub(super) fn running_redraw_in(now: chrono::DateTime<chrono::Utc>) -> std::time
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log::ToolCall;
+    use crate::event::ToolCall;
     use unicode_segmentation::UnicodeSegmentation;
     use unicode_width::UnicodeWidthStr;
 
@@ -751,14 +755,14 @@ mod tests {
         let mut provider = provider;
         let mut session = provider.refresh(1).sessions.remove(0);
         session.transcript = Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fixture));
-        provider.log(&session, usize::MAX, false).unwrap()
+        provider.event_panel(&session, usize::MAX, false).unwrap()
     }
 
     #[test]
     fn codex_agent_message_has_a_named_title_and_no_output_arrow() {
         let events = codex_fixture_events("tests/fixtures/codex-agent-messages/new-task.jsonl");
         let event = events.first().unwrap();
-        let detail = detail(event, "09:55:00".into(), Style::new().dim());
+        let detail = event_detail_content(event, "09:55:00".into(), Style::new().dim());
         assert_eq!(detail.sections.len(), 1);
         let section = &detail.sections[0];
         assert_eq!(section.title.left.as_deref(), Some("New task"));
@@ -779,7 +783,7 @@ mod tests {
         let events = codex_fixture_events("tests/fixtures/codex-agent-messages/sequence.jsonl");
         assert_eq!(events.len(), 1);
         let event = &events[0];
-        let detail = detail(event, "merged time".into(), Style::new().dim());
+        let detail = event_detail_content(event, "merged time".into(), Style::new().dim());
         assert_eq!(detail.sections.len(), 4);
         let expected_times = ["21:22:10", "21:22:35", "21:22:53", "21:22:53"];
         for (section, expected) in detail.sections.iter().zip(expected_times) {
@@ -798,7 +802,7 @@ mod tests {
 
     #[test]
     fn section_titles_cover_single_tools_and_messages() {
-        let parsed = crate::providers::claude::log::tail(
+        let parsed = crate::providers::claude::event_reader::tail(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/claude-agent-display.jsonl"),
             100,
@@ -807,7 +811,7 @@ mod tests {
         for source in parsed.iter().filter(|event| !event.calls.is_empty()) {
             let mut event = source.clone();
             event.calls.truncate(1);
-            let detail = detail(&event, "event time".into(), Style::new().dim());
+            let detail = event_detail_content(&event, "event time".into(), Style::new().dim());
             let title = &detail.sections[0].title;
             let clock = event.calls[0].started_at.map(|at| {
                 at.with_timezone(&chrono::Local)
@@ -831,7 +835,7 @@ mod tests {
         let mut message = event(vec![]);
         message.kind = Kind::Assistant;
         message.sender = Some("peer".into());
-        let detail = detail(&message, "event time".into(), Style::new().dim());
+        let detail = event_detail_content(&message, "event time".into(), Style::new().dim());
         let title = &detail.sections[0].title;
         assert_eq!(title.left.as_deref(), Some("peer"));
         assert_eq!(title.title, "Assistant");
@@ -847,9 +851,9 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            detail_left: "Bash".into(),
-            detail_title: "Check the workspace".into(),
-            show_details: false,
+            event_detail_left: "Bash".into(),
+            event_detail_title: "Check the workspace".into(),
+            show_event_detail: false,
             id: "description-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -860,7 +864,7 @@ mod tests {
             duration: None,
         };
         for count in [1, 2] {
-            let detail = detail(
+            let detail = event_detail_content(
                 &event(vec![call.clone(); count]),
                 String::new(),
                 Style::new(),
@@ -880,9 +884,9 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            detail_left: "general-purpose".into(),
-            detail_title: "Inspect source".into(),
-            show_details: false,
+            event_detail_left: "general-purpose".into(),
+            event_detail_title: "Inspect source".into(),
+            show_event_detail: false,
             id: "call-id".into(),
             title: "Agent".into(),
             name: "Agent".into(),
@@ -896,7 +900,7 @@ mod tests {
             duration: Some(chrono::Duration::seconds(12)),
         };
         for count in [1, 2] {
-            let detail = detail(
+            let detail = event_detail_content(
                 &event(vec![call.clone(); count]),
                 "10:11:12".into(),
                 Style::new().dim(),
@@ -912,7 +916,7 @@ mod tests {
                 );
                 assert_eq!(
                     title.title_style,
-                    super::super::style::log_styles(&Kind::Tool).0
+                    super::super::style::event_styles(&Kind::Tool).0
                 );
                 assert_eq!(title.meta_style, Style::new().dim());
                 assert_eq!(section.groups.len(), 3);
@@ -922,13 +926,13 @@ mod tests {
                 assert!(section.groups[2].parts[0].running());
             }
         }
-        call.detail_title = "source-reader".into();
+        call.event_detail_title = "source-reader".into();
         assert_eq!(call_title(&call).1, "source-reader");
-        call.detail_title = "Agent".into();
+        call.event_detail_title = "Agent".into();
         assert_eq!(call_title(&call).1, "Agent");
-        call.detail_left = "Task call-id".into();
+        call.event_detail_left = "Task call-id".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id · 1"));
-        call.detail_left = "Read".into();
+        call.event_detail_left = "Read".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Read · 1"));
     }
 
@@ -950,7 +954,7 @@ mod tests {
             event.kind = kind.clone();
             event.sender = Some("peer".into());
             event.body = "before {\"ok\":true} after".into();
-            let detail = detail(&event, "event time".into(), Style::new().dim());
+            let detail = event_detail_content(&event, "event time".into(), Style::new().dim());
             assert_eq!(detail.sections.len(), 1);
             let title = &detail.sections[0].title;
             assert_eq!(title.time.as_deref(), Some("event time"));
@@ -960,7 +964,7 @@ mod tests {
                 if kind == Kind::Tool {
                     event.body.as_str()
                 } else {
-                    super::super::log::kind_label(&kind)
+                    super::super::event_list::kind_label(&kind)
                 }
             );
             if kind == Kind::Tool {
@@ -1030,9 +1034,9 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            detail_left: "Bash".into(),
-            detail_title: "Bash".into(),
-            show_details: false,
+            event_detail_left: "Bash".into(),
+            event_detail_title: "Bash".into(),
+            show_event_detail: false,
             id: "running-copy".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -1590,9 +1594,9 @@ mod tests {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                detail_left: "Bash".into(),
-                detail_title: "Bash".into(),
-                show_details: false,
+                event_detail_left: "Bash".into(),
+                event_detail_title: "Bash".into(),
+                show_event_detail: false,
                 id: "Bash-fixture".into(),
                 title: "Bash".into(),
                 name: "Bash".into(),
@@ -1615,9 +1619,9 @@ mod tests {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                detail_left: "Read".into(),
-                detail_title: "Read".into(),
-                show_details: false,
+                event_detail_left: "Read".into(),
+                event_detail_title: "Read".into(),
+                show_event_detail: false,
                 id: "Read-fixture".into(),
                 title: "Read".into(),
                 name: "Read".into(),
@@ -1682,9 +1686,9 @@ mod tests {
                     model_settings: None,
                     agent_thread_id: None,
                     agent_path: None,
-                    detail_left: "Bash".into(),
-                    detail_title: "Run checks".into(),
-                    show_details: false,
+                    event_detail_left: "Bash".into(),
+                    event_detail_title: "Run checks".into(),
+                    show_event_detail: false,
                     id: "arrow-fixture".into(),
                     title: "Run checks".into(),
                     name: "Bash".into(),
@@ -1703,7 +1707,7 @@ mod tests {
                         part.lines(width, Style::default().dim(), chrono::DateTime::UNIX_EPOCH);
                     assert_eq!(lines[0].width(), usize::from(width > 0));
                     assert_eq!(lines[0].to_string().find('↓'), (width > 0).then_some(0));
-                    assert_eq!(lines[0].style, super::super::style::log_jump_style());
+                    assert_eq!(lines[0].style, super::super::style::event_jump_style());
                     assert!(part.maps(&lines)[0].is_empty());
                 }
             }
@@ -1719,9 +1723,9 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            detail_left: "Edit".into(),
-            detail_title: "Edit".into(),
-            show_details: false,
+            event_detail_left: "Edit".into(),
+            event_detail_title: "Edit".into(),
+            show_event_detail: false,
             id: "Edit-fixture".into(),
             title: "Edit".into(),
             name: "Edit".into(),
@@ -1776,7 +1780,7 @@ mod tests {
                     .join("tests/fixtures")
                     .join(fixture),
             );
-            for mut event in codex.log(&session, usize::MAX, false).unwrap() {
+            for mut event in codex.event_panel(&session, usize::MAX, false).unwrap() {
                 assert!(event.calls.iter().all(|call| call.is_error));
                 for failed in [true, false] {
                     for call in &mut event.calls {
@@ -1825,9 +1829,9 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            detail_left: "Bash".into(),
-            detail_title: "Bash".into(),
-            show_details: false,
+            event_detail_left: "Bash".into(),
+            event_detail_title: "Bash".into(),
+            show_event_detail: false,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
@@ -1846,7 +1850,7 @@ mod tests {
         let lines = parts[1].lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert_eq!(
             lines[0].spans[0].style,
-            super::super::style::log_styles(&Kind::Error).0
+            super::super::style::event_styles(&Kind::Error).0
         );
         assert_eq!(parts[2].source, "\tboom");
     }

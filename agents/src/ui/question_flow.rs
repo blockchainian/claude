@@ -104,8 +104,8 @@ impl View {
             || self.help
             || self.confirm_dialog.is_some()
             || self.searching
-            || self.log_search.editing
-            || self.log_detail_search.editing
+            || self.event_search.editing
+            || self.event_detail_search.editing
         {
             return None;
         }
@@ -221,7 +221,7 @@ mod tests {
             name: None,
             title: title.into(),
             prompt: title.into(),
-            detail_sources: Default::default(),
+            task_details_sources: Default::default(),
             prompt_images: Vec::new(),
             queued: Vec::new(),
             prompt_at: None,
@@ -330,7 +330,7 @@ mod tests {
         let ask = row.ask.take();
         row.status = SessionStatus::Working;
         view.set_sessions(vec![row.clone()], false);
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         row.status = SessionStatus::NeedsInput;
         row.ask = ask;
         view.set_sessions(vec![row.clone()], false);
@@ -339,9 +339,9 @@ mod tests {
             view.handle_key(KeyCode::Char('1').into()),
             Some(Action::AnswerQuestions { .. })
         ));
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.set_sessions(vec![row], false);
-        assert_eq!(view.active_panel, Panel::Details);
+        assert_eq!(view.active_panel, Panel::TaskDetails);
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod tests {
             .position(|line| line.contains("Type something."))
             .unwrap() as u16;
         let x = view.viewport.borrow().prompt.x + 1 + 5;
-        view.active_panel = Panel::LogList;
+        view.active_panel = Panel::EventList;
         let event = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Middle),
             column: x + 20,
@@ -404,7 +404,7 @@ mod tests {
         assert!(view.active_question().is_some());
         view.rename_target = view.selected_id().cloned();
         view.rename.set_text("你好");
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         let area = Rect::new(0, 0, 160, 40);
         let mut buffer = Buffer::empty(area);
         view.render(area, &mut buffer);

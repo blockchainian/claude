@@ -91,8 +91,8 @@ fn clicking_bottom_aligned_model_row_applies_its_choice() {
         SelectorKind::Model { values, .. } => (values.len() - 1, values.last().unwrap().clone()),
         _ => unreachable!(),
     };
-    let details = view.viewport.borrow().details;
-    let bottom = Rect::new(details.x, details.bottom() - 1, details.width, 1);
+    let task_details = view.viewport.borrow().task_details;
+    let bottom = Rect::new(task_details.x, task_details.bottom() - 1, task_details.width, 1);
     assert_eq!(row_of(&view, index), bottom);
     assert_eq!(click(&mut view, bottom), None);
     assert_eq!(

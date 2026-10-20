@@ -1,4 +1,4 @@
-//! Whether any task worked, dotted on the task log's top rule below the task list: each dot column
+//! Whether any task worked, dotted on the task event list's top rule below the task list: each dot column
 //! of the shared timeline is one bin, dotted in Markdown's inline code color when a task worked
 //! in it.
 
@@ -19,9 +19,9 @@ impl View {
         self.activity = bins;
     }
 
-    /// Dots the bins some task worked in on the rule row `area`, around the log's jump button.
+    /// Dots the bins some task worked in on the rule row `area`, around the event list's jump button.
     pub(super) fn render_activity_strip(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
-        let jump = self.viewport.borrow().log_jump;
+        let jump = self.viewport.borrow().event_jump;
         for x in area.left()..area.right() {
             if jump.contains(Position::new(x, area.y)) {
                 continue;

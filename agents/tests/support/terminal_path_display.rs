@@ -55,7 +55,7 @@ fn terminal_path_suffixes_and_cwd_basename() {
                 .lines()
                 .any(|line| line.contains('─') && line.contains("path-cwd"))
     });
-    // Both the log summary and the selected tool detail retain the filename.
+    // Both the event list summary and the selected tool detail retain the filename.
     for line in wide.lines().filter(|line| line.contains(basename)) {
         assert!(!line.contains(cwd.to_str().unwrap()), "{line}");
         assert!(!line.contains("d…/s…/s…/"), "{line}");
@@ -107,7 +107,7 @@ fn terminal_path_suffixes_and_cwd_basename() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_details_directory_precedes_title_and_branch() {
+fn terminal_task_details_directory_precedes_title_and_branch() {
     let repository = tempfile::tempdir().unwrap();
     let cwd = repository.path().join("repo");
     std::fs::create_dir(&cwd).unwrap();

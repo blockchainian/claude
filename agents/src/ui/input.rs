@@ -1,9 +1,9 @@
 use super::render::HORIZONTAL_PADDING;
 use super::*;
 
-/// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
+/// Rows one wheel report scrolls the event list and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
-/// Wheel reports a scrollable log entry's title holds before the wheel moves past it.
+/// Wheel reports a scrollable event list entry's title holds before the wheel moves past it.
 const TITLE_HOLD_WHEELS: usize = 2;
 
 #[derive(PartialEq, Eq)]
@@ -13,10 +13,10 @@ pub(super) enum ClickTarget {
         row: u16,
         bottom: bool,
     },
-    Log {
+    Event {
         index: usize,
     },
-    Details {
+    TaskDetails {
         session: SessionKey,
         source: Option<String>,
         text: String,
@@ -41,42 +41,42 @@ enum PasteTarget {
     Title(Rect),
     Branch(Rect),
     Search(Rect),
-    LogSearch(Rect),
-    DetailSearch(Rect),
+    EventSearch(Rect),
+    EventDetailSearch(Rect),
     Question(Rect),
 }
 
 impl View {
-    pub(crate) fn set_log_sort(&mut self, sorting: LogSort) {
-        let following = self.following_log();
+    pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
+        let following = self.following_event();
         let full = self
-            .log_selected
-            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+            .event_selected
+            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
         let background_full = self
-            .log_background_return
+            .event_background_return
             .as_ref()
             .and_then(|saved| saved.event)
-            .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
-        self.log_sort = sorting;
-        self.prepare_log_search();
-        self.log_selected = full.and_then(|full| self.shown_position(full));
+            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+        self.event_sort = sorting;
+        self.prepare_event_search();
+        self.event_selected = full.and_then(|full| self.shown_position(full));
         let background_event = background_full.and_then(|full| self.shown_position(full));
-        if let Some(saved) = &mut self.log_background_return {
+        if let Some(saved) = &mut self.event_background_return {
             saved.event = background_event;
         }
-        self.log_pending_older = 0;
-        self.viewport.borrow_mut().log_unseen = 0;
-        if self.log_background_return.is_none() {
-            self.show_newest_log();
+        self.event_pending_older = 0;
+        self.viewport.borrow_mut().event_unseen = 0;
+        if self.event_background_return.is_none() {
+            self.show_newest_event();
         } else if following {
-            self.viewport.borrow_mut().log_scroll = self.log_max_scroll();
+            self.viewport.borrow_mut().event_scroll = self.event_max_scroll();
         } else {
-            self.reveal_log_selection();
+            self.reveal_event_selection();
         }
     }
 
-    fn detail_copy_label(&self, event: &crate::log::Event) -> String {
-        super::log::copied_label(event)
+    fn event_detail_copy_label(&self, event: &crate::event::Event) -> String {
+        super::event_list::copied_label(event)
     }
 
     pub(crate) fn pending_click_in(&self, now: Instant) -> Option<Duration> {
@@ -95,20 +95,25 @@ impl View {
         }
         let click = self.pending_click.take().expect("click is due");
         match click.target {
-            ClickTarget::Log { .. } | ClickTarget::ListBorder { .. } => None,
-            ClickTarget::Details {
+            ClickTarget::Event { .. } | ClickTarget::ListBorder { .. } => None,
+            ClickTarget::TaskDetails {
                 session, source, ..
             } => {
                 if self.selected_id() == Some(&session)
                     && let Some(source) = source
-                    && let Some((full, _)) = self.log.iter().enumerate().rev().find(|(_, event)| {
-                        event.source.as_ref() == Some(&source)
-                            || event.calls.iter().any(|call| call.id == source)
-                    })
+                    && let Some((full, _)) =
+                        self.event_panel
+                            .iter()
+                            .enumerate()
+                            .rev()
+                            .find(|(_, event)| {
+                                event.source.as_ref() == Some(&source)
+                                    || event.calls.iter().any(|call| call.id == source)
+                            })
                 {
                     let index = self.shown_position(full);
-                    self.log_background_return = None;
-                    self.select_log_event(index);
+                    self.event_background_return = None;
+                    self.select_event(index);
                 }
                 None
             }
@@ -167,21 +172,21 @@ impl View {
         if self.prompt_focused() {
             return;
         }
-        if self.log_detail_search.editing {
-            self.log_detail_search.editing = false;
+        if self.event_detail_search.editing {
+            self.event_detail_search.editing = false;
             return;
         }
-        if self.log_search.editing {
-            self.log_search.editing = false;
+        if self.event_search.editing {
+            self.event_search.editing = false;
             return;
         }
-        if let Some(previous) = self.log_background_return.take() {
-            self.select_log_event(previous.event);
+        if let Some(previous) = self.event_background_return.take() {
+            self.select_event(previous.event);
 
-            self.log_detail_search = previous.search;
-            self.viewport.borrow_mut().log_detail_scroll = previous.scroll;
+            self.event_detail_search = previous.search;
+            self.viewport.borrow_mut().event_detail_scroll = previous.scroll;
         } else {
-            self.show_newest_log();
+            self.show_newest_event();
         }
     }
 
@@ -192,20 +197,20 @@ impl View {
         let body = match std::fs::read_to_string(output) {
             Ok(body) => body,
             Err(error) => {
-                self.set_notice(Some(format!("Cannot read background log: {error}")));
+                self.set_notice(Some(format!("Cannot read background events: {error}")));
                 return;
             }
         };
-        if self.log_background_return.is_none() {
-            self.log_background_return = Some(BackgroundReturn {
-                event: self.log_selected,
+        if self.event_background_return.is_none() {
+            self.event_background_return = Some(BackgroundReturn {
+                event: self.event_selected,
 
-                scroll: self.viewport.borrow().log_detail_scroll,
-                search: std::mem::take(&mut self.log_detail_search),
+                scroll: self.viewport.borrow().event_detail_scroll,
+                search: std::mem::take(&mut self.event_detail_search),
             });
         }
-        self.log_background_event = Some(crate::log::Event {
-            kind: crate::log::Kind::Tool,
+        self.background_event = Some(crate::event::Event {
+            kind: crate::event::Kind::Tool,
             source: None,
             completed_time: false,
             background: false,
@@ -219,16 +224,16 @@ impl View {
             duration: None,
             previous_end: None,
             images: Vec::new(),
-            calls: vec![crate::log::ToolCall {
+            calls: vec![crate::event::ToolCall {
                 agent_message: None,
                 started_at: None,
                 hide_output: false,
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                detail_left: String::new(),
-                detail_title: task.description.clone(),
-                show_details: false,
+                event_detail_left: String::new(),
+                event_detail_title: task.description.clone(),
+                show_event_detail: false,
                 id: String::new(),
                 title: task.description,
                 name: "background".into(),
@@ -240,8 +245,8 @@ impl View {
             }],
         });
 
-        self.viewport.borrow_mut().log_detail_layout = None;
-        self.viewport.borrow_mut().log_detail_scroll = 0;
+        self.viewport.borrow_mut().event_detail_layout = None;
+        self.viewport.borrow_mut().event_detail_scroll = 0;
     }
 
     fn set_filter(&mut self, idx: usize) {
@@ -360,18 +365,26 @@ impl View {
             return Some(Panel::TaskList);
         }
         if viewport.title_input.contains(position)
-            || viewport.details_title.contains(position)
-            || viewport.details_input.contains(position)
+            || viewport.task_details_title.contains(position)
+            || viewport.task_details_input.contains(position)
             || viewport
                 .field_targets
                 .iter()
                 .any(|(rect, _)| rect.contains(position))
         {
-            return Some(Panel::Details);
+            return Some(Panel::TaskDetails);
         }
         for (panel, content, borders) in [
-            (Panel::Output, viewport.log_detail, viewport.output_borders),
-            (Panel::LogList, viewport.log, viewport.log_borders),
+            (
+                Panel::EventDetail,
+                viewport.event_detail,
+                viewport.output_borders,
+            ),
+            (
+                Panel::EventList,
+                viewport.event_panel,
+                viewport.event_borders,
+            ),
         ] {
             let within_content = !content.is_empty()
                 && position.x >= content.x.saturating_sub(HORIZONTAL_PADDING + 1)
@@ -383,11 +396,11 @@ impl View {
             }
         }
         if viewport.terminal.contains(position) {
-            return Some(Panel::Output);
+            return Some(Panel::EventDetail);
         }
         for (panel, content) in [
             (Panel::TaskList, viewport.list),
-            (Panel::Details, viewport.details),
+            (Panel::TaskDetails, viewport.task_details),
         ] {
             if !content.is_empty()
                 && position.x >= content.x.saturating_sub(HORIZONTAL_PADDING + 1)
@@ -418,9 +431,9 @@ impl View {
         }
         if let Some(selector) = &self.selector
             && selector.branch_editor().is_some()
-            && v.details_input.contains(at)
+            && v.task_details_input.contains(at)
         {
-            return Some(PasteTarget::Branch(v.details_input));
+            return Some(PasteTarget::Branch(v.task_details_input));
         }
         if v.prompt.contains(at) && self.input_disabled().is_none() {
             let area = v.prompt.inner(Margin::new(1, 0));
@@ -434,13 +447,13 @@ impl View {
         if self.searching && v.search.contains(at) {
             return Some(PasteTarget::Search(v.search));
         }
-        let row = super::log::search_input_rect(v.log);
-        if self.log_search.editing && row.contains(at) {
-            return Some(PasteTarget::LogSearch(row));
+        let row = super::event_list::search_input_rect(v.event_panel);
+        if self.event_search.editing && row.contains(at) {
+            return Some(PasteTarget::EventSearch(row));
         }
-        let row = super::log::search_input_rect(v.log_detail);
-        if self.log_detail_search.editing && row.contains(at) {
-            return Some(PasteTarget::DetailSearch(row));
+        let row = super::event_list::search_input_rect(v.event_detail);
+        if self.event_detail_search.editing && row.contains(at) {
+            return Some(PasteTarget::EventDetailSearch(row));
         }
         None
     }
@@ -463,13 +476,13 @@ impl View {
                     .click_row_after(area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
             }
             PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
-            PasteTarget::LogSearch(area) => {
-                self.log_search
+            PasteTarget::EventSearch(area) => {
+                self.event_search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
-            PasteTarget::DetailSearch(area) => {
-                self.log_detail_search
+            PasteTarget::EventDetailSearch(area) => {
+                self.event_detail_search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
@@ -508,7 +521,7 @@ impl View {
 
     fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
         let viewport = self.viewport.borrow();
-        if viewport.details_title.contains(position)
+        if viewport.task_details_title.contains(position)
             && let Some(id) = self.selected_id()
         {
             return Some(ClickTarget::Title(id.clone()));
@@ -516,9 +529,9 @@ impl View {
         if let Some(cwd) = self.heading_at(position) {
             return Some(ClickTarget::Heading(cwd));
         }
-        if viewport.details.contains(position)
+        if viewport.task_details.contains(position)
             && let Some((_, task)) = viewport
-                .details_background
+                .task_details_background
                 .iter()
                 .find(|(rows, _)| rows.contains(&position.y))
         {
@@ -527,21 +540,21 @@ impl View {
         if let Some(path) = self.link_at(position) {
             return Some(ClickTarget::Link(path));
         }
-        if viewport.details.contains(position)
+        if viewport.task_details.contains(position)
             && let Some((_, text, label)) = viewport
-                .details_copy
+                .task_details_copy
                 .iter()
                 .find(|(rows, _, _)| rows.contains(&position.y))
             && let Some(session) = self.selected_row()
         {
             let source = match *label {
-                "Copied last activity" => session.detail_sources[0].clone(),
-                "Copied update" => session.detail_sources[1].clone(),
-                "Copied prompt" => session.detail_sources[2].clone(),
+                "Copied last activity" => session.task_details_sources[0].clone(),
+                "Copied update" => session.task_details_sources[1].clone(),
+                "Copied prompt" => session.task_details_sources[2].clone(),
                 "Copied tasks" => None,
                 _ => return None,
             };
-            return Some(ClickTarget::Details {
+            return Some(ClickTarget::TaskDetails {
                 session: session.id.clone(),
                 source,
                 text: text.clone(),
@@ -554,26 +567,26 @@ impl View {
             .position(|rect| rect.contains(position))
         {
             return Some(ClickTarget::ListBorder {
-                panel: Panel::Output,
+                panel: Panel::EventDetail,
                 row: position.y,
                 bottom: border == 1,
             });
         }
-        if !viewport.log_jump.contains(position)
+        if !viewport.event_jump.contains(position)
             && let Some(border) = viewport
-                .log_borders
+                .event_borders
                 .iter()
                 .position(|rect| rect.contains(position))
         {
             return Some(ClickTarget::ListBorder {
-                panel: Panel::LogList,
+                panel: Panel::EventList,
                 row: position.y,
                 bottom: border == 1,
             });
         }
         for (panel, content) in [
             (Panel::TaskList, viewport.list),
-            (Panel::Details, viewport.details),
+            (Panel::TaskDetails, viewport.task_details),
         ] {
             if !content.is_empty()
                 && position.x >= content.x
@@ -587,12 +600,12 @@ impl View {
                 });
             }
         }
-        if viewport.log.contains(position)
+        if viewport.event_panel.contains(position)
             && let Some(&index) = viewport
-                .log_rows
-                .get(usize::from(position.y - viewport.log.y))
+                .event_rows
+                .get(usize::from(position.y - viewport.event_panel.y))
         {
-            return Some(ClickTarget::Log { index });
+            return Some(ClickTarget::Event { index });
         }
         None
     }
@@ -615,7 +628,7 @@ impl View {
             .map(|overlay| overlay.modal)?;
         if !modal
             && mouse.kind == MouseEventKind::Down(MouseButton::Middle)
-            && self.viewport.borrow().details_input.contains(position)
+            && self.viewport.borrow().task_details_input.contains(position)
             && self
                 .selector
                 .as_ref()
@@ -645,7 +658,7 @@ impl View {
                     .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
                     && (modal || self.selector.is_some())
                 {
-                    self.last_detail_click = None;
+                    self.last_event_detail_click = None;
                     self.right_click();
                 }
             }
@@ -716,19 +729,20 @@ impl View {
                 .take()
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
-                self.last_detail_click = None;
+                self.last_event_detail_click = None;
                 if self.selected_draft.is_some() {
                     self.right_click();
                     return None;
                 }
-                if self.viewport.borrow().log_detail.contains(position) {
+                if self.viewport.borrow().event_detail.contains(position) {
                     return if self.terminal.is_some() {
                         Some(Action::CloseTerminal)
                     } else {
                         self.selected_id().cloned().map(Action::OpenTerminal)
                     };
                 }
-                if self.selector.is_some() && self.viewport.borrow().details.contains(position) {
+                if self.selector.is_some() && self.viewport.borrow().task_details.contains(position)
+                {
                     self.pending_click = None;
                     self.cancel_selector();
                 } else {
@@ -798,7 +812,7 @@ impl View {
                         self.last_click = None;
                         self.pending_click = None;
                         self.last_copy_click = None;
-                        self.last_detail_click = None;
+                        self.last_event_detail_click = None;
                     }
                 }
                 return None;
@@ -822,8 +836,8 @@ impl View {
             }
             _ => {}
         }
-        let detail_click = if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-            self.last_detail_click.take()
+        let event_detail_click = if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            self.last_event_detail_click.take()
         } else {
             None
         };
@@ -852,12 +866,12 @@ impl View {
                 {
                     self.close_selector();
                 } else {
-                    self.set_active_panel(Panel::Details);
+                    self.set_active_panel(Panel::TaskDetails);
                     self.open_field(field);
                 }
                 return None;
             }
-            if self.viewport.borrow().details_title.contains(position)
+            if self.viewport.borrow().task_details_title.contains(position)
                 && let Some(session) = self.selected_row()
             {
                 let id = session.id.clone();
@@ -889,9 +903,9 @@ impl View {
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
-            && self.viewport.borrow().log_jump.contains(position)
+            && self.viewport.borrow().event_jump.contains(position)
         {
-            self.show_newest_log();
+            self.show_newest_event();
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
@@ -899,15 +913,15 @@ impl View {
                 self.click_target_at(position)
         {
             if self.defer_click(target) {
-                if panel == Panel::Output {
-                    self.set_active_panel(Panel::Output);
-                    self.navigate_detail(
-                        Panel::Output,
+                if panel == Panel::EventDetail {
+                    self.set_active_panel(Panel::EventDetail);
+                    self.navigate_event_detail(
+                        Panel::EventDetail,
                         if bottom { KeyCode::End } else { KeyCode::Home },
                     );
-                } else if panel == Panel::Details {
+                } else if panel == Panel::TaskDetails {
                     let mut viewport = self.viewport.borrow_mut();
-                    let state = &mut viewport.details_scroll;
+                    let state = &mut viewport.task_details_scroll;
                     let row = if bottom { state.content_top } else { u16::MAX };
                     while state.scroll_window(bottom, row) {}
                 } else if panel == Panel::TaskList {
@@ -922,12 +936,12 @@ impl View {
                         self.viewport.borrow_mut().scroll = if bottom { usize::MAX } else { 0 };
                     }
                 } else if bottom {
-                    self.show_newest_log();
+                    self.show_newest_event();
                 } else {
-                    self.log_background_return = None;
-                    self.log_pending_older = 0;
-                    self.log_start_requested = true;
-                    self.select_log_event(Some(0));
+                    self.event_background_return = None;
+                    self.event_pending_older = 0;
+                    self.event_start_requested = true;
+                    self.select_event(Some(0));
                 }
             }
             return None;
@@ -936,24 +950,24 @@ impl View {
             let event = {
                 let viewport = self.viewport.borrow();
                 viewport
-                    .log
+                    .event_panel
                     .contains(position)
-                    .then(|| usize::from(mouse.row - viewport.log.y))
-                    .and_then(|row| viewport.log_rows.get(row))
+                    .then(|| usize::from(mouse.row - viewport.event_panel.y))
+                    .and_then(|row| viewport.event_rows.get(row))
                     .and_then(|&full| self.shown_position(full))
             };
             if let Some(event) = event {
-                self.log_background_return = None;
-                self.select_log_event(Some(event));
+                self.event_background_return = None;
+                self.select_event(Some(event));
             }
             let background = {
                 let viewport = self.viewport.borrow();
                 viewport
-                    .details
+                    .task_details
                     .contains(position)
                     .then(|| {
                         viewport
-                            .details_background
+                            .task_details_background
                             .iter()
                             .find(|(rows, _)| rows.contains(&mouse.row))
                             .map(|(_, task)| task.clone())
@@ -967,26 +981,26 @@ impl View {
                 return None;
             }
             if let Some(target) = self.link_at(position) {
-                let detail = self.viewport.borrow().log_detail;
+                let detail = self.viewport.borrow().event_detail;
                 let has_double = {
                     let viewport = self.viewport.borrow();
-                    viewport.log.contains(position)
+                    viewport.event_panel.contains(position)
                         || (detail.contains(position)
-                            && self.visible_log_event().is_some()
-                            && mouse.row >= detail.y + super::log::LOG_TOP)
+                            && self.visible_event().is_some()
+                            && mouse.row >= detail.y + super::event_list::EVENT_TOP)
                         || viewport.list.contains(position)
-                        || (viewport.details.contains(position)
+                        || (viewport.task_details.contains(position)
                             && viewport
-                                .details_copy
+                                .task_details_copy
                                 .iter()
                                 .any(|(rows, _, _)| rows.contains(&mouse.row)))
                 };
                 if has_double {
                     if self.defer_click(ClickTarget::Link(target)) {
                         let viewport = self.viewport.borrow();
-                        if viewport.details.contains(position) {
+                        if viewport.task_details.contains(position) {
                             return viewport
-                                .details_copy
+                                .task_details_copy
                                 .iter()
                                 .find(|(rows, _, _)| rows.contains(&mouse.row))
                                 .map(|(_, text, label)| Action::Copy {
@@ -994,16 +1008,16 @@ impl View {
                                     label: (*label).into(),
                                 });
                         }
-                        if viewport.log.contains(position) {
+                        if viewport.event_panel.contains(position) {
                             drop(viewport);
                             return None;
                         }
                         if detail.contains(position)
-                            && let Some(event) = self.visible_log_event()
+                            && let Some(event) = self.visible_event()
                         {
                             return Some(Action::Copy {
-                                text: self.detail_text(event),
-                                label: self.detail_copy_label(event),
+                                text: self.event_detail_text(event),
+                                label: self.event_detail_copy_label(event),
                             });
                         }
                     }
@@ -1012,7 +1026,7 @@ impl View {
                 return Some(Action::OpenPath(target));
             }
         }
-        let (tab, over_tabs, over_list, over_details, over_log, entry, log_row, copy_text) = {
+        let (tab, over_tabs, over_list, over_task_details, over_event, entry, event_row, copy_text) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
                 .tabs
@@ -1023,15 +1037,15 @@ impl View {
                 .list_rows
                 .contains(position)
                 .then(|| viewport.first_entry + usize::from(mouse.row - viewport.list_rows.y));
-            let log_row = viewport
-                .log
+            let event_row = viewport
+                .event_panel
                 .contains(position)
-                .then(|| usize::from(mouse.row - viewport.log.y))
-                .and_then(|row| viewport.log_rows.get(row).copied());
+                .then(|| usize::from(mouse.row - viewport.event_panel.y))
+                .and_then(|row| viewport.event_rows.get(row).copied());
             // The selected event's body starts below the top rows, its header and a blank row.
-            let copy_text = if viewport.details.contains(position) {
+            let copy_text = if viewport.task_details.contains(position) {
                 viewport
-                    .details_copy
+                    .task_details_copy
                     .iter()
                     .find(|(rows, _, _)| rows.contains(&mouse.row))
                     .map(|(_, text, label)| (text.clone(), (*label).to_owned()))
@@ -1042,10 +1056,10 @@ impl View {
                 tab,
                 viewport.tab_bar.contains(position),
                 viewport.list.contains(position),
-                viewport.details.contains(position),
-                viewport.log.contains(position) || viewport.log_detail.contains(position),
+                viewport.task_details.contains(position),
+                viewport.event_panel.contains(position) || viewport.event_detail.contains(position),
                 entry,
-                log_row,
+                event_row,
                 copy_text,
             )
         };
@@ -1079,12 +1093,12 @@ impl View {
                         return None;
                     }
                     self.last_click = Some((task, now));
-                } else if let Some(index) = log_row {
-                    self.defer_click(ClickTarget::Log { index });
-                } else if let Some(target @ ClickTarget::Details { .. }) =
+                } else if let Some(index) = event_row {
+                    self.defer_click(ClickTarget::Event { index });
+                } else if let Some(target @ ClickTarget::TaskDetails { .. }) =
                     self.click_target_at(position)
                 {
-                    let ClickTarget::Details { text, label, .. } = &target else {
+                    let ClickTarget::TaskDetails { text, label, .. } = &target else {
                         unreachable!()
                     };
                     let action = Action::Copy {
@@ -1094,24 +1108,24 @@ impl View {
                     if self.defer_click(target) {
                         return Some(action);
                     }
-                } else if self.viewport.borrow().log_text.area.contains(position)
+                } else if self.viewport.borrow().event_text.area.contains(position)
                     && let Some(session) = self.selected_id().cloned()
-                    && self.visible_log_event().is_some()
+                    && self.visible_event().is_some()
                 {
                     let now = Instant::now();
-                    let double = detail_click.is_some_and(|(last, index, at)| {
+                    let double = event_detail_click.is_some_and(|(last, index, at)| {
                         last == session
-                            && index == self.log_selected
+                            && index == self.event_selected
                             && now.duration_since(at) < self.double_click_interval
                     });
                     if double {
-                        let event = self.visible_log_event().expect("detail event is visible");
+                        let event = self.visible_event().expect("detail event is visible");
                         return Some(Action::Copy {
-                            text: self.detail_text(event),
-                            label: self.detail_copy_label(event),
+                            text: self.event_detail_text(event),
+                            label: self.event_detail_copy_label(event),
                         });
                     }
-                    self.last_detail_click = Some((session, self.log_selected, now));
+                    self.last_event_detail_click = Some((session, self.event_selected, now));
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {
@@ -1123,7 +1137,7 @@ impl View {
                     self.last_copy_click = Some((text, now));
                 }
             }
-            MouseEventKind::Up(MouseButton::Right) => self.show_newest_log(),
+            MouseEventKind::Up(MouseButton::Right) => self.show_newest_event(),
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {
@@ -1135,14 +1149,14 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
-                } else if over_log && self.viewport.borrow().log.contains(position) {
-                    self.move_log_selection(forward);
-                } else if over_details && let Some(selector) = self.selector.as_mut() {
+                } else if over_event && self.viewport.borrow().event_panel.contains(position) {
+                    self.move_event_selection(forward);
+                } else if over_task_details && let Some(selector) = self.selector.as_mut() {
                     let code = if forward { KeyCode::Down } else { KeyCode::Up };
                     selector.selected =
                         super::navigation::step(selector.selected, selector.len(), 1, code);
-                } else if over_log || over_details {
-                    self.scroll_content_rows(forward, over_log, mouse.row, WHEEL_ROWS, true);
+                } else if over_event || over_task_details {
+                    self.scroll_content_rows(forward, over_event, mouse.row, WHEEL_ROWS, true);
                 }
             }
             _ => {}
@@ -1155,8 +1169,8 @@ impl View {
         let viewport = self.viewport.borrow();
         [
             &viewport.list_links,
-            &viewport.details_links,
-            &viewport.log_links,
+            &viewport.task_details_links,
+            &viewport.event_links,
         ]
         .into_iter()
         .flatten()
@@ -1164,66 +1178,66 @@ impl View {
         .map(|(_, target)| target.clone())
     }
 
-    /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
+    /// Scrolls the event list panel, or the task details panel when `over_event` is false, by one row.
     #[cfg(test)]
-    pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) -> bool {
-        self.scroll_content_rows(forward, over_log, row, 1, false)
+    pub(super) fn scroll_content_row(&mut self, forward: bool, over_event: bool, row: u16) -> bool {
+        self.scroll_content_rows(forward, over_event, row, 1, false)
     }
 
-    /// With `wheel`, a scrollable log entry's title holds reports in the direction of travel.
+    /// With `wheel`, a scrollable event list entry's title holds reports in the direction of travel.
     fn scroll_content_rows(
         &mut self,
         forward: bool,
-        over_log: bool,
+        over_event: bool,
         row: u16,
         rows: usize,
         wheel: bool,
     ) -> bool {
-        let over_log_detail = {
+        let over_event_detail = {
             let viewport = self.viewport.borrow();
-            (viewport.log_detail.y..viewport.log_detail.bottom()).contains(&row)
+            (viewport.event_detail.y..viewport.event_detail.bottom()).contains(&row)
         };
-        if over_log && over_log_detail {
-            self.prepare_log_detail_scroll();
+        if over_event && over_event_detail {
+            self.prepare_event_detail_scroll();
         }
         let mut viewport = self.viewport.borrow_mut();
-        if over_log && over_log_detail {
-            let title_hold = viewport.log_detail_title_hold.take();
+        if over_event && over_event_detail {
+            let title_hold = viewport.event_detail_title_hold.take();
             if let Some((direction, left)) = title_hold
                 && wheel
                 && direction == forward
-                && viewport.log_detail_max > 0
+                && viewport.event_detail_max > 0
             {
-                viewport.log_detail_title_hold = (left > 1).then_some((direction, left - 1));
+                viewport.event_detail_title_hold = (left > 1).then_some((direction, left - 1));
                 true
-            } else if viewport.log_detail_state.scroll_rows(forward, row, rows) {
-                viewport.log_detail_scroll = viewport.log_detail_state.position();
-                if wheel && !forward && viewport.log_detail_scroll == 0 {
-                    viewport.log_detail_title_hold = Some((false, TITLE_HOLD_WHEELS));
+            } else if viewport.event_detail_state.scroll_rows(forward, row, rows) {
+                viewport.event_detail_scroll = viewport.event_detail_state.position();
+                if wheel && !forward && viewport.event_detail_scroll == 0 {
+                    viewport.event_detail_title_hold = Some((false, TITLE_HOLD_WHEELS));
                 }
                 true
             } else {
                 drop(viewport);
-                let selected = self.log_selected;
-                self.move_log_selection(forward);
-                if wheel && self.log_selected != selected {
+                let selected = self.event_selected;
+                self.move_event_selection(forward);
+                if wheel && self.event_selected != selected {
                     let mut viewport = self.viewport.borrow_mut();
-                    viewport.log_detail_entry = Some(forward);
-                    viewport.log_detail_title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
+                    viewport.event_detail_entry = Some(forward);
+                    viewport.event_detail_title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
                 }
                 false
             }
-        } else if over_log {
-            viewport.log_scroll = if forward {
-                viewport.log_scroll.saturating_add(1)
+        } else if over_event {
+            viewport.event_scroll = if forward {
+                viewport.event_scroll.saturating_add(1)
             } else {
-                viewport.log_scroll.saturating_sub(1)
+                viewport.event_scroll.saturating_sub(1)
             };
             true
         } else {
             let mut consumed = false;
             for _ in 0..rows {
-                if !viewport.details_scroll.scroll(forward, row) {
+                if !viewport.task_details_scroll.scroll(forward, row) {
                     break;
                 }
                 consumed = true;
@@ -1250,29 +1264,31 @@ impl View {
                 }
                 _ => unreachable!("list navigation code"),
             },
-            Panel::LogList => self.navigate_log(code),
-            panel @ (Panel::Details | Panel::Output) => self.navigate_detail(panel, code),
+            Panel::EventList => self.navigate_event(code),
+            panel @ (Panel::TaskDetails | Panel::EventDetail) => {
+                self.navigate_event_detail(panel, code)
+            }
             Panel::Prompt => {}
         }
     }
 
-    fn navigate_detail(&mut self, panel: Panel, code: KeyCode) {
-        if panel == Panel::Output {
+    fn navigate_event_detail(&mut self, panel: Panel, code: KeyCode) {
+        if panel == Panel::EventDetail {
             if self.shown_terminal().is_some() {
                 return;
             }
-            self.prepare_log_detail_scroll();
+            self.prepare_event_detail_scroll();
         }
         let viewport = &mut *self.viewport.borrow_mut();
-        let page = if panel == Panel::Details {
-            viewport.details.height
+        let page = if panel == Panel::TaskDetails {
+            viewport.task_details.height
         } else {
-            viewport.log_text.area.height
+            viewport.event_text.area.height
         };
-        let state = if panel == Panel::Details {
-            &mut viewport.details_scroll
+        let state = if panel == Panel::TaskDetails {
+            &mut viewport.task_details_scroll
         } else {
-            &mut viewport.log_detail_state
+            &mut viewport.event_detail_state
         };
         let forward = matches!(code, KeyCode::Down | KeyCode::PageDown | KeyCode::End);
         let row = state.content_top;
@@ -1286,8 +1302,8 @@ impl View {
             };
             state.scroll_rows(forward, row, rows);
         }
-        if panel == Panel::Output {
-            viewport.log_detail_scroll = viewport.log_detail_state.position();
+        if panel == Panel::EventDetail {
+            viewport.event_detail_scroll = viewport.event_detail_state.position();
         }
     }
 
@@ -1342,12 +1358,12 @@ impl View {
         let session = self.selected_row()?;
         let id = session.id.clone();
         self.stopping_prompt = (session.status == SessionStatus::Working
-            && self.log_session.as_ref() == Some(&id))
+            && self.event_session.as_ref() == Some(&id))
         .then(|| {
-            self.log
+            self.event_panel
                 .iter()
                 .rev()
-                .find(|event| event.kind == crate::log::Kind::User)
+                .find(|event| event.kind == crate::event::Kind::User)
                 .map(|event| (id.clone(), event.body.clone()))
         })
         .flatten();
@@ -1371,7 +1387,7 @@ impl View {
         let title = session.display_title().to_owned();
         self.rename.set_text(&title);
         self.rename_target = Some(id);
-        self.set_active_panel(Panel::Details);
+        self.set_active_panel(Panel::TaskDetails);
         self.name_target = None;
         self.search.clear();
         self.searching = false;
@@ -1441,7 +1457,10 @@ impl View {
         {
             return Some(Action::Quit);
         }
-        if self.active_panel == Panel::Details && self.title_editing() && self.selector.is_none() {
+        if self.active_panel == Panel::TaskDetails
+            && self.title_editing()
+            && self.selector.is_none()
+        {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('c')
                     if key.code == KeyCode::Esc
@@ -1473,21 +1492,21 @@ impl View {
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
             && !matches!(
                 self.active_panel,
-                Panel::TaskList | Panel::LogList | Panel::Output
+                Panel::TaskList | Panel::EventList | Panel::EventDetail
             )
             && !self.prompt_focused()
             && self.title_editor().is_none()
             && !self.searching
-            && !self.log_search.editing
-            && !self.log_detail_search.editing
+            && !self.event_search.editing
+            && !self.event_detail_search.editing
         {
             return None;
         }
         if self.prompt_focused()
             && self.input_disabled().is_none()
             && !self.searching
-            && !self.log_search.editing
-            && !self.log_detail_search.editing
+            && !self.event_search.editing
+            && !self.event_detail_search.editing
         {
             if key.code == KeyCode::Esc && self.selected_draft.is_some() {
                 self.confirm_draft_delete();
@@ -1533,8 +1552,8 @@ impl View {
             && self.confirm_dialog.is_none()
             && !self.help
             && self.rename_target.is_none()
-            && !self.log_search.editing
-            && !self.log_detail_search.editing
+            && !self.event_search.editing
+            && !self.event_detail_search.editing
             && !self.searching
             && self
                 .selected_row()
@@ -1617,38 +1636,38 @@ impl View {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
-        if self.log_detail_search.editing {
+        if self.event_detail_search.editing {
             match key.code {
-                KeyCode::Esc => self.log_detail_search.clear(),
-                KeyCode::Enter => self.log_detail_search.editing = false,
+                KeyCode::Esc => self.event_detail_search.clear(),
+                KeyCode::Enter => self.event_detail_search.editing = false,
                 _ => {
-                    self.log_detail_search.query.handle(key);
+                    self.event_detail_search.query.handle(key);
                 }
             }
-            self.jump_detail_match();
+            self.jump_event_detail_match();
             return None;
         }
-        if self.log_search.editing {
+        if self.event_search.editing {
             let selected_full = self
-                .log_selected
-                .and_then(|index| self.shown_log_events().nth(index).map(|(full, _)| full));
+                .event_selected
+                .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
             match key.code {
                 KeyCode::Esc => {
-                    self.log_search.clear();
+                    self.event_search.clear();
                 }
-                KeyCode::Enter => self.log_search.editing = false,
+                KeyCode::Enter => self.event_search.editing = false,
                 _ => {
-                    let before = self.log_search.query.text().to_owned();
-                    if self.log_search.query.handle(key) {
-                        if self.log_search.query.text() != before {
-                            self.rematch_log_at(selected_full);
+                    let before = self.event_search.query.text().to_owned();
+                    if self.event_search.query.handle(key) {
+                        if self.event_search.query.text() != before {
+                            self.rematch_event_at(selected_full);
                         }
                         return None;
                     }
                 }
             }
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-                self.rematch_log_at(selected_full);
+                self.rematch_event_at(selected_full);
                 return None;
             }
         }
@@ -1699,37 +1718,37 @@ impl View {
         if plain && key.code == KeyCode::Char('/') {
             match self.active_panel {
                 Panel::TaskList => self.searching = true,
-                Panel::LogList => {
-                    self.log_search.editing = true;
+                Panel::EventList => {
+                    self.event_search.editing = true;
 
-                    self.prepare_log_search();
+                    self.prepare_event_search();
                 }
-                Panel::Output => {
-                    self.log_detail_search.editing = true;
-                    self.jump_detail_match();
+                Panel::EventDetail => {
+                    self.event_detail_search.editing = true;
+                    self.jump_event_detail_match();
                 }
                 _ => {}
             }
             return None;
         }
-        if plain && key.code == KeyCode::Enter && self.active_panel == Panel::LogList {
-            self.jump_log_agent();
+        if plain && key.code == KeyCode::Enter && self.active_panel == Panel::EventList {
+            self.jump_event_agent();
             return None;
         }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);
             return None;
         }
-        if plain && key.code == KeyCode::Char('t') && self.active_panel == Panel::LogList {
-            self.set_log_sort(match self.log_sort {
-                LogSort::Time => LogSort::Duration,
-                LogSort::Duration => LogSort::Time,
+        if plain && key.code == KeyCode::Char('t') && self.active_panel == Panel::EventList {
+            self.set_event_sort(match self.event_sort {
+                EventSort::Time => EventSort::Duration,
+                EventSort::Duration => EventSort::Time,
             });
-            return Some(Action::PersistSorting(self.log_sort));
+            return Some(Action::PersistSorting(self.event_sort));
         }
         if plain
             && key.code == KeyCode::Esc
-            && self.active_panel == Panel::Details
+            && self.active_panel == Panel::TaskDetails
             && self.selected_draft.is_some()
         {
             self.confirm_draft_delete();
@@ -1852,7 +1871,7 @@ impl View {
 }
 
 #[cfg(test)]
-pub(super) use super::details_scroll::curtain_target;
+pub(super) use super::section_scroll::curtain_target;
 
 #[cfg(test)]
 #[path = "input_tests.rs"]

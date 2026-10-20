@@ -80,13 +80,13 @@ fn links_without_double_action_open_each_click_immediately() {
     let (rect, target) = view
         .viewport
         .borrow()
-        .details_links
+        .task_details_links
         .iter()
         .find(|(rect, _)| {
             !view
                 .viewport
                 .borrow()
-                .details_copy
+                .task_details_copy
                 .iter()
                 .any(|(rows, _, _)| rows.contains(&rect.y))
         })
@@ -110,13 +110,13 @@ fn pending_path_precedes_immediate_link_action() {
     let (link, target) = view
         .viewport
         .borrow()
-        .details_links
+        .task_details_links
         .iter()
         .find(|(rect, _)| {
             !view
                 .viewport
                 .borrow()
-                .details_copy
+                .task_details_copy
                 .iter()
                 .any(|(rows, _, _)| rows.contains(&rect.y))
         })

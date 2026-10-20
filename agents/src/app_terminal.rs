@@ -1,4 +1,4 @@
-//! Opens, feeds and closes the session terminal shown in the log detail panel.
+//! Opens, feeds and closes the session terminal shown in the event detail panel.
 
 use super::{App, Input};
 use crate::model::SessionStatus;
@@ -20,7 +20,7 @@ impl App {
         }
         let Some(size) = self.view.terminal_size() else {
             self.view
-                .set_notice(Some("The log detail panel is hidden".into()));
+                .set_notice(Some("The event detail panel is hidden".into()));
             return;
         };
         if self.closing_terminals.contains_key(&id) {
@@ -75,7 +75,7 @@ impl App {
         Some(session.id)
     }
 
-    /// Detaches or ends the open terminal and shows the log detail again.
+    /// Detaches or ends the open terminal and shows the event detail again.
     pub(super) fn close_terminal(&mut self) {
         self.terminal_task = None;
         let Some(terminal) = self.terminal.take() else {
@@ -126,9 +126,11 @@ impl App {
     /// still selected, closes unselected or exited programs, and fits the selected
     /// terminal to the panel.
     pub(super) fn sync_terminal(&mut self) {
-        if self.terminal.as_ref().is_some_and(|terminal| {
-            self.view.selected_id() != Some(&terminal.id)
-        }) {
+        if self
+            .terminal
+            .as_ref()
+            .is_some_and(|terminal| self.view.selected_id() != Some(&terminal.id))
+        {
             self.close_terminal();
             return;
         }
@@ -602,9 +604,9 @@ mod tests {
     }
 
     #[test]
-    fn close_restores_logs_before_a_stubborn_client_exits() {
+    fn close_restores_events_before_a_stubborn_client_exits() {
         let (directory, mut app, id) = fixture();
-        let log = draw(&mut app);
+        let event_panel = draw(&mut app);
         let pid = attach(&mut app, id, &directory.path().join("pid"));
         let screen = app.terminal.as_ref().unwrap().screen.clone();
         let start = Instant::now();
@@ -615,7 +617,7 @@ mod tests {
             start.elapsed()
         );
         assert!(app.terminal.is_none());
-        assert_eq!(draw(&mut app), log);
+        assert_eq!(draw(&mut app), event_panel);
         assert_eq!(
             unsafe { libc::kill(pid as i32, 0) },
             0,

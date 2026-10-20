@@ -15,7 +15,7 @@ pub(super) struct Link {
 pub(super) type DrawnLink = (Rect, PathBuf);
 
 /// The existing paths in `text`, and the label of each of `images`.
-pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -> Vec<Link> {
+pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image]) -> Vec<Link> {
     let mut links = markdown_links(text, cwd);
     for link in path_links(text, &super::paths::text_paths(text, cwd), cwd) {
         if !links
@@ -303,7 +303,7 @@ mod tests {
             "see `src/ui/log.rs`, and/or ~/., {} and https://x.io/a/b [Image #1]",
             absolute.display()
         );
-        let images = [crate::log::Image {
+        let images = [crate::event::Image {
             label: "[Image #1]".into(),
             path: "/tmp/1.png".into(),
         }];

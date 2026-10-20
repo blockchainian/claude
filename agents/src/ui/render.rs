@@ -62,13 +62,13 @@ pub(super) struct CenterLayout {
     pub(super) top: Rect,
     pub(super) list: Rect,
     pub(super) gap: Rect,
-    pub(super) details: Rect,
+    pub(super) task_details: Rect,
     pub(super) search: Rect,
     pub(super) usage_chart: Rect,
     pub(super) footer: Rect,
-    pub(super) log: Rect,
+    pub(super) event_panel: Rect,
     pub(super) prompt: Rect,
-    pub(super) log_detail: Rect,
+    pub(super) event_detail: Rect,
 }
 
 impl View {
@@ -83,8 +83,8 @@ impl View {
         let header = row(area, 0, header_height);
         let wide = area.width >= WIDE_LAYOUT_COLUMNS;
         // The prompt or question grows with its content up to a share of the rows between
-        // the header and the footer: half in narrow mode, where the log list stacks below
-        // it, and two thirds in wide mode, where the log sits beside the panels.
+        // the header and the footer: half in narrow mode, where the event list stacks below
+        // it, and two thirds in wide mode, where the event list sits beside the panels.
         let content_rows = area
             .height
             .saturating_sub(header_height + footer_height + 2)
@@ -107,14 +107,15 @@ impl View {
             )
             .min(prompt_cap);
         let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
-        let log_height = bottom_height.saturating_sub(footer_height).max(10);
-        let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6;
+        let event_height = bottom_height.saturating_sub(footer_height).max(10);
+        let show_event =
+            area.height.saturating_sub(footer_height + event_height) >= header_height + 6;
         // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
         // The output keeps its top rule inside this share and leaves one row for its bottom rule.
         let content_height = area
             .height
             .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
-        let (top_height, list_height, detail_height) = if !show_log {
+        let (top_height, list_height, event_detail_height) = if !show_event {
             (
                 area.height
                     .saturating_sub(header_height + footer_height + prompt_height),
@@ -136,55 +137,55 @@ impl View {
         let top = body;
         let prompt = row(
             area,
-            header_height + top_height + u16::from(show_log),
+            header_height + top_height + u16::from(show_event),
             prompt_height,
         );
-        let log = if show_log && !wide {
+        let event_panel = if show_event && !wide {
             row(area, prompt.bottom() - area.y + 1, list_height)
                 .inner(Margin::new(HORIZONTAL_PADDING, 0))
         } else {
             Rect::default()
         };
-        let log_detail = if show_log {
+        let event_detail = if show_event {
             row(
                 area,
                 header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
-                detail_height,
+                event_detail_height,
             )
         } else {
             Rect::default()
         };
-        let (body, log_list) = if wide && show_log {
+        let (body, event_list) = if wide && show_event {
             let column_width = (body.width - 2 * PANEL_GAP) / 4;
-            let log_width = body.width - 2 * PANEL_GAP - 2 * column_width;
+            let event_width = body.width - 2 * PANEL_GAP - 2 * column_width;
             (
                 Rect {
-                    width: body.width - log_width - PANEL_GAP,
+                    width: body.width - event_width - PANEL_GAP,
                     ..body
                 },
-                Rect::new(body.right() - log_width, body.y, log_width, body.height),
+                Rect::new(body.right() - event_width, body.y, event_width, body.height),
             )
         } else {
             (body, Rect::default())
         };
-        let [list, gap, details] = if body.width >= 2 * PANEL_GAP + 1 {
+        let [list, gap, task_details] = if body.width >= 2 * PANEL_GAP + 1 {
             let content = Rect {
                 width: body.width - PANEL_GAP,
                 ..body
             };
-            let [list, mut details] =
+            let [list, mut task_details] =
                 Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
                     .areas(content);
             let gap = Rect::new(list.right(), body.y, PANEL_GAP, body.height);
-            details.x += gap.width;
-            [list, gap, details]
+            task_details.x += gap.width;
+            [list, gap, task_details]
         } else {
             [body, Rect::default(), Rect::default()]
         };
         // Keep the chart's original canvas and scale when the input row takes list space.
         let usage_chart = list;
         let (list, search) = if self.searching {
-            let input = log::search_input_rect(list);
+            let input = event_list::search_input_rect(list);
             (
                 row(list, 0, list.height.saturating_sub(input.height)),
                 input,
@@ -197,21 +198,25 @@ impl View {
             top,
             list,
             gap,
-            details,
+            task_details,
             search,
             usage_chart,
             footer,
-            log: if wide && show_log { log_list } else { log },
+            event_panel: if wide && show_event {
+                event_list
+            } else {
+                event_panel
+            },
             prompt,
-            log_detail,
+            event_detail,
         }
     }
-    pub(crate) fn log_event_count(&self, area: Rect) -> usize {
+    pub(crate) fn event_count(&self, area: Rect) -> usize {
         usize::from(
             self.center_layout(area)
-                .log
+                .event_panel
                 .height
-                .saturating_sub(u16::from(self.log_search.active())),
+                .saturating_sub(u16::from(self.event_search.active())),
         )
     }
 
@@ -224,7 +229,7 @@ impl View {
         }
         if !self.help
             && self.confirm_dialog.is_none()
-            && self.active_panel == Panel::Details
+            && self.active_panel == Panel::TaskDetails
             && let Some(editor) = self.title_editor()
         {
             let input = self.viewport.borrow().title_input;
@@ -237,11 +242,11 @@ impl View {
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
-            && self.active_panel == Panel::Details
+            && self.active_panel == Panel::TaskDetails
             && let Some(selector) = &self.selector
             && let Some(editor) = selector.branch_editor()
         {
-            let input = self.viewport.borrow().details_input;
+            let input = self.viewport.borrow().task_details_input;
             if !input.is_empty() {
                 let (_, caret) = input_row(&format!("New branch {PROMPT_MARKER} "), editor, input);
                 return Some((input.x + caret, input.y));
@@ -264,21 +269,24 @@ impl View {
                 &self.input_label(),
             );
         }
-        if (self.log_search.editing || self.log_detail_search.editing)
+        if (self.event_search.editing || self.event_detail_search.editing)
             && !self.help
             && self.confirm_dialog.is_none()
-            && !layout.log.is_empty()
+            && !layout.event_panel.is_empty()
         {
-            let search_area = if self.log_detail_search.editing && !layout.log_detail.is_empty() {
-                layout.log_detail.inner(Margin::new(HORIZONTAL_PADDING, 0))
+            let search_area = if self.event_detail_search.editing && !layout.event_detail.is_empty()
+            {
+                layout
+                    .event_detail
+                    .inner(Margin::new(HORIZONTAL_PADDING, 0))
             } else {
-                layout.log
+                layout.event_panel
             };
-            let input = log::search_input_rect(search_area);
-            let search = if self.log_detail_search.editing {
-                &self.log_detail_search
+            let input = event_list::search_input_rect(search_area);
+            let search = if self.event_detail_search.editing {
+                &self.event_detail_search
             } else {
-                &self.log_search
+                &self.event_search
             };
             let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
             return Some((input.x + caret, input.y));
@@ -335,17 +343,17 @@ impl View {
             viewport.list_links.clear();
             viewport.marker = None;
             viewport.field_targets.clear();
-            viewport.details = Rect::default();
-            viewport.details_title = Rect::default();
+            viewport.task_details = Rect::default();
+            viewport.task_details_title = Rect::default();
             viewport.title_input = Rect::default();
-            viewport.details_input = Rect::default();
-            viewport.log = Rect::default();
-            viewport.log_borders = [Rect::default(); 2];
+            viewport.task_details_input = Rect::default();
+            viewport.event_panel = Rect::default();
+            viewport.event_borders = [Rect::default(); 2];
             viewport.output_borders = [Rect::default(); 2];
-            viewport.log_detail = Rect::default();
+            viewport.event_detail = Rect::default();
             viewport.terminal = Rect::default();
-            viewport.details_links.clear();
-            viewport.log_links.clear();
+            viewport.task_details_links.clear();
+            viewport.event_links.clear();
         }
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
@@ -424,9 +432,12 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
-            for y in layout.log.y..layout.log.bottom() {
-                buf[(layout.log.x.saturating_sub(HORIZONTAL_PADDING + 1), y)]
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+            for y in layout.event_panel.y..layout.event_panel.bottom() {
+                buf[(
+                    layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
+                    y,
+                )]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
@@ -447,41 +458,41 @@ impl View {
         }
         // Activity and task status share the rule immediately above the prompt.
         let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
-        if !layout.log_detail.is_empty() {
+        if !layout.event_detail.is_empty() {
             rule(middle, buf);
         }
-        let mut details = layout.details;
-        let details_rule = if details.is_empty() {
+        let mut task_details = layout.task_details;
+        let task_details_rule = if task_details.is_empty() {
             None
-        } else if !layout.log_detail.is_empty() {
-            Some(Rect::new(details.x, middle.y, details.width, 1))
+        } else if !layout.event_detail.is_empty() {
+            Some(Rect::new(task_details.x, middle.y, task_details.width, 1))
         } else {
-            details.height = details.height.saturating_sub(1);
-            Some(row(layout.details, details.height, 1))
+            task_details.height = task_details.height.saturating_sub(1);
+            Some(row(layout.task_details, task_details.height, 1))
         };
-        if !details.is_empty() {
-            self.render_details(details, buf, now);
+        if !task_details.is_empty() {
+            self.render_task_details(task_details, buf, now);
         }
         {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log = layout.log;
+            viewport.event_panel = layout.event_panel;
             viewport.search = layout.search;
-            viewport.log_detail = inset(layout.log_detail);
+            viewport.event_detail = inset(layout.event_detail);
         }
-        self.render_log(layout.log, buf, now);
-        if !layout.log_detail.is_empty() {
-            rule(row(layout.log_detail, 0, 1), buf);
-            let bottom = row(area, layout.log_detail.bottom() - area.y, 1);
+        self.render_event(layout.event_panel, buf, now);
+        if !layout.event_detail.is_empty() {
+            rule(row(layout.event_detail, 0, 1), buf);
+            let bottom = row(area, layout.event_detail.bottom() - area.y, 1);
             rule(bottom, buf);
-            self.viewport.borrow_mut().output_borders = [row(layout.log_detail, 0, 1), bottom];
-            self.render_log_detail(inset(layout.log_detail), buf, now);
+            self.viewport.borrow_mut().output_borders = [row(layout.event_detail, 0, 1), bottom];
+            self.render_event_detail(inset(layout.event_detail), buf, now);
         }
-        let footer_title = self.viewport.borrow_mut().log_detail_footer_title.take();
+        let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
         if let Some((title, columns)) = footer_title
             && self.copied.is_none()
             && self.footer_shows_task_hints()
         {
-            super::log::render_footer_title(
+            super::event_list::render_footer_title(
                 title,
                 columns,
                 inset(layout.footer),
@@ -490,18 +501,23 @@ impl View {
                 buf,
             );
         }
-        if !layout.log.is_empty() {
-            self.viewport.borrow_mut().log_borders = [
+        if !layout.event_panel.is_empty() {
+            self.viewport.borrow_mut().event_borders = [
                 Rect::new(
-                    layout.log.x,
-                    layout.log.y.saturating_sub(1),
-                    layout.log.width,
+                    layout.event_panel.x,
+                    layout.event_panel.y.saturating_sub(1),
+                    layout.event_panel.width,
                     1,
                 ),
-                Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
+                Rect::new(
+                    layout.event_panel.x,
+                    layout.event_panel.bottom(),
+                    layout.event_panel.width,
+                    1,
+                ),
             ];
             let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.log.bottom()
+                layout.event_panel.bottom()
             } else {
                 let border = row(area, layout.prompt.bottom() - area.y, 1);
                 rule(border, buf);
@@ -510,18 +526,18 @@ impl View {
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
             let left = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.log.x.saturating_sub(HORIZONTAL_PADDING + 1)
+                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1)
             } else {
                 area.x
             };
-            // The duration label sits on the border between the log list and its detail in both
+            // The duration label sits on the border between the event list and its detail in both
             // layouts; the New button, shown only in time order, shares the model's border.
-            let jump_y = if self.log_sort == LogSort::Duration {
-                layout.log.bottom()
+            let jump_y = if self.event_sort == EventSort::Duration {
+                layout.event_panel.bottom()
             } else {
                 model_y
             };
-            self.render_log_jump(
+            self.render_event_jump(
                 Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
                 buf,
             );
@@ -532,7 +548,7 @@ impl View {
             } else {
                 left
             };
-            self.render_log_model(
+            self.render_event_model(
                 Rect::new(
                     model_left,
                     model_y,
@@ -544,12 +560,12 @@ impl View {
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
-        if let Some(details_rule) = details_rule {
-            // The title and status rules run from the separator's joint on the left to the log's
+        if let Some(task_details_rule) = task_details_rule {
+            // The title and status rules run from the separator's joint on the left to the event list's
             // joint or the screen's right edge.
             let left = layout.gap.x + HORIZONTAL_PADDING;
-            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
-                layout.log.x - HORIZONTAL_PADDING
+            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+                layout.event_panel.x - HORIZONTAL_PADDING
             } else {
                 area.right()
             };
@@ -560,7 +576,7 @@ impl View {
                     now,
                 );
             }
-            self.render_title_rule(Rect::new(left, details_rule.y, right - left, 1), buf);
+            self.render_title_rule(Rect::new(left, task_details_rule.y, right - left, 1), buf);
         }
         let mut separators = vec![];
         if layout.gap.width > 1 {
@@ -570,15 +586,15 @@ impl View {
                 layout.gap.bottom(),
             ));
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
             separators.push((
-                layout.log.x.saturating_sub(HORIZONTAL_PADDING + 1),
-                layout.log.y,
-                layout.log.bottom(),
+                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
+                layout.event_panel.y,
+                layout.event_panel.bottom(),
             ));
         }
         join_separators(&separators, area, buf);
-        self.render_controls(details, buf);
+        self.render_controls(task_details, buf);
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.top, buf);
             self.viewport.borrow_mut().marker = None;
@@ -863,7 +879,7 @@ impl View {
             self.viewport.borrow_mut().title_input = input;
         }
         if session.is_some() || draft.is_some_and(|draft| draft.name.is_some()) {
-            self.viewport.borrow_mut().details_title = input;
+            self.viewport.borrow_mut().task_details_title = input;
         }
         let (folder_area, right_area) = render_rule_ends(
             rule,
@@ -893,11 +909,11 @@ impl View {
             links.push((area, PathBuf::from(url)));
         }
         super::links::underline(buf, &links);
-        viewport.details_links.extend(links);
+        viewport.task_details_links.extend(links);
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
-    fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
+    fn render_event_model(&self, rule: Rect, buf: &mut Buffer) {
         let draft = self.selected_draft();
         let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
@@ -918,7 +934,7 @@ impl View {
             (None, None) => return,
         };
         let separator = super::title_rule::SEPARATOR;
-        let label = self.viewport.borrow().log_label;
+        let label = self.viewport.borrow().event_label;
         let right = if label.intersects(rule) {
             label.x.saturating_sub(1)
         } else {
@@ -974,7 +990,7 @@ impl View {
                 .set_style(style::time_style());
         }
     }
-    pub(super) fn render_details(
+    pub(super) fn render_task_details(
         &self,
         area: Rect,
         buf: &mut Buffer,
@@ -982,17 +998,17 @@ impl View {
     ) {
         {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.details = Rect::default();
-            viewport.details_title = Rect::default();
+            viewport.task_details = Rect::default();
+            viewport.task_details_title = Rect::default();
             viewport.title_input = Rect::default();
-            viewport.details_input = Rect::default();
-            viewport.details_copy.clear();
-            viewport.details_background.clear();
-            viewport.details_links.clear();
-            viewport.details_text = text_selection::TextRegion::default();
+            viewport.task_details_input = Rect::default();
+            viewport.task_details_copy.clear();
+            viewport.task_details_background.clear();
+            viewport.task_details_links.clear();
+            viewport.task_details_text = text_selection::TextRegion::default();
         }
         if let Some(draft) = self.selected_draft() {
-            self.viewport.borrow_mut().details = area;
+            self.viewport.borrow_mut().task_details = area;
             if let Some(error) = &draft.error {
                 Paragraph::new(error.as_str())
                     .wrap(ratatui::widgets::Wrap { trim: false })
@@ -1003,7 +1019,7 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        self.viewport.borrow_mut().details = area;
+        self.viewport.borrow_mut().task_details = area;
         let width = usize::from(area.width.max(1));
         // Sections top to bottom: background, activity, update, prompt and queued
         // messages, needs input, tasks. The title sits on the rule below the panel.
@@ -1091,7 +1107,7 @@ impl View {
 
         let activity = session.activity.as_ref();
         if let Some(activity) = activity {
-            let label = super::log::summary_line(
+            let label = super::event_list::summary_line(
                 &activity.label,
                 &activity.kind,
                 activity.exit_code,
@@ -1122,7 +1138,11 @@ impl View {
             } else {
                 super::links::path_links(
                     &activity.label,
-                    &super::log::summary_paths(&activity.label, &activity.paths, &session.cwd),
+                    &super::event_list::summary_paths(
+                        &activity.label,
+                        &activity.paths,
+                        &session.cwd,
+                    ),
                     &session.cwd,
                 )
             });
@@ -1143,7 +1163,7 @@ impl View {
                 width,
             )));
             let start = items.len();
-            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
+            let body_style = style::event_styles(&crate::event::Kind::Assistant).1;
             items.extend(
                 super::text::lines(message, &session.cwd, width, true)
                     .into_iter()
@@ -1240,7 +1260,7 @@ impl View {
                             question,
                             &session.cwd,
                             width,
-                            &crate::log::Kind::Assistant,
+                            &crate::event::Kind::Assistant,
                             None,
                         ),
                         width,
@@ -1350,16 +1370,16 @@ impl View {
                 label: (*label).to_owned(),
             });
         }
-        self.viewport.borrow_mut().details_text = text_selection::TextRegion {
+        self.viewport.borrow_mut().task_details_text = text_selection::TextRegion {
             area,
             sources,
             rows: Vec::new(),
         };
         let available = usize::from(area.height);
-        let budget = budget_details(&items, &bodies, background, available);
+        let budget = budget_task_details(&items, &bodies, background, available);
         let (scroll, body_rows, total) = {
             let mut viewport = self.viewport.borrow_mut();
-            let state = &mut viewport.details_scroll;
+            let state = &mut viewport.task_details_scroll;
             state.content_top = content_top;
             state.prepare(keys);
             let excluded = budget
@@ -1411,7 +1431,7 @@ impl View {
             item_links.retain(|_| *rows.next().unwrap());
             (layout.scroll, state.bodies.clone(), layout.total)
         };
-        self.viewport.borrow_mut().details_copy = body_rows
+        self.viewport.borrow_mut().task_details_copy = body_rows
             .into_iter()
             .zip(copies)
             .filter_map(|(rows, text)| {
@@ -1437,7 +1457,11 @@ impl View {
                 let y = area.y + (offset - scroll) as u16;
                 if let Some(mut mapped) = mapped {
                     mapped.y = y;
-                    self.viewport.borrow_mut().details_text.rows.push(mapped);
+                    self.viewport
+                        .borrow_mut()
+                        .task_details_text
+                        .rows
+                        .push(mapped);
                 }
                 drawn_links.extend(links.into_iter().map(|(columns, target)| {
                     (
@@ -1457,7 +1481,7 @@ impl View {
                     let start = offset.max(scroll);
                     let end = (offset + height).min(scroll + available);
                     if start < end && task.output.is_some() {
-                        self.viewport.borrow_mut().details_background.push((
+                        self.viewport.borrow_mut().task_details_background.push((
                             content_top + (start - scroll) as u16
                                 ..content_top + (end - scroll) as u16,
                             task.clone(),
@@ -1476,7 +1500,7 @@ impl View {
                     let (text, kind, exit_code, paths) = subagent_line(child);
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
-                            super::log::summary_line(
+                            super::event_list::summary_line(
                                 text,
                                 &kind,
                                 exit_code,
@@ -1548,19 +1572,25 @@ impl View {
                 if !source.is_empty() {
                     source.pop();
                     let mut viewport = self.viewport.borrow_mut();
-                    viewport.details_text.sources.push(text_selection::Source {
-                        id,
-                        text: source.into(),
-                        label: "Copied selection".into(),
-                    });
+                    viewport
+                        .task_details_text
+                        .sources
+                        .push(text_selection::Source {
+                            id,
+                            text: source.into(),
+                            label: "Copied selection".into(),
+                        });
                     for (y, cells) in rows {
                         if y >= scroll && y < scroll + available {
-                            viewport.details_text.rows.push(text_selection::DrawnRow {
-                                segment: id,
-                                x: area.x,
-                                y: area.y + (y - scroll) as u16,
-                                cells,
-                            });
+                            viewport
+                                .task_details_text
+                                .rows
+                                .push(text_selection::DrawnRow {
+                                    segment: id,
+                                    x: area.x,
+                                    y: area.y + (y - scroll) as u16,
+                                    cells,
+                                });
                         }
                     }
                 }
@@ -1578,7 +1608,7 @@ impl View {
             line("…".dim(), last, buf);
             self.viewport
                 .borrow_mut()
-                .details_text
+                .task_details_text
                 .rows
                 .retain(|row| row.y != last.y);
             drawn_links.retain(|(rect, _)| rect.y != last.y);
@@ -1589,12 +1619,12 @@ impl View {
         }
         self.viewport
             .borrow_mut()
-            .details_text
+            .task_details_text
             .sources
             .sort_by_key(|source| source.id);
-        self.viewport.borrow_mut().details_links = drawn_links;
-        self.highlight_text_selection(text_selection::Panel::Details, buf);
-        super::links::underline(buf, &self.viewport.borrow().details_links);
+        self.viewport.borrow_mut().task_details_links = drawn_links;
+        self.highlight_text_selection(text_selection::Panel::TaskDetails, buf);
+        super::links::underline(buf, &self.viewport.borrow().task_details_links);
     }
 }
 
@@ -1640,7 +1670,7 @@ pub(super) fn allocate(wants: &[usize], budget: usize) -> Vec<usize> {
     rows
 }
 
-struct DetailsBudget {
+struct TaskDetailsBudget {
     bodies: Vec<(usize, usize)>,
     background_cut: Option<std::ops::Range<usize>>,
 }
@@ -1653,12 +1683,12 @@ fn body_key(section: &str, text: &impl std::hash::Hash) -> u64 {
     hasher.finish()
 }
 
-fn budget_details(
+fn budget_task_details(
     items: &[Item<'_>],
     bodies: &[std::ops::Range<usize>],
     background: std::ops::Range<usize>,
     available: usize,
-) -> Option<DetailsBudget> {
+) -> Option<TaskDetailsBudget> {
     let wants = bodies.iter().map(|body| body.len()).collect::<Vec<_>>();
     let floors = wants.iter().filter(|&&want| want > 0).count();
     let background_rows = items[background.clone()]
@@ -1694,7 +1724,7 @@ fn budget_details(
         .zip(wants)
         .map(|(alloc, want)| (alloc, want - alloc))
         .collect();
-    Some(DetailsBudget {
+    Some(TaskDetailsBudget {
         bodies,
         background_cut,
     })
@@ -1782,7 +1812,7 @@ fn render_rule_ends(
     (place(left, true), place(right, false))
 }
 
-/// One row-aligned piece of the details panel.
+/// One row-aligned piece of the task details panel.
 enum Item<'a> {
     Text(Line<'static>),
     Decoration(Line<'static>),
@@ -1810,12 +1840,12 @@ impl<T: Into<Line<'static>>> From<T> for Item<'_> {
 }
 
 /// A working subagent's current tool call, or its last message between calls,
-/// with the log kind that styles it.
+/// with the event list kind that styles it.
 fn subagent_line(
     child: &Session,
 ) -> (
     &str,
-    crate::log::Kind,
+    crate::event::Kind,
     Option<i64>,
     &[std::ops::Range<usize>],
 ) {
@@ -1832,7 +1862,7 @@ fn subagent_line(
     } else {
         (
             child.last_message.as_deref().unwrap_or_default(),
-            crate::log::Kind::Assistant,
+            crate::event::Kind::Assistant,
             None,
             &[],
         )
@@ -1912,7 +1942,7 @@ mod wrapped_path_tests {
     const MESSAGE: &str = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
 
     #[test]
-    fn details_and_log_share_structured_message_layout() {
+    fn task_details_and_event_share_structured_message_layout() {
         let source = include_str!("../../tests/fixtures/structured_text/real-theme.plist");
         let cwd = std::path::Path::new("/project");
         let expected: Vec<_> = super::super::tool_detail::Part::prose_parts(source.into(), true)
@@ -1923,7 +1953,7 @@ mod wrapped_path_tests {
     }
 
     #[test]
-    fn wrapped_details_keep_fitting_paths_and_markdown_styles() {
+    fn wrapped_task_details_keep_fitting_paths_and_markdown_styles() {
         for markdown in [false, true] {
             let lines = super::text::lines(
                 "some prose before /tmp/fits.md and after",
@@ -1952,7 +1982,7 @@ mod wrapped_path_tests {
     }
 
     #[test]
-    fn details_last_message_and_prompt_show_abbreviated_screenshot_path() {
+    fn task_details_last_message_and_prompt_show_abbreviated_screenshot_path() {
         let now = chrono::Utc::now();
         let session = Session {
             id: crate::providers::SessionKey {
@@ -1964,7 +1994,7 @@ mod wrapped_path_tests {
             name: None,
             title: "Path probe".into(),
             prompt: MESSAGE.into(),
-            detail_sources: Default::default(),
+            task_details_sources: Default::default(),
             prompt_images: Vec::new(),
             queued: Vec::new(),
             prompt_at: None,
@@ -1995,7 +2025,7 @@ mod wrapped_path_tests {
         view.set_sessions(vec![session], false);
         let area = Rect::new(0, 0, 40, 30);
         let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, now);
+        view.render_task_details(area, &mut buf, now);
         let rows: Vec<String> = buf
             .content
             .chunks(40)
@@ -2012,7 +2042,7 @@ mod wrapped_path_tests {
     }
 
     #[test]
-    fn wrapped_details_abbreviate_screenshot_path_at_narrow_width() {
+    fn wrapped_task_details_abbreviate_screenshot_path_at_narrow_width() {
         let lines = super::text::lines(MESSAGE, std::path::Path::new("/project"), 40, true);
         let plain: Vec<_> = lines.iter().map(ToString::to_string).collect();
         assert_eq!(
@@ -2043,27 +2073,28 @@ mod background_title_tests {
             branch: "main".into(),
         });
         for width in [44, 80, 100, 149, 150, 200] {
-            view.log_sort = LogSort::Duration;
+            view.event_sort = EventSort::Duration;
             let area = Rect::new(0, 0, width, 40);
             let mut buf = Buffer::empty(area);
             view.render(area, &mut buf);
             let viewport = view.viewport.borrow();
-            let top = viewport.log_borders[0];
-            let y = viewport.log_borders[1].y;
-            let label = Rect::new(viewport.log.right() + 1 - 10, y, 10, 1);
+            let top = viewport.event_borders[0];
+            let y = viewport.event_borders[1].y;
+            let label = Rect::new(viewport.event_panel.right() + 1 - 10, y, 10, 1);
             let text: String = (label.x..label.right())
                 .map(|x| buf[(x, y)].symbol())
                 .collect();
             assert_eq!(text, " duration ", "width {width}");
             let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(format!("tests/ui_snapshots/log_duration_label_{width}.txt"));
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "tests/ui_snapshots/event_duration_label_{width}.txt"
+            ));
             let snapshot = format!("{row}\n");
             if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
                 std::fs::write(&path, &snapshot).unwrap();
             }
             assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
-            assert!(viewport.log_jump.is_empty());
+            assert!(viewport.event_jump.is_empty());
             for x in label.x..label.right() {
                 assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
             }
@@ -2115,12 +2146,12 @@ mod branch_input_tests {
             for text in ["", "feature/你好", "feature/".repeat(30).as_str()] {
                 let area = Rect::new(4, 2, width, 40);
                 let mut view = View::default();
-                view.set_active_panel(Panel::Details);
+                view.set_active_panel(Panel::TaskDetails);
                 let mut editor = line_edit::LineEdit::default();
                 editor.insert(text);
                 view.selector = Some(Selector::new(
                     SelectorKind::Branch {
-                        draft: crate::model::DraftId {
+                        draft: crate::model::DraftKey {
                             millis: 0,
                             counter: 1,
                         },
@@ -2132,8 +2163,8 @@ mod branch_input_tests {
                 ));
                 let mut buffer = Buffer::empty(area);
                 view.render(area, &mut buffer);
-                let rect = view.viewport.borrow().details_input;
-                assert_eq!(rect.x, view.center_layout(area).details.x);
+                let rect = view.viewport.borrow().task_details_input;
+                assert_eq!(rect.x, view.center_layout(area).task_details.x);
                 let editor = view.selector.as_ref().unwrap().branch_editor().unwrap();
                 let mut expected = Buffer::empty(rect);
                 render_input_row("New branch ❯ ", editor, rect, &mut expected);
@@ -2160,7 +2191,7 @@ mod title_input_tests {
         let cwd = directory.path().join("项目");
         std::fs::create_dir(&cwd).unwrap();
         let mut view = View::default();
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
             cwd,

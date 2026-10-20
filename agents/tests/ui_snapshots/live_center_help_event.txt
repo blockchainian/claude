@@ -1,0 +1,24 @@
+  Active 2                                                                              Inactive 1
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Task shortcuts
+
+ Navigate                                Tasks
+ ↑           Up                          n          New
+ ↓           Down                        o          Terminal
+ ⌃w h/j/k/l  Focus left/down/up/right    f          Fork
+ enter       Terminal                    r          Rename
+ →/⌃l        Terminal                    x          Stop
+ pgup        Page up                     a          Archive
+ pgdn        Page down                   h          Hide
+ ⌃c          Quit                        backspace  Delete
+ esc         Previous                    p          Pin/unpin
+
+ View                                    Events
+ tab/⇧tab  Filter                        /                       Search
+ /         Search                        t                       Sort
+ g         Group                         2× click top border     Earliest
+                                         2× click bottom border  Latest
+
+
+
+ esc back

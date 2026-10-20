@@ -1,6 +1,4 @@
-//! Persisted command-center configuration and runtime state.
-
-use crate::model::{Grouping, LogSort};
+use crate::model::{EventSort, Grouping};
 use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -70,7 +68,7 @@ pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
     pub grouping: Grouping,
-    pub sorting: LogSort,
+    pub sorting: EventSort,
     pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
@@ -112,7 +110,7 @@ impl Default for StoredConfig {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default().as_str().into(),
-            sorting: LogSort::default().as_str().into(),
+            sorting: EventSort::default().as_str().into(),
             theme: None,
             light_theme: None,
             dark_theme: None,
@@ -174,7 +172,7 @@ impl Default for Preferences {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default(),
-            sorting: LogSort::default(),
+            sorting: EventSort::default(),
             pinned: Vec::new(),
             theme: None,
             light_theme: None,
@@ -234,7 +232,7 @@ impl Preferences {
             worktree_root: stored.config.worktree_root,
             double_click_ms: stored.config.double_click_ms,
             grouping,
-            sorting: LogSort::parse(&stored.config.sorting).unwrap_or_default(),
+            sorting: EventSort::parse(&stored.config.sorting).unwrap_or_default(),
             pinned: stored
                 .state
                 .pinned

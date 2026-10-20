@@ -2,7 +2,7 @@ use super::*;
 
 const WIDTH: usize = 240;
 
-fn log_divider(capture: &str) -> Option<usize> {
+fn event_divider(capture: &str) -> Option<usize> {
     capture
         .lines()
         .enumerate()
@@ -12,7 +12,7 @@ fn log_divider(capture: &str) -> Option<usize> {
 }
 
 fn list_row<'a>(capture: &'a str, label: &str) -> Option<(usize, &'a str)> {
-    let divider = log_divider(capture)?;
+    let divider = event_divider(capture)?;
     capture.lines().take(divider).enumerate().find(|(_, row)| {
         row.rsplit_once('│')
             .is_some_and(|(_, list)| list.contains(label))
@@ -29,7 +29,7 @@ fn select_tool(tmux: &Tmux, label: &str) -> String {
     tmux.capture_when(|capture| {
         capture
             .lines()
-            .skip(log_divider(capture).unwrap() + 1)
+            .skip(event_divider(capture).unwrap() + 1)
             .any(|row| row.trim_start().starts_with(name) && row.contains(subject))
     })
 }
@@ -37,14 +37,14 @@ fn select_tool(tmux: &Tmux, label: &str) -> String {
 fn assert_title(capture: &str, name: &str, subject: &str) {
     let title = capture
         .lines()
-        .skip(log_divider(capture).unwrap() + 1)
+        .skip(event_divider(capture).unwrap() + 1)
         .find(|row| row.trim_start().starts_with(name) && row.contains(subject))
         .unwrap_or_else(|| panic!("missing {name} / {subject} detail title: {capture}"));
     assert_eq!(title[..title.find(name).unwrap()].width(), 1, "{capture}");
     assert_eq!(title.matches(name).count(), 1, "{capture}");
     assert_eq!(
         title[..title.find(subject).unwrap()].width(),
-        terminal_detail_width::detail_center(WIDTH, subject.width()),
+        terminal_event_detail_width::event_detail_center(WIDTH, subject.width()),
         "subject stays centered independently of the tool name: {capture}"
     );
 }
@@ -56,7 +56,7 @@ fn write_verdict(name: &str, captures: &[String]) {
     std::fs::write(&path, captures.join("\n\n")).unwrap();
     let verdict = serde_json::json!({
         "verdict": "pass", "provider": name, "capture": path,
-        "tool_names": true, "detail_titles": true,
+        "tool_names": true, "event_detail_titles": true,
     });
     std::fs::write(
         directory.join(format!("{name}.json")),
@@ -173,7 +173,7 @@ fn terminal_codex_tool_list_shell_group() {
     });
     let title = capture
         .lines()
-        .skip(log_divider(&capture).unwrap() + 1)
+        .skip(event_divider(&capture).unwrap() + 1)
         .find(|row| row.trim_start().starts_with("Exec command"))
         .unwrap();
     assert_eq!(title.find("Exec command"), Some(1), "{capture}");

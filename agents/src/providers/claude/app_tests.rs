@@ -28,7 +28,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, App) {
     app.sessions[0].cwd = dir.path().to_owned();
     app.sessions[0].status = SessionStatus::Ready;
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_log(8);
+    app.refresh_event(8);
     (dir, app)
 }
 
@@ -41,7 +41,7 @@ fn replace_transcript(path: &std::path::Path, content: impl AsRef<[u8]>) {
 
 pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-    app.refresh_log(8);
+    app.refresh_event(8);
     quit
 }
 
@@ -89,20 +89,20 @@ fn terminal_theme_events_update_background_and_accents() {
 }
 
 #[test]
-fn task_log_cache_rereads_when_event_count_changes() {
+fn task_event_cache_rereads_when_event_count_changes() {
     let (_dir, mut app) = fixture();
     key(&mut app, KeyCode::BackTab);
     app.refresh();
-    app.refresh_log(8);
+    app.refresh_event(8);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 18), (24, 18)] {
-        app.refresh_log(
+        app.refresh_event(
             app.view
-                .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
+                .event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
         );
-        assert_eq!(app.view.log.len(), count);
+        assert_eq!(app.view.event_panel.len(), count);
     }
 }
 
@@ -151,11 +151,11 @@ fn transcript_copies(payload: &str, copies: usize, first: usize) -> String {
     text
 }
 
-fn log_detail(app: &App) -> String {
-    log_detail_at(app, ratatui::layout::Rect::new(0, 0, 120, 23))
+fn event_detail(app: &App) -> String {
+    event_detail_at(app, ratatui::layout::Rect::new(0, 0, 120, 23))
 }
 
-fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
+fn event_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
     let bottom = area.height - 2;
@@ -178,7 +178,7 @@ fn log_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
         .join("\n")
 }
 
-pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
+pub(super) fn scroll_event(app: &mut App, kind: crossterm::event::MouseEventKind) {
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
@@ -190,7 +190,7 @@ pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) 
     }));
 }
 
-pub(super) fn click_log(app: &mut App) {
+pub(super) fn click_event(app: &mut App) {
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -213,7 +213,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_log(8);
+    app.refresh_event(8);
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -234,29 +234,29 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             .unwrap()
     );
     assert!(app.receiver.try_recv().is_err());
-    assert_eq!(app.view.log_scroll(), 2);
-    let detail = log_detail(&app);
+    assert_eq!(app.view.event_scroll(), 2);
+    let detail = event_detail(&app);
     assert!(detail.contains("Transcript copy 17"), "{detail}");
     assert!(detail.contains("User"), "{detail}");
 }
 
 #[test]
-fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
+fn task_event_scroll_reloads_requested_events_and_keeps_cache() {
     use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_log(8);
+    app.refresh_event(8);
     for _ in 0..7 {
-        scroll_log(&mut app, ScrollUp);
+        scroll_event(&mut app, ScrollUp);
     }
-    app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 16);
-    assert_eq!(app.view.log.len(), 16);
-    assert!(log_detail(&app).contains("Transcript copy 16"));
-    let cached = app.view.log.clone();
+    app.refresh_event(8);
+    assert_eq!(app.view.event_scroll(), 8);
+    assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 16);
+    assert_eq!(app.view.event_panel.len(), 16);
+    assert!(event_detail(&app).contains("Transcript copy 16"));
+    let cached = app.view.event_panel.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     std::fs::write(
         &path,
@@ -269,35 +269,35 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap()
         .set_modified(modified)
         .unwrap();
-    app.refresh_log(8);
-    assert_eq!(app.view.log, cached);
+    app.refresh_event(8);
+    assert_eq!(app.view.event_panel, cached);
     for _ in 0..7 {
-        scroll_log(&mut app, ScrollDown);
+        scroll_event(&mut app, ScrollDown);
     }
-    app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 16);
-    assert_eq!(app.view.log.len(), 16);
-    assert_eq!(app.view.log, cached);
-    assert!(log_detail(&app).contains("Transcript copy 19"));
+    app.refresh_event(8);
+    assert_eq!(app.view.event_scroll(), 8);
+    assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 16);
+    assert_eq!(app.view.event_panel.len(), 16);
+    assert_eq!(app.view.event_panel, cached);
+    assert!(event_detail(&app).contains("Transcript copy 19"));
 }
 
 #[test]
-fn task_log_wheel_reverses_across_reloaded_windows() {
-    task_log_navigation_reverses_across_reloaded_windows(None);
+fn task_event_wheel_reverses_across_reloaded_windows() {
+    task_event_navigation_reverses_across_reloaded_windows(None);
 }
 
 #[test]
-fn task_log_wheel_then_arrow_keys_reverse_across_reloaded_windows() {
-    task_log_navigation_reverses_across_reloaded_windows(Some(KeyCode::Down));
+fn task_event_wheel_then_arrow_keys_reverse_across_reloaded_windows() {
+    task_event_navigation_reverses_across_reloaded_windows(Some(KeyCode::Down));
 }
 
 #[test]
-fn task_log_wheel_then_j_k_keys_reverse_across_reloaded_windows() {
-    task_log_navigation_reverses_across_reloaded_windows(Some(KeyCode::Char('j')));
+fn task_event_wheel_then_j_k_keys_reverse_across_reloaded_windows() {
+    task_event_navigation_reverses_across_reloaded_windows(Some(KeyCode::Char('j')));
 }
 
-fn task_log_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCode>) {
+fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCode>) {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
@@ -312,7 +312,7 @@ fn task_log_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCo
     let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let column = area.x + area.width * 2 / 3 + 1;
     let row = area.y + 2;
-    let visible = app.view.log_event_count(area);
+    let visible = app.view.event_count(area);
     let wheel = |app: &mut App, kind| {
         app.handle_event(Event::Mouse(MouseEvent {
             kind,
@@ -320,17 +320,17 @@ fn task_log_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCo
             row,
             modifiers: KeyModifiers::NONE,
         }));
-        app.refresh_log(visible);
+        app.refresh_event(visible);
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
     };
-    app.refresh_log(visible);
+    app.refresh_event(visible);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     for _ in 0..45 {
         wheel(&mut app, MouseEventKind::ScrollUp);
     }
-    let before = log_detail_at(&app, area);
+    let before = event_detail_at(&app, area);
     if let Some(code) = navigation {
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
@@ -345,10 +345,10 @@ fn task_log_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCo
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         }
-        // Clicking the selected top row gives keyboard navigation to the log list.
+        // Clicking the selected top row gives keyboard navigation to the event list.
         for _ in 0..6 {
             app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-            app.refresh_log(visible);
+            app.refresh_event(visible);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         }
@@ -357,7 +357,7 @@ fn task_log_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCo
             wheel(&mut app, MouseEventKind::ScrollDown);
         }
     }
-    let after = log_detail_at(&app, area);
+    let after = event_detail_at(&app, area);
     assert!(
         after.contains("Transcript copy 20"),
         "newer navigation must pass the notification: {after}"
@@ -370,27 +370,27 @@ fn task_log_navigation_reverses_across_reloaded_windows(navigation: Option<KeyCo
                 KeyCode::Char('k')
             };
             app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-            app.refresh_log(visible);
+            app.refresh_event(visible);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         } else {
             wheel(&mut app, MouseEventKind::ScrollUp);
         }
     }
-    assert_eq!(log_detail_at(&app, area), before);
+    assert_eq!(event_detail_at(&app, area), before);
 }
 
 #[test]
-fn top_border_loads_first_event_of_whole_log() {
+fn top_border_loads_first_event_of_whole_event() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 200, 0));
-    app.refresh_log(8);
-    assert_eq!(app.view.log.len(), 8);
+    app.refresh_event(8);
+    assert_eq!(app.view.event_panel.len(), 8);
     let area = ratatui::layout::Rect::new(0, 0, 200, 45);
-    let visible = app.view.log_event_count(area);
+    let visible = app.view.event_count(area);
     let scroll = |app: &mut App, kind| {
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -437,17 +437,17 @@ fn top_border_loads_first_event_of_whole_log() {
     for latest in [false, true] {
         click(&mut app, 1);
         click(&mut app, 1);
-        app.refresh_log(visible);
-        let detail = log_detail_at(&app, area);
+        app.refresh_event(visible);
+        let detail = event_detail_at(&app, area);
         assert!(detail.contains("Transcript copy 0"), "{detail}");
         scroll(&mut app, MouseEventKind::ScrollDown);
         scroll(&mut app, MouseEventKind::ScrollDown);
-        app.refresh_log(visible);
-        assert!(log_detail_at(&app, area).contains("Transcript copy 1"));
+        app.refresh_event(visible);
+        assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
         scroll(&mut app, MouseEventKind::ScrollUp);
         scroll(&mut app, MouseEventKind::ScrollUp);
-        app.refresh_log(visible);
-        assert!(log_detail_at(&app, area).contains("Transcript copy 0"));
+        app.refresh_event(visible);
+        assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
         if latest {
@@ -461,7 +461,7 @@ fn top_border_loads_first_event_of_whole_log() {
                 .unwrap()
                 .write_all(transcript_copies(&payload, 1, 200).as_bytes())
                 .unwrap();
-            app.refresh_log(visible);
+            app.refresh_event(visible);
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.view.render(area, &mut buffer);
             let row = (0..45)
@@ -488,78 +488,78 @@ fn top_border_loads_first_event_of_whole_log() {
                 }));
             }
         }
-        app.refresh_log(visible);
-        assert!(log_detail_at(&app, area).contains("Transcript copy 200"));
-        assert_eq!(app.view.log_scroll(), app.view.log_max_scroll());
+        app.refresh_event(visible);
+        assert!(event_detail_at(&app, area).contains("Transcript copy 200"));
+        assert_eq!(app.view.event_scroll(), app.view.event_max_scroll());
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
     }
 }
 
 #[test]
-fn task_log_growth_keeps_older_selection_and_viewport() {
+fn task_event_growth_keeps_older_selection_and_viewport() {
     use crossterm::event::MouseEventKind::ScrollUp;
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_log(
+    app.refresh_event(
         app.view
-            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
-    scroll_log(&mut app, ScrollUp);
-    app.refresh_log(
+    scroll_event(&mut app, ScrollUp);
+    app.refresh_event(
         app.view
-            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
-    let before = app.view.log.clone();
-    let selected = log_detail(&app);
-    let scroll = app.view.log_scroll();
+    let before = app.view.event_panel.clone();
+    let selected = event_detail(&app);
+    let scroll = app.view.event_scroll();
     std::fs::write(
         &path,
         transcript_copies(&payload, 20, 0)
             + &transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20),
     )
     .unwrap();
-    app.refresh_log(
+    app.refresh_event(
         app.view
-            .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
-    assert_eq!(app.view.log_scroll(), scroll);
-    assert_eq!(log_detail(&app), selected);
-    assert_ne!(app.view.log, before);
-    let detail = log_detail(&app);
+    assert_eq!(app.view.event_scroll(), scroll);
+    assert_eq!(event_detail(&app), selected);
+    assert_ne!(app.view.event_panel, before);
+    let detail = event_detail(&app);
     assert!(detail.contains("Transcript copy 19"), "{detail}");
     assert!(detail.contains("User"), "{detail}");
     assert!(!detail.contains("Transcript copy 20"), "{detail}");
 }
 
 #[test]
-fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
+fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     use std::io::Write;
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_log(1);
-    click_log(&mut app);
+    app.refresh_event(1);
+    click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
-    app.refresh_log(1);
+    app.refresh_event(1);
     for c in "Codex".chars() {
         key(&mut app, KeyCode::Char(c));
     }
-    super::log_search_tests::finish_search(&mut app);
-    app.refresh_log(1);
-    assert_eq!(app.view.matching_log_count(), 20);
+    super::event_search_tests::finish_search(&mut app);
+    app.refresh_event(1);
+    assert_eq!(app.view.matching_event_count(), 20);
     for _ in 0..30 {
-        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+        scroll_event(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
-    app.refresh_log(1);
-    assert_eq!(app.view.log_scroll(), 0);
-    let detail = log_detail(&app);
+    app.refresh_event(1);
+    assert_eq!(app.view.event_scroll(), 0);
+    let detail = event_detail(&app);
     assert!(detail.contains("Transcript copy 0"), "{detail}");
     assert!(detail.contains("User"), "{detail}");
-    let cached = app.view.log.clone();
+    let cached = app.view.event_panel.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     std::fs::write(
         &path,
@@ -573,9 +573,9 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
         .set_modified(modified)
         .unwrap();
     key(&mut app, KeyCode::Backspace);
-    app.refresh_log(1);
+    app.refresh_event(1);
     assert_eq!(
-        app.view.log, cached,
+        app.view.event_panel, cached,
         "query changes reuse cached transcript"
     );
     key(&mut app, KeyCode::Char('x'));
@@ -584,44 +584,44 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
         .open(&path)
         .unwrap();
     writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
-    app.refresh_log(1);
-    assert_eq!(app.view.matching_log_count(), 21);
-    assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");
+    app.refresh_event(1);
+    assert_eq!(app.view.matching_event_count(), 21);
+    assert_eq!(app.view.event_panel.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
-    app.refresh_log(1);
-    assert_eq!(app.view.log.len(), 41);
+    app.refresh_event(1);
+    assert_eq!(app.view.event_panel.len(), 41);
 }
 
 #[test]
-fn task_log_scroll_clamps_at_transcript_start() {
+fn task_event_scroll_clamps_at_transcript_start() {
     use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
     let (_dir, mut app) = fixture();
-    assert_eq!(app.view.log.len(), 2);
-    app.refresh_log(1);
+    assert_eq!(app.view.event_panel.len(), 2);
+    app.refresh_event(1);
     for _ in 0..5 {
-        scroll_log(&mut app, ScrollUp);
+        scroll_event(&mut app, ScrollUp);
     }
-    app.refresh_log(1);
-    assert_eq!(app.view.log.len(), 2);
-    scroll_log(&mut app, ScrollDown);
-    app.refresh_log(1);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 2);
-    assert_eq!(app.view.log.len(), 2);
+    app.refresh_event(1);
+    assert_eq!(app.view.event_panel.len(), 2);
+    scroll_event(&mut app, ScrollDown);
+    app.refresh_event(1);
+    assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 2);
+    assert_eq!(app.view.event_panel.len(), 2);
     // A transcript shorter than the visible window clamps all the way to zero.
-    scroll_log(&mut app, ScrollUp);
-    app.refresh_log(8);
-    app.refresh_log(8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
+    scroll_event(&mut app, ScrollUp);
+    app.refresh_event(8);
+    app.refresh_event(8);
+    assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 8);
 }
 
 #[test]
-fn task_log_cache_uses_selection_length_and_mtime() {
+fn task_event_cache_uses_selection_length_and_mtime() {
     use std::io::Write;
     let (_dir, mut app) = fixture();
     key(&mut app, KeyCode::BackTab);
     app.refresh();
-    app.refresh_log(8);
-    assert_eq!(app.view.log.len(), 2);
+    app.refresh_event(8);
+    assert_eq!(app.view.event_panel.len(), 2);
     let path = app.sessions[0].transcript.clone().unwrap();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     let original = std::fs::read_to_string(&path).unwrap();
@@ -630,13 +630,13 @@ fn task_log_cache_uses_selection_length_and_mtime() {
     std::fs::write(&path, &changed).unwrap();
     let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     file.set_modified(modified).unwrap();
-    let cached = app.view.log.clone();
-    app.refresh_log(8);
-    assert_eq!(app.view.log, cached);
+    let cached = app.view.event_panel.clone();
+    app.refresh_event(8);
+    assert_eq!(app.view.event_panel, cached);
     file.set_modified(modified + Duration::from_secs(1))
         .unwrap();
-    app.refresh_log(8);
-    assert_ne!(app.view.log, cached);
+    app.refresh_event(8);
+    assert_ne!(app.view.event_panel, cached);
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .open(&path)
@@ -645,17 +645,17 @@ fn task_log_cache_uses_selection_length_and_mtime() {
     file.set_modified(modified + Duration::from_secs(1))
         .unwrap();
     app.refresh();
-    app.refresh_log(8);
+    app.refresh_event(8);
     assert_eq!(app.sessions.len(), 1);
     assert!(
         app.view.selected_id().is_some(),
         "selected disappeared after refresh"
     );
-    assert_eq!(app.view.log.last().unwrap().body, "queued");
+    assert_eq!(app.view.event_panel.last().unwrap().body, "queued");
 }
 
 #[test]
-fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
+fn task_event_reloads_on_keyboard_selection_and_clears_without_transcript() {
     let (dir, mut app) = fixture();
     let mut second = app.sessions[0].clone();
     second.id = session_key("second");
@@ -669,20 +669,23 @@ fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
     third.transcript = None;
     app.sessions.extend([second, third]);
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_log(8);
+    app.refresh_event(8);
     key(&mut app, KeyCode::Down);
-    assert_eq!(app.view.log_session.as_ref(), Some(&session_key("second")));
-    assert_eq!(app.view.log[0].body, "second prompt");
+    assert_eq!(
+        app.view.event_session.as_ref(),
+        Some(&session_key("second"))
+    );
+    assert_eq!(app.view.event_panel[0].body, "second prompt");
     key(&mut app, KeyCode::Down);
-    assert!(app.view.log.is_empty());
-    assert!(app.view.log_session.is_none());
+    assert!(app.view.event_panel.is_empty());
+    assert!(app.view.event_session.is_none());
 }
 
 #[test]
-fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
+fn subagent_selection_loads_own_transcript_and_restores_parent_event() {
     let (dir, mut app) = fixture();
     let parent = app.sessions[0].clone();
-    let parent_log = app.view.log.clone();
+    let parent_event = app.view.event_panel.clone();
     let mut child = parent.clone();
     child.id = session_key("agent-abf695d5995bd43ab");
     child.parent = Some(parent.id.clone());
@@ -699,14 +702,17 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
     app.view.set_sessions(app.sessions.clone(), false);
     key(&mut app, KeyCode::Down);
     assert_eq!(app.view.selected_id(), Some(&child.id));
-    assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
-    assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
-    assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-    click_log(&mut app);
+    assert_eq!(app.view.event_session.as_ref(), Some(&child.id));
+    assert_eq!(app.transcript_stamp.as_ref().unwrap().session, child.id);
+    assert!(app.view.event_panel[0].body.starts_with("SubagentHandback"));
+    click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
-    app.refresh_log(8);
-    assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
-    assert!(app.view.log[0].body.starts_with("SubagentHandback"));
+    app.refresh_event(8);
+    assert_eq!(
+        app.full_transcript_stamp.as_ref().unwrap().session,
+        child.id
+    );
+    assert!(app.view.event_panel[0].body.starts_with("SubagentHandback"));
     key(&mut app, KeyCode::Esc);
     // Return to the task list before changing the selected task.
     let (column, row) = app.view.marker_pos().unwrap();
@@ -717,13 +723,13 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
         modifiers: KeyModifiers::NONE,
     }));
     key(&mut app, KeyCode::Up);
-    assert_eq!(app.view.log_session.as_ref(), Some(&parent.id));
-    assert_eq!(app.log_stamp.as_ref().unwrap().session, parent.id);
-    assert_eq!(app.view.log, parent_log);
+    assert_eq!(app.view.event_session.as_ref(), Some(&parent.id));
+    assert_eq!(app.transcript_stamp.as_ref().unwrap().session, parent.id);
+    assert_eq!(app.view.event_panel, parent_event);
 }
 
 #[test]
-fn working_subagent_log_ticks_without_process_and_ready_log_stops() {
+fn working_subagent_event_ticks_without_process_and_ready_event_stops() {
     let (dir, mut app, _child) = subagent_fixture();
     let path = dir.path().join("running-subagent.jsonl");
     std::fs::write(
@@ -745,24 +751,24 @@ fn working_subagent_log_ticks_without_process_and_ready_log_stops() {
     ] {
         app.sessions[1].status = status;
         app.view.set_sessions(app.sessions.clone(), false);
-        app.view.log = crate::providers::claude::log::tail(&path, 8).unwrap();
-        assert_eq!(app.view.log_redraw_in(now), expected);
+        app.view.event_panel = crate::providers::claude::event_reader::tail(&path, 8).unwrap();
+        assert_eq!(app.view.event_redraw_in(now), expected);
     }
 }
 
 #[test]
-fn last_prose_log_row_ticks_each_second_under_a_minute() {
+fn last_prose_event_row_ticks_each_second_under_a_minute() {
     let (_dir, mut app) = fixture();
     let started_at = chrono::Utc::now();
-    app.view.log_session = Some(app.sessions[0].id.clone());
-    app.view.log = vec![crate::log::Event {
+    app.view.event_session = Some(app.sessions[0].id.clone());
+    app.view.event_panel = vec![crate::event::Event {
         completed_time: false,
         background: false,
         source: None,
         source_records: Vec::new(),
         sender: None,
         detail_body: None,
-        kind: crate::log::Kind::Assistant,
+        kind: crate::event::Kind::Assistant,
         body: "done".into(),
         paths: Vec::new(),
         started_at,
@@ -773,9 +779,12 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
         calls: Vec::new(),
     }];
     let at = |seconds| started_at + chrono::Duration::seconds(seconds);
-    assert_eq!(app.view.log_redraw_in(at(12)), Some(Duration::from_secs(1)));
     assert_eq!(
-        app.view.log_redraw_in(at(125)),
+        app.view.event_redraw_in(at(12)),
+        Some(Duration::from_secs(1))
+    );
+    assert_eq!(
+        app.view.event_redraw_in(at(125)),
         Some(Duration::from_secs(55))
     );
 }
@@ -808,7 +817,7 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
     assert_ne!(selected, child.id);
     let sessions = app.sessions.clone();
     let preferences = app.preferences.clone();
-    let log = app.view.log.clone();
+    let event_panel = app.view.event_panel.clone();
     let path = child.transcript.as_ref().unwrap();
     let transcript = std::fs::read(path).unwrap();
     let meta = path.with_extension("meta.json");
@@ -842,7 +851,7 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
     assert_eq!(after, before);
     assert_eq!(app.sessions, sessions);
     assert_eq!(app.preferences, preferences);
-    assert_eq!(app.view.log, log);
+    assert_eq!(app.view.event_panel, event_panel);
     assert_eq!(app.view.selected_id(), Some(&selected));
     assert!(app.launch.is_none());
     assert_eq!(std::fs::read(path).unwrap(), transcript);

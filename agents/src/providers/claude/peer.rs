@@ -1,4 +1,4 @@
-use crate::log::Kind;
+use crate::event::Kind;
 use serde_json::Value;
 
 type Message<'a> = (Option<&'a str>, &'a str);

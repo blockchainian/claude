@@ -1,4 +1,4 @@
-use crate::log::Image;
+use crate::event::Image;
 use base64::Engine;
 use serde_json::Value;
 use std::{collections::HashMap, path::PathBuf};

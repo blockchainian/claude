@@ -5,7 +5,10 @@ use super::*;
 fn terminal_model_command_refreshes_without_an_assistant_reply() {
     let fixture = include_str!("../fixtures/claude-model-command.jsonl");
     let (assistant, commands) = fixture.split_once('\n').unwrap();
-    let before = format!("{}{assistant}\n", include_str!("../fixtures/transcript.jsonl"));
+    let before = format!(
+        "{}{assistant}\n",
+        include_str!("../fixtures/transcript.jsonl")
+    );
     let (_directory, tmux, transcript) = start_probe_with_transcript("model-command", &before);
     tmux.wait_for(|screen| screen.contains("claude-fable-5-1 · medium"));
     std::fs::write(&transcript, format!("{before}{commands}")).unwrap();

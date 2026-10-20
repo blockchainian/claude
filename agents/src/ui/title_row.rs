@@ -1,6 +1,4 @@
-//! Event and tool titles drawn inside the detail panel's content column.
-
-use super::detail_model::{DetailColumns, TitleRow};
+use super::event_detail::{EventDetailColumns, TitleRow};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::text_selection_layout::{CellMap, map_lines_in};
 use ratatui::text::{Line, Span};
@@ -9,13 +7,13 @@ impl TitleRow {
     /// Draw the text area; cell columns are relative to its left edge.
     /// The caller draws `time` separately in `columns.time` with `meta_style`.
     #[cfg(test)]
-    pub fn line(&self, columns: DetailColumns) -> (Line<'static>, Vec<CellMap>) {
+    pub fn line(&self, columns: EventDetailColumns) -> (Line<'static>, Vec<CellMap>) {
         self.line_in(columns, std::path::Path::new("/nonexistent"))
     }
 
     pub fn line_in(
         &self,
-        columns: DetailColumns,
+        columns: EventDetailColumns,
         cwd: &std::path::Path,
     ) -> (Line<'static>, Vec<CellMap>) {
         let width = usize::from(columns.text.width);
@@ -58,7 +56,7 @@ impl TitleRow {
         ));
         let mut maps =
             map_lines_in(&source, std::slice::from_ref(&drawn), false, Some(cwd)).remove(0);
-        let mut title = super::log::truncate_detail_line(drawn, &mut maps, width);
+        let mut title = super::event_list::truncate_event_detail_line(drawn, &mut maps, width);
         for span in &mut title.spans {
             span.style = self.title_style;
         }
@@ -85,7 +83,7 @@ impl TitleRow {
 
 #[cfg(test)]
 mod tests {
-    use super::super::detail_model::{DetailColumns, detail_columns};
+    use super::super::event_detail::{EventDetailColumns, event_detail_columns};
     use super::*;
     use ratatui::{
         layout::Rect,
@@ -103,8 +101,8 @@ mod tests {
         }
     }
 
-    fn columns(width: u16) -> DetailColumns {
-        detail_columns(Rect::new(10, 2, width, 8), Rect::new(0, 0, 40, 8))
+    fn columns(width: u16) -> EventDetailColumns {
+        event_detail_columns(Rect::new(10, 2, width, 8), Rect::new(0, 0, 40, 8))
     }
 
     #[test]

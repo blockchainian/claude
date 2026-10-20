@@ -1,6 +1,6 @@
 use super::navigation::ListRow;
 use super::*;
-use crate::model::DraftId;
+use crate::model::DraftKey;
 use crate::repository::{BrowseEntry, browse_entries};
 use crate::state::DraftBranch;
 use crate::tasks::BranchChoice;
@@ -16,12 +16,12 @@ pub(super) enum Field {
     Directory,
 }
 #[derive(Clone)]
-pub(super) enum ControlTarget {
-    Draft(DraftId),
+pub(super) enum TaskKey {
+    Draft(DraftKey),
     Session(SessionKey),
 }
 
-/// The list the details panel shows to choose a new task's repository or branch, or a task's
+/// The list the task details panel shows to choose a new task's repository or branch, or a task's
 /// model or effort. Clicks and Enter apply immediately. A right click or Esc cancels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Origin {
@@ -40,26 +40,26 @@ pub(super) struct Selector {
 
 pub(super) enum SelectorKind {
     Repository {
-        draft: DraftId,
+        draft: DraftKey,
         dir: PathBuf,
         entries: Vec<BrowseEntry>,
     },
     /// The repository's branches above the input naming a new one, whose choice index is
     /// `branches.len()`.
     Branch {
-        draft: DraftId,
+        draft: DraftKey,
         branches: Vec<String>,
         editor: line_edit::LineEdit,
         editing: bool,
     },
     Model {
-        target: ControlTarget,
+        target: TaskKey,
         values: Vec<String>,
         labels: Vec<String>,
         families: Vec<String>,
     },
     Effort {
-        target: ControlTarget,
+        target: TaskKey,
         values: Vec<String>,
         labels: Vec<String>,
     },
@@ -131,15 +131,15 @@ impl Selector {
         }
     }
 
-    fn draft(&self) -> Option<DraftId> {
+    fn draft(&self) -> Option<DraftKey> {
         match &self.kind {
             SelectorKind::Repository { draft, .. } | SelectorKind::Branch { draft, .. } => {
                 Some(*draft)
             }
             SelectorKind::Model { target, .. } | SelectorKind::Effort { target, .. } => {
                 match target {
-                    ControlTarget::Draft(draft) => Some(*draft),
-                    ControlTarget::Session(_) => None,
+                    TaskKey::Draft(draft) => Some(*draft),
+                    TaskKey::Session(_) => None,
                 }
             }
         }
@@ -229,7 +229,7 @@ impl View {
             },
             selected,
         ));
-        self.set_active_panel(Panel::Details);
+        self.set_active_panel(Panel::TaskDetails);
     }
 
     /// Runs the field rule only for a wizard transition.
@@ -328,11 +328,11 @@ impl View {
             },
             selected,
         ));
-        self.set_active_panel(Panel::Details);
+        self.set_active_panel(Panel::TaskDetails);
         true
     }
 
-    pub(super) fn open_name(&mut self, id: DraftId) {
+    pub(super) fn open_name(&mut self, id: DraftKey) {
         if self
             .drafts
             .iter()
@@ -356,13 +356,13 @@ impl View {
         }
         self.rename_target = None;
         self.name_target = Some(id);
-        self.set_active_panel(Panel::Details);
+        self.set_active_panel(Panel::TaskDetails);
     }
 
     /// Branch picks finish their selector; only wizard picks advance the rule.
     fn choose_branch(
         &mut self,
-        id: DraftId,
+        id: DraftKey,
         branch: String,
         new: bool,
         advance: bool,
@@ -428,7 +428,7 @@ impl View {
     }
 
     /// Creates directly from the prompt box, keeping its contents until hand-off.
-    fn create_task(&mut self, id: DraftId) -> Option<Action> {
+    fn create_task(&mut self, id: DraftKey) -> Option<Action> {
         let draft = self.drafts.iter().find(|draft| draft.id == id)?;
         if draft.working || draft.job.is_some() {
             return None;
@@ -441,7 +441,7 @@ impl View {
             DraftBranch::New(name) => Some(BranchChoice::New(name.clone())),
         };
         let action = Action::CreateTask {
-            draft_id: id,
+            draft_key: id,
             provider: draft.setup.provider,
             branch,
             request: crate::tasks::NewTask {
@@ -522,7 +522,7 @@ impl View {
             }
             (
                 draft.setup.provider,
-                ControlTarget::Draft(draft.id),
+                TaskKey::Draft(draft.id),
                 self.draft_model(draft).map(str::to_owned),
                 self.draft_effort(draft).map(str::to_owned),
             )
@@ -532,7 +532,7 @@ impl View {
             }
             (
                 session.id.provider,
-                ControlTarget::Session(session.id.clone()),
+                TaskKey::Session(session.id.clone()),
                 session.model.clone(),
                 session.effort.clone(),
             )
@@ -598,7 +598,7 @@ impl View {
         let mut selector = Selector::new(kind, current.unwrap_or_default());
         selector.current = current;
         self.selector = Some(selector);
-        self.set_active_panel(Panel::Details);
+        self.set_active_panel(Panel::TaskDetails);
     }
 
     /// Keeps an unapplied branch name when leaving its selector.
@@ -640,7 +640,7 @@ impl View {
     }
 
     /// Drops a selector that belongs to `draft`.
-    pub(super) fn close_draft_selector(&mut self, draft: DraftId) {
+    pub(super) fn close_draft_selector(&mut self, draft: DraftKey) {
         if self.name_target == Some(draft) {
             self.name_target = None;
             self.rename.clear();
@@ -703,7 +703,7 @@ impl View {
                 BrowseEntry::Parent(_) | BrowseEntry::Folder(_) => self.single_choice(index),
                 BrowseEntry::Repository(cwd) => {
                     let action = Action::ChangeDraftDirectory {
-                        draft_id: *draft,
+                        draft_key: *draft,
                         cwd: cwd.clone(),
                     };
                     let id = *draft;
@@ -743,7 +743,7 @@ impl View {
             | SelectorKind::Effort { target, values, .. } => {
                 let value = values.get(index)?.clone();
                 // A session already running with the chosen value has nothing to change.
-                if matches!(target, ControlTarget::Session(_)) && selector.current == Some(index) {
+                if matches!(target, TaskKey::Session(_)) && selector.current == Some(index) {
                     self.close_selector();
                     return None;
                 }
@@ -751,7 +751,7 @@ impl View {
                 let model = matches!(selector.kind, SelectorKind::Model { .. });
                 self.close_selector();
                 match target {
-                    ControlTarget::Draft(id) => {
+                    TaskKey::Draft(id) => {
                         let draft = self.drafts.iter().find(|draft| draft.id == id)?;
                         let default = if model {
                             draft.defaults.model.as_deref()
@@ -768,7 +768,7 @@ impl View {
                         self.draft_changed(id);
                         None
                     }
-                    ControlTarget::Session(id) => Some(if model {
+                    TaskKey::Session(id) => Some(if model {
                         Action::SetModel { id, model: value }
                     } else {
                         Action::SetEffort { id, effort: value }
@@ -780,8 +780,8 @@ impl View {
 
     /// Handles typing, navigation and choice in the details selector.
     pub(super) fn selector_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
-        // The selector has the keys only after a click in the details panel or on a border field.
-        if self.active_panel != Panel::Details {
+        // The selector has the keys only after a click in the task details panel or on a border field.
+        if self.active_panel != Panel::TaskDetails {
             return None;
         }
         let selector = self.selector.as_mut()?;
@@ -800,7 +800,7 @@ impl View {
             return Some(None);
         }
         let code = super::navigation::list_navigation(key)?;
-        let page = self.viewport.borrow().details.height.saturating_sub(1);
+        let page = self.viewport.borrow().task_details.height.saturating_sub(1);
         selector.selected =
             super::navigation::step(selector.selected, selector.len(), usize::from(page), code);
         Some(None)
@@ -830,10 +830,10 @@ impl View {
             buf,
         );
         if let Some(index) = create {
-            let row = super::log::search_input_rect(area);
+            let row = super::event_list::search_input_rect(area);
             if let Some(editor) = selector.branch_editor() {
                 render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
-                self.viewport.borrow_mut().details_input = row;
+                self.viewport.borrow_mut().task_details_input = row;
             } else {
                 let label = match &selector.kind {
                     SelectorKind::Branch { draft, .. } => match &self
@@ -936,7 +936,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = draft_view(directory.path(), directory.path());
         let area = Rect::new(3, 2, 160, 40);
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Model);
         assert!(!view.prompt_focused());
         let selector = view.selector.as_ref().unwrap();
@@ -959,7 +959,7 @@ mod tests {
             Some("claude-sonnet-5-5")
         );
         assert!(view.pending_click.is_none());
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Effort);
         let selector = view.selector.as_ref().unwrap();
         let SelectorKind::Effort { values, .. } = &selector.kind else {
@@ -972,7 +972,7 @@ mod tests {
         assert!(view.selector.is_none());
         assert!(view.pending_click.is_none());
         assert_eq!(view.drafts[0].setup.effort.as_deref(), Some("low"));
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Effort);
         let selector = view.selector.as_ref().unwrap();
         let SelectorKind::Effort { values, .. } = &selector.kind else {
@@ -985,12 +985,12 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(view.drafts[0].setup.effort.as_deref(), Some("high"));
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Effort);
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(view.selector.is_none());
         assert_eq!(view.drafts.len(), 1);
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Effort);
         screen(&view, area);
         let row = row_of(&view, 0);
@@ -1031,15 +1031,15 @@ mod tests {
     }
     fn panel_rows(view: &View, area: Rect) -> Vec<String> {
         let rendered = screen(view, area);
-        let details = view.viewport.borrow().details;
+        let task_details = view.viewport.borrow().task_details;
         rendered
             .lines()
-            .skip(usize::from(details.y))
-            .take(usize::from(details.height))
+            .skip(usize::from(task_details.y))
+            .take(usize::from(task_details.height))
             .map(|line| {
                 line.chars()
-                    .skip(usize::from(details.x))
-                    .take(usize::from(details.width))
+                    .skip(usize::from(task_details.x))
+                    .take(usize::from(task_details.width))
                     .collect::<String>()
                     .trim_end()
                     .to_owned()
@@ -1049,7 +1049,7 @@ mod tests {
 
     fn prompt_step(view: &mut View) {
         let id = view.selected_draft.unwrap();
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_name(id);
         assert!(view.name_target.is_some());
         assert_eq!(
@@ -1065,7 +1065,7 @@ mod tests {
         view.drafts[0].repository_confirmed = true;
         view.handle_paste("unfinished task");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.selector.as_mut().unwrap().selected = 2;
     }
 
@@ -1087,7 +1087,7 @@ mod tests {
         assert_eq!(rows.last().unwrap(), NEW_BRANCH);
         assert_eq!(
             row_of(&view, 2).y,
-            view.viewport.borrow().details.bottom() - 1
+            view.viewport.borrow().task_details.bottom() - 1
         );
         assert!(!view.selector.as_ref().unwrap().input_active());
         assert_eq!(view.selector.as_ref().unwrap().selected, 2);
@@ -1095,7 +1095,7 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let rows = panel_rows(&view, area);
         assert_eq!(rows.last().unwrap().trim_end(), "New branch ❯");
-        let input = view.viewport.borrow().details_input;
+        let input = view.viewport.borrow().task_details_input;
         assert_eq!(view.cursor_pos(area), Some((input.x + 13, input.y)));
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -1155,12 +1155,12 @@ mod tests {
             let mut buffer = Buffer::empty(area);
             view.render(area, &mut buffer);
             let viewport = view.viewport.borrow();
-            let bottom = viewport.details.bottom() - 1;
+            let bottom = viewport.task_details.bottom() - 1;
             let selected = view.selector.as_ref().unwrap().selected;
             assert_eq!(row_of(&view, branches.len()).y, bottom);
             assert_eq!(
                 viewport.picker_rows.len(),
-                usize::from(viewport.details.height - 1)
+                usize::from(viewport.task_details.height - 1)
             );
             for (rect, index) in &viewport.picker_rows {
                 let expected = if *index == branches.len() {
@@ -1194,7 +1194,7 @@ mod tests {
         );
         assert!(view.selector.as_ref().unwrap().input_active());
         screen(&view, area);
-        assert_eq!(view.viewport.borrow().details_input, button);
+        assert_eq!(view.viewport.borrow().task_details_input, button);
     }
 
     #[test]
@@ -1206,7 +1206,7 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.handle_paste("feature/probe");
         screen(&view, Rect::new(0, 0, 160, 40));
-        let input = view.viewport.borrow().details_input;
+        let input = view.viewport.borrow().task_details_input;
         assert_eq!(click(&mut view, input), None);
         assert!(view.selector.as_ref().unwrap().input_active());
         assert!(view.selector.is_some());
@@ -1217,7 +1217,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let repository = repository(directory.path());
         let mut view = draft_view(&repository, directory.path());
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         let area = Rect::new(0, 0, 160, 16);
         let mut states = Vec::new();
         states.push(panel_rows(&view, area).join("\n"));
@@ -1309,7 +1309,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut view = draft_view(directory.path(), directory.path());
         view.drafts[0].setup.branch.clear();
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Branch);
         assert!(view.selector.is_none());
         assert_eq!(view.name_target, view.selected_draft);
@@ -1322,10 +1322,10 @@ mod tests {
                 .iter()
                 .all(|(_, field)| *field != Field::Branch)
         );
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Model);
         assert!(view.selector.is_some());
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         view.open_field(Field::Effort);
         assert!(view.selector.is_some());
     }

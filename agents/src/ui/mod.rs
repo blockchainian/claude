@@ -10,10 +10,15 @@ mod formatting;
 pub(crate) use drafts::DraftSetup;
 mod centering;
 #[cfg(test)]
-mod chronological_log_tests;
+mod chronological_event_tests;
 mod content;
-mod detail_model;
-mod details_scroll;
+mod event_agent;
+mod event_detail;
+mod event_list;
+#[cfg(test)]
+#[path = "event_scroll_tests.rs"]
+mod event_scroll_tests;
+mod event_search;
 pub(crate) mod highlight;
 mod hints;
 mod hyperlink;
@@ -21,12 +26,6 @@ mod input;
 mod line_edit;
 mod line_truncation;
 mod links;
-mod log;
-mod log_agent;
-#[cfg(test)]
-#[path = "log_scroll_tests.rs"]
-mod log_scroll_tests;
-mod log_search;
 mod markdown;
 mod navigation;
 mod paths;
@@ -36,6 +35,8 @@ mod question_view;
 mod render;
 mod reset_credit;
 mod rows;
+#[path = "section_scroll.rs"]
+mod section_scroll;
 mod selection_tabs;
 pub(crate) mod shell_commands;
 mod shortcut_help;
@@ -141,68 +142,68 @@ struct Viewport {
     search: Rect,
     list_rows: Rect,
     first_entry: usize,
-    log: Rect,
-    log_detail: Rect,
-    /// Where the session terminal was drawn inside the log detail panel.
+    event_panel: Rect,
+    event_detail: Rect,
+    /// Where the session terminal was drawn inside the event detail panel.
     terminal: Rect,
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
     overlays: Vec<Overlay>,
-    /// The details panel's bottom input row for a new branch.
-    details_input: Rect,
-    /// The shared task name editor on the details panel's lower rule.
+    /// The task details panel's bottom input row for a new branch.
+    task_details_input: Rect,
+    /// The shared task name editor on the task details panel's lower rule.
     title_input: Rect,
-    /// The selected task's name on the details panel's lower rule.
-    details_title: Rect,
+    /// The selected task's name on the task details panel's lower rule.
+    task_details_title: Rect,
     confirm_options: Vec<(Rect, bool)>,
-    /// Index of the first visible event in the chronological shown log.
-    log_scroll: usize,
-    /// Events that arrived below the rows on screen since the log left its newest row.
-    log_unseen: usize,
-    /// Where the last render drew the button that jumps back to the newest log row.
-    log_jump: Rect,
+    /// Index of the first visible event in the chronological shown event list.
+    event_scroll: usize,
+    /// Events that arrived below the rows on screen since the event list left its newest row.
+    event_unseen: usize,
+    /// Where the last render drew the button that jumps back to the newest event row.
+    event_jump: Rect,
     /// Space reserved for the New button or duration label.
-    log_label: Rect,
-    log_borders: [Rect; 2],
+    event_label: Rect,
+    event_borders: [Rect; 2],
     output_borders: [Rect; 2],
-    /// Index into the task log of each drawn log row, top down.
-    log_rows: Vec<usize>,
+    /// Index into the task event list of each drawn event row, top down.
+    event_rows: Vec<usize>,
     /// Lines of the selected event scrolled off the top.
-    log_detail_scroll: usize,
-    log_detail_max: usize,
-    log_detail_state: DetailsScroll,
-    log_detail_key: Option<u64>,
+    event_detail_scroll: usize,
+    event_detail_max: usize,
+    event_detail_state: SectionScroll,
+    event_detail_key: Option<u64>,
     /// The wheel direction that selected the entry, until its layout starts it at that end.
-    log_detail_entry: Option<bool>,
+    event_detail_entry: Option<bool>,
     /// The wheel direction the selected entry's title holds reports against, and how many remain.
-    log_detail_title_hold: Option<(bool, usize)>,
+    event_detail_title_hold: Option<(bool, usize)>,
     /// The title of the section on the detail's top row once that title scrolls off.
-    log_detail_footer_title: Option<(Line<'static>, detail_model::DetailColumns)>,
-    log_detail_saved: HashMap<u64, DetailsScroll>,
+    event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
+    event_detail_saved: HashMap<u64, SectionScroll>,
     /// The selected event's layout, cached until its content or size changes.
-    log_detail_layout: Option<log::DetailLayout>,
-    log_detail_columns: Option<detail_model::DetailColumns>,
-    log_text: text_selection::TextRegion,
-    details_text: text_selection::TextRegion,
+    event_detail_layout: Option<event_list::EventDetailLayout>,
+    event_detail_columns: Option<event_detail::EventDetailColumns>,
+    event_text: text_selection::TextRegion,
+    task_details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
-    log_list_text: text_selection::TextRegion,
+    event_list_text: text_selection::TextRegion,
     task_scroll_max: usize,
-    details: Rect,
-    details_scroll: DetailsScroll,
+    task_details: Rect,
+    task_details_scroll: SectionScroll,
     /// Screen rows of each copyable details body drawn by the last render, with its full text.
-    details_copy: Vec<(std::ops::Range<u16>, String, &'static str)>,
-    details_background: Vec<(std::ops::Range<u16>, crate::model::BackgroundTask)>,
-    /// Links drawn by the last render of each panel: the task list, the details and the log.
+    task_details_copy: Vec<(std::ops::Range<u16>, String, &'static str)>,
+    task_details_background: Vec<(std::ops::Range<u16>, crate::model::BackgroundTask)>,
+    /// Links drawn by the last render of each panel: the task list, the details and the event list.
     list_links: Vec<links::DrawnLink>,
-    details_links: Vec<links::DrawnLink>,
-    log_links: Vec<links::DrawnLink>,
+    task_details_links: Vec<links::DrawnLink>,
+    event_links: Vec<links::DrawnLink>,
     /// Screen cell at the start of the selected row in the last render.
     marker: Option<(u16, u16)>,
 }
 
 #[derive(Default)]
-struct DetailsScroll {
+struct SectionScroll {
     reveal: Vec<usize>,
     hidden: Vec<usize>,
     bodies: Vec<std::ops::Range<usize>>,
@@ -219,15 +220,15 @@ struct DetailsScroll {
 struct BackgroundReturn {
     event: Option<usize>,
     scroll: usize,
-    search: log_search::LogSearch,
+    search: event_search::EventSearch,
 }
 
-/// What a task's details and log panels showed when the user last left it.
+/// What a task's details and event list panels showed when the user last left it.
 #[derive(Default)]
 struct TaskPanels {
     input_box: prompt_box::PromptBox,
-    details_scroll: DetailsScroll,
-    log_search: log_search::LogSearch,
+    task_details_scroll: SectionScroll,
+    event_search: event_search::EventSearch,
 }
 
 /// Confirmation before a destructive provider action.
@@ -249,13 +250,13 @@ enum ConfirmAction {
 enum Panel {
     #[default]
     TaskList,
-    LogList,
-    Output,
-    Details,
+    EventList,
+    EventDetail,
+    TaskDetails,
     Prompt,
 }
 
-pub(crate) use crate::model::LogSort;
+pub(crate) use crate::model::EventSort;
 
 pub struct View {
     /// The single keyboard destination; selection and scroll positions do not own focus.
@@ -263,11 +264,11 @@ pub struct View {
     /// Actions created by panel changes outside keyboard and mouse handlers.
     pending_actions: Vec<Action>,
     window_prefix: Option<KeyEvent>,
-    /// The session whose program runs in the log detail panel, and its screen.
+    /// The session whose program runs in the event detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
     pub(crate) startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
-    selected_draft: Option<crate::model::DraftId>,
+    selected_draft: Option<crate::model::DraftKey>,
     next_draft: u64,
     drafts_dirty: bool,
     draft_jobs_pending: bool,
@@ -276,20 +277,20 @@ pub struct View {
     pub(crate) weekly_usage: HashMap<ProviderId, crate::providers::WeeklyUsage>,
     pub(crate) usage_view: crate::state::UsageView,
     selector: Option<Selector>,
-    pub(crate) log: Vec<crate::log::Event>,
-    pub(crate) log_session: Option<SessionKey>,
-    pub(crate) log_search: log_search::LogSearch,
-    log_order: Vec<usize>,
-    pub(crate) log_sort: LogSort,
+    pub(crate) event_panel: Vec<crate::event::Event>,
+    pub(crate) event_session: Option<SessionKey>,
+    pub(crate) event_search: event_search::EventSearch,
+    event_order: Vec<usize>,
+    pub(crate) event_sort: EventSort,
     last_update: DateTime<Utc>,
     /// The selected event, shared by the list cursor and detail panel.
-    log_selected: Option<usize>,
-    log_background_event: Option<crate::log::Event>,
+    event_selected: Option<usize>,
+    background_event: Option<crate::event::Event>,
     /// Older wheel steps waiting for App to extend the loaded transcript window.
-    log_pending_older: usize,
-    pub(crate) log_start_requested: bool,
-    log_background_return: Option<BackgroundReturn>,
-    log_detail_search: log_search::LogSearch,
+    event_pending_older: usize,
+    pub(crate) event_start_requested: bool,
+    event_background_return: Option<BackgroundReturn>,
+    event_detail_search: event_search::EventSearch,
     input_box: prompt_box::PromptBox,
     prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
     questions: question_flow::Questions,
@@ -311,7 +312,7 @@ pub struct View {
     search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<SessionKey>,
-    name_target: Option<crate::model::DraftId>,
+    name_target: Option<crate::model::DraftKey>,
     /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
     stopping_prompt: Option<(SessionKey, String)>,
     rename: line_edit::LineEdit,
@@ -328,7 +329,7 @@ pub struct View {
     last_click: Option<(usize, Instant)>,
     double_click_interval: Duration,
     pending_click: Option<input::PendingClick>,
-    last_detail_click: Option<(SessionKey, Option<usize>, Instant)>,
+    last_event_detail_click: Option<(SessionKey, Option<usize>, Instant)>,
     /// Button, origin and drag state of the held mouse press.
     mouse_press: Option<(MouseButton, u16, u16, bool)>,
     /// The pressed panel owns the drag and release, including presses outside panels.
@@ -341,7 +342,7 @@ pub struct View {
     text_selection: RefCell<Option<text_selection::Selection>>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
-    /// The task whose details and log panels are on screen.
+    /// The task whose details and event list panels are on screen.
     panels_task: Option<SessionKey>,
     /// The panels of each task the user left, by task.
     task_panels: HashMap<SessionKey, TaskPanels>,
@@ -409,17 +410,17 @@ impl View {
             window_prefix: None,
             terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
-            log: Vec::new(),
-            log_session: None,
-            log_selected: None,
-            log_background_event: None,
-            log_pending_older: 0,
-            log_start_requested: false,
-            log_background_return: None,
-            log_detail_search: log_search::LogSearch::default(),
-            log_search: log_search::LogSearch::default(),
-            log_order: Vec::new(),
-            log_sort: LogSort::Time,
+            event_panel: Vec::new(),
+            event_session: None,
+            event_selected: None,
+            background_event: None,
+            event_pending_older: 0,
+            event_start_requested: false,
+            event_background_return: None,
+            event_detail_search: event_search::EventSearch::default(),
+            event_search: event_search::EventSearch::default(),
+            event_order: Vec::new(),
+            event_sort: EventSort::Time,
             last_update: Utc::now(),
             drafts: Vec::new(),
             selected_draft: None,
@@ -465,7 +466,7 @@ impl View {
             last_click: None,
             double_click_interval: DOUBLE_CLICK_INTERVAL,
             pending_click: None,
-            last_detail_click: None,
+            last_event_detail_click: None,
             mouse_press: None,
             mouse_panel: None,
             pressed_task: None,
@@ -530,37 +531,37 @@ impl View {
         if self.confirm_dialog.is_some() || self.help {
             return;
         }
-        let details_active = self.active_panel == Panel::Details;
+        let task_details_active = self.active_panel == Panel::TaskDetails;
         if let Some(editor) = self
             .selector
             .as_mut()
-            .filter(|_| details_active)
+            .filter(|_| task_details_active)
             .and_then(Selector::active_editor)
         {
             editor.insert(text);
             return;
         }
-        if self.selector.is_some() && details_active {
+        if self.selector.is_some() && task_details_active {
             return;
         }
         if !self.searching
-            && !self.log_search.editing
-            && !self.log_detail_search.editing
+            && !self.event_search.editing
+            && !self.event_detail_search.editing
             && self.question_paste(text)
         {
             return;
         }
-        if details_active && self.title_editor().is_some() {
+        if task_details_active && self.title_editor().is_some() {
             self.rename.insert(text);
         } else if self.prompt_focused() && self.input_disabled().is_none() {
             self.input_box.paste(text);
-        } else if self.log_detail_search.editing {
-            self.log_detail_search.query.insert(text);
-            self.jump_detail_match();
-        } else if self.log_search.editing {
-            self.log_search.query.insert(text);
-            self.rematch_log();
-            self.show_newest_log();
+        } else if self.event_detail_search.editing {
+            self.event_detail_search.query.insert(text);
+            self.jump_event_detail_match();
+        } else if self.event_search.editing {
+            self.event_search.query.insert(text);
+            self.rematch_event();
+            self.show_newest_event();
         } else if self.searching {
             self.search.insert(text);
             let selected = self
@@ -631,9 +632,8 @@ impl View {
         };
         target.state = prompt_box::SendState::Ready;
         target.submitting = true;
-        // Explicit input keeps this task selected when its waiting status clears.
+        // Explicit input cancels the return to the interrupted task, but keeps the queue.
         if prompt && self.selected_id() == Some(id) {
-            self.attention_selection = None;
             self.interrupted_selection = None;
         }
     }
@@ -823,7 +823,7 @@ impl View {
                     .unwrap_or_else(|| self.fallback_selection());
                 self.set_selected(index);
             } else {
-                self.set_selected(self.fallback_selection());
+                return;
             }
         }
         self.remember_selection();
@@ -1071,49 +1071,49 @@ impl View {
         }
         visible
     }
-    pub(crate) fn log_scroll(&self) -> usize {
-        self.viewport.borrow().log_scroll
+    pub(crate) fn event_scroll(&self) -> usize {
+        self.viewport.borrow().event_scroll
     }
 
-    pub(crate) fn clamp_log_scroll(&mut self, max: usize) {
+    pub(crate) fn clamp_event_scroll(&mut self, max: usize) {
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_scroll = viewport.log_scroll.min(max);
+        viewport.event_scroll = viewport.event_scroll.min(max);
     }
 
-    pub(crate) fn log_max_scroll(&self) -> usize {
+    pub(crate) fn event_max_scroll(&self) -> usize {
         let height = usize::from(
             self.viewport
                 .borrow()
-                .log
+                .event_panel
                 .height
-                .saturating_sub(u16::from(self.log_search.active())),
+                .saturating_sub(u16::from(self.event_search.active())),
         );
-        self.matching_log_count().saturating_sub(height)
+        self.matching_event_count().saturating_sub(height)
     }
 
-    pub(crate) fn log_read_count(&self, visible: usize, has_older: bool) -> usize {
-        let loaded = self.log.len().max(visible);
+    pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
+        let loaded = self.event_panel.len().max(visible);
         if has_older
-            && (self.log_page_pending() || (self.log_scroll() == 0 && !self.following_log()))
+            && (self.event_page_pending() || (self.event_scroll() == 0 && !self.following_event()))
         {
-            loaded.saturating_add(visible.max(self.log_pending_older).max(1))
+            loaded.saturating_add(visible.max(self.event_pending_older).max(1))
         } else {
             loaded
         }
     }
 
-    /// Selects the newest shown event and resumes following the log.
-    fn show_newest_log(&mut self) {
-        self.select_log_event(None);
-        self.log_detail_search.clear();
-        let max = self.log_max_scroll();
+    /// Selects the newest shown event and resumes following the event list.
+    fn show_newest_event(&mut self) {
+        self.select_event(None);
+        self.event_detail_search.clear();
+        let max = self.event_max_scroll();
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_scroll = max;
-        viewport.log_detail_scroll = 0;
-        viewport.log_unseen = 0;
-        self.log_pending_older = 0;
-        self.log_start_requested = false;
-        self.log_background_return = None;
+        viewport.event_scroll = max;
+        viewport.event_detail_scroll = 0;
+        viewport.event_unseen = 0;
+        self.event_pending_older = 0;
+        self.event_start_requested = false;
+        self.event_background_return = None;
     }
 
     fn set_selected(&mut self, selected: usize) {
@@ -1141,7 +1141,7 @@ impl View {
         }
     }
 
-    /// Keeps the details and log panels with their task: saves what the task the user left
+    /// Keeps the details and event list panels with their task: saves what the task the user left
     /// showed, and shows what the selected task showed when the user last left it.
     fn show_selected_panels(&mut self) {
         self.sync_questions();
@@ -1154,8 +1154,8 @@ impl View {
         let viewport = self.viewport.get_mut();
         let left = TaskPanels {
             input_box: std::mem::take(&mut self.input_box),
-            details_scroll: std::mem::take(&mut viewport.details_scroll),
-            log_search: std::mem::take(&mut self.log_search),
+            task_details_scroll: std::mem::take(&mut viewport.task_details_scroll),
+            event_search: std::mem::take(&mut self.event_search),
         };
         if let Some(id) = self.panels_task.take() {
             self.task_panels.insert(id, left);
@@ -1164,22 +1164,23 @@ impl View {
             .as_ref()
             .and_then(|id| self.task_panels.remove(id))
             .unwrap_or_default();
-        if shown.details_scroll.left_keys.is_none() {
-            shown.details_scroll.left_keys = Some(std::mem::take(&mut shown.details_scroll.keys));
+        if shown.task_details_scroll.left_keys.is_none() {
+            shown.task_details_scroll.left_keys =
+                Some(std::mem::take(&mut shown.task_details_scroll.keys));
         }
-        viewport.details_scroll = shown.details_scroll;
-        viewport.log_scroll = 0;
-        viewport.log_unseen = 0;
-        viewport.log_detail_scroll = 0;
-        viewport.log_detail_layout = None;
+        viewport.task_details_scroll = shown.task_details_scroll;
+        viewport.event_scroll = 0;
+        viewport.event_unseen = 0;
+        viewport.event_detail_scroll = 0;
+        viewport.event_detail_layout = None;
         self.input_box = shown.input_box;
-        self.log_search = shown.log_search;
-        self.log_selected = None;
-        self.log_background_event = None;
-        self.log_pending_older = 0;
-        self.log_start_requested = false;
-        self.log_background_return = None;
-        self.log_detail_search.clear();
+        self.event_search = shown.event_search;
+        self.event_selected = None;
+        self.background_event = None;
+        self.event_pending_older = 0;
+        self.event_start_requested = false;
+        self.event_background_return = None;
+        self.event_detail_search.clear();
         self.pending_click = None;
         self.panels_task = selected;
     }

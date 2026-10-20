@@ -1,7 +1,7 @@
 //! Message layout and one-line summaries shared by the panels.
 
 use super::tool_detail::Part;
-use crate::log::Kind;
+use crate::event::Kind;
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -37,7 +37,7 @@ pub(crate) fn summary(
     kind: &Kind,
     paths: Option<&[Range<usize>]>,
 ) -> Line<'static> {
-    let style = super::style::log_styles(kind).1;
+    let style = super::style::event_styles(kind).1;
     let normalized;
     let text = if !is_prose(kind) && paths.is_none() {
         normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");

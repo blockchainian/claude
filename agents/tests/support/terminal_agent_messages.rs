@@ -103,14 +103,14 @@ fn terminal_codex_agent_message_bodies() {
             .unwrap();
         let column = line[..line.find(&label).unwrap()].width();
         tmux.mouse(0, column, row, true);
-        let detail_title = if subject == "demo_sub" {
+        let event_detail_title = if subject == "demo_sub" {
             subject.to_owned()
         } else {
             format!("← {subject}")
         };
         let capture = tmux.capture_when(|capture| {
             capture.lines().any(|line| {
-                line.contains(&detail_title)
+                line.contains(&event_detail_title)
                     && line.contains(if subject == "demo_sub" {
                         "Spawn agent"
                     } else if subject == "ux_probe" {
@@ -246,13 +246,13 @@ fn terminal_codex_collaboration_navigation() {
     let spawn = tmux.capture_when(|capture| {
         capture.contains("Spawn agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")
     });
-    let log_surface = spawn
+    let event_surface = spawn
         .lines()
         .map(|line| line.chars().skip(90).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!log_surface.contains("SubAgentActivity"), "{spawn}");
-    assert!(!log_surface.contains("CollabAgentToolCall"), "{spawn}");
+    assert!(!event_surface.contains("SubAgentActivity"), "{spawn}");
+    assert!(!event_surface.contains("CollabAgentToolCall"), "{spawn}");
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     let jumped = tmux.capture_when(|capture| {
         capture.contains("root → new task") && !capture.contains("demo_sub → 演示完成")

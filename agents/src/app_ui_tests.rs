@@ -85,7 +85,7 @@ fn row_ends(buffer: &ratatui::buffer::Buffer, text: &str) -> ((u16, u16), (u16, 
     ((starts[0], y), (*starts.last().unwrap(), y))
 }
 
-fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
+fn event_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let separators: Vec<_> = (0..buffer.area.width)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
@@ -93,7 +93,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let (left, rows) = if separators.len() == 2 {
         (separators[1] + 2, 2..prompt - 1)
     } else {
-        (1, prompt + 2..log_list_end(buffer, prompt))
+        (1, prompt + 2..event_list_end(buffer, prompt))
     };
     for y in rows.rev() {
         for x in left..buffer.area.width - 1 {
@@ -105,7 +105,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     panic!("missing log body {text:?}:\n{}", lines(buffer).join("\n"));
 }
 
-fn log_list_end(buffer: &ratatui::buffer::Buffer, prompt: u16) -> u16 {
+fn event_list_end(buffer: &ratatui::buffer::Buffer, prompt: u16) -> u16 {
     (prompt + 2..buffer.area.height - 1)
         .find(|&y| {
             (1..buffer.area.width - 1)
@@ -139,7 +139,7 @@ fn wheel(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
     })));
 }
 
-fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
+fn assert_event_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
     let separators: Vec<_> = (0..buffer.area.width)
         .filter(|&x| buffer[(x, 2)].symbol() == "│")
         .collect();
@@ -187,16 +187,16 @@ fn settled_zero_duration_leaves_the_time_column_empty_through_app() {
         app.refresh();
         select_archive(&mut app);
         let buffer = draw(&mut app, width);
-        let (x, y) = log_position(&buffer, "Equal timestamp reply");
+        let (x, y) = event_position(&buffer, "Equal timestamp reply");
         let right = width - 1;
         assert_eq!(segment(&buffer, right - 8..right, y), "        ");
         assert_eq!(segment(&buffer, right - 10..right - 8, y), "  ");
         assert_eq!(buffer[(right - 11, y)].symbol(), "…");
-        let (prompt_x, prompt_y) = log_position(&buffer, "Equal timestamp prompt");
+        let (prompt_x, prompt_y) = event_position(&buffer, "Equal timestamp prompt");
         assert_eq!(x, prompt_x);
         assert_eq!(buffer[(right - 11, prompt_y)].symbol(), "…");
         assert!(segment(&buffer, right - 8..right, prompt_y).contains(':'));
-        let (_, latest_y) = log_position(&buffer, "Following message");
+        let (_, latest_y) = event_position(&buffer, "Following message");
         assert!(
             !segment(&buffer, right - 8..right, latest_y)
                 .trim()
@@ -206,41 +206,41 @@ fn settled_zero_duration_leaves_the_time_column_empty_through_app() {
 }
 
 #[test]
-fn log_selection_cursor_fills_padding_through_app() {
+fn event_selection_cursor_fills_padding_through_app() {
     for width in [120, 180] {
         let (_directory, mut app) = fixture();
         select_archive(&mut app);
         let buffer = draw(&mut app, width);
-        assert_log_cursor(&buffer, log_position(&buffer, "对").1);
+        assert_event_cursor(&buffer, event_position(&buffer, "对").1);
     }
 }
 
 #[test]
-fn log_selection_wheel_updates_detail_and_cursor_through_app() {
+fn event_selection_wheel_updates_detail_and_cursor_through_app() {
     for (width, height) in [(120, 45), (180, 40)] {
         let (_directory, mut app) = fixture();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
-        let (x, newest) = log_position(&buffer, "对");
+        let (x, newest) = event_position(&buffer, "对");
         assert!(
-            log_position(&buffer, "⏺").1 < newest,
+            event_position(&buffer, "⏺").1 < newest,
             "older rows are above latest"
         );
         wheel(&mut app, MouseEventKind::ScrollUp, x, newest);
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("codex thread"));
-        let (_, older) = log_position(&buffer, "⏺");
-        assert_log_cursor(&buffer, older);
+        assert!(event_detail_content(&buffer).contains("codex thread"));
+        let (_, older) = event_position(&buffer, "⏺");
+        assert_event_cursor(&buffer, older);
         assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
         wheel(&mut app, MouseEventKind::ScrollDown, x, older);
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("decision"));
+        assert!(event_detail_content(&buffer).contains("decision"));
         assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
     }
 }
 
 #[test]
-fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
+fn event_selection_follows_appends_and_jump_resumes_tail_through_app() {
     for (width, height) in [(120, 45), (180, 40)] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -253,12 +253,12 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         std::fs::write(&path, payload).unwrap();
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("decision"));
-        let (x, y) = log_position(&buffer, "⏺");
+        assert!(event_detail_content(&buffer).contains("decision"));
+        let (x, y) = event_position(&buffer, "⏺");
         click(&mut app, x, y);
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("codex thread"));
-        assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
+        assert!(event_detail_content(&buffer).contains("codex thread"));
+        assert_event_cursor(&buffer, event_position(&buffer, "⏺").1);
         assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
         let mut arrival: serde_json::Value = serde_json::from_str(first).unwrap();
         arrival["timestamp"] = "2026-10-06T16:40:00Z".into();
@@ -271,14 +271,14 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         std::fs::write(&path, format!("{payload}{arrival}\n")).unwrap();
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
-        assert!(!detail(&buffer).contains("tail-arrival-proof"));
-        assert!(detail(&buffer).contains("codex thread"));
-        assert_log_cursor(&buffer, y);
+        assert!(!event_detail_content(&buffer).contains("tail-arrival-proof"));
+        assert!(event_detail_content(&buffer).contains("codex thread"));
+        assert_event_cursor(&buffer, y);
         let (x, y) = position(&buffer, "↓ 1 New");
         click(&mut app, x, y);
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("tail-arrival-proof"));
-        assert_log_cursor(&buffer, log_position(&buffer, "tail-arrival-proof").1);
+        assert!(event_detail_content(&buffer).contains("tail-arrival-proof"));
+        assert_event_cursor(&buffer, event_position(&buffer, "tail-arrival-proof").1);
         assert!(!lines(&buffer).join("\n").contains("↓ 1 New"));
         let previous = arrival.to_string();
         arrival["uuid"] = "tail-following".into();
@@ -287,13 +287,13 @@ fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
         std::fs::write(&path, format!("{payload}{previous}\n{arrival}\n")).unwrap();
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
-        assert!(detail(&buffer).contains("tail-following-proof"));
-        assert_log_cursor(&buffer, log_position(&buffer, "tail-following-proof").1);
+        assert!(event_detail_content(&buffer).contains("tail-following-proof"));
+        assert_event_cursor(&buffer, event_position(&buffer, "tail-following-proof").1);
     }
 }
 
 #[test]
-fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
+fn event_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
     // Nineteen rows keep all three panels visible in both layouts.
     for width in [120, 180] {
         let (_directory, mut app) = fixture();
@@ -321,15 +321,15 @@ fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         app.refresh();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, 19);
-        let (x, y) = log_position(&buffer, "event-39");
+        let (x, y) = event_position(&buffer, "event-39");
         // A burst is dispatched before the next frame, just like the real App loop.
         for _ in 0..12 {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         }
         let buffer = draw_size(&mut app, width, 19);
-        assert!(detail(&buffer).contains("event-27"));
-        assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
-        let selected_position = log_position(&buffer, "event-27");
+        assert!(event_detail_content(&buffer).contains("event-27"));
+        assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
+        let selected_position = event_position(&buffer, "event-27");
         record["uuid"] = "selection-40".into();
         record["timestamp"] = (start + chrono::Duration::seconds(40)).to_rfc3339().into();
         record["message"]["content"] = format!("event-40 {body}").into();
@@ -337,24 +337,24 @@ fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         std::fs::write(&path, &payload).unwrap();
         app.refresh();
         let buffer = draw_size(&mut app, width, 19);
-        assert!(detail(&buffer).contains("event-27"));
-        assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
+        assert!(event_detail_content(&buffer).contains("event-27"));
+        assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
         assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
-        assert_eq!(log_position(&buffer, "event-27"), selected_position);
+        assert_eq!(event_position(&buffer, "event-27"), selected_position);
         for expected in (0..27).rev() {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
             let buffer = draw_size(&mut app, width, 19);
             let label = format!("event-{expected:02}");
-            assert!(detail(&buffer).contains(&label));
-            assert_log_cursor(&buffer, log_position(&buffer, &label).1);
+            assert!(event_detail_content(&buffer).contains(&label));
+            assert_event_cursor(&buffer, event_position(&buffer, &label).1);
         }
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-        assert!(detail(&draw_size(&mut app, width, 19)).contains("event-00"));
+        assert!(event_detail_content(&draw_size(&mut app, width, 19)).contains("event-00"));
     }
 }
 
 #[test]
-fn log_selection_switching_tasks_resets_following_through_app() {
+fn event_selection_switching_tasks_resets_following_through_app() {
     for width in [120, 180] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -369,26 +369,26 @@ fn log_selection_switching_tasks_resets_following_through_app() {
         select_archive(&mut app);
         let first = app.view.selected_id().cloned().unwrap();
         let buffer = draw(&mut app, width);
-        let (x, y) = log_position(&buffer, "对");
+        let (x, y) = event_position(&buffer, "对");
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-        assert!(detail(&draw(&mut app, width)).contains("codex thread"));
+        assert!(event_detail_content(&draw(&mut app, width)).contains("codex thread"));
         click(&mut app, 0, 2);
         key(&mut app, KeyCode::Down);
         let buffer = draw(&mut app, width);
         assert_ne!(app.view.selected_id(), Some(&first));
-        assert!(detail(&buffer).contains("decision"));
-        assert_log_cursor(&buffer, log_position(&buffer, "对").1);
+        assert!(event_detail_content(&buffer).contains("decision"));
+        assert_event_cursor(&buffer, event_position(&buffer, "对").1);
         key(&mut app, KeyCode::Up);
         let buffer = draw(&mut app, width);
         assert_eq!(app.view.selected_id(), Some(&first));
-        assert!(detail(&buffer).contains("decision"));
-        assert_log_cursor(&buffer, log_position(&buffer, "对").1);
+        assert!(event_detail_content(&buffer).contains("decision"));
+        assert_event_cursor(&buffer, event_position(&buffer, "对").1);
         assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
     }
 }
 
 #[test]
-fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
+fn selected_real_transcript_draws_event_and_prompt_at_narrow_and_wide_sizes() {
     let (_directory, mut app) = fixture();
     assert!(app.view.selected_id().is_none());
     key(&mut app, KeyCode::Tab);
@@ -397,7 +397,7 @@ fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
     for width in [80, 120, 150, 200] {
         let buffer = draw(&mut app, width);
         assert!(
-            app.log_stamp.is_some(),
+            app.transcript_stamp.is_some(),
             "draw must read the selected transcript"
         );
         let rendered = lines(&buffer).join("\n");
@@ -608,7 +608,7 @@ fn wait_for_click(app: &mut App) {
     }
 }
 
-fn detail(buffer: &ratatui::buffer::Buffer) -> String {
+fn event_detail_content(buffer: &ratatui::buffer::Buffer) -> String {
     let rendered = lines(buffer);
     let bottom = rendered.len() - 2;
     let separator = rendered[..bottom]
@@ -630,7 +630,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("codex thread"),
+            event_detail_content(&buffer).contains("codex thread"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -638,17 +638,17 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("decision"),
+            event_detail_content(&buffer).contains("decision"),
             "{}",
             lines(&buffer).join("\n")
         );
         // Click the actual User event in the list, not the preview.
-        let (x, y) = log_position(&buffer, "⏺");
+        let (x, y) = event_position(&buffer, "⏺");
         click(&mut app, x, y);
         wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("codex thread"),
+            event_detail_content(&buffer).contains("codex thread"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -663,17 +663,17 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("codex thread"),
+            event_detail_content(&buffer).contains("codex thread"),
             "{}",
             lines(&buffer).join("\n")
         );
         // Another list row replaces the pinned event through the same click deadline.
-        let (x, y) = log_position(&buffer, "对");
+        let (x, y) = event_position(&buffer, "对");
         click(&mut app, x, y);
         wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("decision"),
+            event_detail_content(&buffer).contains("decision"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -681,7 +681,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
 }
 
 #[test]
-fn narrow_and_wide_log_double_click_focuses_list_and_keeps_preview_following() {
+fn narrow_and_wide_event_double_click_focuses_list_and_keeps_preview_following() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -691,7 +691,7 @@ fn narrow_and_wide_log_double_click_focuses_list_and_keeps_preview_following() {
         app.refresh();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
-        let (x, y) = log_position(&buffer, "⏺");
+        let (x, y) = event_position(&buffer, "⏺");
         click(&mut app, x, y);
         click(&mut app, x, y);
         key(&mut app, KeyCode::Char('/'));
@@ -707,7 +707,7 @@ fn narrow_and_wide_log_double_click_focuses_list_and_keeps_preview_following() {
         app.refresh();
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("decision"),
+            event_detail_content(&buffer).contains("decision"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -719,22 +719,22 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
-        let original = detail(&draw_size(&mut app, width, height));
+        let original = event_detail_content(&draw_size(&mut app, width, height));
         let initial = draw_size(&mut app, width, height);
-        let (column, row) = log_position(&initial, "Stop hook");
+        let (column, row) = event_position(&initial, "Stop hook");
         click(&mut app, column, row);
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("Stop hook".into()));
         let buffer = draw_size(&mut app, width, height);
         assert!(lines(&buffer).join("\n").contains("Search ❯ Stop hook"));
         assert_eq!(
-            detail(&buffer),
+            event_detail_content(&buffer),
             original,
             "filtering the list must preserve newest preview"
         );
         key(&mut app, KeyCode::Esc);
         let buffer = draw_size(&mut app, width, height);
-        let (x, y) = log_position(&buffer, "⏺");
+        let (x, y) = event_position(&buffer, "⏺");
         click(&mut app, x, y);
         wait_for_click(&mut app);
         click(&mut app, 1, height - 3);
@@ -742,7 +742,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         app.handle_event(Event::Paste("await".into()));
         let buffer = draw_size(&mut app, width, height);
         assert!(
-            detail(&buffer).contains("Search ❯ await"),
+            event_detail_content(&buffer).contains("Search ❯ await"),
             "{}",
             lines(&buffer).join("\n")
         );
@@ -764,14 +764,14 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
 }
 
 #[test]
-fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
+fn narrow_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
     for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
         let prompt = position(&buffer, "❯").1;
         let middle = prompt - 1;
-        let list_end = log_list_end(&buffer, prompt);
+        let list_end = event_list_end(&buffer, prompt);
         let heights = [
             middle - 2,
             list_end.saturating_sub(prompt + 2),
@@ -783,34 +783,34 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
             "{width}x{height}:\n{}",
             lines(&buffer).join("\n")
         );
-        assert!(detail(&buffer).contains("decision"));
-        let (x, y) = log_position(&buffer, "⏺");
+        assert!(event_detail_content(&buffer).contains("decision"));
+        let (x, y) = event_position(&buffer, "⏺");
         click(&mut app, x, y);
         wait_for_click(&mut app);
         let opened = draw_size(&mut app, width, height);
-        assert!(detail(&opened).contains("codex thread"));
+        assert!(event_detail_content(&opened).contains("codex thread"));
         assert_eq!(
             lines(&opened)[usize::from(prompt + 2)..usize::from(list_end)],
             lines(&buffer)[usize::from(prompt + 2)..usize::from(list_end)],
             "opening an event must preserve the visible event list"
         );
-        let (x, y) = log_position(&opened, "对");
+        let (x, y) = event_position(&opened, "对");
         click(&mut app, x, y);
         wait_for_click(&mut app);
         let changed = draw_size(&mut app, width, height);
-        assert!(detail(&changed).contains("decision"));
-        assert!(log_position(&changed, "⏺").1 < list_end);
+        assert!(event_detail_content(&changed).contains("decision"));
+        assert!(event_position(&changed, "⏺").1 < list_end);
     }
 }
 
 #[test]
-fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
+fn narrow_and_wide_event_panels_scroll_and_copy_independently() {
     // The wide detail must stay one row short of its event so that the wheel has room to scroll.
     for (width, height) in [(120, 30), (100, 30), (180, 23)] {
         let (_directory, mut app) = border_fixture();
         app.view.set_double_click_ms(20);
         let buffer = draw_size(&mut app, width, height);
-        let (x, y) = log_position(&buffer, "⏺");
+        let (x, y) = event_position(&buffer, "⏺");
         click(&mut app, x, y);
         wait_for_click(&mut app);
         let buffer = draw_size(&mut app, width, height);
@@ -845,7 +845,7 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
             }),
             "copy the real event body at {width}x{height}"
         );
-        let before = detail(&buffer);
+        let before = event_detail_content(&buffer);
         for (kind, column, row) in [
             (MouseEventKind::ScrollUp, x, y),
             (MouseEventKind::ScrollDown, text_x, text_y),
@@ -859,7 +859,7 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
             draw_size(&mut app, width, height);
         }
         let scrolled = draw_size(&mut app, width, height);
-        assert_ne!(detail(&scrolled), before);
+        assert_ne!(event_detail_content(&scrolled), before);
         assert!(!lines(&scrolled).join("\n").contains("↓ Latest"));
         assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
         click(&mut app, x, y);
@@ -867,7 +867,10 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         let latest = draw_size(&mut app, width, height);
         assert!(!lines(&latest).join("\n").contains("↓ Latest"));
         assert_eq!(
-            detail(&latest).lines().skip(1).collect::<Vec<_>>(),
+            event_detail_content(&latest)
+                .lines()
+                .skip(1)
+                .collect::<Vec<_>>(),
             before.lines().skip(1).collect::<Vec<_>>()
         );
     }
@@ -962,8 +965,8 @@ fn wide_border_labels_stay_in_their_columns() {
         let prompt = position(&buffer, "❯").1;
         let middle = prompt - 1;
         let tasks = 1..separators[0] - 1;
-        let details = separators[0] + 2..separators[1] - 1;
-        let log = separators[1] + 2..width - 1;
+        let task_details = separators[0] + 2..separators[1] - 1;
+        let event_panel = separators[1] + 2..width - 1;
         assert!(
             segment(&buffer, tasks.clone(), middle)
                 .chars()
@@ -971,27 +974,31 @@ fn wide_border_labels_stay_in_their_columns() {
             "activity missing on middle border:\n{}",
             rendered.join("\n")
         );
-        let bottom = segment(&buffer, details.clone(), middle);
+        let bottom = segment(&buffer, task_details.clone(), middle);
         // The fixture's recorded prompt cache has long expired, so ⏸︎ follows the status.
-        let start = (details.len() - 11) / 2;
+        let start = (task_details.len() - 11) / 2;
         assert_eq!(
             segment(
                 &buffer,
-                details.start + start as u16..details.start + start as u16 + 11,
+                task_details.start + start as u16..task_details.start + start as u16 + 11,
                 1
             ),
             " Working ⏸\u{fe0e} "
         );
         assert!(!bottom.contains("2m 0s"));
         assert!(!bottom.contains("Working"));
-        assert!(segment(&buffer, details.clone(), 1).ends_with(" 2m 0s"));
+        assert!(segment(&buffer, task_details.clone(), 1).ends_with(" 2m 0s"));
         let title_prefix: String = app.sessions[0].display_title().chars().take(8).collect();
         assert!(bottom.contains(&title_prefix));
-        assert!(!segment(&buffer, details.clone(), 1).contains(&title_prefix));
+        assert!(!segment(&buffer, task_details.clone(), 1).contains(&title_prefix));
         assert!(segment(&buffer, tasks.clone(), 1).chars().all(|c| c == '─'));
-        assert!(segment(&buffer, log.clone(), 1).chars().all(|c| c == '─'));
+        assert!(
+            segment(&buffer, event_panel.clone(), 1)
+                .chars()
+                .all(|c| c == '─')
+        );
         for y in 2..middle {
-            for range in [details.clone(), log.clone()] {
+            for range in [task_details.clone(), event_panel.clone()] {
                 let text = segment(&buffer, range, y);
                 assert!(
                     !text.contains("Working ·") && !text.contains("────"),
@@ -1002,18 +1009,18 @@ fn wide_border_labels_stay_in_their_columns() {
         // Scrolling without arrivals leaves the borders free of jump buttons.
         app.handle_event(Event::Mouse(MouseEvent {
             kind: MouseEventKind::ScrollUp,
-            column: log.start,
+            column: event_panel.start,
             row: 5,
             modifiers: KeyModifiers::NONE,
         }));
         let buffer = draw(&mut app, width);
-        assert!(!segment(&buffer, log.clone(), middle).contains("↓ Latest"));
-        assert!(!segment(&buffer, log.clone(), 1).contains("↓ Latest"));
+        assert!(!segment(&buffer, event_panel.clone(), middle).contains("↓ Latest"));
+        assert!(!segment(&buffer, event_panel.clone(), 1).contains("↓ Latest"));
         for y in 2..middle {
-            assert!(!segment(&buffer, log.clone(), y).contains("↓ Latest"));
+            assert!(!segment(&buffer, event_panel.clone(), y).contains("↓ Latest"));
         }
-        click(&mut app, log.start + 1, middle);
-        click(&mut app, log.start + 1, middle);
+        click(&mut app, event_panel.start + 1, middle);
+        click(&mut app, event_panel.start + 1, middle);
         assert!(
             !lines(&draw(&mut app, width))
                 .join("\n")
@@ -1051,20 +1058,20 @@ fn narrow_render_survives_wide_resize_unchanged() {
 }
 
 #[test]
-fn log_rows_keep_fixed_content_and_right_aligned_times() {
+fn event_rows_keep_fixed_content_and_right_aligned_times() {
     use chrono::TimeZone;
     let (_directory, mut app) = fixture();
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Home);
     draw(&mut app, 100);
-    let source = crate::providers::claude::log::tail_session(
+    let source = crate::providers::claude::event_reader::tail_session(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl"),
         200,
         true,
     )
     .unwrap()
     .into_iter()
-    .find(|event| event.kind == crate::log::Kind::Tool)
+    .find(|event| event.kind == crate::event::Kind::Tool)
     .unwrap();
     let at = chrono::Local
         .with_ymd_and_hms(2026, 10, 12, 10, 6, 26)
@@ -1085,9 +1092,9 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
         .collect::<Vec<_>>();
     for width in [100, 149, 150, 200] {
         draw(&mut app, width);
-        app.view.set_log(events.clone());
+        app.view.set_event(events.clone());
         let buffer = draw(&mut app, width);
-        let (x, top) = log_position(&buffer, "long body");
+        let (x, top) = event_position(&buffer, "long body");
         let right = width - 1;
         assert_eq!(
             x,
@@ -1111,11 +1118,11 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
     }
 }
 
-#[path = "app_details_tests.rs"]
-mod details_alignment;
+#[path = "app_task_details_tests.rs"]
+mod task_details_alignment;
 
 #[test]
-fn app_log_padding_and_clicks_follow_real_transcript_rows() {
+fn app_event_padding_and_clicks_follow_real_transcript_rows() {
     for width in [149, 200] {
         for edge in [false, true] {
             let (_directory, mut app) = fixture_with_double_click_ms(20);
@@ -1125,7 +1132,7 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 .filter(|&x| buffer[(x, 2)].symbol() == "│")
                 .collect();
             let left = if width == 200 { separators[1] + 2 } else { 1 };
-            let (x, y) = log_position(&buffer, "⏺ Ran 4 stop hooks");
+            let (x, y) = event_position(&buffer, "⏺ Ran 4 stop hooks");
             assert_eq!(x, left);
             assert_eq!(
                 (left..width).rfind(|&x| buffer[(x, y)].symbol() != " "),
@@ -1134,20 +1141,20 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
             click(&mut app, if edge { width - 2 } else { left }, y);
             wait_for_click(&mut app);
             let buffer = draw(&mut app, width);
-            let (detail_x, detail_y) = position(&buffer, "User      ");
+            let (event_detail_x, event_detail_y) = position(&buffer, "User      ");
             let (_, prompt_y) = position(&buffer, "❯");
             assert!(
-                detail_y > prompt_y,
+                event_detail_y > prompt_y,
                 "clicked event must open below the prompt"
             );
-            assert_eq!(detail_x, width / 2 - "User".len() as u16 / 2);
-            assert_eq!(buffer[(width - 1, detail_y)].symbol(), "▕");
+            assert_eq!(event_detail_x, width / 2 - "User".len() as u16 / 2);
+            assert_eq!(buffer[(width - 1, event_detail_y)].symbol(), "▕");
             assert_eq!(
-                (1..width - 1).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
+                (1..width - 1).rfind(|&x| buffer[(x, event_detail_y)].symbol() != " "),
                 Some(width - 2)
             );
             assert!(
-                lines(&buffer)[usize::from(detail_y)..]
+                lines(&buffer)[usize::from(event_detail_y)..]
                     .join("\n")
                     .contains("⏺ Ran 4 stop hooks")
             );
@@ -1270,10 +1277,10 @@ fn incremental_refresh_parses_only_appended_fixture_bytes() {
     select_archive(&mut app);
     draw_size(&mut app, 200, 45);
     let path = app.sessions[0].transcript.clone().unwrap();
-    let before = app.log_parsed_bytes;
+    let before = app.transcript_parsed_bytes;
     draw_size(&mut app, 200, 45);
     assert_eq!(
-        app.log_parsed_bytes, before,
+        app.transcript_parsed_bytes, before,
         "unchanged file must decode zero bytes"
     );
     let payload = include_str!("../tests/fixtures/claude-task-notifications.jsonl");
@@ -1285,7 +1292,7 @@ fn incremental_refresh_parses_only_appended_fixture_bytes() {
         .unwrap();
     app.refresh();
     draw_size(&mut app, 200, 45);
-    assert_eq!(app.log_parsed_bytes - before, payload.len() as u64);
+    assert_eq!(app.transcript_parsed_bytes - before, payload.len() as u64);
 }
 
 // A real PTY program isolates selection and shutdown from provider availability.

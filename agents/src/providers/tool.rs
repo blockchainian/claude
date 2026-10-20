@@ -1,7 +1,7 @@
 pub(crate) mod groups;
 pub(crate) mod shell_summary;
 
-use crate::log::{Section, ToolCall};
+use crate::event::{Section, ToolCall};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -430,11 +430,11 @@ pub(crate) fn rule(name: &str) -> &'static ToolRule {
         .unwrap_or(&DEFAULT_RULE)
 }
 
-pub(crate) fn tool_kind(name: &str) -> crate::log::Kind {
+pub(crate) fn tool_kind(name: &str) -> crate::event::Kind {
     if rule(name).question {
-        crate::log::Kind::Assistant
+        crate::event::Kind::Assistant
     } else {
-        crate::log::Kind::Tool
+        crate::event::Kind::Tool
     }
 }
 
@@ -499,7 +499,7 @@ pub(crate) fn list_title(
     groups.finish().unwrap()
 }
 
-pub(crate) fn detail_titles(name: &str, subject: Option<&str>) -> (String, String) {
+pub(crate) fn event_detail_titles(name: &str, subject: Option<&str>) -> (String, String) {
     let display = display_tool_name(name);
     match subject.filter(|subject| !subject.trim().is_empty()) {
         Some(subject) => (display, subject.to_owned()),
@@ -692,11 +692,11 @@ pub(crate) fn result_state(text: &str, value: &Value, error: bool) -> ResultStat
     }
 }
 
-pub(crate) fn result_kind(kind: crate::log::Kind, state: &ResultState) -> crate::log::Kind {
+pub(crate) fn result_kind(kind: crate::event::Kind, state: &ResultState) -> crate::event::Kind {
     if state.denied {
-        crate::log::Kind::Denied
+        crate::event::Kind::Denied
     } else if state.is_error {
-        crate::log::Kind::Error
+        crate::event::Kind::Error
     } else {
         kind
     }
@@ -1417,9 +1417,9 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
-    fn shell_output(command: &str, text: &str) -> Vec<crate::log::Section> {
+    fn shell_output(command: &str, text: &str) -> Vec<crate::event::Section> {
         super::shell_output_sections(command, "stdout", text).unwrap_or_else(|| {
-            vec![crate::log::Section::Text {
+            vec![crate::event::Section::Text {
                 label: "stdout".into(),
                 text: text.into(),
             }]
@@ -1452,7 +1452,7 @@ mod tests {
         );
         assert!(matches!(
             shell_output("tail -n +2 a.rs; cat b.py", "one\ntwo").as_slice(),
-            [crate::log::Section::Text { .. }]
+            [crate::event::Section::Text { .. }]
         ));
     }
 
@@ -1475,13 +1475,13 @@ mod tests {
         );
         assert!(matches!(
             shell_output("cat a.rs b.py", "one\ntwo").as_slice(),
-            [crate::log::Section::Text { .. }]
+            [crate::event::Section::Text { .. }]
         ));
     }
 
     #[test]
     fn shell_output_diff_and_search() {
-        use crate::log::Section;
+        use crate::event::Section;
         let diff = "@@ -1 +1 @@\n-old\n+new";
         for command in [
             "git diff -- a.rs",
@@ -1529,7 +1529,7 @@ mod tests {
 
     #[test]
     fn shell_output_truncation_keeps_known_prefix() {
-        use crate::log::Section;
+        use crate::event::Section;
         let output = shell_output(
             "sed -n '1p' a.rs; sed -n '1,4p' b.py",
             "Total output lines: 5\n\nfn main() {}\nprint(1)\n…238 tokens truncated…\nprint(4)",
@@ -1562,7 +1562,7 @@ mod tests {
 
     #[test]
     fn shell_output_splits_mixed_file_reads() {
-        use crate::log::Section;
+        use crate::event::Section;
         let output = shell_output(
             "sed -n '4,5p' a.rs\nhead -n 1 b.py; cat Cargo.toml",
             "fn main() {\n}\nprint('hi')\n[package]\nname = 'agents'",
@@ -1594,7 +1594,7 @@ mod tests {
 
     #[test]
     fn shell_output_splits_reads_before_other_commands() {
-        use crate::log::Section;
+        use crate::event::Section;
         let first = "let first = 1;\n".repeat(341);
         let second = "let second = 2;\n".repeat(181);
         let tail = "12345 agents/tests/fixtures/claude-tool-calls.jsonl\n678 agents/tests/fixtures/claude-tool-calls.jsonl\n";
@@ -1627,7 +1627,7 @@ mod tests {
 
     #[test]
     fn shell_output_stops_at_unknown_counts() {
-        use crate::log::Section;
+        use crate::event::Section;
         for command in [
             "sed -n '1p' a.rs; cat b.py; head -n 1 c.rs",
             "sed -n '1p' a.rs; sed -n '2,$p' b.py; head -n 1 c.rs",
@@ -1654,7 +1654,7 @@ mod tests {
 
     #[test]
     fn shell_output_validates_counts_before_splitting() {
-        use crate::log::Section;
+        use crate::event::Section;
         for command in [
             "head -n 2 a.rs; head -n 2 b.py",
             "head -n 1 a.rs; head -n 1 b.py",
@@ -1692,7 +1692,7 @@ mod tests {
 
     #[test]
     fn shell_output_rejects_nonliteral_commands() {
-        use crate::log::Section;
+        use crate::event::Section;
         for command in [
             "head -n 1 a.rs | cat; cat b.rs",
             "head -n 1 a.rs > out; cat b.rs",
@@ -1714,7 +1714,7 @@ mod tests {
 
     #[test]
     fn shell_output_counts_literal_separators_and_default_reads() {
-        use crate::log::Section;
+        use crate::event::Section;
         let text = format!("{}---\n===\nlast", "line\n".repeat(10));
         let output = shell_output(
             "head a.rs; printf '%s\\n' '---' '==='; sed -n '1,$p' b.py",
@@ -1798,7 +1798,7 @@ mod tests {
                 let (_, subject, sections) = super::presentation(&name, input);
                 assert_eq!(
                     sections,
-                    vec![crate::log::Section::Markdown {
+                    vec![crate::event::Section::Markdown {
                         label: "text".into(),
                         text: text.into(),
                     }]
@@ -1827,12 +1827,12 @@ mod tests {
             let display = super::display_tool_name(name);
             for subject in [None, Some(""), Some(" \t ")] {
                 assert_eq!(
-                    super::detail_titles(name, subject),
+                    super::event_detail_titles(name, subject),
                     (String::new(), display.clone())
                 );
             }
             assert_eq!(
-                super::detail_titles(name, Some("Inspect source")),
+                super::event_detail_titles(name, Some("Inspect source")),
                 (display, "Inspect source".into())
             );
         }
@@ -1877,7 +1877,7 @@ mod tests {
                 format!("functions.collaboration.{name}"),
             ] {
                 if name == "spawn_agent" {
-                    let message = crate::log::agent::tool_message(&raw, &input).unwrap();
+                    let message = crate::event::agent::tool_message(&raw, &input).unwrap();
                     assert_eq!(message.recipient.as_deref(), Some(subject));
                     assert_eq!(message.content.text(), input["message"].as_str().unwrap());
                     continue;
@@ -1886,7 +1886,7 @@ mod tests {
                 assert_eq!(actual.as_deref(), Some(subject));
                 assert_eq!(
                     sections,
-                    vec![crate::log::Section::Markdown {
+                    vec![crate::event::Section::Markdown {
                         label: "message".into(),
                         text: input["message"].as_str().unwrap().to_owned(),
                     }]
@@ -1993,7 +1993,7 @@ mod tests {
             serde_json::json!(42),
         ] {
             value["name"] = name;
-            let output = vec![crate::log::Section::Structured {
+            let output = vec![crate::event::Section::Structured {
                 label: "output".into(),
                 text: value.to_string(),
             }];
@@ -2016,7 +2016,7 @@ mod tests {
             block["type"] = kind.into();
             assert_eq!(
                 super::mcp_content(&serde_json::Value::Array(vec![block])),
-                vec![crate::log::Section::Placeholder(format!(
+                vec![crate::event::Section::Placeholder(format!(
                     "[{kind} image/png]"
                 ))]
             );
@@ -2041,7 +2041,7 @@ mod tests {
             assert_eq!(subject.as_deref(), Some("tool-calls"));
             assert_eq!(
                 input,
-                vec![crate::log::Section::Markdown {
+                vec![crate::event::Section::Markdown {
                     label: "prompt".into(),
                     text: call["input"]["prompt"].as_str().unwrap().into(),
                 }]

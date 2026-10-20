@@ -367,8 +367,8 @@ mod tests {
                     .is_empty()
             );
         }
-        for details in [Value::Null, json!([])] {
-            response["rateLimitResetCredits"]["credits"] = details;
+        for task_details in [Value::Null, json!([])] {
+            response["rateLimitResetCredits"]["credits"] = task_details;
             assert!(
                 parse_account(response.clone())
                     .unwrap()

@@ -57,7 +57,7 @@ impl View {
 
 pub(super) fn clock_text(at: DateTime<Utc>) -> String {
     at.with_timezone(&chrono::Local)
-        .format(super::log::CLOCK_FORMAT)
+        .format(super::event_list::CLOCK_FORMAT)
         .to_string()
 }
 
@@ -135,7 +135,7 @@ pub(super) fn format_duration(seconds: i64) -> String {
     }
 }
 
-pub(super) fn format_log_duration(duration: chrono::Duration) -> String {
+pub(super) fn format_event_duration(duration: chrono::Duration) -> String {
     let duration = duration.max(chrono::Duration::zero());
     if duration < chrono::Duration::seconds(1) {
         let milliseconds = (duration.subsec_nanos() + 500_000) / 1_000_000;
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn log_durations_round_subseconds_to_whole_milliseconds() {
+    fn event_durations_round_subseconds_to_whole_milliseconds() {
         for (nanos, expected) in [
             (-1, ""),
             (0, ""),
@@ -237,7 +237,7 @@ mod tests {
             (93_780_000_000_000, "1d 2h"),
         ] {
             assert_eq!(
-                format_log_duration(chrono::Duration::nanoseconds(nanos)),
+                format_event_duration(chrono::Duration::nanoseconds(nanos)),
                 expected
             );
         }

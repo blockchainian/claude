@@ -73,11 +73,7 @@ impl View {
             }
         };
         if self.grouping == Grouping::Project && !self.is_pinned(index) {
-            super::line_truncation::abbreviate_path(
-                &group,
-                usize::from(width).min(/*other*/ 64),
-                None,
-            )
+            super::line_truncation::abbreviate_path(&group, usize::from(width).min(64), None)
         } else {
             group
         }
@@ -151,7 +147,7 @@ impl View {
             };
         }
         if reveal && !dragging && selected >= start + height {
-            start = selected.saturating_add(/*rhs*/ 1).saturating_sub(height);
+            start = selected.saturating_add(1).saturating_sub(height);
         }
         state.scroll = start;
         state.first_entry = start;
@@ -166,7 +162,7 @@ impl View {
                 }
                 CenterRow::Gap => continue,
                 CenterRow::ShowMore => {
-                    let rect = row(viewport, offset as u16, /*height*/ 1);
+                    let rect = row(viewport, offset as u16, 1);
                     let selected = self.selected == usize::MAX;
                     let style = if selected {
                         cursor_style()
@@ -183,7 +179,7 @@ impl View {
                 }
             };
             let task = &self.rows[index];
-            let rect = row(viewport, offset as u16, /*height*/ 1);
+            let rect = row(viewport, offset as u16, 1);
             if matches!(entry, CenterRow::Group(_)) {
                 let group = self.group_heading(index, rect.width);
                 let rect = heading_rect(&group, rect);
@@ -243,8 +239,8 @@ impl View {
                 Rect::new(
                     rect.x + rect.width.min(indent),
                     rect.y,
-                    rect.width.saturating_sub(indent).min(/*other*/ 1),
-                    /*height*/ 1,
+                    rect.width.saturating_sub(indent).min(1),
+                    1,
                 ),
                 buf,
             );
@@ -286,15 +282,7 @@ impl View {
                 .render(row(area, area.height - 1, 1), buf);
         }
         if padding > 0 && start + height < entries.len() {
-            line(
-                "↓".dim(),
-                row(
-                    area,
-                    area.height.saturating_sub(/*rhs*/ 1),
-                    /*height*/ 1,
-                ),
-                buf,
-            );
+            line("↓".dim(), row(area, area.height.saturating_sub(1), 1), buf);
         }
         let text_area = state.list_rows;
         drop(state);

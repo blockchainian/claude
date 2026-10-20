@@ -36,7 +36,7 @@ impl View {
             } else {
                 hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
             }
-        } else if self.log_search.editing || self.log_detail_search.editing {
+        } else if self.event_search.editing || self.event_detail_search.editing {
             hint_line(&[("esc", "back"), ("enter", "keep")])
         } else if self
             .selected_row()
@@ -68,8 +68,8 @@ impl View {
             && self.active_question().is_none()
             && !(self.selected_draft().is_some()
                 && (self.prompt_focused() || self.selector.is_some()))
-            && !self.log_search.editing
-            && !self.log_detail_search.editing
+            && !self.event_search.editing
+            && !self.event_detail_search.editing
     }
 
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -117,7 +117,7 @@ impl View {
                 &[("tab/⇧tab", "Filter"), ("/", "Search"), ("g", "Group")],
             ),
             group(
-                "Log",
+                "Events",
                 &[
                     ("/", "Search"),
                     ("t", "Sort"),
@@ -147,7 +147,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn log_help_includes_duration_sort_key() {
+    fn event_help_includes_duration_sort_key() {
         let view = View::default();
         assert!(view.center_help_lines(120).iter().any(|line| {
             let text = line.to_string();
@@ -197,10 +197,10 @@ mod tests {
                 2 => view.help = true,
                 3 => {
                     view.rename_target = Some(id);
-                    view.set_active_panel(Panel::Details);
+                    view.set_active_panel(Panel::TaskDetails);
                 }
-                4 => view.log_search.editing = true,
-                5 => view.log_detail_search.editing = true,
+                4 => view.event_search.editing = true,
+                5 => view.event_detail_search.editing = true,
                 6 => view.searching = true,
                 _ => unreachable!(),
             }

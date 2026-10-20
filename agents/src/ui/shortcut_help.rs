@@ -19,7 +19,7 @@ impl Group {
             .iter()
             .map(|entry| Span::raw(&entry.key).width())
             .max()
-            .unwrap_or(/*default*/ 0);
+            .unwrap_or(0);
         let mut lines = vec![self.title.bold().into()];
         for entry in &self.entries {
             let key = entry.key.clone().fg(accent_color());
@@ -34,9 +34,9 @@ pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> 
     let groups = groups.map(|group| group.lines());
     let widths: Vec<usize> = groups
         .iter()
-        .map(|group| group.iter().map(Line::width).max().unwrap_or(/*default*/ 0))
+        .map(|group| group.iter().map(Line::width).max().unwrap_or(0))
         .collect();
-    let width = usize::from(width.max(/*other*/ 1));
+    let width = usize::from(width.max(1));
     let mut result = Vec::new();
     if widths.iter().sum::<usize>() + COLUMN_GAP * (groups.len() - 1) <= width {
         result.extend(columns(&groups, &widths));
@@ -62,7 +62,7 @@ pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> 
 }
 
 fn columns(groups: &[Vec<Line<'static>>], widths: &[usize]) -> Vec<Line<'static>> {
-    let height = groups.iter().map(Vec::len).max().unwrap_or(/*default*/ 0);
+    let height = groups.iter().map(Vec::len).max().unwrap_or(0);
     (0..height)
         .map(|row| {
             let mut line = Line::default();

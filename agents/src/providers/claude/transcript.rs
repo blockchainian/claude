@@ -18,14 +18,14 @@ pub(super) struct Summary {
     task_replay: TaskReplay,
     model_history: ModelHistory,
     prompt_cache: PromptCache,
-    pub detail_sources: [Option<String>; 3],
+    pub task_details_sources: [Option<String>; 3],
     pub started_at: Option<DateTime<Utc>>,
     pub subagent_records: Vec<Value>,
     pub cwd: Option<PathBuf>,
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
     pub prompt: String,
-    pub prompt_images: Vec<crate::log::Image>,
+    pub prompt_images: Vec<crate::event::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -515,14 +515,14 @@ fn prompt_text(record: &Value) -> Option<String> {
     match record["type"].as_str()? {
         "user" => {
             if let Some((name, body)) = super::peer::origin_message(record) {
-                return Some(crate::log::participant_text(name, body));
+                return Some(crate::event::participant_text(name, body));
             }
             if record["isMeta"] == true {
                 return None;
             }
             let text = content_text(record, false)?;
             Some(match super::peer::wrapped_message(&text) {
-                Some((_, (name, body))) => crate::log::participant_text(name, body),
+                Some((_, (name, body))) => crate::event::participant_text(name, body),
                 None => typed_text(text),
             })
         }
@@ -550,7 +550,7 @@ fn prompt_text(record: &Value) -> Option<String> {
 
 /// Text the user typed, with pasted blocks shown as their content.
 fn typed_text(text: String) -> String {
-    super::log::prompt_body(&text)
+    super::event_reader::prompt_body(&text)
 }
 
 fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
@@ -755,7 +755,7 @@ fn read_messages(
     let mut images = super::images::PromptImages::default();
     let mut image_error = None;
     let mut ask_error = None;
-    let mut activity = super::log::ActivityLog::default();
+    let mut activity = super::event_reader::ActivityEvent::default();
     walk_records(file, start, bytes, sidechains, |record| {
         if !descriptions_only && !activity.ready() {
             activity.record(record.clone());
@@ -848,9 +848,9 @@ fn read_messages(
         if !prompt_found
             && let Some(prompt) = prompt_text(&record)
             && !prompt.trim().is_empty()
-            && super::log::is_prompt_text(&record, &prompt)
+            && super::event_reader::is_prompt_text(&record, &prompt)
         {
-            summary.detail_sources[2] = record["uuid"].as_str().map(str::to_owned);
+            summary.task_details_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
             match images.take(&record, &summary.prompt) {
                 Ok(images) => summary.prompt_images = images,
@@ -872,7 +872,7 @@ fn read_messages(
             && record["type"] == "assistant"
             && let Some(message) = content_text(&record, true)
         {
-            summary.detail_sources[1] = message_source(&record);
+            summary.task_details_sources[1] = message_source(&record);
             summary.last_message = Some(printable(&message));
             summary.last_message_at = at;
         }
@@ -897,7 +897,7 @@ fn read_messages(
         return Err(error);
     }
     if let Some(event) = activity.finish()? {
-        summary.detail_sources[0] = event.calls.first().map(|call| call.id.clone());
+        summary.task_details_sources[0] = event.calls.first().map(|call| call.id.clone());
         summary.activity = Some(event.activity());
     }
     summary.completed_background = background.completed.clone();
@@ -1040,7 +1040,7 @@ pub(super) mod tests {
     use std::io::Write;
 
     #[test]
-    fn background_branch_reaches_details_border() {
+    fn background_branch_reaches_task_details_border() {
         let mut fixture = tempfile::NamedTempFile::new().unwrap();
         fixture
             .write_all(include_bytes!(
@@ -1407,7 +1407,7 @@ pub(super) mod tests {
 
     /// Asserts `images` are the labelled PNGs embedded in the transcript.
     pub(in crate::providers::claude) fn assert_embedded_images(
-        images: &[crate::log::Image],
+        images: &[crate::event::Image],
         numbers: &[u64],
     ) {
         assert_eq!(
@@ -1430,7 +1430,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn details_prompt_images_join_the_selected_prompt() {
+    fn task_details_prompt_images_join_the_selected_prompt() {
         let (dir, records) = image_fixture();
         let path = dir.path().join("transcript.jsonl");
         // Split the two-image companion from its prompt across read chunks.
@@ -1449,7 +1449,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn image_companion_is_not_the_details_prompt() {
+    fn image_companion_is_not_the_task_details_prompt() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(include_bytes!(
             "../../../tests/fixtures/claude-prompt-images.jsonl"
@@ -1495,13 +1495,15 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn pasted_prompt_and_queue_keep_the_log_message_body() {
+    fn pasted_prompt_and_queue_keep_the_event_message_body() {
         let record: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
         let raw = record["message"]["content"].as_str().unwrap();
-        let expected = super::super::log::pasted_content(raw).unwrap();
+        let expected = super::super::event_reader::pasted_content(raw).unwrap();
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
-        let event = super::super::log::tail(file.path(), 1).unwrap().remove(0);
+        let event = super::super::event_reader::tail(file.path(), 1)
+            .unwrap()
+            .remove(0);
         assert_eq!(event.body, expected);
         assert_eq!(summary(&file).prompt, expected);
         assert_eq!(
@@ -1511,7 +1513,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn xml_prompt_keeps_the_document_in_summary_and_log() {
+    fn xml_prompt_keeps_the_document_in_summary_and_event() {
         let xml = include_str!("../../../tests/fixtures/structured_text/real-theme.plist");
         assert_eq!(
             queued_prompts(vec![QueueOperation::Enqueue(xml.into())]),
@@ -1522,7 +1524,7 @@ pub(super) mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
         assert_eq!(summary(&file).prompt, xml);
-        let events = super::super::log::tail(file.path(), 1).unwrap();
+        let events = super::super::event_reader::tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].body, xml);
     }
@@ -1536,7 +1538,7 @@ pub(super) mod tests {
         assert_eq!(
             summary.prompt,
             printable(
-                &super::super::log::pasted_content(
+                &super::super::event_reader::pasted_content(
                     records[0]["message"]["content"].as_str().unwrap()
                 )
                 .unwrap()
@@ -2103,9 +2105,12 @@ pub(super) mod tests {
                         }
                         .unwrap();
                         let activity = summary.activity.unwrap();
-                        let events =
-                            super::super::log::tail_session(file.path(), usize::MAX, sidechain)
-                                .unwrap();
+                        let events = super::super::event_reader::tail_session(
+                            file.path(),
+                            usize::MAX,
+                            sidechain,
+                        )
+                        .unwrap();
                         let event = events
                             .iter()
                             .rev()
@@ -2135,7 +2140,7 @@ pub(super) mod tests {
         let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
         assert_eq!(
             summary.activity.unwrap().label,
-            super::super::log::tail(file.path(), usize::MAX)
+            super::super::event_reader::tail(file.path(), usize::MAX)
                 .unwrap()
                 .iter()
                 .rev()
@@ -2148,7 +2153,7 @@ pub(super) mod tests {
         let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
         assert_eq!(
             summary.activity.unwrap().label,
-            super::super::log::tail(file.path(), usize::MAX)
+            super::super::event_reader::tail(file.path(), usize::MAX)
                 .unwrap()
                 .iter()
                 .rev()
@@ -2170,7 +2175,7 @@ pub(super) mod tests {
         let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
         assert_eq!(
             summary.activity.unwrap().label,
-            super::super::log::tail(file.path(), usize::MAX)
+            super::super::event_reader::tail(file.path(), usize::MAX)
                 .unwrap()
                 .iter()
                 .rev()

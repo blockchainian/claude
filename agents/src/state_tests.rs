@@ -37,7 +37,7 @@ fn preferences_round_trip_and_corrupt_defaults() {
         worktree_root: Some(dir.path().join("trees")),
         double_click_ms: 200,
         grouping: Grouping::Model,
-        sorting: LogSort::Duration,
+        sorting: EventSort::Duration,
         pinned: vec![
             "claude:second".parse().unwrap(),
             "codex:first".parse().unwrap(),
@@ -133,7 +133,7 @@ fn stale_writers_only_replace_their_field() {
     view.save_usage(dir.path(), ProviderId::Codex, &usage(16.0, Some(2)))
         .unwrap();
     grouping.save_grouping(dir.path()).unwrap();
-    sorting.sorting = LogSort::Duration;
+    sorting.sorting = EventSort::Duration;
     sorting.save_sorting(dir.path()).unwrap();
     let preferences = Preferences::load(dir.path());
     assert_eq!(preferences.pinned, pins.pinned);
@@ -141,7 +141,7 @@ fn stale_writers_only_replace_their_field() {
     assert_eq!(preferences.grouping, Grouping::Model);
     assert_eq!(preferences.double_click_ms, 450);
     assert_eq!(preferences.usage.len(), 2);
-    assert_eq!(preferences.sorting, LogSort::Duration);
+    assert_eq!(preferences.sorting, EventSort::Duration);
     let stored: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
     assert_eq!(stored["config"]["custom"], "keep");

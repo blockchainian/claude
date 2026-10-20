@@ -114,12 +114,12 @@ fn assert_covered(
 
 fn picker(kind: &str, check_underlines: bool) {
     for width in [120, 200] {
-        use super::super::draft_controls::{ControlTarget, SelectorKind};
+        use super::super::draft_controls::{SelectorKind, TaskKey};
         let (_directory, mut view) = recorded_view();
         let area = Rect::new(0, 0, width, 60);
         let mut before = Buffer::empty(area);
         draw(&view, &mut before);
-        let target = ControlTarget::Session(view.selected_id().unwrap().clone());
+        let target = TaskKey::Session(view.selected_id().unwrap().clone());
         let choice = match kind {
             "model" => SelectorKind::Model {
                 target,
@@ -133,7 +133,7 @@ fn picker(kind: &str, check_underlines: bool) {
                 labels: vec!["high".into()],
             },
             "repository" => SelectorKind::Repository {
-                draft: crate::model::DraftId {
+                draft: crate::model::DraftKey {
                     millis: 0,
                     counter: 0,
                 },
@@ -160,7 +160,7 @@ fn picker(kind: &str, check_underlines: bool) {
         view.selector = Some(Selector::new(choice, 0));
         let mut after = Buffer::empty(area);
         draw(&view, &mut after);
-        let cover = view.viewport.borrow().details;
+        let cover = view.viewport.borrow().task_details;
         assert_covered(&mut view, &after, cover, &before, check_underlines);
     }
 }

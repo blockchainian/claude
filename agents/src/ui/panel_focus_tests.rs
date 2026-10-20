@@ -6,9 +6,9 @@ fn at(view: &mut View, panel: usize, kind: MouseEventKind) {
         let viewport = view.viewport.borrow();
         [
             viewport.list,
-            viewport.log,
-            viewport.log_detail,
-            viewport.details,
+            viewport.event_panel,
+            viewport.event_detail,
+            viewport.task_details,
             viewport.prompt,
         ][panel]
     };
@@ -19,8 +19,8 @@ fn at(view: &mut View, panel: usize, kind: MouseEventKind) {
 fn editing(view: &View) -> [bool; 3] {
     [
         view.searching,
-        view.log_search.editing,
-        view.log_detail_search.editing,
+        view.event_search.editing,
+        view.event_detail_search.editing,
     ]
 }
 
@@ -32,7 +32,7 @@ fn panel_focus_slash_tracks_wheel_but_ignores_hover() {
         MouseEventKind::Moved,
     ] {
         for panel in 0..5 {
-            let (mut view, _) = log_fixture();
+            let (mut view, _) = event_fixture();
             click_panel(&mut view, panel);
             at(&mut view, (panel + 1) % 5, kind);
             let active = if kind == MouseEventKind::Moved {
@@ -55,18 +55,18 @@ fn panel_focus_startup_and_keyboard() {
     let mut view = fixture();
     key(&mut view, KeyCode::Char('/'));
     assert!(view.searching);
-    let (mut view, _) = log_fixture();
+    let (mut view, _) = event_fixture();
     at(&mut view, 2, MouseEventKind::Down(MouseButton::Left));
     key(&mut view, KeyCode::Down);
     key(&mut view, KeyCode::Char('/'));
-    assert!(view.log_detail_search.editing);
+    assert!(view.event_detail_search.editing);
 }
 
 #[test]
 fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
     for panel in 0..3 {
         for destination in 0..5 {
-            let (mut view, _) = log_fixture();
+            let (mut view, _) = event_fixture();
             at(&mut view, panel, MouseEventKind::Down(MouseButton::Left));
             key(&mut view, KeyCode::Char('/'));
             key(&mut view, KeyCode::Char('a'));
@@ -85,8 +85,8 @@ fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
             );
             if panel != destination {
                 assert!(view.search.is_empty());
-                assert!(view.log_search.query.is_empty());
-                assert!(view.log_detail_search.query.is_empty());
+                assert!(view.event_search.query.is_empty());
+                assert!(view.event_detail_search.query.is_empty());
                 key(&mut view, KeyCode::Char('/'));
                 assert_eq!(
                     editing(&view),
@@ -96,8 +96,8 @@ fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
                 key(&mut view, KeyCode::Char('/'));
                 let query = match panel {
                     0 => view.search.text(),
-                    1 => view.log_search.query.text(),
-                    _ => view.log_detail_search.query.text(),
+                    1 => view.event_search.query.text(),
+                    _ => view.event_detail_search.query.text(),
                 };
                 assert_eq!(query, "a/");
             }
@@ -108,7 +108,7 @@ fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
 #[test]
 fn panel_focus_slash_does_not_type_into_other_editors() {
     for panel in 1..5 {
-        let (mut view, _) = log_fixture();
+        let (mut view, _) = event_fixture();
         view.rows[view.selected].process = None;
         view.active_panel = Panel::Prompt;
         click_panel(&mut view, panel);
@@ -124,7 +124,7 @@ fn panel_focus_slash_does_not_type_into_other_editors() {
 #[test]
 fn panel_focus_ctrl_r_never_opens_search() {
     for panel in 0..5 {
-        let (mut view, _) = log_fixture();
+        let (mut view, _) = event_fixture();
         at(&mut view, panel, MouseEventKind::Down(MouseButton::Left));
         view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
         assert_eq!(editing(&view), [false; 3]);
@@ -137,27 +137,27 @@ fn click_panel(view: &mut View, panel: usize) {
 }
 
 #[test]
-fn panel_click_log_list_takes_prompt_focus_and_opens_search() {
-    let (mut view, _) = log_fixture();
+fn panel_click_event_list_takes_prompt_focus_and_opens_search() {
+    let (mut view, _) = event_fixture();
     view.active_panel = Panel::Prompt;
     click_panel(&mut view, 1);
     key(&mut view, KeyCode::Char('/'));
-    assert!(view.log_search.editing);
-    assert!(view.active_panel == Panel::LogList);
-    assert!(!(view.active_panel == Panel::Output));
+    assert!(view.event_search.editing);
+    assert!(view.active_panel == Panel::EventList);
+    assert!(!(view.active_panel == Panel::EventDetail));
     assert!(!view.prompt_focused());
     assert!(view.input_box.editor.is_empty());
 }
 
 #[test]
-fn panel_click_log_detail_takes_prompt_focus_and_opens_search() {
-    let (mut view, _) = log_fixture();
+fn panel_click_event_detail_takes_prompt_focus_and_opens_search() {
+    let (mut view, _) = event_fixture();
     view.active_panel = Panel::Prompt;
     click_panel(&mut view, 2);
     key(&mut view, KeyCode::Char('/'));
-    assert!(view.log_detail_search.editing);
-    assert!(view.active_panel == Panel::Output);
-    assert!(!(view.active_panel == Panel::LogList));
+    assert!(view.event_detail_search.editing);
+    assert!(view.active_panel == Panel::EventDetail);
+    assert!(!(view.active_panel == Panel::EventList));
     assert!(!view.prompt_focused());
     assert!(view.input_box.editor.is_empty());
 }
@@ -165,25 +165,25 @@ fn panel_click_log_detail_takes_prompt_focus_and_opens_search() {
 #[test]
 fn panel_click_non_input_takes_prompt_focus() {
     for panel in [0, 3] {
-        let (mut view, _) = log_fixture();
-        view.active_panel = Panel::LogList;
-        view.active_panel = Panel::Output;
+        let (mut view, _) = event_fixture();
+        view.active_panel = Panel::EventList;
+        view.active_panel = Panel::EventDetail;
         click_panel(&mut view, panel);
         assert!(!view.prompt_focused(), "panel {panel}");
-        assert!(!(view.active_panel == Panel::LogList), "panel {panel}");
-        assert!(!(view.active_panel == Panel::Output), "panel {panel}");
+        assert!(!(view.active_panel == Panel::EventList), "panel {panel}");
+        assert!(!(view.active_panel == Panel::EventDetail), "panel {panel}");
     }
 }
 
 #[test]
 fn panel_click_prompt_regains_focus_and_types_slash() {
-    let (mut view, _) = log_fixture();
+    let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
     click_panel(&mut view, 2);
     click_panel(&mut view, 4);
     assert!(view.prompt_focused());
-    assert!(!(view.active_panel == Panel::LogList));
-    assert!(!(view.active_panel == Panel::Output));
+    assert!(!(view.active_panel == Panel::EventList));
+    assert!(!(view.active_panel == Panel::EventDetail));
     key(&mut view, KeyCode::Char('/'));
     assert_eq!(view.input_box.editor.text(), "/");
     assert_eq!(editing(&view), [false; 3]);

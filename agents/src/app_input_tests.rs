@@ -414,7 +414,7 @@ fn app_creates_worktree_with_the_task_request() {
     app.handle_action(Some(Action::NewDraft { cwd: repo.clone() }));
     assert!(screen(&mut app).contains("New task"));
     app.handle_action(Some(Action::CreateTask {
-        draft_id: DraftId {
+        draft_key: DraftKey {
             millis: 0,
             counter: 1,
         },
@@ -433,7 +433,7 @@ fn app_creates_worktree_with_the_task_request() {
     // The worktree arrives with the request; handling it would start a real task.
     let event = app.receiver.recv_timeout(Duration::from_secs(15)).unwrap();
     assert!(
-        matches!(&event, Input::WorktreeCreated { draft_id: DraftId { millis: 0, counter: 1 }, request, result: Ok((path, branch)), .. }
+        matches!(&event, Input::WorktreeCreated { draft_key: DraftKey { millis: 0, counter: 1 }, request, result: Ok((path, branch)), .. }
         if path == &worktree && branch == "feature-path" && request.prompt == "probe")
     );
     assert_eq!(

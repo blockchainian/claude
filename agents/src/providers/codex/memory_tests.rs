@@ -1,5 +1,5 @@
 use super::rollout::{Reader, summary, tail};
-use crate::log::Kind;
+use crate::event::Kind;
 use serde_json::Value;
 use std::io::Write;
 
@@ -118,7 +118,7 @@ fn memory_reply_completion_before_paging_boundary_still_wins() {
     assert_eq!(reader.refresh(1).unwrap().events[0].body, expected());
 }
 
-fn assert_memory_note(event: &crate::log::Event) {
+fn assert_memory_note(event: &crate::event::Event) {
     let detail = event.detail_body.as_ref().unwrap();
     assert!(detail.text.is_none());
     assert_eq!(detail.notes.len(), 1);

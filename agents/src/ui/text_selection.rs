@@ -4,15 +4,15 @@ use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Panel {
-    Details,
-    Log,
+    TaskDetails,
+    Event,
     Tasks,
-    LogList,
+    EventList,
 }
 
 impl Panel {
     fn is_list(self) -> bool {
-        matches!(self, Self::Tasks | Self::LogList)
+        matches!(self, Self::Tasks | Self::EventList)
     }
 }
 
@@ -168,19 +168,19 @@ impl Selection {
 impl View {
     fn text_region(viewport: &Viewport, panel: Panel) -> &TextRegion {
         match panel {
-            Panel::Details => &viewport.details_text,
-            Panel::Log => &viewport.log_text,
+            Panel::TaskDetails => &viewport.task_details_text,
+            Panel::Event => &viewport.event_text,
             Panel::Tasks => &viewport.task_text,
-            Panel::LogList => &viewport.log_list_text,
+            Panel::EventList => &viewport.event_list_text,
         }
     }
 
-    pub(super) fn cancel_detail_selection(&self) {
+    pub(super) fn cancel_event_detail_selection(&self) {
         if self
             .text_selection
             .borrow()
             .as_ref()
-            .is_some_and(|selection| selection.panel == Panel::Log)
+            .is_some_and(|selection| selection.panel == Panel::Event)
         {
             self.text_selection.borrow_mut().take();
         }
@@ -188,20 +188,25 @@ impl View {
 
     pub(super) fn begin_text_selection(&mut self, x: u16, y: u16) {
         let viewport = self.viewport.borrow();
-        let selection = [Panel::Details, Panel::Log, Panel::Tasks, Panel::LogList]
-            .into_iter()
-            .find_map(|panel| {
-                let region = Self::text_region(&viewport, panel);
-                let anchor = region.hit(x, y, true, panel.is_list())?;
-                Some(Selection {
-                    panel,
-                    start: anchor,
-                    end: anchor,
-                    pointer: (x, y),
-                    dragged: false,
-                    sources: region.sources.clone(),
-                })
-            });
+        let selection = [
+            Panel::TaskDetails,
+            Panel::Event,
+            Panel::Tasks,
+            Panel::EventList,
+        ]
+        .into_iter()
+        .find_map(|panel| {
+            let region = Self::text_region(&viewport, panel);
+            let anchor = region.hit(x, y, true, panel.is_list())?;
+            Some(Selection {
+                panel,
+                start: anchor,
+                end: anchor,
+                pointer: (x, y),
+                dragged: false,
+                sources: region.sources.clone(),
+            })
+        });
         *self.text_selection.borrow_mut() = selection;
     }
 
@@ -277,26 +282,26 @@ impl View {
                 };
                 previous != viewport.scroll
             }
-            Panel::LogList => {
-                let previous = viewport.log_scroll;
-                viewport.log_scroll = if forward {
+            Panel::EventList => {
+                let previous = viewport.event_scroll;
+                viewport.event_scroll = if forward {
                     previous.saturating_add(1)
                 } else {
                     previous.saturating_sub(1)
                 };
-                previous != viewport.log_scroll
+                previous != viewport.event_scroll
             }
-            Panel::Log => {
-                let previous = viewport.log_detail_scroll;
-                viewport.log_detail_scroll = if forward {
-                    previous.saturating_add(1).min(viewport.log_detail_max)
+            Panel::Event => {
+                let previous = viewport.event_detail_scroll;
+                viewport.event_detail_scroll = if forward {
+                    previous.saturating_add(1).min(viewport.event_detail_max)
                 } else {
                     previous.saturating_sub(1)
                 };
-                previous != viewport.log_detail_scroll
+                previous != viewport.event_detail_scroll
             }
-            Panel::Details => {
-                let state = &mut viewport.details_scroll;
+            Panel::TaskDetails => {
+                let state = &mut viewport.task_details_scroll;
                 if let Some(max) = state.fallback_max {
                     let previous = state.offset;
                     state.offset = if forward {
@@ -359,7 +364,7 @@ impl View {
         else {
             return;
         };
-        if panel.is_list() || panel == Panel::Details {
+        if panel.is_list() || panel == Panel::TaskDetails {
             for source in &region.sources {
                 if let Some(cached) = selection
                     .sources
@@ -497,7 +502,7 @@ impl View {
         }
         match panel {
             Panel::Tasks => self.viewport.borrow_mut().task_text = region,
-            Panel::LogList => self.viewport.borrow_mut().log_list_text = region,
+            Panel::EventList => self.viewport.borrow_mut().event_list_text = region,
             _ => unreachable!("screen cells belong to a list"),
         }
         self.highlight_text_selection(panel, buf);

@@ -9,7 +9,7 @@ fn editing_title(width: u16) -> (tempfile::TempDir, View, SessionKey, String) {
         None
     );
     assert_eq!(view.rename_target.as_ref(), Some(&id));
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     let area = Rect::new(0, 0, width, 50);
     view.render(area, &mut Buffer::empty(area));
     (directory, view, id, original)
@@ -84,9 +84,9 @@ fn changed_title_automatic_panel_change_closes_editor() {
                     )),
                 );
             } else {
-                view.set_active_panel(Panel::Output);
+                view.set_active_panel(Panel::EventDetail);
             }
-            assert_eq!(view.active_panel, Panel::Output);
+            assert_eq!(view.active_panel, Panel::EventDetail);
             assert!(view.rename_target.is_none());
             assert_eq!(
                 view.take_pending_action(),
@@ -128,7 +128,7 @@ fn unchanged_title_blur_closes_without_provider_request() {
                 "keyboard" => leave_title_with_keyboard(&mut view),
                 "mouse" => leave_title_with_mouse(&mut view),
                 "automatic" => {
-                    view.set_active_panel(Panel::Output);
+                    view.set_active_panel(Panel::EventDetail);
                     None
                 }
                 _ => unreachable!(),
@@ -141,11 +141,11 @@ fn unchanged_title_blur_closes_without_provider_request() {
 }
 
 #[test]
-fn activating_details_again_keeps_title_editing() {
+fn activating_task_details_again_keeps_title_editing() {
     for width in [100, 200] {
         let (_directory, mut view, id, _original) = editing_title(width);
         view.rename.set_text("Still editing");
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         assert_eq!(view.rename_target.as_ref(), Some(&id));
         assert_eq!(view.rename.text(), "Still editing");
         assert_eq!(view.take_pending_action(), None);

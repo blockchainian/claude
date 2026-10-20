@@ -10,7 +10,7 @@ fn assert_deleted_draft_can_restart(view: &mut View, cwd: &std::path::Path) {
     let id = view.add_draft(setup(&target));
     assert_eq!(view.selected_draft, Some(id));
     assert_eq!(view.name_target, Some(id));
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert!(view.rename.text().is_empty());
 }
 
@@ -21,7 +21,7 @@ fn draft_deletion_unnamed_escape_returns_to_task_list() {
         view.add_draft(setup(directory.path()));
         let area = Rect::new(0, 0, width, 50);
         view.render(area, &mut Buffer::empty(area));
-        assert_eq!(view.active_panel, Panel::Details);
+        assert_eq!(view.active_panel, Panel::TaskDetails);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert!(view.confirm_dialog.is_none());
         assert_deleted_draft_can_restart(&mut view, directory.path());
@@ -129,7 +129,7 @@ fn escape_routes_by_panel_and_closes_only_the_focused_layer() {
         assert!(view.selector.is_none());
         assert!(view.confirm_dialog.is_none());
 
-        // A visible selector belongs to Details, even when Prompt has the keys.
+        // A visible selector belongs to TaskDetails, even when Prompt has the keys.
         view.open_field(Field::Branch);
         view.set_active_panel(Panel::Prompt);
         assert!(view.selector.is_some());
@@ -139,7 +139,7 @@ fn escape_routes_by_panel_and_closes_only_the_focused_layer() {
         key(&mut view, KeyCode::Esc);
         assert!(view.confirm_dialog.is_none());
         view.close_selector();
-        view.set_active_panel(Panel::Details);
+        view.set_active_panel(Panel::TaskDetails);
         assert!(view.name_target.is_none());
         key(&mut view, KeyCode::Esc);
         assert!(view.confirm_dialog.is_some());

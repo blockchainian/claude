@@ -8,8 +8,8 @@ fn paste_at(view: &mut View, x: u16, y: u16) {
         "at {x},{y}; title {:?}; search {} log {} detail {}",
         view.viewport.borrow().title_input,
         view.searching,
-        view.log_search.editing,
-        view.log_detail_search.editing
+        view.event_search.editing,
+        view.event_detail_search.editing
     );
     view.handle_paste("贴🦀");
 }
@@ -45,7 +45,7 @@ fn middle_paste_prompt_hits_display_cells_and_line_ends() {
         let prompt = view.viewport.borrow().prompt;
         // The first line has the task label; later lines start at the padding.
         let prefix = format!("{} {PROMPT_MARKER} ", view.input_label()).width() as u16;
-        view.active_panel = Panel::LogList;
+        view.active_panel = Panel::EventList;
         paste_at(
             &mut view,
             prompt.x + 1 + if y == 0 { prefix } else { 0 } + x,
@@ -67,9 +67,9 @@ fn middle_paste_non_inputs_do_nothing() {
     let viewport = view.viewport.borrow();
     let areas = [
         viewport.list,
-        viewport.log,
-        viewport.log_detail,
-        viewport.details,
+        viewport.event_panel,
+        viewport.event_detail,
+        viewport.task_details,
     ];
     drop(viewport);
     for area in areas {
@@ -96,7 +96,7 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
     assert_eq!(view.rename.text(), "剪贴板贴🦀后");
     assert_eq!(view.rename.cursor(), "剪贴板贴🦀".len());
 
-    for panel in [Panel::TaskList, Panel::LogList, Panel::Output] {
+    for panel in [Panel::TaskList, Panel::EventList, Panel::EventDetail] {
         let mut view = fixture();
         view.active_panel = panel;
         if view.active_panel == Panel::Prompt {
@@ -107,14 +107,16 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
         let layout = view.center_layout(Rect::new(0, 0, 160, 40));
         let area = match panel {
             Panel::TaskList => layout.search,
-            Panel::LogList => super::super::log::search_input_rect(layout.log),
-            _ => super::super::log::search_input_rect(layout.log_detail.inner(Margin::new(1, 0))),
+            Panel::EventList => super::super::event_list::search_input_rect(layout.event_panel),
+            _ => super::super::event_list::search_input_rect(
+                layout.event_detail.inner(Margin::new(1, 0)),
+            ),
         };
         paste_at(&mut view, area.right() - 1, area.y);
         let editor = match panel {
             Panel::TaskList => &view.search,
-            Panel::LogList => &view.log_search.query,
-            _ => &view.log_detail_search.query,
+            Panel::EventList => &view.event_search.query,
+            _ => &view.event_detail_search.query,
         };
         assert_eq!(editor.text(), "贴🦀");
         assert_eq!(editor.cursor(), "贴🦀".len());
@@ -128,7 +130,7 @@ fn middle_paste_branch_moves_focus_from_prompt() {
     editor.set_text("剪贴板后");
     view.selector = Some(Selector::new(
         draft_controls::SelectorKind::Branch {
-            draft: crate::model::DraftId {
+            draft: crate::model::DraftKey {
                 millis: 1,
                 counter: 0,
             },
@@ -140,13 +142,13 @@ fn middle_paste_branch_moves_focus_from_prompt() {
     ));
     view.active_panel = Panel::Prompt;
     screen(&view, 160, 40);
-    let area = view.viewport.borrow().details_input;
+    let area = view.viewport.borrow().task_details_input;
     paste_at(
         &mut view,
         area.x + "New branch ❯ ".width() as u16 + 5,
         area.y,
     );
-    assert!(view.active_panel == Panel::Details);
+    assert!(view.active_panel == Panel::TaskDetails);
     assert!(!view.prompt_focused());
     let editor = view.selector.as_ref().unwrap().branch_editor().unwrap();
     assert_eq!(editor.text(), "剪贴板贴🦀后");

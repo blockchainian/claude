@@ -51,7 +51,7 @@ pub struct Activity {
     /// Provider-marked paths in the summary label.
     pub paths: Vec<std::ops::Range<usize>>,
     pub exit_code: Option<i64>,
-    pub kind: crate::log::Kind,
+    pub kind: crate::event::Kind,
     pub label: String,
     pub at: DateTime<Utc>,
 }
@@ -97,12 +97,12 @@ pub struct Session {
     pub name: Option<String>,
     /// Best available title when there is no user name: the AI title, else the first prompt.
     pub title: String,
-    /// Latest real user prompt, up to 512 chars, for the details panel.
+    /// Latest real user prompt, up to 512 chars, for the task details panel.
     pub prompt: String,
     /// Source record or tool-call identities for activity, update and prompt.
-    pub detail_sources: [Option<String>; 3],
+    pub task_details_sources: [Option<String>; 3],
     /// Images attached to `prompt` whose files still exist.
-    pub prompt_images: Vec<crate::log::Image>,
+    pub prompt_images: Vec<crate::event::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -187,18 +187,18 @@ impl Session {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DraftId {
+pub struct DraftKey {
     pub millis: u64,
     pub counter: u64,
 }
 
-impl std::fmt::Display for DraftId {
+impl std::fmt::Display for DraftKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "draft-{}-{}", self.millis, self.counter)
     }
 }
 
-impl std::str::FromStr for DraftId {
+impl std::str::FromStr for DraftKey {
     type Err = &'static str;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let (millis, counter) = value
@@ -237,14 +237,14 @@ pub enum Action {
     },
     /// Creates a task, first moving it to the checkout of `branch` when one is chosen.
     CreateTask {
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         request: crate::tasks::NewTask,
         branch: Option<crate::tasks::BranchChoice>,
     },
     /// Moves a new task into another repository.
     ChangeDraftDirectory {
-        draft_id: DraftId,
+        draft_key: DraftKey,
         cwd: PathBuf,
     },
     SetModel {
@@ -257,10 +257,10 @@ pub enum Action {
     },
     /// Build a provider resume command.
     Resume(SessionKey),
-    /// Enter, Right, Ctrl-L, `o` or a right click on the log detail: run the session's
-    /// program in the log detail panel.
+    /// Enter, Right, Ctrl-L, `o` or a right click on the event detail: run the session's
+    /// program in the event detail panel.
     OpenTerminal(SessionKey),
-    /// A right click on the session terminal: detach it and show the log detail again.
+    /// A right click on the session terminal: detach it and show the event detail again.
     CloseTerminal,
     /// Keys and mouse reports for the session terminal.
     TerminalInput(Vec<u8>),
@@ -279,8 +279,8 @@ pub enum Action {
     },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
-    /// `t`: the log sorting changed; persist it.
-    PersistSorting(LogSort),
+    /// `t`: the event sorting changed; persist it.
+    PersistSorting(EventSort),
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,
     /// `r`: set the session display name.
@@ -304,7 +304,7 @@ pub enum Action {
     ShowMore,
     /// Ctrl-c.
     Quit,
-    /// Double click on an open log event or a details body: copy its text to the
+    /// Double click on an open event or a details body: copy its text to the
     /// clipboard and confirm with `label`.
     Copy {
         text: String,
@@ -316,13 +316,13 @@ pub enum Action {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum LogSort {
+pub enum EventSort {
     #[default]
     Time,
     Duration,
 }
 
-impl LogSort {
+impl EventSort {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Time => "time",

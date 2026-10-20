@@ -13,27 +13,27 @@ fn window_navigation_all_directions_in_both_layouts() {
     use Panel::*;
     for width in [100, 200] {
         for terminal in [false, true] {
-            let bottom = Output;
+            let bottom = EventDetail;
             let expected = if width == 200 {
                 vec![
-                    (TaskList, [TaskList, Prompt, TaskList, Details]),
-                    (Details, [TaskList, Prompt, Details, LogList]),
-                    (LogList, [Details, Prompt, LogList, LogList]),
-                    (Prompt, [Prompt, bottom, Details, Prompt]),
+                    (TaskList, [TaskList, Prompt, TaskList, TaskDetails]),
+                    (TaskDetails, [TaskList, Prompt, TaskDetails, EventList]),
+                    (EventList, [TaskDetails, Prompt, EventList, EventList]),
+                    (Prompt, [Prompt, bottom, TaskDetails, Prompt]),
                     (bottom, [bottom, bottom, Prompt, bottom]),
                 ]
             } else {
                 vec![
-                    (TaskList, [TaskList, Prompt, TaskList, Details]),
-                    (Details, [TaskList, Prompt, Details, Details]),
-                    (Prompt, [Prompt, LogList, TaskList, Prompt]),
-                    (LogList, [LogList, bottom, Prompt, LogList]),
-                    (bottom, [bottom, bottom, LogList, bottom]),
+                    (TaskList, [TaskList, Prompt, TaskList, TaskDetails]),
+                    (TaskDetails, [TaskList, Prompt, TaskDetails, TaskDetails]),
+                    (Prompt, [Prompt, EventList, TaskList, Prompt]),
+                    (EventList, [EventList, bottom, Prompt, EventList]),
+                    (bottom, [bottom, bottom, EventList, bottom]),
                 ]
             };
             for (source, targets) in expected {
                 for (direction, target) in ['h', 'j', 'k', 'l'].into_iter().zip(targets) {
-                    let (mut view, now) = log_fixture();
+                    let (mut view, now) = event_fixture();
                     view.rows[0].process = None;
                     if terminal {
                         let screen = crate::session_terminal::TerminalScreen::new(10, 80);
@@ -42,7 +42,7 @@ fn window_navigation_all_directions_in_both_layouts() {
                             std::sync::Arc::new(std::sync::Mutex::new(screen)),
                         );
                     }
-                    log_screen(&view, width, 45, now);
+                    event_screen(&view, width, 45, now);
                     view.set_active_panel(source);
 
                     assert_eq!(chord(&mut view, direction), None);
@@ -51,8 +51,11 @@ fn window_navigation_all_directions_in_both_layouts() {
                         "width={width} terminal={terminal} key={direction}"
                     );
                     assert_eq!(view.prompt_focused(), target == Prompt);
-                    assert_eq!((view.active_panel == Panel::LogList), target == LogList);
-                    assert_eq!((view.active_panel == Panel::Output), target == Output);
+                    assert_eq!((view.active_panel == Panel::EventList), target == EventList);
+                    assert_eq!(
+                        (view.active_panel == Panel::EventDetail),
+                        target == EventDetail
+                    );
                 }
             }
         }
@@ -62,7 +65,7 @@ fn window_navigation_all_directions_in_both_layouts() {
 #[test]
 fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
     for search in [false, true] {
-        let (mut view, _) = log_fixture();
+        let (mut view, _) = event_fixture();
         if search {
             key(&mut view, KeyCode::Char('/'));
             for c in "one two".chars() {
@@ -87,14 +90,14 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
 
 #[test]
 fn window_navigation_terminal_ctrl_w_l_is_not_forwarded() {
-    let (mut view, _) = log_fixture();
+    let (mut view, _) = event_fixture();
     view.show_terminal(
         session_key("log"),
         std::sync::Arc::new(std::sync::Mutex::new(
             crate::session_terminal::TerminalScreen::new(10, 40),
         )),
     );
-    view.set_active_panel(Panel::Output);
+    view.set_active_panel(Panel::EventDetail);
     // A horizontal arrangement checks that terminal input cannot consume navigation.
     {
         let v = &mut *view.viewport.borrow_mut();
@@ -107,14 +110,14 @@ fn window_navigation_terminal_ctrl_w_l_is_not_forwarded() {
 
 #[test]
 fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
-    let (mut view, _) = log_fixture();
+    let (mut view, _) = event_fixture();
     view.show_terminal(
         session_key("log"),
         std::sync::Arc::new(std::sync::Mutex::new(
             crate::session_terminal::TerminalScreen::new(10, 40),
         )),
     );
-    view.set_active_panel(Panel::Output);
+    view.set_active_panel(Panel::EventDetail);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
         None
@@ -130,7 +133,7 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
 
 #[test]
 fn window_navigation_release_and_second_ctrl_w_preserve_input() {
-    let (mut view, _) = log_fixture();
+    let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
     view.set_active_panel(Panel::Prompt);
     view.input_box.editor.insert("one two three");
@@ -147,15 +150,15 @@ fn window_navigation_release_and_second_ctrl_w_preserve_input() {
 
 #[test]
 fn window_navigation_leaving_search_cancels_it_like_a_click() {
-    let (mut view, now) = log_fixture();
-    log_screen(&view, 200, 45, now);
+    let (mut view, now) = event_fixture();
+    event_screen(&view, 200, 45, now);
     key(&mut view, KeyCode::Char('/'));
     key(&mut view, KeyCode::Char('x'));
     assert!(view.searching);
     chord(&mut view, 'l');
     assert!(!view.searching);
     assert!(view.search.is_empty());
-    assert!(view.active_panel == Panel::Details);
+    assert!(view.active_panel == Panel::TaskDetails);
 }
 
 #[test]
@@ -195,24 +198,24 @@ fn window_navigation_real_terminal_probe() {
     };
     wait("WINDOW-PROBE>", &terminal);
     for width in [100, 200] {
-        let (mut view, now) = log_fixture();
+        let (mut view, now) = event_fixture();
         view.rows[0].process = None;
         view.show_terminal(session_key("log"), terminal.screen.clone());
-        assert_eq!(view.active_panel, Panel::Output);
-        log_screen(&view, width, 45, now);
+        assert_eq!(view.active_panel, Panel::EventDetail);
+        event_screen(&view, width, 45, now);
         assert_eq!(chord(&mut view, 'l'), None);
-        assert!(view.active_panel == Panel::Output); // no panel to the right
+        assert!(view.active_panel == Panel::EventDetail);
         assert_eq!(chord(&mut view, 'k'), None);
         assert!(
             view.active_panel
                 == if width == 200 {
                     Panel::Prompt
                 } else {
-                    Panel::LogList
+                    Panel::EventList
                 }
         );
         view.show_terminal(session_key("log"), terminal.screen.clone());
-        view.set_active_panel(Panel::Output);
+        view.set_active_panel(Panel::EventDetail);
         // A real readline Ctrl-W deletes the last word before the following key.
         let command = format!("echo one{width} two");
         terminal.write(command.as_bytes()).unwrap();
@@ -242,16 +245,16 @@ fn window_navigation_real_terminal_probe() {
 
 #[test]
 fn opening_editors_activates_them_but_updates_preserve_activation() {
-    let (mut view, _) = log_fixture();
+    let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
-    view.set_active_panel(Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
     view.prepare_prompt();
     assert_eq!(view.active_panel, Panel::Prompt);
-    view.set_active_panel(Panel::Details);
-    view.select_log_event(Some(0));
-    assert!(view.active_panel == Panel::Details);
+    view.set_active_panel(Panel::TaskDetails);
+    view.select_event(Some(0));
+    assert!(view.active_panel == Panel::TaskDetails);
     view.set_sessions(view.rows.clone(), false);
-    assert!(view.active_panel == Panel::Details);
+    assert!(view.active_panel == Panel::TaskDetails);
     view.add_draft(DraftSetup {
         provider: ProviderId::Claude,
         cwd: std::env::temp_dir(),
@@ -259,20 +262,20 @@ fn opening_editors_activates_them_but_updates_preserve_activation() {
         effort: None,
         branch: String::new(),
     });
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert!(view.name_target.is_some());
     view.close_selector();
-    assert_eq!(view.active_panel, Panel::Details);
-    view.set_active_panel(Panel::Output);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
+    view.set_active_panel(Panel::EventDetail);
     view.open_name(view.selected_draft.unwrap());
-    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
 }
 
 #[test]
 fn output_panel_keeps_activation_when_terminal_contents_change() {
     for width in [100, 200] {
-        let (mut view, now) = log_fixture();
-        view.set_active_panel(Panel::Output);
+        let (mut view, now) = event_fixture();
+        view.set_active_panel(Panel::EventDetail);
         view.show_terminal(
             session_key("log"),
             std::sync::Arc::new(std::sync::Mutex::new(
@@ -288,14 +291,14 @@ fn output_panel_keeps_activation_when_terminal_contents_change() {
             Some(Action::TerminalInput(vec![2]))
         );
         view.hide_terminal();
-        log_screen(&view, width, 45, now);
+        event_screen(&view, width, 45, now);
         chord(&mut view, 'k');
         assert_eq!(
             view.active_panel,
             if width == 200 {
                 Panel::Prompt
             } else {
-                Panel::LogList
+                Panel::EventList
             }
         );
     }

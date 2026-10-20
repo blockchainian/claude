@@ -250,7 +250,7 @@ fn save_title_capture(tmux: &Tmux, name: &str) {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_task_names_edit_on_details_rule() {
+fn terminal_task_names_edit_on_task_details_rule() {
     let (_directory, tmux, _transcript) = start_probe("inline-task-name");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
     assert_title_caret(&tmux, "New task", 0);
@@ -369,7 +369,7 @@ fn terminal_task_names_edit_on_details_rule() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_new_task_status_is_capitalized_in_list_and_details() {
+fn terminal_new_task_status_is_capitalized_in_list_and_task_details() {
     let (_directory, tmux, _transcript) = start_probe("draft-status");
     begin_named_draft(&tmux, "Status probe");
     let capture = tmux.capture_when(|capture| {
@@ -879,7 +879,7 @@ fn terminal_draft_wizard_focus_order_and_clicks() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_draft_escape_follows_details_and_prompt_focus() {
+fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
     let mut checks = Vec::new();
     for width in [120, 200] {
         let root = tempfile::tempdir().unwrap();
@@ -991,7 +991,7 @@ fn terminal_draft_escape_follows_details_and_prompt_focus() {
         });
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| !capture.contains("enter select"));
-        checks.push(serde_json::json!({"width":width,"details_empty_escape":"delete_confirmation","prompt_with_branch_selector_escape":"delete_confirmation","cancel_preserves_draft":true,"branch_blur_saved":"foo","branch_reopen_prefilled":true,"branch_escape_layers":true}));
+        checks.push(serde_json::json!({"width":width,"task_details_empty_escape":"delete_confirmation","prompt_with_branch_selector_escape":"delete_confirmation","cancel_preserves_draft":true,"branch_blur_saved":"foo","branch_reopen_prefilled":true,"branch_escape_layers":true}));
     }
     let verdict = serde_json::json!({"verdict":"pass","checks":checks});
     if let Some(directory) = std::env::var_os("AGENTS_PROBE_CAPTURE_DIR") {

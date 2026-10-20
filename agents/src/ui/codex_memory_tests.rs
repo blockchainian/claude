@@ -24,14 +24,16 @@ fn provider_view() -> (tempfile::TempDir, View, chrono::DateTime<Utc>) {
     assert_eq!(sessions.len(), 1);
     let now = "2026-10-12T02:13:00Z".parse().unwrap();
     sessions[0].updated_at = now;
-    let events = provider.log(&sessions[0], usize::MAX, false).unwrap();
+    let events = provider
+        .event_panel(&sessions[0], usize::MAX, false)
+        .unwrap();
     let id = sessions[0].id.clone();
     let mut view = test_view(Grouping::Project, false);
     view.status_filter = 1;
     view.set_sessions(sessions, false);
-    view.log_session = Some(id);
-    view.set_log(events);
-    view.select_log_event(Some(0));
+    view.event_session = Some(id);
+    view.set_event(events);
+    view.select_event(Some(0));
     (dir, view, now)
 }
 
@@ -74,37 +76,37 @@ fn assert_clean_complete(body: &str) {
 }
 
 #[test]
-fn codex_memory_citation_details_use_processed_body() {
+fn codex_memory_citation_task_details_use_processed_body() {
     let (_dir, view, now) = provider_view();
     let area = Rect::new(0, 0, 160, 65);
     let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, now);
+    view.render_task_details(area, &mut buf, now);
     let rendered = text(&buf);
     assert_clean_complete(&rendered);
     assert_eq!(
         rendered,
-        include_str!("../../tests/ui_snapshots/codex_memory_details.txt")
+        include_str!("../../tests/ui_snapshots/codex_memory_task_details.txt")
     );
 }
 
 #[test]
-fn codex_memory_citation_log_list_and_detail_use_processed_body() {
+fn codex_memory_citation_event_list_and_detail_use_processed_body() {
     let (_dir, view, now) = provider_view();
-    assert_eq!(view.log.len(), 1, "reply must appear once");
+    assert_eq!(view.event_panel.len(), 1, "reply must appear once");
     let area = Rect::new(0, 0, 2400, 2);
     let mut buf = Buffer::empty(area);
-    view.render_log(area, &mut buf, now);
+    view.render_event(area, &mut buf, now);
     assert_clean_complete(&text(&buf));
     assert!(!text(&buf).contains("Memory:"));
     let area = Rect::new(0, 0, 160, 65);
     let mut buf = Buffer::empty(area);
-    view.render_log_detail(area, &mut buf, now);
+    view.render_event_detail(area, &mut buf, now);
     let rendered = text(&buf);
     assert_clean_complete(&rendered);
     assert!(rendered.contains("Memory: MEMORY.md:136 · source conditions validation context"));
     assert_eq!(
         rendered,
-        include_str!("../../tests/ui_snapshots/codex_memory_log_detail.txt")
+        include_str!("../../tests/ui_snapshots/codex_memory_event_detail.txt")
     );
 }
 
@@ -114,18 +116,18 @@ fn codex_memory_note_link_opens_the_recorded_file_line() {
     let memory = dir.path().join("memories/MEMORY.md");
     std::fs::create_dir(memory.parent().unwrap()).unwrap();
     std::fs::write(&memory, "# Memory\n").unwrap();
-    let mut events = view.log.clone();
+    let mut events = view.event_panel.clone();
     events[0].detail_body.as_mut().unwrap().notes[0].links[0].path = memory.clone();
-    view.set_log(events);
+    view.set_event(events);
     let area = Rect::new(0, 0, 160, 65);
-    view.viewport.borrow_mut().log_detail = area;
+    view.viewport.borrow_mut().event_detail = area;
     let mut buf = Buffer::empty(area);
-    view.render_log_detail(area, &mut buf, now);
+    view.render_event_detail(area, &mut buf, now);
     let target = PathBuf::from(super::super::vscode::file_line_link(&memory, 136).unwrap());
     let (rect, _) = view
         .viewport
         .borrow()
-        .log_links
+        .event_links
         .iter()
         .find(|(_, path)| *path == target)
         .cloned()

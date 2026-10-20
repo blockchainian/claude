@@ -1,7 +1,7 @@
 //! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
 use crate::model::Action;
-use crate::model::{DraftId, Session, SessionStatus};
+use crate::model::{DraftKey, Session, SessionStatus};
 use crate::providers::Snapshot;
 use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
@@ -42,19 +42,19 @@ enum Input {
     },
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
-    LogLoaded {
+    EventsLoaded {
         token: u64,
-        reader: Box<dyn crate::log::Reader>,
-        result: io::Result<(LogStamp, crate::log::Update)>,
+        reader: Box<dyn crate::event::Reader>,
+        result: io::Result<(TranscriptStamp, crate::event::Update)>,
     },
     Created {
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         result: io::Result<std::process::Output>,
     },
     /// A new task's worktree, with the task request to create in it.
     WorktreeCreated {
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         request: crate::tasks::NewTask,
         result: io::Result<(PathBuf, String)>,
@@ -136,7 +136,7 @@ pub struct App {
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
-    /// The session program running in the log detail panel.
+    /// The session program running in the event detail panel.
     terminal: Option<crate::session_terminal::SessionTerminal>,
     /// The task whose terminal opens once that task's previous client has closed.
     terminal_task: Option<SessionKey>,
@@ -144,13 +144,13 @@ pub struct App {
     waiting_terminal: Option<SessionKey>,
     /// Clients being reaped before the same session can open another terminal.
     closing_terminals: std::collections::HashMap<SessionKey, session_terminal::TerminalClose>,
-    log_stamp: Option<LogStamp>,
-    full_log_stamp: Option<LogStamp>,
-    task_log: Option<(SessionKey, PathBuf, Box<dyn crate::log::Reader>)>,
-    pending_log: Option<PendingLog>,
-    log_request: u64,
-    log_oldest_offset: u64,
-    log_parsed_bytes: u64,
+    transcript_stamp: Option<TranscriptStamp>,
+    full_transcript_stamp: Option<TranscriptStamp>,
+    transcript: Option<(SessionKey, PathBuf, Box<dyn crate::event::Reader>)>,
+    pending_transcript: Option<PendingTranscript>,
+    transcript_request: u64,
+    transcript_oldest_offset: u64,
+    transcript_parsed_bytes: u64,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
     /// When each recently active transcript's turns ran.
@@ -158,7 +158,7 @@ pub struct App {
 }
 
 #[derive(PartialEq, Eq)]
-struct LogStamp {
+struct TranscriptStamp {
     session: SessionKey,
     path: PathBuf,
     modified: std::time::SystemTime,
@@ -166,7 +166,7 @@ struct LogStamp {
     count: usize,
 }
 
-struct PendingLog {
+struct PendingTranscript {
     token: u64,
     session: SessionKey,
     path: PathBuf,
@@ -208,7 +208,7 @@ impl App {
     pub fn new(mut hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
-        view.set_log_sort(preferences.sorting);
+        view.set_event_sort(preferences.sorting);
         hub.set_weekly_usage(preferences.usage.clone());
         view.weekly_usage = preferences.usage.clone();
         view.usage_view = preferences.usage_view;
@@ -246,13 +246,13 @@ impl App {
             terminal_task: None,
             waiting_terminal: None,
             closing_terminals: std::collections::HashMap::new(),
-            log_stamp: None,
-            full_log_stamp: None,
-            task_log: None,
-            pending_log: None,
-            log_request: 0,
-            log_oldest_offset: 0,
-            log_parsed_bytes: 0,
+            transcript_stamp: None,
+            full_transcript_stamp: None,
+            transcript: None,
+            pending_transcript: None,
+            transcript_request: 0,
+            transcript_oldest_offset: 0,
+            transcript_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
             activity: std::collections::HashMap::new(),
         }
@@ -368,7 +368,7 @@ impl App {
         let mut cursor = None;
         terminal.draw(|frame| {
             let area = frame.area();
-            self.refresh_log(self.view.log_event_count(area));
+            self.refresh_event(self.view.event_count(area));
             self.refresh_usage();
             self.refresh_activity(area.width, now);
             self.view.render_at(area, frame.buffer_mut(), now);
@@ -419,8 +419,8 @@ impl App {
         let timeout = schedule.redraw_timeout(now, self.view.has_background());
         let timeout = self
             .view
-            .log_redraw_in(wall_now)
-            .map_or(timeout, |log| timeout.min(log));
+            .event_redraw_in(wall_now)
+            .map_or(timeout, |event_panel| timeout.min(event_panel));
         let timeout = self
             .view
             .tool_redraw_in(wall_now)
@@ -484,25 +484,25 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
-                Input::LogLoaded {
+                Input::EventsLoaded {
                     token,
                     reader,
                     result,
                 } => {
-                    self.finish_log_load(token, reader, result);
+                    self.finish_event_load(token, reader, result);
                 }
                 Input::Created {
-                    draft_id,
+                    draft_key,
                     provider,
                     result,
                 } => {
                     let result =
                         result.and_then(|output| self.hub.provider(provider).created_job(&output));
-                    self.view.draft_created(draft_id, result);
+                    self.view.draft_created(draft_key, result);
                     schedule.changed(Instant::now());
                 }
                 Input::WorktreeCreated {
-                    draft_id,
+                    draft_key,
                     provider,
                     mut request,
                     result,
@@ -510,10 +510,10 @@ impl App {
                     Ok((cwd, branch)) => {
                         request.cwd = cwd.clone();
                         self.view
-                            .draft_worktree_created(draft_id, Ok((cwd, branch)));
-                        self.create_task(draft_id, provider, request);
+                            .draft_worktree_created(draft_key, Ok((cwd, branch)));
+                        self.create_task(draft_key, provider, request);
                     }
-                    Err(error) => self.view.draft_worktree_created(draft_id, Err(error)),
+                    Err(error) => self.view.draft_worktree_created(draft_key, Err(error)),
                 },
                 Input::Sent { id, input, result } => {
                     self.pending_inputs.remove(&id);
@@ -590,12 +590,12 @@ impl App {
         false
     }
 
-    fn refresh_log(&mut self, visible: usize) {
-        let count = if self.view.log_start_requested || self.view.log_fully_loaded() {
+    fn refresh_event(&mut self, visible: usize) {
+        let count = if self.view.event_start_requested || self.view.transcript_fully_loaded() {
             usize::MAX
         } else {
             self.view
-                .log_read_count(visible, self.log_oldest_offset > 0)
+                .event_read_count(visible, self.transcript_oldest_offset > 0)
         };
         let selected = self
             .view
@@ -603,51 +603,51 @@ impl App {
             .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
             .cloned();
         let Some(selected) = selected.filter(|session| session.transcript.is_some()) else {
-            self.log_stamp = None;
-            self.full_log_stamp = None;
-            self.task_log = None;
-            self.pending_log = None;
-            self.log_oldest_offset = 0;
-            self.view.log.clear();
-            self.view.prepare_log_search();
-            self.view.log_session = None;
+            self.transcript_stamp = None;
+            self.full_transcript_stamp = None;
+            self.transcript = None;
+            self.pending_transcript = None;
+            self.transcript_oldest_offset = 0;
+            self.view.event_panel.clear();
+            self.view.prepare_event_search();
+            self.view.event_session = None;
             return;
         };
         let path = selected.transcript.as_ref().expect("transcript checked");
-        if let Some(pending) = &self.pending_log {
+        if let Some(pending) = &self.pending_transcript {
             if pending.session == selected.id && &pending.path == path {
                 return;
             }
-            self.pending_log = None;
+            self.pending_transcript = None;
         }
         if self
-            .task_log
+            .transcript
             .as_ref()
             .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path)
         {
-            match crate::providers::log_reader(&selected) {
+            match crate::providers::event_reader(&selected) {
                 Ok(reader) => {
-                    self.task_log = Some((selected.id.clone(), path.clone(), reader));
-                    self.log_oldest_offset = u64::MAX;
-                    if self.view.log_session.as_ref() != Some(&selected.id) {
-                        self.view.apply_log_update(crate::log::Update {
+                    self.transcript = Some((selected.id.clone(), path.clone(), reader));
+                    self.transcript_oldest_offset = u64::MAX;
+                    if self.view.event_session.as_ref() != Some(&selected.id) {
+                        self.view.apply_event_update(crate::event::Update {
                             reset: true,
                             ..Default::default()
                         });
-                        self.view.log_session = Some(selected.id.clone());
+                        self.view.event_session = Some(selected.id.clone());
                     }
                 }
                 Err(error) => {
-                    self.apply_log_result(Err(error), visible);
+                    self.apply_event_result(Err(error), visible);
                     return;
                 }
             }
         }
-        if self.view.log_fully_loaded() && self.log_oldest_offset > 0 {
-            let (session, path, mut reader) = self.task_log.take().expect("reader checked");
-            self.log_request += 1;
-            let token = self.log_request;
-            self.pending_log = Some(PendingLog {
+        if self.view.transcript_fully_loaded() && self.transcript_oldest_offset > 0 {
+            let (session, path, mut reader) = self.transcript.take().expect("reader checked");
+            self.transcript_request += 1;
+            let token = self.transcript_request;
+            self.pending_transcript = Some(PendingTranscript {
                 token,
                 session: session.clone(),
                 path: path.clone(),
@@ -658,7 +658,7 @@ impl App {
                 let result = reader.refresh(usize::MAX).and_then(|update| {
                     let metadata = std::fs::metadata(&path)?;
                     Ok((
-                        LogStamp {
+                        TranscriptStamp {
                             session,
                             path,
                             modified: metadata.modified()?,
@@ -668,7 +668,7 @@ impl App {
                         update,
                     ))
                 });
-                let _ = sender.send(Input::LogLoaded {
+                let _ = sender.send(Input::EventsLoaded {
                     token,
                     reader,
                     result,
@@ -676,15 +676,15 @@ impl App {
             });
             return;
         }
-        let result = (|| -> io::Result<(LogStamp, crate::log::Update)> {
+        let result = (|| -> io::Result<(TranscriptStamp, crate::event::Update)> {
             let update = self
-                .task_log
+                .transcript
                 .as_mut()
                 .expect("reader opened")
                 .2
                 .refresh(count)?;
             let metadata = std::fs::metadata(path)?;
-            let stamp = LogStamp {
+            let stamp = TranscriptStamp {
                 session: selected.id.clone(),
                 path: path.clone(),
                 modified: metadata.modified()?,
@@ -693,17 +693,17 @@ impl App {
             };
             Ok((stamp, update))
         })();
-        self.apply_log_result(result, visible);
+        self.apply_event_result(result, visible);
     }
 
-    fn finish_log_load(
+    fn finish_event_load(
         &mut self,
         token: u64,
-        reader: Box<dyn crate::log::Reader>,
-        result: io::Result<(LogStamp, crate::log::Update)>,
+        reader: Box<dyn crate::event::Reader>,
+        result: io::Result<(TranscriptStamp, crate::event::Update)>,
     ) {
         let Some(pending) = self
-            .pending_log
+            .pending_transcript
             .as_ref()
             .filter(|pending| pending.token == token)
         else {
@@ -713,55 +713,55 @@ impl App {
             && self.sessions.iter().any(|session| {
                 session.id == pending.session && session.transcript.as_ref() == Some(&pending.path)
             });
-        let pending = self.pending_log.take().expect("request checked");
+        let pending = self.pending_transcript.take().expect("request checked");
         if current {
-            self.task_log = Some((pending.session, pending.path, reader));
-            self.apply_log_result(result, pending.visible);
+            self.transcript = Some((pending.session, pending.path, reader));
+            self.apply_event_result(result, pending.visible);
         }
     }
 
-    fn apply_log_result(
+    fn apply_event_result(
         &mut self,
-        result: io::Result<(LogStamp, crate::log::Update)>,
+        result: io::Result<(TranscriptStamp, crate::event::Update)>,
         visible: usize,
     ) {
         match result {
             Ok((stamp, update)) => {
-                self.log_parsed_bytes += update.parsed_bytes;
-                self.log_oldest_offset = update.oldest_offset;
+                self.transcript_parsed_bytes += update.parsed_bytes;
+                self.transcript_oldest_offset = update.oldest_offset;
                 debug_assert!(update.oldest_offset <= update.read_offset);
-                let changed = self.view.log_page_pending()
+                let changed = self.view.event_page_pending()
                     || update.reset
                     || update.prepended > 0
                     || update.appended > 0
                     || update.replaced > 0;
                 if changed {
-                    self.view.apply_log_update(update);
+                    self.view.apply_event_update(update);
                 }
-                self.view.finish_log_start();
-                self.view.log_session = Some(stamp.session.clone());
+                self.view.finish_event_start();
+                self.view.event_session = Some(stamp.session.clone());
                 self.view
-                    .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
-                if self.view.log_fully_loaded() {
-                    self.full_log_stamp = Some(stamp);
-                    self.log_stamp = None;
+                    .clamp_event_scroll(self.view.matching_event_count().saturating_sub(visible));
+                if self.view.transcript_fully_loaded() {
+                    self.full_transcript_stamp = Some(stamp);
+                    self.transcript_stamp = None;
                 } else {
-                    self.full_log_stamp = None;
-                    self.log_stamp = Some(stamp);
+                    self.full_transcript_stamp = None;
+                    self.transcript_stamp = Some(stamp);
                 }
             }
             Err(error) => {
-                self.task_log = None;
-                self.log_oldest_offset = 0;
-                self.log_stamp = None;
-                self.full_log_stamp = None;
-                if self.view.log_sort != crate::ui::LogSort::Duration {
-                    self.view.log.clear();
-                    self.view.prepare_log_search();
-                    self.view.log_session = None;
+                self.transcript = None;
+                self.transcript_oldest_offset = 0;
+                self.transcript_stamp = None;
+                self.full_transcript_stamp = None;
+                if self.view.event_sort != crate::ui::EventSort::Duration {
+                    self.view.event_panel.clear();
+                    self.view.prepare_event_search();
+                    self.view.event_session = None;
                 }
                 self.view
-                    .set_notice(Some(format!("Cannot read task log: {error}")));
+                    .set_notice(Some(format!("Cannot read task events: {error}")));
             }
         }
     }
@@ -1041,7 +1041,7 @@ impl App {
 
     fn create_task(
         &mut self,
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         request: crate::tasks::NewTask,
     ) {
@@ -1053,7 +1053,7 @@ impl App {
         let job = match job {
             Ok(job) => job,
             Err(error) => {
-                self.view.draft_created(draft_id, Err(error));
+                self.view.draft_created(draft_key, Err(error));
                 return;
             }
         };
@@ -1064,13 +1064,13 @@ impl App {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
                     .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
                 let _ = sender.send(Input::Created {
-                    draft_id,
+                    draft_key,
                     provider,
                     result,
                 });
             })
         {
-            self.view.draft_created(draft_id, Err(error));
+            self.view.draft_created(draft_key, Err(error));
         }
     }
 
@@ -1080,24 +1080,24 @@ impl App {
         self.report_save(saved);
     }
 
-    fn change_draft_directory(&mut self, draft_id: DraftId, cwd: PathBuf) {
+    fn change_draft_directory(&mut self, draft_key: DraftKey, cwd: PathBuf) {
         match draft_location(cwd) {
-            Ok((cwd, branch)) => self.view.draft_directory_changed(draft_id, cwd, branch),
-            Err(error) => self.view.draft_directory_failed(draft_id, error),
+            Ok((cwd, branch)) => self.view.draft_directory_changed(draft_key, cwd, branch),
+            Err(error) => self.view.draft_directory_failed(draft_key, error),
         }
     }
 
     /// Creates the task's worktree on `branch`, then the task in it.
     fn create_task_in_worktree(
         &mut self,
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         request: crate::tasks::NewTask,
         branch: crate::tasks::BranchChoice,
     ) {
         let Some(root) = self.preferences.worktree_root.clone() else {
             self.view.draft_worktree_created(
-                draft_id,
+                draft_key,
                 Err(io::Error::other("Set worktree_root in agents.json")),
             );
             return;
@@ -1114,14 +1114,14 @@ impl App {
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
                 let _ = sender.send(Input::WorktreeCreated {
-                    draft_id,
+                    draft_key,
                     provider,
                     request,
                     result,
                 });
             })
         {
-            self.view.draft_worktree_created(draft_id, Err(error));
+            self.view.draft_worktree_created(draft_key, Err(error));
         }
     }
 
@@ -1244,19 +1244,19 @@ impl App {
             Action::PersistDrafts => self.persist_drafts(),
             Action::NewDraft { cwd } => self.new_draft(cwd),
             Action::CreateTask {
-                draft_id,
+                draft_key,
                 provider,
                 request,
                 branch: None,
-            } => self.create_task(draft_id, provider, request),
+            } => self.create_task(draft_key, provider, request),
             Action::CreateTask {
-                draft_id,
+                draft_key,
                 provider,
                 request,
                 branch: Some(branch),
-            } => self.create_task_in_worktree(draft_id, provider, request, branch),
-            Action::ChangeDraftDirectory { draft_id, cwd } => {
-                self.change_draft_directory(draft_id, cwd)
+            } => self.create_task_in_worktree(draft_key, provider, request, branch),
+            Action::ChangeDraftDirectory { draft_key, cwd } => {
+                self.change_draft_directory(draft_key, cwd)
             }
             Action::SetModel { id, model } => self.send_input(id, SessionInput::SetModel(model)),
             Action::SetEffort { id, effort } => {
@@ -1557,8 +1557,8 @@ mod loop_tests;
 mod project_tests;
 
 #[cfg(test)]
-#[path = "app_log_search_tests.rs"]
-mod log_search_tests;
+#[path = "app_event_search_tests.rs"]
+mod event_search_tests;
 
 #[cfg(test)]
 #[path = "app_weekly_usage_tests.rs"]

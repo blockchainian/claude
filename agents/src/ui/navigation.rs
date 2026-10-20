@@ -157,7 +157,7 @@ impl View {
             .find(|(_, index)| *index == self.selected)
             .map(|(position, _)| *position)
             .unwrap_or(tasks[0].0);
-        let height = state.page_height.max(/*other*/ 1);
+        let height = state.page_height.max(1);
         let target = if forward {
             current.saturating_add(height)
         } else {

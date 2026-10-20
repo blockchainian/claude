@@ -16,17 +16,17 @@ pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) ->
 }
 
 fn detailed_provider_text(name: &str, usage: &WeeklyUsage, left: bool) -> String {
-    let details = provider_details(usage, left);
-    if details.is_empty() {
+    let usage_text = provider_usage_text(usage, left);
+    if usage_text.is_empty() {
         name.to_owned()
     } else if left {
-        format!("{details} {name}")
+        format!("{usage_text} {name}")
     } else {
-        format!("{name} {details}")
+        format!("{name} {usage_text}")
     }
 }
 
-fn provider_details(usage: &WeeklyUsage, left: bool) -> String {
+fn provider_usage_text(usage: &WeeklyUsage, left: bool) -> String {
     let reset = usage.resets_at.map(|reset| {
         let reset = reset + chrono::Duration::seconds(30);
         format!(
@@ -201,8 +201,9 @@ pub(super) fn render(
         }
         return Some(Rect::new(center - half, area.y, half * 2 + 1, 1));
     }
-    let texts =
-        std::array::from_fn::<_, 2, _>(|i| usage[i].map(|usage| provider_details(usage, i == 0)));
+    let texts = std::array::from_fn::<_, 2, _>(|i| {
+        usage[i].map(|usage| provider_usage_text(usage, i == 0))
+    });
     let widths = texts.each_ref().map(|text| {
         text.as_ref()
             .map_or(0, |text| Line::from(text.as_str()).width() as u16)
@@ -222,12 +223,12 @@ pub(super) fn render(
             1,
         );
         target = Some(target.map_or(side, |target| target.union(side)));
-        let details = texts[i].as_ref().unwrap();
+        let usage_text = texts[i].as_ref().unwrap();
         let gap = " ".repeat(usize::from(half - widths[i] - names[i].len() as u16 - 2));
         let text = if i == 0 {
-            format!(" {details}{gap}{} ", names[i])
+            format!(" {usage_text}{gap}{} ", names[i])
         } else {
-            format!(" {}{gap}{details} ", names[i])
+            format!(" {}{gap}{usage_text} ", names[i])
         };
         Line::styled(text, text_style(usage[i].unwrap())).render(side, buf);
     }

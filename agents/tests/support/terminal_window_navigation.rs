@@ -33,8 +33,11 @@ fn terminal_vim_window_navigation_uses_rendered_panels() {
         // Details ignores slash, so the following question mark opens help.
         // In the task list it would be inserted into the search editor instead.
         tmux.run(&["send-keys", "-t", "probe", "?"]);
-        let details = tmux.capture_when(|capture| capture.contains("Task shortcuts"));
-        assert!(!details.contains("Search ❯"), "details focus: {details}");
+        let task_details = tmux.capture_when(|capture| capture.contains("Task shortcuts"));
+        assert!(
+            !task_details.contains("Search ❯"),
+            "task details focus: {task_details}"
+        );
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| !capture.contains("Task shortcuts"));
 
@@ -67,7 +70,7 @@ fn terminal_vim_window_navigation_uses_rendered_panels() {
 
         window_key(&tmux, "j");
         if width == 200 {
-            // The full-width prompt lies between the top log list and log details.
+            // The full-width prompt lies between the top event list and event details.
             window_key(&tmux, "j");
         }
         tmux.run(&["send-keys", "-t", "probe", "/"]);
@@ -85,9 +88,9 @@ fn terminal_vim_window_navigation_uses_rendered_panels() {
     let verdict = serde_json::json!({
         "verdict": "pass",
         "widths": [200, 100],
-        "task_list_to_details": true,
-        "details_to_prompt": true,
-        "log_list_to_detail": true,
+        "task_list_to_event_detail": true,
+        "task_details_to_prompt": true,
+        "event_list_to_event_detail": true,
         "non_direction_preserves_word_delete": true,
         "prompt_word_delete": true,
         "captures": captures,
@@ -187,18 +190,18 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
             .collect::<Vec<_>>();
         assert_eq!(rules.len(), if width == 200 { 3 } else { 4 }, "{initial}");
         let task_list = (0, separators[0], 2, rules[0]);
-        let task_detail = (
+        let task_details_region = (
             separators[0] + 1,
             if width == 200 { separators[1] } else { width },
             2,
             rules[0],
         );
-        let log_list = if width == 200 {
+        let event_list = if width == 200 {
             (separators[1] + 1, width, 2, rules[0])
         } else {
             (0, width, rules[1] + 1, rules[2])
         };
-        let log_detail = (0, width, rules[rules.len() - 2] + 1, rules[rules.len() - 1]);
+        let event_detail = (0, width, rules[rules.len() - 2] + 1, rules[rules.len() - 1]);
         let slice = |capture: &str, (left, right, top, bottom): (usize, usize, usize, usize)| {
             capture
                 .lines()
@@ -240,7 +243,10 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
                 .to_owned()
         };
         // Wheel activation in either details pane must keep paging out of both lists.
-        for (name, region) in [("task_details", task_detail), ("log_details", log_detail)] {
+        for (name, region) in [
+            ("task_details", task_details_region),
+            ("event_detail_position", event_detail),
+        ] {
             tmux.mouse(0, task_list.0 + 2, task_list.2 + 2, true);
             tmux.mouse(65, region.0 + 2, region.2 + 2, false);
             let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -258,8 +264,8 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
                 "{name}: task list moved: {forward}"
             );
             assert_eq!(
-                slice(&before, log_list),
-                slice(&forward, log_list),
+                slice(&before, event_list),
+                slice(&forward, event_list),
                 "{name}: log list moved: {forward}"
             );
             tmux.run(&["send-keys", "-t", "probe", "C-b"]);
@@ -276,8 +282,8 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
                 "{name}: task list moved back: {backward}"
             );
             assert_eq!(
-                slice(&before, log_list),
-                slice(&backward, log_list),
+                slice(&before, event_list),
+                slice(&backward, event_list),
                 "{name}: log list moved back: {backward}"
             );
             evidence.push(serde_json::json!({"width":width, "panel":name, "wheel_activation":true, "forward":true, "backward":true, "lists_unchanged":true}));
@@ -291,7 +297,7 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
         let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         tmux.run(&["send-keys", "-t", "probe", "C-b"]);
         let moved =
-            tmux.capture_when(|capture| slice(capture, log_list) != slice(&before, log_list));
+            tmux.capture_when(|capture| slice(capture, event_list) != slice(&before, event_list));
         assert_eq!(
             slice(&before, task_list),
             slice(&moved, task_list),
@@ -299,13 +305,13 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
         );
         tmux.run(&["send-keys", "-t", "probe", "C-f"]);
         let returned =
-            tmux.capture_when(|capture| slice(capture, log_list) != slice(&moved, log_list));
+            tmux.capture_when(|capture| slice(capture, event_list) != slice(&moved, event_list));
         assert_eq!(
             slice(&before, task_list),
             slice(&returned, task_list),
             "log-list forward paging moved tasks: {returned}"
         );
-        evidence.push(serde_json::json!({"width":width, "panel":"log_list", "forward":true, "backward":true, "ctrl_w_focus":true, "task_list_unchanged":true}));
+        evidence.push(serde_json::json!({"width":width, "panel":"event_list", "forward":true, "backward":true, "ctrl_w_focus":true, "task_list_unchanged":true}));
         tmux.mouse(0, task_list.0 + 2, task_list.2 + 2, true);
         let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         tmux.run(&["send-keys", "-t", "probe", "C-f"]);
@@ -319,7 +325,7 @@ fn terminal_active_panel_paging_stays_in_focused_panel() {
         tmux.run(&["send-keys", "-t", "probe", "C-f", "C-b"]);
         tmux.run(&["send-keys", "-t", "probe", "-l", "paging barrier"]);
         let after = tmux.capture_when(|capture| capture.contains("❯ paging barrier"));
-        for region in [task_list, task_detail, log_list, log_detail] {
+        for region in [task_list, task_details_region, event_list, event_detail] {
             assert_eq!(
                 slice(&before, region),
                 slice(&after, region),

@@ -30,7 +30,7 @@ fn child_box_clock_matches_its_own_prompt_for_both_providers() {
             view.selected = view.rows.iter().position(|s| s.id.id == "parent").unwrap();
             let area = Rect::new(0, 0, 80, 40);
             let mut buf = Buffer::empty(area);
-            view.render_details(area, &mut buf, now);
+            view.render_task_details(area, &mut buf, now);
             let title = buf
                 .content
                 .chunks(80)
@@ -44,7 +44,7 @@ fn child_box_clock_matches_its_own_prompt_for_both_providers() {
             if prompt_at.is_some() {
                 view.selected = view.rows.iter().position(|s| s.id.id == "child").unwrap();
                 let mut buf = Buffer::empty(area);
-                view.render_details(area, &mut buf, now);
+                view.render_task_details(area, &mut buf, now);
                 let prompt = buf
                     .content
                     .chunks(80)

@@ -1,6 +1,3 @@
-//! Text bytes safe to display, retaining message whitespace.
-
-/// Keep printable Unicode and message line breaks and tabs; discard terminal controls.
 pub(crate) fn printable(text: &str) -> String {
     struct Text(String);
     impl vte::Perform for Text {

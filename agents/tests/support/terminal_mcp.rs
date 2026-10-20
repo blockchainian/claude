@@ -27,7 +27,7 @@ fn token_color(capture: &str, token: &str, width: u16, height: u16) -> vt100::Co
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_claude_mcp_generic_details() {
+fn terminal_claude_mcp_generic_event_detail() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("mcp-claude-generic");
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "150"]);
@@ -152,7 +152,7 @@ fn start_codex_mcp_probe(fixture: &str) -> (tempfile::TempDir, Tmux) {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_codex_mcp_generic_details() {
+fn terminal_codex_mcp_generic_event_detail() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../fixtures/mcp-codex/structured.json")).unwrap();
     let (directory, tmux) = start_codex_mcp_probe(&format!("{fixture}\n"));

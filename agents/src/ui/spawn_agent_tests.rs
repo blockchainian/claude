@@ -1,5 +1,5 @@
 use super::*;
-use crate::log::Event;
+use crate::event::Event;
 
 fn display_view() -> View {
     use crate::providers::Provider;
@@ -27,7 +27,7 @@ fn claude_events(name: &str) -> Vec<Event> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name);
-    crate::providers::claude::log::tail(&path, usize::MAX).unwrap()
+    crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap()
 }
 
 fn spawn_event(events: &[Event]) -> &Event {
@@ -46,12 +46,12 @@ fn spawn_event(events: &[Event]) -> &Event {
 fn panel(view: &mut View, event: &Event) -> String {
     let row = session("spawn", "Spawn", SessionStatus::Ready, 0);
     view.set_sessions(vec![row], false);
-    view.log_session = Some(view.selected_row().unwrap().id.clone());
-    view.set_log(vec![event.clone()]);
+    view.event_session = Some(view.selected_row().unwrap().id.clone());
+    view.set_event(vec![event.clone()]);
     let area = Rect::new(0, 0, 240, 42);
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, DateTime::UNIX_EPOCH);
-    let detail = view.viewport.borrow().log_detail;
+    let detail = view.viewport.borrow().event_detail;
     buffer
         .content
         .chunks(240)
@@ -80,7 +80,7 @@ fn snapshot(name: &str, text: &str) {
         .join("tests/ui_snapshots")
         .join(name);
     let actual = format!("{text}\n");
-    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+    if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
         std::fs::write(&path, &actual).unwrap();
     }
     assert_eq!(actual, std::fs::read_to_string(path).unwrap());
@@ -94,10 +94,10 @@ fn spawn_agent_claude_background_name_model_and_hidden_receipt() {
     assert_eq!(event.summary(), "Spawn agent 查 Claude 前台转后台");
     let shown = view.display_event(event);
     assert_eq!(
-        shown.calls[0].detail_title,
+        shown.calls[0].event_detail_title,
         "查 Claude 前台转后台 · Sonnet 5.5"
     );
-    let body = view.detail_text(event);
+    let body = view.event_detail_text(event);
     assert!(
         !body.contains("Async agent launched successfully"),
         "{body}"
@@ -125,13 +125,16 @@ fn spawn_agent_codex_model_and_hidden_receipt() {
     let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
     let mut session = fixture().rows.remove(0);
     session.transcript = Some(path);
-    let events = provider.log(&session, usize::MAX, false).unwrap();
+    let events = provider.event_panel(&session, usize::MAX, false).unwrap();
     let event = spawn_event(&events);
     let mut view = display_view();
     assert_eq!(event.summary(), "Spawn agent demo_sub");
     let shown = view.display_event(event);
-    assert_eq!(shown.calls[0].detail_title, "demo_sub · GPT-6.1-Sol · low");
-    let body = view.detail_text(event);
+    assert_eq!(
+        shown.calls[0].event_detail_title,
+        "demo_sub · GPT-6.1-Sol · low"
+    );
+    let body = view.event_detail_text(event);
     assert!(!body.contains("task_name"), "{body}");
     snapshot("spawn_agent_codex.txt", &panel(&mut view, event));
 }

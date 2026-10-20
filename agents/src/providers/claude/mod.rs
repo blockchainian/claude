@@ -9,15 +9,15 @@ mod background;
 pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;
-#[cfg(test)]
-mod settings_tests;
 mod defaults;
 mod models;
 #[cfg(test)]
+mod settings_tests;
+#[cfg(test)]
 pub use models::write_fixture_cache;
 mod ask_user_question;
+pub(crate) mod event_reader;
 mod images;
-pub(crate) mod log;
 mod peer;
 pub(super) mod registry;
 mod settings;
@@ -837,17 +837,17 @@ impl Provider for ClaudeProvider {
         self.snapshot(pages)
     }
     #[cfg(test)]
-    fn log(
+    fn event_panel(
         &self,
         session: &Session,
         count: usize,
         sidechains: bool,
-    ) -> io::Result<Vec<crate::log::Event>> {
+    ) -> io::Result<Vec<crate::event::Event>> {
         let path = session
             .transcript
             .as_deref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Session has no transcript"))?;
-        log::tail_session(path, count, sidechains)
+        event_reader::tail_session(path, count, sidechains)
     }
 
     fn create(
@@ -1122,7 +1122,7 @@ fn session(
         name: None,
         title,
         prompt: summary.prompt,
-        detail_sources: summary.detail_sources,
+        task_details_sources: summary.task_details_sources,
         prompt_images: summary.prompt_images,
         queued: summary.queued,
         prompt_at: summary.prompt_at,
@@ -1602,8 +1602,8 @@ mod tests {
         );
         assert_eq!(new.get_args().count(), 0);
         assert_eq!(
-            provider.log(&session, 8, false).unwrap(),
-            log::tail(&path, 8).unwrap()
+            provider.event_panel(&session, 8, false).unwrap(),
+            event_reader::tail(&path, 8).unwrap()
         );
         provider.rename(&session, "Provider title").unwrap();
         assert_eq!(

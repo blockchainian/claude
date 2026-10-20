@@ -71,9 +71,9 @@ fn escape_walks_selection_history_without_bouncing() {
 fn escape_search_and_other_panels_do_not_consume_task_history() {
     for panel in [
         Panel::TaskList,
-        Panel::LogList,
-        Panel::Output,
-        Panel::Details,
+        Panel::EventList,
+        Panel::EventDetail,
+        Panel::TaskDetails,
     ] {
         let mut view = tasks();
         let first = view.selected_id().cloned();
@@ -188,7 +188,7 @@ fn escape_closes_overlays_without_consuming_history() {
             0 => view.help = true,
             1 => {
                 view.rename_target = second.clone();
-                view.set_active_panel(Panel::Details);
+                view.set_active_panel(Panel::TaskDetails);
             }
             2 => {
                 view.confirm_dialog = Some(ConfirmDialog {
@@ -197,14 +197,14 @@ fn escape_closes_overlays_without_consuming_history() {
                     confirm: false,
                 })
             }
-            3 => view.log_search.editing = true,
-            4 => view.log_detail_search.editing = true,
+            3 => view.event_search.editing = true,
+            4 => view.event_detail_search.editing = true,
             _ => unreachable!(),
         }
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), second.as_ref());
         assert!(!view.help && view.rename_target.is_none() && view.confirm_dialog.is_none());
-        assert!(!view.log_search.editing && !view.log_detail_search.editing);
+        assert!(!view.event_search.editing && !view.event_detail_search.editing);
         view.set_active_panel(Panel::TaskList);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());

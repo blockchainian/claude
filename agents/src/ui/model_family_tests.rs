@@ -120,7 +120,7 @@ fn model_families_preserve_first_appearance_and_model_order() {
         let len = values.len();
         let original = selector.selected;
         screen(&view, Rect::new(0, 0, 160, 50));
-        assert_eq!(view.active_panel, Panel::Details);
+        assert_eq!(view.active_panel, Panel::TaskDetails);
         for index in (original + 1..len).chain(0..=original) {
             view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             assert_eq!(view.selector.as_ref().unwrap().selected, index);
@@ -148,12 +148,12 @@ fn model_families_preserve_first_appearance_and_model_order() {
             }
         }
         screen(&view, Rect::new(0, 0, 160, 50));
-        let details = view.viewport.borrow().details;
-        let top = details.bottom() - rows.len() as u16;
+        let task_details = view.viewport.borrow().task_details;
+        let top = task_details.bottom() - rows.len() as u16;
         for (offset, row) in rows.iter().enumerate() {
             if matches!(row, ListRow::Text(_)) {
                 assert_eq!(
-                    click(&mut view, Rect::new(details.x, top + offset as u16, 1, 1)),
+                    click(&mut view, Rect::new(task_details.x, top + offset as u16, 1, 1)),
                     None
                 );
                 assert_eq!(view.selector.as_ref().unwrap().selected, original);

@@ -1,5 +1,5 @@
-#[path = "support/terminal_details_borders.rs"]
-mod terminal_details_borders;
+#[path = "support/terminal_task_details_borders.rs"]
+mod terminal_task_details_borders;
 
 #[path = "support/terminal_output_borders.rs"]
 mod terminal_output_borders;
@@ -31,8 +31,8 @@ mod terminal_task_navigation;
 #[path = "support/terminal_memory_citation.rs"]
 mod terminal_memory_citation;
 
-#[path = "support/terminal_log_search.rs"]
-mod terminal_log_search;
+#[path = "support/terminal_event_search.rs"]
+mod terminal_event_search;
 
 use std::path::Path;
 use std::process::Command;
@@ -199,7 +199,7 @@ fn assert_title_caret(tmux: &Tmux, title: &str, offset: usize) -> String {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_background_log_has_no_marker_and_keeps_its_time() {
+fn terminal_background_event_has_no_marker_and_keeps_its_time() {
     let records = include_str!("fixtures/background/two-awaits.jsonl");
     let contents = |count| {
         format!(
@@ -232,7 +232,7 @@ fn terminal_background_log_has_no_marker_and_keeps_its_time() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_queued_details_wrap_and_separate_messages() {
+fn terminal_queued_task_details_wrap_and_separate_messages() {
     let mut enqueue: serde_json::Value = include_str!("fixtures/claude-main-model-history.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
@@ -288,7 +288,9 @@ fn terminal_queued_details_wrap_and_separate_messages() {
         }
         previous_tail = Some(end);
     }
-    println!("{{\"queued_details\":\"pass\",\"wrap\":true,\"bold\":false,\"blank_rows\":true}}");
+    println!(
+        "{{\"queued_task_details\":\"pass\",\"wrap\":true,\"bold\":false,\"blank_rows\":true}}"
+    );
 }
 
 fn start_probe_with_transcript(
@@ -406,7 +408,7 @@ fn terminal_show_more_keeps_label_while_loading() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_branch_name_edits_in_details_and_preserves_input() {
+fn terminal_branch_name_edits_in_task_details_and_preserves_input() {
     let repository = tempfile::tempdir().unwrap();
     for args in [
         vec!["init", "-b", "main"],
@@ -767,7 +769,7 @@ fn terminal_inline_code_follows_neovim_accent() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_leaving_list_search_preserves_detail() {
+fn terminal_leaving_list_search_preserves_event_detail() {
     for mouse_exit in [false, true] {
         let (_directory, tmux, _transcript) = start_probe(if mouse_exit {
             "search-exit-mouse"
@@ -996,7 +998,7 @@ fn terminal_task_cursor_keeps_cell_colors() {
     println!("{{\"task_cursor\":\"pass\",\"widths\":[120,200]}}");
 }
 
-fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
+fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     let lines: Vec<_> = capture.lines().collect();
     let separators: Vec<_> = lines[2]
         .match_indices('│')
@@ -1006,18 +1008,20 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         .iter()
         .take_while(|line| line.matches('│').count() == separators.len())
         .count();
-    let details_start = separators[0];
-    let details_end = if width >= 150 {
+    let task_details_start = separators[0];
+    let task_details_end = if width >= 150 {
         separators[1] + 1
     } else {
         width as usize
     };
     let middle: Vec<_> = lines[top_end].chars().collect();
-    let details: String = middle[details_start..details_end].iter().collect();
+    let task_details: String = middle[task_details_start..task_details_end]
+        .iter()
+        .collect();
     let status = " Inactive ";
-    let start = (details_end - details_start - status.len()) / 2;
+    let start = (task_details_end - task_details_start - status.len()) / 2;
     assert_eq!(
-        details
+        task_details
             .chars()
             .skip(start)
             .take(status.len())
@@ -1025,9 +1029,9 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         status,
         "{capture}"
     );
-    assert!(details.starts_with('┴'), "{capture}");
+    assert!(task_details.starts_with('┴'), "{capture}");
     assert!(
-        details.ends_with(if width >= 150 {
+        task_details.ends_with(if width >= 150 {
             " claude╶┴"
         } else {
             " claude╶─"
@@ -1035,12 +1039,16 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         "{capture}"
     );
     assert!(
-        details.chars().skip(1).take(start - 1).all(|c| c == '─'),
+        task_details
+            .chars()
+            .skip(1)
+            .take(start - 1)
+            .all(|c| c == '─'),
         "{capture}"
     );
-    let folder_start = details.chars().count() - " claude╶─".chars().count();
+    let folder_start = task_details.chars().count() - " claude╶─".chars().count();
     assert!(
-        details
+        task_details
             .chars()
             .skip(start + status.len())
             .take(folder_start - start - status.len())
@@ -1051,13 +1059,13 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     let parser = captured_screen(&colored, width, height);
     let cell = parser
         .screen()
-        .cell(top_end as u16, (details_start + start + 1) as u16)
+        .cell(top_end as u16, (task_details_start + start + 1) as u16)
         .unwrap();
     assert!(cell.bold(), "{colored}");
     assert!(!cell.dim(), "{colored}");
     assert_eq!(cell.fgcolor(), vt100::Color::Default);
 
-    let top: String = (details_start..details_end)
+    let top: String = (task_details_start..task_details_end)
         .map(|x| parser.screen().cell(1, x as u16).unwrap().contents())
         .collect();
     let elapsed = top
@@ -1070,8 +1078,8 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         "{capture}"
     );
     assert!(!elapsed.trim().is_empty(), "{capture}");
-    let elapsed_start = details_end - 1 - elapsed.width();
-    for x in elapsed_start + 1..details_end - 2 {
+    let elapsed_start = task_details_end - 1 - elapsed.width();
+    for x in elapsed_start + 1..task_details_end - 2 {
         let cell = parser.screen().cell(1, x as u16).unwrap();
         assert!(cell.dim(), "{colored}");
         assert!(!cell.bold(), "{colored}");
@@ -1081,21 +1089,21 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         .find(|part| !part.trim_matches([' ', '┬']).is_empty())
         .unwrap();
     assert!(title.starts_with(' ') && title.ends_with(' '), "{capture}");
-    let start = (details_end - details_start - title.width()) / 2;
+    let start = (task_details_end - task_details_start - title.width()) / 2;
     assert_eq!(top[..top.find(title).unwrap()].width(), start, "{capture}");
-    for x in details_start + start + 1..details_start + start + title.width() - 1 {
+    for x in task_details_start + start + 1..task_details_start + start + title.width() - 1 {
         let cell = parser.screen().cell(1, x as u16).unwrap();
         if !cell.contents().is_empty() {
             assert!(cell.bold(), "{colored}");
             assert!(!cell.dim(), "{colored}");
         }
     }
-    println!("{{\"details_borders\":\"pass\",\"width\":{width}}}");
+    println!("{{\"task_details_borders\":\"pass\",\"width\":{width}}}");
 }
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_details_borders_keep_status_and_elapsed_separate() {
+fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
     let (_directory, tmux, _transcript) = start_probe("details-borders");
     for width in [112, 200] {
         tmux.run(&[
@@ -1110,11 +1118,11 @@ fn terminal_details_borders_keep_status_and_elapsed_separate() {
         std::thread::sleep(Duration::from_millis(300));
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         println!("{width} columns:\n{capture}");
-        assert_details_borders(&tmux, width, 50, &capture);
+        assert_task_details_borders(&tmux, width, 50, &capture);
     }
 }
 
-// Runs the executable's terminal loop, provider discovery and log loading, rather
+// Runs the executable's terminal loop, provider discovery and event loading, rather
 // than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
@@ -1182,7 +1190,7 @@ fn terminal_layout_tracks_width() {
             .count();
         let prompt = top_end + 1;
         assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
-        let log_rule = if width >= 150 {
+        let event_rule = if width >= 150 {
             top_end + 2
         } else {
             (prompt + 2..lines.len() - 1)
@@ -1190,13 +1198,13 @@ fn terminal_layout_tracks_width() {
                 .expect("separate list/detail border")
         };
         let top_height = top_end - 2;
-        let bottom_height = lines.len() - log_rule - 2;
+        let bottom_height = lines.len() - event_rule - 2;
         if width >= 150 {
             let content = height as usize - 6;
             assert_eq!(top_height, content * 618 / 1000, "{capture}");
             assert_eq!(top_height + bottom_height, content, "{capture}");
         } else {
-            let list_height = log_rule - prompt - 2;
+            let list_height = event_rule - prompt - 2;
             let content = height as usize - 7;
             let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
             assert_eq!(
@@ -1209,7 +1217,7 @@ fn terminal_layout_tracks_width() {
             );
         }
         assert!(
-            !lines[log_rule + 1].trim().is_empty(),
+            !lines[event_rule + 1].trim().is_empty(),
             "blank row below log rule: {capture}"
         );
         let model = lines
@@ -1220,14 +1228,18 @@ fn terminal_layout_tracks_width() {
             model.contains("claude-opus-5-5") && model.contains("medium"),
             "model group missing: {capture}"
         );
-        assert_details_borders(&tmux, width, height, &capture);
+        assert_task_details_borders(&tmux, width, height, &capture);
         if width >= 150 {
             let column_width = (width as usize - 8) / 4;
             assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
             for line in &lines[2..top_end] {
-                let log = line.split('│').next_back().unwrap();
-                if !log.trim().is_empty() {
-                    assert_eq!(log.len() - log.trim_start().len(), 1, "log left: {line}");
+                let event_panel = line.split('│').next_back().unwrap();
+                if !event_panel.trim().is_empty() {
+                    assert_eq!(
+                        event_panel.len() - event_panel.trim_start().len(),
+                        1,
+                        "log left: {line}"
+                    );
                     assert_eq!(
                         line.trim_end().width(),
                         width as usize - 1,
@@ -1240,21 +1252,21 @@ fn terminal_layout_tracks_width() {
                 "prompt missing: {capture}"
             );
             let middle: Vec<_> = lines[top_end].chars().collect();
-            let details: String = middle[separators[0] + 2..separators[1] - 1]
+            let task_details: String = middle[separators[0] + 2..separators[1] - 1]
                 .iter()
                 .collect();
             assert!(
-                details.contains(" Inactive "),
+                task_details.contains(" Inactive "),
                 "status missing from middle rule: {capture}"
             );
             for line in &lines[2..top_end] {
-                let log = line.split('│').next_back().unwrap();
-                assert!(!log.contains("────"), "extra log rule: {capture}");
+                let event_panel = line.split('│').next_back().unwrap();
+                assert!(!event_panel.contains("────"), "extra log rule: {capture}");
                 assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
             }
-            assert!(lines[log_rule].trim().chars().all(|c| c == '─'));
+            assert!(lines[event_rule].trim().chars().all(|c| c == '─'));
             assert!(
-                lines[log_rule + 4..lines.len() - 1]
+                lines[event_rule + 4..lines.len() - 1]
                     .iter()
                     .any(|line| line.width() > width as usize * 2 / 3),
                 "detail does not span the terminal: {capture}"
@@ -1263,23 +1275,23 @@ fn terminal_layout_tracks_width() {
                 lines[2..top_end].iter().any(|line| {
                     line.split('│')
                         .next_back()
-                        .is_some_and(|log| log.contains("Stop hook"))
+                        .is_some_and(|event_panel| event_panel.contains("Stop hook"))
                 }),
                 "event list missing from top row: {capture}"
             );
         } else {
-            let list = lines[prompt + 2..log_rule].join("\n");
+            let list = lines[prompt + 2..event_rule].join("\n");
             assert!(
                 list.contains("Stop hook"),
                 "event list missing below prompt: {capture}"
             );
             assert!(
-                lines[log_rule + 1..lines.len() - 1]
+                lines[event_rule + 1..lines.len() - 1]
                     .join("\n")
                     .contains("decision"),
                 "newest event detail missing below list: {capture}"
             );
-            let user_row = (prompt + 1..log_rule)
+            let user_row = (prompt + 1..event_rule)
                 .find(|&row| lines[row].contains("⏺"))
                 .expect("real user event row");
             // Feed the same SGR mouse press/release received by the terminal loop.
@@ -1294,19 +1306,19 @@ fn terminal_layout_tracks_width() {
             let opened = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             let opened_lines: Vec<_> = opened.lines().collect();
             assert_eq!(
-                opened_lines[prompt + 2..log_rule].join("\n"),
+                opened_lines[prompt + 2..event_rule].join("\n"),
                 list,
                 "event list hidden after click: {opened}"
             );
-            assert!(!opened_lines[log_rule].contains("↓ Latest"), "{opened}");
+            assert!(!opened_lines[event_rule].contains("↓ Latest"), "{opened}");
             assert!(
-                opened_lines[log_rule + 1..opened_lines.len() - 1]
+                opened_lines[event_rule + 1..opened_lines.len() - 1]
                     .join("\n")
                     .contains("run_in_background"),
                 "clicked user event missing from detail: {opened}"
             );
             // Search follows the last mouse panel, independently of the selected event.
-            tmux.mouse(0, 1, log_rule + 1, true);
+            tmux.mouse(0, 1, event_rule + 1, true);
             tmux.run(&["send-keys", "-t", "probe", "/"]);
             tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
             std::thread::sleep(Duration::from_millis(200));
@@ -1314,14 +1326,14 @@ fn terminal_layout_tracks_width() {
             assert!(
                 searched
                     .lines()
-                    .skip(log_rule + 1)
+                    .skip(event_rule + 1)
                     .any(|line| line.contains("Search ❯ await")),
                 "detail search missing: {searched}"
             );
             tmux.run(&["send-keys", "-t", "probe", "Escape"]);
             // Select the real newest event so each resize starts with the same detail.
             std::thread::sleep(Duration::from_millis(200));
-            let assistant_row = (prompt + 2..log_rule)
+            let assistant_row = (prompt + 2..event_rule)
                 .find(|&row| opened_lines[row].contains("对，必须"))
                 .expect("newest assistant row");
             tmux.run(&[
@@ -1342,7 +1354,7 @@ fn terminal_layout_tracks_width() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_compaction_summary_keeps_row_and_labels_detail() {
+fn terminal_compaction_summary_keeps_row_and_labels_event_detail() {
     use std::io::Write;
 
     let (_directory, tmux, transcript) = start_probe("compaction");
@@ -1372,12 +1384,12 @@ fn terminal_compaction_summary_keeps_row_and_labels_detail() {
         "{capture}"
     );
     assert!(!detail.contains("User"), "{capture}");
-    println!("{{\"compaction_list\":\"pass\",\"compaction_detail\":\"pass\"}}");
+    println!("{{\"compaction_list\":\"pass\",\"compaction_event_detail\":\"pass\"}}");
 }
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_log_selection_tracks_wheel_click_and_tail() {
+fn terminal_event_selection_tracks_wheel_click_and_tail() {
     use std::io::Write;
 
     for width in [120, 180] {
@@ -1761,7 +1773,7 @@ fn terminal_running_tool_animates_without_input() {
             assert_eq!((x, y), previous, "animation must stay centered");
         }
         position = Some((x, y));
-        assert_eq!(x, terminal_detail_width::detail_center(200, 3));
+        assert_eq!(x, terminal_event_detail_width::event_detail_center(200, 3));
         for offset in 0..3 {
             let cell = screen.cell(y as u16, (x + offset) as u16).unwrap();
             assert!(cell.dim(), "running output stays dim: x={x}, raw={raw:?}");
@@ -1822,7 +1834,7 @@ fn background_text_probe(name: &str, text: &str) -> (tempfile::TempDir, Tmux, st
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_details_section_positions() {
+fn terminal_task_details_section_positions() {
     let (_directory, tmux, transcript) =
         background_text_probe("details-sections", "Running checks\n");
     let background = include_str!("fixtures/background/records.jsonl");
@@ -1969,7 +1981,7 @@ fn terminal_details_section_positions() {
                 }
             }
             println!(
-                "{{\"details_sections\":\"pass\",\"folder_on_status_rule\":\"pass\",\"model_on_log_rule\":\"pass\",\"metadata_dim\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
+                "{{\"task_details_sections\":\"pass\",\"folder_on_status_rule\":\"pass\",\"model_on_event_rule\":\"pass\",\"metadata_dim\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
             );
         }
     }
@@ -1977,7 +1989,7 @@ fn terminal_details_section_positions() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_details_background_before_activity() {
+fn terminal_task_details_background_before_activity() {
     let (_directory, tmux, transcript) =
         background_text_probe("background-before-activity", "Running checks\n");
     let content = format!(
@@ -1994,12 +2006,12 @@ fn terminal_details_background_before_activity() {
         positions.iter().all(Option::is_some) && positions.is_sorted()
     });
     println!("{capture}");
-    println!("{{\"details_background_before_activity\":\"pass\"}}");
+    println!("{{\"task_details_background_before_activity\":\"pass\"}}");
 }
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_details_needs_input_follows_prompt_before_tasks() {
+fn terminal_task_details_needs_input_follows_prompt_before_tasks() {
     let (directory, tmux, transcript) = start_probe("details-needs-input");
     let job = directory.path().join("claude/jobs/details-needs-input");
     std::fs::create_dir_all(&job).unwrap();
@@ -2049,7 +2061,7 @@ mod terminal_codex_exit;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_log_metadata_aligns_new_with_clock() {
+fn terminal_event_metadata_aligns_new_with_clock() {
     for width in [80, 200] {
         let (_directory, tmux, transcript) = start_probe("log-latest-border");
         tmux.run(&[
@@ -2204,7 +2216,7 @@ fn terminal_log_metadata_aligns_new_with_clock() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_log_border_double_clicks() {
+fn terminal_event_border_double_clicks() {
     let (_directory, tmux, _transcript) = start_probe("log-borders");
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
     tmux.wait_for(|capture| capture.lines().count() == 45 && capture.contains("对，必须"));
@@ -2492,7 +2504,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 .min()
                 .expect("detail body group");
             let group_right = group.iter().map(|line| line.width()).max().unwrap();
-            let cap = terminal_detail_width::message_width(&capture, usize::from(width));
+            let cap = terminal_event_detail_width::message_width(&capture, usize::from(width));
             if prose {
                 assert!(
                     group_right - group_left <= cap,
@@ -2504,11 +2516,14 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             let maximum_width = if prose {
                 cap
             } else {
-                terminal_detail_width::content_width(usize::from(width))
+                terminal_event_detail_width::content_width(usize::from(width))
             };
-            let leftmost = terminal_detail_width::detail_center(usize::from(width), maximum_width);
-            let rightmost =
-                terminal_detail_width::detail_center(usize::from(width), group_right - group_left);
+            let leftmost =
+                terminal_event_detail_width::event_detail_center(usize::from(width), maximum_width);
+            let rightmost = terminal_event_detail_width::event_detail_center(
+                usize::from(width),
+                group_right - group_left,
+            );
             assert!(
                 (leftmost..=rightmost).contains(&group_left),
                 "{kind} group center outside {leftmost}..={rightmost} at {width}: {capture}"
@@ -2694,13 +2709,13 @@ fn terminal_manager_detach_title() {
         assert!(title.contains(subject), "{capture}");
         assert_eq!(
             title[..title.find(subject).unwrap()].width(),
-            terminal_detail_width::detail_center(usize::from(width), subject.width()),
+            terminal_event_detail_width::event_detail_center(usize::from(width), subject.width()),
             "thread title stays on the panel midline: {capture}"
         );
         assert_eq!(rows[rule + 3].trim(), "↓", "{capture}");
         assert_eq!(
             rows[rule + 3][..rows[rule + 3].find('↓').unwrap()].width(),
-            terminal_detail_width::detail_center(usize::from(width), 1),
+            terminal_event_detail_width::event_detail_center(usize::from(width), 1),
             "empty input arrow stays on the panel midline: {capture}"
         );
         assert!(
@@ -2716,8 +2731,8 @@ fn terminal_manager_detach_title() {
     }
 }
 
-#[path = "support/terminal_detail_width.rs"]
-mod terminal_detail_width;
+#[path = "support/terminal_event_detail_width.rs"]
+mod terminal_event_detail_width;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
@@ -2811,7 +2826,10 @@ fn terminal_start_tool_name_header() {
         );
         assert_eq!(
             bar[..bar.find("Claude 图片链接").unwrap()].width(),
-            terminal_detail_width::detail_center(usize::from(width), "Claude 图片链接".width()),
+            terminal_event_detail_width::event_detail_center(
+                usize::from(width),
+                "Claude 图片链接".width()
+            ),
             "tool name stays on the panel midline: {capture}"
         );
         assert!(bar.contains("Claude 图片链接"), "{capture}");
@@ -2924,8 +2942,8 @@ mod terminal_notification;
 #[path = "support/terminal_paths.rs"]
 mod paths;
 
-#[path = "support/terminal_log_scroll.rs"]
-mod terminal_log_scroll;
+#[path = "support/terminal_event_scroll.rs"]
+mod terminal_event_scroll;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
@@ -2999,7 +3017,7 @@ fn terminal_weekly_usage_on_task_header() {
 
 #[test]
 #[ignore = "requires tmux; runs the real app with isolated preferences"]
-fn terminal_context_usage_on_details_border() {
+fn terminal_context_usage_on_task_details_border() {
     let (_claude_directory, claude, _transcript) = start_probe("claude-context-border");
     let capture = claude.capture_when(|capture| capture.contains("Update"));
     let claude_border = capture.lines().nth(1).unwrap().to_owned();

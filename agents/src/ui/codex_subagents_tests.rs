@@ -217,8 +217,8 @@ fn nested_connectors_include_siblings_outside_the_viewport() {
     );
 }
 
-#[path = "codex_subagent_details_tests.rs"]
-mod details;
+#[path = "codex_subagent_task_details_tests.rs"]
+mod task_details;
 
 #[test]
 fn nested_rows_align_status_and_time_columns() {
@@ -267,7 +267,7 @@ fn child_box_and_task_list_share_the_first_line_title() {
             .unwrap(),
     )
     .unwrap();
-    let title = crate::log::agent::name(
+    let title = crate::event::agent::name(
         record["payload"]["source"]["subagent"]["thread_spawn"]["agent_path"]
             .as_str()
             .unwrap(),

@@ -40,14 +40,14 @@ fn subagent_reader_pages_appends_and_resets_its_history_boundary() {
         update
             .events
             .iter()
-            .all(|event| event.kind != crate::log::Kind::User)
+            .all(|event| event.kind != crate::event::Kind::User)
     );
     let parent = include_str!("../../../tests/fixtures/codex-subagents/parent.jsonl");
     std::fs::write(file.path(), parent).unwrap();
     let update = reader.refresh(usize::MAX).unwrap();
     assert!(update.reset);
     assert_eq!(update.events.len(), 1);
-    assert_eq!(update.events[0].kind, crate::log::Kind::Assistant);
+    assert_eq!(update.events[0].kind, crate::event::Kind::Assistant);
 }
 
 #[test]

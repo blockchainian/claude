@@ -1,4 +1,4 @@
-use crate::log::{Event, Image, Kind, Section, ToolCall};
+use crate::event::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::text::printable;
 use crate::providers::tool::{self, Output, list_title, tool_kind};
@@ -26,7 +26,7 @@ const CHUNK: u64 = 64 * 1024;
 pub(super) struct Summary {
     pub prompt_at: Option<DateTime<Utc>>,
     pub cache_expires_at: Option<DateTime<Utc>>,
-    pub detail_sources: [Option<String>; 3],
+    pub task_details_sources: [Option<String>; 3],
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
@@ -498,7 +498,7 @@ fn text_section(label: &str, text: &str) -> Section {
 
 #[cfg(test)]
 fn agent_name(path: &str) -> &str {
-    crate::log::agent::name(path)
+    crate::event::agent::name(path)
 }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
@@ -527,12 +527,13 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         )
     });
     let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref()).or(subject);
-    let (detail_left, detail_title) = tool::detail_titles(&raw_name, subject.as_deref());
+    let (event_detail_left, event_detail_title) =
+        tool::event_detail_titles(&raw_name, subject.as_deref());
     let mut call = ToolCall {
         agent_message: None,
-        detail_left,
-        detail_title,
-        show_details: true,
+        event_detail_left,
+        event_detail_title,
+        show_event_detail: true,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
         title: list_title(
             &raw_name,
@@ -554,20 +555,20 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     };
     call.agent_message = arguments
         .as_ref()
-        .and_then(|input| crate::log::agent::tool_message(&raw_name, input));
+        .and_then(|input| crate::event::agent::tool_message(&raw_name, input));
     if let Some(message) = &mut call.agent_message
         && serde_json::from_str::<Value>(raw)
             .ok()
             .and_then(|args| args["message"].as_str().map(is_fernet_token))
             == Some(true)
     {
-        message.content = crate::log::agent::Content::Encrypted;
+        message.content = crate::event::agent::Content::Encrypted;
     }
     call.agent_path = call
         .agent_message
         .as_ref()
         .and_then(|message| message.recipient.clone());
-    crate::log::agent::present(&mut call);
+    crate::event::agent::present(&mut call);
     crate::providers::tool::annotate(&mut call);
     call
 }
@@ -646,14 +647,15 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let raw_name = name;
     let (_, subject, input) = crate::providers::tool::presentation(&raw_name, &arguments);
     let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref()).or(subject);
-    let (detail_left, detail_title) = tool::detail_titles(&raw_name, subject.as_deref());
+    let (event_detail_left, event_detail_title) =
+        tool::event_detail_titles(&raw_name, subject.as_deref());
     let state = tool::result_state("", item, false);
     let exit_code = state.exit_code;
     let mut call = ToolCall {
         agent_message: None,
-        detail_left,
-        detail_title,
-        show_details: true,
+        event_detail_left,
+        event_detail_title,
+        show_event_detail: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
         title: list_title(&raw_name, subject.as_deref(), &arguments, exit_code),
         name: raw_name.clone(),
@@ -784,9 +786,9 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     };
     let call = completed_call(item, command_text);
     let body = call.title.clone();
-    let paths = if item_type == "FileChange" && !call.detail_left.is_empty() {
-        let mut offset = call.detail_left.len() + 1;
-        call.detail_title
+    let paths = if item_type == "FileChange" && !call.event_detail_left.is_empty() {
+        let mut offset = call.event_detail_left.len() + 1;
+        call.event_detail_title
             .split(" · ")
             .map(|path| {
                 let range = offset..offset + path.len();
@@ -872,7 +874,7 @@ pub(super) fn first_prompt(
     Ok((Vec::new(), None))
 }
 
-/// Read the same parsed rows as the log, including call/result and message pairing.
+/// Read the same parsed rows as the event list, including call/result and message pairing.
 fn latest_activity(path: &Path) -> io::Result<Option<Event>> {
     let mut reader = Reader::new(path.to_path_buf(), false);
     let mut requested = 16;
@@ -898,7 +900,7 @@ fn latest_activity(path: &Path) -> io::Result<Option<Event>> {
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
     if let Some(event) = latest_activity(path)? {
-        summary.detail_sources[0] = event.source.clone();
+        summary.task_details_sources[0] = event.source.clone();
         summary.activity = Some(event.activity());
     }
     let mut boundary = false;
@@ -989,22 +991,23 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         // replies, so only the completion for the selected id can replace it.
         let selected_completion = completed_assistant(&record)
             && message_source.is_some()
-            && message_source == summary.detail_sources[1];
+            && message_source == summary.task_details_sources[1];
         let resolves_source = !message_source_closed
-            && summary.detail_sources[1].is_none()
+            && summary.task_details_sources[1].is_none()
             && message_source.is_some();
         if let Some(text) = message.as_ref()
             && (summary.last_message.is_none() || resolves_source || selected_completion)
         {
-            summary.detail_sources[1] = message_source.clone();
+            summary.task_details_sources[1] = message_source.clone();
             summary.last_message = Some(printable(text));
             summary.last_message_at = Some(at);
             message_pending_completion = message_source.is_some() && !completed_assistant(&record);
         }
-        // Completion notifications repeat the reply but have no log row. Keep
+        // Completion notifications repeat the reply but have no event row. Keep
         // the identity of the latest message record in that turn instead.
-        if summary.detail_sources[1].is_none() && !message_source_closed && message.is_some() {
-            summary.detail_sources[1] = assistant_source(&record, offset);
+        if summary.task_details_sources[1].is_none() && !message_source_closed && message.is_some()
+        {
+            summary.task_details_sources[1] = assistant_source(&record, offset);
         }
         Ok(!(boundary
             && cache_resolved
@@ -1012,7 +1015,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             && summary.last_message.is_some()
             && summary.activity.is_some()
             && !message_pending_completion
-            && (summary.detail_sources[1].is_some() || message_source_closed)))
+            && (summary.task_details_sources[1].is_some() || message_source_closed)))
     })?;
     summary.cache_expires_at = cache_request_at.map(|at| at + chrono::Duration::minutes(30));
     summary.pending_questions = pending.into_iter().rev().flatten().collect();
@@ -1067,7 +1070,7 @@ impl Reader {
                 || payload["name"]
                     .as_str()
                     .and_then(|name| {
-                        crate::log::agent::tool_message(
+                        crate::event::agent::tool_message(
                             name,
                             &tool_arguments(payload).unwrap_or(Value::Null),
                         )
@@ -1120,7 +1123,7 @@ impl Reader {
         }
     }
 
-    pub fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+    pub fn refresh(&mut self, requested: usize) -> io::Result<crate::event::Update> {
         use std::os::unix::fs::MetadataExt;
         let mut file = File::open(&self.path)?;
         let metadata = file.metadata()?;
@@ -1259,7 +1262,7 @@ impl Reader {
             .map(|(_, event)| event.clone())
             .collect();
         self.boundary.capture(&mut file, metadata.len())?;
-        Ok(crate::log::Update {
+        Ok(crate::event::Update {
             events,
             prepended,
             appended: if reset { 0 } else { appended },
@@ -1301,8 +1304,8 @@ fn missing_assistant_context(records: &[(u64, Value)]) -> bool {
     pending.iter().any(|id| !completed.contains(id))
 }
 
-impl crate::log::Reader for Reader {
-    fn refresh(&mut self, requested: usize) -> io::Result<crate::log::Update> {
+impl crate::event::Reader for Reader {
+    fn refresh(&mut self, requested: usize) -> io::Result<crate::event::Update> {
         Reader::refresh(self, requested)
     }
 }
@@ -1324,7 +1327,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
         .collect())
 }
 
-fn memory_notes(item: &Value) -> io::Result<Vec<crate::log::Note>> {
+fn memory_notes(item: &Value) -> io::Result<Vec<crate::event::Note>> {
     let Some(citation) = item.get("memory_citation").filter(|value| !value.is_null()) else {
         return Ok(Vec::new());
     };
@@ -1383,9 +1386,9 @@ fn memory_notes(item: &Value) -> io::Result<Vec<crate::log::Note>> {
             };
             let prefix = if index == 0 { "Memory: " } else { "        " };
             let end = prefix.len() + location.len();
-            Ok(crate::log::Note {
+            Ok(crate::event::Note {
                 text: format!("{prefix}{location} · {}", entry.note),
-                links: vec![crate::log::FileLink {
+                links: vec![crate::event::FileLink {
                     range: prefix.len()..end,
                     path: home.join("memories").join(entry.path),
                     line: entry.line_start,
@@ -1435,7 +1438,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         let mut images = Vec::new();
         let mut calls = Vec::new();
         let detail_body = None;
-        let reference = |offset| crate::log::SourceRecord {
+        let reference = |offset| crate::event::SourceRecord {
             path: path.to_path_buf(),
             offset,
         };
@@ -1505,7 +1508,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                         .and_then(|record| record["payload"]["agent_path"].as_str())
                         .map(str::to_owned);
                 }
-                crate::log::agent::present(&mut call);
+                crate::event::agent::present(&mut call);
                 let body = call
                     .agent_message
                     .as_ref()
@@ -1523,7 +1526,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     if item["type"] == "SubAgentActivity" && item["kind"] == "started" {
                         call.agent_thread_id = item["agent_thread_id"].as_str().map(str::to_owned);
                         call.agent_path = item["agent_path"].as_str().map(str::to_owned);
-                        call.model_settings = Some(crate::log::ModelSettings {
+                        call.model_settings = Some(crate::event::ModelSettings {
                             provider: crate::providers::ProviderId::Codex,
                             model: item["model"].as_str().map(str::to_owned),
                             effort: item["reasoning_effort"].as_str().map(str::to_owned),
@@ -1596,29 +1599,29 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 let message_type = field("Message Type: ")?;
                 let author = required_text(payload, "author")?;
                 let recipient = required_text(payload, "recipient")?;
-                let message = crate::log::agent::Message {
+                let message = crate::event::agent::Message {
                     author: Some(author.to_owned()),
                     recipient: Some(recipient.to_owned()),
                     direction: if author == sender {
-                        crate::log::agent::Direction::Outgoing
+                        crate::event::agent::Direction::Outgoing
                     } else if recipient == sender {
-                        crate::log::agent::Direction::Incoming
+                        crate::event::agent::Direction::Incoming
                     } else {
-                        crate::log::agent::Direction::Between
+                        crate::event::agent::Direction::Between
                     },
                     kind: message_type.to_owned(),
                     content: if encrypted {
-                        crate::log::agent::Content::Encrypted
+                        crate::event::agent::Content::Encrypted
                     } else {
-                        crate::log::agent::Content::Text(text.clone())
+                        crate::event::agent::Content::Text(text.clone())
                     },
                 };
                 let body = text.clone();
                 calls.push(ToolCall {
                     agent_message: Some(message),
-                    detail_left: String::new(),
-                    detail_title: String::new(),
-                    show_details: true,
+                    event_detail_left: String::new(),
+                    event_detail_title: String::new(),
+                    show_event_detail: true,
                     id: required_text(payload, "id")?.to_owned(),
                     title: body.clone(),
                     name: message_type.to_owned(),
@@ -1636,7 +1639,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     is_error: false,
                     duration: None,
                 });
-                crate::log::agent::present(calls.last_mut().unwrap());
+                crate::event::agent::present(calls.last_mut().unwrap());
                 (Kind::Agent, body, None)
             }
 
@@ -1705,7 +1708,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                 detail_body: {
                     let notes = memory_notes(&payload["item"])?;
                     (detail_body.is_some() || !notes.is_empty()).then_some(
-                        crate::log::MessageDetail {
+                        crate::event::MessageDetail {
                             text: detail_body,
                             notes,
                         },
@@ -1736,7 +1739,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
         .map(|(offset, event)| (event.source.clone(), *offset))
         .collect();
     let mut entries: Vec<_> =
-        crate::log::agent::merge(entries.into_iter().map(|(_, event)| event).collect())
+        crate::event::agent::merge(entries.into_iter().map(|(_, event)| event).collect())
             .into_iter()
             .map(|event| (offsets[&event.source], event))
             .collect();
@@ -1753,7 +1756,7 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 #[cfg(test)]
 mod tests {
     #[test]
-    fn real_activity_uses_the_latest_log_event() {
+    fn real_activity_uses_the_latest_event() {
         let fixture = include_str!("../../../tests/fixtures/codex-latest-activity.jsonl");
         for count in [11, 12, 28, 142, 143, 144, 145, 148, 149, 156] {
             let file = tempfile::NamedTempFile::new().unwrap();
@@ -1770,7 +1773,10 @@ mod tests {
             assert_eq!(activity.label, event.summary(), "prefix {count}");
             assert_eq!(activity.kind, event.kind, "prefix {count}");
             assert_eq!(activity.at, event.started_at, "prefix {count}");
-            assert_eq!(result.detail_sources[0], event.source, "prefix {count}");
+            assert_eq!(
+                result.task_details_sources[0], event.source,
+                "prefix {count}"
+            );
         }
     }
 
@@ -1793,7 +1799,7 @@ mod tests {
             (Some("{}"), input["threadId"].as_str().unwrap()),
         ] {
             let call = response_tool_call(&payload, output);
-            assert_eq!(call.detail_title, expected);
+            assert_eq!(call.event_detail_title, expected);
             assert!(call.title.contains(expected));
             let mut records: Vec<Value> =
                 include_str!("../../../tests/fixtures/codex-tool-calls.jsonl")
@@ -1835,8 +1841,8 @@ mod tests {
             ),
         );
         assert_eq!(call.title, "sed, cat");
-        assert_eq!(call.detail_left, "Exec command");
-        assert_eq!(call.detail_title, "sed, cat");
+        assert_eq!(call.event_detail_left, "Exec command");
+        assert_eq!(call.event_detail_title, "sed, cat");
         let mut failed = record["payload"]["item"].clone();
         failed["exit_code"] = 2.into();
         assert_eq!(
@@ -1882,7 +1888,7 @@ mod tests {
                 Some("A command description")
             );
             assert_eq!(call.title, "A command description");
-            assert!(!call.detail_title.is_empty());
+            assert!(!call.event_detail_title.is_empty());
             assert!(matches!(&call.input[0], Section::Shell { text, .. } if text == command));
         }
     }
@@ -2002,7 +2008,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::log::Kind;
+    use crate::event::Kind;
     use std::io::Write;
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-rollout.jsonl")
@@ -2036,8 +2042,10 @@ mod tests {
     #[test]
     fn captured_shell_truncated_reads_keep_known_code_sections() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        file.write_all(include_bytes!("../../../tests/fixtures/codex-shell-truncated.jsonl"))
-            .unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/codex-shell-truncated.jsonl"
+        ))
+        .unwrap();
         let events = tail(file.path(), 20).unwrap();
         let output = events[0].calls[0].output.as_ref().unwrap();
         assert!(output.iter().any(|section| matches!(section,
@@ -2050,8 +2058,10 @@ mod tests {
     #[test]
     fn captured_shell_diff_uses_diff_section() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        file.write_all(include_bytes!("../../../tests/fixtures/codex-shell-diff.jsonl"))
-            .unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/codex-shell-diff.jsonl"
+        ))
+        .unwrap();
         let events = tail(file.path(), 20).unwrap();
         assert!(matches!(&events[0].calls[0].output.as_ref().unwrap()[0],
             Section::Diff { text, .. } if text.starts_with("diff --git ") && text.contains("@@ -35,7 +35,11 @@")));
@@ -2155,7 +2165,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_response_titles_use_command_subject_and_shell_detail() {
+    fn shell_response_titles_use_command_subject_and_shell_event_detail() {
         let record = tool_records()
             .into_iter()
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
@@ -2174,8 +2184,11 @@ mod tests {
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
             assert_eq!(call.title, "cat, sed");
-            assert_eq!(call.detail_title, "cat, sed");
-            assert_eq!(call.detail_left, crate::providers::tool::title_name(name));
+            assert_eq!(call.event_detail_title, "cat, sed");
+            assert_eq!(
+                call.event_detail_left,
+                crate::providers::tool::title_name(name)
+            );
             let (_, _, input) =
                 crate::providers::tool::presentation(name, &tool_arguments(&payload).unwrap());
             assert_eq!(call.input, input);
@@ -2208,7 +2221,7 @@ mod tests {
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, "cat, sed");
-            assert_eq!(events[0].calls[0].detail_left, "Exec command");
+            assert_eq!(events[0].calls[0].event_detail_left, "Exec command");
         }
     }
 
@@ -2220,8 +2233,8 @@ mod tests {
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
-        assert_eq!(event.calls[0].detail_title, "cat, sed");
-        assert_eq!(event.calls[0].detail_left, "Exec command");
+        assert_eq!(event.calls[0].event_detail_title, "cat, sed");
+        assert_eq!(event.calls[0].event_detail_left, "Exec command");
         assert_eq!(event.body, "cat, sed");
         let file = records
             .iter()
@@ -2229,7 +2242,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(file).unwrap().unwrap();
         assert_eq!(
-            event.calls[0].detail_title,
+            event.calls[0].event_detail_title,
             "/workspace/agents/src/processes.rs"
         );
         assert!(event.calls[0].input.is_empty());
@@ -2406,13 +2419,16 @@ mod tests {
     }
 
     #[test]
-    fn detail_sources_identify_real_rollout_events() {
+    fn task_details_sources_identify_real_rollout_events() {
         let path = fixture();
-        let details = summary(&path).unwrap();
+        let task_details = summary(&path).unwrap();
         let (_, prompt) = first_prompt(&path, "Check the dashboard.").unwrap();
         let events = tail(&path, usize::MAX).unwrap();
         for (source, kind) in [
-            (details.detail_sources[1].as_ref(), Kind::Assistant),
+            (
+                task_details.task_details_sources[1].as_ref(),
+                Kind::Assistant,
+            ),
             (prompt.as_ref(), Kind::User),
         ] {
             let source = source.unwrap_or_else(|| panic!("fixture source {kind:?}"));
@@ -2426,7 +2442,7 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner/command.jsonl");
         let tool_summary = summary(&tool_path).unwrap();
         let tool_events = tail(&tool_path, usize::MAX).unwrap();
-        let source = tool_summary.detail_sources[0].as_ref().unwrap();
+        let source = tool_summary.task_details_sources[0].as_ref().unwrap();
         assert!(
             tool_events
                 .iter()
@@ -2485,10 +2501,10 @@ mod tests {
         assert_eq!(spawn[1].output, None);
         let custom = calls.iter().find(|call| call.name == "js_repl").unwrap();
         assert!(
-            matches!(&custom.input[0], crate::log::Section::Text { text, .. } if text.starts_with("// codex-js-repl"))
+            matches!(&custom.input[0], crate::event::Section::Text { text, .. } if text.starts_with("// codex-js-repl"))
         );
         assert!(
-            matches!(&custom.output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text == "[]")
+            matches!(&custom.output.as_ref().unwrap()[0], crate::event::Section::Text { text, .. } if text == "[]")
         );
         assert!(!calls.iter().any(|call| call.name == "exec"));
     }
@@ -2503,10 +2519,10 @@ mod tests {
         let event = completed_tool(command).unwrap().unwrap();
         assert_eq!(event.calls.len(), 1);
         assert!(
-            matches!(&event.calls[0].input[0], crate::log::Section::Shell { text, prefix: 0 } if text == command["payload"]["item"]["command"][2].as_str().unwrap())
+            matches!(&event.calls[0].input[0], crate::event::Section::Shell { text, prefix: 0 } if text == command["payload"]["item"]["command"][2].as_str().unwrap())
         );
         assert!(
-            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text == command["payload"]["item"]["aggregated_output"].as_str().unwrap())
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::event::Section::Text { text, .. } if text == command["payload"]["item"]["aggregated_output"].as_str().unwrap())
         );
         let file = records
             .iter()
@@ -2514,7 +2530,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(file).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::log::Section::Diff { label, text } if label.is_empty() && text.starts_with("@@ -132,2 +132,22 @@"))
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::event::Section::Diff { label, text } if label.is_empty() && text.starts_with("@@ -132,2 +132,22 @@"))
         );
     }
 
@@ -2568,7 +2584,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_arguments_and_completed_mcp_results_keep_details() {
+    fn malformed_arguments_and_completed_mcp_results_keep_event_detail() {
         let records = tool_records();
         let mut call = records
             .iter()
@@ -2723,7 +2739,7 @@ mod tests {
         let events = tail(file.path(), 100).unwrap();
         assert_eq!(events[0].calls.len(), 1);
         assert!(
-            matches!(&events[0].calls[0].output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text.starts_with("Script completed") && !text.contains("skip") && text.ends_with("\nsecond text"))
+            matches!(&events[0].calls[0].output.as_ref().unwrap()[0], crate::event::Section::Text { text, .. } if text.starts_with("Script completed") && !text.contains("skip") && text.ends_with("\nsecond text"))
         );
     }
 
@@ -2760,10 +2776,10 @@ mod tests {
             .find(|record| record["payload"]["name"] == "request_user_input")
             .unwrap();
         let call = response_tool_call(&record["payload"], None);
-        assert_eq!(call.detail_left, "Request user input");
-        assert_eq!(call.detail_title, "Color");
+        assert_eq!(call.event_detail_left, "Request user input");
+        assert_eq!(call.event_detail_title, "Color");
         assert_eq!(call.title, "Request user input Color");
-        assert!(call.show_details);
+        assert!(call.show_event_detail);
         assert_eq!(
             call.input,
             vec![
@@ -2853,7 +2869,7 @@ mod tests {
                 assert_eq!(tool_body(&payload).unwrap(), "(encrypted)");
                 assert_eq!(call.title, expected);
                 assert_eq!(
-                    call.detail_title,
+                    call.event_detail_title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
@@ -2896,7 +2912,7 @@ mod tests {
                 payload["name"] = name.clone().into();
                 let call = response_tool_call(&payload, None);
                 assert_eq!(
-                    call.detail_left,
+                    call.event_detail_left,
                     if tool == "send_message" {
                         "Message".to_owned()
                     } else {
@@ -2904,7 +2920,7 @@ mod tests {
                     }
                 );
                 assert_eq!(
-                    call.detail_title,
+                    call.event_detail_title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
@@ -2921,7 +2937,7 @@ mod tests {
     }
 
     #[test]
-    fn request_user_input_log_and_activity_show_name_and_headers() {
+    fn request_user_input_event_and_activity_show_name_and_headers() {
         for mode in ["default", "plan"] {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(format!("tests/fixtures/codex-input/{mode}-pending.jsonl"));
@@ -3057,7 +3073,7 @@ mod tests {
         );
     }
     #[test]
-    fn real_agent_names_in_log_and_activity() {
+    fn real_agent_names_in_event_and_activity() {
         for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
             .lines()
             .zip([
@@ -3132,7 +3148,7 @@ mod tests {
         assert!(result.turn_ended);
     }
     #[test]
-    fn log_maps_real_records_without_duplicate_messages() {
+    fn event_maps_real_records_without_duplicate_messages() {
         let events = tail(&fixture(), 100).unwrap();
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
@@ -3171,7 +3187,7 @@ mod tests {
         assert!(!result.turn_ended);
     }
     #[test]
-    fn duplicate_message_order_does_not_change_log() {
+    fn duplicate_message_order_does_not_change_event() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         let text = std::fs::read_to_string(fixture()).unwrap();
         let mut lines: Vec<_> = text.lines().collect();
@@ -3238,7 +3254,7 @@ mod timeout_test {
         output["timed_out"] = true.into();
         assert_eq!(
             response_output("wait_agent", &output.to_string()),
-            vec![crate::log::Section::Text {
+            vec![crate::event::Section::Text {
                 label: "output".into(),
                 text: "(timed out)".into()
             }]
@@ -3273,8 +3289,8 @@ mod perspective_tests {
                 .find(|r| r["payload"]["name"] == name)
                 .unwrap();
             let call = response_tool_call(&record["payload"], None);
-            assert_eq!(call.detail_left, expected_left);
-            assert_eq!(call.detail_title, expected_title);
+            assert_eq!(call.event_detail_left, expected_left);
+            assert_eq!(call.event_detail_title, expected_title);
         }
         assert_eq!(
             crate::providers::tool::title_name("FINAL_ANSWER"),
@@ -3380,7 +3396,7 @@ mod perspective_tests {
             events[0]
                 .calls
                 .iter()
-                .all(|call| call.detail_title == "beta → root")
+                .all(|call| call.event_detail_title == "beta → root")
         );
     }
 
@@ -3463,7 +3479,7 @@ mod exchange_tests {
                     .iter()
                     .any(|block| block["type"] == "encrypted_content")
                 {
-                    assert_eq!(message.content, crate::log::agent::Content::Encrypted);
+                    assert_eq!(message.content, crate::event::agent::Content::Encrypted);
                 } else {
                     assert_eq!(message.content.text(), body);
                 }
@@ -3496,7 +3512,7 @@ mod exchange_tests {
         let events = tail(file.path(), 10).unwrap();
         assert_eq!(
             events[0].calls[0].agent_message.as_ref().unwrap().content,
-            crate::log::agent::Content::Text("(encrypted)".to_owned())
+            crate::event::agent::Content::Text("(encrypted)".to_owned())
         );
     }
 }

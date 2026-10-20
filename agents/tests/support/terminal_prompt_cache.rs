@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_prompt_cache_countdown_on_details_border() {
+fn terminal_prompt_cache_countdown_on_task_details_border() {
     let mut borders = Vec::new();
     // Replay a real request with ten minutes of its recorded one-hour TTL left, then expired.
     for (minutes_ago, wall_time) in [(50, "50m"), (70, "1h 10m")] {
@@ -77,7 +77,10 @@ fn prompt_cache_borders(minutes_ago: i64, wall_time: &str) -> Vec<String> {
             assert!(screen.cell(y as u16, x as u16).unwrap().bold(), "{border}");
         } else {
             let (before, wall) = border.split_once(" · ").unwrap();
-            assert!(before.ends_with('s') && wall.starts_with(wall_time), "{border}");
+            assert!(
+                before.ends_with('s') && wall.starts_with(wall_time),
+                "{border}"
+            );
             let x = row[..row.find(" · ").unwrap()].width() - 1;
             assert_eq!(
                 screen.cell(y as u16, x as u16).unwrap().fgcolor(),

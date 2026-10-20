@@ -29,7 +29,7 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         let mut provider =
             CodexProvider::new(directory.path().into(), directory.path().join("manager"));
         let session = provider.refresh(1).sessions.remove(0);
-        let events = provider.log(&session, usize::MAX, false).unwrap();
+        let events = provider.event_panel(&session, usize::MAX, false).unwrap();
         let record: serde_json::Value = serde_json::from_str(source).unwrap();
         let input = record["payload"]["item"]["arguments"]["text"]
             .as_str()
@@ -38,12 +38,12 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         let call = &events[0].calls[0];
         let display_name = crate::providers::tool::display_tool_name(&call.name);
         assert_eq!(events[0].body, format!("{display_name} {input}"));
-        assert_eq!(call.detail_left, "");
-        assert_eq!(call.detail_title, display_name);
+        assert_eq!(call.event_detail_left, "");
+        assert_eq!(call.event_detail_title, display_name);
         let now = events[0].ended_at.unwrap();
-        let (mut view, _) = log_fixture();
-        view.set_log(events);
-        let rendered = log_screen(&view, 160, 65, now);
+        let (mut view, _) = event_fixture();
+        view.set_event(events);
+        let rendered = event_screen(&view, 160, 65, now);
         assert!(!rendered.contains("\"text\":"), "{rendered}");
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("tests/ui_snapshots/claude_client_{tool}.txt"));

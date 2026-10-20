@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn task_double_click_keeps_task_focus_and_enter_opens() {
-    let (mut view, now) = log_fixture();
-    log_screen(&view, 120, 40, now);
+    let (mut view, now) = event_fixture();
+    event_screen(&view, 120, 40, now);
     view.rows[view.selected].process = None;
     let id = view.selected_id().unwrap().clone();
     let (x, y) = view.viewport.borrow().marker.unwrap();
@@ -20,9 +20,9 @@ fn task_double_click_keeps_task_focus_and_enter_opens() {
 
 #[test]
 fn focused_input_pastes_and_consumes_task_shortcuts() {
-    let (mut view, now) = log_fixture();
+    let (mut view, now) = event_fixture();
     view.rows[view.selected].process = None;
-    let rendered = log_screen(&view, 120, 40, now);
+    let rendered = event_screen(&view, 120, 40, now);
     let input = view.center_layout(Rect::new(0, 0, 120, 40)).prompt;
     click_mouse(
         &mut view,
@@ -53,38 +53,38 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
 }
 
 #[test]
-fn right_click_outside_preserves_input_focus_and_log_selection() {
-    let (mut view, now) = log_fixture();
-    view.select_fixture_event(Some(view.log[0].clone()));
-    let expected = view.log_selected;
-    log_screen(&view, 120, 40, now);
+fn right_click_outside_preserves_input_focus_and_event_selection() {
+    let (mut view, now) = event_fixture();
+    view.select_fixture_event(Some(view.event_panel[0].clone()));
+    let expected = view.event_selected;
+    event_screen(&view, 120, 40, now);
     view.active_panel = Panel::Prompt;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
     assert!(view.prompt_focused());
-    assert_eq!(view.log_selected, expected);
+    assert_eq!(view.event_selected, expected);
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
     assert!(view.prompt_focused());
-    assert_eq!(view.log_selected, expected);
+    assert_eq!(view.event_selected, expected);
 }
 
 #[test]
-fn whole_log_row_double_click_keeps_log_focus_and_detail() {
+fn whole_event_row_double_click_keeps_event_focus_and_event_detail() {
     for width in [120, 200] {
-        let (mut view, now) = log_fixture();
+        let (mut view, now) = event_fixture();
         view.rows[view.selected].process = None;
-        log_screen(&view, width, 60, now);
+        event_screen(&view, width, 60, now);
         let (x, y, expected) = {
             let viewport = view.viewport.borrow();
             let row = view
-                .log
+                .event_panel
                 .iter()
-                .position(|event| !log::shows_calls(event))
+                .position(|event| !event_list::shows_calls(event))
                 .unwrap();
-            assert!(row < viewport.log_rows.len());
+            assert!(row < viewport.event_rows.len());
             (
-                viewport.log.x + 11,
-                viewport.log.y + row as u16,
-                view.log[row].clone(),
+                viewport.event_panel.x + 11,
+                viewport.event_panel.y + row as u16,
+                view.event_panel[row].clone(),
             )
         };
         let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
@@ -93,19 +93,19 @@ fn whole_log_row_double_click_keeps_log_focus_and_detail() {
             view.flush_pending_click(Instant::now() + view.double_click_interval),
             None
         );
-        assert_eq!(view.visible_log_event(), Some(&expected));
+        assert_eq!(view.visible_event(), Some(&expected));
         assert_eq!(click_mouse(&mut view, click), None);
         assert_eq!(click_mouse(&mut view, click), None);
         assert!(!view.prompt_focused());
-        assert!(view.active_panel == Panel::LogList);
-        assert_eq!(view.visible_log_event(), Some(&expected));
-        log_screen(&view, width, 60, now);
+        assert!(view.active_panel == Panel::EventList);
+        assert_eq!(view.visible_event(), Some(&expected));
+        event_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();
-        assert!(!viewport.log_rows.is_empty());
-        if expected.kind == crate::log::Kind::Tool && expected.calls.is_empty() {
-            assert!(viewport.log_text.rows.is_empty());
+        assert!(!viewport.event_rows.is_empty());
+        if expected.kind == crate::event::Kind::Tool && expected.calls.is_empty() {
+            assert!(viewport.event_text.rows.is_empty());
         } else {
-            assert!(!viewport.log_text.rows.is_empty());
+            assert!(!viewport.event_text.rows.is_empty());
         }
     }
 }
@@ -266,7 +266,7 @@ fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
 
 #[test]
 fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
-    let (mut view, now) = log_fixture();
+    let (mut view, now) = event_fixture();
     view.rows[view.selected].process = None;
     view.active_panel = Panel::Prompt;
     let paragraph = include_str!("../../tests/fixtures/claude-peer-message.txt");
@@ -281,22 +281,22 @@ fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
     let layout = view.center_layout(area);
     assert_eq!(layout.prompt.height, (40 - 3 - 2) / 2);
     assert!(layout.top.height >= 6, "{:?}", layout.top);
-    assert!(layout.log_detail.height >= 5, "{:?}", layout.log_detail);
-    let rendered = log_screen(&view, 120, 40, now);
+    assert!(layout.event_detail.height >= 5, "{:?}", layout.event_detail);
+    let rendered = event_screen(&view, 120, 40, now);
     assert!(rendered.contains("No reply needed."), "{rendered}");
-    // Wide mode puts the log beside the panels, so the prompt may take two thirds.
+    // Wide mode puts the event list beside the panels, so the prompt may take two thirds.
     let wide = view.center_layout(Rect::new(0, 0, 200, 40));
     assert_eq!(wide.prompt.height, (40 - 3 - 2) * 2 / 3);
     assert!(wide.top.height >= 4, "{:?}", wide.top);
-    assert!(wide.log_detail.height >= 3, "{:?}", wide.log_detail);
+    assert!(wide.event_detail.height >= 3, "{:?}", wide.event_detail);
 }
 
 #[test]
 fn prompt_paste_and_cursor_require_the_active_prompt_panel() {
-    let (mut view, now) = log_fixture();
+    let (mut view, now) = event_fixture();
     view.rows[view.selected].process = None;
     let area = Rect::new(0, 0, 120, 40);
-    log_screen(&view, 120, 40, now);
+    event_screen(&view, 120, 40, now);
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
     view.handle_paste(text);
     assert!(view.input_box.editor.is_empty());

@@ -62,7 +62,7 @@ fn terminal_output_border_double_clicks() {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        // The right side also overlaps the log list's bottom rule in narrow mode.
+        // The right side also overlaps the event list's bottom rule in narrow mode.
         let column = (width * 3 / 4..width - 2)
             .find(|&column| rows[top].chars().nth(column) == Some('─'))
             .expect("plain top rule cell");

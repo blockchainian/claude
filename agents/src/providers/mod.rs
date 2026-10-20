@@ -3,7 +3,7 @@ pub(crate) mod codex;
 pub(crate) mod text;
 pub(crate) mod tool;
 
-use crate::log;
+use crate::event;
 use crate::model::{Action, Session};
 use std::{
     collections::HashMap,
@@ -300,8 +300,12 @@ pub trait Provider {
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
     #[cfg(test)]
-    fn log(&self, session: &Session, count: usize, sidechains: bool)
-    -> io::Result<Vec<log::Event>>;
+    fn event_panel(
+        &self,
+        session: &Session,
+        count: usize,
+        sidechains: bool,
+    ) -> io::Result<Vec<event::Event>>;
     /// Returns a resume, fork or new-session command when available.
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command>;
     fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
@@ -325,13 +329,16 @@ pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
 }
 
 /// Opens a reader whose decoded records and event state survive refreshes.
-pub(crate) fn log_reader(session: &Session) -> io::Result<Box<dyn log::Reader>> {
+pub(crate) fn event_reader(session: &Session) -> io::Result<Box<dyn event::Reader>> {
     let path = session
         .transcript
         .clone()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Session has no transcript"))?;
     Ok(match session.id.provider {
-        ProviderId::Claude => Box::new(claude::log::Reader::new(path, session.parent.is_some())),
+        ProviderId::Claude => Box::new(claude::event_reader::Reader::new(
+            path,
+            session.parent.is_some(),
+        )),
         ProviderId::Codex => Box::new(codex::rollout::Reader::new(path, session.parent.is_some())),
     })
 }

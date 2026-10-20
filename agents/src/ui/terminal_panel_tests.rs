@@ -10,8 +10,8 @@ fn right_click(view: &mut View, column: u16, row: u16) -> Option<Action> {
 }
 
 fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
-    let (mut view, now) = log_fixture();
-    log_screen(&view, 100, 45, now);
+    let (mut view, now) = event_fixture();
+    event_screen(&view, 100, 45, now);
     let (rows, cols) = view.terminal_size().unwrap();
     let screen: Screen =
         std::sync::Arc::new(std::sync::Mutex::new(TerminalScreen::new(rows, cols)));
@@ -21,8 +21,8 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
         .unwrap()
         .check_ready(std::time::Instant::now(), |_| false);
     view.show_terminal(session_key("log"), screen.clone());
-    view.set_active_panel(Panel::Output);
-    log_screen(&view, 100, 45, now);
+    view.set_active_panel(Panel::EventDetail);
+    event_screen(&view, 100, 45, now);
     (view, now, screen)
 }
 
@@ -30,16 +30,16 @@ fn open_terminal(text: &[u8]) -> (View, chrono::DateTime<Utc>, Screen) {
 fn opening_terminal_activates_output_and_closing_preserves_activation() {
     for panel in [
         Panel::TaskList,
-        Panel::Details,
-        Panel::LogList,
+        Panel::TaskDetails,
+        Panel::EventList,
         Panel::Prompt,
-        Panel::Output,
+        Panel::EventDetail,
     ] {
-        let (mut view, _) = log_fixture();
+        let (mut view, _) = event_fixture();
         view.set_active_panel(panel);
         let screen = std::sync::Arc::new(std::sync::Mutex::new(TerminalScreen::new(10, 40)));
         view.show_terminal(session_key("log"), screen.clone());
-        assert_eq!(view.active_panel, Panel::Output);
+        assert_eq!(view.active_panel, Panel::EventDetail);
         assert_eq!(
             view.handle_key(KeyCode::Char('x').into()),
             Some(Action::TerminalInput(b"x".to_vec()))
@@ -53,10 +53,10 @@ fn opening_terminal_activates_output_and_closing_preserves_activation() {
 }
 
 #[test]
-fn right_click_on_the_log_detail_opens_and_closes_the_terminal() {
-    let (mut view, now) = log_fixture();
-    log_screen(&view, 100, 45, now);
-    let detail = view.viewport.borrow().log_detail;
+fn right_click_on_the_event_detail_opens_and_closes_the_terminal() {
+    let (mut view, now) = event_fixture();
+    event_screen(&view, 100, 45, now);
+    let detail = view.viewport.borrow().event_detail;
     assert_eq!(
         right_click(&mut view, detail.x + 2, detail.y + 2),
         Some(Action::OpenTerminal(session_key("log")))
@@ -73,7 +73,7 @@ fn right_click_on_the_log_detail_opens_and_closes_the_terminal() {
 fn the_terminal_draws_the_program_screen_below_the_panel_rule() {
     let (view, now, _screen) = open_terminal(b"hello from codex");
     let terminal = view.viewport.borrow().terminal;
-    let screen = log_screen(&view, 100, 45, now);
+    let screen = event_screen(&view, 100, 45, now);
     let row = screen.lines().nth(usize::from(terminal.y)).unwrap();
     assert!(row.contains("hello from codex"), "{screen}");
     assert_eq!(
@@ -86,7 +86,7 @@ fn the_terminal_draws_the_program_screen_below_the_panel_rule() {
 fn synchronized_output_keeps_the_displayed_screen_and_cursor_until_the_frame_ends() {
     let (view, now, screen) = open_terminal(b"READY\x1b[12;3H\x1b[?25h");
     let area = Rect::new(0, 0, 100, 45);
-    let before = log_screen(&view, 100, 45, now);
+    let before = event_screen(&view, 100, 45, now);
     let cursor = view.cursor_pos(area);
     assert!(cursor.is_some());
 
@@ -95,11 +95,11 @@ fn synchronized_output_keeps_the_displayed_screen_and_cursor_until_the_frame_end
     for byte in &frame[..frame.len() - 1] {
         screen.lock().unwrap().process(&[*byte]);
         assert_eq!(view.cursor_pos(area), cursor);
-        assert_eq!(log_screen(&view, 100, 45, now), before);
+        assert_eq!(event_screen(&view, 100, 45, now), before);
     }
     screen.lock().unwrap().process(&frame[frame.len() - 1..]);
     assert_eq!(view.cursor_pos(area), cursor);
-    assert_ne!(log_screen(&view, 100, 45, now), before);
+    assert_ne!(event_screen(&view, 100, 45, now), before);
     assert!(screen.lock().unwrap().screen().contents().contains('2'));
 }
 
@@ -107,7 +107,7 @@ fn synchronized_output_keeps_the_displayed_screen_and_cursor_until_the_frame_end
 fn a_synchronized_redraw_retains_the_last_published_frame_before_its_clear_prefix() {
     let (view, now, screen) = open_terminal(b"READY\x1b[12;3H\x1b[?25h");
     let area = Rect::new(0, 0, 100, 45);
-    let before = log_screen(&view, 100, 45, now);
+    let before = event_screen(&view, 100, 45, now);
     let cursor = view.cursor_pos(area);
     // Codex's full-history redraw clears immediately before beginning its update.
     screen
@@ -115,7 +115,7 @@ fn a_synchronized_redraw_retains_the_last_published_frame_before_its_clear_prefi
         .unwrap()
         .process(b"\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H\x1b[?2026h\x1b[1;1H\x1b[J");
     assert_eq!(view.cursor_pos(area), cursor);
-    assert_eq!(log_screen(&view, 100, 45, now), before);
+    assert_eq!(event_screen(&view, 100, 45, now), before);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn the_wheel_does_nothing_over_a_program_without_mouse_reports() {
         .collect();
     let (mut view, now, _screen) = open_terminal(&lines);
     let terminal = view.viewport.borrow().terminal;
-    let before = log_screen(&view, 100, 45, now);
+    let before = event_screen(&view, 100, 45, now);
     assert_eq!(
         view.handle_mouse(mouse(
             MouseEventKind::ScrollUp,
@@ -194,7 +194,7 @@ fn the_wheel_does_nothing_over_a_program_without_mouse_reports() {
         )),
         None
     );
-    assert_eq!(log_screen(&view, 100, 45, now), before);
+    assert_eq!(event_screen(&view, 100, 45, now), before);
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             terminal.y + 1,
         );
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.active_panel == Panel::Output);
+        assert!(view.active_panel == Panel::EventDetail);
         assert_eq!(
             view.terminal_paste("text"),
             Some(Action::TerminalPaste("text".into()))
@@ -235,11 +235,11 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), list.x + 1, list.y),
         );
-        log_screen(&view, 100, 45, now);
+        event_screen(&view, 100, 45, now);
         let focus = view.active_panel;
-        assert!(focus != Panel::Output);
+        assert!(focus != Panel::EventDetail);
         assert_eq!(view.handle_mouse(middle), expected);
-        assert!(view.active_panel == Panel::Output);
+        assert!(view.active_panel == Panel::EventDetail);
         assert_eq!(
             view.terminal_paste("text"),
             Some(Action::TerminalPaste("text".into()))
@@ -252,14 +252,14 @@ fn middle_paste_follows_the_program_mouse_mode_and_focuses_terminal() {
             )),
             release
         );
-        assert!(view.active_panel == Panel::Output);
+        assert!(view.active_panel == Panel::EventDetail);
     }
 }
 
 #[test]
 fn loading_terminal_shows_running_dots_without_a_cursor() {
     let (view, now, _screen) = open_terminal(b"");
-    let drawn = log_screen(&view, 100, 45, now);
+    let drawn = event_screen(&view, 100, 45, now);
     assert!(
         drawn.contains(super::super::tool_detail::running_frame(now)),
         "{drawn}"

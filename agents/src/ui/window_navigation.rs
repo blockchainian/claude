@@ -7,7 +7,7 @@ impl View {
         if panel == self.active_panel {
             return;
         }
-        if self.active_panel == Panel::Details {
+        if self.active_panel == Panel::TaskDetails {
             self.save_branch_editor();
             if self.title_editor().is_some()
                 && let Some(action) = self.save_title()
@@ -15,7 +15,7 @@ impl View {
                 self.pending_actions.push(action);
             }
         }
-        if (self.searching || self.log_search.editing || self.log_detail_search.editing)
+        if (self.searching || self.event_search.editing || self.event_detail_search.editing)
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         {
             self.pending_actions.push(action);
@@ -67,14 +67,14 @@ impl View {
     pub(super) fn move_panel(&mut self, direction: char) {
         let v = self.viewport.borrow();
         let bottom = if self.shown_terminal().is_some() {
-            (Panel::Output, v.terminal)
+            (Panel::EventDetail, v.terminal)
         } else {
-            (Panel::Output, v.log_detail)
+            (Panel::EventDetail, v.event_detail)
         };
         let panels = [
             (Panel::TaskList, v.list),
-            (Panel::Details, v.details),
-            (Panel::LogList, v.log),
+            (Panel::TaskDetails, v.task_details),
+            (Panel::EventList, v.event_panel),
             (Panel::Prompt, v.prompt),
             bottom,
         ];

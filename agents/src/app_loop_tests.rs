@@ -14,7 +14,7 @@ fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
 }
 
 #[test]
-fn idle_loop_finishes_click_without_delaying_log_selection() {
+fn idle_loop_finishes_click_without_delaying_event_selection() {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();

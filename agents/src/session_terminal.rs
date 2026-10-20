@@ -1,4 +1,4 @@
-//! A session's own program running on a pty whose screen the log detail panel draws.
+//! A session's own program running on a pty whose screen the event detail panel draws.
 
 use crate::providers::SessionKey;
 use crate::pty::Pty;

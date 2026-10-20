@@ -37,7 +37,7 @@ pub(crate) fn render_filled_tab_bar(
     if show_left {
         Line::from("‹")
             .dim()
-            .render(Rect::new(x, area.y, /*width*/ 1, /*height*/ 1), buf);
+            .render(Rect::new(x, area.y, 1, 1), buf);
         x += 2;
     }
     let right = area.right().saturating_sub(u16::from(show_right) * 2);
@@ -57,21 +57,15 @@ pub(crate) fn render_filled_tab_bar(
         } else {
             line.style(inactive_tab_style())
         };
-        let tab = Rect::new(x, area.y, width, /*height*/ 1);
+        let tab = Rect::new(x, area.y, width, 1);
         line.render(tab, buf);
         regions.push((idx, tab));
-        x = x.saturating_add(width).saturating_add(/*rhs*/ 1);
+        x = x.saturating_add(width).saturating_add(1);
     }
     if show_right {
-        Line::from(PROMPT_MARKER).dim().render(
-            Rect::new(
-                area.right() - 1,
-                area.y,
-                /*width*/ 1,
-                /*height*/ 1,
-            ),
-            buf,
-        );
+        Line::from(PROMPT_MARKER)
+            .dim()
+            .render(Rect::new(area.right() - 1, area.y, 1, 1), buf);
     }
     regions
 }

@@ -131,7 +131,7 @@ fn background_children_keep_start_order_through_provider_refreshes() {
         view.selected = view.rows.iter().position(|s| s.id.id == parent_id).unwrap();
         let area = Rect::new(0, 0, 100, 40);
         let mut buffer = Buffer::empty(area);
-        view.render_details(area, &mut buffer, now);
+        view.render_task_details(area, &mut buffer, now);
         let rows: Vec<String> = buffer
             .content
             .chunks(100)

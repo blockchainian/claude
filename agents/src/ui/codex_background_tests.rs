@@ -43,7 +43,7 @@ fn background_collects_commands_from_all_descendant_statuses_and_depths() {
     assert!(view.has_background());
     let area = Rect::new(0, 0, 60, 30);
     let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, now);
+    view.render_task_details(area, &mut buf, now);
     let rendered = buf
         .content
         .chunks(60)
@@ -64,7 +64,7 @@ fn background_collects_commands_from_all_descendant_statuses_and_depths() {
 }
 
 #[test]
-fn background_without_output_shows_title_time_and_does_not_open_log() {
+fn background_without_output_shows_title_time_and_does_not_open_event() {
     let terminals: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/codex-background/terminals.json"
     ))
@@ -88,7 +88,7 @@ fn background_without_output_shows_title_time_and_does_not_open_log() {
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 60, 20);
     let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, started + Duration::seconds(65));
+    view.render_task_details(area, &mut buf, started + Duration::seconds(65));
     let rendered = buf
         .content
         .chunks(60)
@@ -105,14 +105,14 @@ fn background_without_output_shows_title_time_and_does_not_open_log() {
         .to_owned();
     assert!(rendered.contains(command), "{rendered}");
     assert!(rendered.contains("1m 5s"), "{rendered}");
-    assert!(view.viewport.borrow().details_background.is_empty());
-    let before = view.visible_log_event().cloned();
+    assert!(view.viewport.borrow().task_details_background.is_empty());
+    let before = view.visible_event().cloned();
     assert_eq!(double_click_text(&mut view, &rendered, command), None);
-    assert_eq!(view.visible_log_event().cloned(), before);
+    assert_eq!(view.visible_event().cloned(), before);
     assert!(view.notice.is_none());
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/ui_snapshots/details_codex_background.txt");
-    if std::env::var_os("UPDATE_DETAIL_SNAPSHOT").is_some() {
+        .join("tests/ui_snapshots/task_details_codex_background.txt");
+    if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
         std::fs::write(&path, &rendered).unwrap();
     }
     assert_eq!(rendered, std::fs::read_to_string(path).unwrap());

@@ -70,7 +70,7 @@ fn section_rows(capture: &str, width: usize) -> Vec<&str> {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_log_section_titles_and_scrolling() {
+fn terminal_event_section_titles_and_scrolling() {
     use std::io::Write;
 
     let (_directory, tmux, transcript) = start_probe("section-titles");
@@ -83,7 +83,7 @@ fn terminal_log_section_titles_and_scrolling() {
     assert!(rows[0].contains("Assistant"), "{capture}");
     assert_eq!(
         rows[0][..rows[0].find("Assistant").unwrap()].width(),
-        terminal_detail_width::detail_center(200, "Assistant".width()),
+        terminal_event_detail_width::event_detail_center(200, "Assistant".width()),
         "{capture}"
     );
     assert!(!rows[0].contains('─'), "{capture}");
@@ -163,7 +163,7 @@ fn terminal_log_section_titles_and_scrolling() {
     let output = std::env::temp_dir().join("agents-log-section-scroll.txt");
     std::fs::write(&output, after).unwrap();
     println!(
-        "{{\"log_section_titles\":\"pass\",\"message\":true,\"general_purpose\":true,\"title_scrolls\":true,\"capture\":\"{}\"}}",
+        "{{\"event_section_titles\":\"pass\",\"message\":true,\"general_purpose\":true,\"title_scrolls\":true,\"capture\":\"{}\"}}",
         output.display()
     );
 }
@@ -218,7 +218,7 @@ fn terminal_parallel_tools_have_only_section_titles() {
         assert_eq!(row.matches("codex-manager start").count(), 1, "{capture}");
         assert_eq!(
             row[..row.find(name).unwrap()].width(),
-            terminal_detail_width::detail_center(200, name.width()),
+            terminal_event_detail_width::event_detail_center(200, name.width()),
             "{capture}"
         );
         assert!(rows[index + 1].trim().is_empty(), "{capture}");

@@ -1,48 +1,50 @@
 use super::*;
 
-fn recorded_summaries() -> Vec<crate::log::Event> {
+fn recorded_summaries() -> Vec<crate::event::Event> {
     use crate::providers::Provider;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let prose = crate::providers::claude::log::tail_session(
+    let prose = crate::providers::claude::event_reader::tail_session(
         &root.join("transcript.jsonl"),
         usize::MAX,
         true,
     )
     .unwrap()
     .into_iter()
-    .find(|event| event.kind == crate::log::Kind::Assistant && event.body.contains('`'))
+    .find(|event| event.kind == crate::event::Kind::Assistant && event.body.contains('`'))
     .unwrap();
-    let read =
-        crate::providers::claude::log::tail(&root.join("claude-tool-calls.jsonl"), usize::MAX)
-            .unwrap()
-            .into_iter()
-            .find(|event| event.calls.iter().any(|call| call.name == "Read"))
-            .unwrap();
+    let read = crate::providers::claude::event_reader::tail(
+        &root.join("claude-tool-calls.jsonl"),
+        usize::MAX,
+    )
+    .unwrap()
+    .into_iter()
+    .find(|event| event.calls.iter().any(|call| call.name == "Read"))
+    .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let provider =
         crate::providers::codex::CodexProvider::new(dir.path().into(), dir.path().join("manager"));
     let mut row = session("failed", "Failure", SessionStatus::Working, 0);
     row.transcript = Some(root.join("codex-command-failed.jsonl"));
     let failed = provider
-        .log(&row, usize::MAX, false)
+        .event_panel(&row, usize::MAX, false)
         .unwrap()
         .pop()
         .unwrap();
     assert!(!read.paths.is_empty());
     assert_eq!(failed.calls[0].exit_code, Some(1));
-    let bold = crate::providers::claude::log::tail_session(
+    let bold = crate::providers::claude::event_reader::tail_session(
         &root.join("claude-notification-reply.jsonl"),
         usize::MAX,
         true,
     )
     .unwrap()
     .into_iter()
-    .find(|event| event.kind == crate::log::Kind::Assistant && event.body.contains("**"))
+    .find(|event| event.kind == crate::event::Kind::Assistant && event.body.contains("**"))
     .unwrap();
     vec![prose, bold, read, failed]
 }
 
-fn assert_summary_surface(event: &crate::log::Event, width: u16, child: bool) -> String {
+fn assert_summary_surface(event: &crate::event::Event, width: u16, child: bool) -> String {
     let now = event.started_at;
     let mut row = session("summary", "Summary", SessionStatus::Working, 0);
     row.cwd = PathBuf::from("/workspace");
@@ -65,9 +67,9 @@ fn assert_summary_surface(event: &crate::log::Event, width: u16, child: bool) ->
     }
     let area = Rect::new(0, 0, width, 24);
     let mut actual = Buffer::empty(area);
-    view.render_details(area, &mut actual, now);
+    view.render_task_details(area, &mut actual, now);
     let line = super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
-        super::super::log::body_line(event, usize::from(width), Path::new("/workspace")),
+        super::super::event_list::body_line(event, usize::from(width), Path::new("/workspace")),
         usize::from(width),
     );
     let mut expected = Buffer::empty(Rect::new(0, 0, width, 1));
@@ -116,7 +118,7 @@ fn assert_summary_surface(event: &crate::log::Event, width: u16, child: bool) ->
             assert!(
                 view.viewport
                     .borrow()
-                    .details_links
+                    .task_details_links
                     .iter()
                     .any(|(_, target)| *target == link.target),
                 "missing activity path link: {link:?}"
@@ -153,7 +155,7 @@ fn assert_summary_surface(event: &crate::log::Event, width: u16, child: bool) ->
 }
 
 #[test]
-fn recorded_last_activity_matches_log_summary() {
+fn recorded_last_activity_matches_event_summary() {
     for event in recorded_summaries() {
         for width in [24, 64, 120] {
             assert_summary_surface(&event, width, false);
@@ -162,7 +164,7 @@ fn recorded_last_activity_matches_log_summary() {
 }
 
 #[test]
-fn recorded_subagent_matches_log_summary() {
+fn recorded_subagent_matches_event_summary() {
     for event in recorded_summaries() {
         for width in [24, 64, 120] {
             assert_summary_surface(&event, width, true);
@@ -201,7 +203,7 @@ fn recorded_read_with_spaces_keeps_provider_path_range() {
     record["message"]["content"][0]["input"]["file_path"] = file.to_str().unwrap().into();
     let transcript = dir.path().join("read.jsonl");
     std::fs::write(&transcript, format!("{record}\n")).unwrap();
-    let event = crate::providers::claude::log::tail(&transcript, usize::MAX)
+    let event = crate::providers::claude::event_reader::tail(&transcript, usize::MAX)
         .unwrap()
         .pop()
         .unwrap();

@@ -12,10 +12,10 @@ fn mouse(kind: MouseEventKind, x: u16, y: u16) -> MouseEvent {
 fn fixture() -> View {
     let mut view = View::new(Grouping::Project, false);
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-    let event = crate::providers::claude::log::tail(&path, usize::MAX)
+    let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
         .unwrap()
         .into_iter()
-        .find(|event| event.kind == crate::log::Kind::Assistant && event.body.starts_with("对，"))
+        .find(|event| event.kind == crate::event::Kind::Assistant && event.body.starts_with("对，"))
         .unwrap();
     let row = Session {
         id: SessionKey {
@@ -27,7 +27,7 @@ fn fixture() -> View {
         name: None,
         title: "Selection".into(),
         prompt: event.body,
-        detail_sources: Default::default(),
+        task_details_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: Vec::new(),
         prompt_at: None,
@@ -58,10 +58,10 @@ fn fixture() -> View {
     view
 }
 
-fn details(view: &View) -> Buffer {
+fn task_details(view: &View) -> Buffer {
     let area = Rect::new(2, 1, 30, 80);
     let mut buf = Buffer::empty(Rect::new(0, 0, 40, 90));
-    view.render_details(area, &mut buf, Utc::now());
+    view.render_task_details(area, &mut buf, Utc::now());
     buf
 }
 
@@ -86,7 +86,7 @@ fn position(buf: &Buffer, text: &str) -> (u16, u16) {
 #[test]
 fn drag_soft_wrapped_body_copies_source_without_wrap_newlines() {
     let mut view = fixture();
-    let buf = details(&view);
+    let buf = task_details(&view);
     let start = position(&buf, "对，");
     let end = position(&buf, "不过");
     assert!(end.1 > start.1);
@@ -116,7 +116,7 @@ fn drag_soft_wrapped_body_copies_source_without_wrap_newlines() {
 #[test]
 fn stationary_click_copies_nothing() {
     let mut view = fixture();
-    let buf = details(&view);
+    let buf = task_details(&view);
     let (x, y) = position(&buf, "对，");
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y))
@@ -126,13 +126,13 @@ fn stationary_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, y))
             .is_none()
     );
-    assert_eq!(details(&view), buf);
+    assert_eq!(task_details(&view), buf);
 }
 
 #[test]
 fn release_clears_the_highlight() {
     let mut view = fixture();
-    let buf = details(&view);
+    let buf = task_details(&view);
     let start = position(&buf, "对，");
     let end = position(&buf, "不过");
     view.handle_mouse(mouse(
@@ -142,12 +142,12 @@ fn release_clears_the_highlight() {
     ));
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
     assert!(
-        details(&view)[start]
+        task_details(&view)[start]
             .modifier
             .contains(ratatui::style::Modifier::REVERSED)
     );
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1));
-    assert_eq!(details(&view), buf);
+    assert_eq!(task_details(&view), buf);
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn edge_drag_scrolls_and_copies_beyond_the_first_screen() {
     let area = Rect::new(2, 1, 30, 10);
     let render = |view: &View| {
         let mut buf = Buffer::empty(Rect::new(0, 0, 40, 20));
-        view.render_details(area, &mut buf, Utc::now());
+        view.render_task_details(area, &mut buf, Utc::now());
         buf
     };
     let first = render(&view);
@@ -233,23 +233,23 @@ fn edge_drag_scrolls_and_copies_beyond_the_first_screen() {
 }
 
 #[test]
-fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
+fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
     let mut view = fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-    let event = crate::providers::claude::log::tail(&path, usize::MAX)
+    let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
         .unwrap()
         .into_iter()
         .find(|event| event.body == view.rows[0].prompt)
         .unwrap();
-    let source = super::log::open_text(&event);
+    let source = super::event_list::open_text(&event);
     view.rows[0].transcript = Some(path);
-    view.log_session = Some(view.rows[0].id.clone());
+    view.event_session = Some(view.rows[0].id.clone());
     view.select_fixture_event(Some(event));
     let area = Rect::new(2, 1, 30, 10);
-    view.viewport.borrow_mut().log_detail = area;
+    view.viewport.borrow_mut().event_detail = area;
     let render = |view: &View| {
         let mut buf = Buffer::empty(Rect::new(0, 0, 40, 40));
-        view.render_log_detail(area, &mut buf, Utc::now());
+        view.render_event_detail(area, &mut buf, Utc::now());
         buf
     };
     let first = render(&view);
@@ -268,7 +268,7 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
         assert!(view.tick_text_selection());
         render(&view);
     }
-    assert_eq!(view.viewport.borrow().log_detail_scroll, 10);
+    assert_eq!(view.viewport.borrow().event_detail_scroll, 10);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.x,
@@ -276,7 +276,7 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
     ));
     assert!(view.tick_text_selection());
     render(&view);
-    assert_eq!(view.viewport.borrow().log_detail_scroll, 9);
+    assert_eq!(view.viewport.borrow().event_detail_scroll, 9);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.right(),
@@ -305,13 +305,13 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
 fn drag_between_bodies_joins_original_text_with_one_newline() {
     let mut view = fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-    let event = crate::providers::claude::log::tail(&path, usize::MAX)
+    let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
         .unwrap()
         .into_iter()
-        .find(|event| event.kind == crate::log::Kind::User)
+        .find(|event| event.kind == crate::event::Kind::User)
         .unwrap();
     view.rows[0].last_message = Some(event.body);
-    let buf = details(&view);
+    let buf = task_details(&view);
     let start = position(&buf, "⏺ Ran");
     let end = position(&buf, "对，");
     view.handle_mouse(mouse(
@@ -437,13 +437,13 @@ fn task_list_drag_copies_rendered_indicator_ellipsis_and_time() {
     assert_eq!(dashboard(&view, area), initial);
 }
 
-fn path_log_fixture() -> View {
+fn path_event_fixture() -> View {
     let mut view = fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-    let events = crate::providers::claude::log::tail(&path, usize::MAX).unwrap();
+    let events = crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap();
     let mut event = events
         .into_iter()
-        .find(|event| event.kind == crate::log::Kind::User)
+        .find(|event| event.kind == crate::event::Kind::User)
         .unwrap();
     // Isolate a verbatim path from the real pasted command so abbreviation is visible.
     let source_path = event
@@ -455,47 +455,51 @@ fn path_log_fixture() -> View {
     event.body = source_path.clone();
     event.paths = std::iter::once(0..source_path.len()).collect();
     view.rows[0].transcript = Some(path);
-    view.log_session = Some(view.rows[0].id.clone());
-    view.set_log(vec![event]);
+    view.event_session = Some(view.rows[0].id.clone());
+    view.set_event(vec![event]);
     view
 }
 
 #[test]
-fn log_list_drag_copies_abbreviated_path_as_drawn() {
-    let mut view = path_log_fixture();
+fn event_list_drag_copies_abbreviated_path_as_drawn() {
+    let mut view = path_event_fixture();
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
-    let log = view.viewport.borrow().log;
-    let y = log.y;
-    let expected = drawn_cells(&initial, y, log.x, log.right());
+    let event_panel = view.viewport.borrow().event_panel;
+    let y = event_panel.y;
+    let expected = drawn_cells(&initial, y, event_panel.x, event_panel.right());
     assert!(expected.contains('…'), "{expected}");
-    for range in &view.log[0].paths {
+    for range in &view.event_panel[0].paths {
         if range.len() > 60 {
-            assert!(!expected.contains(&view.log[0].body[range.clone()]));
+            assert!(!expected.contains(&view.event_panel[0].body[range.clone()]));
         }
     }
     assert!(
-        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, y))
-            .is_none()
-    );
-    dashboard(&view, area);
-    assert!(
         view.handle_mouse(mouse(
-            MouseEventKind::Drag(MouseButton::Left),
-            log.right(),
+            MouseEventKind::Down(MouseButton::Left),
+            event_panel.x,
             y
         ))
         .is_none()
     );
     dashboard(&view, area);
     assert!(
-        view.visible_log_event() == view.log.last(),
+        view.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            event_panel.right(),
+            y
+        ))
+        .is_none()
+    );
+    dashboard(&view, area);
+    assert!(
+        view.visible_event() == view.event_panel.last(),
         "dragging list text preserves the selected event"
     );
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
             MouseEventKind::Up(MouseButton::Left),
-            log.right(),
+            event_panel.right(),
             y
         ))),
         expected
@@ -603,32 +607,32 @@ fn task_list_click_and_double_click_keep_actions_without_copying() {
 }
 
 #[test]
-fn log_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
-    let mut view = path_log_fixture();
-    let mut newest = view.log[0].clone();
+fn event_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
+    let mut view = path_event_fixture();
+    let mut newest = view.event_panel[0].clone();
     newest.started_at += chrono::Duration::seconds(1);
     newest.body = "Newest event".into();
     newest.paths.clear();
-    let mut events = view.log.clone();
+    let mut events = view.event_panel.clone();
     events.push(newest);
-    view.set_log(events);
+    view.set_event(events);
     let area = Rect::new(0, 0, 100, 30);
     dashboard(&view, area);
-    let log = view.viewport.borrow().log;
-    let at = (log.x, log.y);
+    let event_panel = view.viewport.borrow().event_panel;
+    let at = (event_panel.x, event_panel.y);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.visible_log_event(), view.log.last());
+    assert_eq!(view.visible_event(), view.event_panel.last());
     dashboard(&view, area);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.visible_log_event(), view.log.first());
+    assert_eq!(view.visible_event(), view.event_panel.first());
     view.flush_pending_click(Instant::now() + view.double_click_interval);
-    assert_eq!(view.visible_log_event(), view.log.first());
+    assert_eq!(view.visible_event(), view.event_panel.first());
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
@@ -641,22 +645,22 @@ fn log_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), at.0, at.1))
             .is_none()
     );
-    assert!(view.log_selected.is_some());
+    assert!(view.event_selected.is_some());
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.visible_log_event(), view.log.last());
+    assert_eq!(view.visible_event(), view.event_panel.last());
 }
 
 #[test]
-fn log_list_edge_drag_caches_rows_beyond_first_screen() {
+fn event_list_edge_drag_caches_rows_beyond_first_screen() {
     let mut view = fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
-    let events = crate::providers::claude::log::tail(&path, usize::MAX).unwrap();
+    let events = crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap();
     view.rows[0].transcript = Some(path);
-    view.log_session = Some(view.rows[0].id.clone());
-    view.log = (0..30)
+    view.event_session = Some(view.rows[0].id.clone());
+    view.event_panel = (0..30)
         .map(|index| {
             let mut event = events[index % events.len()].clone();
             event.started_at += chrono::Duration::seconds(index as i64);
@@ -665,32 +669,41 @@ fn log_list_edge_drag_caches_rows_beyond_first_screen() {
         .collect();
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
-    let log = view.viewport.borrow().log;
-    let height = view.viewport.borrow().log_rows.len();
+    let event_panel = view.viewport.borrow().event_panel;
+    let height = view.viewport.borrow().event_rows.len();
     let mut rows = std::collections::BTreeMap::new();
     let remember =
         |view: &View, buf: &Buffer, rows: &mut std::collections::BTreeMap<usize, String>| {
             let viewport = view.viewport.borrow();
-            for offset in 0..viewport.log_rows.len() {
+            for offset in 0..viewport.event_rows.len() {
                 rows.insert(
-                    viewport.log_scroll + offset,
-                    drawn_cells(buf, log.y + offset as u16, log.x, log.right()),
+                    viewport.event_scroll + offset,
+                    drawn_cells(
+                        buf,
+                        event_panel.y + offset as u16,
+                        event_panel.x,
+                        event_panel.right(),
+                    ),
                 );
             }
         };
     remember(&view, &initial, &mut rows);
-    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, log.y));
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        event_panel.x,
+        event_panel.y,
+    ));
     dashboard(&view, area);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
-        log.right(),
-        log.bottom(),
+        event_panel.right(),
+        event_panel.bottom(),
     ));
     dashboard(&view, area);
     for tick in 1..=5 {
         assert!(view.tick_text_selection(), "tick {tick} scrolls log rows");
         let drawn = dashboard(&view, area);
-        assert_eq!(view.log_scroll(), tick);
+        assert_eq!(view.event_scroll(), tick);
         remember(&view, &drawn, &mut rows);
     }
     let expected = (0..height + 5)
@@ -700,8 +713,8 @@ fn log_list_edge_drag_caches_rows_beyond_first_screen() {
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
             MouseEventKind::Up(MouseButton::Left),
-            log.right(),
-            log.bottom()
+            event_panel.right(),
+            event_panel.bottom()
         ))),
         expected
     );
@@ -839,37 +852,41 @@ fn dragging_across_other_task_rows_preserves_selected_task() {
 }
 
 #[test]
-fn dragging_across_cut_log_rows_preserves_selected_event() {
-    let mut view = path_log_fixture();
-    view.log.push(view.log[0].clone());
-    view.set_log(view.log.clone());
+fn dragging_across_cut_event_rows_preserves_selected_event() {
+    let mut view = path_event_fixture();
+    view.event_panel.push(view.event_panel[0].clone());
+    view.set_event(view.event_panel.clone());
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
-    let log = view.viewport.borrow().log;
-    let y = log.y;
+    let event_panel = view.viewport.borrow().event_panel;
+    let y = event_panel.y;
     let expected = (y..=y + 1)
-        .map(|row| drawn_cells(&initial, row, log.x, log.right()))
+        .map(|row| drawn_cells(&initial, row, event_panel.x, event_panel.right()))
         .collect::<Vec<_>>()
         .join("\n");
-    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, y));
-    assert_eq!(view.visible_log_event(), view.log.last());
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        event_panel.x,
+        y,
+    ));
+    assert_eq!(view.visible_event(), view.event_panel.last());
     dashboard(&view, area);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
-        log.right(),
+        event_panel.right(),
         y + 1,
     ));
-    assert_eq!(view.visible_log_event(), view.log.last());
+    assert_eq!(view.visible_event(), view.event_panel.last());
     dashboard(&view, area);
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
             MouseEventKind::Up(MouseButton::Left),
-            log.right(),
+            event_panel.right(),
             y + 1
         ))),
         expected
     );
-    assert_eq!(view.visible_log_event(), view.log.last());
+    assert_eq!(view.visible_event(), view.event_panel.last());
     assert_eq!(dashboard(&view, area), initial);
 }
 
@@ -920,39 +937,39 @@ fn second_task_press_drag_is_not_a_double_click() {
 }
 
 #[test]
-fn right_drag_does_not_close_open_log() {
-    let mut view = path_log_fixture();
-    view.select_fixture_event(Some(view.log[0].clone()));
-    let event = view.log_selected;
+fn right_drag_does_not_close_open_event() {
+    let mut view = path_event_fixture();
+    view.select_fixture_event(Some(view.event_panel[0].clone()));
+    let event = view.event_selected;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20));
-    assert_eq!(view.log_selected, event);
+    assert_eq!(view.event_selected, event);
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Right), 3, 20));
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 3, 20));
-    assert_eq!(view.log_selected, event);
+    assert_eq!(view.event_selected, event);
 }
 
 #[test]
 fn right_click_selects_newest_only_on_release() {
-    let mut view = path_log_fixture();
-    let mut newest = view.log[0].clone();
+    let mut view = path_event_fixture();
+    let mut newest = view.event_panel[0].clone();
     newest.started_at += chrono::Duration::seconds(1);
     newest.body = "Newest event".into();
     newest.paths.clear();
-    let mut events = view.log.clone();
+    let mut events = view.event_panel.clone();
     events.push(newest);
-    view.set_log(events);
-    view.select_fixture_event(Some(view.log[0].clone()));
-    let event = view.log_selected;
+    view.set_event(events);
+    view.select_fixture_event(Some(view.event_panel[0].clone()));
+    let event = view.event_selected;
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20))
             .is_none()
     );
-    assert_eq!(view.log_selected, event);
+    assert_eq!(view.event_selected, event);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 2, 20))
             .is_none()
     );
-    assert_eq!(view.visible_log_event(), view.log.last());
+    assert_eq!(view.visible_event(), view.event_panel.last());
 }
 
 #[test]
@@ -999,7 +1016,7 @@ fn task_click_uses_press_position_and_completed_click_time() {
 }
 
 fn drag_text(view: &mut View, text: &str) -> Option<Action> {
-    let buf = details(view);
+    let buf = task_details(view);
     let (x, y) = position(&buf, text);
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     view.handle_mouse(mouse(
@@ -1015,7 +1032,7 @@ fn drag_text(view: &mut View, text: &str) -> Option<Action> {
 }
 
 #[test]
-fn details_default_selection_needs_input_and_headers() {
+fn task_details_default_selection_needs_input_and_headers() {
     let mut view = fixture();
     view.rows[0].prompt = "Short prompt".into();
     view.rows[0].status = SessionStatus::NeedsInput;
@@ -1036,7 +1053,7 @@ fn details_default_selection_needs_input_and_headers() {
 }
 
 #[test]
-fn details_default_selection_background_and_subagent() {
+fn task_details_default_selection_background_and_subagent() {
     let mut view = fixture();
     let mut parent = view.rows[0].clone();
     parent.prompt = "Short prompt".into();

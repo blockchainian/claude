@@ -28,12 +28,12 @@ fn terminal_wide_golden_layout() {
             .count();
         let prompt = 2 + top + 1;
         assert!(lines[prompt].contains('❯'), "{capture}");
-        let detail_rule = prompt + 1;
+        let event_detail_rule = prompt + 1;
         assert!(
-            lines[detail_rule].trim().chars().all(|c| c == '─'),
+            lines[event_detail_rule].trim().chars().all(|c| c == '─'),
             "{capture}"
         );
-        let bottom = height - detail_rule - 2;
+        let bottom = height - event_detail_rule - 2;
         let available = height - 6;
         assert_eq!(top, available * 618 / 1000, "{capture}");
         assert_eq!(top + bottom, available, "{capture}");

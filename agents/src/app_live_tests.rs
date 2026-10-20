@@ -64,7 +64,7 @@ pub(crate) fn select(app: &mut App, id: &SessionKey) {
     );
 }
 
-/// Opens the selected session's terminal in the log detail panel and waits until its screen
+/// Opens the selected session's terminal in the event detail panel and waits until its screen
 /// satisfies `ready`.
 pub(crate) fn open_terminal(app: &mut App, id: SessionKey, ready: impl Fn(&str) -> bool) {
     select(app, &id);
@@ -182,7 +182,7 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
     action(
         app,
         Action::CreateTask {
-            draft_id: DraftId {
+            draft_key: DraftKey {
                 millis: 0,
                 counter: 1,
             },

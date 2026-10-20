@@ -20,7 +20,7 @@ use super::{
     SessionInput, SessionKey, Snapshot, TerminalCommand, WeeklyUsageJob,
 };
 #[cfg(test)]
-use crate::log;
+use crate::event;
 use crate::model::{Action, Process, Session, SessionStatus};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, Row};
@@ -198,7 +198,7 @@ impl CodexProvider {
             };
             if let Some(summary) = summary {
                 if let Some(path) = session.transcript.as_deref() {
-                    (session.prompt_images, session.detail_sources[2]) =
+                    (session.prompt_images, session.task_details_sources[2]) =
                         rollout::first_prompt(path, &session.prompt)?;
                 }
                 apply_rollout(session, summary);
@@ -371,7 +371,7 @@ fn model_family(slug: &str, display_name: &str) -> String {
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
     session.prompt_at = summary.prompt_at;
     session.cache_expires_at = summary.cache_expires_at;
-    session.detail_sources[..2].clone_from_slice(&summary.detail_sources[..2]);
+    session.task_details_sources[..2].clone_from_slice(&summary.task_details_sources[..2]);
     session.last_message = summary.last_message;
     session.last_message_at = summary.last_message_at;
     session.last_record_at = summary.updated_at;
@@ -432,7 +432,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         .and_then(|spawn| spawn.get("agent_path"))
         .and_then(|path| path.as_str());
     let title = if let Some(path) = agent_path {
-        crate::log::agent::name(path).to_owned()
+        crate::event::agent::name(path).to_owned()
     } else {
         column::<String>(row, "title")?
             .filter(|s| !s.is_empty())
@@ -459,7 +459,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         } else {
             prompt.chars().take(512).collect()
         },
-        detail_sources: Default::default(),
+        task_details_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: vec![],
         prompt_at: None,
@@ -679,7 +679,12 @@ impl Provider for CodexProvider {
         })
     }
     #[cfg(test)]
-    fn log(&self, session: &Session, count: usize, _: bool) -> io::Result<Vec<log::Event>> {
+    fn event_panel(
+        &self,
+        session: &Session,
+        count: usize,
+        _: bool,
+    ) -> io::Result<Vec<event::Event>> {
         session
             .transcript
             .as_deref()

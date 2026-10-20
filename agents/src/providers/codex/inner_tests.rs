@@ -1,5 +1,5 @@
 use super::rollout::{summary, tail};
-use crate::log::{Event, Kind};
+use crate::event::{Event, Kind};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -124,7 +124,7 @@ fn image_view_retains_image_path_for_rendering() {
     let records = records("image-view");
     assert_eq!(entries[0].body, "ImageView");
     assert!(entries[0].paths.is_empty());
-    let crate::log::Section::Structured { text, .. } = &entries[0].calls[0].input[0] else {
+    let crate::event::Section::Structured { text, .. } = &entries[0].calls[0].input[0] else {
         panic!("image arguments require JSON");
     };
     assert_eq!(
@@ -227,7 +227,7 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 }
 
 #[test]
-fn file_change_without_start_log_anchors_at_completion() {
+fn file_change_without_start_event_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].body, "Apply patch /workspace/project/design.md");
@@ -451,7 +451,7 @@ fn image_fixture(name: &str) -> PathBuf {
 }
 
 #[test]
-fn prompt_image_wrappers_are_not_log_text() {
+fn prompt_image_wrappers_are_not_event_text() {
     for name in ["wrapped", "fallback"] {
         let records: Vec<Value> = std::fs::read_to_string(image_fixture(name))
             .unwrap()
@@ -516,7 +516,7 @@ fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].images,
-            [crate::log::Image {
+            [crate::event::Image {
                 label: "[Image #1]".into(),
                 path: image.clone()
             }]
@@ -619,7 +619,7 @@ fn session_prompt_images_belong_to_first_user_message() {
         let session = sessions.iter().find(|s| s.id.id == "thread-0").unwrap();
         assert_eq!(
             session.prompt_images,
-            [crate::log::Image {
+            [crate::event::Image {
                 label: "[Image #1]".into(),
                 path: image.clone()
             }]
@@ -711,11 +711,11 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     assert_eq!(event.body, "sleep");
     assert_eq!(call.name, "exec_command");
     assert_eq!(call.title, "sleep");
-    assert_eq!(call.detail_title, "sleep");
-    assert_eq!(call.detail_left, "Exec command");
+    assert_eq!(call.event_detail_title, "sleep");
+    assert_eq!(call.event_detail_left, "Exec command");
     assert_eq!(
         call.input,
-        vec![crate::log::Section::Shell {
+        vec![crate::event::Section::Shell {
             text: "sleep 60".into(),
             prefix: 0,
         }]
@@ -733,12 +733,12 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
     let call = &event.calls[0];
     assert_eq!(event.body, "git {status, diff}, sed");
     assert_eq!(call.title, event.body);
-    assert_eq!(call.detail_title, "git {status, diff}, sed");
-    assert_eq!(call.detail_left, "Exec command");
+    assert_eq!(call.event_detail_title, "git {status, diff}, sed");
+    assert_eq!(call.event_detail_left, "Exec command");
     assert!(event.paths.is_empty());
     assert_eq!(call.name, "exec_command");
     assert!(
-        matches!(&call.input[0], crate::log::Section::Shell { text, .. } if text.contains("git status --short && git diff --name-only"))
+        matches!(&call.input[0], crate::event::Section::Shell { text, .. } if text.contains("git status --short && git diff --name-only"))
     );
     assert_record_timing(event, &records("git-chain")[1]);
     assert_eq!(
@@ -758,10 +758,10 @@ fn interaction_functions_win_over_completed_items() {
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].summary(), "Spawn agent demo_sub");
-    assert_eq!(rows[0].calls[0].detail_left, "Spawn agent");
+    assert_eq!(rows[0].calls[0].event_detail_left, "Spawn agent");
     assert_eq!(
         rows[0].calls[0].input,
-        vec![crate::log::Section::Markdown {
+        vec![crate::event::Section::Markdown {
             label: String::new(),
             text: "(encrypted)".into()
         }]
@@ -769,14 +769,14 @@ fn interaction_functions_win_over_completed_items() {
     assert_eq!(rows[1].summary(), "Wait agent");
     assert_eq!(
         rows[1].calls[0].input,
-        vec![crate::log::Section::Prose {
+        vec![crate::event::Section::Prose {
             text: "70000".into(),
             markdown: false
         }]
     );
     assert_eq!(
         rows[1].calls[0].output,
-        Some(vec![crate::log::Section::Text {
+        Some(vec![crate::event::Section::Text {
             label: "output".into(),
             text: "Wait completed.".into()
         }])
@@ -790,7 +790,7 @@ fn interaction_messages_keep_route_and_merge_adjacent_sender() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows[0].summary(), "root → new task");
-    assert_eq!(rows[0].calls[0].detail_left, "New task");
+    assert_eq!(rows[0].calls[0].event_detail_left, "New task");
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/codex-interaction/messages.jsonl");
     let rows = tail(&path, 100).unwrap();
@@ -840,13 +840,13 @@ fn child_function_message_uses_session_sender() {
 }
 
 #[test]
-fn child_real_command_and_extension_have_complete_details() {
+fn child_real_command_and_extension_have_complete_event_detail() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
     let rows = tail(&path, 100).unwrap();
     let command = rows.iter().find(|row| row.body == "sleep").unwrap();
     assert!(
-        matches!(&command.calls[0].input[0], crate::log::Section::Shell { text, .. } if text == "sleep 60")
+        matches!(&command.calls[0].input[0], crate::event::Section::Shell { text, .. } if text == "sleep 60")
     );
     assert_eq!(command.duration.unwrap().num_seconds(), 59);
     assert!(rows.iter().any(|row| row.body == "Extension"));

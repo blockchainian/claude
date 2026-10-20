@@ -114,8 +114,8 @@ pub(super) fn thread_color(slot: usize) -> Color {
 }
 
 /// Label and body styles for transcript events, with the theme accent on tools.
-pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
-    use crate::log::Kind;
+pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
+    use crate::event::Kind;
     let body = match kind {
         Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
         Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
@@ -126,13 +126,13 @@ pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
 }
 
 /// Numeric command status has its own error span; the summary keeps its tool color.
-pub(super) fn log_body_style(kind: &crate::log::Kind, exit_code: Option<i64>) -> Style {
-    let kind = if *kind == crate::log::Kind::Error && exit_code.is_some_and(|code| code != 0) {
-        &crate::log::Kind::Tool
+pub(super) fn event_body_style(kind: &crate::event::Kind, exit_code: Option<i64>) -> Style {
+    let kind = if *kind == crate::event::Kind::Error && exit_code.is_some_and(|code| code != 0) {
+        &crate::event::Kind::Tool
     } else {
         kind
     };
-    log_styles(kind).1
+    event_styles(kind).1
 }
 
 pub(super) fn error_style() -> Style {
@@ -152,16 +152,16 @@ pub(super) fn timeline_style(use_colors: bool) -> Style {
     }
 }
 
-pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
+pub(super) fn event_time_style(kind: &crate::event::Kind, last: bool) -> Style {
     if last {
-        log_styles(kind).1.bold()
+        event_styles(kind).1.bold()
     } else {
         time_style()
     }
 }
 
 /// The arrows that separate a tool call's input from its output.
-pub(super) fn log_jump_style() -> Style {
+pub(super) fn event_jump_style() -> Style {
     Style::default().bold().not_dim()
 }
 
@@ -172,7 +172,7 @@ pub(super) fn exit_code_line(text: String, code: Option<i64>, style: Style) -> L
         if let Some(prefix) = text.strip_suffix(&format!(" · {digits}")) {
             return Line::from(vec![
                 Span::styled(format!("{prefix} · "), style),
-                Span::styled(digits, log_styles(&crate::log::Kind::Error).1.not_dim()),
+                Span::styled(digits, event_styles(&crate::event::Kind::Error).1.not_dim()),
             ]);
         }
     }

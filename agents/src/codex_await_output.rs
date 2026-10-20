@@ -47,13 +47,13 @@ fn is_exit_status(line: &str) -> bool {
 }
 
 /// Formats await event bodies as Markdown, retaining other output as plain text.
-pub fn section(text: String) -> crate::log::Section {
+pub fn section(text: String) -> crate::event::Section {
     match message(&text) {
-        Some(text) => crate::log::Section::Markdown {
+        Some(text) => crate::event::Section::Markdown {
             label: String::new(),
             text,
         },
-        None => crate::log::Section::Text {
+        None => crate::event::Section::Text {
             label: String::new(),
             text,
         },
@@ -81,7 +81,7 @@ mod tests {
         let text = "{\"kind\":\"completed\",\"lastMessage\":\"**done**\\n\"}";
         assert_eq!(
             super::section(text.to_owned()),
-            crate::log::Section::Markdown {
+            crate::event::Section::Markdown {
                 label: String::new(),
                 text: "**done**\n".to_owned(),
             }
@@ -89,7 +89,7 @@ mod tests {
         let ordinary = "{\"text\":\"ordinary JSON\"}";
         assert_eq!(
             super::section(ordinary.to_owned()),
-            crate::log::Section::Text {
+            crate::event::Section::Text {
                 label: String::new(),
                 text: ordinary.to_owned(),
             }

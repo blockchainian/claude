@@ -64,7 +64,7 @@ fn terminal_codex_memory_citation_body() {
     let capture_path = std::env::temp_dir().join("agents-memory-citation-tmux.txt");
     std::fs::write(&capture_path, &capture).unwrap();
     let clean = !capture.contains("oai-mem-citation") && !capture.contains("citation_entries");
-    // One copy belongs to Update, one to the log detail, and one to the log list.
+    // One copy belongs to Update, one to the event detail, and one to the event list.
     let copies = capture.matches("完成，未提交。").count();
     let cited = capture.contains("Memory: MEMORY.md:136 · source conditions validation context");
     let complete = capture.contains("270→270")
