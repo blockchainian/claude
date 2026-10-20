@@ -3,10 +3,10 @@ import test from 'node:test';
 import { checkRewrite } from '../scripts/checks.mjs';
 
 function passes(before, after = before) {
-  assert.equal(checkRewrite(before, after), null);
+  assert.equal(checkRewrite(`${before}\nexport {};`, `${after}\nexport {};`), null);
 }
 function rejects(before, after, reason) {
-  const result = checkRewrite(before, after);
+  const result = checkRewrite(`${before}\nexport {};`, `${after}\nexport {};`);
   assert.equal(typeof result, 'string');
   assert.match(result, reason);
   assert.ok(!result.includes('\n'));

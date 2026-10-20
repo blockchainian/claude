@@ -1,5 +1,6 @@
 import { timed } from './timing.mjs';
 import { isLexicalIdentifier } from './identifiers.mjs';
+import { fragmentFacts } from './fragments.mjs';
 // Rejects rewrites that change module contracts, scope resolution or source text.
 import { execFileSync } from 'node:child_process';
 import { parse } from '@babel/parser';
@@ -92,12 +93,14 @@ function header(source) {
 }
 
 function analyze(source, ast) {
+  let facts;
   const bindings = new Set();
   const variables = new Map();
   const globals = new Set();
   let constReassigned = 0;
   let earlyUse = 0;
   traverse(ast, {
+    Program(path) { facts = fragmentFacts(path); },
     Scope(path) {
       for (const binding of Object.values(path.scope.bindings)) bindings.add(binding);
     },
@@ -181,7 +184,7 @@ function analyze(source, ast) {
     offset = edit.end;
   }
   text += source.slice(offset);
-  return { globals, constReassigned, earlyUse, structure, references, text };
+  return { globals, constReassigned, earlyUse, structure, references, text, ...facts };
 }
 
 /** Returns null on success, otherwise a single-line rejection reason. */
@@ -189,9 +192,14 @@ export function checkRewrite(before, after) {
   let original;
   let result;
   try {
-    execFileSync(process.execPath, ['--input-type=module', '--check'], { input: after, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 });
-    original = timed('parse', () => parse(before, { sourceType: 'module' }));
-    result = timed('parse', () => parse(after, { sourceType: 'module' }));
+    original = timed('parse', () => parse(before, { sourceType: 'unambiguous', allowUndeclaredExports: true }));
+    result = timed('parse', () => parse(after, { sourceType: 'unambiguous', allowUndeclaredExports: true }));
+    let unboundExports;
+    traverse(result, { Program(path) { ({ unboundExports } = fragmentFacts(path)); path.stop(); } });
+    // Node requires local exports to be declared. Supply only the missing
+    // sibling declarations for its syntax check; scope checks use the real AST.
+    const declarations = unboundExports.size ? `\nlet ${[...unboundExports].join(',')};` : '';
+    execFileSync(process.execPath, ['--input-type=module', '--check'], { input: after + declarations, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 });
   } catch {
     return 'PARSE_FAIL';
   }
@@ -208,6 +216,7 @@ export function checkRewrite(before, after) {
   } catch (error) {
     return `SCOPE_ANALYSIS_FAILED ${String(error.message).split(/[\r\n]/)[0]}`;
   }
+  if (a.fragment && JSON.stringify(a.topLevelNames) !== JSON.stringify(b.topLevelNames)) return 'FRAGMENT_TOP_LEVEL_CHANGED';
   const globals = [...b.globals].filter(name => !a.globals.has(name) && !allowedGlobals.has(name));
   if (globals.length) return `NEW_GLOBALS ${globals.join(',')}`;
   if (b.constReassigned > a.constReassigned) return 'CONST_REASSIGNED';

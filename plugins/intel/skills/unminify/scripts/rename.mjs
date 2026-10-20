@@ -1,5 +1,6 @@
 import { timed } from './timing.mjs';
 import { isLexicalIdentifier } from './identifiers.mjs';
+import { fragmentFacts } from './fragments.mjs';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import { dirname, resolve } from 'node:path';
@@ -28,7 +29,7 @@ export function toIdentifier(raw) {
 }
 
 function parseSource(source) {
-  return timed('parse', () => parse(source, { sourceType: 'unambiguous', plugins: ['jsx'] }));
+  return timed('parse', () => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, plugins: ['jsx'] }));
 }
 
 function analyze(source) {
@@ -79,11 +80,11 @@ function analyze(source) {
     const b = intervals.get(inner);
     return a.start <= b.start && b.start < a.end;
   };
-  return { ast, bindings, globals, contains, program, jsxTags };
+  return { ast, bindings, globals, contains, program, jsxTags, ...fragmentFacts(program) };
 }
 
 export function resolveNames(source, proposals) {
-  const { bindings, globals, contains, jsxTags } = analyze(source);
+  const { bindings, globals, contains, jsxTags, fragment } = analyze(source);
   const byName = new Map();
   for (const record of bindings.values()) {
     if (!byName.has(record.name)) byName.set(record.name, new Set());
@@ -93,6 +94,7 @@ export function resolveNames(source, proposals) {
   for (const [key, raw] of proposals) {
     const record = bindings.get(key);
     if (!record) throw new Error(`Unknown binding key: ${key}`);
+    if (fragment && record.binding.scope.path.isProgram()) continue;
     let proposed = toIdentifier(raw);
     if (jsxTags.has(key) && /^[a-z]/.test(proposed)) proposed = proposed[0].toUpperCase() + proposed.slice(1);
     if (proposed === record.name) continue;
@@ -245,7 +247,7 @@ export function followImports(files, withFile = (file, task) => task()) {
       // Retain names and offsets across modules, never Babel nodes or scopes.
       const bindings = new Map(Object.values(analysis.program.scope.bindings)
         .map(binding => [binding.identifier.start, binding.identifier.name]));
-      return { source, bindings, exports, stars, imports };
+      return { source, bindings, exports, stars, imports, fragment: analysis.fragment };
     }));
   }
   function findExport(file, name, seen = new Set()) {
@@ -276,6 +278,10 @@ export function followImports(files, withFile = (file, task) => task()) {
     const branch = new Set(visiting).add(file);
     const module = modules.get(file);
     const proposals = new Map();
+    if (module.fragment) {
+      resolved.set(file, proposals);
+      return proposals;
+    }
     for (const imported of module.imports) {
       const exported = findExport(imported.target, imported.name);
       if (!exported) continue;
