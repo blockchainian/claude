@@ -280,7 +280,7 @@ fn active_panel_question_keys_require_prompt_focus() {
                     }],
                 },
             });
-            view.sync_questions();
+            view.show_questions();
             view.set_active_panel(panel);
             event_screen(&view, width, 45, now);
             assert!(view.active_question().is_some());

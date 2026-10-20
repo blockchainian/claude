@@ -116,7 +116,7 @@ impl View {
         }
     }
 
-    pub(super) fn sync_questions(&mut self) {
+    pub(super) fn show_questions(&mut self) {
         let previous = self
             .selected_id()
             .and_then(|id| self.questions.visible(id).map(|view| view.ask().clone()));

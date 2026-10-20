@@ -1113,7 +1113,7 @@ impl View {
     fn show_selected_panels(&mut self) {
         let selected = self.selected_task_key();
         if self.panels_task == selected {
-            self.sync_questions();
+            self.show_questions();
             return;
         }
         self.park_event_list();
@@ -1190,7 +1190,7 @@ impl View {
         if !task_list_focused {
             self.restore_task_focus(shown.focus.unwrap_or_default());
         }
-        self.sync_questions();
+        self.show_questions();
         if task_list_focused {
             self.active_panel = Panel::TaskList;
         }
