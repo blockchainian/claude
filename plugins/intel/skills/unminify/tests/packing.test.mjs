@@ -61,7 +61,7 @@ async function fixture(t, source) {
     createNamer(options) { return createNamer({ ...options, codexHome,
       baseUrl: `http://127.0.0.1:${server.address().port}`, retryDelayMs: 1 }); } };
   return { root, requests, controls,
-    run: options => run({ dirs: [root], concurrency: 1, ...options }, dependencies),
+    run: options => run({ paths: [root], concurrency: 1, ...options }, dependencies),
     logs: async runId => (await records(join(root, '.unminify', 'requests.jsonl'))).filter(row => row.run_id === runId && row.kind === 'model'),
     journal: () => records(join(root, '.unminify', 'input.mjs.jsonl')) };
 }

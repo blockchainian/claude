@@ -18,12 +18,13 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 ## Run
 
 Install dependencies with `(cd "$SKILL_DIR/scripts" && npm ci)` if needed. Pass the one or
-more target directories supplied by the user; they must be inside one Git repository and run
-together in one process sharing one rate limit. Check its Git status
+more target directories or files supplied by the user; they must be inside one Git repository
+and run together in one process sharing one rate limit. A directory selects its files; a file
+is selected the same way. Check its Git status
 before rewriting so existing work is visible.
 
 ```bash
-node "$SKILL_DIR/scripts/cli.mjs" <dir>... \
+node "$SKILL_DIR/scripts/cli.mjs" <path>... \
   --concurrency 20 --context-tokens 100000 --short-len 3
 ```
 

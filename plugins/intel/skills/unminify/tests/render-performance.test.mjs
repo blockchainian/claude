@@ -101,7 +101,7 @@ test('many real batches fill a local HTTP/2 session and persist valid rewrites',
     await new Promise(resolve => server.close(resolve));
   });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const summary = await run({ dirs: [root], codexHome, concurrency, contextTokens: 115 }, {
+  const summary = await run({ paths: [root], codexHome, concurrency, contextTokens: 115 }, {
     ...select, ...rename, ...checks,
     createNamer: options => createNamer({ ...options, baseUrl, refreshUrl: `${baseUrl}/oauth/token`, timeoutMs: 5000 }),
     output: () => {},
