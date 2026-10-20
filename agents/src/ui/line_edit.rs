@@ -278,21 +278,28 @@ impl LineEdit {
     }
     /// Deletes what Ctrl+E would move over.
     pub(super) fn kill_to_end(&mut self) {
-        let start = self.cursor;
-        self.line_end();
-        self.cursor = self.replace_images(start..self.cursor, "").start;
-        self.remove_empty_line(false);
+        if !self.remove_empty_line(false) {
+            let start = self.cursor;
+            self.line_end();
+            self.cursor = self.replace_images(start..self.cursor, "").start;
+            self.remove_empty_line(false);
+        }
+        self.align_cursor();
     }
     /// Deletes what Ctrl+A would move over.
     pub(super) fn kill_to_start(&mut self) {
-        let end = self.cursor;
-        self.line_start();
-        self.cursor = self.replace_images(self.cursor..end, "").start;
-        self.remove_empty_line(true);
+        if !self.remove_empty_line(true) {
+            let end = self.cursor;
+            self.line_start();
+            self.cursor = self.replace_images(self.cursor..end, "").start;
+            self.remove_empty_line(true);
+        }
+        self.align_cursor();
     }
-    /// Removes the caret's line once a kill leaves it empty, by deleting its line break
-    /// before the caret when `before` is set and there is one, or else the one after.
-    fn remove_empty_line(&mut self, before: bool) {
+    /// Removes the caret's line when it is empty, by deleting its line break before the
+    /// caret when `before` is set and there is one, or else the one after. Returns whether
+    /// a line was removed.
+    fn remove_empty_line(&mut self, before: bool) -> bool {
         let (head, tail) = self.text.split_at(self.cursor);
         let break_len = |crlf: bool, lf: bool| {
             if crlf { Some(2) } else { lf.then_some(1) }
@@ -304,11 +311,12 @@ impl LineEdit {
             let range = match (previous, next) {
                 (Some(len), _) if before || next.is_none() => self.cursor - len..self.cursor,
                 (_, Some(len)) => self.cursor..self.cursor + len,
-                _ => self.cursor..self.cursor,
+                _ => return false,
             };
             self.cursor = self.replace_images(range, "").start;
+            return true;
         }
-        self.align_cursor();
+        false
     }
     pub(super) fn kill_word_back(&mut self) {
         let end = self.cursor;
@@ -600,6 +608,17 @@ mod tests {
         e.set_cursor(4);
         e.kill_to_end();
         assert_eq!((e.text(), e.cursor), ("one", 3));
+    }
+
+    #[test]
+    fn kills_on_an_empty_line_remove_only_that_line() {
+        let mut e = edit("1\n2\n");
+        e.kill_to_start();
+        assert_eq!((e.text(), e.cursor), ("1\n2", 3));
+        let mut e = edit("1\n\n2");
+        e.set_cursor(2);
+        e.kill_to_end();
+        assert_eq!((e.text(), e.cursor), ("1\n2", 2));
     }
 
     #[test]
