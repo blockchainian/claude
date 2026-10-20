@@ -145,22 +145,22 @@ pub(crate) enum Input {
     Shell,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Format {
     Text,
     Markdown,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Output {
+    Field(&'static str, Format),
+    Extract(fn(&Value, &ToolResult<'_>) -> Option<Vec<Section>>),
     Read,
     Write,
     Patch,
     Shell,
     Matches,
     Questions,
-    Markdown,
-    Fetch,
     Empty,
     Hidden,
     Agent,
@@ -298,7 +298,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         name: "SendMessage",
         subject: Some(Subject::Recipient),
         input: Some((Input::Field("message"), Format::Markdown)),
-        output: Some(Output::Markdown),
+        output: Some(Output::Extract(markdown_output)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -322,10 +322,16 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "WebSearch",
+        input: Some((Input::Field("query"), Format::Text)),
+        output: Some(Output::Extract(web_search_output)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "WebFetch",
         subject: Some(Subject::Field("url")),
         input: Some((Input::FetchPrompt, Format::Text)),
-        output: Some(Output::Fetch),
+        output: Some(Output::Field("result", Format::Markdown)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -781,14 +787,18 @@ pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_
         return generic();
     }
     match mode {
-        Some(Output::Markdown | Output::Agent) => vec![Section::Markdown {
-            label: "output".to_owned(),
-            text: result.text.to_owned(),
-        }],
-        Some(Output::Fetch) if value["result"].is_string() => vec![Section::Markdown {
-            label: "output".to_owned(),
-            text: value["result"].as_str().unwrap().to_owned(),
-        }],
+        Some(Output::Extract(extract)) => extract(input, result).unwrap_or_else(generic),
+        Some(Output::Field(field, format)) if value[field].is_string() => {
+            let text = value[field].as_str().unwrap().to_owned();
+            vec![match format {
+                Format::Text => text_section("output", &text),
+                Format::Markdown => Section::Markdown {
+                    label: "output".into(),
+                    text,
+                },
+            }]
+        }
+        Some(Output::Agent) => markdown_output(input, result).unwrap(),
         Some(Output::Read) if value["type"] == "image" => {
             vec![Section::Placeholder(format!(
                 "[image {}]",
@@ -833,6 +843,57 @@ pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_
         }
         _ => generic(),
     }
+}
+
+fn markdown_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
+    Some(vec![Section::Markdown {
+        label: "output".into(),
+        text: result.text.to_owned(),
+    }])
+}
+
+fn web_search_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
+    #[derive(serde::Deserialize)]
+    struct SearchLink {
+        title: String,
+        url: String,
+    }
+
+    let (_, links) = result.text.split_once("\n\nLinks: ")?;
+    let mut stream = serde_json::Deserializer::from_str(links).into_iter::<Vec<SearchLink>>();
+    let links_found = stream.next()?.ok()?;
+    let mut text = String::from("| Title |\n| --- |\n");
+    for link in links_found {
+        let title: String = link
+            .title
+            .chars()
+            .flat_map(|character| {
+                // Search titles are literal text inside a Markdown table cell.
+                if character.is_ascii_punctuation() {
+                    vec!['\\', character]
+                } else if matches!(character, '\n' | '\r') {
+                    vec![' ']
+                } else {
+                    vec![character]
+                }
+            })
+            .collect();
+        let url = link
+            .url
+            .replace('<', "%3C")
+            .replace('>', "%3E")
+            .replace('\n', "%0A")
+            .replace('\r', "%0D")
+            .replace('|', "%7C");
+        text.push_str(&format!("| [{title}](<{url}>) |\n"));
+    }
+    // The decoder stops at the array boundary; preserve all following Markdown.
+    text.pop();
+    text.push_str(&links[stream.byte_offset()..]);
+    Some(vec![Section::Markdown {
+        label: "output".into(),
+        text,
+    }])
 }
 
 pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {

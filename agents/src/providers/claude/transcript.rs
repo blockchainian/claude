@@ -619,8 +619,10 @@ impl Background {
             if record["type"] == "assistant"
                 && block["type"] == "tool_use"
                 && block["name"].as_str().is_some_and(|name| {
-                    crate::providers::tool::rule(name).output
-                        == Some(crate::providers::tool::Output::Shell)
+                    matches!(
+                        crate::providers::tool::rule(name).output,
+                        Some(crate::providers::tool::Output::Shell)
+                    )
                 })
                 && let Some(id) = block["id"].as_str()
                 && let Some((task, output)) = self.pending.remove(id)
