@@ -200,7 +200,7 @@ export async function run(options, dependencies) {
             summary.completed++;
             emit({ file, status: 'renamed', batches: stages.flat().length });
           } finally { endWriting(); }
-        } finally { event({ type: 'file_end', ...metrics, at: Date.now() }); }
+        } finally { event({ type: 'file_end', phase: 'main', ...metrics, at: Date.now() }); }
       });
     }
     try {
@@ -223,12 +223,13 @@ export async function run(options, dependencies) {
         finally {
           endImports();
           for (const metrics of fileMetrics.values()) {
-            if (!changes?.has(metrics.file)) event({ type: 'file_end', ...metrics, at: Date.now() });
+            if (!changes?.has(metrics.file)) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
           }
         }
         for (const [file, after] of changes) {
           if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
           const metrics = fileMetrics.get(file);
+          let writtenAt = null;
           const endWriting = phase('check_write', file);
           try {
             const before = sources.get(file), journal = journals.get(file);
@@ -243,11 +244,11 @@ export async function run(options, dependencies) {
             atomicWrite(join(root, file), after);
             journal.complete(after, 'imports');
             sources.set(file, after);
-            metrics.written_at = Date.now();
+            writtenAt = Date.now();
             emit({ file, status: 'imports' });
           } finally {
             endWriting();
-            event({ type: 'file_end', ...metrics, at: Date.now() });
+            event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: writtenAt, at: Date.now() });
           }
         }
       }
