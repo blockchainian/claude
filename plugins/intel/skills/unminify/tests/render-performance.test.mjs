@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from '../scripts/node_modules/@babel/parser/lib/index.js';
+import { packBatches } from '../scripts/pack.mjs';
 import { withTimings } from '../scripts/timing.mjs';
 import * as select from '../scripts/select.mjs';
 import * as rename from '../scripts/rename.mjs';
@@ -22,7 +23,7 @@ test('planned large-file batches reuse parsing and keep renders independent', ()
     + '\n' + largeSource(1600);
   assert(Buffer.byteLength(source) > 100_000);
   const totals = {};
-  const plan = withTimings(totals, () => select.planFile(source));
+  const plan = withTimings(totals, () => select.planFile(source, { contextTokens: 2000 }));
   assert(totals.parse > 0);
   const batches = plan.stages[1];
   assert.equal(batches.length, 1600);
@@ -43,7 +44,7 @@ test('planned large-file batches reuse parsing and keep renders independent', ()
 
 test('cached contexts preserve public names and do not retain prior render edits', () => {
   const source = 'export const a = 1; function f(v1) { const b = a + v1; return { a, b, v1 }; }';
-  const plan = select.planFile(source, { maxIds: 1 });
+  const plan = select.planFile(source, { contextTokens: 100 });
   const outer = plan.stages[0][0].keys[0];
   for (const batch of plan.stages.flat()) {
     const baseline = select.renderBatch(source, batch);
@@ -100,7 +101,7 @@ test('many real batches fill a local HTTP/2 session and persist valid rewrites',
     await new Promise(resolve => server.close(resolve));
   });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const summary = await run({ dir: root, codexHome, concurrency, contextBytes: 200 }, {
+  const summary = await run({ dir: root, codexHome, concurrency, contextTokens: 115 }, {
     ...select, ...rename, ...checks,
     createNamer: options => createNamer({ ...options, baseUrl, refreshUrl: `${baseUrl}/oauth/token`, timeoutMs: 5000 }),
     output: () => {},
@@ -111,4 +112,20 @@ test('many real batches fill a local HTTP/2 session and persist valid rewrites',
   const after = await readFile(join(root, 'large.js'), 'utf8');
   assert.match(after, /const computedValue = inputValue \+ 79/);
   assert.equal(checks.checkRewrite(source, after), null);
+});
+
+test('planning and packing a synthetic 150KB src file take seconds', () => {
+  const source = largeSource(2400);
+  assert(Buffer.byteLength(source) >= 150_000);
+  for (const contextTokens of [100000, 2000]) {
+    const started = performance.now();
+    const { stages } = select.planFile(source, { contextTokens });
+    const requests = stages.flatMap(stage => packBatches(stage,
+      (batch, options) => select.renderBatch(source, batch, new Map(), options), { contextTokens }));
+    const elapsed = performance.now() - started;
+    assert(elapsed < 5000, `${elapsed}ms for planning and packing`);
+    assert(requests.every(request => request.estimated_input_tokens <= contextTokens));
+    assert.equal(requests.flatMap(request => request.parts.flatMap(part => part.batch.keys)).length, 4800);
+    if (contextTokens === 100000) assert(requests.length <= 2);
+  }
 });

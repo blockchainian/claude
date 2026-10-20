@@ -10,9 +10,14 @@ import * as select from '../scripts/select.mjs';
 import * as rename from '../scripts/rename.mjs';
 import * as checks from '../scripts/checks.mjs';
 import { createNamer } from '../scripts/model.mjs';
+import { getEncoding } from '../scripts/node_modules/js-tiktoken/dist/index.js';
 import { report } from '../scripts/perf.mjs';
+import { openJournal } from '../scripts/journal.mjs';
 
-const planOptions = options => ({ shortLen: 3, maxIds: 60, contextBytes: 8000, ...options });
+const encoder = getEncoding('o200k_base');
+const inputTokens = body => encoder.encode(body.instructions, [], []).length + encoder.encode(body.input[0].content[0].text, [], []).length;
+
+const planOptions = options => ({ shortLen: 3, contextTokens: 1000, ...options });
 const sourceWithFunctions = (count, padding = 17000) => `const a = 7;\n${Array.from({ length: count }, (_, index) =>
   `function calculateValue${index}(x) { const y = x + a; return y * 2; }`).join('\n')}\n/*${' padding'.repeat(Math.ceil(padding / 8))}*/\n`;
 const records = async path => (await readFile(path, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -73,12 +78,12 @@ function assertSchema(request, expectedCount) {
   for (const key of schema.required) assert.deepEqual(schema.properties[key], { type: 'string' });
 }
 
-for (const contextBytes of [8000, 16000]) test(`same-file small function batches share bounded requests (${contextBytes} bytes)`, async t => {
-  const source = sourceWithFunctions(24);
-  const options = planOptions({ maxIds: 8, contextBytes });
+for (const contextTokens of [1000, 1600]) test(`same-file small function batches share bounded requests (${contextTokens} tokens)`, async t => {
+  const source = sourceWithFunctions(60);
+  const options = planOptions({ contextTokens });
   const stages = select.planFile(source, options).stages;
   assert.equal(stages.length, 2);
-  assert.equal(stages[1].length, 24);
+  assert.equal(stages[1].length, 60);
   const target = await fixture(t, source);
   const summary = await target.run(options);
   assert.equal(summary.exitCode, 0);
@@ -91,8 +96,8 @@ for (const contextBytes of [8000, 16000]) test(`same-file small function batches
     assert(row.batch_ids.length > 0);
     assert.equal(row.file, 'input.mjs');
     assert.equal(row.name_count, row.batch_ids.reduce((sum, id) => sum + batches.get(id).keys.length, 0));
-    assert(row.name_count <= options.maxIds);
-    assert(Buffer.byteLength(target.requests[index].context) <= options.contextBytes);
+    assert.equal(row.estimated_input_tokens, inputTokens(target.requests[index].body));
+    assert(row.estimated_input_tokens <= options.contextTokens);
     assertSchema(target.requests[index], row.name_count);
     if (row.batch_ids.length > 1) {
       const first = select.renderBatch(source, batches.get(row.batch_ids[0])).context;
@@ -103,9 +108,26 @@ for (const contextBytes of [8000, 16000]) test(`same-file small function batches
   assert.equal(logs[0].batch_ids.length, 1);
   const topName = Object.values(target.requests[0].names)[0];
   for (const request of target.requests.slice(1)) assert(request.context.includes(topName), 'functions see the accepted top-level name');
-  assert.deepEqual(logs.slice(1).map(row => row.name_count), [8, 8, 8, 8, 8, 8]);
+  assert(logs.slice(1).some(row => row.name_count > 8), 'names do not impose a cap');
+  assert(logs.length > 2, 'token budget splits the stage');
+  assert.equal(summary.estimated_input_tokens, logs.reduce((sum, row) => sum + row.estimated_input_tokens, 0));
+  assert.equal(summary.tokens.input_tokens, logs.length * 12);
+  for (let index = 1; index + 1 < logs.length; index++) {
+    const row = logs[index], next = batches.get(logs[index + 1].batch_ids[0]);
+    const extra = select.renderBatch(source, next, new Map([[stages[0][0].keys[0], topName]]), {
+      placeholderOffset: row.name_count, placeholderCount: row.name_count + next.keys.length,
+    });
+    const text = target.requests[index].body.input[0].content[0].text;
+    const placeholders = [...Object.keys(target.requests[index].names), ...Object.keys(extra.placeholders)].join(', ');
+    const prefix = text.slice(0, text.indexOf('\n\n')).replace(/placeholders: .*?\. Use/, `placeholders: ${placeholders}. Use`);
+    const context = (row.batch_ids.length === 1 ? `// Batch ${row.batch_ids[0]}\n` : '')
+      + target.requests[index].context + `\n\n// Batch ${next.id}\n${extra.context}`;
+    assert(encoder.encode(target.requests[index].body.instructions, [], []).length
+      + encoder.encode(`${prefix}\n\n${context}`, [], []).length > options.contextTokens,
+    'the next batch exceeds the budget including prompt and separators');
+  }
   const counts = logs.map(row => row.name_count).sort((a, b) => a - b);
-  const stats = { median: counts[(counts.length - 1) / 2], mean: counts.reduce((sum, value) => sum + value, 0) / counts.length };
+  const stats = { median: (counts[Math.floor((counts.length - 1) / 2)] + counts[Math.floor(counts.length / 2)]) / 2, mean: counts.reduce((sum, value) => sum + value, 0) / counts.length };
   assert.deepEqual(summary.names_per_request, stats);
   const performance = report({ dir: target.root, runId: summary.run_id });
   assert.equal(performance.requests, logs.length);
@@ -114,36 +136,42 @@ for (const contextBytes of [8000, 16000]) test(`same-file small function batches
   assert.deepEqual((await target.journal()).filter(row => row.id).map(row => row.id), stages.flat().map(batch => batch.id));
 });
 
-test('context byte cap includes separators and oversized batches travel alone', async t => {
-  const longName = `calculate${'Long'.repeat(100)}`;
-  const source = sourceWithFunctions(12, 0) + `function ${longName}(z) { return z + a; }\n`;
-  const options = planOptions({ contextBytes: 360 });
-  const stages = select.planFile(source, options).stages;
-  const batches = new Map(stages.flat().map(batch => [batch.id, batch]));
-  const oversized = new Set([...batches].filter(([, batch]) => Buffer.byteLength(select.renderBatch(source, batch).context) > options.contextBytes).map(([id]) => id));
-  assert(oversized.size > 0, 'fixture contains a context that cannot fit alone');
+test('large optional context is shortened and every request includes prompt overhead', async t => {
+  const source = sourceWithFunctions(12, 0) + `function calculateLarge(z) { const q = "${'optional context '.repeat(1000)}"; return z + a + q; }`;
+  const options = planOptions({ contextTokens: 400 });
   const target = await fixture(t, source);
   const summary = await target.run(options);
   assert.equal(summary.exitCode, 0);
   const logs = await target.logs(summary.run_id);
-  assert(logs.some(row => row.batch_ids?.length > 1), 'small contexts are packed');
+  assert(logs.length > 2);
+  assert(logs.some(row => row.batch_ids.length > 1), 'small contexts still share requests');
+  assert(target.requests.every(request => !request.context.includes('optional context')), 'oversized optional initializer is removed');
   for (const [index, row] of logs.entries()) {
-    if (row.batch_ids.some(id => oversized.has(id))) assert.equal(row.batch_ids.length, 1);
-    else assert(Buffer.byteLength(target.requests[index].context) <= options.contextBytes, 'combined context including delimiters respects byte cap');
+    assert.equal(row.estimated_input_tokens, inputTokens(target.requests[index].body));
+    assert(row.estimated_input_tokens <= options.contextTokens);
     assertSchema(target.requests[index], row.name_count);
-    if (row.batch_ids.length > 1 && index + 1 < logs.length && !oversized.has(logs[index + 1].batch_ids[0])) {
-      const nextId = logs[index + 1].batch_ids[0];
-      const nextContext = select.renderBatch(source, batches.get(nextId), new Map([[stages[0][0].keys[0], Object.values(target.requests[0].names)[0]]])).context;
-      const combinedBytes = Buffer.byteLength(`${target.requests[index].context}\n\n// Batch ${nextId}\n${nextContext}`);
-      assert(combinedBytes > options.contextBytes, 'a context-limited request greedily consumes every fitting next batch');
-    }
   }
+  assert.equal(checks.checkRewrite(source, await readFile(join(target.root, 'input.mjs'), 'utf8')), null);
+});
+
+test('default budget keeps hundreds of small functions in a single request', async t => {
+  const source = sourceWithFunctions(300, 0);
+  const target = await fixture(t, source);
+  const summary = await target.run({});
+  assert.equal(summary.exitCode, 0);
+  assert.equal(target.requests.length, 1);
+  assert(target.requests[0].body.text.format.schema.required.length > 600);
+  const logs = await target.logs(summary.run_id);
+  assert.equal(logs[0].estimated_input_tokens, inputTokens(target.requests[0].body));
+  assert.equal(summary.estimated_input_tokens, logs[0].estimated_input_tokens);
+  assert.equal(report({ dir: target.root }).estimated_input_tokens, summary.estimated_input_tokens);
+  assert.equal(report({ dir: target.root }).input_tokens, summary.tokens.input_tokens);
   assert.equal(checks.checkRewrite(source, await readFile(join(target.root, 'input.mjs'), 'utf8')), null);
 });
 
 test('quota interruption resumes only unrecorded original batch ids', async t => {
   const source = sourceWithFunctions(20);
-  const options = planOptions({ maxIds: 8 });
+  const options = planOptions({ contextTokens: 500 });
   const stages = select.planFile(source, options).stages;
   const target = await fixture(t, source);
   target.controls.failAt = 3;
@@ -155,6 +183,9 @@ test('quota interruption resumes only unrecorded original batch ids', async t =>
   assert(accepted.every(row => !row.reason));
   const acceptedIds = new Set(accepted.map(row => row.id));
   const before = target.requests.length;
+  const changed = await target.run({ ...options, contextTokens: 501 });
+  assert.equal(changed.exitCode, 1);
+  assert.equal(target.requests.length, before, 'option mismatch sends no request');
   target.controls.failAt = null;
   const resumed = await target.run(options);
   assert.equal(resumed.exitCode, 0);
@@ -171,8 +202,8 @@ test('quota interruption resumes only unrecorded original batch ids', async t =>
 
 
 test('placeholders from other packed batches cannot shadow imported context names', async t => {
-  const source = `import { external as v3 } from 'external';\n${sourceWithFunctions(8).replaceAll('x + a', 'x + v3')}`;
-  const options = planOptions({ maxIds: 8 });
+  const source = `import { external as v3 } from 'external';\n${sourceWithFunctions(24).replaceAll('x + a', 'x + v3')}`;
+  const options = planOptions({ contextTokens: 500 });
   const target = await fixture(t, source);
   const summary = await target.run(options);
   assert.equal(summary.exitCode, 0);
@@ -215,4 +246,28 @@ test('single-batch requests preserve their original rendered context', async t =
   assert.equal(summary.exitCode, 0);
   assert.equal(target.requests.length, 1);
   assert.equal(target.requests[0].context, expected);
+});
+
+
+test('an irreducible batch over budget is rejected before HTTP and preserves source', async t => {
+  const source = 'const a = 1; console.log(a);';
+  const target = await fixture(t, source);
+  const summary = await target.run({ contextTokens: 1 });
+  assert.equal(summary.exitCode, 1);
+  assert.equal(target.requests.length, 0);
+  assert.equal(await readFile(join(target.root, 'input.mjs'), 'utf8'), source);
+  assert.equal((await target.journal()).filter(row => row.id).length, 0);
+});
+
+
+test('an unfinished journal with removed batch options is refused', async t => {
+  const source = sourceWithFunctions(4, 0);
+  const target = await fixture(t, source);
+  openJournal(target.root, 'input.mjs', source, { shortLen: 3, maxIds: 60, contextBytes: 8000 });
+  const before = await target.journal();
+  const summary = await target.run({});
+  assert.equal(summary.exitCode, 1);
+  assert.equal(target.requests.length, 0);
+  assert.deepEqual(await target.journal(), before);
+  assert.equal(await readFile(join(target.root, 'input.mjs'), 'utf8'), source);
 });

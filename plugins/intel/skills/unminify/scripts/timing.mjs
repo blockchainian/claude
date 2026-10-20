@@ -36,7 +36,10 @@ export function namingStats(requests) {
   const model = requests.filter(row => row.kind === 'model');
   const counts = model.map(row => row.name_count).filter(Number.isFinite).sort((a, b) => a - b);
   const middle = Math.floor(counts.length / 2);
-  return { requests: model.length, names_per_request: {
+  return { requests: model.length,
+    estimated_input_tokens: model.reduce((sum, row) => sum + (row.estimated_input_tokens ?? 0), 0),
+    input_tokens: model.reduce((sum, row) => sum + (row.usage?.input_tokens ?? 0), 0),
+    names_per_request: {
     median: counts.length ? (counts[Math.floor((counts.length - 1) / 2)] + counts[middle]) / 2 : 0,
     mean: counts.length ? counts.reduce((sum, count) => sum + count, 0) / counts.length : 0,
   } };

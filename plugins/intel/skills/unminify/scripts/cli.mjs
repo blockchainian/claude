@@ -8,13 +8,13 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
-const defaults = { concurrency: 20, maxIds: 60, contextBytes: 8000, shortLen: 3 };
+const defaults = { concurrency: 20, contextTokens: 100000, shortLen: 3 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const help = 'unminify <dir> [--ignore <file>] [--concurrency 20] [--max-ids 60] [--context-bytes 8000] [--short-len 3]';
+const help = 'unminify <dir> [--ignore <file>] [--concurrency 20] [--context-tokens 100000] [--short-len 3]';
 
 export function parseArgs(args) {
   const options = { ...defaults };
-  const flags = { '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--max-ids': 'maxIds', '--context-bytes': 'contextBytes', '--short-len': 'shortLen' };
+  const flags = { '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--context-tokens': 'contextTokens', '--short-len': 'shortLen' };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
@@ -84,7 +84,7 @@ export async function run(options, dependencies) {
       ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined,
       onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
     });
-    const planOptions = { shortLen: settings.shortLen, maxIds: settings.maxIds, contextBytes: settings.contextBytes };
+    const planOptions = { shortLen: settings.shortLen, contextTokens: settings.contextTokens };
     summary.files = files.length;
     selectionEnd(); selectionEnd = null;
     let stop = null, active = 0;

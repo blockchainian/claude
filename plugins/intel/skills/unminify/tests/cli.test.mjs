@@ -68,7 +68,8 @@ export function contracts(files = ['a.js'], controls = {}) {
 }
 test('arguments enforce the fixed model and positive integer limits', () => {
   assert.equal(parseArgs(['src', '--concurrency', '2']).concurrency, 2);
-  for (const args of [[], ['src', '--model', 'other'], ['src', '--max-ids', '0'], ['src', '--short-len', '1.5'], ['src', '--ignore']]) assert.throws(() => parseArgs(args));
+  assert.equal(parseArgs(['src']).contextTokens, 100000);
+  for (const args of [[], ['src', '--model', 'other'], ['src', '--max-ids', '60'], ['src', '--context-bytes', '8000'], ['src', '--context-tokens', '0'], ['src', '--short-len', '1.5'], ['src', '--ignore']]) assert.throws(() => parseArgs(args));
 });
 test('one shared namer, stage ordering, bounded concurrency, completion replay and usage', async t => {
   const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });

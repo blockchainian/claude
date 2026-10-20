@@ -29,7 +29,7 @@ async function localRun(t, multipleBatches = false) {
   if (multipleBatches) {
     await rm(join(root, 'sample.js'));
     await writeFile(join(root, 'a-sample.js'), "import { a as b } from './consumer.js'; const c = 1; console.log(b, c);\n");
-    await writeFile(join(root, 'consumer.js'), 'export const a = 1; const b = 2; const c = 3; const d = 4; console.log(a, b, c, d);\n');
+    await writeFile(join(root, 'consumer.js'), 'export const a = 1; export const b = 2; export const c = 3; export const d = 4; console.log(a, b, c, d);\n');
   }
   const token = `e30.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.local`;
   await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt',
@@ -76,7 +76,7 @@ async function localRun(t, multipleBatches = false) {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const dependencies = { ...select, ...rename, ...checks,
     createNamer: options => createNamer({ ...options, baseUrl, retryDelayMs: 1 }), output: () => {} };
-  const summary = await run({ dir: root, codexHome, concurrency: 1, ...(multipleBatches ? { maxIds: 1 } : {}) }, dependencies);
+  const summary = await run({ dir: root, codexHome, concurrency: 1, ...(multipleBatches ? { contextTokens: 80 } : {}) }, dependencies);
   assert.equal(summary.exitCode, 0);
   return { root, summary, codexHome, dependencies };
 }
@@ -90,6 +90,11 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   const requests = await records(join(root, '.unminify', 'requests.jsonl'));
   const performance = await records(join(root, '.unminify', 'performance.jsonl'));
   assert.deepEqual(requests.map(request => request.status), [429, 200]);
+  assert(requests.every(request => request.estimated_input_tokens > 0));
+  assert.equal(requests[0].estimated_input_tokens, requests[1].estimated_input_tokens);
+  assert.equal(summary.estimated_input_tokens, requests.reduce((sum, row) => sum + row.estimated_input_tokens, 0));
+  assert.equal(report.estimated_input_tokens, summary.estimated_input_tokens);
+  assert.equal(report.input_tokens, summary.tokens.input_tokens);
   assert.equal(report.run_id, summary.run_id);
   assert.equal(report.total_ms, summary.total_ms);
   assert.deepEqual(report.phase_ms, summary.phase_ms);

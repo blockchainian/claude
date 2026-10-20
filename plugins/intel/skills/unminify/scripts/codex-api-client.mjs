@@ -160,6 +160,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
 
   async function logged(kind, operation, context = {}) {
     const metrics = { kind, run_id: runId, file: context.file ?? null, batch_id: context.batch_id ?? null,
+      estimated_input_tokens: context.estimated_input_tokens ?? null,
       batch_ids: context.batch_ids ?? null, name_count: context.name_count ?? null,
       phase: context.phase ?? 'auth', queued_at: context.queued_at ?? Date.now(), sent_at: null,
       headers_at: null, ended_at: null, attempt: context.attempt ?? 1,
@@ -347,7 +348,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     let recovered = false, httpAttempt = 0, previousFailure = null;
     let queuedAt = telemetry.queued_at ?? Date.now();
     const context = () => ({ file: telemetry.file, batch_id: telemetry.batch_id, batch_ids: telemetry.batch_ids,
-      name_count: telemetry.name_count, phase: telemetry.phase,
+      estimated_input_tokens: telemetry.estimated_input_tokens, name_count: telemetry.name_count, phase: telemetry.phase,
       queued_at: queuedAt, attempt: ++httpAttempt, previous_failure: previousFailure });
     for (let attempt = 0; ; attempt++) {
       if (terminal) throw terminal;
