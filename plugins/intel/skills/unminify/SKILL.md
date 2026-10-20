@@ -38,8 +38,9 @@ Planning and packing count the actual instructions, prompt and rendered context 
 `js-tiktoken` 1.0.21 with `o200k_base`. Oversized contexts are shortened; an irreducible
 batch that still cannot fit fails before sending. Placeholders are unique across
 the request; replies and resume records stay keyed by the original batch IDs.
-After all files finish, imports follow export names
-without another model request. Public export names stay unchanged.
+At the end of every run, including interrupted runs, imports in journal-completed files
+follow export names without another model request. Unfinished files supply their current
+export names but remain untouched so their journals can resume. Public export names stay unchanged.
 
 ## Ignore and resume
 
