@@ -85,13 +85,13 @@ export function openJournal(root, file, source, options) {
   if (!done && header.options !== config) throw new Error(`options changed: ${file}`);
   return {
     path, batches, get done() { return done; },
-    batch(id, names, reason) {
+    batch(id, names) {
       const values = Object.fromEntries(names);
       if (batches.has(id)) {
         if (JSON.stringify(batches.get(id)) !== JSON.stringify(values)) throw new Error(`conflicting batch: ${id}`);
         return;
       }
-      append({ id, names: values, ...(reason ? { reason } : {}) });
+      append({ id, names: values });
       batches.set(id, values);
     },
     prepare(before, after, status) { append({ type: 'prepare', before: hash(before), after: hash(after), status }); },
