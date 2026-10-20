@@ -298,11 +298,20 @@ fn task_return_routes_restore_parked_title_and_caret() {
             let area = Rect::new(0, 0, 200, 50);
             view.render(area, &mut Buffer::empty(area));
             match route {
-                "tab" => {
-                    assert_eq!(key(&mut view, KeyCode::Tab), None);
-                }
-                "backtab" => {
-                    assert_eq!(key(&mut view, KeyCode::BackTab), None);
+                "tab" | "backtab" => {
+                    let filter = view.status_filter;
+                    let code = if route == "tab" {
+                        KeyCode::Tab
+                    } else {
+                        KeyCode::BackTab
+                    };
+                    assert_eq!(key(&mut view, code), None);
+                    assert_eq!(view.status_filter, 1 - filter, "{route}");
+                    assert_eq!(view.active_panel, Panel::TaskList, "{route}");
+                    assert_eq!(key(&mut view, code), None);
+                    assert_eq!(view.status_filter, filter, "{route}");
+                    assert_eq!(view.active_panel, Panel::TaskList, "{route}");
+                    assert_eq!(key(&mut view, KeyCode::Enter), None);
                 }
                 "enter" => {
                     assert_eq!(key(&mut view, KeyCode::Enter), None);

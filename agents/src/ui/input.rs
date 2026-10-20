@@ -1727,9 +1727,6 @@ impl View {
             return None;
         }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
-            if self.enter_task() {
-                return None;
-            }
             self.set_filter(1 - self.status_filter);
             return None;
         }

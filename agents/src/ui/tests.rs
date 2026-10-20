@@ -1311,6 +1311,38 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
 }
 
 #[test]
+fn tab_switches_filter_without_entering_a_revisited_task() {
+    assert_tab_switches_filter_without_entering_a_revisited_task(KeyCode::Tab);
+}
+
+#[test]
+fn backtab_switches_filter_without_entering_a_revisited_task() {
+    assert_tab_switches_filter_without_entering_a_revisited_task(KeyCode::BackTab);
+}
+
+fn assert_tab_switches_filter_without_entering_a_revisited_task(code: KeyCode) {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Home);
+    let selected = view.selected_id().cloned();
+    view.set_active_panel(Panel::Prompt);
+    view.set_active_panel(Panel::TaskList);
+    key(&mut view, KeyCode::Char('j'));
+    assert_ne!(view.selected_id(), selected.as_ref());
+    key(&mut view, KeyCode::Char('k'));
+    assert_eq!(view.selected_id(), selected.as_ref());
+    assert!(view.task_entry_pending);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    screen(&view, 120, 40);
+    let filter = view.status_filter;
+
+    assert_eq!(key(&mut view, code), None);
+
+    assert_eq!(view.status_filter, 1 - filter);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(screen(&view, 120, 40).contains("Inactive 1"));
+}
+
+#[test]
 fn refresh_keeps_active_when_selected_task_becomes_inactive() {
     for provider in [ProviderId::Claude, ProviderId::Codex] {
         for status in [
