@@ -18,6 +18,8 @@ pub use models::write_fixture_cache;
 mod ask_user_question;
 pub(crate) mod event_reader;
 mod images;
+#[cfg(test)]
+mod lazy_sessions_tests;
 mod peer;
 pub(super) mod registry;
 mod settings;
@@ -481,19 +483,66 @@ impl ClaudeProvider {
                 .cmp(&a.updated_at)
                 .then_with(|| a.id.cmp(&b.id))
         });
+        // Child transcripts share the history page; only descendants of live
+        // sessions are selected independently of that page.
+        let child_files: Vec<_> = self
+            .index
+            .values()
+            .flat_map(|file| {
+                let parent = SessionKey {
+                    provider: ProviderId::Claude,
+                    id: file.id.clone(),
+                };
+                subagent_files(&file.path)
+                    .into_iter()
+                    .map(move |file| (file, parent.clone()))
+            })
+            .collect();
+        let mut paths: HashSet<PathBuf> =
+            self.index.values().map(|file| file.path.clone()).collect();
+        paths.extend(child_files.iter().map(|(file, _)| file.path.clone()));
+        let mut children = Vec::new();
+        for (file, parent) in child_files
+            .iter()
+            .filter(|(_, parent)| live_ids.contains(&parent.id))
+        {
+            if let Some(child) = self.subagent(file, parent.clone(), true) {
+                children.push(child);
+            }
+        }
         let mut inactive: Vec<_> = self
             .index
             .values()
             .filter(|file| !live_ids.contains(&file.id))
-            .map(|file| (file.id.clone(), file.modified))
+            .cloned()
+            .map(|file| (file, None))
+            .chain(
+                child_files
+                    .into_iter()
+                    .map(|(file, parent)| (file, Some(parent))),
+            )
             .collect();
-        inactive.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        inactive.sort_by(|a, b| {
+            b.0.modified
+                .cmp(&a.0.modified)
+                .then_with(|| a.0.id.cmp(&b.0.id))
+        });
         let shown = pages.saturating_mul(PAGE_SIZE);
         let has_more = inactive.len() > shown;
-        for (id, _) in inactive.into_iter().take(shown) {
-            let (summary, path, modified) = self.summary(&id);
-            self.background.observe(&id, &summary);
-            sessions.push(session(id, summary, path, modified));
+        for (file, parent) in inactive.into_iter().take(shown) {
+            if let Some(parent) = parent {
+                // An already selected live descendant still consumes its history slot.
+                if live_ids.contains(&parent.id) {
+                    continue;
+                }
+                if let Some(child) = self.subagent(&file, parent, false) {
+                    children.push(child);
+                }
+            } else {
+                let (summary, path, modified) = self.summary(&file.id);
+                self.background.observe(&file.id, &summary);
+                sessions.push(session(file.id, summary, path, modified));
+            }
         }
         for session in &mut sessions {
             if session.process.is_none() {
@@ -514,12 +563,6 @@ impl ClaudeProvider {
                 .refresh(&self.config_dir, &mut sessions, &background::Processes)
         {
             eprintln!("agents: Claude background tasks: {error}");
-        }
-        let mut paths: HashSet<PathBuf> =
-            self.index.values().map(|file| file.path.clone()).collect();
-        let mut children = Vec::new();
-        for parent in &sessions {
-            children.extend(self.subagents(parent, &mut paths));
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
@@ -656,68 +699,65 @@ impl ClaudeProvider {
             .map(|cached| cached.summary.clone())
     }
 
-    fn subagents(&mut self, parent: &Session, paths: &mut HashSet<PathBuf>) -> Vec<Session> {
-        let Some(transcript) = &parent.transcript else {
-            return Vec::new();
-        };
-        let mut children = Vec::new();
-        for entry in fs::read_dir(transcript.with_extension("").join("subagents"))
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if path
-                .extension()
-                .is_none_or(|extension| extension != "jsonl")
-            {
-                continue;
-            }
-            let Some(id) = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .filter(|id| id.strip_prefix("agent-").is_some_and(|id| !id.is_empty()))
-            else {
-                continue;
-            };
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            if !metadata.is_file() {
-                continue;
-            }
-            let Ok(modified) = metadata.modified() else {
-                continue;
-            };
-            paths.insert(path.clone());
-            let file = Transcript {
-                id: id.to_owned(),
-                path: path.clone(),
-                modified,
-                len: metadata.len(),
-            };
-            let Some(summary) = self.summary_file(&file, true) else {
-                continue;
-            };
-            let Some(meta) = subagents::Metadata::read(&path.with_extension("meta.json")) else {
-                continue;
-            };
-            let status = meta.status(
-                &summary,
-                &self.config_dir,
-                parent.process.is_some() || parent.status != SessionStatus::Inactive,
-            );
-            let mut child = session(file.id, summary, Some(path), modified.into());
-            child.parent = Some(parent.id.clone());
-            child.title = meta.title();
-            child.prompt = child.title.clone();
-            child.name = meta.name();
-            child.status = status;
-            children.push(child);
-        }
-        children.sort_by(|a, b| a.id.cmp(&b.id));
-        children
+    fn subagent(&mut self, file: &Transcript, parent: SessionKey, alive: bool) -> Option<Session> {
+        let summary = self.summary_file(file, true)?;
+        let meta = subagents::Metadata::read(&file.path.with_extension("meta.json"))?;
+        let status = meta.status(&summary, &self.config_dir, alive);
+        let mut child = session(
+            file.id.clone(),
+            summary,
+            Some(file.path.clone()),
+            file.modified.into(),
+        );
+        child.parent = Some(parent);
+        child.title = meta.title();
+        child.prompt = child.title.clone();
+        child.name = meta.name();
+        child.status = status;
+        Some(child)
     }
+}
+
+fn subagent_files(transcript: &Path) -> Vec<Transcript> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(transcript.with_extension("").join("subagents"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_none_or(|extension| extension != "jsonl")
+        {
+            continue;
+        }
+        let Some(id) = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|id| id.strip_prefix("agent-").is_some_and(|id| !id.is_empty()))
+        else {
+            continue;
+        };
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let file = Transcript {
+            id: id.to_owned(),
+            path: path.clone(),
+            modified,
+            len: metadata.len(),
+        };
+        files.push(file);
+    }
+    files.sort_by(|a, b| a.id.cmp(&b.id));
+    files
 }
 
 impl Provider for ClaudeProvider {

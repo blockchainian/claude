@@ -1,0 +1,5 @@
+*-agents
+*.ansi
+*.json
+*.log
+*.txt

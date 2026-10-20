@@ -90,61 +90,73 @@ fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
     }
 }
 
-pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
-    let entries = match fs::read_dir(home.join("threads")) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(error) => return Err(error),
+fn state_links(home: &Path, parent: &SessionKey) -> io::Result<HashMap<String, Link>> {
+    let dir = home.join(&parent.id);
+    let Some(state) = read::<State>(&dir.join("state.json"))? else {
+        return Ok(HashMap::new());
     };
+    let files = fs::read_dir(&dir)?
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<io::Result<Vec<_>>>()?;
+    Ok(state
+        .threads
+        .into_iter()
+        .map(|thread| {
+            let prefix = format!("{}.ask.", thread.id);
+            let needs_input = !thread.detached
+                && (!thread.waiting.is_empty()
+                    || files
+                        .iter()
+                        .any(|name| name.starts_with(&prefix) && name.ends_with(".json")));
+            (
+                thread.id,
+                Link {
+                    parent: parent.clone(),
+                    name: thread.name.filter(|name| !name.trim().is_empty()),
+                    needs_input,
+                    detached: thread.detached,
+                },
+            )
+        })
+        .collect())
+}
+
+pub(super) fn parent_links(home: &Path, parent: &SessionKey) -> io::Result<HashMap<String, Link>> {
+    if parent.provider != ProviderId::Claude {
+        return Ok(HashMap::new());
+    }
+    let mut links = HashMap::new();
+    for (id, link) in state_links(home, parent)? {
+        let supervisor = read::<Supervisor>(&home.join("threads").join(format!("{id}.json")))?;
+        if supervisor.is_some_and(|supervisor| supervisor.session_id == parent.id) {
+            links.insert(id, link);
+        }
+    }
+    Ok(links)
+}
+
+pub(super) fn thread_links(
+    home: &Path,
+    ids: impl IntoIterator<Item = String>,
+) -> io::Result<HashMap<String, Link>> {
     let mut states = HashMap::new();
     let mut links = HashMap::new();
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().is_none_or(|ext| ext != "json") {
-            continue;
-        }
-        let Some(supervisor) = read::<Supervisor>(&path)? else {
+    for id in ids {
+        let Some(supervisor) =
+            read::<Supervisor>(&home.join("threads").join(format!("{id}.json")))?
+        else {
             continue;
         };
         let session_id = supervisor.session_id;
         if !states.contains_key(&session_id) {
-            let dir = home.join(&session_id);
-            let state = read::<State>(&dir.join("state.json"))?;
-            let mut threads = HashMap::new();
-            if let Some(state) = state {
-                let files = fs::read_dir(&dir)?
-                    .map(|entry| {
-                        entry.map(|entry| entry.file_name().to_string_lossy().into_owned())
-                    })
-                    .collect::<io::Result<Vec<_>>>()?;
-                for thread in state.threads {
-                    let prefix = format!("{}.ask.", thread.id);
-                    let needs_input = !thread.detached
-                        && (!thread.waiting.is_empty()
-                            || files
-                                .iter()
-                                .any(|name| name.starts_with(&prefix) && name.ends_with(".json")));
-                    threads.insert(thread.id, (thread.name, needs_input, thread.detached));
-                }
-            }
-            states.insert(session_id.clone(), threads);
+            let parent = SessionKey {
+                provider: ProviderId::Claude,
+                id: session_id.clone(),
+            };
+            states.insert(session_id.clone(), state_links(home, &parent)?);
         }
-        let Some(id) = path.file_stem().and_then(|id| id.to_str()) else {
-            continue;
-        };
-        if let Some((name, needs_input, detached)) = states[&session_id].get(id) {
-            links.insert(
-                id.to_owned(),
-                Link {
-                    parent: SessionKey {
-                        provider: ProviderId::Claude,
-                        id: session_id.clone(),
-                    },
-                    name: name.clone().filter(|name| !name.trim().is_empty()),
-                    needs_input: *needs_input,
-                    detached: *detached,
-                },
-            );
+        if let Some(link) = states.get_mut(&session_id).unwrap().remove(&id) {
+            links.insert(id, link);
         }
     }
     Ok(links)
@@ -153,6 +165,96 @@ pub(super) fn links(home: &Path) -> io::Result<HashMap<String, Link>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn attached_parent(home: &Path) -> SessionKey {
+        fs::create_dir_all(home.join("claude-parent")).unwrap();
+        fs::create_dir_all(home.join("threads")).unwrap();
+        fs::write(
+            home.join("claude-parent/state.json"),
+            include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json"),
+        )
+        .unwrap();
+        fs::write(
+            home.join("threads/thread-12.json"),
+            br#"{"sessionId":"claude-parent","pid":70792}"#,
+        )
+        .unwrap();
+        SessionKey {
+            provider: ProviderId::Claude,
+            id: "claude-parent".into(),
+        }
+    }
+
+    #[test]
+    fn parent_lookup_only_reads_its_own_state_and_registered_children() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let parent = attached_parent(home);
+        fs::create_dir(home.join("unrelated-parent")).unwrap();
+        fs::write(
+            home.join("unrelated-parent/state.json"),
+            b"invalid unrelated state",
+        )
+        .unwrap();
+        fs::write(
+            home.join("threads/unrelated.json"),
+            b"invalid unrelated registry",
+        )
+        .unwrap();
+        let links = parent_links(home, &parent).unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links["thread-12"].name.as_deref(), Some("Managed worker"));
+        assert_eq!(links["thread-12"].parent, parent);
+        fs::write(home.join("claude-parent/thread-12.ask.pending.json"), b"{}").unwrap();
+        assert!(parent_links(home, &parent).unwrap()["thread-12"].needs_input);
+        fs::write(
+            home.join("threads/thread-12.json"),
+            br#"{"sessionId":"other-parent","pid":70792}"#,
+        )
+        .unwrap();
+        assert!(parent_links(home, &parent).unwrap().is_empty());
+        fs::remove_file(home.join("threads/thread-12.json")).unwrap();
+        assert!(parent_links(home, &parent).unwrap().is_empty());
+        assert!(
+            parent_links(
+                home,
+                &SessionKey {
+                    provider: ProviderId::Codex,
+                    id: parent.id
+                }
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn thread_lookup_only_reads_requested_registries_and_their_states() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let parent = attached_parent(home);
+        fs::create_dir(home.join("unrelated-parent")).unwrap();
+        fs::write(
+            home.join("unrelated-parent/state.json"),
+            b"invalid unrelated state",
+        )
+        .unwrap();
+        fs::write(
+            home.join("threads/unrelated.json"),
+            b"invalid unrelated registry",
+        )
+        .unwrap();
+        let links = thread_links(home, ["thread-12".into(), "missing".into()]).unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links["thread-12"].parent, parent);
+        assert_eq!(links["thread-12"].name.as_deref(), Some("Managed worker"));
+        fs::write(
+            home.join("threads/thread-12.json"),
+            br#"{"sessionId":"other-parent","pid":70792}"#,
+        )
+        .unwrap();
+        assert!(thread_links(home, ["thread-12".into()]).unwrap().is_empty());
+    }
 
     #[test]
     fn detach_uses_the_installed_user_plugin_and_provider_directories() {
@@ -250,16 +352,17 @@ mod tests {
             )
             .unwrap();
         }
-        let current = links(&home).unwrap();
+        let current = thread_links(&home, ["thread-12".into(), "thread-13".into()]).unwrap();
         entry["sessionId"] = "claude-after-another-clear".into();
         fs::write(&registry, entry.to_string()).unwrap();
-        let after_clear = links(&home).unwrap();
+        let after_clear = thread_links(&home, ["thread-12".into(), "thread-13".into()]).unwrap();
         fs::remove_file(&registry).unwrap();
-        let missing_registry = links(&home).unwrap();
+        let missing_registry =
+            thread_links(&home, ["thread-12".into(), "thread-13".into()]).unwrap();
         fs::write(&registry, entry.to_string()).unwrap();
         child.kill().unwrap();
         child.wait().unwrap();
-        let exited = links(&home).unwrap();
+        let exited = thread_links(&home, ["thread-12".into(), "thread-13".into()]).unwrap();
         for id in ["thread-12", "thread-13"] {
             assert_eq!(current[id].parent.id, "claude-parent");
             assert_eq!(after_clear[id].parent.id, "claude-parent");
@@ -296,12 +399,23 @@ mod tests {
         )
         .unwrap();
         let check = || {
-            let links = links(home).unwrap();
+            let links = thread_links(home, [id.clone()]).unwrap();
             let link = links.get(id).expect("detached thread retains its parent");
             assert_eq!(link.parent.provider, ProviderId::Claude);
             assert_eq!(link.parent.id, supervisor.session_id);
             assert_eq!(link.name, state.threads[0].name);
             assert!(!link.needs_input);
+            assert!(link.detached);
+            let parent = SessionKey {
+                provider: ProviderId::Claude,
+                id: supervisor.session_id.clone(),
+            };
+            let children = parent_links(home, &parent).unwrap();
+            assert!(children[id].detached);
+            assert!(!children[id].needs_input);
+            let selected = thread_links(home, [id.clone()]).unwrap();
+            assert!(selected[id].detached);
+            assert!(!selected[id].needs_input);
         };
         check();
         // A stale request file cannot make a detached thread need input.

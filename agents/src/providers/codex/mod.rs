@@ -4,6 +4,8 @@ mod ask_live_tests;
 mod background;
 #[cfg(test)]
 mod inner_tests;
+#[cfg(test)]
+mod lazy_tests;
 mod manager;
 #[cfg(test)]
 mod memory_tests;
@@ -107,16 +109,78 @@ impl CodexProvider {
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
-        let manager = manager::links(&self.manager_home)?;
-        let names = indexed_names(&self.home)?;
-        let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
-        let starts = process_starts(&live.values().copied().collect::<Vec<_>>())?;
-        let mut statement = db
-            .prepare("SELECT * FROM threads")
+        let live_ids = serde_json::to_string(&live.keys().collect::<Vec<_>>())?;
+        let shown = pages.saturating_mul(PAGE_SIZE);
+        let schema: HashSet<String> = db
+            .prepare("PRAGMA table_info(threads)")
+            .map_err(io::Error::other)?
+            .query_map([], |row| row.get(1))
+            .map_err(io::Error::other)?
+            .collect::<rusqlite::Result<_>>()
             .map_err(io::Error::other)?;
+        let updated = if schema.contains("updated_at_ms") {
+            "COALESCE(updated_at_ms, updated_at * 1000)"
+        } else {
+            "updated_at * 1000"
+        };
+        // Filter internal review threads before applying the history budget.
+        let review = if schema.contains("source") {
+            "AND CASE WHEN json_valid(source) THEN COALESCE(json_extract(source, '$.subagent') != 'review', 1) AND COALESCE(json_extract(source, '$.subagent.other') != 'guardian', 1) ELSE 1 END"
+        } else {
+            ""
+        };
+        let thread_source = if schema.contains("thread_source") {
+            "AND COALESCE(thread_source, '') != 'guardian_review'"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT id FROM threads WHERE id NOT IN (SELECT value FROM json_each(?1)) {review} {thread_source} ORDER BY {updated} DESC, id LIMIT ?2"
+        );
+        let mut statement = db.prepare(&sql).map_err(io::Error::other)?;
+        let mut recent = statement
+            .query_map(
+                rusqlite::params![live_ids, shown.saturating_add(1) as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(io::Error::other)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(io::Error::other)?;
+        let has_more = recent.len() > shown;
+        recent.truncate(shown);
+        recent.extend(live.keys().cloned());
+        let sessions = self.read_sessions(&db, &recent, &live)?;
+        Ok(Snapshot { sessions, has_more })
+    }
+
+    fn read_sessions(
+        &self,
+        db: &Connection,
+        ids: &[String],
+        live: &HashMap<String, u32>,
+    ) -> io::Result<Vec<Session>> {
+        let names = indexed_names(&self.home)?;
+        let links = manager::thread_links(&self.manager_home, ids.iter().cloned())?;
+        let starts = process_starts(&live.values().copied().collect::<Vec<_>>())?;
+        let edges = has_edges(db).map_err(io::Error::other)?;
+        let parent = if edges {
+            "(SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id=t.id)"
+        } else {
+            "NULL"
+        };
+        let sql = format!(
+            "SELECT t.*, {parent} AS parent_id FROM threads t WHERE t.id IN (SELECT value FROM json_each(?1))"
+        );
+        let mut statement = db.prepare(&sql).map_err(io::Error::other)?;
+        let ids = serde_json::to_string(ids)?;
         let rows = statement
-            .query_map([], |row| {
+            .query_map([ids], |row| {
+                let id: String = row.get("id")?;
+                let parents = column::<String>(row, "parent_id")?
+                    .map(|p| (id, p))
+                    .into_iter()
+                    .collect();
                 let mut session = session(row, &parents)?;
                 if column::<String>(row, "history_mode")?.as_deref() != Some("paginated")
                     && let Some(session) = session.as_mut()
@@ -127,79 +191,70 @@ impl CodexProvider {
                 Ok(session)
             })
             .map_err(io::Error::other)?;
-        let mut models = self
-            .models
-            .lock()
-            .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?;
-        models.refresh(&self.home.join("models_cache.json"))?;
         let mut sessions = Vec::new();
         for row in rows {
-            if let Some(mut session) = row.map_err(io::Error::other)? {
-                if let Some(pid) = live.get(&session.id.id) {
-                    session.process = Some(Process {
-                        pid: *pid,
-                        label: Some("codex".into()),
-                        started_at: starts.get(pid).copied(),
-                    });
-                }
-                if let Some(link) = manager.get(&session.id.id) {
-                    let native_agent = session.parent.is_some();
-                    session.parent = Some(link.parent.clone());
-                    if session.name.is_none() {
-                        session.name = link.name.clone();
-                    }
-                    if !native_agent && let Some(name) = &session.name {
-                        session.title = name.clone();
-                    }
-                    if link.needs_input {
-                        session.status = SessionStatus::NeedsInput;
-                    }
-                }
-                sessions.push(session);
+            let Some(mut session) = row.map_err(io::Error::other)? else {
+                continue;
+            };
+            if let Some(pid) = live.get(&session.id.id) {
+                session.process = Some(Process {
+                    pid: *pid,
+                    label: Some("codex".into()),
+                    started_at: starts.get(pid).copied(),
+                });
             }
+            if let Some(link) = links.get(&session.id.id) {
+                let native_agent = session.parent.is_some();
+                session.parent = Some(link.parent.clone());
+                if session.name.is_none() {
+                    session.name = link.name.clone();
+                }
+                if !native_agent && let Some(name) = &session.name {
+                    session.title = name.clone();
+                }
+                if link.needs_input {
+                    session.status = SessionStatus::NeedsInput;
+                }
+            }
+            sessions.push(session);
         }
-        drop(models);
+        self.models
+            .lock()
+            .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?
+            .refresh(&self.home.join("models_cache.json"))?;
         sessions.sort_by(|a, b| {
             b.updated_at
                 .cmp(&a.updated_at)
                 .then_with(|| a.id.cmp(&b.id))
         });
-        let inactive: Vec<_> = sessions
-            .iter()
-            .filter(|s| s.parent.is_none() && s.process.is_none())
-            .map(|s| s.id.clone())
-            .collect();
-        let shown = pages.saturating_mul(PAGE_SIZE);
-        let has_more = inactive.len() > shown;
-        let mut selected: HashSet<_> = sessions
-            .iter()
-            .filter(|s| {
-                (s.parent.is_none() && s.process.is_some())
-                    || s.parent
-                        .as_ref()
-                        .is_some_and(|parent| parent.provider == ProviderId::Claude)
-            })
-            .map(|s| s.id.clone())
-            .chain(inactive.into_iter().take(shown))
-            .collect();
-        // Descendants follow their visible parent without consuming another page slot.
-        loop {
-            let before = selected.len();
-            for session in &sessions {
-                if session
-                    .parent
-                    .as_ref()
-                    .is_some_and(|p| selected.contains(p))
-                {
-                    selected.insert(session.id.clone());
-                }
-            }
-            if selected.len() == before {
-                break;
-            }
+        Ok(sessions)
+    }
+
+    fn child_sessions(&self, parents: &[SessionKey]) -> io::Result<Vec<Session>> {
+        let path = self.home.join("state_5.sqlite");
+        if !path.exists() {
+            return Ok(vec![]);
         }
-        sessions.retain(|s| selected.contains(&s.id));
-        Ok(Snapshot { sessions, has_more })
+        let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(io::Error::other)?;
+        let native: Vec<_> = parents
+            .iter()
+            .filter(|p| p.provider == ProviderId::Codex)
+            .map(|p| &p.id)
+            .collect();
+        let mut ids = Vec::new();
+        if !native.is_empty() && has_edges(&db).map_err(io::Error::other)? {
+            ids = db.prepare("SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id IN (SELECT value FROM json_each(?1))").map_err(io::Error::other)?
+                .query_map([serde_json::to_string(&native)?], |r| r.get(0)).map_err(io::Error::other)?
+                .collect::<rusqlite::Result<_>>().map_err(io::Error::other)?;
+        }
+        for parent in parents.iter().filter(|p| p.provider == ProviderId::Claude) {
+            ids.extend(manager::parent_links(&self.manager_home, parent)?.into_keys());
+        }
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        self.read_sessions(&db, &ids, &HashMap::new())
     }
 
     fn enrich_sessions(&self, mut snapshot: Snapshot) -> io::Result<Snapshot> {
@@ -547,25 +602,8 @@ fn indexed_names(home: &Path) -> io::Result<HashMap<String, String>> {
     Ok(names)
 }
 
-fn parents(db: &Connection) -> rusqlite::Result<HashMap<String, String>> {
-    let present: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread_spawn_edges')", [], |row| row.get(0))?;
-    if !present {
-        return Ok(HashMap::new());
-    }
-    let mut statement = db.prepare("SELECT * FROM thread_spawn_edges")?;
-    let mut parents = HashMap::new();
-    let rows = statement.query_map([], |row| {
-        Ok((
-            column::<String>(row, "child_thread_id")?,
-            column::<String>(row, "parent_thread_id")?,
-        ))
-    })?;
-    for row in rows {
-        if let (Some(child), Some(parent)) = row? {
-            parents.insert(child, parent);
-        }
-    }
-    Ok(parents)
+fn has_edges(db: &Connection) -> rusqlite::Result<bool> {
+    db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread_spawn_edges')", [], |row| row.get(0))
 }
 
 fn status(live: bool, turn_ended: bool) -> SessionStatus {
@@ -707,6 +745,14 @@ impl Provider for CodexProvider {
         self.discover_sessions(pages)
             .unwrap_or_else(failed_snapshot)
     }
+    fn children(&mut self, parents: &[SessionKey]) -> Snapshot {
+        self.child_sessions(parents)
+            .map(|sessions| Snapshot {
+                sessions,
+                has_more: false,
+            })
+            .unwrap_or_else(failed_snapshot)
+    }
     fn enrich(&mut self, snapshot: Snapshot) -> Snapshot {
         self.enrich_sessions(snapshot)
             .unwrap_or_else(failed_snapshot)
@@ -825,7 +871,7 @@ impl Provider for CodexProvider {
         let id = session.id.id.clone();
         let archived = session.archived;
         Ok(Box::new(move || {
-            if manager::links(&manager_home)?
+            if manager::thread_links(&manager_home, [id.clone()])?
                 .get(&id)
                 .is_some_and(|link| !link.detached)
             {

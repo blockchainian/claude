@@ -219,7 +219,7 @@ fn terminal_task_follow_only_returns_to_active() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
+fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
     let listed = |capture: &str, title: &str| {
         capture
             .lines()
@@ -247,6 +247,10 @@ fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
     let id = transcript.file_stem().unwrap().to_str().unwrap();
     let mut entry = registry_entry(id, "Live parent", directory.path());
     entry["status"] = "busy".into();
+    entry["updatedAt"] =
+        (chrono::Utc::now() - chrono::Duration::hours(2) - chrono::Duration::minutes(1))
+            .timestamp_millis()
+            .into();
     let path = registry.join(format!("{id}.json"));
     write_entry(&path, &entry);
     let inactive = tmux.capture_when(|capture| {
@@ -261,7 +265,11 @@ fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
         .find(|line| line.contains("Live parent") && line.contains('●'))
         .unwrap();
     assert!(
-        !parent_row.split('│').next().unwrap().contains("Working"),
+        parent_row.split('│').next().unwrap().contains("Working"),
+        "{inactive}"
+    );
+    assert!(
+        parent_row.split('│').next().unwrap().contains("2h ago"),
         "{inactive}"
     );
     let child_row = inactive
@@ -318,7 +326,11 @@ fn terminal_status_tabs_filter_children_and_omit_ancestor_status() {
         .find(|line| line.contains("Live parent") && line.contains('○'))
         .unwrap();
     assert!(
-        !parent_row.split('│').next().unwrap().contains("Ready"),
+        parent_row.split('│').next().unwrap().contains("Ready"),
+        "{refreshed}"
+    );
+    assert!(
+        parent_row.split('│').next().unwrap().contains("2h ago"),
         "{refreshed}"
     );
     let verdict = serde_json::json!({"passed": true, "active": active, "inactive": inactive, "default_selection": default_selection, "remembered_selection": remembered_selection, "refreshed": refreshed});

@@ -136,7 +136,42 @@ impl Hub {
             .iter_mut()
             .map(|provider| provider.discover(self.pages))
             .collect();
-        remove_orphans(&mut snapshots);
+        let mut frontier: Vec<_> = snapshots
+            .iter()
+            .flat_map(|s| &s.sessions)
+            .filter(|s| s.process.is_some())
+            .map(|s| s.id.clone())
+            .collect();
+        let mut selected: HashSet<_> = snapshots
+            .iter()
+            .flat_map(|s| &s.sessions)
+            .map(|s| s.id.clone())
+            .collect();
+        let mut visited = HashSet::new();
+        while !frontier.is_empty() {
+            frontier.retain(|id| visited.insert(id.clone()));
+            if frontier.is_empty() {
+                break;
+            }
+            let mut next = Vec::new();
+            for (provider, snapshot) in self.providers.iter_mut().zip(&mut snapshots) {
+                for child in provider.children(&frontier).sessions {
+                    next.push(child.id.clone());
+                    if selected.insert(child.id.clone()) {
+                        snapshot.sessions.push(child);
+                    }
+                }
+                // Claude discovers its own subagents together with their transcript.
+                next.extend(
+                    snapshot
+                        .sessions
+                        .iter()
+                        .filter(|s| s.parent.as_ref().is_some_and(|p| frontier.contains(p)))
+                        .map(|s| s.id.clone()),
+                );
+            }
+            frontier = next;
+        }
         merge(
             self.providers
                 .iter_mut()
@@ -146,39 +181,18 @@ impl Hub {
     }
 }
 
-fn remove_orphans(snapshots: &mut [Snapshot]) {
-    // Remove orphaned descendants too, so every retained parent remains in the snapshot.
-    loop {
-        let ids: HashSet<_> = snapshots
-            .iter()
-            .flat_map(|snapshot| &snapshot.sessions)
-            .map(|session| session.id.clone())
-            .collect();
-        let mut removed = false;
-        for snapshot in snapshots.iter_mut() {
-            let count = snapshot.sessions.len();
-            snapshot.sessions.retain(|session| {
-                session
-                    .parent
-                    .as_ref()
-                    .is_none_or(|parent| ids.contains(parent))
-            });
-            removed |= snapshot.sessions.len() != count;
-        }
-        if !removed {
-            break;
-        }
-    }
-}
-
 fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
-    let mut snapshots: Vec<_> = snapshots.collect();
-    remove_orphans(&mut snapshots);
     let mut sessions = Vec::new();
     let mut has_more = false;
     for snapshot in snapshots {
         sessions.extend(snapshot.sessions);
         has_more |= snapshot.has_more;
+    }
+    let ids: HashSet<_> = sessions.iter().map(|s| s.id.clone()).collect();
+    for session in &mut sessions {
+        if session.parent.as_ref().is_some_and(|p| !ids.contains(p)) {
+            session.parent = None;
+        }
     }
     let (mut parents, mut children): (Vec<_>, Vec<_>) = sessions
         .into_iter()

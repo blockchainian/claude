@@ -299,11 +299,18 @@ pub trait Provider {
     }
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
-    /// Discovers session ownership before the hub removes descendants of absent parents.
+    /// Discovers live sessions and the requested recent history page.
     fn discover(&mut self, pages: usize) -> Snapshot {
         self.refresh(pages)
     }
-    /// Reads details for the sessions retained by the hub.
+    /// Discovers direct children of the supplied live-session tree frontier.
+    fn children(&mut self, _parents: &[SessionKey]) -> Snapshot {
+        Snapshot {
+            sessions: vec![],
+            has_more: false,
+        }
+    }
+    /// Reads details for the selected sessions.
     fn enrich(&mut self, snapshot: Snapshot) -> Snapshot {
         snapshot
     }

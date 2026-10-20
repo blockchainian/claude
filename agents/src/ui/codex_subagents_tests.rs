@@ -293,3 +293,89 @@ fn child_box_and_task_list_share_the_first_line_title() {
     assert_eq!(text.matches(title).count(), 2, "{text}");
     assert!(!text.contains("Hidden second line"));
 }
+
+#[test]
+fn inactive_merged_tree_keeps_cross_provider_ancestors_and_flat_sessions() {
+    let reference: chrono::DateTime<Utc> = "2026-10-19T12:00:00Z".parse().unwrap();
+    let mut parent = session(
+        "claude-parent",
+        "Live Claude parent",
+        SessionStatus::Working,
+        0,
+    );
+    parent.updated_at = reference - Duration::minutes(2);
+    let mut child = session(
+        "managed-child",
+        "Finished managed child",
+        SessionStatus::Inactive,
+        0,
+    );
+    child.id.provider = ProviderId::Codex;
+    child.parent = Some(parent.id.clone());
+    child.updated_at = reference - Duration::minutes(1);
+    let mut grandchild = session(
+        "native-child",
+        "Finished native child",
+        SessionStatus::Inactive,
+        0,
+    );
+    grandchild.id.provider = ProviderId::Codex;
+    grandchild.parent = Some(child.id.clone());
+    grandchild.updated_at = reference - Duration::minutes(3);
+    // The merged snapshot clears a missing parent before handing rows to the view.
+    let mut flat = session(
+        "flat-history",
+        "Unattached history",
+        SessionStatus::Inactive,
+        0,
+    );
+    flat.id.provider = ProviderId::Codex;
+    flat.updated_at = reference - Duration::minutes(10);
+
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![flat, grandchild, child, parent], false);
+    view.status_filter = tab_for_status(SessionStatus::Inactive);
+    assert_eq!(
+        ids(&view),
+        [
+            "claude-parent",
+            "managed-child",
+            "native-child",
+            "flat-history"
+        ]
+    );
+
+    let area = Rect::new(0, 0, 160, 12);
+    let mut buffer = Buffer::empty(area);
+    view.render_center_rows(area, &mut buffer, reference);
+    let lines: Vec<_> = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect();
+    for (title, status, age, prefix) in [
+        ("Live Claude parent", "Working", "2m ago", ""),
+        ("Finished managed child", "Inactive", "1m ago", "└─ "),
+        ("Finished native child", "Inactive", "3m ago", "   └─ "),
+        ("Unattached history", "Inactive", "10m ago", ""),
+    ] {
+        let line = lines.iter().find(|line| line.contains(title)).unwrap();
+        assert!(line.starts_with(prefix), "{line}");
+        assert!(line.contains(status), "{line}");
+        assert!(line.ends_with(age), "{line}");
+        if prefix.is_empty() {
+            assert!(!line.contains('└') && !line.contains('├'), "{line}");
+        }
+    }
+    assert_eq!(
+        view.group_index(
+            view.rows
+                .iter()
+                .position(|row| row.id.id == "flat-history")
+                .unwrap()
+        ),
+        view.rows.iter().position(|row| row.id.id == "flat-history")
+    );
+}

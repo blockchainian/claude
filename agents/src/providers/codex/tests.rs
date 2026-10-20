@@ -42,7 +42,7 @@ fn thread_clock_uses_latest_recorded_turn_without_changing_thread_birth() {
             records.lines().take(count).collect::<Vec<_>>().join("\n") + "\n",
         )
         .unwrap();
-        let snapshot = provider.refresh(1);
+        let snapshot = provider.refresh(2);
         let session = snapshot
             .sessions
             .iter()
@@ -494,11 +494,12 @@ fn manager_fixture(dir: &Path, provider: &mut CodexProvider, kind: &str) -> Path
 }
 
 #[test]
-fn manager_children_bypass_codex_paging_and_keep_descendants() {
+fn manager_children_obey_codex_paging_and_keep_recorded_parents() {
     let (dir, mut provider) = fixture();
     manager_fixture(dir.path(), &mut provider, "attached");
-    let snapshot = provider.snapshot(0).unwrap();
-    assert_eq!(snapshot.sessions.len(), 2);
+    let snapshot = provider.snapshot(2).unwrap();
+    assert_eq!(snapshot.sessions.len(), 14);
+    assert!(provider.snapshot(0).unwrap().sessions.is_empty());
     let child = snapshot
         .sessions
         .iter()
@@ -522,7 +523,7 @@ fn manager_children_bypass_codex_paging_and_keep_descendants() {
 }
 
 #[test]
-fn hub_prunes_manager_orphans_before_reading_their_rollouts() {
+fn hub_keeps_recent_manager_orphans_and_reports_visible_read_errors() {
     let (dir, mut provider) = fixture();
     manager_fixture(dir.path(), &mut provider, "detached");
     let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
@@ -556,14 +557,23 @@ fn hub_prunes_manager_orphans_before_reading_their_rollouts() {
     .unwrap();
 
     let mut hub = crate::sessions::Hub::new(vec![Box::new(provider)]);
-    for _ in 0..2 {
-        let snapshot = hub.refresh();
-        assert_eq!(snapshot.sessions.len(), 1);
-        let session = &snapshot.sessions[0];
-        assert_eq!(session.id.id, "thread-12");
-        assert!(session.last_record_at.is_some());
-        assert!(session.activity.is_some());
-    }
+    assert!(hub.refresh().sessions.is_empty());
+    db.execute(
+        "UPDATE threads SET rollout_path=?",
+        [visible.to_str().unwrap()],
+    )
+    .unwrap();
+    let snapshot = hub.refresh();
+    assert_eq!(snapshot.sessions.len(), 3);
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-0")
+            .unwrap()
+            .parent
+            .is_none()
+    );
 
     db.execute(
         "UPDATE threads SET rollout_path=? WHERE id='thread-12'",
@@ -639,7 +649,7 @@ fn archived_detached_manager_thread_does_not_need_detaching_again() {
         .unwrap()
         .execute("UPDATE threads SET archived=1 WHERE id='thread-0'", [])
         .unwrap();
-    let snapshot = provider.snapshot(0).unwrap();
+    let snapshot = provider.snapshot(2).unwrap();
     let session = snapshot
         .sessions
         .iter()
@@ -661,7 +671,7 @@ fn manager_waiting_and_asks_override_rollout_status_and_clear() {
     std::fs::write(&path, state.to_string()).unwrap();
     assert_eq!(
         provider
-            .snapshot(0)
+            .snapshot(2)
             .unwrap()
             .sessions
             .iter()
@@ -680,7 +690,7 @@ fn manager_waiting_and_asks_override_rollout_status_and_clear() {
     .unwrap();
     assert_eq!(
         provider
-            .snapshot(0)
+            .snapshot(2)
             .unwrap()
             .sessions
             .iter()
@@ -692,7 +702,7 @@ fn manager_waiting_and_asks_override_rollout_status_and_clear() {
     std::fs::remove_file(ask).unwrap();
     assert_eq!(
         provider
-            .snapshot(0)
+            .snapshot(2)
             .unwrap()
             .sessions
             .iter()
@@ -727,9 +737,29 @@ fn manager_detached_records_nest_but_missing_and_reassigned_records_do_not() {
         r#"{"sessionId":"another-session","pid":12345}"#,
     )
     .unwrap();
-    assert!(provider.snapshot(0).unwrap().sessions.is_empty());
+    assert!(
+        provider
+            .snapshot(2)
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap()
+            .parent
+            .is_none()
+    );
     std::fs::remove_file(provider.manager_home.join("threads/thread-12.json")).unwrap();
-    assert!(provider.snapshot(0).unwrap().sessions.is_empty());
+    assert!(
+        provider
+            .snapshot(2)
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap()
+            .parent
+            .is_none()
+    );
     assert!(session.join("state.json").exists());
 }
 
@@ -763,17 +793,24 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     )
     .unwrap();
 
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET updated_at_ms=9999999999999 WHERE id='thread-12'",
+            [],
+        )
+        .unwrap();
     let mut orphan_hub = Hub::new(vec![Box::new(CodexProvider::new(
         dir.path().into(),
         codex.manager_home.clone(),
     ))]);
-    assert!(
-        orphan_hub
-            .refresh()
-            .sessions
-            .iter()
-            .all(|s| s.id.id != "thread-12" && s.id.id != "thread-13")
-    );
+    let orphan = orphan_hub
+        .refresh()
+        .sessions
+        .into_iter()
+        .find(|s| s.id.id == "thread-12")
+        .unwrap();
+    assert!(orphan.parent.is_none());
     let mut hub = Hub::new(vec![
         Box::new(ClaudeProvider::new(claude_home)),
         Box::new(codex),
@@ -895,7 +932,7 @@ fn manager_children_launch_like_ordinary_threads() {
     let (dir, mut provider) = fixture();
     manager_fixture(dir.path(), &mut provider, "attached");
     let mut session = provider
-        .snapshot(0)
+        .snapshot(2)
         .unwrap()
         .sessions
         .into_iter()
@@ -1023,7 +1060,7 @@ fn names_follow_history_mode_and_manager_precedence() {
     ] {
         db.execute("UPDATE threads SET history_mode=?1,title=?2,first_user_message=?3,name=?4 WHERE id='thread-12'", rusqlite::params![history,title,first,name]).unwrap();
         let session = provider
-            .snapshot(0)
+            .snapshot(2)
             .unwrap()
             .sessions
             .into_iter()
@@ -1040,7 +1077,7 @@ fn names_follow_history_mode_and_manager_precedence() {
     .unwrap();
     assert_eq!(
         provider
-            .snapshot(0)
+            .snapshot(2)
             .unwrap()
             .sessions
             .into_iter()
@@ -1082,7 +1119,7 @@ fn manager_thread_operations_use_the_provider_paths() {
     let (dir, mut provider) = fixture();
     manager_fixture(dir.path(), &mut provider, "attached");
     let mut session = provider
-        .snapshot(0)
+        .snapshot(2)
         .unwrap()
         .sessions
         .into_iter()
@@ -1242,11 +1279,63 @@ fn native_agent_title_keeps_its_recorded_path_when_a_manager_link_names_it() {
         [],
     )
     .unwrap();
-    let sessions = provider.refresh(1).sessions;
+    let sessions = provider.refresh(2).sessions;
     let child = sessions
         .iter()
         .find(|session| session.id.id == "thread-12")
         .unwrap();
     assert_eq!(child.display_title(), "provider_adapters");
     assert_eq!(child.name.as_deref(), Some("Managed worker"));
+}
+
+#[test]
+fn lazy_discovery_does_not_parse_history_outside_the_page() {
+    let (dir, provider) = fixture();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    // Duplicate a captured row without changing the upstream schema. Invalid optional
+    // values outside the requested page expose eager row decoding, not just enrichment.
+    db.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1600)
+        INSERT INTO threads (id,rollout_path,created_at,updated_at,source,model_provider,cwd,title,sandbox_policy,approval_mode,model)
+        SELECT 'history-'||x,rollout_path,created_at,1,source,model_provider,cwd,title,sandbox_policy,approval_mode,X'FF' FROM threads,n WHERE id='thread-0';").unwrap();
+    let snapshot = provider
+        .discover_sessions(1)
+        .expect("old rows are never decoded");
+    assert_eq!(snapshot.sessions.len(), PAGE_SIZE);
+    assert!(snapshot.has_more);
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .all(|s| !s.id.id.starts_with("history-"))
+    );
+}
+
+#[test]
+fn lazy_discovery_counts_children_in_the_inactive_page() {
+    let (dir, provider) = fixture();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute(
+        "UPDATE threads SET updated_at_ms=9999999999999 WHERE id='thread-13'",
+        [],
+    )
+    .unwrap();
+    let snapshot = provider.discover_sessions(1).unwrap();
+    assert_eq!(snapshot.sessions.len(), PAGE_SIZE);
+    assert!(snapshot.sessions.iter().any(|s| s.id.id == "thread-13"));
+    assert!(!snapshot.sessions.iter().any(|s| s.id.id == "thread-12"));
+}
+
+#[test]
+fn lazy_history_budget_excludes_guardian_rows_before_limiting() {
+    let (dir, provider) = fixture();
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET source='vscode',updated_at_ms=9999999999999 WHERE id='thread-14'",
+            [],
+        )
+        .unwrap();
+    let snapshot = provider.discover_sessions(1).unwrap();
+    assert_eq!(snapshot.sessions.len(), PAGE_SIZE);
+    assert!(snapshot.sessions.iter().any(|s| s.id.id == "thread-9"));
 }

@@ -58,7 +58,7 @@ fn hub_pages_each_provider_and_merges_by_time() {
 }
 
 #[test]
-fn merge_orders_live_then_inactive_then_children_and_drops_orphans() {
+fn merge_orders_live_then_inactive_then_children_and_flattens_orphans() {
     let dir = config(7);
     let mut snapshot = ClaudeProvider::new(dir.path().into()).refresh(1);
     let key = |id: &str| SessionKey {
@@ -84,9 +84,11 @@ fn merge_orders_live_then_inactive_then_children_and_drops_orphans() {
     let expected = vec![
         later_live.id.clone(),
         live.id.clone(),
+        orphan.id.clone(),
         inactive.id.clone(),
         earlier_child.id.clone(),
         child.id.clone(),
+        descendant.id.clone(),
     ];
     let result = merge(
         [
@@ -119,4 +121,27 @@ fn single_provider_hub_preserves_snapshot() {
     let actual = Hub::new(vec![Box::new(ClaudeProvider::new(dir.path().into()))]).refresh();
     assert_eq!(actual.sessions, expected.sessions);
     assert_eq!(actual.has_more, expected.has_more);
+}
+
+#[test]
+fn lazy_merge_keeps_orphans_flat_and_attaches_their_children() {
+    let dir = config(2);
+    let mut sessions = ClaudeProvider::new(dir.path().into()).refresh(1).sessions;
+    sessions[0].parent = Some(SessionKey {
+        provider: ProviderId::Codex,
+        id: "absent".into(),
+    });
+    sessions[1].parent = Some(sessions[0].id.clone());
+    let expected = sessions[0].id.clone();
+    let snapshot = merge(
+        [Snapshot {
+            sessions,
+            has_more: false,
+        }]
+        .into_iter(),
+    );
+    assert_eq!(snapshot.sessions.len(), 2);
+    assert_eq!(snapshot.sessions[0].id, expected);
+    assert!(snapshot.sessions[0].parent.is_none());
+    assert_eq!(snapshot.sessions[1].parent.as_ref(), Some(&expected));
 }
