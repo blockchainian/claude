@@ -5,6 +5,8 @@ use super::*;
 use crate::event::{Event, Kind};
 use chrono::{DateTime, Utc};
 
+const TURN_BRACKET: [&str; 3] = ["┐", "│", "┘"];
+
 pub(super) const CLOCK_FORMAT: &str = "%H:%M:%S";
 pub(super) const CLOCK_WIDTH: usize = 8;
 
@@ -155,7 +157,7 @@ impl View {
                     let position = (area.right(), area.y + index as u16);
                     if buf.area.contains(position.into()) {
                         buf[position]
-                            .set_symbol(super::tool_detail::SHELL_BRACKET[bracket])
+                            .set_symbol(TURN_BRACKET[bracket])
                             .set_style(super::tool_detail::bracket_style());
                     }
                 }

@@ -30,7 +30,7 @@ fn real_prompt_and_response_have_an_open_turn_bracket() {
     let (_dir, view) = transcript_fixture(include_str!("../../tests/fixtures/transcript.jsonl"));
     let buffer = draw(&view, 80, 10);
     let panel = view.viewport.borrow().event_panel;
-    assert_eq!(buffer[(panel.right(), panel.y)].symbol(), "┌");
+    assert_eq!(buffer[(panel.right(), panel.y)].symbol(), "┐");
     assert_eq!(buffer[(panel.right(), panel.y + 1)].symbol(), "│");
     assert_eq!(
         view.viewport.borrow().event_list_text.area.right(),
@@ -66,9 +66,9 @@ fn real_completed_turn_uses_corners_and_keeps_selection_background() {
         let buffer = draw(&view, width, 20);
         let viewport = view.viewport.borrow();
         assert!(viewport.event_rows.len() >= 3);
-        assert_eq!(buffer[(width - 1, 1)].symbol(), "┌");
+        assert_eq!(buffer[(width - 1, 1)].symbol(), "┐");
         let last = viewport.event_rows.len() as u16;
-        assert_eq!(buffer[(width - 1, last)].symbol(), "└");
+        assert_eq!(buffer[(width - 1, last)].symbol(), "┘");
         assert_eq!(buffer[(width - 1, last)].bg, buffer[(width - 2, last)].bg);
         assert_eq!(buffer[(width - 1, last)].fg, ratatui::style::Color::Reset);
         assert!(
@@ -84,14 +84,14 @@ fn clipped_real_turn_keeps_vertical_lines_at_viewport_edges() {
     let (_dir, mut view) = completed_fixture();
     assert!(view.event_panel.len() >= 3);
     view.event_list.cursor = Some(0);
-    assert_eq!(brackets(&view, 80, 2), "┌│");
+    assert_eq!(brackets(&view, 80, 2), "┐│");
     view.event_list.cursor = Some(1);
     view.event_list.scroll.set(1);
     let shown = brackets(&view, 80, 1);
     assert_eq!(shown, "│");
     view.event_list.cursor = Some(view.event_panel.len() - 1);
     view.event_list.scroll.set(view.event_panel.len() - 2);
-    assert_eq!(brackets(&view, 80, 2), "│└");
+    assert_eq!(brackets(&view, 80, 2), "│┘");
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn search_draws_corners_on_visible_rows_and_leaves_input_unmarked() {
     assert!(view.matching_event_count() < view.event_panel.len());
     let buffer = draw(&view, 80, 20);
     let viewport = view.viewport.borrow();
-    assert_eq!(buffer[(79, 1)].symbol(), "┌");
-    assert_eq!(buffer[(79, viewport.event_rows.len() as u16)].symbol(), "└");
+    assert_eq!(buffer[(79, 1)].symbol(), "┐");
+    assert_eq!(buffer[(79, viewport.event_rows.len() as u16)].symbol(), "┘");
     assert_eq!(buffer[(79, 20)].symbol(), " ");
 }

@@ -160,12 +160,12 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
             probe.resize(width, 50);
             let name = format!("complete-{width}");
             let edge = probe.wait(&name, width, 50, |_, edge| {
-                ["┌", "│", "└"]
+                ["┐", "│", "┘"]
                     .iter()
                     .all(|glyph| edge.iter().any(|cell| cell == glyph))
             });
-            let top = edge.iter().position(|cell| cell == "┌").unwrap();
-            let bottom = edge.iter().position(|cell| cell == "└").unwrap();
+            let top = edge.iter().position(|cell| cell == "┐").unwrap();
+            let bottom = edge.iter().position(|cell| cell == "┘").unwrap();
             assert!(bottom > top + 1);
             assert!(edge[top + 1..bottom].iter().all(|cell| cell == "│"));
             // Click inside the event panel, outside the extra bracket column.
@@ -187,7 +187,7 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
                 capture.contains("duration")
                     && edge
                         .iter()
-                        .all(|cell| !["┌", "│", "└"].contains(&cell.as_str()))
+                        .all(|cell| !["┐", "│", "┘"].contains(&cell.as_str()))
             });
             probe.key("t");
             cases.push(serde_json::json!({"width":width,"complete_bracket":true,"duration_hides_bracket":true}));
@@ -198,10 +198,10 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
         let scroll = Probe::start(running, "scroll", &output, deadline);
         scroll.resize(112, 19);
         let edge = scroll.wait("scroll-bottom", 112, 19, |_, edge| {
-            edge.iter().any(|cell| cell == "│") && !edge.iter().any(|cell| cell == "┌")
+            edge.iter().any(|cell| cell == "│") && !edge.iter().any(|cell| cell == "┐")
         });
         assert!(
-            !edge.iter().any(|cell| cell == "└"),
+            !edge.iter().any(|cell| cell == "┘"),
             "running turn must stay open"
         );
         let row = edge.iter().position(|cell| cell == "│").unwrap();
@@ -214,7 +214,7 @@ fn terminal_turn_groups_follow_layout_sort_and_scroll() {
         ]);
         scroll.key("Home");
         scroll.wait("scroll-top", 112, 19, |_, edge| {
-            edge.iter().any(|cell| cell == "┌") && !edge.iter().any(|cell| cell == "└")
+            edge.iter().any(|cell| cell == "┐") && !edge.iter().any(|cell| cell == "┘")
         });
         serde_json::json!({"verdict":"pass","cases":cases,"clipped_head_has_vertical":true,"running_has_no_bottom_corner":true,"scroll_to_head_restores_corner":true})
     });
