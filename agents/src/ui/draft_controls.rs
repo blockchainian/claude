@@ -360,7 +360,13 @@ impl View {
     }
 
     /// Branch picks finish their selector; only wizard picks advance the rule.
-    fn choose_branch(&mut self, id: DraftId, branch: String, new: bool) -> Option<Action> {
+    fn choose_branch(
+        &mut self,
+        id: DraftId,
+        branch: String,
+        new: bool,
+        advance: bool,
+    ) -> Option<Action> {
         let origin = self.selector.as_ref()?.origin;
         let draft = self.drafts.iter_mut().find(|item| item.id == id)?;
         if draft.working || draft.job.is_some() {
@@ -379,10 +385,41 @@ impl View {
             .unwrap()
             .pending_branch = None;
         self.draft_changed(id);
-        if origin == Origin::Wizard {
+        if advance && origin == Origin::Wizard {
             self.advance_draft(false)
         } else {
             None
+        }
+    }
+
+    /// Saves a branch editor on panel blur without advancing the wizard.
+    pub(super) fn save_branch_editor(&mut self) {
+        let Some(Selector {
+            kind:
+                SelectorKind::Branch {
+                    draft,
+                    editor,
+                    editing: true,
+                    ..
+                },
+            ..
+        }) = &self.selector
+        else {
+            return;
+        };
+        let id = *draft;
+        let name = editor.text().trim().to_owned();
+        if name.is_empty() {
+            if let Some(Selector {
+                kind: SelectorKind::Branch { editing, .. },
+                ..
+            }) = &mut self.selector
+            {
+                *editing = false;
+            }
+            self.close_selector();
+        } else {
+            self.choose_branch(id, name, true, false);
         }
     }
 
@@ -694,7 +731,7 @@ impl View {
                     None => (editor.text().trim().to_owned(), true),
                 };
                 if !branch.is_empty() {
-                    return self.choose_branch(draft, branch, new);
+                    return self.choose_branch(draft, branch, new, true);
                 }
                 None
             }

@@ -11,6 +11,9 @@ impl View {
         {
             self.pending_actions.push(action);
         }
+        if panel != self.active_panel && self.active_panel == Panel::Details {
+            self.save_branch_editor();
+        }
         if panel != self.active_panel
             && (self.searching || self.log_search.editing || self.log_detail_search.editing)
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))

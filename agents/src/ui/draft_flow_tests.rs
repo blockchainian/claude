@@ -1713,7 +1713,7 @@ fn draft_branch_edit_field_toggle_closes_once_and_keeps_text() {
 }
 
 #[test]
-fn draft_branch_edit_prompt_click_closes_and_enter_restores_text() {
+fn draft_branch_edit_prompt_click_saves_and_enter_creates() {
     let (_directory, mut view) = git_draft();
     type_pending_branch(&mut view);
     render(&view);
@@ -1722,8 +1722,13 @@ fn draft_branch_edit_prompt_click_closes_and_enter_restores_text() {
     assert!(view.selector.is_none());
     assert!(view.prompt_focused());
     view.handle_paste("Prompt kept");
-    assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert_pending_branch(&view);
+    assert_eq!(
+        view.selected_draft().unwrap().branch,
+        DraftBranch::New("feature/pending".into())
+    );
+    assert!(
+        matches!(key(&mut view, KeyCode::Enter), Some(Action::CreateTask { branch: Some(crate::tasks::BranchChoice::New(ref name)), .. }) if name == "feature/pending")
+    );
     assert_eq!(view.input_box.editor.text(), "Prompt kept");
 }
 
@@ -1937,5 +1942,50 @@ fn saved_new_branch_row_shows_name_and_reopens_prefilled() {
             view.selected_draft().unwrap().branch,
             DraftBranch::New("foo".into())
         );
+    }
+}
+
+#[test]
+fn branch_editor_saves_when_details_loses_focus_without_advancing() {
+    for exit in [0, 1, 2] {
+        for name in ["  foo  ", "   "] {
+            let (_directory, mut view) = git_draft();
+            view.open_field(Field::Branch);
+            key(&mut view, KeyCode::End);
+            key(&mut view, KeyCode::Enter);
+            view.selector.as_mut().unwrap().origin = Origin::Wizard;
+            view.handle_paste(name);
+            render(&view);
+            match exit {
+                0 => {
+                    let prompt = view.viewport.borrow().prompt;
+                    click(&mut view, prompt.x + 2, prompt.y);
+                }
+                1 => {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    key(&mut view, KeyCode::Char('j'));
+                }
+                _ => view.set_active_panel(Panel::Output),
+            }
+            assert_eq!(
+                view.selected_draft().unwrap().branch,
+                if name.trim().is_empty() {
+                    DraftBranch::Unchosen
+                } else {
+                    DraftBranch::New("foo".into())
+                }
+            );
+            assert!(view.selected_draft().unwrap().pending_branch.is_none());
+            assert!(view.selector.is_none());
+            assert!(!view.selected_draft().unwrap().working);
+            assert_eq!(
+                view.active_panel,
+                if exit == 2 {
+                    Panel::Output
+                } else {
+                    Panel::Prompt
+                }
+            );
+        }
     }
 }
