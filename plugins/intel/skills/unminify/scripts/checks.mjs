@@ -1,4 +1,5 @@
 import { timed } from './timing.mjs';
+import { isLexicalIdentifier } from './identifiers.mjs';
 // Rejects rewrites that change module contracts, scope resolution or source text.
 import { execFileSync } from 'node:child_process';
 import { parse } from '@babel/parser';
@@ -46,15 +47,6 @@ function moduleFacts(ast) {
     else if (node.type === 'ExportAllDeclaration') names.add(`export:*:${node.source.value}`);
   }
   return { names: JSON.stringify([...names].sort()), loads: JSON.stringify(loads) };
-}
-
-function variableIdentifier(path) {
-  const parent = path.parent;
-  if ((parent.type === 'ObjectProperty' || parent.type === 'ObjectMethod' || parent.type === 'ClassMethod' || parent.type === 'ClassProperty') && path.key === 'key' && !parent.computed) return false;
-  if ((parent.type === 'MemberExpression' || parent.type === 'OptionalMemberExpression') && path.key === 'property' && !parent.computed) return false;
-  if (parent.type === 'ImportSpecifier' && path.key === 'imported') return false;
-  if (parent.type === 'ExportSpecifier' && (path.key === 'exported' || path.parentPath.parent.source)) return false;
-  return path.isReferencedIdentifier() || path.isBindingIdentifier();
 }
 
 function splitExportDeclarations(source, ast, result) {
@@ -110,7 +102,7 @@ function analyze(source, ast) {
       for (const binding of Object.values(path.scope.bindings)) bindings.add(binding);
     },
     Identifier(path) {
-      if (!variableIdentifier(path)) return;
+      if (!isLexicalIdentifier(path)) return;
       const binding = path.scope.getBinding(path.node.name);
       variables.set(path.node, binding ?? null);
       if (!binding) globals.add(path.node.name);

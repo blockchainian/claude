@@ -1,4 +1,5 @@
 import { timed } from './timing.mjs';
+import { isLexicalIdentifier } from './identifiers.mjs';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import { dirname, resolve } from 'node:path';
@@ -121,19 +122,6 @@ export function resolveNames(source, proposals) {
     if (name !== record.binding.identifier.name) result.set(key, name);
   }
   return result;
-}
-
-function isLexicalIdentifier(path) {
-  if (path.isJSXIdentifier()) {
-    const parent = path.parentPath;
-    if (parent.isJSXMemberExpression()) return path.key === 'object';
-    return (parent.isJSXOpeningElement() || parent.isJSXClosingElement()) && path.key === 'name' && !/^[a-z]/.test(path.node.name);
-  }
-  const parent = path.parentPath;
-  if (parent.isImportSpecifier() && path.key === 'imported') return false;
-  if (parent.isExportSpecifier() && (path.key === 'exported' || parent.parentPath.node.source)) return false;
-  if (parent.isObjectProperty() && path.key === 'key' && !parent.node.computed) return false;
-  return path.isReferencedIdentifier() || path.isBindingIdentifier();
 }
 
 function shorthandProperty(path) {
