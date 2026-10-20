@@ -88,7 +88,8 @@ pub(super) fn map_lines_in(
                 line.spans
                     .first()
                     .filter(|span| {
-                        !span.content.is_empty()
+                        span.style == ratatui::style::Style::default()
+                            && !span.content.is_empty()
                             && span.content.chars().all(|ch| ch == ' ')
                             && line.spans.len() > 1
                     })

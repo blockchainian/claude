@@ -103,6 +103,7 @@ fn text_cell<'a>(buffer: &'a Buffer, text: &str) -> &'a ratatui::buffer::Cell {
 
 #[test]
 fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_styles() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (view, now) = open_tool_fixture();
     let mut event = view.visible_event().unwrap().clone();
     event.calls.clear();
@@ -150,7 +151,13 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
             );
             assert_eq!(text_cell(&buffer, "Heading").fg, Color::Reset);
             assert_eq!(text_cell(&buffer, "link").fg, Color::Reset);
-            assert_eq!(text_cell(&buffer, "let value").fg, Color::Cyan);
+            assert_eq!(
+                text_cell(&buffer, "let value").fg,
+                super::super::highlight::code_lines("let value = 42;\n", "rs")[0].spans[0]
+                    .style
+                    .fg
+                    .unwrap()
+            );
             assert!(
                 view.viewport
                     .borrow()

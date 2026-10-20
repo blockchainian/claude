@@ -1,5 +1,8 @@
-use super::content::{Block, Kind};
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use super::{
+    content::{Block, Kind},
+    highlight,
+};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -76,9 +79,15 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                         writer.separate();
                         writer.styles.push(style.green());
                     }
-                    Tag::CodeBlock(_) => {
+                    Tag::CodeBlock(kind) => {
                         writer.separate();
                         writer.code = true;
+                        writer.code_lang = match kind {
+                            CodeBlockKind::Fenced(info) => {
+                                info.split_whitespace().next().map(str::to_owned)
+                            }
+                            CodeBlockKind::Indented => None,
+                        };
                         writer.kind = Kind::Preformatted;
                         writer.styles.push(style.cyan());
                     }
@@ -116,7 +125,13 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                     writer.kind = Kind::Prose;
                 }
                 TagEnd::Paragraph => writer.flush(),
-                TagEnd::Heading(_) | TagEnd::BlockQuote | TagEnd::CodeBlock => {
+                TagEnd::CodeBlock => {
+                    writer.code_lines();
+                    writer.styles.pop();
+                    writer.code = false;
+                    writer.kind = Kind::Prose;
+                }
+                TagEnd::Heading(_) | TagEnd::BlockQuote => {
                     writer.flush();
                     writer.styles.pop();
                     writer.code = false;
@@ -136,14 +151,7 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                 }
                 _ => {}
             },
-            Event::Text(text) if writer.code => {
-                for part in text.split_inclusive('\n') {
-                    writer.push(part.trim_end_matches('\n'), writer.style());
-                    if part.ends_with('\n') {
-                        writer.flush_code();
-                    }
-                }
-            }
+            Event::Text(text) if writer.code => writer.code_text.push_str(&text),
             Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
                 writer.push(&text, writer.style())
             }
@@ -172,6 +180,8 @@ struct Writer {
     lists: Vec<Option<u64>>,
     indent: usize,
     code: bool,
+    code_text: String,
+    code_lang: Option<String>,
     kind: Kind,
     /// Cells of the table being parsed, row by row; the first row is the header.
     table: Option<Vec<Vec<Line<'static>>>>,
@@ -243,6 +253,40 @@ impl Writer {
                 self.flush_code();
             }
         }
+    }
+
+    fn code_lines(&mut self) {
+        let text = std::mem::take(&mut self.code_text)
+            .chars()
+            .map(|ch| {
+                if ch.is_control() && ch != '\n' {
+                    ' '
+                } else {
+                    ch
+                }
+            })
+            .collect::<String>();
+        let lang = self.code_lang.take();
+        let mut highlighted = lang
+            .filter(|lang| highlight::find_syntax(lang).is_some())
+            .map(|lang| highlight::code_lines(&text, &lang).into_iter());
+        for part in text.split_inclusive('\n') {
+            if let Some(lines) = &mut highlighted {
+                let line = lines.next().expect("highlighted code line");
+                if line.spans.is_empty() {
+                    self.push("", self.style());
+                }
+                for span in line.spans {
+                    self.push(&span.content, span.style);
+                }
+            } else {
+                self.push(part.trim_end_matches('\n'), self.style());
+            }
+            if part.ends_with('\n') {
+                self.flush_code();
+            }
+        }
+        self.flush();
     }
 
     fn flush(&mut self) {
@@ -370,6 +414,76 @@ mod tests {
     }
 
     #[test]
+    fn fenced_code_uses_language_styles() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let code = "/* comment\n   continued */\nfn main() {\n    let text = \"中文\";\n}\n";
+        for info in ["rust", "rs", "rust extra words"] {
+            let lines = render(&format!("```{info}\n{code}```"), 80);
+            assert_eq!(lines, super::super::highlight::code_lines(code, "rs"));
+        }
+    }
+
+    #[test]
+    fn code_without_known_language_stays_cyan() {
+        for source in [
+            "```unknown-language\n  code\nnext\n```",
+            "```\n  code\nnext\n```",
+            "      code\n    next",
+        ] {
+            let lines = render(source, 40);
+            assert_eq!(plain(&lines), ["  code", "next"]);
+            assert!(
+                lines
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .all(|span| span.style.fg == Some(Color::Cyan))
+            );
+        }
+    }
+
+    #[test]
+    fn fenced_code_preserves_layout_and_selection_sources() {
+        for prefix in ["", "- item\n\n  ", "- outer\n  - item\n\n    "] {
+            let code = "/* 中文\n   continued */\n\n\tlet text = \"&amp;\";\n";
+            let fenced = format!("```rust\n{code}```");
+            let source = if prefix.is_empty() {
+                fenced
+            } else {
+                let indent = prefix.lines().last().unwrap();
+                format!("{prefix}{}", fenced.replace('\n', &format!("\n{indent}")))
+            };
+            let plain_source = source.replacen("```rust", "```", 1);
+            let lines = render(&source, 80);
+            let plain_lines = render(&plain_source, 80);
+            assert_eq!(plain(&lines), plain(&plain_lines));
+            let maps = super::super::text_selection_layout::map_lines(&source, &lines, true);
+            let plain_maps =
+                super::super::text_selection_layout::map_lines(&plain_source, &plain_lines, true);
+            let selected =
+                |source: &str, maps: Vec<Vec<super::super::text_selection_layout::CellMap>>| {
+                    maps.into_iter()
+                        .map(|row| {
+                            row.into_iter()
+                                .map(|(cells, bytes)| (cells, source[bytes].to_owned()))
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>()
+                };
+            assert_eq!(selected(&source, maps), selected(&plain_source, plain_maps));
+            let blocks = blocks(&source);
+            let plain_blocks = super::blocks(&plain_source);
+            assert_eq!(blocks.len(), plain_blocks.len());
+            for (block, plain_block) in blocks.iter().zip(&plain_blocks) {
+                assert_eq!(
+                    std::mem::discriminant(&block.kind),
+                    std::mem::discriminant(&plain_block.kind)
+                );
+                assert_eq!(block.indent, plain_block.indent);
+            }
+        }
+    }
+
+    #[test]
     fn headings_quotes_and_code() {
         for (source, modifier) in [
             ("# title", Modifier::BOLD),
@@ -388,14 +502,7 @@ mod tests {
             Some(Color::Green)
         );
         for source in ["```rust\n  code\nnext\n```", "      code\n    next"] {
-            let lines = render(source, 40);
-            assert_eq!(plain(&lines), ["  code", "next"]);
-            assert!(
-                lines
-                    .iter()
-                    .flat_map(|line| &line.spans)
-                    .all(|span| span.style.fg == Some(Color::Cyan))
-            );
+            assert_eq!(plain(&render(source, 40)), ["  code", "next"]);
         }
     }
 }
