@@ -12,6 +12,9 @@ export function transformSyntax(source, { rules = defaults, fragment = false, fr
     const globalAllowed = globalGuard(ast,fragment,fragmentContext);
     const context = {
       source, fragment,
+      isIntrinsicGlobal(path, name) {
+        return globalAllowed(name, path.scope);
+      },
       canIntroduceGlobal(path, name) {
         if (!rule.globals?.includes(name)) throw new Error(`undeclared intrinsic for ${rule.name}: ${name}`);
         if (!globalAllowed(name)) return false;

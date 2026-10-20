@@ -24,7 +24,7 @@ function facts(ast, options) {
         layout.push([position,path.node.type,path.node.kind ?? null,groups]);
       }
     },
-    Identifier(path) {
+    'Identifier|JSXIdentifier'(path) {
       if (isLexicalIdentifier(path) && !path.scope.getBinding(path.node.name)) globals.add(path.node.name);
     },
   });

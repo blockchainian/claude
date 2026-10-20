@@ -28,6 +28,7 @@ deduplicating modules. Rule additions do not require changes to the CLI or runne
 `visitor(context)` returns a Babel visitor. `context.source` is the current pass's
 text, and `context.fragment` includes detected unbound exports. Parentheses have
 explicit `ParenthesizedExpression` nodes. Every pass gets a fresh parse and scope.
+Parsing and independent rewrite checks both accept JSX.
 
 `context.replace(pathOrNode, text)` records an original source interval. The runner
 applies nonoverlapping edits, preserves every byte outside them, and inserts spaces
@@ -43,6 +44,15 @@ and no unknown direct eval or known eval mentioning that name. It also records t
 name for this pass's independent free-variable check. Call it only for the exact
 intrinsic reference being synthesized. A rule declares these names in its `globals`
 array, e.g. `globals: ['undefined']`, so checkpoints track relevant global evidence.
+
+`context.isIntrinsicGlobal(path, name)` checks whether an existing reference at
+`path` resolves to an unshadowed intrinsic global. It uses the current lexical
+scope, so an unrelated sibling function's binding does not block the query.
+Module/ancestor bindings, `with`, unknown eval and known eval mentioning the name
+block it. Fragments additionally require `fragmentContext` with no program binding
+of that name across the indexed files. This read-only query requires no `globals`
+declaration and grants no authorization to synthesize a reference;
+`canIntroduceGlobal` retains its stricter module-wide binding check.
 
 For fragments, pass `fragmentContext` from `indexFragmentContext(files)` or
 `loadFragmentContext(root, inputs)`. The latter indexes the whole Git root, falling
