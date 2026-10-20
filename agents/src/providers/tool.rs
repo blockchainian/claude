@@ -1,5 +1,10 @@
 pub(crate) mod groups;
+mod shell_output;
+#[cfg(test)]
+mod shell_output_tests;
 pub(crate) mod shell_summary;
+
+use shell_output::{Stream, sections as shell_output_sections};
 
 use crate::event::{Section, ToolCall};
 use serde_json::Value;
@@ -188,6 +193,7 @@ pub(crate) struct ToolRule {
     pub task: Option<TaskAction>,
     pub list_subject: bool,
     pub list_input: bool,
+    shell_stream: Stream,
 }
 
 const DEFAULT_RULE: ToolRule = ToolRule {
@@ -202,6 +208,12 @@ const DEFAULT_RULE: ToolRule = ToolRule {
     task: None,
     list_subject: false,
     list_input: false,
+    shell_stream: Stream {
+        merged_stderr: false,
+        trimmed: false,
+        exit_code: None,
+        is_error: false,
+    },
 };
 
 pub(crate) const TOOL_RULES: &[ToolRule] = &[
@@ -239,6 +251,12 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         input: Some((Input::Shell, Format::Text)),
         output: Some(Output::Shell),
         list_subject: true,
+        shell_stream: Stream {
+            merged_stderr: false,
+            trimmed: true,
+            exit_code: None,
+            is_error: false,
+        },
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -247,6 +265,12 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         input: Some((Input::Shell, Format::Text)),
         output: Some(Output::Shell),
         list_subject: true,
+        shell_stream: Stream {
+            merged_stderr: true,
+            trimmed: false,
+            exit_code: None,
+            is_error: false,
+        },
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -255,6 +279,12 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         input: Some((Input::Shell, Format::Text)),
         output: Some(Output::Shell),
         list_subject: true,
+        shell_stream: Stream {
+            merged_stderr: true,
+            trimmed: false,
+            exit_code: None,
+            is_error: false,
+        },
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -263,6 +293,12 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         input: Some((Input::Shell, Format::Text)),
         output: Some(Output::Shell),
         list_subject: true,
+        shell_stream: Stream {
+            merged_stderr: true,
+            trimmed: false,
+            exit_code: None,
+            is_error: false,
+        },
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -1088,161 +1124,6 @@ fn question_sections(input: &Value) -> Vec<Section> {
     sections
 }
 
-struct ShellOutput {
-    path: Option<String>,
-    lines: Option<usize>,
-    numbered: bool,
-    diff: bool,
-}
-
-fn shell_read(command: &str) -> Option<ShellOutput> {
-    let pipeline = shell_summary::pipeline_words(command)?;
-    let mut stages = pipeline.iter();
-    let words = stages.next()?;
-    let words: Vec<_> = words.iter().map(String::as_str).collect();
-    let mut read = shell_read_words(&words)?;
-    for stage in stages {
-        let stage: Vec<_> = stage.iter().map(String::as_str).collect();
-        if read.diff && !matches!(stage.first(), Some(&"head" | &"sed")) {
-            return None;
-        }
-        let mut words = stage.clone();
-        words.push("stdout");
-        let filter = shell_read_words(&words)?;
-        if filter.numbered
-            || filter.diff
-            || !matches!(stage.first(), Some(&"head" | &"tail" | &"sed"))
-        {
-            return None;
-        }
-        read.lines = if read.diff { None } else { filter.lines };
-    }
-    Some(read)
-}
-
-fn shell_read_words(words: &[&str]) -> Option<ShellOutput> {
-    let number = |value: &str| {
-        (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
-            .then(|| value.parse::<usize>().ok())
-            .flatten()
-    };
-    let mut numbered = false;
-    let (path, lines) = match words {
-        ["git", "diff" | "show", ..] | ["diff", "-u", ..] => {
-            return Some(ShellOutput {
-                path: None,
-                lines: None,
-                numbered: false,
-                diff: true,
-            });
-        }
-        ["git", "log", args @ ..] if args.iter().any(|arg| matches!(*arg, "-p" | "--patch")) => {
-            return Some(ShellOutput {
-                path: None,
-                lines: None,
-                numbered: false,
-                diff: true,
-            });
-        }
-        ["cat", "-n", path] | ["nl", "-ba", path] => {
-            numbered = true;
-            (*path, None)
-        }
-        ["cat", paths @ ..] if !paths.is_empty() => {
-            let path = *paths.first()?;
-            if paths
-                .iter()
-                .any(|path| path.is_empty() || path.starts_with('-'))
-            {
-                return None;
-            }
-            let language = |path: &str| {
-                crate::ui::highlight::find_syntax(file_language(path)).map(|syntax| syntax.scope)
-            };
-            if paths.len() > 1
-                && (language(path).is_none()
-                    || !paths.iter().all(|other| language(other) == language(path)))
-            {
-                return None;
-            }
-            (path, None)
-        }
-        ["head" | "tail", path] => (*path, Some(10)),
-        [tool @ ("head" | "tail"), "-n", count, path] => {
-            let lines = if *tool == "tail" && count.starts_with('+') {
-                number(&count[1..])?;
-                None
-            } else {
-                Some(number(count)?)
-            };
-            (*path, lines)
-        }
-        ["head" | "tail", count, path] => {
-            let count = count
-                .strip_prefix("-n")
-                .or_else(|| count.strip_prefix('-'))?;
-            (*path, Some(number(count)?))
-        }
-        ["sed", "-n", range, path] => {
-            let range = range.strip_suffix('p')?;
-            let lines = if let Some((start, end)) = range.split_once(',') {
-                let start = number(start)?.checked_sub(1)?;
-                if end == "$" {
-                    None
-                } else {
-                    Some(number(end)?.checked_sub(start).filter(|count| *count > 0)?)
-                }
-            } else if range == "$" {
-                Some(1)
-            } else {
-                number(range)?.checked_sub(1)?;
-                Some(1)
-            };
-            (*path, lines)
-        }
-        ["echo", args @ ..]
-            if !args.first().is_some_and(|arg| {
-                arg.strip_prefix('-').is_some_and(|flags| {
-                    !flags.is_empty() && flags.chars().all(|ch| matches!(ch, 'n' | 'e' | 'E'))
-                })
-            }) =>
-        {
-            // Echo escape handling differs between shells.
-            if args.iter().any(|arg| arg.contains('\\')) {
-                return None;
-            }
-            return Some(ShellOutput {
-                path: None,
-                lines: Some(
-                    args.join(" ").lines().count().max(1)
-                        + usize::from(args.last().is_some_and(|arg| arg.ends_with('\n'))),
-                ),
-                numbered: false,
-                diff: false,
-            });
-        }
-        ["printf", format, args @ ..] => {
-            let output = printf_separator(format, args)?;
-            if !output.is_empty() && !output.ends_with('\n') {
-                return None;
-            }
-            return Some(ShellOutput {
-                path: None,
-                lines: Some(output.lines().count()),
-                numbered: false,
-                diff: false,
-            });
-        }
-        _ => return None,
-    };
-    (!path.is_empty() && !path.starts_with('-')).then(|| ShellOutput {
-        path: Some(path.to_owned()),
-        lines,
-        numbered,
-        diff: false,
-    })
-}
-
 fn printf_separator(format: &str, args: &[&str]) -> Option<String> {
     let mut output = String::new();
     let mut argument = 0;
@@ -1278,167 +1159,6 @@ fn printf_separator(format: &str, args: &[&str]) -> Option<String> {
     }
 }
 
-fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<Section>> {
-    let mut prefix_len = 0;
-    for line in text.split_inclusive('\n') {
-        if line.starts_with("Warning: truncated output (original token count: ")
-            || line
-                .strip_prefix("Total output lines: ")
-                .is_some_and(|count| count.trim().parse::<usize>().is_ok())
-            || (prefix_len > 0 && line.trim().is_empty())
-        {
-            prefix_len += line.len();
-        } else {
-            break;
-        }
-    }
-    if prefix_len > 0 {
-        let mut sections = vec![Section::Text {
-            label: label.into(),
-            text: text[..prefix_len].into(),
-        }];
-        sections.extend(shell_output_sections(command, label, &text[prefix_len..])?);
-        return Some(sections);
-    }
-    let commands = crate::ui::shell_commands::split(command)?;
-    let reads = commands
-        .iter()
-        .map(|range| {
-            let command = &command[range.range.clone()];
-            let pipeline = shell_summary::pipeline_words(command)?;
-            let read = shell_read(command);
-            if pipeline.len() > 1 && read.is_none() {
-                return None;
-            }
-            Some(read)
-        })
-        .collect::<Option<Vec<_>>>()?;
-    reads.first()?.as_ref()?;
-    let section = |read: Option<&ShellOutput>, text: &str| {
-        if let Some(read) = read {
-            if read.diff {
-                return Section::Diff {
-                    label: String::new(),
-                    text: text.into(),
-                };
-            }
-            if let Some(path) = &read.path {
-                let mut section = file_section(label, path, text);
-                match &mut section {
-                    Section::Markdown { .. } => return section,
-                    Section::Code { lang, .. }
-                        if crate::ui::highlight::find_syntax(lang).is_some() =>
-                    {
-                        if read.numbered {
-                            *lang = format!("numbered:{lang}");
-                        }
-                        return section;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Section::Text {
-            label: label.into(),
-            text: text.into(),
-        }
-    };
-    let truncated = |line: &str| {
-        line.contains("[... omitted end of long line]")
-            || line
-                .split_once(" tokens truncated")
-                .is_some_and(|(prefix, _)| {
-                    prefix
-                        .trim_end_matches(|ch: char| ch.is_ascii_digit())
-                        .ends_with('…')
-                        && prefix.ends_with(|ch: char| ch.is_ascii_digit())
-                })
-    };
-    let mut ends = vec![0];
-    ends.extend(text.split_inclusive('\n').scan(0, |offset, line| {
-        *offset += line.len();
-        Some(*offset)
-    }));
-    let marker = text.lines().position(truncated);
-    let split = || {
-        let mut line = 0usize;
-        let mut sections = Vec::new();
-        for (index, read) in reads.iter().enumerate() {
-            let read = read.as_ref();
-            let remainder = read
-                .is_none_or(|read| (read.lines.is_none() || read.diff) && index + 1 < reads.len());
-            let end = match read.and_then(|read| read.lines) {
-                Some(count) => line.checked_add(count)?,
-                None => ends.len() - 1,
-            };
-            let start = *ends.get(line)?;
-            if let Some(marker) = marker.filter(|marker| *marker >= line && *marker < end) {
-                let marker_byte = ends[marker];
-                if marker_byte > start {
-                    sections.push(section(
-                        read.filter(|_| !remainder),
-                        &text[start..marker_byte],
-                    ));
-                }
-                if !remainder && index + 1 == reads.len() {
-                    let tail = &text[marker_byte..];
-                    let mut start = 0;
-                    for (offset, row) in tail.split_inclusive('\n').scan(0, |offset, row| {
-                        let start = *offset;
-                        *offset += row.len();
-                        Some((start, row))
-                    }) {
-                        if truncated(row) {
-                            if start < offset {
-                                sections.push(section(read, &tail[start..offset]));
-                            }
-                            sections.push(section(None, row));
-                            start = offset + row.len();
-                        }
-                    }
-                    if start < tail.len() {
-                        sections.push(section(read, &tail[start..]));
-                    }
-                } else {
-                    sections.push(section(None, &text[marker_byte..]));
-                }
-                return Some(sections);
-            }
-            let end_byte = *ends.get(end)?;
-            // A following command cannot start halfway through a stdout line.
-            if !remainder
-                && index + 1 < reads.len()
-                && end_byte > start
-                && !text[..end_byte].ends_with('\n')
-            {
-                return None;
-            }
-            sections.push(section(read.filter(|_| !remainder), &text[start..end_byte]));
-            line = end;
-            if remainder {
-                break;
-            }
-        }
-        (line == ends.len() - 1).then_some(sections)
-    };
-    if let Some(sections) = split() {
-        return Some(sections);
-    }
-    let paths = reads
-        .iter()
-        .map(|read| read.as_ref()?.path.as_deref())
-        .collect::<Option<Vec<_>>>()?;
-    let path = *paths.first()?;
-    let syntax = crate::ui::highlight::find_syntax(file_language(path))?;
-    paths
-        .iter()
-        .all(|path| {
-            crate::ui::highlight::find_syntax(file_language(path))
-                .is_some_and(|other| other.scope == syntax.scope)
-        })
-        .then(|| vec![section(reads.first().and_then(Option::as_ref), text)])
-}
-
 fn highlight_shell_output(call: &mut ToolCall) {
     if !matches!(rule(&call.name).output, Some(Output::Shell)) {
         return;
@@ -1455,7 +1175,16 @@ fn highlight_shell_output(call: &mut ToolCall) {
             .flat_map(|section| {
                 if let Section::Text { label, text } = &section
                     && matches!(label.as_str(), "stdout" | "output")
-                    && let Some(sections) = shell_output_sections(command, label, text)
+                    && let Some(sections) = shell_output_sections(
+                        command,
+                        label,
+                        text,
+                        Stream {
+                            exit_code: call.exit_code,
+                            is_error: call.is_error,
+                            ..rule(&call.name).shell_stream
+                        },
+                    )
                 {
                     return sections;
                 }
@@ -1541,365 +1270,22 @@ mod tests {
     }
 
     fn shell_output(command: &str, text: &str) -> Vec<crate::event::Section> {
-        super::shell_output_sections(command, "stdout", text).unwrap_or_else(|| {
-            vec![crate::event::Section::Text {
-                label: "stdout".into(),
-                text: text.into(),
-            }]
-        })
-    }
-
-    #[test]
-    fn shell_output_short_counts_and_pipes() {
-        for command in [
-            "head -1 a.rs",
-            "tail -1 a.rs",
-            "head -n1 a.rs",
-            "tail -n1 a.rs",
-            "cat a.rs | head -1",
-            "cat a.rs | tail -1",
-            "cat a.rs | sed -n '2p'",
-        ] {
-            assert_eq!(
-                shell_output(&format!("{command}; cat b.py"), "let a = 1;\nprint(1)"),
-                vec![
-                    super::code_section("stdout", "rs", "let a = 1;\n"),
-                    super::code_section("stdout", "py", "print(1)")
-                ],
-                "{command}"
-            );
-        }
-        assert_eq!(
-            shell_output("tail -n +2 a.rs", "let a = 1;"),
-            vec![super::code_section("stdout", "rs", "let a = 1;")]
-        );
-        assert!(matches!(
-            shell_output("tail -n +2 a.rs; cat b.py", "one\ntwo").as_slice(),
-            [crate::event::Section::Text { .. }]
-        ));
-    }
-
-    #[test]
-    fn shell_output_numbered_and_multiple_files() {
-        for command in ["nl -ba a.rs", "cat -n a.rs", "nl -ba a.rs | sed -n '1,2p'"] {
-            assert_eq!(
-                shell_output(command, "     1\tfn main() {}"),
-                vec![super::code_section(
-                    "stdout",
-                    "numbered:rs",
-                    "     1\tfn main() {}"
-                )],
-                "{command}"
-            );
-        }
-        assert_eq!(
-            shell_output("cat a.rs b.rs", "fn a() {}\nfn b() {}"),
-            vec![super::code_section("stdout", "rs", "fn a() {}\nfn b() {}")]
-        );
-        assert!(matches!(
-            shell_output("cat a.rs b.py", "one\ntwo").as_slice(),
-            [crate::event::Section::Text { .. }]
-        ));
-    }
-
-    #[test]
-    fn shell_output_diff_and_search() {
-        use crate::event::Section;
-        let diff = "@@ -1 +1 @@\n-old\n+new";
-        for command in [
-            "git diff -- a.rs",
-            "git show HEAD",
-            "git log -p -1",
-            "diff -u a.rs b.rs",
-            "git diff | head -2",
-            "git diff | sed -n '1,3p'",
-        ] {
-            assert!(
-                matches!(
-                    shell_output(command, diff).as_slice(),
-                    [Section::Diff { .. }]
-                ),
-                "{command}"
-            );
-            let sections = shell_output(
-                &format!("sed -n '1p' a.rs; {command}"),
-                &format!("fn main() {{}}\n{diff}"),
-            );
-            assert!(
-                matches!(
-                    sections.as_slice(),
-                    [Section::Code { .. }, Section::Diff { .. }]
-                ),
-                "{command}"
-            );
-        }
-        for command in [
-            "rg -n foo src",
-            "grep -n foo a.rs",
-            "git diff | grep foo",
-            "git diff; cat a.rs",
-            "git show HEAD | tail -1",
-        ] {
-            assert!(
-                matches!(
-                    shell_output(command, diff).as_slice(),
-                    [Section::Text { .. }]
-                ),
-                "{command}"
-            );
-        }
-    }
-
-    #[test]
-    fn shell_output_truncation_keeps_known_prefix() {
-        use crate::event::Section;
-        let output = shell_output(
-            "sed -n '1p' a.rs; sed -n '1,4p' b.py",
-            "Total output lines: 5\n\nfn main() {}\nprint(1)\n…238 tokens truncated…\nprint(4)",
-        );
-        assert!(matches!(output.as_slice(),
-            [Section::Text { .. }, Section::Code { lang: a, .. }, Section::Code { lang: b, .. },
-             Section::Text { text: marker, .. }, Section::Code { lang: c, .. }]
-            if a == "rs" && b == "py" && c == "py" && marker.contains("tokens truncated")));
-        let output = shell_output(
-            "sed -n '1,4p' a.rs; cat b.py",
-            "fn main() {}\n…238 tokens truncated…\nprint(4)",
-        );
-        assert!(matches!(
-            output.as_slice(),
-            [Section::Code { .. }, Section::Text { .. }]
-        ));
-        let output = shell_output(
-            "cat a.rs",
-            "fn main() {}\n[... omitted end of long line]\nfn last() {}",
-        );
-        assert!(matches!(
-            output.as_slice(),
-            [
-                Section::Code { .. },
-                Section::Text { .. },
-                Section::Code { .. }
-            ]
-        ));
-    }
-
-    #[test]
-    fn shell_output_splits_mixed_file_reads() {
-        use crate::event::Section;
-        let output = shell_output(
-            "sed -n '4,5p' a.rs\nhead -n 1 b.py; cat Cargo.toml",
-            "fn main() {\n}\nprint('hi')\n[package]\nname = 'agents'",
-        );
-        assert_eq!(
-            output,
-            vec![
-                super::code_section("stdout", "rs", "fn main() {\n}\n"),
-                super::code_section("stdout", "py", "print('hi')\n"),
-                super::code_section("stdout", "toml", "[package]\nname = 'agents'"),
-            ]
-        );
-        let output = shell_output(
-            "sed -n '1p' a.rs && echo '---'; tail -n 1 b.py",
-            "fn main() {}\n---\nprint('hi')",
-        );
-        assert_eq!(
-            output,
-            vec![
-                super::code_section("stdout", "rs", "fn main() {}\n"),
-                Section::Text {
+        super::shell_output_sections(command, "stdout", text, super::Stream::default())
+            .unwrap_or_else(|| {
+                vec![crate::event::Section::Text {
                     label: "stdout".into(),
-                    text: "---\n".into()
-                },
-                super::code_section("stdout", "py", "print('hi')"),
-            ]
-        );
+                    text: text.into(),
+                }]
+            })
     }
 
     #[test]
-    fn shell_output_splits_reads_before_other_commands() {
-        use crate::event::Section;
-        let first = "let first = 1;\n".repeat(341);
-        let second = "let second = 2;\n".repeat(181);
-        let tail = "12345 agents/tests/fixtures/claude-tool-calls.jsonl\n678 agents/tests/fixtures/claude-tool-calls.jsonl\n";
-        let command = "sed -n '60,400p' agents/src/ui/log.rs\nsed -n '1080,1260p' agents/src/ui/log.rs\nwc -c agents/tests/fixtures/claude-tool-calls.jsonl\nwc -l agents/tests/fixtures/claude-tool-calls.jsonl";
+    fn shell_output_cd_before_sed() {
+        let text = "export const check = true;\n".repeat(36);
         assert_eq!(
-            shell_output(command, &format!("{first}{second}{tail}")),
-            vec![
-                super::code_section("stdout", "rs", &first),
-                super::code_section("stdout", "rs", &second),
-                Section::Text {
-                    label: "stdout".into(),
-                    text: tail.into()
-                },
-            ]
+            shell_output("cd /a/b/tests && sed -n 35,70p checks.test.mjs", &text),
+            vec![super::code_section("stdout", "mjs", &text)]
         );
-        assert_eq!(
-            shell_output(
-                "sed -n '1p' a.rs; rg foo src",
-                "let foo = 1;\nsrc/main.rs:foo\n"
-            ),
-            vec![
-                super::code_section("stdout", "rs", "let foo = 1;\n"),
-                Section::Text {
-                    label: "stdout".into(),
-                    text: "src/main.rs:foo\n".into()
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn shell_output_stops_at_unknown_counts() {
-        use crate::event::Section;
-        for command in [
-            "sed -n '1p' a.rs; cat b.py; head -n 1 c.rs",
-            "sed -n '1p' a.rs; sed -n '2,$p' b.py; head -n 1 c.rs",
-            "sed -n '1p' a.rs; ls; head -n 1 c.rs",
-            "sed -n '1p' a.rs; pwd; head -n 1 c.rs",
-        ] {
-            assert_eq!(
-                shell_output(command, "one\ntwo\nthree"),
-                vec![
-                    super::code_section("stdout", "rs", "one\n"),
-                    Section::Text {
-                        label: "stdout".into(),
-                        text: "two\nthree".into()
-                    },
-                ],
-                "{command}"
-            );
-        }
-        assert!(
-            super::shell_output_sections("rg foo src; sed -n '1p' a.rs", "stdout", "one\ntwo")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn shell_output_validates_counts_before_splitting() {
-        use crate::event::Section;
-        for command in [
-            "head -n 2 a.rs; head -n 2 b.py",
-            "head -n 1 a.rs; head -n 1 b.py",
-            "head -n 2 a.rs; head -n 2 b.py; rg foo src",
-            "cat a.rs; cat b.py",
-            "sed -n '1,$p' a.rs; cat b.py",
-        ] {
-            assert!(
-                matches!(
-                    shell_output(command, "one\ntwo\nthree").as_slice(),
-                    [Section::Text { .. }]
-                ),
-                "{command}"
-            );
-        }
-        assert_eq!(
-            shell_output("head -n 2 a.rs; head -n 2 b.rs", "one\ntwo"),
-            vec![super::code_section("stdout", "rs", "one\ntwo")]
-        );
-        assert_eq!(
-            shell_output("cat a.rs; cat b.rs", "one\ntwo"),
-            vec![Section::Text {
-                label: "stdout".into(),
-                text: "one\ntwo".into()
-            }]
-        );
-        assert_eq!(
-            shell_output("head -n 1 a.rs; cat b.py", "one\n"),
-            vec![
-                super::code_section("stdout", "rs", "one\n"),
-                super::code_section("stdout", "py", "")
-            ]
-        );
-    }
-
-    #[test]
-    fn shell_output_rejects_nonliteral_commands() {
-        use crate::event::Section;
-        for command in [
-            "head -n 1 a.rs | cat; cat b.rs",
-            "head -n 1 a.rs > out; cat b.rs",
-            "head -n 1 $FILE; cat b.rs",
-            "head -n 1 *.rs; cat b.rs",
-            "head -n 1 a.rs; echo \"$X\"; cat b.rs",
-            "head -n 1 a.rs; rg foo src | cat",
-            "head -n 1 a.rs; ls > out",
-        ] {
-            assert!(
-                matches!(
-                    shell_output(command, "one\ntwo").as_slice(),
-                    [Section::Text { .. }]
-                ),
-                "{command}"
-            );
-        }
-    }
-
-    #[test]
-    fn shell_output_counts_literal_separators_and_default_reads() {
-        use crate::event::Section;
-        let text = format!("{}---\n===\nlast", "line\n".repeat(10));
-        let output = shell_output(
-            "head a.rs; printf '%s\\n' '---' '==='; sed -n '1,$p' b.py",
-            &text,
-        );
-        assert_eq!(output.len(), 3);
-        assert!(matches!(&output[1], Section::Text { text, .. } if text == "---\n===\n"));
-        let output = shell_output(
-            "sed -n '1p' a.unknown-language; cat b.py",
-            "plain\nprint('hi')",
-        );
-        assert!(matches!(&output[0], Section::Text { text, .. } if text == "plain\n"));
-        assert!(matches!(&output[1], Section::Code { lang, .. } if lang == "py"));
-    }
-
-    #[test]
-    fn shell_read_path_accepts_only_one_literal_file() {
-        for (command, path) in [
-            ("sed -n '10,80p' src/foo.rs", "src/foo.rs"),
-            ("sed -n '1,$p' src/foo.rs", "src/foo.rs"),
-            ("cat 'foo bar.py'", "foo bar.py"),
-            ("head foo.ts", "foo.ts"),
-            ("head -n 50 foo.ts", "foo.ts"),
-            ("tail -n 20 foo.go", "foo.go"),
-            ("cat 'foo;bar.rs'", "foo;bar.rs"),
-        ] {
-            assert_eq!(
-                super::shell_read(command)
-                    .and_then(|read| read.path)
-                    .as_deref(),
-                Some(path),
-                "{command}"
-            );
-        }
-        for command in [
-            "sed -n 1,5p a.rs | grep x",
-            "cat a.rs&&pwd",
-            "cat a.rs;pwd",
-            "cat a.rs > output",
-            "cat a.rs 2>/dev/null",
-            "cat < a.rs",
-            "cat a.rs &",
-            "cat a.rs\npwd",
-            "cat *.rs",
-            "cat $FILE.rs",
-            "cat $(pwd)/a.rs",
-            "cat `pwd`/a.rs",
-            "cat a{,b}.rs",
-            "cat \"$FILE.rs\"",
-            "cat '' a.rs",
-            "cat ''",
-            "head -n nope a.rs",
-            "sed -n '1p;2p' a.rs",
-            "sed -n '1,2,3p' a.rs",
-            "cat 'a.rs",
-        ] {
-            assert_eq!(
-                super::shell_read(command).and_then(|read| read.path),
-                None,
-                "{command}"
-            );
-        }
     }
 
     #[test]

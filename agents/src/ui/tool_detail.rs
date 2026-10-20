@@ -793,8 +793,12 @@ mod tests {
                     result["toolUseResult"]["file"]["content"] = content.into();
                 }
                 _ => {
-                    call["message"]["content"][0]["input"]["command"] =
-                        format!("{name} {path}").into();
+                    let command = if name == "head" {
+                        format!("head -n {} {path}", content.lines().count())
+                    } else {
+                        format!("{name} {path}")
+                    };
+                    call["message"]["content"][0]["input"]["command"] = command.into();
                     result["toolUseResult"]["stdout"] = content.into();
                     result["toolUseResult"]["stderr"] = "".into();
                 }

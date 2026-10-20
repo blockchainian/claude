@@ -2115,7 +2115,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn shell_multiple_file_reads_highlight_stdout() {
+    fn shell_multiple_file_reads_with_mixed_languages_stay_plain() {
         let mut records: Vec<Value> =
             include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
                 .lines()
@@ -2130,14 +2130,12 @@ pub(crate) mod tests {
         records[1]["message"]["content"][0]["content"] = stdout.into();
         let events = events_from(records);
         let output = events[0].calls[0].output.as_ref().unwrap();
-        assert_eq!(output.len(), 4);
-        assert_eq!(output[0], code_section("stdout", "rs", "fn main() {}\n"));
-        assert!(matches!(&output[1], Section::Text { label, text }
-            if label == "stdout" && text == "---\n"));
-        assert_eq!(output[2], code_section("stdout", "py", "print('ready')\n"));
         assert_eq!(
-            output[3],
-            code_section("stdout", "toml", "[package]\nname = \"agents\"")
+            output,
+            &vec![Section::Text {
+                label: "stdout".into(),
+                text: stdout.into(),
+            }]
         );
     }
 

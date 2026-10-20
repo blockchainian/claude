@@ -2869,7 +2869,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_multiple_file_reads_highlight_stdout() {
+    fn shell_multiple_file_reads_with_mixed_languages_stay_plain() {
         let mut record = tool_records()
             .into_iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2882,25 +2882,17 @@ mod tests {
         writeln!(file.as_file(), "{record}").unwrap();
         let events = tail(file.path(), 20).unwrap();
         let output = events[0].calls[0].output.as_ref().unwrap();
-        assert_eq!(output.len(), 4);
         assert_eq!(
-            output[0],
-            tool::code_section("output", "rs", "fn main() {}\n")
-        );
-        assert!(matches!(&output[1], Section::Text { label, text }
-            if label == "output" && text == "---\n"));
-        assert_eq!(
-            output[2],
-            tool::code_section("output", "py", "print('ready')\n")
-        );
-        assert_eq!(
-            output[3],
-            tool::code_section("output", "toml", "[package]\nname = \"agents\"")
+            output,
+            &vec![Section::Text {
+                label: "output".into(),
+                text: stdout.into(),
+            }]
         );
     }
 
     #[test]
-    fn shell_file_reads_before_other_commands_highlight_stdout() {
+    fn shell_file_reads_before_unknown_commands_stay_plain() {
         let mut record = tool_records()
             .into_iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
@@ -2912,13 +2904,10 @@ mod tests {
         let events = tail(file.path(), 20).unwrap();
         assert_eq!(
             events[0].calls[0].output.as_ref().unwrap(),
-            &vec![
-                tool::code_section("output", "rs", "let foo = 1;\n"),
-                Section::Text {
-                    label: "output".into(),
-                    text: "src/main.rs:foo\n".into(),
-                },
-            ]
+            &vec![Section::Text {
+                label: "output".into(),
+                text: "let foo = 1;\nsrc/main.rs:foo\n".into(),
+            }]
         );
     }
 
