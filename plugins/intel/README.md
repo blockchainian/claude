@@ -65,6 +65,17 @@ path.
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
+Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
+`.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
+performance summaries to `.unminify/performance.jsonl` in the target Git root. Telemetry
+contains no credentials or source text. Analyze the latest run locally with
+`node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo>`; optional `--run-id <id>`,
+`--window-seconds 10` and `--slow-files 10` select the run, window size and slow-file count.
+The JSON report includes windowed throughput, concurrency, latency and 429 counts, phase
+elapsed times and slow files. Summary latency/throughput include refresh HTTP attempts;
+local-step times include nested work and phase totals can overlap.
+
+
 ## Tests
 
 Run `npm run test:intel` from the marketplace root. The unminify end-to-end check calls the real

@@ -122,6 +122,7 @@ test('GOAWAY and disconnected sessions are replaced for subsequent requests', { 
   await closed;
   await c.respond(request);
   assert.equal(sessions.size, 3);
+  assert.deepEqual(f.logs.map(row => row.session_id), [1, 2, 3]);
 });
 
 test('refresh on another origin uses a separate HTTP/2 session', async t => {
@@ -199,7 +200,7 @@ test('redirects are refused and retried as transport failures without following 
   });
   await assert.rejects(f.client().respond(request), /network or stream failure/);
   assert.equal(calls, 4);
-  assert(f.logs.every(event => event.status === null));
+  assert(f.logs.every(event => event.status === 307));
 });
 
 test('temporary rate limits retry rather than terminally exhausting the client', async t => {
@@ -511,4 +512,49 @@ test('refresh failure is terminal AUTH with no credential material', async t => 
   await assert.rejects(c.respond(request), error => error.code === 'AUTH' && !String(error).includes('fake-refresh'));
   await assert.rejects(c.respond(request), { code: 'AUTH' });
   assert.equal(calls, 1);
+});
+
+test('attempt telemetry measures queue, headers, retry, pause and refresh without payloads', async t => {
+  let calls = 0;
+  const events = [];
+  const f = await fixture(t, async (req, res) => {
+    if (req.url === '/oauth/token') { res.end(JSON.stringify({ access_token: fresh() })); return; }
+    calls++;
+    await delay(10);
+    if (calls === 1) { res.writeHead(429, { 'retry-after': '0.03' }); res.end('{}'); return; }
+    send(res);
+  }, { expired: true });
+  const c = f.client({ concurrency: 1, runId: 'telemetry', event: record => events.push(record) });
+  await Promise.all(Array.from({ length: 3 }, (_, i) => c.respond({ ...request,
+    telemetry: { file: 'a.js', batch_id: String(i), phase: 'model' } })));
+  await c.close();
+  assert.equal(f.logs.length, 5);
+  for (const row of f.logs) {
+    assert.equal(row.run_id, 'telemetry');
+    assert(row.queued_at <= row.sent_at);
+    assert(row.sent_at <= row.headers_at);
+    assert(row.headers_at <= row.ended_at);
+    assert.equal(row.duration_ms, row.ended_at - row.sent_at);
+    assert(row.body_bytes > 0);
+    assert.equal(row.in_flight, 1);
+    assert(row.queued >= 0);
+    assert.equal(row.session_id, 1);
+    assert(row.attempt >= 1);
+  }
+  const model = f.logs.filter(row => row.kind === 'model');
+  assert(model.some(row => row.queued > 0));
+  assert(model.some(row => row.sent_at - row.queued_at >= 20));
+  assert.equal(model[1].attempt, 2);
+  assert.equal(model[1].previous_failure, 'HTTP_429');
+  assert.equal(model[0].file, 'a.js');
+  assert.equal(model[0].batch_id, '0');
+  assert.equal(model[0].phase, 'model');
+  const start = events.find(row => row.type === 'pause_start');
+  const end = events.find(row => row.type === 'pause_end');
+  assert.equal(start.retry_after, '0.03');
+  assert.equal(end.pause_id, start.pause_id);
+  assert(end.ended_at - start.started_at >= 25);
+  const serialized = JSON.stringify([f.logs, events]);
+  for (const secret of [...Object.values(f.auth.tokens).filter(v => typeof v === 'string'), 'hello', 'Return text.'])
+    assert(!serialized.includes(secret));
 });

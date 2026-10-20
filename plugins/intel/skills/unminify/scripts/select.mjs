@@ -1,3 +1,4 @@
+import { timed } from './timing.mjs';
 import { readFile, readdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -10,7 +11,7 @@ import ignore from 'ignore';
 const traverse = traverseModule.default ?? traverseModule;
 const generate = generateModule.default ?? generateModule;
 const exec = promisify(execFile);
-const parseSource = source => parse(source, { sourceType: 'unambiguous' });
+const parseSource = source => timed('parse', () => parse(source, { sourceType: 'unambiguous' }));
 const bytes = code => Buffer.byteLength(code, 'utf8');
 const inside = (node, container) => node.start >= container.start && node.end <= container.end;
 const isOwner = p => p.isFunction() || p.isClass();
@@ -30,7 +31,7 @@ function analyze(source) {
 }
 
 /** Paths are relative to the enclosing Git root; ignore rules to their own file. */
-export async function listFiles(dir, { ignoreFile } = {}) {
+export async function listFiles(dir, { ignoreFile, onParse } = {}) {
   dir = await realpath(dir);
   const root = (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: dir })).stdout.trim();
   const rulesFile = ignoreFile ? await realpath(ignoreFile) : path.join(root, '.ignore');
@@ -50,8 +51,10 @@ export async function listFiles(dir, { ignoreFile } = {}) {
         if (entry.name !== '.git' && !ignored(file + path.sep)) await walk(file);
       } else if (entry.isFile() && /\.m?js$/.test(entry.name) && !ignored(file)) {
         const source = await readFile(file, 'utf8');
+        const startedAt = Date.now(), started = performance.now();
         try { parseSource(source); }
         catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+        onParse?.(path.relative(root, file).split(path.sep).join('/'), startedAt, performance.now() - started);
         files.push(path.relative(root,file).split(path.sep).join('/'));
       }
     }

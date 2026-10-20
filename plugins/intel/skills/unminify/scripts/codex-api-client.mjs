@@ -97,11 +97,12 @@ async function consume(response, metrics) {
 /** A file-backed ChatGPT Responses client. Endpoint and timing overrides support local tests.
  * respond({ model, effort, instructions, input, schema?, validate? }) returns { output, usage }.
  * With schema, output is parsed JSON; validate(output) may throw to request a retry.
- * log receives { kind, status, duration_ms, usage, rate_headers } for each HTTP attempt.
+ * log receives timing, queue, session and safe response metadata for each HTTP attempt.
+ * event receives shared rate-limit pause boundaries; telemetry identifies the calling batch.
  * close() drains accepted calls and prevents further calls.
  */
 export function createCodexClient({ concurrency = 20, codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'),
-  log = () => {}, baseUrl = 'https://chatgpt.com/backend-api/codex',
+  log = () => {}, event = () => {}, queued = () => 0, runId = randomUUID(), baseUrl = 'https://chatgpt.com/backend-api/codex',
   refreshUrl = 'https://auth.openai.com/oauth/token', timeoutMs = 120_000, retryDelayMs = 500,
   rateLimitDelayMs = 60_000 } = {}) {
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new Error('Invalid concurrency.');
@@ -114,23 +115,30 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
   let terminal, accepting = true, active = 0;
   const queue = [], drain = [];
   const sessions = new Map(), connections = new Set();
-  let pausedUntil = 0, pauseWait;
+  let pausedUntil = 0, pauseWait, inFlight = 0, sessionNumber = 0, pauseNumber = 0;
+  const sessionIds = new WeakMap(), pauses = new Map();
+  function endPauses() {
+    const ended_at = Date.now();
+    for (const [pause_id, started_at] of pauses) event({ type: 'pause_end', run_id: runId, pause_id, started_at, ended_at, at: ended_at });
+    pauses.clear();
+  }
   const stopped = new AbortController();
 
   function stop(error) {
     terminal = error;
     stopped.abort();
+    endPauses();
     return error;
   }
   async function waitForRateLimit() {
     if (terminal) throw terminal;
-    if (performance.now() >= pausedUntil) return;
+    if (performance.now() >= pausedUntil) { endPauses(); return; }
     if (!pauseWait) pauseWait = (async () => {
       while (performance.now() < pausedUntil) {
         await delay(Math.min(pausedUntil - performance.now(), 2_147_483_647), undefined,
           { signal: stopped.signal });
       }
-    })().catch(error => { throw terminal ?? error; }).finally(() => { pauseWait = undefined; });
+    })().catch(error => { throw terminal ?? error; }).finally(() => { pauseWait = undefined; endPauses(); });
     await pauseWait;
   }
 
@@ -150,12 +158,17 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     } catch { throw authError(); }
   }
 
-  async function logged(kind, operation) {
-    const started = performance.now();
-    const metrics = { kind, status: null, duration_ms: 0, usage: null, rate_headers: {} };
+  async function logged(kind, operation, context = {}) {
+    const metrics = { kind, run_id: runId, file: context.file ?? null, batch_id: context.batch_id ?? null,
+      phase: context.phase ?? 'auth', queued_at: context.queued_at ?? Date.now(), sent_at: null,
+      headers_at: null, ended_at: null, attempt: context.attempt ?? 1,
+      previous_failure: context.previous_failure ?? null, session_id: null, body_bytes: 0,
+      in_flight: 0, queued: 0, status: null, duration_ms: 0, usage: null, rate_headers: {} };
     try { return await operation(metrics); }
     finally {
-      metrics.duration_ms = performance.now() - started;
+      metrics.ended_at = Date.now();
+      metrics.duration_ms = metrics.sent_at === null ? 0 : metrics.ended_at - metrics.sent_at;
+      if (metrics.sent_at !== null) inFlight--;
       try { await log(metrics); } catch { throw new Error('Request logging failed.'); }
     }
   }
@@ -163,6 +176,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     let session = sessions.get(origin);
     if (session && !session.closed && !session.destroyed) return session;
     session = connect(origin);
+    sessionIds.set(session, ++sessionNumber);
     sessions.set(origin, session);
     connections.add(session);
     const forget = () => { if (sessions.get(origin) === session) sessions.delete(origin); };
@@ -176,27 +190,37 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     const payload = JSON.stringify(body);
     const target = new URL(url);
     const session = sessionFor(target.origin);
+    metrics.body_bytes = Buffer.byteLength(payload);
+    metrics.session_id = sessionIds.get(session);
     return new Promise((resolve, reject) => {
       const stream = session.request({ ':method': 'POST', ':path': target.pathname + target.search,
         'content-type': 'application/json', ...headers,
         [constants.sensitiveHeaders]: ['authorization', 'chatgpt-account-id'] });
+      metrics.sent_at = Date.now();
+      metrics.in_flight = ++inFlight;
+      metrics.queued = queued() + queue.length + Math.max(0, active - inFlight);
       // Keep the deadline active through the entire response, including SSE consumption.
       const timer = setTimeout(() => stream.destroy(new Error('Request timed out.')), timeoutMs);
       stream.once('close', () => { clearTimeout(timer); reject(new Error('Request closed.')); });
       stream.on('error', reject);
       stream.once('response', responseHeaders => {
+        metrics.headers_at = Date.now();
+        metrics.status = responseHeaders[':status'];
+        metrics.rate_headers = rateHeaders(Object.entries(responseHeaders), secrets);
         if ([301, 302, 303, 307, 308].includes(responseHeaders[':status']) && responseHeaders.location !== undefined) {
           stream.close(constants.NGHTTP2_CANCEL);
           reject(new Error('Redirect refused.'));
           return;
         }
-        metrics.status = responseHeaders[':status'];
-        metrics.rate_headers = rateHeaders(Object.entries(responseHeaders), secrets);
         if (url === endpoint && metrics.status === 429) {
           const value = responseHeaders['retry-after'];
           const seconds = typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : NaN;
           const waitMs = Number.isFinite(seconds * 1000) ? seconds * 1000 : rateLimitDelayMs;
           pausedUntil = Math.max(pausedUntil, performance.now() + waitMs);
+          const pause_id = ++pauseNumber, started_at = Date.now();
+          pauses.set(pause_id, started_at);
+          event({ type: 'pause_start', run_id: runId, pause_id, started_at, at: started_at,
+            retry_after: metrics.rate_headers['retry-after'] ?? null });
         }
         resolve({ status: metrics.status, ok: metrics.status >= 200 && metrics.status < 300, body: stream });
       });
@@ -265,7 +289,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     }
   }
 
-  async function refresh(auth, reason) {
+  async function refresh(auth, reason, context) {
     const pending = refreshes.get(authPath);
     if (pending) { await pending; return readAuth(); }
     const promise = (async () => {
@@ -280,7 +304,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
             refresh_token: latest.tokens.refresh_token, refresh_reason: reason }, metrics);
           if (!response.ok) { response.body.close(constants.NGHTTP2_CANCEL); throw authError(); }
           return JSON.parse(await responseText(response));
-        });
+        }, { ...context, queued_at: Date.now(), attempt: 1 });
         for (const key of ['access_token', 'refresh_token', 'id_token']) {
           if (data[key] !== undefined && (typeof data[key] !== 'string' || !data[key])) throw authError();
           if (typeof data[key] === 'string') secrets.add(data[key]);
@@ -315,17 +339,20 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     finally { if (refreshes.get(authPath) === promise) refreshes.delete(authPath); }
   }
 
-  async function run({ model, effort, instructions, input, schema, validate }) {
+  async function run({ model, effort, instructions, input, schema, validate, telemetry = {} }) {
     const body = { model, reasoning: { effort }, instructions, input, tools: [], tool_choice: 'auto',
       parallel_tool_calls: false, store: false, stream: true, include: [],
       ...(schema === undefined ? {} : { text: { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } } }) };
-    let recovered = false;
+    let recovered = false, httpAttempt = 0, previousFailure = null;
+    let queuedAt = telemetry.queued_at ?? Date.now();
+    const context = () => ({ file: telemetry.file, batch_id: telemetry.batch_id, phase: telemetry.phase,
+      queued_at: queuedAt, attempt: ++httpAttempt, previous_failure: previousFailure });
     for (let attempt = 0; ; attempt++) {
       if (terminal) throw terminal;
       try {
         let auth = await readAuth();
         const reason = refreshReason(auth);
-        if (reason) auth = await refresh(auth, reason);
+        if (reason) auth = await refresh(auth, reason, telemetry);
         for (;;) {
           await waitForRateLimit();
           if (terminal) throw terminal;
@@ -358,16 +385,20 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
               if (error.retryable || /^Responses HTTP \d+\.$/.test(error.message)) throw error;
               throw retryError('Responses network or stream failure.');
             } finally { if (response?.body) response.body.close(constants.NGHTTP2_CANCEL); }
-          });
-          if (result.rateLimited) continue;
+          }, context());
+          queuedAt = Date.now();
+          if (result.rateLimited) { previousFailure = 'HTTP_429'; continue; }
           if (!result.unauthorized) return result;
           if (recovered) throw authError();
           recovered = true;
-          auth = await refresh(auth, 'unauthorized_recovery');
+          previousFailure = 'HTTP_401';
+          auth = await refresh(auth, 'unauthorized_recovery', telemetry);
         }
       } catch (error) {
         if (['AUTH', 'USAGE_LIMIT'].includes(error.code)) throw stop(error);
         if (!error.retryable || attempt === 3) throw new Error(error.message);
+        previousFailure = error.code ?? error.message;
+        queuedAt = Date.now();
         await delay(retryDelayMs * 2 ** attempt);
       }
     }
@@ -386,11 +417,12 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     respond(request) {
       if (terminal) return Promise.reject(terminal);
       if (!accepting) return Promise.reject(new Error('Responses client is closed.'));
-      return new Promise((resolve, reject) => { queue.push({ request, resolve, reject }); pump(); });
+      return new Promise((resolve, reject) => { queue.push({ request: { ...request, telemetry: { ...request.telemetry, queued_at: request.telemetry?.queued_at ?? Date.now() } }, resolve, reject }); pump(); });
     },
     async close() {
       accepting = false;
       if (active || queue.length) await new Promise(resolve => drain.push(resolve));
+      endPauses();
       await Promise.all([...connections].filter(session => !session.destroyed).map(session => new Promise(resolve => {
         session.once('close', resolve);
         session.close();

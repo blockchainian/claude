@@ -1,3 +1,4 @@
+import { timed } from './timing.mjs';
 // Rejects rewrites that change module contracts, scope resolution or source text.
 import { execFileSync } from 'node:child_process';
 import { parse } from '@babel/parser';
@@ -90,7 +91,7 @@ function splitExportDeclarations(source, ast, result) {
     offset = edit.end;
   }
   text += source.slice(offset);
-  return { source: text, ast: parse(text, { sourceType: 'module' }) };
+  return { source: text, ast: timed('parse', () => parse(text, { sourceType: 'module' })) };
 }
 
 function header(source) {
@@ -197,8 +198,8 @@ export function checkRewrite(before, after) {
   let result;
   try {
     execFileSync(process.execPath, ['--input-type=module', '--check'], { input: after, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 });
-    original = parse(before, { sourceType: 'module' });
-    result = parse(after, { sourceType: 'module' });
+    original = timed('parse', () => parse(before, { sourceType: 'module' }));
+    result = timed('parse', () => parse(after, { sourceType: 'module' }));
   } catch {
     return 'PARSE_FAIL';
   }
