@@ -149,6 +149,7 @@ export async function run(options, dependencies) {
           }
           if (stop) throw stop;
           const renames = new Map();
+          let batchFailed = false;
           const endPlanning = phase('selection_plan', file);
           try { ({ stages } = timed('planFile', () => api.planFile(source, planOptions))); }
           finally { endPlanning(); }
@@ -174,8 +175,9 @@ export async function run(options, dependencies) {
                       batch_ids: batchIds, name_count: Object.keys(payload.placeholders).length,
                       phase: 'model', queued_at: queuedAt }); } catch (error) {
                       if (error.code === 'USAGE_LIMIT' || error.code === 'AUTH') throw error;
+                      // Unrecorded batches keep the file unfinished, so resume retries them.
+                      batchFailed = true;
                       for (const { batch } of parts) {
-                        journal.batch(batch.id, new Map(), error.message);
                         summary.failedBatches++;
                         emit({ file, status: 'batch-failed', batch: batch.id, reason: error.message });
                       }
@@ -199,6 +201,7 @@ export async function run(options, dependencies) {
               if (failure) throw failure.reason;
             }
           } finally { endModel(); }
+          if (batchFailed) return;
           const endWriting = phase('check_write', file);
           try {
             const after = timed('applyRenames', () => api.applyRenames(source, renames));

@@ -108,6 +108,18 @@ test('one shared namer, stage ordering, bounded concurrency, completion replay a
   assert.equal(replay.calls, 0);
   assert.deepEqual(deps.events.at(-1), ['close', 0]);
 });
+test('a failed batch leaves its file unwritten and unfinished so resume retries it', async t => {
+  const root = await workspace(t);
+  const failed = contracts(['a.js'], { failAt: 2, code: 'NETWORK' });
+  const result = await run({ dirs: [root], concurrency: 1 }, failed);
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.failedBatches, 2);
+  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'a b c');
+  const resumed = contracts(['a.js']);
+  assert.equal((await run({ dirs: [root] }, resumed)).exitCode, 0);
+  assert.equal(resumed.calls, 1);
+  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
+});
 for (const code of ['AUTH', 'USAGE_LIMIT']) test(`${code} drains in-flight replies, persists them and resumes`, async t => {
   const files = ['a.js', 'b.js'];
   const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });
