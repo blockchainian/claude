@@ -63,10 +63,15 @@ API calls without this context retain the conservative fragment policy. The CLI
 passes the context to both syntax rewriting and its independent checks. Checkpoints
 retain the shadowed intrinsic names rather than unrelated names that renaming may change.
 
-Rules must skip transformations that change fragment Program bindings, declaration
-kinds, declaration grouping or placement. Full local function transformations can
-use complete Babel scopes. `checks.mjs` reparses both texts, verifies fragment
-bindings and declaration layout, and rejects newly introduced free variables except
+Rules must preserve fragment Program binding names and each name's declaration
+kind. Declaration splitting and merging are allowed when declaration initialization
+and statement evaluation retain their order and control regions. Initializer
+prefixes may become statements at the same evaluation position, including inside
+blocks; the rule must separately prove lexical initialization and other expression
+semantics. Declaration counts and destructuring boundaries remain checked.
+Full local function transformations can use complete Babel scopes.
+`checks.mjs` reparses both texts, verifies fragment bindings and the ordered
+declaration/read/call/control events, and rejects newly introduced free variables except
 intrinsics explicitly authorized by the pass's guard. A rejected pass throws before
 any file write. Existing rename checks are independent and unchanged.
 

@@ -19,8 +19,8 @@ test('invalid input and invalid replacement fail without accepting output', () =
   assert.throws(()=>transformSyntax('const = ;'));
   assert.throws(()=>transformSyntax('use(7)',{rules:[{name:'Broken',visitor({replace}) {return { NumericLiteral(p){replace(p,')');} };}}]}), /PARSE_FAIL/);
 });
-test('syntax checks freeze fragment binding kinds and declaration boundaries', () => {
-  for(const [before,after] of [['var shared=1;','let shared=1;'],['var a=1,b=2;','var a=1;var b=2;'],['var shared=1;','var changed=1;'],['if(x){var shared=1;}','if(x){} var shared=1;']])
+test('syntax checks preserve fragment binding kinds and evaluation order', () => {
+  for(const [before,after] of [['var shared=1;','let shared=1;'],['var shared=1;','var changed=1;'],['if(x){var shared=1;}','if(x){} var shared=1;']])
     assert.match(checkSyntaxRewrite(before,after,{fragment:true}),/FRAGMENT/);
   assert.equal(checkSyntaxRewrite('var shared=!0;','var shared=true;',{fragment:true}),null);
 });
