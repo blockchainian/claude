@@ -1,3 +1,4 @@
+import { timed } from './timing.mjs';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import { dirname, resolve } from 'node:path';
@@ -26,7 +27,7 @@ export function toIdentifier(raw) {
 }
 
 function parseSource(source) {
-  return parse(source, { sourceType: 'unambiguous', plugins: ['jsx'] });
+  return timed('parse', () => parse(source, { sourceType: 'unambiguous', plugins: ['jsx'] }));
 }
 
 function analyze(source) {
@@ -203,7 +204,7 @@ function externalName(node) {
   return node.name ?? node.value;
 }
 
-export function followImports(files) {
+export function followImports(files, withFile = (file, task) => task()) {
   const modules = new Map();
   const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
   const targetFile = (file, specifier) => {
@@ -215,7 +216,7 @@ export function followImports(files) {
     return null;
   };
   for (const [file, source] of files) {
-    const analysis = analyze(source);
+    const analysis = withFile(file, () => analyze(source));
     const exports = new Map();
     const stars = [];
     const imports = [];
@@ -289,14 +290,14 @@ export function followImports(files) {
       const name = names.get(exported.key) ?? modules.get(exported.file).analysis.bindings.get(exported.key).name;
       proposals.set(imported.key, name);
     }
-    const names = resolveNames(module.source, proposals);
+    const names = withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals)));
     resolved.set(file, names);
     return names;
   }
   const changed = new Map();
   for (const [file, module] of modules) {
     const names = plan(file);
-    if (names.size) changed.set(file, applyRenames(module.source, names));
+    if (names.size) changed.set(file, withFile(file, () => timed('applyRenames', () => applyRenames(module.source, names))));
   }
   return changed;
 }

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { randomUUID } from 'node:crypto';
+import { withTimings, timed, intervalMs, requestStats } from './timing.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -43,144 +45,238 @@ export async function run(options, dependencies) {
   for (const key of Object.keys(defaults)) {
     if (!Number.isSafeInteger(settings[key]) || settings[key] < 1) throw new Error(`${key} must be a positive integer`);
   }
-  const api = dependencies ?? await modules();
-  const output = api.output ?? (line => console.log(line));
-  const emit = record => output(JSON.stringify(record));
+  const startedAt = Date.now(), runId = randomUUID();
   const dir = resolve(settings.dir);
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' }).trim();
-  const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');
-  const files = await api.listFiles(dir, { ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined });
-  const planOptions = { shortLen: settings.shortLen, maxIds: settings.maxIds, contextBytes: settings.contextBytes };
-  const summary = { type: 'summary', files: files.length, completed: 0, skipped: 0, rejected: 0, failedBatches: 0, requests: 0, tokens: Object.fromEntries(usageKeys.map(key => [key, 0])), quota: {}, exitCode: 0 };
-  let stop = null, active = 0;
-  const waiters = [];
-  const sources = new Map(), journals = new Map();
-  const log = record => {
-    appendRecord(join(root, '.unminify', 'requests.jsonl'), record);
-    if (record.kind !== 'model') return;
-    summary.requests++;
-    for (const key of usageKeys) summary.tokens[key] += record.usage?.[key] ?? 0;
-    for (const [header, value] of Object.entries(record.rate_headers ?? {})) {
-      if (!header.endsWith('-used-percent') || !Number.isFinite(Number(value))) continue;
-      const percent = Number(value);
-      const entry = summary.quota[header] ?? { before: percent };
-      entry.after = percent;
-      entry.change = percent - entry.before;
-      summary.quota[header] = entry;
-    }
-  };
-  const namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log });
-  async function withSlot(task) {
-    if (active >= settings.concurrency) await new Promise(resolve => waiters.push(resolve));
-    else active++;
-    try {
-      if (stop) throw stop;
-      return await task();
-    } catch (error) {
-      if (error.code === 'USAGE_LIMIT' || error.code === 'AUTH') stop ??= error;
-      throw error;
-    } finally {
-      const next = waiters.shift();
-      if (next) next();
-      else active--;
-    }
+  const performancePath = join(root, '.unminify', 'performance.jsonl');
+  const event = record => appendRecord(performancePath, { ...record, run_id: runId });
+  event({ type: 'run_start', at: startedAt });
+  const phases = {}, requests = [], pauses = [], fileMetrics = new Map();
+  function phase(name, file) {
+    const start = Date.now();
+    event({ type: 'phase_start', phase: name, file, at: start });
+    return () => {
+      const end = Date.now();
+      (phases[name] ??= []).push([start, end]);
+      event({ type: 'phase_end', phase: name, file, at: end, started_at: start });
+    };
   }
-  async function processFile(file) {
-    const path = join(root, file);
-    const source = readFileSync(path, 'utf8');
-    sources.set(file, source);
-    const journal = openJournal(root, file, source, planOptions);
-    journals.set(file, journal);
-    if (journal.done) {
-      summary.skipped++;
-      if (journal.done.status === 'rejected') summary.rejected++;
-      emit({ file, status: 'skipped', previous: journal.done.status, ...(journal.done.reason ? { reason: journal.done.reason } : {}) });
-      return;
+  let selectionEnd = phase('selection_plan');
+  const output = dependencies?.output ?? (line => console.log(line));
+  const emit = record => output(JSON.stringify(record));
+  const summary = { type: 'summary', run_id: runId, files: 0, completed: 0, skipped: 0, rejected: 0,
+    failedBatches: 0, requests: 0, tokens: Object.fromEntries(usageKeys.map(key => [key, 0])), quota: {}, exitCode: 0 };
+  function fileMetricsFor(file, at = Date.now()) {
+    if (!fileMetrics.has(file)) {
+      const metrics = { file, started_at: at, last_batch_at: null, written_at: null,
+        cpu_ms: Object.fromEntries(['parse', 'planFile', 'renderBatch', 'resolveNames', 'applyRenames', 'checkRewrite'].map(key => [key, 0])) };
+      fileMetrics.set(file, metrics);
+      event({ type: 'file_start', file, at });
     }
-    const renames = new Map();
-    const { stages } = api.planFile(source, planOptions);
-    for (const stage of stages) {
-      const results = await Promise.allSettled(stage.map(async batch => {
-        if (journal.batches.has(batch.id)) {
-          for (const [key, name] of Object.entries(journal.batches.get(batch.id))) renames.set(Number(key), name);
-          return;
-        }
-        if (stop) throw stop;
-        await withSlot(async () => {
-          const payload = api.renderBatch(source, batch, renames);
-          let response;
-          try { response = await namer.name(payload); } catch (error) {
-            if (error.code === 'USAGE_LIMIT' || error.code === 'AUTH') throw error;
-            journal.batch(batch.id, new Map(), error.message);
-            summary.failedBatches++;
-            emit({ file, status: 'batch-failed', batch: batch.id, reason: error.message });
-            return;
-          }
-          const entries = Object.entries(payload.placeholders);
-          if (!response.names || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string') || Object.keys(response.names).length !== entries.length) throw new Error(`invalid names for ${file}:${batch.id}`);
-          const proposals = new Map(renames);
-          for (const [placeholder, key] of entries) proposals.set(key, response.names[placeholder]);
-          const resolved = api.resolveNames(source, proposals);
-          const names = new Map(batch.keys.filter(key => resolved.has(key)).map(key => [key, resolved.get(key)]));
-          // Persist before exposing a reply to any later render or starting queued work.
-          journal.batch(batch.id, names);
-          for (const [key, name] of names) renames.set(key, name);
-        });
-      }));
-      const failure = results.find(result => result.status === 'rejected');
-      if (failure) throw failure.reason;
-    }
-    const after = api.applyRenames(source, renames);
-    const reason = await api.checkRewrite(source, after);
-    if (reason !== null) {
-      journal.complete(source, 'rejected', reason);
-      summary.rejected++;
-      emit({ file, status: 'rejected', reason });
-      return;
-    }
-    journal.prepare(source, after, 'renamed');
-    atomicWrite(path, after);
-    journal.complete(after, 'renamed');
-    sources.set(file, after);
-    summary.completed++;
-    emit({ file, status: 'renamed', batches: stages.flat().length });
+    return fileMetrics.get(file);
   }
+  let api, namer;
   try {
-    const results = await Promise.allSettled(files.map(processFile));
-    for (let index = 0; index < results.length; index++) {
-      if (results[index].status !== 'rejected') continue;
-      summary.exitCode = 1;
-      emit({ file: files[index], status: 'interrupted', reason: results[index].reason.message });
-    }
-    if (!summary.exitCode) {
-      const changes = await api.followImports(sources);
-      for (const [file, after] of changes) {
-        if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
-        const before = sources.get(file), journal = journals.get(file);
-        const reason = await api.checkRewrite(before, after);
-        if (reason !== null) {
-          journal.rejectImports(reason);
-          summary.rejected++;
-          emit({ file, status: 'imports-rejected', reason });
-          continue;
-        }
-        journal.prepare(before, after, 'imports');
-        atomicWrite(join(root, file), after);
-        journal.complete(after, 'imports');
-        sources.set(file, after);
-        emit({ file, status: 'imports' });
+    api = dependencies ?? await modules();
+    const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');
+    const files = await api.listFiles(dir, {
+      ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined,
+      onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
+    });
+    const planOptions = { shortLen: settings.shortLen, maxIds: settings.maxIds, contextBytes: settings.contextBytes };
+    summary.files = files.length;
+    selectionEnd(); selectionEnd = null;
+    let stop = null, active = 0;
+    const waiters = [];
+    const sources = new Map(), journals = new Map();
+    const log = record => {
+      record = { ...record, run_id: runId };
+      requests.push(record);
+      appendRecord(join(root, '.unminify', 'requests.jsonl'), record);
+      if (record.kind !== 'model') return;
+      summary.requests++;
+      for (const key of usageKeys) summary.tokens[key] += record.usage?.[key] ?? 0;
+      for (const [header, value] of Object.entries(record.rate_headers ?? {})) {
+        if (!header.endsWith('-used-percent') || !Number.isFinite(Number(value))) continue;
+        const percent = Number(value);
+        const entry = summary.quota[header] ?? { before: percent };
+        entry.after = percent;
+        entry.change = percent - entry.before;
+        summary.quota[header] = entry;
+      }
+    };
+    namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
+      event(record) {
+        event(record);
+        if (record.type === 'pause_end') pauses.push([record.started_at, record.ended_at]);
+      } });
+    async function withSlot(task) {
+      if (active >= settings.concurrency) await new Promise(resolve => waiters.push(resolve));
+      else active++;
+      try {
+        if (stop) throw stop;
+        return await task();
+      } catch (error) {
+        if (error.code === 'USAGE_LIMIT' || error.code === 'AUTH') stop ??= error;
+        throw error;
+      } finally {
+        const next = waiters.shift();
+        if (next) next();
+        else active--;
       }
     }
-  } finally { await namer.close(); }
-  if (stop) {
-    output(`${stop.code}: ${stop.code === 'AUTH' ? 'Run codex login, then resume.' : 'Wait for quota to reset, then resume.'} Resume with the same unminify command; completed replies are saved.`);
+    async function processFile(file) {
+      const metrics = fileMetricsFor(file);
+      return withTimings(metrics.cpu_ms, async () => {
+        try {
+          const path = join(root, file);
+          const source = readFileSync(path, 'utf8');
+          sources.set(file, source);
+          const journal = openJournal(root, file, source, planOptions);
+          journals.set(file, journal);
+          if (journal.done) {
+            summary.skipped++;
+            if (journal.done.status === 'rejected') summary.rejected++;
+            emit({ file, status: 'skipped', previous: journal.done.status, ...(journal.done.reason ? { reason: journal.done.reason } : {}) });
+            return;
+          }
+          const renames = new Map();
+          const endPlanning = phase('selection_plan', file);
+          let stages;
+          try { ({ stages } = timed('planFile', () => api.planFile(source, planOptions))); }
+          finally { endPlanning(); }
+          const endModel = phase('model', file);
+          try {
+            for (const stage of stages) {
+              const results = await Promise.allSettled(stage.map(async batch => {
+                try {
+                  if (journal.batches.has(batch.id)) {
+                    for (const [key, name] of Object.entries(journal.batches.get(batch.id))) renames.set(Number(key), name);
+                    return;
+                  }
+                  if (stop) throw stop;
+                  const queuedAt = Date.now();
+                  await withSlot(async () => {
+                    const payload = timed('renderBatch', () => api.renderBatch(source, batch, renames));
+                    let response;
+                    try { response = await namer.name(payload, { file, batch_id: batch.id, phase: 'model', queued_at: queuedAt }); } catch (error) {
+                      if (error.code === 'USAGE_LIMIT' || error.code === 'AUTH') throw error;
+                      journal.batch(batch.id, new Map(), error.message);
+                      summary.failedBatches++;
+                      emit({ file, status: 'batch-failed', batch: batch.id, reason: error.message });
+                      return;
+                    }
+                    const entries = Object.entries(payload.placeholders);
+                    if (!response.names || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string') || Object.keys(response.names).length !== entries.length) throw new Error(`invalid names for ${file}:${batch.id}`);
+                    const proposals = new Map(renames);
+                    for (const [placeholder, key] of entries) proposals.set(key, response.names[placeholder]);
+                    const resolved = timed('resolveNames', () => api.resolveNames(source, proposals));
+                    const names = new Map(batch.keys.filter(key => resolved.has(key)).map(key => [key, resolved.get(key)]));
+                    // Persist before exposing a reply to any later render or starting queued work.
+                    journal.batch(batch.id, names);
+                    for (const [key, name] of names) renames.set(key, name);
+                  });
+                } finally { metrics.last_batch_at = Date.now(); }
+              }));
+              const failure = results.find(result => result.status === 'rejected');
+              if (failure) throw failure.reason;
+            }
+          } finally { endModel(); }
+          const endWriting = phase('check_write', file);
+          try {
+            const after = timed('applyRenames', () => api.applyRenames(source, renames));
+            const reason = await timed('checkRewrite', () => api.checkRewrite(source, after));
+            if (reason !== null) {
+              journal.complete(source, 'rejected', reason);
+              summary.rejected++;
+              emit({ file, status: 'rejected', reason });
+              return;
+            }
+            journal.prepare(source, after, 'renamed');
+            atomicWrite(path, after);
+            journal.complete(after, 'renamed');
+            metrics.written_at = Date.now();
+            sources.set(file, after);
+            summary.completed++;
+            emit({ file, status: 'renamed', batches: stages.flat().length });
+          } finally { endWriting(); }
+        } finally { event({ type: 'file_end', ...metrics, at: Date.now() }); }
+      });
+    }
+    try {
+      const results = await Promise.allSettled(files.map(processFile));
+      for (let index = 0; index < results.length; index++) {
+        if (results[index].status !== 'rejected') continue;
+        summary.exitCode = 1;
+        emit({ file: files[index], status: 'interrupted', reason: results[index].reason.message });
+      }
+      if (!summary.exitCode) {
+        const endImports = phase('followImports');
+        let changes;
+        try {
+          changes = await api.followImports(sources, (file, task) => {
+            const end = phase('followImports', file);
+            try { return withTimings(fileMetrics.get(file).cpu_ms, task); }
+            finally { end(); }
+          });
+        }
+        finally {
+          endImports();
+          for (const metrics of fileMetrics.values()) {
+            if (!changes?.has(metrics.file)) event({ type: 'file_end', ...metrics, at: Date.now() });
+          }
+        }
+        for (const [file, after] of changes) {
+          if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
+          const metrics = fileMetrics.get(file);
+          const endWriting = phase('check_write', file);
+          try {
+            const before = sources.get(file), journal = journals.get(file);
+            const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after)));
+            if (reason !== null) {
+              journal.rejectImports(reason);
+              summary.rejected++;
+              emit({ file, status: 'imports-rejected', reason });
+              continue;
+            }
+            journal.prepare(before, after, 'imports');
+            atomicWrite(join(root, file), after);
+            journal.complete(after, 'imports');
+            sources.set(file, after);
+            metrics.written_at = Date.now();
+            emit({ file, status: 'imports' });
+          } finally {
+            endWriting();
+            event({ type: 'file_end', ...metrics, at: Date.now() });
+          }
+        }
+      }
+    } finally { await namer.close(); namer = undefined; }
+    if (stop) {
+      output(`${stop.code}: ${stop.code === 'AUTH' ? 'Run codex login, then resume.' : 'Wait for quota to reset, then resume.'} Resume with the same unminify command; completed replies are saved.`);
+      summary.exitCode = 1;
+    }
+    if (summary.rejected || summary.failedBatches) summary.exitCode = 1;
+    return summary;
+  } catch (error) {
     summary.exitCode = 1;
+    throw error;
+  } finally {
+    try { await namer?.close(); }
+    finally {
+      selectionEnd?.();
+      const endedAt = Date.now();
+      summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
+      if (!Object.keys(summary.quota).length) summary.quota = "没测到";
+      summary.total_ms = endedAt - startedAt;
+      summary.phase_ms = Object.fromEntries(['selection_plan', 'model', 'followImports', 'check_write']
+        .map(key => [key, intervalMs(phases[key] ?? [])]));
+      Object.assign(summary, requestStats(requests, pauses, summary.total_ms));
+      event({ type: 'run_end', at: endedAt, total_ms: summary.total_ms });
+      event({ ...summary, at: endedAt });
+      emit(summary);
+    }
   }
-  if (summary.rejected || summary.failedBatches) summary.exitCode = 1;
-  summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
-  if (!Object.keys(summary.quota).length) summary.quota = "没测到";
-  emit(summary);
-  return summary;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

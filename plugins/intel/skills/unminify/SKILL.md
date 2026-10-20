@@ -42,7 +42,14 @@ syntax relative to the ignore file: directories, wildcards, `!` exceptions and w
 `#` comments; do not use trailing comments. The plugin supplies no project-specific ignore list.
 
 Accepted replies are synced immediately to `.unminify/<relative-path>.jsonl` at the target
-Git root. HTTP attempt logs are in `.unminify/requests.jsonl`. Rerun the same command and batch
+Git root. `.unminify/requests.jsonl` appends each model or token-refresh HTTP attempt;
+`.unminify/performance.jsonl` appends run, file, phase and shared 429 pause boundaries.
+Both use a run ID and epoch-millisecond timestamps. Attempts include queue/send/headers/end
+times, retry cause, in-flight and queued counts, file/batch/phase, body bytes and HTTP/2
+session ID (changes on reconnect), plus status, usage and safe rate headers. Credentials,
+auth-file contents and source text are never logged in these telemetry files.
+
+Rerun the same command and batch
 options after interruption. Completed files are skipped; unfinished files reuse recorded
 replies against the unchanged original source. Do not delete journals during a resumable run.
 If source or batch options changed, stop and report the mismatch rather than discard records.
@@ -57,4 +64,23 @@ then rerun. A failed rewrite keeps the file intact and records the reason; repor
 Parse the JSON status lines and final summary. Report changed, skipped and rejected files,
 request count, token totals and first-to-last quota percentage changes; if quota headers
 were absent, report `没测到`. Inspect the Git diff and leave committing target source to the
-caller. Do not run the live-model `scripts/e2e.mjs` unless the user requested it.
+caller. The final summary is also appended to `performance.jsonl`: total and phase elapsed
+milliseconds, HTTP-attempt p50/p90/max, time-weighted average and peak in-flight requests,
+429 count, shared pause elapsed time and HTTP attempts per minute (including refreshes).
+Phase times merge overlapping intervals within each phase; different phases can overlap.
+Per-file `cpu_ms` counts local elapsed milliseconds for parsing, planning, rendering,
+resolving/applying names and rewrite checks, including child-process time. Nested steps are
+inclusive, so do not add them together. `written_at` is null when no write completed.
+
+Analyze recorded logs without calling a model:
+
+```bash
+node "$SKILL_DIR/scripts/perf.mjs" <target-repo> \
+  --window-seconds 10 --slow-files 10
+# Add --run-id <id> to select an earlier run; the default is the latest start.
+```
+
+The JSON report shows sends, completions, end-of-window and peak in-flight counts, mean
+completed-attempt duration and 429 responses per window, phase times and slowest files.
+An interrupted run uses its recorded boundaries; incomplete trailing JSONL records are ignored.
+Do not run the live-model `scripts/e2e.mjs` unless the user requested it.
