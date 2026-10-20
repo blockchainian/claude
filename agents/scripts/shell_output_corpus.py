@@ -12,6 +12,7 @@ Only repository files named below are read by generate; private inputs stay loca
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -54,6 +55,23 @@ CASES = [
     [('git diff --no-index --stat -- agents/AGENTS.md AGENTS.md', None)],
     [('head -n 5 agents/src/main.rs', 'rs'), ('grep -n certainly_not_a_repository_symbol agents/Cargo.toml', None)],
     [('head -n 5 agents/src/main.rs', 'rs'), ('head -n 5 agents/not-a-file.rs', None)],
+]
+
+
+# A short read must stay colored beside line-formatted output after slicing.
+PIPELINE_CASES = [
+    stages
+    for producer in ('rg -n package agents/Cargo.toml',
+                     'grep -n package agents/Cargo.toml',
+                     'git log --oneline -1 -- agents/AGENTS.md')
+    for filter_command in ('head -25', 'tail -n 25', 'sed -n 1,25p',
+                           'head -25 | tail -n 25 | cat')
+    for stages in (
+        [('sed -n 1,10000p agents/Cargo.toml', 'toml'),
+         (f'{producer} | {filter_command}', None)],
+        [(f'{producer} | {filter_command}', None),
+         ('sed -n 1,10000p agents/Cargo.toml', 'toml')],
+    )
 ]
 
 
@@ -100,6 +118,11 @@ def execute_case(stages, provider):
 def generate(args):
     records = [execute_case(stages, provider)
                for provider in ('claude', 'codex') for stages in CASES]
+    for provider in ('claude', 'codex'):
+        for stages in PIPELINE_CASES:
+            record = execute_case(stages, provider)
+            record['minimum_highlighted'] = sum(s['end'] - s['start'] for s in record['expected'])
+            records.append(record)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('w') as output:
         for record in records:
@@ -262,12 +285,50 @@ def read_jsonl(path):
         return [json.loads(line) for line in source]
 
 
+def highlight_counts(records, observed):
+    if len(records) != len(observed):
+        raise ValueError('Rust report record count differs from input')
+    counts = []
+    for record, result in zip(records, observed):
+        if (result['command'], result['provider']) != (record['command'], record['provider']):
+            raise ValueError('Rust report order differs from input')
+        lines = set()
+        total = len(record['stdout'].splitlines())
+        for span in result['actual']:
+            if not 0 <= span['start'] <= span['end'] <= total:
+                raise ValueError('Rust report span is outside output')
+            lines.update(range(span['start'], span['end']))
+        counts.append(len(lines))
+    return counts
+
+
+def compare_highlights(records, counts, baseline):
+    if len(counts) != len(baseline) or any(type(n) is not int or n < 0 for n in baseline):
+        raise ValueError('Baseline must contain one nonnegative count per call')
+    providers = {provider: {'before': 0, 'after': 0, 'delta': 0}
+                 for provider in ('claude', 'codex')}
+    regressions = []
+    for index, (record, before, after) in enumerate(zip(records, baseline, counts), 1):
+        totals = providers[record['provider']]
+        totals['before'] += before
+        totals['after'] += after
+        totals['delta'] += after - before
+        if after < before:
+            regressions.append({'record': index, 'provider': record['provider'],
+                                'command': record['command'], 'before': before,
+                                'after': after, 'lost': before - after})
+    return {'providers': providers, 'regressed_calls': regressions}
+
+
 def check(args):
     for path in (args.calls, args.replay):
         if not path.is_file():
             raise ValueError(f'Input does not exist: {path}')
     args.report.parent.mkdir(parents=True, exist_ok=True)
     report = {}
+    baseline = json.loads(args.baseline.read_text()) if args.baseline else None
+    saved_baseline = {}
+    failed = False
     started = time.monotonic()
     for name, path in (('calls', args.calls), ('replay', args.replay)):
         observed_path = args.report.with_name(args.report.stem + '-' + name + '.jsonl')
@@ -297,15 +358,37 @@ def check(args):
         if timing['calls'] != len(records):
             raise ValueError(f'Rust timing count differs: {name}')
         report[name] = {'count': len(records), 'elapsed_seconds': timing['elapsed_seconds']}
+        counts = highlight_counts(records, observed)
+        fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+        saved_baseline[name] = {'input_sha256': fingerprint, 'highlighted_lines': counts}
+        report[name]['highlighted_lines'] = sum(counts)
+        report[name]['providers'] = {
+            provider: {'calls': sum(r['provider'] == provider for r in records),
+                       'highlighted_lines': sum(n for r, n in zip(records, counts)
+                                                if r['provider'] == provider)}
+            for provider in ('claude', 'codex')}
+        if baseline is not None:
+            if baseline[name]['input_sha256'] != fingerprint:
+                raise ValueError(f'Baseline input differs: {name}')
+            comparison = compare_highlights(records, counts, baseline[name]['highlighted_lines'])
+            report[name]['comparison'] = comparison
+            failed |= bool(comparison['regressed_calls'])
         if name == 'replay':
             report[name]['reference'] = score(records, observed, expanded=False)
             line_path = args.report.with_name(args.report.stem + '-lines.jsonl')
             with line_path.open('w') as line_report:
                 report[name]['scope'] = score(records, observed, line_report=line_report)
             report[name]['line_report'] = str(line_path)
+            failed |= bool(report[name]['scope']['wrong_lines'])
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    report['elapsed_seconds'] = time.monotonic() - started
+    args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    if args.write_baseline:
+        args.write_baseline.parent.mkdir(parents=True, exist_ok=True)
+        args.write_baseline.write_text(json.dumps(saved_baseline) + '\n')
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    print(f'Audit including build: {time.monotonic() - started:.3f}s', file=sys.stderr)
+    print(f'Audit including build: {report["elapsed_seconds"]:.3f}s', file=sys.stderr)
+    return int(failed)
 
 
 def main():
@@ -319,10 +402,14 @@ def main():
     audit.add_argument('--replay', type=Path, required=True)
     audit.add_argument('--report', type=Path, required=True)
     audit.add_argument('--timeout', type=int, default=600)
+    audit.add_argument('--baseline', type=Path,
+                       help='fail if any call highlights fewer lines than this baseline')
+    audit.add_argument('--write-baseline', type=Path,
+                       help='save per-call highlighted line counts for these exact inputs')
     audit.set_defaults(run=check)
     args = parser.parse_args()
-    args.run(args)
+    return args.run(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

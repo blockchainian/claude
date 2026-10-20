@@ -25,7 +25,6 @@ enum Length {
     Silent,
     Exact(Count),
     AtMost(Count),
-    Lines(&'static LazyLock<Regex>),
     Unknown,
 }
 #[derive(Clone, Copy)]
@@ -42,9 +41,16 @@ struct Row {
     shape: Regex,
     flags: &'static [&'static str],
     length: Length,
+    lines: Option<&'static LazyLock<Regex>>,
     content: Content,
     no_match_exit: Option<i64>,
     filter: bool,
+}
+impl Row {
+    fn lines(mut self, regex: &'static LazyLock<Regex>) -> Self {
+        self.lines = Some(regex);
+        self
+    }
 }
 static SEARCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[^\s:]+:)?\d+[:-]|^--$".into()));
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[ MADRCU?!]{2} \S|## )".into()));
@@ -60,6 +66,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         shape: Regex::new(format!("(?s)\\A(?:{shape})\\z")),
         flags,
         length,
+        lines: None,
         content,
         no_match_exit,
         filter,
@@ -198,11 +205,12 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
                 "--max-count=#",
                 "-m#",
             ],
-            Lines(&SEARCH),
+            Unknown,
             Plain,
             Some(1),
             false,
-        ),
+        )
+        .lines(&SEARCH),
         row(
             r"git\x00status\x00((?:-s|--short|-sb)(?:\x00.*)?)",
             &[
@@ -214,11 +222,12 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
                 "--untracked-files=all",
                 "--untracked-files=no",
             ],
-            Lines(&STATUS),
+            Unknown,
             Plain,
             None,
             false,
-        ),
+        )
+        .lines(&STATUS),
         row(
             r"git\x00log\x00((?:[^\x00]+\x00)*--oneline(?:\x00.*)?)",
             &[
@@ -229,11 +238,12 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
                 "--no-decorate",
                 "--",
             ],
-            Lines(&LOG),
+            Unknown,
             Plain,
             None,
             false,
-        ),
+        )
+        .lines(&LOG),
         row(
             r"wc\x00(-[lcwcm])\x00(.+)",
             &[],
@@ -306,12 +316,12 @@ enum Size {
     Silent,
     Exact(usize),
     AtMost(usize),
-    Lines(&'static LazyLock<Regex>),
     Unknown,
 }
 #[derive(Clone)]
 struct Segment {
     size: Size,
+    lines: Option<&'static LazyLock<Regex>>,
     kind: Kind,
     blank: bool,
     no_match_exit: Option<i64>,
@@ -320,6 +330,7 @@ impl Segment {
     fn unknown() -> Self {
         Self {
             size: Size::Unknown,
+            lines: None,
             kind: Kind::Plain,
             blank: false,
             no_match_exit: None,
@@ -433,7 +444,8 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
         let arg = capture(1);
         let files = capture(2);
         if (matches!(row.content, Content::Diff)
-            || matches!(row.length, Length::Lines(_) | Length::Silent))
+            || row.lines.is_some()
+            || matches!(row.length, Length::Silent))
             && !allowed(arg, row.flags)
         {
             continue;
@@ -466,7 +478,6 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
         let size = match row.length {
             Length::Silent => Size::Silent,
             Length::Unknown => Size::Unknown,
-            Length::Lines(regex) => Size::Lines(regex),
             Length::Exact(c) | Length::AtMost(c) => {
                 let Some((n, b)) = count(c, arg, files) else {
                     continue;
@@ -482,6 +493,7 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
         return Some((
             Segment {
                 size,
+                lines: row.lines,
                 kind,
                 blank,
                 no_match_exit: row.no_match_exit,
@@ -679,7 +691,8 @@ fn boundary(
                 end.checked_sub(n).filter(|n| *n >= start)
             }
         }
-        Size::Lines(regex) => {
+        _ => {
+            let regex = segment.lines?;
             let n = if forward {
                 lines[start..end]
                     .iter()
@@ -694,7 +707,6 @@ fn boundary(
             };
             (n > 0).then_some(if forward { start + n } else { end - n })
         }
-        _ => None,
     }
 }
 
@@ -765,6 +777,7 @@ pub(super) fn sections(
             let mut segment = pipeline(source);
             if index > 0 {
                 segment.size = Size::Unknown;
+                segment.lines = None;
             }
             segments.push(segment);
         }

@@ -173,6 +173,27 @@ fn terminal_shell_file_read_colors() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_shell_line_format_filters_colors() {
+    for (name, filter) in [
+        ("head", "head -25"),
+        ("tail", "tail -n 25"),
+        ("sed", "sed -n 1,25p"),
+    ] {
+        probe_shell_output_colors(
+            &format!("line-format-{name}"),
+            &format!("sed -n 140,190p a.rs; rg -n answer a.rs | {filter}"),
+            &[
+                "let answer = \"file-read-highlight\";",
+                "72:let plain = \"search-output\";",
+            ],
+            &[(0, "answer", "file-read-highlight")],
+            &[(1, "plain =", "search-output")],
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shell_multi_file_read_colors() {
     let command = "sed -n '1p' a.rs; echo '---'; head -n 1 b.py && cat Cargo.toml";
     let lines = [

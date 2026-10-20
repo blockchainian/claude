@@ -235,6 +235,54 @@ fn shell_output_command_table() {
 }
 
 #[test]
+fn shell_output_line_formats_survive_filters() {
+    let formats = [
+        ("rg -n foo a.mjs", "72:const foo = 1;\n"),
+        ("grep -n foo a.mjs", "72:const foo = 1;\n"),
+        ("git status --short", " M a.mjs\n"),
+        ("git log --oneline -1", "abcdef12 title\n"),
+    ];
+    let filters = [
+        "head -25",
+        "tail -n 25",
+        "sed -n 1,25p",
+        "cat",
+        "head -25 | tail -n 25 | sed -n 1,25p | cat",
+        "tail -n +1",
+        "sed -n '1,$p'",
+    ];
+    for (producer, line) in formats {
+        for filter in filters {
+            for forward in [false, true] {
+                let (command, stdout, start) = if forward {
+                    (
+                        format!("{producer} | {filter}; sed -n 140,190p a.mjs"),
+                        format!("{line}export const value = 1;\n"),
+                        1,
+                    )
+                } else {
+                    (
+                        format!("sed -n 140,190p a.mjs; {producer} | {filter}"),
+                        format!("export const value = 1;\n{line}"),
+                        0,
+                    )
+                };
+                let expected = vec![Span {
+                    start,
+                    end: start + 1,
+                    language: "mjs".into(),
+                }];
+                assert_eq!(
+                    actual(&command, &stdout, Stream::default()),
+                    expected,
+                    "{command}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn shell_output_provider_rules() {
     let claude = Stream {
         trimmed: true,
@@ -367,6 +415,8 @@ struct Call {
     exit: Option<i64>,
     #[serde(default)]
     expected: Vec<Span>,
+    #[serde(default)]
+    minimum_highlighted: usize,
 }
 
 impl Call {
@@ -397,7 +447,17 @@ fn shell_output_repository_corpus_has_no_wrong_colors() {
         .enumerate()
     {
         let call: Call = serde_json::from_str(line).expect("valid corpus record");
-        for span in actual(&call.command, &call.stdout, call.stream()) {
+        let observed = actual(&call.command, &call.stdout, call.stream());
+        let highlighted: usize = observed.iter().map(|s| s.end - s.start).sum();
+        assert!(
+            highlighted >= call.minimum_highlighted,
+            "corpus record {} lost highlighting: {} < {}: {}",
+            index + 1,
+            highlighted,
+            call.minimum_highlighted,
+            call.command
+        );
+        for span in observed {
             for line in span.start..span.end {
                 colored += 1;
                 let correct = call.expected.iter().any(|expected| {
