@@ -8,6 +8,7 @@ const globals = [...new Set(rules.flatMap(rule => rule.globals ?? []))].sort();
 const pipeline = hash(JSON.stringify(registry)
   + ['runner.mjs', 'guards.mjs', 'checks.mjs', 'stage.mjs', ...registry.map(rule => rule.module)]
     .map(file => readFileSync(new URL(file, import.meta.url), 'utf8')).join(''));
+export { pipeline as syntaxFingerprint };
 export function runSyntaxFile(root, file, {fragment=false, fragmentContext} = {}) {
   const path=join(root,file), source=readFileSync(path,'utf8');
   // Once rename owns a file, its offsets and crash recovery remain authoritative.

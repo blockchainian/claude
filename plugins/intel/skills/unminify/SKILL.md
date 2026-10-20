@@ -32,7 +32,7 @@ The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user'
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
 Never print credentials.
 
-Before planning any names, the command runs all 13 first-batch syntax steps in registry
+Without `--chunks`, before planning any names the command runs all 13 first-batch syntax steps in registry
 order in every selected file. Only converted source ranges are replaced; surrounding
 text stays byte-identical. Fragment files retain program binding names, declaration kinds
 and evaluation order. Their numeric `void` expressions are restored only when the Git-root
@@ -51,6 +51,62 @@ the request; replies and resume records stay keyed by the original batch IDs.
 At the end of every run, including interrupted runs, imports in journal-completed files
 follow export names without another model request. Unfinished files supply their current
 export names but remain untouched so their journals can resume. Public export names stay unchanged.
+
+## Explicit chunks
+
+Use `--chunks <manifest.json>` when files share one program scope without importing
+one another. The command validates the manifest against `scripts/chunks.schema.json`
+(JSON Schema 2020-12). It reads no recovery mapping or source-file header.
+
+```json
+{
+  "version": 1,
+  "chunks": [{ "id": "example", "files": ["src/first.js", "src/last.js"] }]
+}
+```
+
+Paths use forward slashes and are relative to the manifest's directory. Every file must
+exist inside the target Git root, every chunk ID must be unique, and each actual file can
+belong to only one chunk, including path or symlink aliases. Unlisted files retain the
+ordinary file workflow. Without `--chunks`, behavior is unchanged.
+
+```bash
+node "$SKILL_DIR/scripts/cli.mjs" <path>... --chunks <manifest.json> \
+  --chunk-siblings --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
+```
+
+By default, a name is eligible only when its declaration and all its references are in
+the selected files. Add `--chunk-siblings` to update references in unselected sibling
+files of the same chunk. Model naming still starts with selected declarations; import
+following may also update an outside import declaration used by a selected sibling.
+Ignored files are never rewritten. A name is frozen if more than one chunk member
+declares it, any declaration or reference is ignored, or it is a known environment or
+JavaScript global. Direct `eval` or `with` freezes all binding names in the chunk, including
+function locals and import aliases, because their dynamic references cannot be indexed. The `planned` JSON event reports frozen-name counts by reason.
+
+Each eligible program name is proposed once. Context includes declaration excerpts and
+sibling reference excerpts, using the same actual token budget and greedy batch packing.
+Collision resolution considers all chunk program bindings, visible bindings at every
+reference, and unbound globals throughout the chunk. Public properties and export names
+stay unchanged: `export { a }` becomes `export { readableName as a }`.
+Import locals follow the resolved exported binding's name without model requests, including
+references and export locals in sibling files; collision suffixes remain scope-safe.
+An unchanged exporting binding leaves its chunk import alias unchanged.
+
+A chunk prepares selected-file syntax changes in memory, names its program bindings,
+then names selected-file function bindings and follows import names. Individual-file checks and chunk binding,
+global, export-interface and source-text checks must all pass before any member is written.
+A parse or scope-check failure leaves the whole chunk intact. Each source fragment must
+be independently parseable; slices through a token or function body are rejected.
+Unselected siblings receive only the authorized shared-name edits.
+
+Chunk journals live in `.unminify/chunks/`. They store accepted replies and durable
+whole-chunk write intents, including rewritten source, to finish a partially written
+transaction without model requests. Recovery validates every member before writing any
+remaining member and runs before selection or syntax. Manifest membership, selected paths,
+ignore membership, batch options and syntax pipeline must match when resuming; source
+changes fail explicitly. Files already owned by ordinary rename journals cannot be
+silently moved into chunk journals. Use the same command to resume.
 
 ## Ignore and resume
 

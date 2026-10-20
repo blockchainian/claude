@@ -194,7 +194,7 @@ function externalName(node) {
   return node.name ?? node.value;
 }
 
-export function followImports(files, withFile = (file, task) => task(), fragments = new Set()) {
+export function followImports(files, withFile = (file, task) => task(), fragments = new Set(), chunks) {
   const modules = new Map();
   const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
   const targetFile = (file, specifier) => {
@@ -213,7 +213,7 @@ export function followImports(files, withFile = (file, task) => task(), fragment
       const imports = [];
       const local = node => {
         const binding = analysis.program.scope.getBinding(node.name);
-        return binding ? { file, key: binding.identifier.start } : null;
+        return binding ? { file, key: binding.identifier.start } : chunks?.chunkBindings.get(file)?.get(node.name) ?? null;
       };
       for (const node of analysis.ast.program.body) {
         if (node.type === 'ImportDeclaration') {
@@ -278,7 +278,7 @@ export function followImports(files, withFile = (file, task) => task(), fragment
     const branch = new Set(visiting).add(file);
     const module = modules.get(file);
     const proposals = new Map();
-    if (module.fragment) {
+    if (module.fragment && !chunks?.chunkBindings.has(file)) {
       resolved.set(file, proposals);
       return proposals;
     }
@@ -287,16 +287,19 @@ export function followImports(files, withFile = (file, task) => task(), fragment
       if (!exported) continue;
       const names = plan(exported.file, branch);
       const name = names.get(exported.key) ?? modules.get(exported.file).bindings.get(exported.key);
+      if (chunks?.chunkBindings.has(file) && !names.has(exported.key)
+        && !chunks.renamedExports.has(`${exported.file}\0${name}`)) continue;
       proposals.set(imported.key, name);
     }
-    const names = withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals, { fragment: fragments.has(file) })));
+    const names = chunks?.chunkBindings.has(file) ? chunks.resolve(file, proposals)
+      : withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals, { fragment: fragments.has(file) })));
     resolved.set(file, names);
     return names;
   }
   const changed = new Map();
   for (const [file, module] of modules) {
     const names = plan(file);
-    if (names.size) changed.set(file, withFile(file, () => timed('applyRenames', () => applyRenames(module.source, names))));
+    if (names.size && !chunks?.chunkBindings.has(file)) changed.set(file, withFile(file, () => timed('applyRenames', () => applyRenames(module.source, names))));
   }
   return changed;
 }

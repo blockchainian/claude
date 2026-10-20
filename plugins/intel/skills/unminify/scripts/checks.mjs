@@ -50,7 +50,7 @@ function moduleFacts(ast) {
   return { names: JSON.stringify([...names].sort()), loads: JSON.stringify(loads) };
 }
 
-function splitExportDeclarations(source, ast, result) {
+function splitExportDeclarations(source, ast, result, options) {
   const edits = [];
   const exported = new Map();
   traverse(ast, {
@@ -84,7 +84,7 @@ function splitExportDeclarations(source, ast, result) {
     offset = edit.end;
   }
   text += source.slice(offset);
-  return { source: text, ast: timed('parse', () => parse(text, { sourceType: 'module' })) };
+  return { source: text, ast: timed('parse', () => parse(text, { sourceType: 'module', allowUndeclaredExports: !!options?.sharedProgram })) };
 }
 
 function header(source) {
@@ -210,7 +210,7 @@ export function checkRewrite(before, after, options) {
   let a;
   let b;
   try {
-    const normalized = splitExportDeclarations(before, original, result);
+    const normalized = splitExportDeclarations(before, original, result, options);
     a = analyze(normalized.source, normalized.ast, options);
     b = analyze(after, result, options);
   } catch (error) {
