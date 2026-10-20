@@ -12,6 +12,12 @@ function rejects(before, after, reason) {
   assert.ok(!result.includes('\n'));
 }
 
+test('labels are fixed syntax independent of same-name lexical bindings', () => {
+  passes('function f(e) { e: while (e) { continue e; } }', 'function f(array) { e: while (array) { continue e; } }');
+  passes('function f(e) { e: while (e) { break e; } }', 'function f(array) { e: while (array) { break e; } }');
+  rejects('function f(e) { e: while (e) {} }', 'function f(array) { array: while (array) {} }', /structure|text/i);
+});
+
 test('requires Node syntax, including syntax Babel alone accepts', () => {
   rejects('let e = 1;', 'let = ;', /parse/i);
   rejects('const e = 1;', 'const e = <div />;', /parse/i);

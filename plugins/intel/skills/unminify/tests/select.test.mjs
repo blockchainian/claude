@@ -18,6 +18,24 @@ function bindings(code) {
   return result;
 }
 const allBatches = p => p.stages.flat();
+test('placeholder rendering preserves same-name labels and jump targets', () => {
+  const code = `function f(e, n) {
+  const e_length = e.length;
+  e: while (++n < e_length) {
+    for (const x of e) { if (x) continue e; }
+  }
+}`;
+  for (const jump of ['continue', 'break']) {
+    const source = code.replace('continue e;', `${jump} e;`);
+    for (const batch of allBatches(planFile(source, options))) {
+      const { context } = renderBatch(source, batch);
+      assert.doesNotThrow(() => parse(context, { sourceType: 'module' }));
+      assert.match(context, /e: while/);
+      assert.ok(context.includes(`${jump} e;`));
+      assert.match(context, /v2\.length/);
+    }
+  }
+});
 test('a small file keeps all candidates and the complete body in one batch', () => {
   const code = `function a(b, c) {
   const d = [];

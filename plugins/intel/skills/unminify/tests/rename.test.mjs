@@ -3,6 +3,7 @@ import test from 'node:test';
 import { parse } from '../scripts/node_modules/@babel/parser/lib/index.js';
 import traverseModule from '../scripts/node_modules/@babel/traverse/lib/index.js';
 import { toIdentifier, resolveNames, applyRenames, followImports } from '../scripts/rename.mjs';
+import { checkRewrite } from '../scripts/checks.mjs';
 const traverse = traverseModule.default ?? traverseModule;
 const ast = source => parse(source, { sourceType: 'unambiguous', plugins: ['jsx'] });
 function bindings(source) {
@@ -43,6 +44,30 @@ function equivalent(before, after) {
   assert.doesNotThrow(() => ast(after));
   assert.deepEqual(referenceTargets(after), referenceTargets(before));
 }
+
+test('renaming parameters preserves same-name loop labels and jump targets', () => {
+  const source = `function f(e, n) {
+  const e_length = e.length;
+  e: while (++n < e_length) {
+    for (const x of e) { if (x) continue e; }
+  }
+}`;
+  for (const jump of ['continue', 'break']) {
+    const before = source.replace('continue e;', `${jump} e;`);
+    const after = applyRenames(before, resolveNames(before, names(before, [['e', 'array'], ['n', 'currentIndex']])));
+    assert.equal(after, before.replace('f(e, n)', 'f(array, currentIndex)').replace('e.length', 'array.length').replace('++n', '++currentIndex').replace('of e)', 'of array)'));
+    assert.equal(checkRewrite(before, after), null);
+  }
+});
+
+test('non-binding names neither change nor reserve lexical names', () => {
+  const source = 'function f(e) { target: while (e) { use({target: e, target() {}}, e.target, e?.target, e[e]); break target; } }';
+  const resolved = resolveNames(source, names(source, [['e', 'target']]));
+  assert.equal(resolved.get(key(source, 'e')), 'target');
+  const after = applyRenames(source, resolved);
+  assert.equal(after, 'function f(target) { target: while (target) { use({target: target, target() {}}, target.target, target?.target, target[target]); break target; } }');
+  assert.equal(checkRewrite(source, after), null);
+});
 
 test('normalizes separators, punctuation, Unicode, reserved words and invalid starts', () => {
   for (const [input, expected] of [
