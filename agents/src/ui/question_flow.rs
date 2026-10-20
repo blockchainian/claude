@@ -6,6 +6,8 @@ use question_view::{Outcome, QuestionView, Target};
 #[derive(Default)]
 pub(super) struct Questions {
     views: HashMap<SessionKey, QuestionView>,
+    stored: HashMap<SessionKey, crate::state::StoredAsk>,
+    pending: Vec<Action>,
     closed: HashMap<SessionKey, crate::ask::Ask>,
     pub(super) sending: HashSet<SessionKey>,
     /// The last activated position, for suppressing the second release of a double click.
@@ -14,13 +16,8 @@ pub(super) struct Questions {
 
 impl Questions {
     fn sync(&mut self, rows: &[Session]) {
-        let answerable = |ask: &crate::ask::Ask| {
-            ask.session.provider != ProviderId::Claude
-                || matches!(
-                    ask.kind,
-                    crate::ask::AskKind::Questions { blocking: true, .. }
-                )
-        };
+        let answerable =
+            |ask: &crate::ask::Ask| matches!(ask.kind, crate::ask::AskKind::Questions { .. });
         let background = |row: &Session| {
             row.is_live_background()
                 || (row.id.provider == ProviderId::Claude && row.background_job.is_some())
@@ -44,9 +41,23 @@ impl Questions {
                 && answerable(ask)
                 && !self.views.contains_key(&row.id)
             {
-                self.views
-                    .insert(row.id.clone(), QuestionView::new(ask.clone()));
+                let mut view = QuestionView::new(ask.clone());
+                if let Some(stored) = self.stored.get(&row.id) {
+                    view.restore(stored);
+                }
+                self.views.insert(row.id.clone(), view);
             }
+        }
+    }
+
+    fn changed(&mut self, id: &SessionKey, before: crate::state::StoredAsk) {
+        let stored = self.views[id].stored();
+        if stored != before {
+            self.stored.insert(id.clone(), stored.clone());
+            self.pending.push(Action::PersistQuestion {
+                id: id.clone(),
+                ask: Some(stored),
+            });
         }
     }
 
@@ -74,15 +85,39 @@ impl Questions {
         }
         if result.is_ok() {
             self.closed.insert(ask.session.clone(), ask.clone());
+            self.stored.remove(&ask.session);
+            self.pending.push(Action::PersistQuestion {
+                id: ask.session.clone(),
+                ask: None,
+            });
         }
     }
 }
 
 impl View {
+    pub(crate) fn restore_question_answers(&mut self, preferences: &crate::state::Preferences) {
+        self.questions.stored = preferences
+            .tasks
+            .keys()
+            .filter_map(|id| {
+                preferences
+                    .task_ask(id)
+                    .map(|ask| (id.clone(), ask.clone()))
+            })
+            .collect();
+    }
+
+    pub(crate) fn take_question_action(&mut self) -> Option<Action> {
+        match self.questions.pending.len() {
+            0 => None,
+            1 => self.questions.pending.pop(),
+            _ => Some(Action::Batch(std::mem::take(&mut self.questions.pending))),
+        }
+    }
+
     pub(super) fn sync_questions(&mut self) {
         let previous = self
-            .panels_task
-            .as_ref()
+            .selected_id()
             .and_then(|id| self.questions.visible(id).map(|view| view.ask().clone()));
         self.questions.sync(&self.rows);
         if let Some(question) = self.active_question()
@@ -104,8 +139,8 @@ impl View {
             || self.help
             || self.confirm_dialog.is_some()
             || self.searching
-            || self.event_search.editing
-            || self.event_detail_search.editing
+            || self.event_list.search.editing
+            || self.event_detail.search.editing
         {
             return None;
         }
@@ -115,7 +150,9 @@ impl View {
             return Some(None);
         }
         let view = self.questions.views.get_mut(&id).expect("visible question");
+        let before = view.stored();
         let outcome = view.key(key);
+        self.questions.changed(&id, before);
         Some(self.question_outcome(id, outcome))
     }
 
@@ -146,6 +183,7 @@ impl View {
         let area = prompt.inner(Margin::new(super::render::HORIZONTAL_PADDING, 0));
         let interval = self.double_click_interval;
         let view = self.questions.views.get_mut(&id).expect("visible question");
+        let before = view.stored();
         let target = view.target(area, mouse.column, mouse.row);
         match mouse.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => view.scroll(
@@ -166,6 +204,7 @@ impl View {
                         self.questions.last_click =
                             Some((id.clone(), mouse.column, mouse.row, now));
                         let outcome = view.choose(row);
+                        self.questions.changed(&id, before);
                         return Some(self.question_outcome(id, outcome));
                     }
                 }
@@ -173,16 +212,19 @@ impl View {
             },
             _ => {}
         }
+        self.questions.changed(&id, before);
         Some(None)
     }
 
     pub(super) fn position_question_paste(&mut self, area: Rect, column: u16, row: u16) {
         let id = self.selected_id().expect("question session").clone();
+        let before = self.questions.views[&id].stored();
         self.questions
             .views
             .get_mut(&id)
             .expect("visible question")
             .position_paste(area, column, row);
+        self.questions.changed(&id, before);
     }
 
     pub(super) fn question_paste(&mut self, text: &str) -> bool {
@@ -196,11 +238,13 @@ impl View {
             return false;
         }
         if !self.questions.sending.contains(&id) {
+            let before = self.questions.views[&id].stored();
             self.questions
                 .views
                 .get_mut(&id)
                 .expect("visible question")
                 .paste(text);
+            self.questions.changed(&id, before);
         }
         true
     }
@@ -321,6 +365,120 @@ mod tests {
         view.set_sessions(vec![row], false);
         view.set_active_panel(Panel::Prompt);
         view
+    }
+
+    #[test]
+    fn half_answer_changes_queue_persistence_and_restore_after_restart() {
+        let mut view = multi_fixture();
+        view.handle_key(KeyCode::Char('2').into());
+        view.handle_key(KeyCode::Char('4').into());
+        view.handle_paste("半截回答");
+        view.handle_key(KeyCode::PageDown.into());
+        let mut preferences = crate::state::Preferences::default();
+        let directory = tempfile::tempdir().unwrap();
+        let Some(Action::Batch(actions)) = view.take_question_action() else {
+            panic!("question edits should queue persistence");
+        };
+        for action in actions {
+            let Action::PersistQuestion { id, ask } = action else {
+                panic!("unexpected action: {action:?}");
+            };
+            preferences
+                .save_task_ask(directory.path(), &id, ask)
+                .unwrap();
+        }
+        let mut preferences = crate::state::Preferences::load(directory.path());
+        let mut restarted = View::default();
+        restarted.restore_question_answers(&preferences);
+        restarted.set_sessions(view.rows.clone(), false);
+        restarted.set_active_panel(Panel::Prompt);
+        assert_eq!(restarted.active_question().unwrap().page(), 1);
+        assert_eq!(
+            restarted.active_question().unwrap().stored(),
+            view.active_question().unwrap().stored()
+        );
+        let Some(Action::AnswerQuestions { ask, answer }) =
+            restarted.handle_key(KeyCode::Enter.into())
+        else {
+            panic!("restored review should submit");
+        };
+        assert_eq!(answer.answers["Probe single choice?"].answers, ["Green"]);
+        assert_eq!(
+            answer.answers["Probe single choice?"].other.as_deref(),
+            Some("半截回答")
+        );
+        let input = crate::providers::SessionInput::Answer {
+            ask: ask.clone(),
+            answer,
+            transcript: "probe.jsonl".into(),
+        };
+        restarted.input_complete(
+            &ask.session,
+            &input,
+            Err(std::io::ErrorKind::BrokenPipe.into()),
+        );
+        assert!(restarted.take_question_action().is_none());
+        assert!(
+            crate::state::Preferences::load(directory.path())
+                .task_ask(&ask.session)
+                .is_some()
+        );
+        restarted.input_complete(&ask.session, &input, Ok(()));
+        assert_eq!(
+            restarted.take_question_action(),
+            Some(Action::PersistQuestion {
+                id: ask.session.clone(),
+                ask: None
+            })
+        );
+        preferences
+            .save_task_ask(directory.path(), &ask.session, None)
+            .unwrap();
+        assert!(
+            crate::state::Preferences::load(directory.path())
+                .task_ask(&ask.session)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn half_answer_mouse_and_typed_text_queue_only_changed_payloads() {
+        let mut view = multi_fixture();
+        let green = row_of(&screen(&view, 100, 40), "2. [ ] Green");
+        click(&mut view, 10, green);
+        let Some(Action::PersistQuestion {
+            ask: Some(stored), ..
+        }) = view.take_question_action()
+        else {
+            panic!("mouse selection was not persisted");
+        };
+        assert_eq!(stored.answers["Probe single choice?"].answers, ["Green"]);
+        view.handle_key(KeyCode::Char('4').into());
+        view.handle_key(KeyCode::Char('x').into());
+        let Some(Action::PersistQuestion {
+            ask: Some(stored), ..
+        }) = view.take_question_action()
+        else {
+            panic!("typed text was not persisted");
+        };
+        assert_eq!(
+            stored.answers["Probe single choice?"].other.as_deref(),
+            Some("x")
+        );
+        view.handle_key(KeyCode::Left.into());
+        assert!(view.take_question_action().is_none());
+        let text = screen(&view, 100, 40);
+        let tabs = row_of(&text, "Submit");
+        let line = text.lines().nth(tabs as usize).unwrap();
+        let column = line.find("Submit").unwrap() as u16;
+        click(&mut view, column, tabs);
+        let Some(Action::PersistQuestion {
+            ask: Some(stored), ..
+        }) = view.take_question_action()
+        else {
+            panic!("mouse tab was not persisted");
+        };
+        assert_eq!(stored.page, 1);
     }
 
     #[test]
@@ -465,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_questions_stay_read_only_after_refresh() {
+    fn transcript_questions_remain_answerable_after_refresh() {
         let mut view = fixture();
         assert!(view.active_question().is_some());
         let mut rows = view.rows.clone();
@@ -474,9 +632,8 @@ mod tests {
         *blocking = false;
         view.set_sessions(rows, false);
 
-        assert!(view.active_question().is_none());
-        assert!(!screen(&view, 100, 40).contains("Enter to confirm"));
-        assert!(!matches!(
+        assert!(view.active_question().is_some());
+        assert!(matches!(
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
             Some(Action::AnswerQuestions { .. })
         ));

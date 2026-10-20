@@ -10,6 +10,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthStr;
 
 pub(super) enum Outcome {
@@ -69,6 +70,45 @@ impl QuestionView {
 
     pub(super) fn ask(&self) -> &Ask {
         &self.ask
+    }
+
+    pub(super) fn stored(&self) -> crate::state::StoredAsk {
+        crate::state::StoredAsk {
+            id: self.ask.id.clone(),
+            page: self.page,
+            answers: self.answers(),
+        }
+    }
+
+    pub(super) fn restore(&mut self, stored: &crate::state::StoredAsk) {
+        if stored.id != self.ask.id {
+            return;
+        }
+        let AskKind::Questions { questions, .. } = &self.ask.kind;
+        for (question, page) in questions.iter().zip(&mut self.pages) {
+            let Some(answer) = stored.answers.get(&question.id) else {
+                continue;
+            };
+            page.selected = answer
+                .answers
+                .iter()
+                .filter_map(|label| {
+                    question
+                        .options
+                        .iter()
+                        .position(|option| &option.label == label)
+                })
+                .collect();
+            page.other
+                .set_text(answer.other.as_deref().unwrap_or_default());
+            page.other_checked = !page.other.is_empty();
+            page.focus = if !page.other.is_empty() {
+                question.options.len()
+            } else {
+                page.selected.first().copied().unwrap_or(0)
+            };
+        }
+        self.page = stored.page.min(self.tabs().saturating_sub(1));
     }
 
     pub(super) fn set_error(&mut self, error: Option<String>) {
@@ -156,14 +196,18 @@ impl QuestionView {
         }
     }
 
-    fn submit(&self) -> Outcome {
-        let answers = self
-            .questions()
+    fn answers(&self) -> BTreeMap<String, QuestionAnswer> {
+        self.questions()
             .iter()
             .zip(&self.pages)
             .map(|(question, page)| (question.id.clone(), Self::answer(question, page)))
-            .collect();
-        Outcome::Submit(Answer { answers })
+            .collect()
+    }
+
+    fn submit(&self) -> Outcome {
+        Outcome::Submit(Answer {
+            answers: self.answers(),
+        })
     }
 
     fn answer(question: &Question, page: &Page) -> QuestionAnswer {
@@ -718,6 +762,73 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
             + "\n"
+    }
+
+    #[test]
+    fn ask_view_stored_round_trip_keeps_labels_text_and_review_page() {
+        let mut view = QuestionView::new(fixture("Multi"));
+        view.choose(2);
+        view.choose(0);
+        view.choose(3);
+        view.paste("补充🦀");
+        view.show_page(1);
+        let stored = view.stored();
+        assert_eq!(stored.id, view.ask().id);
+        assert_eq!(stored.page, 1);
+        assert_eq!(
+            stored.answers["Probe multiple choices?"].answers,
+            ["Blue", "Red"]
+        );
+        assert_eq!(
+            stored.answers["Probe multiple choices?"].other.as_deref(),
+            Some("补充🦀")
+        );
+        let mut restored = QuestionView::new(view.ask().clone());
+        restored.restore(&stored);
+        assert_eq!(restored.stored(), stored);
+        assert_eq!(submitted(restored.choose(0)), submitted(view.choose(0)));
+        restored.show_page(0);
+        assert!(restored.pages[0].other_checked);
+        assert!(
+            screen(&restored, 80, 20)
+                .replace(' ', "")
+                .contains("补充🦀")
+        );
+    }
+
+    #[test]
+    fn ask_view_restore_matches_labels_and_discards_missing_options() {
+        let mut view = QuestionView::new(fixture("Multi"));
+        view.choose(2);
+        view.choose(0);
+        let stored = view.stored();
+        let mut ask = view.ask().clone();
+        let AskKind::Questions { questions, .. } = &mut ask.kind;
+        questions[0].options.remove(0);
+        questions[0].options.reverse();
+        let mut restored = QuestionView::new(ask);
+        restored.restore(&stored);
+        assert_eq!(restored.pages[0].selected, [0]);
+        assert_eq!(
+            restored.stored().answers["Probe multiple choices?"].answers,
+            ["Blue"]
+        );
+    }
+
+    #[test]
+    fn ask_view_restore_ignores_other_ask_and_bounds_page() {
+        let mut view = QuestionView::new(fixture("Multi"));
+        view.choose(1);
+        let mut stored = view.stored();
+        stored.page = usize::MAX;
+        let mut restored = QuestionView::new(view.ask().clone());
+        restored.restore(&stored);
+        assert_eq!(restored.page(), 1);
+        stored.id.push('x');
+        let mut restored = QuestionView::new(view.ask().clone());
+        let before = restored.stored();
+        restored.restore(&stored);
+        assert_eq!(restored.stored(), before);
     }
 
     #[test]
