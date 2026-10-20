@@ -1,37 +1,47 @@
-/** Pack one file's pending stage in order, using rendered UTF-8 context sizes. */
-export function packBatches(batches, render, { maxIds, contextBytes }) {
+import { estimateInputTokens } from './prompt.mjs';
+
+/** Pack one file's pending stage, measuring the complete naming input. */
+export function packBatches(batches, render, { contextTokens }) {
   const requests = [];
-  let current = null, count = 0;
-  function requestFor(items, placeholderCount) {
-    let placeholderOffset = 0;
-    const parts = items.map(batch => {
-      const payload = render(batch, { placeholderOffset, placeholderCount });
-      placeholderOffset += batch.keys.length;
-      return { batch, payload };
-    });
-    return { parts, payload: {
-      context: parts.length === 1 ? parts[0].payload.context : parts
-        .map(({ batch, payload }) => `// Batch ${batch.id}\n${payload.context}`).join('\n\n'),
-      placeholders: Object.assign({}, ...parts.map(part => part.payload.placeholders)),
-    } };
-  }
-  function flush() {
-    if (current) requests.push(current);
-    current = null; count = 0;
-  }
-  for (const batch of batches) {
-    if (current && count + batch.keys.length > maxIds) flush();
-    const items = [...(current?.parts.map(part => part.batch) ?? []), batch];
-    let candidate = requestFor(items, count + batch.keys.length);
-    if (current && Buffer.byteLength(candidate.payload.context, 'utf8') > contextBytes) {
-      flush();
-      candidate = requestFor([batch], batch.keys.length);
+  const placeholderCount = batches.reduce((sum, batch) => sum + batch.keys.length, 0);
+  for (let start = 0; start < batches.length;) {
+    const rendered = new Map(), candidates = new Map();
+    function requestFor(length) {
+      if (candidates.has(length)) return candidates.get(length);
+      let placeholderOffset = 0;
+      const parts = batches.slice(start, start + length).map(batch => {
+        if (!rendered.has(batch)) rendered.set(batch, render(batch, { placeholderOffset, placeholderCount }));
+        const payload = rendered.get(batch);
+        placeholderOffset += batch.keys.length;
+        return { batch, payload };
+      });
+      const payload = {
+        context: parts.length === 1 ? parts[0].payload.context : parts
+          .map(({ batch, payload }) => `// Batch ${batch.id}\n${payload.context}`).join('\n\n'),
+        placeholders: Object.assign({}, ...parts.map(part => part.payload.placeholders)),
+      };
+      const request = { parts, payload, estimated_input_tokens: estimateInputTokens(payload) };
+      candidates.set(length, request);
+      return request;
     }
-    current = candidate;
-    count += batch.keys.length;
-    // An oversized original batch keeps its own request.
-    if (count >= maxIds || Buffer.byteLength(current.payload.context, 'utf8') > contextBytes) flush();
+    const remaining = batches.length - start;
+    let length = 1;
+    if (requestFor(1).estimated_input_tokens > contextTokens)
+      throw new Error(`Batch ${batches[start].id} cannot fit the input token budget (${contextTokens}) after context truncation`);
+    // Exponential growth avoids encoding every prefix of a large request.
+    let upper = 2;
+    while (upper <= remaining && requestFor(upper).estimated_input_tokens <= contextTokens) {
+      length = upper;
+      upper *= 2;
+    }
+    let high = Math.min(upper - 1, remaining);
+    while (length < high) {
+      const middle = Math.ceil((length + high) / 2);
+      if (requestFor(middle).estimated_input_tokens <= contextTokens) length = middle;
+      else high = middle - 1;
+    }
+    requests.push(requestFor(length));
+    start += length;
   }
-  flush();
   return requests;
 }

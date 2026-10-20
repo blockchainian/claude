@@ -1,3 +1,4 @@
+import { countTokens, estimateInputTokens } from './prompt.mjs';
 import { timed } from './timing.mjs';
 import { isLexicalIdentifier } from './identifiers.mjs';
 import { readFile, readdir, stat, realpath } from 'node:fs/promises';
@@ -13,7 +14,6 @@ const traverse = traverseModule.default ?? traverseModule;
 const generate = generateModule.default ?? generateModule;
 const exec = promisify(execFile);
 const parseSource = source => timed('parse', () => parse(source, { sourceType: 'unambiguous' }));
-const bytes = code => Buffer.byteLength(code, 'utf8');
 const inside = (node, container) => node.start >= container.start && node.end <= container.end;
 const isOwner = p => p.isFunction() || p.isClass();
 // Batches keep their file analysis alive only while their plan is in use.
@@ -93,24 +93,29 @@ function ownerChain(binding) {
 }
 
 /** Binding keys and scope ranges are Babel start/end: UTF-16 indices, NOT bytes. */
-export function planFile(source, { shortLen = 3, maxIds = 60, contextBytes = 8000 } = {}) {
-  for (const [name, value] of Object.entries({ shortLen, maxIds, contextBytes })) {
+export function planFile(source, { shortLen = 3, contextTokens = 100000 } = {}) {
+  for (const [name, value] of Object.entries({ shortLen, contextTokens })) {
     if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${name} must be a positive integer`);
   }
   const analysis = analyze(source);
   const { ast, bindings } = analysis;
   const remember = stages => {
-    for (const batch of stages.flat()) batchAnalyses.set(batch, analysis);
-    return { stages };
+    function fit(batch) {
+      batchAnalyses.set(batch, analysis);
+      if (estimateInputTokens(renderBatch(source, batch)) <= contextTokens || batch.keys.length === 1) return [batch];
+      const middle = Math.ceil(batch.keys.length / 2);
+      return [batch.keys.slice(0, middle), batch.keys.slice(middle)].flatMap(keys =>
+        fit({ id: `${batch.id.split(':').slice(0, 4).join(':')}:${keys[0]}`, keys }));
+    }
+    return { stages: stages.map(stage => stage.flatMap(fit)) };
   };
   const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length <= shortLen)
     .sort((a,b)=>a.identifier.start-b.identifier.start);
-  if (bytes(source) <= contextBytes && candidates.length <= maxIds) {
-    return remember([candidates.length ? [{
-      id: `Program:${ast.program.start}:${ast.program.end}:${contextBytes}:${candidates[0].identifier.start}:file`,
-      keys: candidates.map(b=>b.identifier.start),
-    }] : []]);
-  }
+  if (!candidates.length) return { stages: [[]] };
+  const whole = { id: `Program:${ast.program.start}:${ast.program.end}:${contextTokens}:${candidates[0].identifier.start}:file`,
+    keys: candidates.map(b=>b.identifier.start) };
+  batchAnalyses.set(whole, analysis);
+  if (estimateInputTokens(renderBatch(source, whole)) <= contextTokens) return { stages: [[whole]] };
   const stages = [[], []];
   const groups = new Map();
   for (const b of candidates) {
@@ -120,12 +125,12 @@ export function planFile(source, { shortLen = 3, maxIds = 60, contextBytes = 800
   }
   function emit(owner, items, stage) {
     if (!items.length) return;
-    const size = bytes(source.slice(owner.start,owner.end));
-    if (owner !== ast.program && size <= contextBytes && items.length <= maxIds) {
-      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${contextBytes}:${items[0].identifier.start}`, keys: items.map(b=>b.identifier.start) });
+    const size = countTokens(source.slice(owner.start,owner.end));
+    if (owner !== ast.program && size <= contextTokens) {
+      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${contextTokens}:${items[0].identifier.start}`, keys: items.map(b=>b.identifier.start) });
       return;
     }
-    if (owner !== ast.program && (size > contextBytes || items.length > maxIds)) {
+    if (owner !== ast.program && size > contextTokens) {
       const local = [];
       const children = new Map();
       for (const b of items) {
@@ -150,13 +155,13 @@ export function planFile(source, { shortLen = 3, maxIds = 60, contextBytes = 800
     let chunk = [], used = 0, statements = new Set();
     function flush() {
       if (!chunk.length) return;
-      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${contextBytes}:${chunk[0]}`, keys: chunk });
+      stages[stage].push({ id: `${owner.type}:${owner.start}:${owner.end}:${contextTokens}:${chunk[0]}`, keys: chunk });
       chunk = []; used = 0; statements = new Set();
     }
     for (const b of items) {
       const statement = b.path.getStatementParent()?.node ?? b.path.node;
-      const cost = statements.has(statement) ? b.identifier.name.length + 12 : bytes(source.slice(statement.start,statement.end));
-      if (chunk.length && (chunk.length >= maxIds || used + cost > contextBytes)) flush();
+      const cost = statements.has(statement) ? countTokens(b.identifier.name) + 4 : countTokens(source.slice(statement.start,statement.end));
+      if (chunk.length && (used + cost > contextTokens)) flush();
       chunk.push(b.identifier.start);
       statements.add(statement);
       used += cost;
@@ -253,21 +258,29 @@ export function renderBatch(source, batch, renames = new Map(), {
   if (wholeFile) return { context: printContext(contextOwner), placeholders };
   const ast = { type: 'File', program: contextOwner.type === 'Program' ? contextOwner
     : { type: 'Program', sourceType: 'module', body: [contextOwner] } };
+  const fits = () => estimateInputTokens({ context: printContext(contextOwner), placeholders }) <= budget;
   if (owner.type === 'Program') {
-    // Preserve implementation prefixes, shortening the longest function body first.
+    // Shorten the longest optional body with logarithmically many tokenizations.
     const bodies = [];
     traverse(ast, { noScope: true, Function(p) {
       if (p.node.body.type === 'BlockStatement' && !containsKey(p.node.body)) bodies.push(p.node.body);
     } });
-    while (bytes(printContext(contextOwner)) > budget) {
-      const longest = bodies.filter(body=>body.body.length)
-        .sort((a,b)=>bytes(printContext(b))-bytes(printContext(a)))[0];
-      if (!longest) break;
-      longest.body.pop();
+    bodies.sort((a, b) => (b.end - b.start) - (a.end - a.start));
+    for (const body of bodies) {
+      if (fits()) break;
+      const statements = body.body;
+      let low = 0, high = statements.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        body.body = statements.slice(0, middle);
+        if (fits()) low = middle;
+        else high = middle - 1;
+      }
+      body.body = statements.slice(0, low);
     }
   }
-  if (bytes(printContext(contextOwner)) > budget) {
-    // Retain the declaration heads if a flat body cannot fit the byte target.
+  if (!fits()) {
+    // Retain the declaration heads if a flat body cannot fit the token budget.
     traverse(ast, {
       noScope: true,
       BlockStatement(p) {
