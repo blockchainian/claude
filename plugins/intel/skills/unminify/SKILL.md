@@ -1,6 +1,6 @@
 ---
 name: unminify
-description: Rename minified JavaScript identifiers with batched model suggestions and scope-safe rewrites. Use when asked to give short variables meaningful names in a JavaScript directory, or resume an interrupted unminify run. Formatting and syntax restructuring are outside this skill.
+description: Restore JavaScript syntax and rename minified identifiers with scope-safe rewrites.
 ---
 
 # Unminify JavaScript
@@ -32,6 +32,11 @@ The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user'
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
 Never print credentials.
 
+Before planning any names, the command restores numeric `void` expressions and minified
+booleans in every selected file. Only converted source ranges are replaced; surrounding
+text stays byte-identical. Fragment files retain their program bindings and declaration
+layout, and keep numeric `void` expressions when chunk-wide global identity is unknown.
+
 The command selects parseable `.js`/`.mjs` files, asks for names of non-import bindings shorter than `--min-symbol-length`,
 resolves naming conflicts, checks each completed file and writes it atomically. Top-level
 batches finish before function batches. Within each file and stage, pending batches are greedily
@@ -49,6 +54,12 @@ export names but remain untouched so their journals can resume. Public export na
 Read the target Git root's `.ignore`, or supply `--ignore <file>`. Rules use `.gitignore`
 syntax relative to the ignore file: directories, wildcards, `!` exceptions and whole-line
 `#` comments; do not use trailing comments. The plugin supplies no project-specific ignore list.
+
+Syntax checkpoints live separately in `.unminify/syntax/<relative-path>.syntax.jsonl`.
+They record pipeline fingerprints and durable write intents, without rename offsets or
+model replies. Resume completes syntax before constructing rename plans from the resulting
+text. Existing rename journals retain ownership of their files and are resumed without
+rerunning syntax. An unfinished syntax checkpoint rejects changed source or pipeline options.
 
 Accepted replies are synced immediately to `.unminify/<relative-path>.jsonl` at the target
 Git root. `.unminify/requests.jsonl` appends each model or token-refresh HTTP attempt;
