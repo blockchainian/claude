@@ -281,13 +281,33 @@ impl LineEdit {
         let start = self.cursor;
         self.line_end();
         self.cursor = self.replace_images(start..self.cursor, "").start;
-        self.align_cursor();
+        self.remove_empty_line(false);
     }
     /// Deletes what Ctrl+A would move over.
     pub(super) fn kill_to_start(&mut self) {
         let end = self.cursor;
         self.line_start();
         self.cursor = self.replace_images(self.cursor..end, "").start;
+        self.remove_empty_line(true);
+    }
+    /// Removes the caret's line once a kill leaves it empty, by deleting its line break
+    /// before the caret when `before` is set and there is one, or else the one after.
+    fn remove_empty_line(&mut self, before: bool) {
+        let (head, tail) = self.text.split_at(self.cursor);
+        let break_len = |crlf: bool, lf: bool| {
+            if crlf { Some(2) } else { lf.then_some(1) }
+        };
+        let previous = break_len(head.ends_with("\r\n"), head.ends_with('\n'));
+        let next = break_len(tail.starts_with("\r\n"), tail.starts_with('\n'));
+        let empty = (head.is_empty() || previous.is_some()) && (tail.is_empty() || next.is_some());
+        if empty {
+            let range = match (previous, next) {
+                (Some(len), _) if before || next.is_none() => self.cursor - len..self.cursor,
+                (_, Some(len)) => self.cursor..self.cursor + len,
+                _ => self.cursor..self.cursor,
+            };
+            self.cursor = self.replace_images(range, "").start;
+        }
         self.align_cursor();
     }
     pub(super) fn kill_word_back(&mut self) {
@@ -556,6 +576,30 @@ mod tests {
             e.kill_to_end();
             assert_eq!((e.text(), e.cursor), (text, 1));
         }
+    }
+
+    #[test]
+    fn kills_that_empty_a_line_remove_it() {
+        let mut e = edit("one\r\ntwo\nth");
+        for (text, cursor) in [("one\r\ntwo", 8), ("one", 3), ("", 0), ("", 0)] {
+            e.kill_to_start();
+            assert_eq!((e.text(), e.cursor), (text, cursor));
+        }
+        let mut e = edit("on\ntwo");
+        e.set_cursor(2);
+        e.kill_to_start();
+        assert_eq!((e.text(), e.cursor), ("two", 0));
+
+        let mut e = edit("one\ntwo\r\nthree");
+        e.home();
+        for text in ["two\r\nthree", "three", "", ""] {
+            e.kill_to_end();
+            assert_eq!((e.text(), e.cursor), (text, 0));
+        }
+        let mut e = edit("one\ntwo");
+        e.set_cursor(4);
+        e.kill_to_end();
+        assert_eq!((e.text(), e.cursor), ("one", 3));
     }
 
     #[test]
