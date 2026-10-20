@@ -224,6 +224,10 @@ pub enum Action {
         ask: crate::ask::Ask,
         answer: crate::ask::Answer,
     },
+    PersistQuestion {
+        id: SessionKey,
+        ask: Option<crate::state::StoredAsk>,
+    },
     PasteImage,
     PasteText,
     SendImages {
@@ -280,7 +284,10 @@ pub enum Action {
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `t`: the event sorting changed; persist it.
-    PersistSorting(EventSort),
+    PersistSorting {
+        id: SessionKey,
+        sorting: EventSort,
+    },
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,
     /// `r`: set the session display name.
@@ -320,23 +327,6 @@ pub enum EventSort {
     #[default]
     Time,
     Duration,
-}
-
-impl EventSort {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Time => "time",
-            Self::Duration => "duration",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "time" => Some(Self::Time),
-            "duration" => Some(Self::Duration),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

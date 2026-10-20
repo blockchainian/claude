@@ -256,6 +256,7 @@ fn duration_history_load_errors_keep_loaded_rows_and_retry() {
 #[test]
 fn sorting_key_persists_both_modes() {
     let (_dir, mut app) = fixture();
+    let id = app.view.selected_id().unwrap().to_string();
     for sorting in ["duration", "time"] {
         app.handle_event(Event::Key(KeyEvent::new(
             KeyCode::Char('t'),
@@ -264,7 +265,12 @@ fn sorting_key_persists_both_modes() {
         let stored: serde_json::Value =
             serde_json::from_slice(&std::fs::read(app.config_dir.join("agents.json")).unwrap())
                 .unwrap();
-        assert_eq!(stored["config"]["sorting"], sorting);
+        assert!(stored["config"].get("sorting").is_none());
+        if sorting == "duration" {
+            assert_eq!(stored["state"]["tasks"][&id]["sort"], sorting);
+        } else {
+            assert!(stored["state"]["tasks"].get(&id).is_none());
+        }
     }
 }
 

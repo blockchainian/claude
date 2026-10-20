@@ -1,7 +1,7 @@
 use crate::model::{EventSort, Grouping};
 use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -63,12 +63,32 @@ fn deserialize_draft_time<'de, D: serde::Deserializer<'de>>(
         .map_err(serde::de::Error::custom)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StoredAsk {
+    pub id: String,
+    pub page: usize,
+    pub answers: BTreeMap<String, crate::ask::QuestionAnswer>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum TaskSort {
+    Duration,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sort: Option<TaskSort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ask: Option<StoredAsk>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
     pub grouping: Grouping,
-    pub sorting: EventSort,
     pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
@@ -80,6 +100,7 @@ pub struct Preferences {
     pub usage: HashMap<ProviderId, WeeklyUsage>,
     pub drafts: Vec<StoredDraft>,
     pub draft_notices: Vec<String>,
+    pub(crate) tasks: HashMap<SessionKey, StoredTask>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -95,7 +116,7 @@ struct StoredConfig {
     worktree_root: Option<PathBuf>,
     double_click_ms: u64,
     grouping: String,
-    sorting: String,
+    usage_view: UsageView,
     #[serde(skip_serializing_if = "Option::is_none")]
     theme: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,7 +131,7 @@ impl Default for StoredConfig {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default().as_str().into(),
-            sorting: EventSort::default().as_str().into(),
+            usage_view: UsageView::default(),
             theme: None,
             light_theme: None,
             dark_theme: None,
@@ -122,8 +143,8 @@ impl Default for StoredConfig {
 #[serde(default)]
 struct StoredState {
     pinned: Vec<String>,
-    usage_view: UsageView,
     usage: StoredUsage,
+    tasks: HashMap<String, StoredTask>,
     drafts: Vec<serde_json::Value>,
 }
 
@@ -172,7 +193,6 @@ impl Default for Preferences {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default(),
-            sorting: EventSort::default(),
             pinned: Vec::new(),
             theme: None,
             light_theme: None,
@@ -181,6 +201,7 @@ impl Default for Preferences {
             usage: HashMap::new(),
             drafts: Vec::new(),
             draft_notices: Vec::new(),
+            tasks: HashMap::new(),
         }
     }
 }
@@ -232,7 +253,6 @@ impl Preferences {
             worktree_root: stored.config.worktree_root,
             double_click_ms: stored.config.double_click_ms,
             grouping,
-            sorting: EventSort::parse(&stored.config.sorting).unwrap_or_default(),
             pinned: stored
                 .state
                 .pinned
@@ -242,10 +262,16 @@ impl Preferences {
             theme: stored.config.theme,
             light_theme: stored.config.light_theme,
             dark_theme: stored.config.dark_theme,
-            usage_view: stored.state.usage_view,
+            usage_view: stored.config.usage_view,
             usage,
             drafts,
             draft_notices,
+            tasks: stored
+                .state
+                .tasks
+                .into_iter()
+                .filter_map(|(key, task)| key.parse().ok().map(|key| (key, task)))
+                .collect(),
         })
     }
 
@@ -275,7 +301,7 @@ impl Preferences {
 
     pub fn save_usage_view(&self, config_dir: &Path) -> io::Result<()> {
         update(config_dir, |document| {
-            document["state"]["usage_view"] = serde_json::to_value(self.usage_view)?;
+            document["config"]["usage_view"] = serde_json::to_value(self.usage_view)?;
             Ok(())
         })
     }
@@ -300,11 +326,110 @@ impl Preferences {
         })
     }
 
-    pub fn save_sorting(&self, config_dir: &Path) -> io::Result<()> {
-        update(config_dir, |document| {
-            document["config"]["sorting"] = self.sorting.as_str().into();
+    pub fn task_sort(&self, key: &SessionKey) -> EventSort {
+        match self.tasks.get(key).and_then(|task| task.sort) {
+            Some(TaskSort::Duration) => EventSort::Duration,
+            None => EventSort::Time,
+        }
+    }
+
+    pub fn task_ask(&self, key: &SessionKey) -> Option<&StoredAsk> {
+        self.tasks.get(key).and_then(|task| task.ask.as_ref())
+    }
+
+    pub fn save_task_sort(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        sorting: EventSort,
+    ) -> io::Result<()> {
+        let sort = match sorting {
+            EventSort::Time => None,
+            EventSort::Duration => Some(TaskSort::Duration),
+        };
+        self.update_task(config_dir, key, |task| {
+            match sort {
+                Some(sort) => {
+                    task.insert("sort".into(), serde_json::to_value(sort)?);
+                }
+                None => {
+                    task.remove("sort");
+                }
+            }
             Ok(())
         })
+    }
+
+    pub fn save_task_ask(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        ask: Option<StoredAsk>,
+    ) -> io::Result<()> {
+        self.update_task(config_dir, key, |task| {
+            match ask {
+                Some(ask) => {
+                    task.insert("ask".into(), serde_json::to_value(ask)?);
+                }
+                None => {
+                    task.remove("ask");
+                }
+            }
+            Ok(())
+        })
+    }
+
+    pub fn forget_task(&mut self, config_dir: &Path, key: &SessionKey) -> io::Result<()> {
+        update(config_dir, |document| {
+            if let Some(tasks) = document["state"]
+                .get_mut("tasks")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                tasks.remove(&key.to_string());
+            }
+            Ok(())
+        })?;
+        self.tasks.remove(key);
+        Ok(())
+    }
+
+    fn update_task(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let mut stored = None;
+        update(config_dir, |document| {
+            let tasks = document["state"]
+                .as_object_mut()
+                .ok_or_else(|| io::Error::other("state must be an object"))?
+                .entry("tasks")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .ok_or_else(|| io::Error::other("tasks must be an object"))?;
+            let name = key.to_string();
+            let task = tasks
+                .entry(name.clone())
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .ok_or_else(|| io::Error::other("task must be an object"))?;
+            change(task)?;
+            if task.is_empty() {
+                tasks.remove(&name);
+            } else {
+                stored = Some(serde_json::from_value(serde_json::Value::Object(
+                    task.clone(),
+                ))?);
+            }
+            Ok(())
+        })?;
+        if let Some(task) = stored {
+            self.tasks.insert(key.clone(), task);
+        } else {
+            self.tasks.remove(key);
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -315,14 +440,18 @@ impl Preferences {
                     worktree_root: self.worktree_root.clone(),
                     double_click_ms: self.double_click_ms,
                     grouping: self.grouping.as_str().into(),
-                    sorting: self.sorting.as_str().into(),
+                    usage_view: self.usage_view,
                     theme: self.theme.clone(),
                     light_theme: self.light_theme.clone(),
                     dark_theme: self.dark_theme.clone(),
                 },
                 state: StoredState {
                     pinned: self.pinned.iter().map(ToString::to_string).collect(),
-                    usage_view: self.usage_view,
+                    tasks: self
+                        .tasks
+                        .iter()
+                        .map(|(key, task)| (key.to_string(), task.clone()))
+                        .collect(),
                     drafts: self
                         .drafts
                         .iter()

@@ -208,12 +208,12 @@ impl App {
     pub fn new(mut hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
-        view.set_event_sort(preferences.sorting);
         hub.set_weekly_usage(preferences.usage.clone());
         view.weekly_usage = preferences.usage.clone();
         view.usage_view = preferences.usage_view;
         view.set_pinned(&preferences.pinned);
         view.set_drafts(&preferences.drafts);
+        view.restore_question_answers(&preferences);
         if !preferences.draft_notices.is_empty() {
             view.set_notice(Some(preferences.draft_notices.join("; ")));
         }
@@ -325,6 +325,8 @@ impl App {
         self.refresh();
         let mut selection_tick = Instant::now();
         loop {
+            let persist = self.view.take_question_action();
+            self.handle_action(persist);
             let persist = self.view.take_drafts_action();
             self.handle_action(persist);
             if selection_tick.elapsed() >= Duration::from_millis(50) {
@@ -920,6 +922,18 @@ impl App {
     fn refresh(&mut self) {
         let Snapshot { sessions, has_more } = self.hub.refresh();
         self.unpin_inactive(&sessions);
+        for session in &sessions {
+            if session.status == SessionStatus::Inactive
+                && self.preferences.task_sort(&session.id) != crate::model::EventSort::Time
+            {
+                let saved = self.preferences.save_task_sort(
+                    &self.config_dir,
+                    &session.id,
+                    crate::model::EventSort::Time,
+                );
+                self.report_save(saved);
+            }
+        }
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
@@ -1190,7 +1204,11 @@ impl App {
 
     fn deleted(&mut self, id: &SessionKey, result: io::Result<()>) {
         match result {
-            Ok(()) => self.refresh(),
+            Ok(()) => {
+                let saved = self.preferences.forget_task(&self.config_dir, id);
+                self.report_save(saved);
+                self.refresh();
+            }
             Err(error) => {
                 self.view.unhide(id);
                 self.refresh();
@@ -1264,6 +1282,10 @@ impl App {
             }
             Action::SendPrompt { id, text } => {
                 self.send_input(id, SessionInput::Prompt(text));
+            }
+            Action::PersistQuestion { id, ask } => {
+                let saved = self.preferences.save_task_ask(&self.config_dir, &id, ask);
+                self.report_save(saved);
             }
             Action::AnswerQuestions { ask, answer } => {
                 let id = ask.session.clone();
@@ -1370,9 +1392,8 @@ impl App {
                 let saved = self.preferences.save_usage_view(&self.config_dir);
                 self.report_save(saved);
             }
-            Action::PersistSorting(sorting) => {
-                self.preferences.sorting = sorting;
-                let saved = self.preferences.save_sorting(&self.config_dir);
+            Action::PersistSorting { id, sorting } => {
+                let saved = self.preferences.save_task_sort(&self.config_dir, &id, sorting);
                 self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {

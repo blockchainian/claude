@@ -1744,7 +1744,10 @@ impl View {
                 EventSort::Time => EventSort::Duration,
                 EventSort::Duration => EventSort::Time,
             });
-            return Some(Action::PersistSorting(self.event_sort));
+            return self.selected_id().cloned().map(|id| Action::PersistSorting {
+                id,
+                sorting: self.event_sort,
+            });
         }
         if plain
             && key.code == KeyCode::Esc

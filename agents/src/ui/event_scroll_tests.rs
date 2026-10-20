@@ -551,7 +551,10 @@ fn event_sort_key_only_changes_the_active_event_list() {
     view.set_active_panel(Panel::EventList);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)),
-        Some(Action::PersistSorting(EventSort::Duration))
+        Some(Action::PersistSorting {
+            id: view.selected_id().unwrap().clone(),
+            sorting: EventSort::Duration,
+        })
     );
 }
 

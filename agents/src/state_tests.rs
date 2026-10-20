@@ -37,7 +37,6 @@ fn preferences_round_trip_and_corrupt_defaults() {
         worktree_root: Some(dir.path().join("trees")),
         double_click_ms: 200,
         grouping: Grouping::Model,
-        sorting: EventSort::Duration,
         pinned: vec![
             "claude:second".parse().unwrap(),
             "codex:first".parse().unwrap(),
@@ -47,6 +46,7 @@ fn preferences_round_trip_and_corrupt_defaults() {
         dark_theme: Some(PathBuf::from("dark.tmTheme")),
         drafts: Vec::new(),
         draft_notices: Vec::new(),
+        tasks: HashMap::new(),
         usage_view: UsageView::Detailed,
         usage: HashMap::from([
             (ProviderId::Claude, usage(21.0, Some(1))),
@@ -58,7 +58,8 @@ fn preferences_round_trip_and_corrupt_defaults() {
     let stored: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
     assert_eq!(stored["config"]["double_click_ms"], 200);
-    assert_eq!(stored["state"]["usage_view"], "detailed");
+    assert_eq!(stored["config"]["usage_view"], "detailed");
+    assert!(stored["state"].get("usage_view").is_none());
     assert_eq!(
         stored["state"]["usage"]["weekly"]["claude"]["used_percent"],
         21.0
@@ -84,7 +85,7 @@ fn unsupported_format_and_invalid_values_use_defaults() {
     for json in [
         r#"{"grouping":"model","pinned":["codex:old"],"double_click_ms":450}"#,
         r#"{"config":{"grouping":"other"},"state":{}}"#,
-        r#"{"config":{},"state":{"usage_view":"other"}}"#,
+        r#"{"config":{"usage_view":"other"},"state":{}}"#,
         r#"{"config":{},"state":{"usage":{"weekly":{"claude":{"used_percent":101}}}}}"#,
         r#"{"config":{},"state":{"usage":{"weekly":{"claude":{"used_percent":21,"resets_at":"broken"}}}}}"#,
     ] {
@@ -123,6 +124,7 @@ fn stale_writers_only_replace_their_field() {
     let mut view = pins.clone();
     let mut grouping = pins.clone();
     let mut sorting = pins.clone();
+    let task = "codex:sorted".parse().unwrap();
     pins.pinned = vec!["claude:pinned".parse().unwrap()];
     view.usage_view = UsageView::Detailed;
     grouping.grouping = Grouping::Model;
@@ -133,19 +135,22 @@ fn stale_writers_only_replace_their_field() {
     view.save_usage(dir.path(), ProviderId::Codex, &usage(16.0, Some(2)))
         .unwrap();
     grouping.save_grouping(dir.path()).unwrap();
-    sorting.sorting = EventSort::Duration;
-    sorting.save_sorting(dir.path()).unwrap();
+    sorting
+        .save_task_sort(dir.path(), &task, EventSort::Duration)
+        .unwrap();
     let preferences = Preferences::load(dir.path());
     assert_eq!(preferences.pinned, pins.pinned);
     assert_eq!(preferences.usage_view, UsageView::Detailed);
     assert_eq!(preferences.grouping, Grouping::Model);
     assert_eq!(preferences.double_click_ms, 450);
     assert_eq!(preferences.usage.len(), 2);
-    assert_eq!(preferences.sorting, EventSort::Duration);
+    assert_eq!(preferences.task_sort(&task), EventSort::Duration);
     let stored: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
     assert_eq!(stored["config"]["custom"], "keep");
     assert_eq!(stored["state"]["custom"], "keep");
+    assert_eq!(stored["config"]["usage_view"], "detailed");
+    assert!(stored["state"].get("usage_view").is_none());
 }
 
 #[test]
@@ -277,37 +282,153 @@ fn drafts_round_trip_drop_unnamed_and_malformed_without_losing_other_state() {
 }
 
 #[test]
-fn sorting_round_trip_and_defaults() {
+fn global_sorting_and_state_usage_view_are_ignored() {
     let dir = tempfile::tempdir().unwrap();
-    for sorting in [Some("time"), Some("duration"), Some("broken"), None] {
-        let mut document = serde_json::json!({
-            "config": {"grouping": "model", "double_click_ms": 450},
-            "state": {"pinned": ["codex:kept"], "usage_view": "detailed"}
-        });
-        if let Some(sorting) = sorting {
-            document["config"]["sorting"] = sorting.into();
-        }
-        fs::write(
-            dir.path().join("agents.json"),
-            serde_json::to_vec(&document).unwrap(),
+    fs::write(
+        dir.path().join("agents.json"),
+        r#"{"config":{"grouping":"model","sorting":"duration"},"state":{"usage_view":"detailed"}}"#,
+    )
+    .unwrap();
+    let preferences = Preferences::load(dir.path());
+    assert_eq!(preferences.grouping, Grouping::Model);
+    assert_eq!(preferences.usage_view, UsageView::Compact);
+    preferences.save(dir.path()).unwrap();
+    assert!(document(dir.path())["config"].get("sorting").is_none());
+}
+
+fn document(dir: &Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(dir.join("agents.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn task_state_round_trip_and_independent_writers() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("agents.json"), r#"{"config":{"custom":"keep","usage_view":"detailed"},"state":{"custom":42,"tasks":{"claude:one":{"custom":true}}}}"#).unwrap();
+    let one = "claude:one".parse().unwrap();
+    let two = "codex:two".parse().unwrap();
+    let mut sorting = Preferences::load(dir.path());
+    let mut answers = sorting.clone();
+    let ask: StoredAsk = serde_json::from_value(serde_json::json!({
+        "id":"ask-1", "page":1,
+        "answers":{"color":{"answers":["Red"],"other":"extra"}}
+    }))
+    .unwrap();
+    sorting
+        .save_task_sort(dir.path(), &one, EventSort::Duration)
+        .unwrap();
+    answers
+        .save_task_ask(dir.path(), &one, Some(ask.clone()))
+        .unwrap();
+    sorting
+        .save_task_sort(dir.path(), &two, EventSort::Duration)
+        .unwrap();
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_sort(&one), EventSort::Duration);
+    assert_eq!(loaded.task_sort(&two), EventSort::Duration);
+    assert_eq!(loaded.task_ask(&one), Some(&ask));
+    assert_eq!(loaded.usage_view, UsageView::Detailed);
+    let stored = document(dir.path());
+    assert_eq!(stored["config"]["custom"], "keep");
+    assert_eq!(stored["state"]["custom"], 42);
+    assert_eq!(stored["state"]["tasks"]["claude:one"]["custom"], true);
+    assert_eq!(
+        stored["state"]["tasks"]["claude:one"]["ask"],
+        serde_json::to_value(&ask).unwrap()
+    );
+    sorting
+        .save_task_sort(dir.path(), &one, EventSort::Time)
+        .unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]["claude:one"]
+            .get("sort")
+            .is_none()
+    );
+    assert_eq!(Preferences::load(dir.path()).task_ask(&one), Some(&ask));
+    answers.forget_task(dir.path(), &one).unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]
+            .get("claude:one")
+            .is_none()
+    );
+    assert_eq!(
+        Preferences::load(dir.path()).task_sort(&two),
+        EventSort::Duration
+    );
+}
+
+#[test]
+fn default_sort_and_empty_task_entries_are_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "codex:task".parse().unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Time)
+        .unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]
+            .get("codex:task")
+            .is_none()
+    );
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Duration)
+        .unwrap();
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Time)
+        .unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]
+            .get("codex:task")
+            .is_none()
+    );
+    preferences
+        .save_task_ask(
+            dir.path(),
+            &key,
+            Some(StoredAsk {
+                id: "ask-1".into(),
+                page: 0,
+                answers: Default::default(),
+            }),
         )
         .unwrap();
-        let preferences = Preferences::load(dir.path());
-        assert_eq!(preferences.grouping, Grouping::Model);
-        assert_eq!(preferences.double_click_ms, 450);
-        assert_eq!(preferences.pinned, vec!["codex:kept".parse().unwrap()]);
-        assert_eq!(preferences.usage_view, UsageView::Detailed);
-        preferences.save(dir.path()).unwrap();
-        let stored: serde_json::Value =
-            serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
-        assert_eq!(
-            stored["config"]["sorting"],
-            if sorting == Some("duration") {
-                "duration"
-            } else {
-                "time"
-            }
-        );
-        assert_eq!(Preferences::load(dir.path()), preferences);
-    }
+    preferences.save_task_ask(dir.path(), &key, None).unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]
+            .get("codex:task")
+            .is_none()
+    );
+    assert_eq!(preferences.task_sort(&key), EventSort::Time);
+    assert_eq!(preferences.task_ask(&key), None);
+}
+
+#[test]
+fn task_write_failure_keeps_preferences_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path().join("not-a-directory");
+    fs::write(&config_dir, "occupied").unwrap();
+    let key = "codex:task".parse().unwrap();
+    let mut preferences = Preferences::default();
+    let before = preferences.clone();
+    assert!(
+        preferences
+            .save_task_sort(&config_dir, &key, EventSort::Duration)
+            .is_err()
+    );
+    assert_eq!(preferences, before);
+    assert!(
+        preferences
+            .save_task_ask(
+                &config_dir,
+                &key,
+                Some(StoredAsk {
+                    id: "ask-1".into(),
+                    page: 0,
+                    answers: Default::default(),
+                })
+            )
+            .is_err()
+    );
+    assert_eq!(preferences, before);
+    assert!(preferences.forget_task(&config_dir, &key).is_err());
+    assert_eq!(preferences, before);
 }
