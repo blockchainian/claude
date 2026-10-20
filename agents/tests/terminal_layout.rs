@@ -2338,6 +2338,64 @@ fn terminal_session_search_overlays_chart_bottom() {
 fn terminal_detail_reading_column_preserves_original_copy() {
     use std::io::Write;
 
+    fn detail_body_row<'a>(
+        line: &'a str,
+        width: u16,
+        last_body_row: bool,
+        source: &[String],
+    ) -> &'a str {
+        let columns = line.width();
+        assert!(
+            columns <= usize::from(width),
+            "capture row exceeds {width}: {line}"
+        );
+        // tmux omits trailing spaces; a full row includes the scrollbar's padding column.
+        let body = if columns == usize::from(width) {
+            let (padding, symbol) = line.char_indices().next_back().unwrap();
+            assert!(
+                matches!(symbol, ' ' | '▕'),
+                "unexpected detail padding: {line}"
+            );
+            &line[..padding]
+        } else {
+            line
+        };
+        if last_body_row && let Some(prefix) = body.trim_end().strip_suffix('…') {
+            let visible = prefix.trim();
+            // Markdown list markers are drawn as bullets instead of their source delimiters.
+            let visible = visible.strip_prefix("• ").unwrap_or(visible);
+            // Strip a viewport continuation only when the recording proves more source follows
+            // this row's text, without a source ellipsis at that position.
+            if !visible.is_empty()
+                && source.iter().flat_map(|text| text.lines()).any(|line| {
+                    line.split_once(visible)
+                        .is_some_and(|(_, suffix)| !suffix.is_empty() && !suffix.starts_with('…'))
+                })
+            {
+                return prefix;
+            }
+        }
+        body
+    }
+
+    fn recorded_text(value: serde_json::Value, texts: &mut Vec<String>) {
+        match value {
+            // Inline code delimiters do not occupy cells in rendered Markdown.
+            serde_json::Value::String(text) => texts.push(text.replace('`', "")),
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    recorded_text(value, texts);
+                }
+            }
+            serde_json::Value::Object(values) => {
+                for value in values.into_values() {
+                    recorded_text(value, texts);
+                }
+            }
+            _ => {}
+        }
+    }
+
     let calls: Vec<_> = include_str!("fixtures/claude-tool-calls.jsonl")
         .lines()
         .collect();
@@ -2386,7 +2444,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
         (
             "question",
             include_str!("fixtures/claude-questions-pending.jsonl").to_owned(),
-            "• 怎么判断",
+            "怎么判断",
             false,
         ),
         (
@@ -2414,6 +2472,15 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             false,
         ),
     ] {
+        let mut source = Vec::new();
+        let recording = if records.is_empty() {
+            include_str!("fixtures/transcript.jsonl")
+        } else {
+            &records
+        };
+        for line in recording.lines() {
+            recorded_text(serde_json::from_str(line).unwrap(), &mut source);
+        }
         let (directory, tmux, transcript) = start_probe(&format!("reading-{kind}"));
         if !records.is_empty() {
             std::fs::OpenOptions::new()
@@ -2443,12 +2510,34 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             let path = std::env::temp_dir().join(format!("agents-reading-{kind}-{width}.txt"));
             std::fs::write(&path, &capture).unwrap();
             let rows: Vec<_> = capture.lines().collect();
-            let rule = rows
+            // Only the detail borders are uninterrupted full-width rules. The top border
+            // precedes its title; the bottom border immediately precedes footer hints.
+            let rules: Vec<_> = rows
+                .windows(2)
+                .enumerate()
+                .filter(|(_, pair)| {
+                    pair[0].width() == usize::from(width)
+                        && pair[0].chars().all(|ch| ch == '─')
+                        && !pair[1].starts_with(" ? help")
+                })
+                .map(|(row, _)| row)
+                .collect();
+            assert_eq!(rules.len(), 1, "{kind} at {width}: {capture}");
+            let rule = rules[0];
+            let bottom = rows
                 .iter()
-                .rposition(|line| line.matches('─').count() > usize::from(width / 2))
-                .expect("detail header rule");
+                .enumerate()
+                .skip(rule + 1)
+                .find(|(_, line)| {
+                    line.width() == usize::from(width) && line.chars().all(|ch| ch == '─')
+                })
+                .map(|(row, _)| row)
+                .expect("full-width detail bottom border");
             assert!(
-                rows[rule + 2].trim_end_matches('│').trim().is_empty(),
+                detail_body_row(rows[rule + 2], width, false, &source)
+                    .trim_end_matches('│')
+                    .trim()
+                    .is_empty(),
                 "{capture}"
             );
             let (row, line) = rows
@@ -2471,11 +2560,17 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 .map(|(index, _)| index + 1)
                 .next_back()
                 .unwrap_or(rule + 3);
-            let group: Vec<_> = rows
+            let group: Vec<_> = rows[..bottom]
                 .iter()
+                .enumerate()
                 .skip(group_start)
-                .take_while(|line| line.trim() != "↓" && !line.starts_with(" ? help"))
-                .map(|line| line.trim_end().trim_end_matches('│').trim_end())
+                .take_while(|(_, line)| line.trim() != "↓" && !line.starts_with(" ? help"))
+                .map(|(row, line)| {
+                    detail_body_row(line, width, row + 1 == bottom, &source)
+                        .trim_end()
+                        .trim_end_matches('│')
+                        .trim_end()
+                })
                 .filter(|line| !line.trim().is_empty())
                 .collect();
             let group_left = group
