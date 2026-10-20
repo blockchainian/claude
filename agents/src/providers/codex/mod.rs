@@ -19,6 +19,11 @@ mod settings_tests;
 mod subagents_tests;
 #[cfg(test)]
 mod tests;
+mod terminal;
+#[cfg(test)]
+mod terminal_live_tests;
+#[cfg(test)]
+mod terminal_tests;
 
 use super::{
     AccountUsageJob, Capabilities, Job, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
@@ -808,6 +813,10 @@ impl Provider for CodexProvider {
         }
         Some(command)
     }
+    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<Job>> {
+        terminal::cleanup(&self.home, session)
+    }
+
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
         if !session.can_resume() {
             return None;
