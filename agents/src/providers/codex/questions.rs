@@ -1,117 +1,33 @@
-use super::{CodexProvider, app_server};
 use crate::{
     ask::{Answer, Ask, AskKind, Question},
     model::Session,
 };
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     io,
     path::Path,
     time::{Duration, Instant},
 };
 
-#[derive(Default)]
-pub(super) struct Questions {
-    calls: HashMap<(String, String), Option<Ask>>,
-}
-
-impl CodexProvider {
-    pub(super) fn questions(
-        &self,
-        sessions: &mut [Session],
-        pending: Vec<(usize, String, DateTime<Utc>, Vec<Question>)>,
-    ) -> io::Result<()> {
-        let mut questions = self
-            .questions
-            .lock()
-            .map_err(|_| io::Error::other("Codex question cache lock poisoned"))?;
-        questions.calls.retain(|(thread, call), _| {
-            pending
-                .iter()
-                .any(|(index, id, _, _)| sessions[*index].id.id == *thread && id == call)
-        });
-        if pending.is_empty()
-            || !self
-                .home
-                .join("app-server-control/app-server-control.sock")
-                .try_exists()?
-        {
-            return Ok(());
-        }
-        let mut client = match app_server::Client::connect(&self.home) {
-            Ok(client) => client,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        };
-        #[derive(Deserialize)]
-        struct Loaded {
-            data: Vec<String>,
-        }
-        let loaded: Loaded = client.request("thread/loaded/list", json!({}))?;
-        for (index, call, since, items) in pending {
-            let session = &mut sessions[index];
-            if !loaded.data.contains(&session.id.id) {
-                continue;
-            }
-            let key = (session.id.id.clone(), call.clone());
-            if !questions.calls.contains_key(&key) {
-                let replay = app_server::thread::question(&mut client, &session.id.id, &call)?;
-                let ask = replay
-                    .map(|request| ask(session, &call, since, items, &request.params))
-                    .transpose()?;
-                questions.calls.insert(key.clone(), ask);
-            }
-            session.ask = questions.calls[&key].clone();
-            if session.ask.is_some() {
-                session.status = crate::model::SessionStatus::NeedsInput;
-            }
-        }
-        Ok(())
+pub(super) fn apply(
+    sessions: &mut [Session],
+    pending: Vec<(usize, String, DateTime<Utc>, Vec<Question>)>,
+) {
+    for (index, call, since, items) in pending {
+        let session = &mut sessions[index];
+        session.ask = Some(ask(session, &call, since, items));
+        session.status = crate::model::SessionStatus::NeedsInput;
     }
 }
 
-fn ask(
-    session: &Session,
-    call: &str,
-    since: DateTime<Utc>,
-    mut questions: Vec<Question>,
-    params: &Value,
-) -> io::Result<Ask> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ReplayQuestion {
-        id: String,
-        is_other: bool,
-        is_secret: bool,
-    }
-    #[derive(Deserialize)]
-    struct Replay {
-        questions: Vec<ReplayQuestion>,
-    }
-    let replay: Replay = serde_json::from_value(params.clone()).map_err(io::Error::other)?;
-    if questions.len() != replay.questions.len() {
-        return Err(io::Error::other("Codex question count changed"));
-    }
+fn ask(session: &Session, call: &str, since: DateTime<Utc>, mut questions: Vec<Question>) -> Ask {
     for question in &mut questions {
-        let flags = replay
-            .questions
-            .iter()
-            .find(|item| item.id == question.id)
-            .ok_or_else(|| io::Error::other("Codex question id changed"))?;
-        question.other = flags.is_other;
-        question.secret = flags.is_secret;
+        question.other = true;
+        question.secret = false;
     }
-    Ok(Ask {
+    Ask {
         id: call.into(),
         session: session.id.clone(),
         since,
@@ -119,7 +35,7 @@ fn ask(
             questions,
             blocking: true,
         },
-    })
+    }
 }
 
 pub(super) fn encode(ask: &Ask, answer: &Answer) -> io::Result<Value> {
@@ -204,7 +120,7 @@ pub(super) fn confirm(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::{Provider, SessionInput};
+    use crate::providers::{Provider, SessionInput, codex::CodexProvider};
     use rusqlite::Connection;
 
     fn session() -> Session {
@@ -230,18 +146,7 @@ mod tests {
         .unwrap();
         let summary = super::super::rollout::summary(&path).unwrap();
         let (call, since) = summary.pending_question_call.unwrap();
-        let request: Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/codex-input/daemon-request.json"
-        ))
-        .unwrap();
-        ask(
-            &session(),
-            &call,
-            since,
-            summary.pending_questions,
-            &request["params"],
-        )
-        .unwrap()
+        ask(&session(), &call, since, summary.pending_questions)
     }
 
     #[test]
@@ -266,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn replayed_question_uses_rollout_identity_and_server_flags() {
+    fn rollout_question_uses_call_identity_and_default_flags() {
         let ask = captured_ask();
         assert_eq!(ask.id, "call_3d3e7995122343ac8f2f117588d23898");
         let AskKind::Questions { questions, .. } = ask.kind;
@@ -378,16 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn offline_questions_never_offer_an_answer() {
+    fn offline_questions_offer_an_answer_from_the_rollout() {
         let dir = tempfile::tempdir().unwrap();
         let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
         let mut sessions = vec![session()];
         let ask = captured_ask();
         let AskKind::Questions { questions, .. } = ask.kind;
-        provider
-            .questions(&mut sessions, vec![(0, ask.id, ask.since, questions)])
-            .unwrap();
-        assert!(sessions[0].ask.is_none());
+        apply(&mut sessions, vec![(0, ask.id, ask.since, questions)]);
+        assert!(sessions[0].ask.is_some());
         assert!(
             provider
                 .send(&sessions[0], SessionInput::Interrupt)

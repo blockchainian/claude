@@ -3213,6 +3213,25 @@ mod tests {
     }
 
     #[test]
+    fn ended_turn_without_question_output_has_no_pending_call() {
+        let mut records = input_records("pending");
+        let completed = input_records("answered")
+            .into_iter()
+            .find(|record| record["payload"]["type"] == "task_complete")
+            .unwrap();
+        for kind in ["task_complete", "turn_aborted"] {
+            let mut ended = completed.clone();
+            ended["payload"]["type"] = kind.into();
+            records.push(ended);
+            let result = input_summary(&records);
+            assert!(result.turn_ended);
+            assert!(result.pending_question_call.is_none());
+            assert!(result.pending_questions.is_empty());
+            records.pop();
+        }
+    }
+
+    #[test]
     fn request_user_input_multiple_questions_and_calls_keep_order() {
         let mut records = input_records("pending");
         let mut call = records

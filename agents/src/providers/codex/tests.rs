@@ -97,7 +97,15 @@ fn request_user_input_pending_answered_and_offline() {
                 .into_iter()
                 .find(|session| session.id.id == "thread-0")
                 .unwrap();
-            assert_eq!(session.status, SessionStatus::Inactive);
+            assert_eq!(
+                session.status,
+                if state == "pending" {
+                    SessionStatus::NeedsInput
+                } else {
+                    SessionStatus::Inactive
+                }
+            );
+            assert_eq!(session.ask.is_some(), state == "pending");
             session.process = Some(Process {
                 pid: std::process::id(),
                 label: Some("codex".into()),
@@ -123,6 +131,38 @@ fn request_user_input_pending_answered_and_offline() {
             apply_rollout(&mut session, rollout::summary(&path).unwrap());
             assert_eq!(session.status, SessionStatus::Inactive);
         }
+    }
+}
+
+#[test]
+fn question_refresh_uses_rollout_without_a_daemon_connection() {
+    let (dir, provider) = fixture();
+    let path = dir.path().join("pending.jsonl");
+    std::fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/codex-input/daemon-pending.jsonl"),
+    )
+    .unwrap();
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET rollout_path=? WHERE id='thread-0'",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    let control = dir.path().join("app-server-control");
+    std::fs::create_dir(&control).unwrap();
+    // A filesystem entry is present, but no daemon can accept a connection here.
+    std::fs::write(control.join("app-server-control.sock"), b"").unwrap();
+    for _ in 0..2 {
+        let snapshot = provider.snapshot(1).unwrap();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id.id == "thread-0")
+            .unwrap();
+        let ask = session.ask.as_ref().expect("rollout question is available");
+        assert_eq!(ask.id, "call_3d3e7995122343ac8f2f117588d23898");
     }
 }
 
@@ -479,6 +519,93 @@ fn manager_children_bypass_codex_paging_and_keep_descendants() {
             .unwrap()
             .contains(&provider.manager_home)
     );
+}
+
+#[test]
+fn hub_prunes_manager_orphans_before_reading_their_rollouts() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "detached");
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute(
+        "DELETE FROM threads WHERE id NOT IN ('thread-0', 'thread-12', 'thread-13')",
+        [],
+    )
+    .unwrap();
+    db.execute_batch(
+        "DELETE FROM thread_spawn_edges;
+         INSERT INTO thread_spawn_edges VALUES ('thread-0', 'thread-13', 'open');",
+    )
+    .unwrap();
+    let unreadable = dir.path().join("orphan.jsonl");
+    std::fs::create_dir(&unreadable).unwrap();
+    db.execute(
+        "UPDATE threads SET rollout_path=? WHERE id IN ('thread-0', 'thread-13')",
+        [unreadable.to_str().unwrap()],
+    )
+    .unwrap();
+    let visible = dir.path().join("visible.jsonl");
+    std::fs::write(
+        &visible,
+        include_str!("../../../tests/fixtures/codex-latest-activity.jsonl"),
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE threads SET rollout_path=? WHERE id='thread-12'",
+        [visible.to_str().unwrap()],
+    )
+    .unwrap();
+
+    let mut hub = crate::sessions::Hub::new(vec![Box::new(provider)]);
+    for _ in 0..2 {
+        let snapshot = hub.refresh();
+        assert_eq!(snapshot.sessions.len(), 1);
+        let session = &snapshot.sessions[0];
+        assert_eq!(session.id.id, "thread-12");
+        assert!(session.last_record_at.is_some());
+        assert!(session.activity.is_some());
+    }
+
+    db.execute(
+        "UPDATE threads SET rollout_path=? WHERE id='thread-12'",
+        [unreadable.to_str().unwrap()],
+    )
+    .unwrap();
+    assert!(hub.refresh().sessions.is_empty());
+
+    db.execute(
+        "UPDATE threads SET rollout_path=?",
+        [visible.to_str().unwrap()],
+    )
+    .unwrap();
+    let parent = "00000000-0000-0000-0000-000000000001";
+    let manager = dir.path().join("manager");
+    std::fs::rename(manager.join("claude-parent"), manager.join(parent)).unwrap();
+    std::fs::write(
+        manager.join("threads/thread-0.json"),
+        serde_json::json!({"sessionId":parent,"pid":12345}).to_string(),
+    )
+    .unwrap();
+    let claude_home = dir.path().join("claude");
+    let project = claude_home.join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join(format!("{parent}.jsonl")),
+        include_str!("../../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut hub = crate::sessions::Hub::new(vec![
+        Box::new(CodexProvider::new(dir.path().into(), manager)),
+        Box::new(crate::providers::claude::ClaudeProvider::new(claude_home)),
+    ]);
+    let snapshot = hub.refresh();
+    assert_eq!(snapshot.sessions.len(), 4);
+    let child = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id.id == "thread-0")
+        .unwrap();
+    assert_eq!(child.parent.as_ref().unwrap().id, parent);
+    assert!(child.activity.is_some());
 }
 
 #[test]

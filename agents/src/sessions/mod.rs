@@ -131,34 +131,54 @@ impl Hub {
     }
 
     pub fn refresh(&mut self) -> Snapshot {
+        let mut snapshots: Vec<_> = self
+            .providers
+            .iter_mut()
+            .map(|provider| provider.discover(self.pages))
+            .collect();
+        remove_orphans(&mut snapshots);
         merge(
             self.providers
                 .iter_mut()
-                .map(|provider| provider.refresh(self.pages)),
+                .zip(snapshots)
+                .map(|(provider, snapshot)| provider.enrich(snapshot)),
         )
     }
 }
 
+fn remove_orphans(snapshots: &mut [Snapshot]) {
+    // Remove orphaned descendants too, so every retained parent remains in the snapshot.
+    loop {
+        let ids: HashSet<_> = snapshots
+            .iter()
+            .flat_map(|snapshot| &snapshot.sessions)
+            .map(|session| session.id.clone())
+            .collect();
+        let mut removed = false;
+        for snapshot in snapshots.iter_mut() {
+            let count = snapshot.sessions.len();
+            snapshot.sessions.retain(|session| {
+                session
+                    .parent
+                    .as_ref()
+                    .is_none_or(|parent| ids.contains(parent))
+            });
+            removed |= snapshot.sessions.len() != count;
+        }
+        if !removed {
+            break;
+        }
+    }
+}
+
 fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
+    let mut snapshots: Vec<_> = snapshots.collect();
+    remove_orphans(&mut snapshots);
     let mut sessions = Vec::new();
     let mut has_more = false;
     for snapshot in snapshots {
         sessions.extend(snapshot.sessions);
         has_more |= snapshot.has_more;
-    }
-    // Remove orphaned descendants too, so every retained parent remains in the snapshot.
-    loop {
-        let ids: HashSet<_> = sessions.iter().map(|session| session.id.clone()).collect();
-        let count = sessions.len();
-        sessions.retain(|session| {
-            session
-                .parent
-                .as_ref()
-                .is_none_or(|parent| ids.contains(parent))
-        });
-        if sessions.len() == count {
-            break;
-        }
     }
     let (mut parents, mut children): (Vec<_>, Vec<_>) = sessions
         .into_iter()

@@ -39,13 +39,20 @@ use std::{
 
 const PAGE_SIZE: usize = 10;
 
+fn failed_snapshot(error: io::Error) -> Snapshot {
+    eprintln!("agents: Codex: {error}");
+    Snapshot {
+        sessions: vec![],
+        has_more: false,
+    }
+}
+
 pub struct CodexProvider {
     home: PathBuf,
     manager_home: PathBuf,
     tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
     models: Mutex<ModelCatalog>,
     background: Mutex<background::Background>,
-    questions: Mutex<questions::Questions>,
 }
 
 impl CodexProvider {
@@ -56,7 +63,6 @@ impl CodexProvider {
             tasks: Mutex::new(HashMap::new()),
             models: Mutex::new(ModelCatalog::default()),
             background: Mutex::new(background::Background::default()),
-            questions: Mutex::new(questions::Questions::default()),
         }
     }
 
@@ -88,6 +94,10 @@ impl CodexProvider {
     }
 
     fn snapshot(&self, pages: usize) -> io::Result<Snapshot> {
+        self.enrich_sessions(self.discover_sessions(pages)?)
+    }
+
+    fn discover_sessions(&self, pages: usize) -> io::Result<Snapshot> {
         let path = self.home.join("state_5.sqlite");
         if !path.exists() {
             return Ok(Snapshot {
@@ -141,6 +151,9 @@ impl CodexProvider {
                     if !native_agent && let Some(name) = &session.name {
                         session.title = name.clone();
                     }
+                    if link.needs_input {
+                        session.status = SessionStatus::NeedsInput;
+                    }
                 }
                 sessions.push(session);
             }
@@ -186,12 +199,18 @@ impl CodexProvider {
             }
         }
         sessions.retain(|s| selected.contains(&s.id));
+        Ok(Snapshot { sessions, has_more })
+    }
+
+    fn enrich_sessions(&self, mut snapshot: Snapshot) -> io::Result<Snapshot> {
+        let sessions = &mut snapshot.sessions;
         let mut tasks = self
             .tasks
             .lock()
             .map_err(|_| io::Error::other("Codex task cache lock poisoned"))?;
         let mut pending = Vec::new();
         for (index, session) in sessions.iter_mut().enumerate() {
+            let needs_input = session.status == SessionStatus::NeedsInput;
             let summary = match session
                 .transcript
                 .as_deref()
@@ -219,16 +238,13 @@ impl CodexProvider {
             } else {
                 session.status = status(session.process.is_some(), false);
             }
-            if manager
-                .get(&session.id.id)
-                .is_some_and(|link| link.needs_input)
-            {
+            if needs_input {
                 session.status = SessionStatus::NeedsInput;
             }
         }
-        self.background(&mut sessions)?;
-        self.questions(&mut sessions, pending)?;
-        Ok(Snapshot { sessions, has_more })
+        self.background(sessions)?;
+        questions::apply(sessions, pending);
+        Ok(snapshot)
     }
 
     fn background(&self, sessions: &mut [Session]) -> io::Result<()> {
@@ -685,13 +701,15 @@ impl Provider for CodexProvider {
             .collect())
     }
     fn refresh(&mut self, pages: usize) -> Snapshot {
-        self.snapshot(pages).unwrap_or_else(|error| {
-            eprintln!("agents: Codex: {error}");
-            Snapshot {
-                sessions: vec![],
-                has_more: false,
-            }
-        })
+        self.snapshot(pages).unwrap_or_else(failed_snapshot)
+    }
+    fn discover(&mut self, pages: usize) -> Snapshot {
+        self.discover_sessions(pages)
+            .unwrap_or_else(failed_snapshot)
+    }
+    fn enrich(&mut self, snapshot: Snapshot) -> Snapshot {
+        self.enrich_sessions(snapshot)
+            .unwrap_or_else(failed_snapshot)
     }
     #[cfg(test)]
     fn event_panel(
