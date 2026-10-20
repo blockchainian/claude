@@ -128,6 +128,11 @@ fn shell_output_command_table() {
         ("git diff | head -2", "-a\n+b", &[(0, 2, "diff")]),
         ("git diff; git show HEAD", "-a\n+b", &[(0, 2, "diff")]),
         ("git diff --stat", "a.rs | 1 +", &[]),
+        (
+            "git diff -- a.rs --stat",
+            "@@ -1 +1 @@\n-a\n+b",
+            &[(0, 3, "diff")],
+        ),
         ("git show --stat HEAD", "a.rs | 1 +", &[]),
         ("sed -n 1p a.rs; git diff", "a\n-b\n+c", &[]),
         (
@@ -278,6 +283,93 @@ fn shell_output_command_table() {
             "{command}"
         );
     }
+}
+
+#[test]
+fn shell_output_search_options() {
+    let cases = [
+        ("grep -n foo -A8 a.rs", "2:foo\n3-    #[default]\n", true),
+        ("grep -rn foo src", "src/a.rs:2:foo\n", true),
+        ("grep -rnE foo src", "src/a.rs:2:foo\n", true),
+        (
+            "grep -rn -A1 foo src",
+            "src/a.rs:2:foo\nsrc/a.rs-3-context\n--\nsrc/a.rs:8:foo\nsrc/a.rs-9-context\n",
+            true,
+        ),
+        ("grep -n -A 8 foo a.rs", "2:foo\n3-context\n", true),
+        (
+            "grep -rn -B3 -A3 foo src",
+            "src/a.rs-1-before\nsrc/a.rs:2:foo\nsrc/a.rs-3-after\n",
+            true,
+        ),
+        (
+            "grep -rn --include='*.rs' foo src",
+            "src/a.rs:2:foo\n",
+            true,
+        ),
+        (
+            "grep -rn --include '*.rs' foo src",
+            "src/a.rs:2:foo\n",
+            true,
+        ),
+        (
+            "rg -n -A8 foo src",
+            "src/a.rs:2:foo\nsrc/a.rs-3-after\n",
+            true,
+        ),
+        ("rg -n -e '-l' src", "src/a.rs:2:-l\n", true),
+        ("grep -rn --include '-l' foo src", "src/a.rs:2:foo\n", true),
+        ("grep -rln foo src", "src/a.rs\n", false),
+        ("grep -n -l foo src", "src/a.rs\n", false),
+        ("grep -nc foo src", "src/a.rs:2\n", false),
+        ("rg -n --json foo src", "{\"type\":\"match\"}\n", false),
+        ("grep -rn foo src", "src/a.rs-after\n", false),
+    ];
+    for (search, output, recognized) in cases {
+        for forward in [false, true] {
+            let (command, stdout, start) = if forward {
+                (
+                    format!("{search}; cat b.rs"),
+                    format!("{output}fn b() {{}}\n"),
+                    output.lines().count(),
+                )
+            } else {
+                (
+                    format!("cat b.rs; {search}"),
+                    format!("fn b() {{}}\n{output}"),
+                    0,
+                )
+            };
+            let expected = if recognized {
+                vec![Span {
+                    start,
+                    end: start + 1,
+                    language: "rs".into(),
+                }]
+            } else {
+                vec![]
+            };
+            assert_eq!(
+                actual(&command, &stdout, Stream::default()),
+                expected,
+                "{command}"
+            );
+        }
+    }
+    let command = "cd agents && sed -n 294,350p src/ui/input.rs; grep -n \"pub enum Panel\\|enum Panel\" -A8 src/ui/mod.rs";
+    let output = format!(
+        "{}233:enum Panel {{\n234-    #[default]\n{}",
+        "    let value = 1;\n".repeat(57),
+        "235-    Panel,\n".repeat(7)
+    );
+    assert_eq!(
+        actual(command, &output, Stream::default()),
+        vec![Span {
+            start: 0,
+            end: 57,
+            language: "rs".into()
+        }]
+    );
 }
 
 #[test]

@@ -91,6 +91,36 @@ BOUNDARY_CASES = [
 ]
 
 
+# Real search output includes combined flags and filename-prefixed context lines.
+SEARCH_CASES = [
+    [('sed -n 1,10000p agents/Cargo.toml', 'toml'), (command, None)]
+    for command in (
+        'grep -n package -A8 agents/Cargo.toml',
+        'grep -rn package agents/Cargo.toml',
+        'grep -rnE package agents/Cargo.toml',
+        'grep -n -A 8 package agents/Cargo.toml',
+        'grep -rn -B3 -A3 package agents/Cargo.toml agents/AGENTS.md',
+        "grep -rn --include='*.rs' 'enum Panel' agents/src/ui/mod.rs",
+        "grep -rn --include '*.rs' 'enum Panel' agents/src/ui/mod.rs",
+        "grep -rn -A3 'enum Panel' agents/src/ui/mod.rs agents/src/model.rs",
+        'rg -n -B3 -A3 package agents/Cargo.toml',
+    )
+]
+
+SEARCH_CASES.append([
+    ('cd agents', None),
+    ('sed -n 294,350p src/ui/input.rs', 'rs'),
+    (r'grep -n "pub enum Panel\|enum Panel" -A8 src/ui/mod.rs', None),
+])
+
+
+CASES.extend(
+    [('sed -n 1,10000p agents/Cargo.toml', 'toml'), (command, None)]
+    for command in ('grep -n -l package agents/Cargo.toml',
+                    'grep -n -c package agents/Cargo.toml',
+                    'rg -n --json package agents/Cargo.toml')
+)
+
 # Both reads can end before their requested range. Their separator must be found
 # by its complete content rather than inferred from either read's line limit.
 KNOWN_OUTPUT_CASES = [
@@ -159,7 +189,7 @@ def generate(args):
     records = [execute_case(stages, provider)
                for provider in ('claude', 'codex') for stages in CASES]
     for provider in ('claude', 'codex'):
-        for stages in PIPELINE_CASES + BOUNDARY_CASES + KNOWN_OUTPUT_CASES:
+        for stages in PIPELINE_CASES + BOUNDARY_CASES + KNOWN_OUTPUT_CASES + SEARCH_CASES:
             record = execute_case(stages, provider)
             record['minimum_highlighted'] = sum(s['end'] - s['start'] for s in record['expected'])
             records.append(record)
@@ -220,8 +250,10 @@ def stage_source(words):
     elif words[:2] in (['git', 'diff'], ['git', 'show'], ['git', 'log']):
         summary = ('--stat', '--name-only', '--name-status', '--shortstat', '--numstat',
                    '--quiet', '--check', '-s', '--no-patch', '--oneline', '--summary', '--dirstat')
+        arguments = words[2:]
+        options = arguments[:arguments.index('--')] if '--' in arguments else arguments
         if any(w in summary or w.startswith(('--format', '--pretty', '--stat')) or ':' in w
-               for w in words[2:]):
+               for w in options):
             return None
         return ('diff', []) if words[1] != 'log' or any(w in ('-p', '--patch') for w in words[2:]) else None
     else:

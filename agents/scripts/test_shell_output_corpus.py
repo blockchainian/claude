@@ -23,6 +23,11 @@ class HighlightBaselineTests(unittest.TestCase):
         cls.observed = [{'provider': r['provider'], 'command': r['command'],
                          'actual': r['expected']} for r in cls.records]
 
+    def test_diff_option_after_separator_is_a_path(self):
+        self.assertEqual(corpus.stage_source(['git', 'diff', '--', 'a.rs', '--stat']),
+                         ('diff', []))
+        self.assertIsNone(corpus.stage_source(['git', 'diff', '--stat', '--', 'a.rs']))
+
     def test_merged_missing_file_diagnostic_is_plain(self):
         record = next(r for r in corpus.read_jsonl(corpus.DEFAULT_FIXTURE)
                       if r['provider'] == 'codex'

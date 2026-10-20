@@ -40,6 +40,8 @@ enum Content {
 struct Row {
     shape: Regex,
     flags: &'static [&'static str],
+    values: &'static [&'static str],
+    required: &'static [&'static str],
     length: Length,
     lines: Option<&'static LazyLock<Regex>>,
     content: Content,
@@ -47,17 +49,61 @@ struct Row {
     filter: bool,
 }
 impl Row {
+    fn options(
+        mut self,
+        values: &'static [&'static str],
+        required: &'static [&'static str],
+    ) -> Self {
+        self.values = values;
+        self.required = required;
+        self
+    }
+
     fn lines(mut self, regex: &'static LazyLock<Regex>) -> Self {
         self.lines = Some(regex);
         self
     }
 }
-static SEARCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[^\s:]+:)?\d+[:-]|^--$".into()));
+static SEARCH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:(?:[^\s:]+:)?\d+[:-]|[^\s:]+-\d+-|--$)".into()));
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[ MADRCU?!]{2} \S|## )".into()));
 static LOG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{7,40} ".into()));
 
 // Shapes match shell words separated by NUL. Capture 1 supplies the count or
-// arguments; capture 2 supplies file names. Flags are an exhaustive allowlist.
+// arguments; capture 2 supplies file names. Flags reject output-changing options;
+// value-taking options consume their argument before checking further flags.
+const DIFF_FLAGS: &[&str] = &[
+    "--stat",
+    "--numstat",
+    "--shortstat",
+    "--name-only",
+    "--name-status",
+    "--summary",
+    "--dirstat",
+    "--check",
+    "--quiet",
+    "-s",
+    "--no-patch",
+    "--oneline",
+    "--format*",
+    "--pretty*",
+];
+
+const DIFF_VALUES: &[&str] = &[
+    "-U",
+    "--unified",
+    "-S",
+    "-G",
+    "--diff-filter",
+    "--src-prefix",
+    "--dst-prefix",
+    "--line-prefix",
+    "-n",
+    "--max-count",
+    "--author",
+    "--grep",
+];
+
 static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     use Content::*;
     use Count::*;
@@ -65,6 +111,8 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     let row = |shape: &str, flags, length, content, no_match_exit, filter| Row {
         shape: Regex::new(format!("(?s)\\A(?:{shape})\\z")),
         flags,
+        values: &[],
+        required: &[],
         length,
         lines: None,
         content,
@@ -75,12 +123,13 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(r"cd\x00([^\x00-][^\x00]*)", &[], Silent, Plain, None, false),
         row(
             r"mkdir\x00(.+)",
-            &["-p", "--parents", "--"],
+            &["-v", "--verbose", "--help", "--version"],
             Silent,
             Plain,
             None,
             false,
-        ),
+        )
+        .options(&["-m", "--mode"], &[]),
         row(r"sleep\x00([0-9.]+)", &[], Silent, Plain, None, false),
         row(
             r"sed\x00-n\x00([0-9]+(?:,(?:[0-9]+|\$))?p|\$p)\x00([^\x00]+)",
@@ -149,101 +198,128 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         ),
         row(
             r"git\x00(?:diff|show)(?:\x00([^:]*))?",
-            &[
-                "--",
-                "--cached",
-                "--staged",
-                "--no-ext-diff",
-                "--no-index",
-                "--no-color",
-                "--color=never",
-                "-w",
-                "--ignore-space-at-eol",
-                "--ignore-all-space",
-                "--no-renames",
-                "--patch",
-                "-p",
-                "--unified=#",
-                "-U#",
-            ],
+            DIFF_FLAGS,
             Unknown,
             Diff,
             None,
             false,
-        ),
+        )
+        .options(DIFF_VALUES, &[]),
         row(
             r"git\x00log\x00((?:-p|--patch)(?:\x00.*)?)",
-            &["-p", "--patch", "-#", "-n#", "--", "--no-color"],
+            DIFF_FLAGS,
             Unknown,
             Diff,
             None,
             false,
-        ),
-        row(r"diff\x00-u\x00(.+)", &["--"], Unknown, Diff, None, false),
+        )
+        .options(DIFF_VALUES, &[]),
         row(
-            r"(?:rg|grep)\x00((?:[^\x00]+\x00)*-n(?:\x00.*)?)",
+            r"diff\x00-u\x00(.+)",
+            DIFF_FLAGS,
+            Unknown,
+            Diff,
+            None,
+            false,
+        )
+        .options(DIFF_VALUES, &[]),
+        row(
+            r"(?:rg|grep)\x00(.+)",
             &[
-                "-n",
-                "-r",
-                "-R",
-                "-i",
-                "-I",
-                "-F",
-                "-E",
-                "-w",
-                "-s",
-                "-S",
-                "--no-heading",
-                "--line-number",
-                "--hidden",
-                "--no-ignore",
-                "--",
-                "-e=",
-                "-g=",
-                "--glob=",
-                "--type=",
-                "--max-count=#",
-                "-m#",
+                "-l",
+                "-L",
+                "-c",
+                "-q",
+                "-p",
+                "--files",
+                "--files-with-matches",
+                "--files-without-match",
+                "--count",
+                "--count-matches",
+                "--json",
+                "--heading",
+                "--pretty",
+                "--quiet",
             ],
             Unknown,
             Plain,
             Some(1),
             false,
         )
-        .lines(&SEARCH),
-        row(
-            r"git\x00status\x00((?:-s|--short|-sb)(?:\x00.*)?)",
+        .lines(&SEARCH)
+        .options(
             &[
-                "-s",
-                "--short",
-                "-sb",
-                "--branch",
-                "--",
-                "--untracked-files=all",
-                "--untracked-files=no",
+                "-A",
+                "-B",
+                "-C",
+                "-e",
+                "-f",
+                "-g",
+                "-t",
+                "-T",
+                "-m",
+                "-M",
+                "--after-context",
+                "--before-context",
+                "--context",
+                "--include",
+                "--exclude",
+                "--exclude-dir",
+                "--include-dir",
+                "--glob",
+                "--iglob",
+                "--type",
+                "--type-not",
+                "--regexp",
+                "--file",
+                "--max-count",
+                "--max-columns",
+                "--color",
+                "--colors",
             ],
+            &["-n", "--line-number"],
+        ),
+        row(
+            r"git\x00status\x00(.+)",
+            &["-z", "--null", "--porcelain*", "--long"],
             Unknown,
             Plain,
             None,
             false,
         )
-        .lines(&STATUS),
+        .lines(&STATUS)
+        .options(
+            &["--untracked-files", "--ignore-submodules"],
+            &["-s", "--short"],
+        ),
         row(
             r"git\x00log\x00((?:[^\x00]+\x00)*--oneline(?:\x00.*)?)",
             &[
-                "--oneline",
-                "-#",
-                "-n#",
-                "--max-count=#",
-                "--no-decorate",
-                "--",
+                "--format*",
+                "--pretty*",
+                "--graph",
+                "--patch",
+                "-p",
+                "--stat*",
+                "-z",
             ],
             Unknown,
             Plain,
             None,
             false,
         )
-        .lines(&LOG),
+        .lines(&LOG)
+        .options(
+            &[
+                "-n",
+                "--max-count",
+                "--author",
+                "--grep",
+                "--since",
+                "--until",
+            ],
+            &[],
+        ),
         row(
             r"wc\x00(-[lcwcm])\x00(.+)",
             &[],
@@ -340,36 +416,50 @@ impl Segment {
     }
 }
 
-fn allowed(args: &str, flags: &[&str]) -> bool {
+fn allowed(args: &str, row: &Row) -> bool {
+    let blocked = |option: &str| {
+        row.flags.iter().any(|flag| {
+            flag.strip_suffix('*')
+                .map_or(option == *flag, |prefix| option.starts_with(prefix))
+        })
+    };
+    let mut required = row.required.is_empty();
     let mut words = args.split('\0');
     while let Some(word) = words.next() {
         if word == "--" {
-            return flags.contains(&"--");
+            break;
         }
-        if !word.starts_with('-') {
+        if !word.starts_with('-') || word == "-" {
             continue;
         }
-        if !flags.iter().any(|flag| {
-            if let Some(prefix) = flag.strip_suffix('#') {
-                word.strip_prefix(prefix)
-                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-            } else if let Some(prefix) = flag.strip_suffix('=') {
-                word == prefix || word.starts_with(&format!("{prefix}="))
-            } else {
-                word == *flag
+        if word.starts_with("--") {
+            let (option, value) = word
+                .split_once('=')
+                .map_or((word, None), |(k, v)| (k, Some(v)));
+            if blocked(option) {
+                return false;
             }
-        }) {
-            return false;
-        }
-        if flags
-            .iter()
-            .any(|flag| flag.strip_suffix('=') == Some(word))
-            && words.next().is_none()
-        {
-            return false;
+            required |= row.required.contains(&option);
+            if value.is_none() && row.values.contains(&option) && words.next().is_none() {
+                return false;
+            }
+        } else {
+            for (index, letter) in word[1..].char_indices() {
+                let option = format!("-{letter}");
+                if blocked(&option) {
+                    return false;
+                }
+                required |= row.required.contains(&option.as_str());
+                if row.values.contains(&option.as_str()) {
+                    if index + 1 + letter.len_utf8() == word.len() && words.next().is_none() {
+                        return false;
+                    }
+                    break;
+                }
+            }
         }
     }
-    true
+    required
 }
 
 fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, Option<String>)> {
@@ -442,7 +532,7 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
         if (matches!(row.content, Content::Diff)
             || row.lines.is_some()
             || matches!(row.length, Length::Silent))
-            && !allowed(arg, row.flags)
+            && !allowed(arg, row)
         {
             continue;
         }
@@ -702,17 +792,15 @@ fn boundary(
         }
         _ => {
             let regex = segment.lines?;
+            let matches = |line: &&&str| {
+                let line = line.strip_suffix('\n').unwrap_or(line);
+                let line = line.strip_suffix('\r').unwrap_or(line);
+                regex.is_match(line)
+            };
             let n = if forward {
-                lines[start..end]
-                    .iter()
-                    .take_while(|l| regex.is_match(l))
-                    .count()
+                lines[start..end].iter().take_while(matches).count()
             } else {
-                lines[start..end]
-                    .iter()
-                    .rev()
-                    .take_while(|l| regex.is_match(l))
-                    .count()
+                lines[start..end].iter().rev().take_while(matches).count()
             };
             (n > 0).then_some(if forward { start + n } else { end - n })
         }
@@ -1003,4 +1091,28 @@ pub(super) fn sections(
         output.push(text_section(label, &text[cursor..]));
     }
     Some(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_output_boundary_matches_line_contents() {
+        static FORMAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^format$".into()));
+        let segment = Segment {
+            lines: Some(&FORMAT),
+            ..Segment::unknown()
+        };
+        for line in ["format", "format\n", "format\r\n"] {
+            for forward in [false, true] {
+                assert_eq!(
+                    boundary(&segment, &[line], 0, 1, forward),
+                    Some(usize::from(forward)),
+                    "{line:?}"
+                );
+            }
+        }
+        assert_eq!(boundary(&segment, &["format \n"], 0, 1, true), None);
+    }
 }
