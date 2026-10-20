@@ -77,8 +77,9 @@ fn manager_child_session_keys_operate() {
     let id = view.selected_id().unwrap().clone();
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
-        Some(Action::OpenTerminal(id.clone()))
+        None
     );
+    assert_eq!(view.active_panel, Panel::TaskList);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE)),
         Some(Action::Fork(id.clone()))
@@ -92,14 +93,14 @@ fn manager_child_session_keys_operate() {
 #[test]
 fn codex_spawn_child_session_keys_emit_unsupported() {
     for (code, modifiers, label) in [
-        (KeyCode::Char('l'), KeyModifiers::CONTROL, "Terminal"),
-        (KeyCode::Char('f'), KeyModifiers::NONE, "Fork"),
-        (KeyCode::Char('r'), KeyModifiers::NONE, "Rename"),
-        (KeyCode::Char('x'), KeyModifiers::NONE, "Stop"),
-        (KeyCode::Char('a'), KeyModifiers::NONE, "Archive"),
-        (KeyCode::Backspace, KeyModifiers::NONE, "Delete"),
-        (KeyCode::Char('h'), KeyModifiers::NONE, "Hide"),
-        (KeyCode::Char('p'), KeyModifiers::NONE, "Pin"),
+        (KeyCode::Char('l'), KeyModifiers::CONTROL, None),
+        (KeyCode::Char('f'), KeyModifiers::NONE, Some("Fork")),
+        (KeyCode::Char('r'), KeyModifiers::NONE, Some("Rename")),
+        (KeyCode::Char('x'), KeyModifiers::NONE, Some("Stop")),
+        (KeyCode::Char('a'), KeyModifiers::NONE, Some("Archive")),
+        (KeyCode::Backspace, KeyModifiers::NONE, Some("Delete")),
+        (KeyCode::Char('h'), KeyModifiers::NONE, Some("Hide")),
+        (KeyCode::Char('p'), KeyModifiers::NONE, Some("Pin")),
     ] {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
@@ -108,7 +109,7 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
             view.set_notice(notice.clone());
             assert_eq!(
                 view.handle_key(KeyEvent::new(code, modifiers)),
-                Some(Action::Unsupported(label)),
+                label.map(Action::Unsupported),
                 "{code:?}"
             );
             assert_eq!(view.selected_id(), Some(&id));
@@ -135,19 +136,18 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
         let session = view.selected_row().unwrap().clone();
         let expected = match code {
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-                Action::OpenTerminal(session.id)
-            }
-            KeyCode::Char('o') => Action::OpenTerminal(session.id),
-            KeyCode::Char('f') => Action::Fork(session.id),
-            KeyCode::Char('n') => Action::NewDraft { cwd: session.cwd },
-            KeyCode::Char('x') => Action::Stop(session.id),
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l' | 'o') => None,
+            KeyCode::Char('f') => Some(Action::Fork(session.id)),
+            KeyCode::Char('n') => Some(Action::NewDraft { cwd: session.cwd }),
+            KeyCode::Char('x') => Some(Action::Stop(session.id)),
             _ => unreachable!(),
         };
-        assert_eq!(
-            view.handle_key(KeyEvent::new(code, modifiers)),
-            Some(expected)
-        );
+        assert_eq!(view.handle_key(KeyEvent::new(code, modifiers)), expected);
+        if matches!(code, KeyCode::Enter | KeyCode::Right | KeyCode::Char('o')) {
+            assert_eq!(view.active_panel, Panel::Prompt);
+        } else if code == KeyCode::Char('l') {
+            assert_eq!(view.active_panel, Panel::TaskList);
+        }
     }
     let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
     let id = view.selected_id().unwrap().clone();
@@ -191,7 +191,7 @@ fn manager_thread_hides_itself_and_pins_its_parent_group() {
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("enter Terminal")
+            .contains("enter open")
     );
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),

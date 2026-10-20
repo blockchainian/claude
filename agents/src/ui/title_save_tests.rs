@@ -311,16 +311,10 @@ fn task_return_routes_restore_parked_title_and_caret() {
                     assert_eq!(key(&mut view, code), None);
                     assert_eq!(view.status_filter, filter, "{route}");
                     assert_eq!(view.active_panel, Panel::TaskList, "{route}");
-                    assert_eq!(
-                        key(&mut view, KeyCode::Enter),
-                        Some(Action::OpenTerminal(first.clone()))
-                    );
+                    assert_eq!(key(&mut view, KeyCode::Enter), None);
                 }
                 "enter" => {
-                    assert_eq!(
-                        key(&mut view, KeyCode::Enter),
-                        Some(Action::OpenTerminal(first.clone()))
-                    );
+                    assert_eq!(key(&mut view, KeyCode::Enter), None);
                 }
                 "right" | "down" => {
                     view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
@@ -352,8 +346,10 @@ fn task_return_routes_restore_parked_title_and_caret() {
         }
         assert_eq!(view.selected_id(), Some(&first), "{route}");
         let expected_panel = match route {
-            "mouse" | "tab" | "backtab" | "enter" => Panel::TaskList,
-            "down" => Panel::Prompt,
+            "previous" => Panel::TaskList,
+            "down" | "prompt" => Panel::Prompt,
+            "events" => Panel::EventList,
+            "detail" => Panel::EventDetail,
             _ => Panel::TaskDetails,
         };
         assert_eq!(view.active_panel, expected_panel, "{route}");
@@ -385,40 +381,40 @@ fn revisited_prompt_task(width: u16) -> (tempfile::TempDir, View, SessionKey) {
     (directory, view, id)
 }
 
-fn assert_revisited_task_opens_terminal(code: KeyCode) {
+fn assert_revisited_task_restores_prompt(code: KeyCode) {
     for width in [100, 200] {
         let (_directory, mut view, id) = revisited_prompt_task(width);
-        assert_eq!(key(&mut view, code), Some(Action::OpenTerminal(id)));
-        assert_eq!(view.active_panel, Panel::TaskList);
+        assert_eq!(key(&mut view, code), None);
+        assert_eq!(view.selected_id(), Some(&id));
+        assert_eq!(view.active_panel, Panel::Prompt);
+        assert!(!view.task_entry_pending);
     }
 }
 
 #[test]
-fn revisited_task_enter_opens_terminal() {
-    assert_revisited_task_opens_terminal(KeyCode::Enter);
+fn revisited_task_enter_restores_prompt() {
+    assert_revisited_task_restores_prompt(KeyCode::Enter);
 }
 
 #[test]
-fn revisited_task_o_opens_terminal() {
-    assert_revisited_task_opens_terminal(KeyCode::Char('o'));
+fn revisited_task_o_restores_prompt() {
+    assert_revisited_task_restores_prompt(KeyCode::Char('o'));
 }
 
 #[test]
-fn revisited_task_right_opens_terminal() {
-    assert_revisited_task_opens_terminal(KeyCode::Right);
+fn revisited_task_right_restores_prompt() {
+    assert_revisited_task_restores_prompt(KeyCode::Right);
 }
 
 #[test]
-fn revisited_task_row_click_keeps_list_focus_for_delete() {
+fn revisited_task_row_click_restores_prompt_without_delete() {
     let (_directory, mut view, id) = revisited_prompt_task(200);
     click_task_row(&mut view, &id);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.active_panel, Panel::TaskList);
+    assert_eq!(view.active_panel, Panel::Prompt);
+    assert!(!view.task_entry_pending);
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(matches!(
-        view.confirm_dialog.as_ref().map(|dialog| &dialog.action),
-        Some(ConfirmAction::Delete(target)) if target == &id
-    ));
+    assert!(view.confirm_dialog.is_none());
 }
 
 #[test]

@@ -795,17 +795,17 @@ mod tests {
     }
 
     #[test]
-    fn restored_terminal_o_enters_terminal() {
+    fn restored_terminal_o_restores_last_panel() {
         restored_terminal_activation(crossterm::event::KeyCode::Char('o'));
     }
 
     #[test]
-    fn restored_terminal_enter_enters_terminal() {
+    fn restored_terminal_enter_restores_last_panel() {
         restored_terminal_activation(crossterm::event::KeyCode::Enter);
     }
 
     #[test]
-    fn restored_terminal_right_enters_terminal() {
+    fn restored_terminal_right_restores_last_panel() {
         restored_terminal_activation(crossterm::event::KeyCode::Right);
     }
 
@@ -834,7 +834,7 @@ mod tests {
         assert_eq!(app.view.selected_id(), Some(&id));
         draw(&mut app);
 
-        app.handle_event(Event::Key(KeyCode::Char('o').into()));
+        app.open_terminal(id.clone());
         assert_eq!(
             app.terminal.as_ref().map(|terminal| &terminal.id),
             Some(&id)
@@ -875,17 +875,15 @@ mod tests {
         );
 
         app.handle_event(Event::Key(key.into()));
-        // An explicit open may wait for its previous client to finish closing.
-        finish_close(&mut app);
         app.sync_terminal();
         let shown = app.terminal.as_ref().map(|terminal| &terminal.id) == Some(&id);
         let focused = app.view.terminal_paste("").is_some();
         app.close_terminal();
         finish_close(&mut app);
-        assert!(shown, "explicit open must restore the terminal");
+        assert!(shown, "entering must preserve the restored terminal");
         assert!(
-            focused,
-            "explicit {key:?} must focus EventDetail after automatic reopen"
+            !focused,
+            "entering with {key:?} must keep the last panel focus instead of opening the terminal"
         );
     }
 

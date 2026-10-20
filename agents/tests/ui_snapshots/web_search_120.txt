@@ -87,4 +87,4 @@
    workspace trust dialog.
  • Gitignore: Sources recommend adding .claude/worktrees/ to .gitignore so worktree contents don't show up…
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc Previous  ↑/↓ move  enter Terminal  n new
+ ? help  esc previous  ↑/↓ move  enter open  n new

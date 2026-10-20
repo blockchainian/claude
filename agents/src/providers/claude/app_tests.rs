@@ -727,14 +727,14 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_event() {
     );
     assert!(app.view.event_panel[0].body.starts_with("SyntaxWarning 修好了"));
     key(&mut app, KeyCode::Esc);
-    // Return to the task list before changing the selected task.
-    let (column, row) = app.view.marker_pos().unwrap();
-    app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
-        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        column,
-        row,
-        modifiers: KeyModifiers::NONE,
-    }));
+    // A remembered task row enters its parked focus; use panel navigation for the list.
+    for direction in ['k', 'k', 'k', 'k', 'h'] {
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+        )));
+        key(&mut app, KeyCode::Char(direction));
+    }
     key(&mut app, KeyCode::Up);
     assert_eq!(app.view.event_session.as_ref(), Some(&parent.id));
     assert_eq!(app.transcript_stamp.as_ref().unwrap().session, parent.id);

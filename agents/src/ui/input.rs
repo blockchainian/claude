@@ -283,7 +283,11 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        let focus = self.task_focus();
         let action = self.handle_panel_mouse(mouse);
+        if self.task_focus() != focus {
+            self.set_active_panel(self.active_panel);
+        }
         self.finish_panel_action(action)
     }
 
@@ -330,14 +334,9 @@ impl View {
                 });
         }
         if let Some(panel) = panel {
-            if panel != Panel::TaskList
-                && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                && self.enter_task()
-            {
-                self.mouse_panel = Some((MouseButton::Left, Some(self.active_panel)));
-                return None;
+            if panel != Panel::TaskList || !self.browsing_task_list(mouse) {
+                self.set_active_panel(panel);
             }
-            self.set_active_panel(panel);
         }
         if let Some(action) = self.overlay_mouse(mouse) {
             return action;
@@ -369,6 +368,23 @@ impl View {
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
+        }
+    }
+
+    fn browsing_task_list(&self, mouse: MouseEvent) -> bool {
+        match mouse.kind {
+            MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight => self
+                .viewport
+                .borrow()
+                .list
+                .contains((mouse.column, mouse.row).into()),
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+                self.pressed_task.is_some()
+            }
+            _ => false,
         }
     }
 
@@ -775,7 +791,11 @@ impl View {
             }
             return None;
         }
-        if (self.active_panel == Panel::TaskDetails && self.rename_target.is_some()) || self.searching {
+        if (self.active_panel == Panel::TaskDetails
+            && self.rename_target.is_some()
+            && !self.browsing_task_list(mouse))
+            || self.searching
+        {
             self.mouse_press = None;
             self.text_selection.borrow_mut().take();
             return None;
@@ -1106,6 +1126,9 @@ impl View {
                         last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
+                    if self.task_entry_pending {
+                        self.enter_task();
+                    }
                     if double {
                         return None;
                     }
@@ -1340,9 +1363,6 @@ impl View {
         self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {
-        if self.selected_draft.is_some() {
-            return Some(Action::Unsupported("Terminal"));
-        }
         if self.selected == usize::MAX
             && self.has_more
             && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive]
@@ -1353,17 +1373,12 @@ impl View {
             self.loading = true;
             return Some(Action::ShowMore);
         }
-        let id = self.selected_id()?.to_owned();
-        if !self.selected_capabilities().resume
-            || !self.selected_row().is_some_and(Session::can_resume)
-        {
-            return Some(Action::Unsupported("Terminal"));
+        if self.task_entry_pending {
+            self.enter_task();
+        } else {
+            self.prepare_prompt();
         }
-        if self.searching {
-            self.search.clear();
-            self.searching = false;
-        }
-        Some(Action::OpenTerminal(id))
+        None
     }
     /// Stops the selected task, keeping a running turn's prompt to return to the input.
     fn stop_from_input(&mut self) -> Option<Action> {
@@ -1417,7 +1432,11 @@ impl View {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let focus = self.task_focus();
         let action = self.handle_key_event(key);
+        if self.task_focus() != focus {
+            self.set_active_panel(self.active_panel);
+        }
         self.finish_panel_action(action)
     }
 
@@ -1448,6 +1467,12 @@ impl View {
     }
 
     fn handle_panel_key(&mut self, key: KeyEvent) -> Option<Action> {
+        if self.active_panel == Panel::TaskList
+            && key.code == KeyCode::Char('l')
+            && key.modifiers == KeyModifiers::CONTROL
+        {
+            return None;
+        }
         if self.frozen_draft() {
             return if key.code == KeyCode::Char('c')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1569,17 +1594,12 @@ impl View {
             && self
                 .selected_row()
                 .is_some_and(|session| !session.can_resume())
-            && ((plain
-                && matches!(
-                    key.code,
-                    KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h' | 'p')
-                ))
-                || (key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('l')))
+            && plain
+            && matches!(
+                key.code,
+                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h' | 'p')
+            )
         {
-            if key.code == KeyCode::Char('l') {
-                return self.activate();
-            }
             return self
                 .selected_row()
                 .filter(|session| !session.can_resume())
@@ -1773,20 +1793,15 @@ impl View {
             return None;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
-            return if key.code == KeyCode::Char('l') {
-                self.activate()
-            } else {
-                None
-            };
+            return None;
         }
         if !plain {
             return None;
         }
         if self.selected_draft.is_some()
-            && matches!(key.code, KeyCode::Char('o' | 'f' | 'a' | 'x' | 'r' | 'h'))
+            && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r' | 'h'))
         {
             return Some(Action::Unsupported(match key.code {
-                KeyCode::Char('o') => "Terminal",
                 KeyCode::Char('f') => "Fork",
                 KeyCode::Char('a') => "Archive",
                 KeyCode::Char('x') => "Stop",

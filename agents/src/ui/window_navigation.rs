@@ -41,11 +41,29 @@ impl View {
         if !self.task_entry_pending || self.help || self.confirm_dialog.is_some() {
             return false;
         }
-        self.restore_task_focus(self.task_focus());
-        true
+        self.restore_task_focus(self.task_focus())
     }
 
-    pub(super) fn restore_task_focus(&mut self, focus: Focus) {
+    pub(super) fn task_focus_available(&self, focus: Focus) -> bool {
+        match focus {
+            Focus::Prompt => self.input_disabled().is_none(),
+            Focus::Question => self.active_question().is_some() || self.input_disabled().is_none(),
+            _ => true,
+        }
+    }
+
+    pub(super) fn input_focus(&self) -> Focus {
+        if self.active_question().is_some() {
+            Focus::Question
+        } else {
+            Focus::Prompt
+        }
+    }
+
+    pub(super) fn restore_task_focus(&mut self, focus: Focus) -> bool {
+        if !self.task_focus_available(focus) {
+            return false;
+        }
         self.task_entry_pending = false;
         let panel = match focus {
             Focus::Prompt | Focus::Question => Panel::Prompt,
@@ -56,6 +74,7 @@ impl View {
             Focus::EventDetail | Focus::EventDetailSearch => Panel::EventDetail,
         };
         self.set_active_panel(panel);
+        true
     }
 
     pub(super) fn task_search_editing(&self) -> bool {
@@ -68,16 +87,8 @@ impl View {
 
     /// Panel interactions, editors and attention requests share this activation entry point.
     pub(super) fn set_active_panel(&mut self, panel: Panel) {
-        if panel == self.active_panel {
-            return;
-        }
-        if panel == Panel::TaskList
-            && let Some(key) = self.panels_task.clone()
-        {
-            let focus = self.task_focus();
-            self.task_uis.entry(key).or_default().focus = Some(focus);
-        }
-        if self.searching
+        if panel != self.active_panel
+            && self.searching
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         {
             self.pending_actions.push(action);
@@ -86,6 +97,10 @@ impl View {
         self.active_panel = panel;
         if panel != Panel::TaskList {
             self.task_entry_pending = false;
+            if let Some(key) = self.panels_task.clone() {
+                let focus = self.task_focus();
+                self.task_uis.entry(key).or_default().focus = Some(focus);
+            }
         }
     }
 

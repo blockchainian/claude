@@ -131,3 +131,94 @@ fn pending_path_precedes_immediate_link_action() {
         ]))
     );
 }
+
+#[test]
+fn title_editing_allows_task_row_click_and_list_wheel() {
+    for wheel in [false, true] {
+        let (directory, mut view) = fixture();
+        let payload = include_str!("../../tests/fixtures/claude-start.jsonl");
+        let session: serde_json::Value =
+            serde_json::from_str(payload.lines().next().unwrap()).unwrap();
+        let id = session["sessionId"].as_str().unwrap();
+        std::fs::write(
+            directory
+                .path()
+                .join("config/projects/probe")
+                .join(format!("{id}.jsonl")),
+            payload,
+        )
+        .unwrap();
+        let mut provider =
+            crate::providers::claude::ClaudeProvider::new(directory.path().join("config"));
+        let mut sessions = provider.refresh(2).sessions;
+        assert_eq!(sessions.len(), 2);
+        for session in &mut sessions {
+            session.status = SessionStatus::Ready;
+            session.cwd = directory.path().into();
+        }
+        view.set_capabilities(HashMap::from([(
+            crate::providers::ProviderId::Claude,
+            provider.capabilities(),
+        )]));
+        view.set_sessions(sessions, false);
+        let visible = view.selectable_indices();
+        view.select(visible[0]);
+        let target = visible[1];
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+            None
+        );
+        assert!(view.rename_target.is_some());
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 45));
+        view.render_at(buffer.area, &mut buffer, Utc::now());
+        let entry = view.center_rows(&view.selectable_indices(), view.grouping).iter()
+            .position(|row| matches!(row, super::super::navigation::CenterRow::Task(index) if *index == target))
+            .unwrap();
+        let (x, y) = {
+            let viewport = view.viewport.borrow();
+            (
+                viewport.list_rows.x + 1,
+                viewport.list_rows.y + (entry - viewport.first_entry) as u16,
+            )
+        };
+        if wheel {
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            });
+        } else {
+            assert_eq!(click(&mut view, x, y), None);
+        }
+        assert_eq!(view.selected, target, "wheel={wheel}");
+    }
+}
+
+#[test]
+fn horizontal_list_wheel_keeps_focus_and_task_wheel_activates_panel() {
+    for kind in [MouseEventKind::ScrollLeft, MouseEventKind::ScrollRight] {
+        let (_directory, mut view) = fixture();
+        view.prepare_prompt();
+        let list = view.viewport.borrow().list;
+        let event = MouseEvent {
+            kind,
+            column: list.x + 1,
+            row: list.y + 1,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(view.handle_mouse(event), None);
+        assert_eq!(view.active_panel, Panel::Prompt);
+        let events = view.viewport.borrow().event_panel;
+        assert!(!events.is_empty());
+        assert_eq!(
+            view.handle_mouse(MouseEvent {
+                column: events.x + 1,
+                row: events.y + 1,
+                ..event
+            }),
+            None
+        );
+        assert_eq!(view.active_panel, Panel::EventList);
+    }
+}

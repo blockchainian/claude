@@ -299,9 +299,20 @@ fn capabilities_gate_codex_actions_in_the_view() {
         provider.capabilities(),
     )]));
     view.set_sessions(vec![session.clone()], false);
+    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+        let mut opening = View::new(Grouping::Project, false);
+        opening.set_capabilities(HashMap::from([(
+            ProviderId::Codex,
+            provider.capabilities(),
+        )]));
+        opening.set_sessions(vec![session.clone()], false);
+        assert_eq!(
+            opening.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            None
+        );
+        assert!(opening.pasting_prompt());
+    }
     for (code, expected) in [
-        (KeyCode::Enter, Action::OpenTerminal(session.id.clone())),
-        (KeyCode::Char('o'), Action::OpenTerminal(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
         (
             KeyCode::Char('n'),
@@ -343,14 +354,12 @@ fn capabilities_gate_codex_actions_in_the_view() {
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
-    for (code, name) in [
-        (KeyCode::Enter, "Terminal"),
-        (KeyCode::Char('o'), "Terminal"),
-    ] {
+    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            Some(Action::Unsupported(name))
+            None
         );
+        assert!(!view.pasting_prompt());
     }
     for (code, label) in [
         (KeyCode::Char('p'), "Pin"),
@@ -856,24 +865,16 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
             .contains(Modifier::DIM)
     );
     assert!(lines[parent_row + 1].contains("Managed worker"));
-    for (code, expected) in [
-        (
-            KeyCode::Enter,
-            Action::OpenTerminal(key("thread-12".into())),
-        ),
-        (
-            KeyCode::Right,
-            Action::OpenTerminal(key("thread-12".into())),
-        ),
-        (
-            KeyCode::Char('o'),
-            Action::OpenTerminal(key("thread-12".into())),
-        ),
-    ] {
+    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            Some(expected)
+            None
         );
+        view.render(buffer.area, &mut buffer);
+        for direction in ['k', 'k', 'k', 'k', 'h'] {
+            view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+            view.handle_key(KeyEvent::new(KeyCode::Char(direction), KeyModifiers::NONE));
+        }
     }
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let click = MouseEvent {
@@ -890,6 +891,10 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     assert_eq!(view.handle_mouse(release), None);
     assert_eq!(view.handle_mouse(click), None);
     assert_eq!(view.handle_mouse(release), None);
+    for direction in ['k', 'k', 'k', 'k', 'h'] {
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        view.handle_key(KeyEvent::new(KeyCode::Char(direction), KeyModifiers::NONE));
+    }
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         None
@@ -897,8 +902,12 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     assert_eq!(view.selected_id(), Some(&parent_key));
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        Some(Action::OpenTerminal(parent_key.clone()))
+        None
     );
+    for direction in ['k', 'k', 'k', 'k', 'h'] {
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        view.handle_key(KeyEvent::new(KeyCode::Char(direction), KeyModifiers::NONE));
+    }
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     for (code, expected) in [
@@ -987,14 +996,12 @@ fn spawn_children_cannot_resume_in_the_view() {
     )]));
     view.set_sessions(vec![parent, child], false);
     assert_eq!(view.selected_id(), Some(&id));
-    for (code, name) in [
-        (KeyCode::Enter, "Terminal"),
-        (KeyCode::Char('o'), "Terminal"),
-    ] {
+    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            Some(Action::Unsupported(name))
+            None
         );
+        assert!(!view.pasting_prompt());
     }
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render(buffer.area, &mut buffer);

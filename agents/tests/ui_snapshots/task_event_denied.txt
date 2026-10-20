@@ -22,4 +22,4 @@
  Reason: The server-side auto mode classifier judged this action dangerous (it gave no …
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc Previous  ↑/↓ move  enter Terminal  n new
+ ? help  esc previous  ↑/↓ move  enter open  n new

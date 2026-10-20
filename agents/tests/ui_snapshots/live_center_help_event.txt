@@ -4,10 +4,10 @@
 
  Navigate                                Tasks
  ↑           Up                          n          New
- ↓           Down                        o          Terminal
+ ↓           Down                        o          Open
  ⌃w h/j/k/l  Focus left/down/up/right    f          Fork
- enter       Terminal                    r          Rename
- →/⌃l        Terminal                    x          Stop
+ enter       Open                        r          Rename
+ →           Open                        x          Stop
  pgup        Page up                     a          Archive
  pgdn        Page down                   h          Hide
  ⌃c          Quit                        backspace  Delete

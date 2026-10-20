@@ -1,21 +1,18 @@
 use super::*;
 
 #[test]
-fn task_double_click_keeps_task_focus_and_enter_opens() {
+fn task_double_click_keeps_task_focus_and_enter_opens_prompt() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 120, 40, now);
     view.rows[view.selected].process = None;
-    let id = view.selected_id().unwrap().clone();
     let (x, y) = view.viewport.borrow().marker.unwrap();
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y);
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(!view.prompt_focused());
     assert!(view.active_panel == Panel::TaskList);
-    assert_eq!(
-        key(&mut view, KeyCode::Enter),
-        Some(Action::OpenTerminal(id))
-    );
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(view.prompt_focused());
 }
 
 #[test]

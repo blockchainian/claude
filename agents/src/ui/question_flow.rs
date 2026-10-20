@@ -15,7 +15,7 @@ pub(super) struct Questions {
 }
 
 impl Questions {
-    fn sync(&mut self, rows: &[Session]) {
+    pub(super) fn sync(&mut self, rows: &[Session]) {
         let answerable =
             |ask: &crate::ask::Ask| matches!(ask.kind, crate::ask::AskKind::Questions { .. });
         let can_answer = |row: &Session| {
@@ -117,6 +117,12 @@ impl View {
     }
 
     pub(super) fn show_questions(&mut self) {
+        let focus = self.task_focus();
+        let remembered = self
+            .panels_task
+            .as_ref()
+            .and_then(|key| self.task_uis.get(key))
+            .is_some_and(|ui| ui.focus.is_some());
         let previous = self
             .selected_id()
             .and_then(|id| self.questions.visible(id).map(|view| view.ask().clone()));
@@ -125,6 +131,8 @@ impl View {
             && previous.as_ref() != Some(question.ask())
         {
             self.set_active_panel(Panel::Prompt);
+        } else if remembered && self.active_panel != Panel::TaskList && self.task_focus() != focus {
+            self.set_active_panel(self.active_panel);
         }
     }
 

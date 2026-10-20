@@ -45,18 +45,18 @@ impl View {
         {
             hint_line(&[
                 ("?", "help"),
-                ("esc", "Previous"),
+                ("esc", "previous"),
                 ("↑/↓", "move"),
                 ("n", "new"),
             ])
         } else if self.searching {
-            hint_line(&[("esc", "back"), ("enter", "Terminal")])
+            hint_line(&[("esc", "back"), ("enter", "open")])
         } else {
             hint_line(&[
                 ("?", "help"),
-                ("esc", "Previous"),
+                ("esc", "previous"),
                 ("↑/↓", "move"),
-                ("enter", "Terminal"),
+                ("enter", "open"),
                 ("n", "new"),
             ])
         }
@@ -91,8 +91,8 @@ impl View {
                     ("↑", "Up"),
                     ("↓", "Down"),
                     ("⌃w h/j/k/l", "Focus left/down/up/right"),
-                    ("enter", "Terminal"),
-                    ("→/⌃l", "Terminal"),
+                    ("enter", "Open"),
+                    ("→", "Open"),
                     ("pgup", "Page up"),
                     ("pgdn", "Page down"),
                     ("⌃c", "Quit"),
@@ -103,7 +103,7 @@ impl View {
                 "Tasks",
                 &[
                     ("n", "New"),
-                    ("o", "Terminal"),
+                    ("o", "Open"),
                     ("f", "Fork"),
                     ("r", "Rename"),
                     ("x", "Stop"),
@@ -146,6 +146,39 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_footer_uses_open_and_lowercase_descriptions() {
+        let mut view = View::default();
+        assert_eq!(
+            view.center_footer_hints().to_string(),
+            "? help  esc previous  ↑/↓ move  enter open  n new"
+        );
+        view.searching = true;
+        assert_eq!(
+            view.center_footer_hints().to_string(),
+            "esc back  enter open"
+        );
+    }
+
+    #[test]
+    fn task_help_describes_open_keys_without_control_l() {
+        let view = View::default();
+        let lines = view.center_help_lines(120);
+        for key in ["enter", "→", "o"] {
+            assert!(
+                lines.iter().any(|line| {
+                    let text = line.to_string();
+                    text.split_whitespace()
+                        .collect::<Vec<_>>()
+                        .windows(2)
+                        .any(|words| words == [key, "Open"])
+                }),
+                "missing {key} Open"
+            );
+        }
+        assert!(lines.iter().all(|line| !line.to_string().contains("⌃l")));
+    }
 
     #[test]
     fn event_help_includes_duration_sort_key() {

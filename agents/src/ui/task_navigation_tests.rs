@@ -26,7 +26,7 @@ fn tasks() -> View {
 }
 
 #[test]
-fn opening_keys_use_terminal() {
+fn opening_keys_focus_prompt_and_control_l_is_inert() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
         (KeyCode::Right, KeyModifiers::NONE),
@@ -34,16 +34,21 @@ fn opening_keys_use_terminal() {
         (KeyCode::Char('o'), KeyModifiers::NONE),
     ] {
         let mut view = tasks();
-        let id = view.selected_id().unwrap().clone();
-        assert_eq!(
-            view.handle_key(KeyEvent::new(code, modifiers)),
-            Some(Action::OpenTerminal(id))
-        );
-        view.capabilities.clear();
-        assert_eq!(
-            view.handle_key(KeyEvent::new(code, modifiers)),
-            Some(Action::Unsupported("Terminal"))
-        );
+        for capabilities in [true, false] {
+            if !capabilities {
+                view.capabilities.clear();
+            }
+            view.set_active_panel(Panel::TaskList);
+            assert_eq!(view.handle_key(KeyEvent::new(code, modifiers)), None);
+            assert_eq!(
+                view.active_panel,
+                if modifiers == KeyModifiers::CONTROL {
+                    Panel::TaskList
+                } else {
+                    Panel::Prompt
+                }
+            );
+        }
     }
 }
 
@@ -148,14 +153,19 @@ fn opening_show_more_still_loads_a_page() {
         key(&mut view, KeyCode::Tab);
         assert_eq!(
             view.handle_key(KeyEvent::new(code, modifiers)),
-            Some(Action::ShowMore)
+            if modifiers == KeyModifiers::CONTROL {
+                None
+            } else {
+                Some(Action::ShowMore)
+            }
         );
+        assert_eq!(view.loading, modifiers != KeyModifiers::CONTROL);
         assert_eq!(view.handle_key(KeyEvent::new(code, modifiers)), None);
     }
 }
 
 #[test]
-fn terminal_and_history_hints_match_keys() {
+fn open_and_history_hints_match_keys() {
     let view = tasks();
     let help = view
         .center_help_lines(120)
@@ -163,17 +173,18 @@ fn terminal_and_history_hints_match_keys() {
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(help.contains("→/⌃l") && help.contains("Terminal"));
+    assert!(help.contains("→") && help.contains("Open"));
+    assert!(!help.contains("⌃l"));
     assert!(help.contains("Previous"));
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("enter Terminal")
+            .contains("enter open")
     );
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("esc Previous")
+            .contains("esc previous")
     );
 }
 

@@ -97,4 +97,4 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc Previous  ↑/↓ move  enter Terminal  n new
+ ? help  esc previous  ↑/↓ move  enter open  n new

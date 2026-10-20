@@ -35,7 +35,7 @@ fn panel_focus_slash_tracks_wheel_but_ignores_hover() {
             let (mut view, _) = event_fixture();
             click_panel(&mut view, panel);
             at(&mut view, (panel + 1) % 5, kind);
-            let active = if kind == MouseEventKind::Moved {
+            let active = if kind == MouseEventKind::Moved || (panel + 1) % 5 == 0 {
                 panel
             } else {
                 (panel + 1) % 5

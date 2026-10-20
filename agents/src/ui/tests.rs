@@ -19,6 +19,8 @@ mod codex_memory_tests;
 #[path = "codex_subagents_tests.rs"]
 mod codex_subagents_tests;
 
+#[path = "focus_rules_tests.rs"]
+mod focus_rules_tests;
 #[path = "panel_focus_tests.rs"]
 mod panel_focus_tests;
 
@@ -2234,18 +2236,16 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
 #[test]
 fn actions_and_hide_move_to_next_visible_row() {
     let mut view = fixture();
-    assert_eq!(
-        key(&mut view, KeyCode::Char('o')),
-        Some(Action::OpenTerminal(session_key("42")))
-    );
+    assert_eq!(key(&mut view, KeyCode::Char('o')), None);
+    assert_eq!(view.active_panel, Panel::Prompt);
+    view.set_active_panel(Panel::TaskList);
     assert_eq!(
         key(&mut view, KeyCode::Char('f')),
         Some(Action::Fork(session_key("42")))
     );
-    assert_eq!(
-        key(&mut view, KeyCode::Right),
-        Some(Action::OpenTerminal(session_key("42")))
-    );
+    assert_eq!(key(&mut view, KeyCode::Right), None);
+    assert_eq!(view.active_panel, Panel::Prompt);
+    view.set_active_panel(Panel::TaskList);
     assert_eq!(
         key(&mut view, KeyCode::Char('x')),
         Some(Action::Unsupported("Stop"))
@@ -6493,9 +6493,9 @@ mod event_search {
             view.center_footer_hints().to_string(),
             super::super::hints::hint_line(&[
                 ("?", "help"),
-                ("esc", "Previous"),
+                ("esc", "previous"),
                 ("↑/↓", "move"),
-                ("enter", "Terminal"),
+                ("enter", "open"),
                 ("n", "new"),
             ])
             .to_string()
@@ -7329,12 +7329,20 @@ mod subagent_actions {
         };
     }
 
-    unsupported_key!(
-        control_l,
-        KeyCode::Char('l'),
-        KeyModifiers::CONTROL,
-        "Terminal"
-    );
+    #[test]
+    fn control_l() {
+        for notice in [None, Some("Keep this notice".to_owned())] {
+            let mut view = fixture();
+            view.set_notice(notice.clone());
+            let before = subagent_rows::screen(&view, 120, 30);
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                None
+            );
+            assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
+            assert_unchanged(&view, &before);
+        }
+    }
     unsupported_key!(rename, KeyCode::Char('r'), KeyModifiers::NONE, "Rename");
     unsupported_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE, "Fork");
     unsupported_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE, "Stop");
@@ -7344,14 +7352,11 @@ mod subagent_actions {
     unsupported_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE, "Pin");
 
     #[test]
-    fn resume_emits_unsupported_notice() {
-        for (code, name) in [
-            (KeyCode::Enter, "Terminal"),
-            (KeyCode::Right, "Terminal"),
-            (KeyCode::Char('o'), "Terminal"),
-        ] {
+    fn open_keys_leave_disabled_subagent_on_list() {
+        for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
             let mut view = fixture();
-            assert_eq!(key(&mut view, code), Some(Action::Unsupported(name)));
+            assert_eq!(key(&mut view, code), None);
+            assert_eq!(view.active_panel, Panel::TaskList);
             assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         }
         let mut view = fixture();
@@ -7387,10 +7392,7 @@ mod subagent_actions {
             view.searching = true;
             view.search.set_text("Parent task");
             let before = subagent_rows::screen(&view, 120, 30);
-            assert_eq!(
-                view.handle_key(event),
-                Some(Action::Unsupported("Terminal"))
-            );
+            assert_eq!(view.handle_key(event), None);
             assert!(view.searching);
             assert_eq!(view.search.text(), "Parent task");
             assert_eq!(subagent_rows::screen(&view, 120, 30), before);
@@ -7402,7 +7404,7 @@ mod subagent_actions {
         let view = fixture();
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "? help  esc Previous  ↑/↓ move  n new"
+            "? help  esc previous  ↑/↓ move  n new"
         );
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),
@@ -7418,10 +7420,12 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
         ProviderId::Claude,
         Capabilities::default(),
     )]));
+    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+        assert_eq!(key(&mut view, code), None);
+        assert_eq!(view.active_panel, Panel::Prompt);
+        view.set_active_panel(Panel::TaskList);
+    }
     for (code, name) in [
-        (KeyCode::Enter, "Terminal"),
-        (KeyCode::Right, "Terminal"),
-        (KeyCode::Char('o'), "Terminal"),
         (KeyCode::Char('f'), "Fork"),
         (KeyCode::Char('r'), "Rename"),
         (KeyCode::Backspace, "Delete"),
@@ -7433,7 +7437,7 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
 }
 
 #[test]
-fn unsupported_provider_mouse_activation_emits_notice() {
+fn unsupported_provider_mouse_selection_then_open_focuses_prompt() {
     let mut view = fixture();
     view.set_capabilities(HashMap::from([(
         ProviderId::Claude,
@@ -7454,20 +7458,16 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(!view.prompt_focused());
     key(&mut view, KeyCode::Esc);
-    assert_eq!(
-        key(&mut view, KeyCode::Enter),
-        Some(Action::Unsupported("Terminal"))
-    );
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(view.active_panel, Panel::Prompt);
 }
 
 #[test]
-fn missing_provider_capabilities_do_not_allow_actions() {
+fn missing_provider_capabilities_do_not_block_prompt_focus() {
     let mut view = fixture();
     view.set_capabilities(HashMap::new());
-    assert_eq!(
-        key(&mut view, KeyCode::Char('o')),
-        Some(Action::Unsupported("Terminal"))
-    );
+    assert_eq!(key(&mut view, KeyCode::Char('o')), None);
+    assert_eq!(view.active_panel, Panel::Prompt);
 }
 
 fn test_view(grouping: Grouping, use_colors: bool) -> View {

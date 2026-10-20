@@ -568,9 +568,7 @@ impl View {
     }
 
     pub(crate) fn prepare_prompt(&mut self) {
-        if self.input_disabled().is_none() {
-            self.set_active_panel(Panel::Prompt);
-        }
+        self.restore_task_focus(self.input_focus());
     }
 
     fn task_input(&mut self, id: &SessionKey) -> &mut prompt_box::PromptBox {
@@ -612,7 +610,14 @@ impl View {
         result: std::io::Result<()>,
     ) {
         if let crate::providers::SessionInput::Answer { ask, .. } = input {
+            let focus = self.task_focus();
             self.questions.complete(ask, &result);
+            if self.selected_id() == Some(id)
+                && self.active_panel == Panel::Prompt
+                && self.task_focus() != focus
+            {
+                self.set_active_panel(Panel::Prompt);
+            }
             if let Err(error) = result {
                 self.set_notice(Some(error.to_string()));
             }
@@ -664,6 +669,25 @@ impl View {
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
         sessions.retain(|session| self.draft_of(&session.id).is_none());
         sessions.extend(self.draft_rows());
+        for session in &sessions {
+            if session.status == SessionStatus::Inactive
+                && self.rows.iter().any(|previous| {
+                    previous.id == session.id && previous.status != SessionStatus::Inactive
+                })
+            {
+                if let Some(ui) = self
+                    .task_uis
+                    .get_mut(&draft_controls::TaskKey::Session(session.id.clone()))
+                {
+                    ui.focus = None;
+                }
+                if self.panels_task.as_ref()
+                    == Some(&draft_controls::TaskKey::Session(session.id.clone()))
+                {
+                    self.task_entry_pending = false;
+                }
+            }
+        }
         let had_sessions = !self.rows.is_empty();
         let selected = self.selected_id().cloned();
         if self.attention_selection.is_some() && self.attention_selection != selected {
@@ -795,7 +819,14 @@ impl View {
                 return;
             }
         }
-        self.restore_task_focus(self.task_focus());
+        let focus = if self.attention_selection.is_some() && self.active_question().is_some() {
+            task_ui::Focus::Question
+        } else {
+            self.task_focus()
+        };
+        if !self.restore_task_focus(focus) {
+            self.set_active_panel(Panel::TaskList);
+        }
         self.remember_selection();
         self.viewport.get_mut().scroll = 0;
     }
@@ -1121,14 +1152,11 @@ impl View {
         let restores_task = selected
             .as_ref()
             .is_some_and(|id| self.task_uis.get(id).is_some_and(|ui| ui.focus.is_some()));
-        let focus = if task_list_focused {
-            self.panels_task
-                .as_ref()
-                .and_then(|key| self.task_uis.get(key))
-                .and_then(|ui| ui.focus)
-        } else {
-            Some(self.task_focus())
-        };
+        let focus = self
+            .panels_task
+            .as_ref()
+            .and_then(|key| self.task_uis.get(key))
+            .and_then(|ui| ui.focus);
         let title = self.title_editing().then(|| std::mem::take(&mut self.rename));
         self.rename_target = None;
         self.name_target = None;
@@ -1187,18 +1215,17 @@ impl View {
         self.event_detail = shown.event_detail;
         self.event_detail.scroll.get_mut().restoring = true;
         self.pending_click = None;
-        if !task_list_focused {
-            self.restore_task_focus(shown.focus.unwrap_or_default());
-        }
-        self.show_questions();
-        if task_list_focused {
-            self.active_panel = Panel::TaskList;
-        }
         if let Some(key) = &selected {
             self.task_uis.entry(key.clone()).or_default().focus = shown.focus;
         }
         self.panels_task = selected;
+        self.questions.sync(&self.rows);
         self.task_entry_pending = task_list_focused && restores_task;
+        if task_list_focused {
+            self.set_active_panel(Panel::TaskList);
+        } else if !self.restore_task_focus(shown.focus.unwrap_or_else(|| self.input_focus())) {
+            self.set_active_panel(Panel::TaskList);
+        }
     }
 
     /// Selects the row the user chose.
@@ -1241,7 +1268,6 @@ impl View {
                 self.status_filter = candidate;
                 if self.selectable_indices().contains(&index) {
                     self.set_selected(index);
-                    self.enter_task();
                     self.remember_selection();
                     self.viewport.get_mut().scroll = 0;
                     return;
