@@ -44,6 +44,7 @@ test('accepts splitting direct exported declarations while preserving their bind
     ['export let e=1; e++;', 'let entry=1;\nexport { entry as e }; entry++;'],
     ['export var e=1;', 'var entry=1;\nexport { entry as e };'],
     ['export function e(){return e}', 'function entry(){return entry}\nexport { entry as e };'],
+    ['export function e(t){return t}', 'function entry(value){return value}\nexport { entry as e };'],
     ['export class e { static get(){return e} }', 'class Entry { static get(){return Entry} }\nexport { Entry as e };'],
     ['export const e=1,t=e; use(t);', 'const entry=1,t=entry;\nexport { entry as e, t }; use(t);'],
     ['export const {x:e,...t}=source;', 'const {x:entry,...rest}=source;\nexport { entry as e, rest as t };'],
