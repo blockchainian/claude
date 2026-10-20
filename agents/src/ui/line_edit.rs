@@ -208,6 +208,31 @@ impl LineEdit {
         self.preferred_column = None;
         self.cursor = self.text.len();
     }
+    /// Moves to the start of the caret's line, or of the previous line when already there.
+    pub(super) fn line_start(&mut self) {
+        self.preferred_column = None;
+        let line_start = |end: usize| self.text[..end].rfind('\n').map_or(0, |i| i + 1);
+        let mut start = line_start(self.cursor);
+        if start == self.cursor && start > 0 {
+            start = line_start(start - 1);
+        }
+        self.cursor = self.caret_boundary(start, false);
+    }
+    /// Moves to the end of the caret's line, or of the next line when already there.
+    pub(super) fn line_end(&mut self) {
+        self.preferred_column = None;
+        let line_end = |from: usize| match self.text[from..].find('\n') {
+            Some(i) => from + i - usize::from(self.text[..from + i].ends_with('\r')),
+            None => self.text.len(),
+        };
+        let mut end = line_end(self.cursor);
+        if end == self.cursor && end < self.text.len() {
+            end = line_end(
+                self.cursor + self.text[self.cursor..].find('\n').expect("line break") + 1,
+            );
+        }
+        self.cursor = self.caret_boundary(end, true);
+    }
     pub(super) fn backspace(&mut self) {
         let end = self.cursor;
         self.left();
@@ -319,12 +344,10 @@ impl LineEdit {
             (KeyCode::Char('f'), KeyModifiers::CONTROL) | (KeyCode::Right, KeyModifiers::NONE) => {
                 self.right()
             }
-            (KeyCode::Char('a'), KeyModifiers::CONTROL) | (KeyCode::Home, KeyModifiers::NONE) => {
-                self.home()
-            }
-            (KeyCode::Char('e'), KeyModifiers::CONTROL) | (KeyCode::End, KeyModifiers::NONE) => {
-                self.end()
-            }
+            (KeyCode::Char('a'), KeyModifiers::CONTROL) => self.line_start(),
+            (KeyCode::Char('e'), KeyModifiers::CONTROL) => self.line_end(),
+            (KeyCode::Home, KeyModifiers::NONE) => self.home(),
+            (KeyCode::End, KeyModifiers::NONE) => self.end(),
             (KeyCode::Char('b'), KeyModifiers::ALT) => self.word_left(),
             (KeyCode::Char('f'), KeyModifiers::ALT) => self.word_right(),
             (KeyCode::Char('k'), KeyModifiers::CONTROL) => self.kill_to_end(),
@@ -487,6 +510,22 @@ mod tests {
                     "{code:?} {modifiers:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn line_keys_step_through_lines() {
+        let control =
+            |e: &mut LineEdit, c| e.handle(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        let mut e = edit("one\r\ntwo\nthree");
+        e.set_cursor("one\r\ntw".len());
+        for cursor in ["one\r\n".len(), 0, 0] {
+            control(&mut e, 'a');
+            assert_eq!(e.cursor, cursor);
+        }
+        for cursor in ["one".len(), "one\r\ntwo".len(), e.text.len(), e.text.len()] {
+            control(&mut e, 'e');
+            assert_eq!(e.cursor, cursor);
         }
     }
 
