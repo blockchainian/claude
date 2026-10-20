@@ -183,9 +183,6 @@ impl View {
             .map(|(panel, _)| panel);
         drop(v);
         if let Some(panel) = target {
-            if source == Panel::TaskList && self.enter_task() {
-                return;
-            }
             self.set_active_panel(panel);
         }
     }

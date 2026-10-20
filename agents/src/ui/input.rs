@@ -1106,7 +1106,6 @@ impl View {
                         last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
-                    self.enter_task();
                     if double {
                         return None;
                     }
@@ -1341,9 +1340,6 @@ impl View {
         self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {
-        if self.enter_task() {
-            return None;
-        }
         if self.selected_draft.is_some() {
             return Some(Action::Unsupported("Terminal"));
         }

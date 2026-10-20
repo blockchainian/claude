@@ -311,10 +311,16 @@ fn task_return_routes_restore_parked_title_and_caret() {
                     assert_eq!(key(&mut view, code), None);
                     assert_eq!(view.status_filter, filter, "{route}");
                     assert_eq!(view.active_panel, Panel::TaskList, "{route}");
-                    assert_eq!(key(&mut view, KeyCode::Enter), None);
+                    assert_eq!(
+                        key(&mut view, KeyCode::Enter),
+                        Some(Action::OpenTerminal(first.clone()))
+                    );
                 }
                 "enter" => {
-                    assert_eq!(key(&mut view, KeyCode::Enter), None);
+                    assert_eq!(
+                        key(&mut view, KeyCode::Enter),
+                        Some(Action::OpenTerminal(first.clone()))
+                    );
                 }
                 "right" | "down" => {
                     view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
@@ -345,10 +351,85 @@ fn task_return_routes_restore_parked_title_and_caret() {
             }
         }
         assert_eq!(view.selected_id(), Some(&first), "{route}");
-        assert_eq!(view.active_panel, Panel::TaskDetails, "{route}");
+        let expected_panel = match route {
+            "mouse" | "tab" | "backtab" | "enter" => Panel::TaskList,
+            "down" => Panel::Prompt,
+            _ => Panel::TaskDetails,
+        };
+        assert_eq!(view.active_panel, expected_panel, "{route}");
         assert_eq!(view.rename.text(), "AlphaBeta", "{route}");
         assert_eq!(view.rename.window(80).1, caret, "{route}");
+        view.set_active_panel(Panel::TaskDetails);
         assert_eq!(key(&mut view, KeyCode::Char('X')), None);
         assert_eq!(view.rename.text(), "AlphaXBeta", "{route}");
+    }
+}
+
+fn revisited_prompt_task(width: u16) -> (tempfile::TempDir, View, SessionKey) {
+    let (directory, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
+    key(&mut view, KeyCode::Home);
+    let id = view.selected_id().unwrap().clone();
+    let area = Rect::new(0, 0, width, 50);
+    view.render(area, &mut Buffer::empty(area));
+    view.prepare_prompt();
+    assert_eq!(view.active_panel, Panel::Prompt);
+    view.set_active_panel(Panel::TaskList);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert_eq!(key(&mut view, KeyCode::Char('j')), None);
+    assert_ne!(view.selected_id(), Some(&id));
+    assert_eq!(key(&mut view, KeyCode::Char('k')), None);
+    assert_eq!(view.selected_id(), Some(&id));
+    assert!(view.task_entry_pending);
+    assert_eq!(view.task_focus(), task_ui::Focus::Prompt);
+    view.render(area, &mut Buffer::empty(area));
+    (directory, view, id)
+}
+
+fn assert_revisited_task_opens_terminal(code: KeyCode) {
+    for width in [100, 200] {
+        let (_directory, mut view, id) = revisited_prompt_task(width);
+        assert_eq!(key(&mut view, code), Some(Action::OpenTerminal(id)));
+        assert_eq!(view.active_panel, Panel::TaskList);
+    }
+}
+
+#[test]
+fn revisited_task_enter_opens_terminal() {
+    assert_revisited_task_opens_terminal(KeyCode::Enter);
+}
+
+#[test]
+fn revisited_task_o_opens_terminal() {
+    assert_revisited_task_opens_terminal(KeyCode::Char('o'));
+}
+
+#[test]
+fn revisited_task_right_opens_terminal() {
+    assert_revisited_task_opens_terminal(KeyCode::Right);
+}
+
+#[test]
+fn revisited_task_row_click_keeps_list_focus_for_delete() {
+    let (_directory, mut view, id) = revisited_prompt_task(200);
+    click_task_row(&mut view, &id);
+    assert_eq!(view.selected_id(), Some(&id));
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert_eq!(key(&mut view, KeyCode::Backspace), None);
+    assert!(matches!(
+        view.confirm_dialog.as_ref().map(|dialog| &dialog.action),
+        Some(ConfirmAction::Delete(target)) if target == &id
+    ));
+}
+
+#[test]
+fn revisited_task_ctrl_w_l_moves_to_adjacent_panel() {
+    for width in [100, 200] {
+        let (_directory, mut view, _) = revisited_prompt_task(width);
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(key(&mut view, KeyCode::Char('l')), None);
+        assert_eq!(view.active_panel, Panel::TaskDetails);
     }
 }
