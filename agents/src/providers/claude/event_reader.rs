@@ -2146,9 +2146,8 @@ pub(crate) mod tests {
         let write = calls.iter().find(|call| call.name == "Write").unwrap();
         assert_eq!(
             write.input,
-            vec![Section::Code {
+            vec![Section::Markdown {
                 label: "input".into(),
-                lang: "md".into(),
                 text: records[6]["message"]["content"][0]["input"]["content"]
                     .as_str()
                     .unwrap()

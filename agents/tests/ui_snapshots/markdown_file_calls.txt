@@ -1,0 +1,60 @@
+Write .md
+agents: clickable paths and image links
+
+Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+
+Goal
+
+Every file path and attached-image placeholder the dashboard draws becomes a link: a plain left
+click on it runs macOS open on the target (files in their default app, directories in Finder). A
+
+Read .md
+agents: clickable paths and image links
+
+Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+
+Goal
+
+Every file path and attached-image placeholder the dashboard draws becomes a link: a plain left
+click on it runs macOS open on the target (files in their default app, directories in Finder). A
+
+cat .md
+agents: clickable paths and image links
+
+Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+
+Goal
+
+Every file path and attached-image placeholder the dashboard draws becomes a link: a plain left
+click on it runs macOS open on the target (files in their default app, directories in Finder). A
+
+head .markdown
+agents: clickable paths and image links
+
+Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+
+Goal
+
+Every file path and attached-image placeholder the dashboard draws becomes a link: a plain left
+click on it runs macOS open on the target (files in their default app, directories in Finder). A
+
+cat .MD
+agents: clickable paths and image links
+
+Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+
+Goal
+
+Every file path and attached-image placeholder the dashboard draws becomes a link: a plain left
+click on it runs macOS open on the target (files in their default app, directories in Finder). A
+
+Read .markdown
+agents: clickable paths and image links
+
+Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+
+Goal
+
+Every file path and attached-image placeholder the dashboard draws becomes a link: a plain left
+click on it runs macOS open on the target (files in their default app, directories in Finder). A
+

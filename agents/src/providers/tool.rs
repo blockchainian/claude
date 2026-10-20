@@ -630,7 +630,7 @@ pub(crate) fn presentation(name: &str, input: &Value) -> (String, Option<String>
     };
     let sections = if matches!(rule(raw_name).output, Some(Output::Write)) {
         match (text(input, "file_path"), input["content"].as_str()) {
-            (Some(path), Some(content)) => vec![file_code_section("input", path, content)],
+            (Some(path), Some(content)) => vec![file_section("input", path, content)],
             _ => sections,
         }
     } else {
@@ -796,7 +796,7 @@ pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_
             ))]
         }
         Some(Output::Read) if value["file"]["content"].is_string() => {
-            vec![file_code_section(
+            vec![file_section(
                 "output",
                 value["file"]["filePath"].as_str().unwrap_or(""),
                 value["file"]["content"].as_str().unwrap(),
@@ -843,14 +843,24 @@ pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
     }
 }
 
-pub(crate) fn file_code_section(label: &str, path: &str, text: &str) -> Section {
+fn file_language(path: &str) -> &str {
     let path = std::path::Path::new(path);
-    let lang = path
-        .extension()
+    path.extension()
         .or_else(|| path.file_name())
         .and_then(|name| name.to_str())
-        .unwrap_or("");
-    code_section(label, lang, text)
+        .unwrap_or("")
+}
+
+pub(crate) fn file_section(label: &str, path: &str, text: &str) -> Section {
+    let lang = file_language(path);
+    if lang.eq_ignore_ascii_case("md") || lang.eq_ignore_ascii_case("markdown") {
+        Section::Markdown {
+            label: label.to_owned(),
+            text: text.to_owned(),
+        }
+    } else {
+        code_section(label, lang, text)
+    }
 }
 
 fn patch_section(value: &serde_json::Value) -> Option<Section> {
@@ -1071,10 +1081,7 @@ fn shell_read_words(words: &[&str]) -> Option<ShellOutput> {
                 return None;
             }
             let language = |path: &str| {
-                let Section::Code { lang, .. } = file_code_section("", path, "") else {
-                    return None;
-                };
-                crate::ui::highlight::find_syntax(&lang).map(|syntax| syntax.scope)
+                crate::ui::highlight::find_syntax(file_language(path)).map(|syntax| syntax.scope)
             };
             if paths.len() > 1
                 && (language(path).is_none()
@@ -1240,14 +1247,18 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
                 };
             }
             if let Some(path) = &read.path {
-                let mut section = file_code_section(label, path, text);
-                if let Section::Code { lang, .. } = &mut section
-                    && crate::ui::highlight::find_syntax(lang).is_some()
-                {
-                    if read.numbered {
-                        *lang = format!("numbered:{lang}");
+                let mut section = file_section(label, path, text);
+                match &mut section {
+                    Section::Markdown { .. } => return section,
+                    Section::Code { lang, .. }
+                        if crate::ui::highlight::find_syntax(lang).is_some() =>
+                    {
+                        if read.numbered {
+                            *lang = format!("numbered:{lang}");
+                        }
+                        return section;
                     }
-                    return section;
+                    _ => {}
                 }
             }
         }
@@ -1342,14 +1353,14 @@ fn shell_output_sections(command: &str, label: &str, text: &str) -> Option<Vec<S
         .map(|read| read.as_ref()?.path.as_deref())
         .collect::<Option<Vec<_>>>()?;
     let path = *paths.first()?;
-    let Section::Code { lang, .. } = file_code_section(label, path, text) else {
-        return None;
-    };
-    let syntax = crate::ui::highlight::find_syntax(&lang)?;
-    paths.iter().all(|path| {
-        matches!(file_code_section(label, path, ""), Section::Code { lang, .. }
-            if crate::ui::highlight::find_syntax(&lang).is_some_and(|other| other.scope == syntax.scope))
-    }).then(|| vec![section(reads.first().and_then(Option::as_ref), text)])
+    let syntax = crate::ui::highlight::find_syntax(file_language(path))?;
+    paths
+        .iter()
+        .all(|path| {
+            crate::ui::highlight::find_syntax(file_language(path))
+                .is_some_and(|other| other.scope == syntax.scope)
+        })
+        .then(|| vec![section(reads.first().and_then(Option::as_ref), text)])
 }
 
 fn highlight_shell_output(call: &mut ToolCall) {

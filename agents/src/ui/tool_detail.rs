@@ -764,6 +764,102 @@ mod tests {
     }
 
     #[test]
+    fn markdown_file_calls_render_headings_and_keep_input_output_semantics() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let input = &records[6]["message"]["content"][0]["input"];
+        let content = input["content"].as_str().unwrap();
+        let mut snapshot = String::new();
+        for (name, indexes, extension) in [
+            ("Write", [6, 7], "md"),
+            ("Read", [2, 3], "md"),
+            ("cat", [0, 1], "md"),
+            ("head", [0, 1], "markdown"),
+            ("cat", [0, 1], "MD"),
+            ("Read", [2, 3], "markdown"),
+        ] {
+            // Replay the captured calls with the captured Write file as their content.
+            let path = format!("/workspace/agents/plan.{extension}");
+            let mut call = records[indexes[0]].clone();
+            let mut result = records[indexes[1]].clone();
+            match name {
+                "Write" => call["message"]["content"][0]["input"]["file_path"] = path.into(),
+                "Read" => {
+                    call["message"]["content"][0]["input"]["file_path"] = path.clone().into();
+                    result["toolUseResult"]["file"]["filePath"] = path.into();
+                    result["toolUseResult"]["file"]["content"] = content.into();
+                }
+                _ => {
+                    call["message"]["content"][0]["input"]["command"] =
+                        format!("{name} {path}").into();
+                    result["toolUseResult"]["stdout"] = content.into();
+                    result["toolUseResult"]["stderr"] = "".into();
+                }
+            }
+            let transcript = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(transcript.path(), format!("{call}\n{result}\n")).unwrap();
+            let events =
+                crate::providers::claude::event_reader::tail(transcript.path(), 1).unwrap();
+            let call = &events[0].calls[0];
+            let sections = if name == "Write" {
+                &call.input
+            } else {
+                call.output.as_ref().unwrap()
+            };
+            let label = if name == "Write" {
+                "input"
+            } else if name == "Read" {
+                "output"
+            } else {
+                "stdout"
+            };
+            assert_eq!(
+                sections,
+                &[Section::Markdown {
+                    label: label.into(),
+                    text: content.into()
+                }],
+                "{name} .{extension}"
+            );
+            let parts = flattened_parts(&events[0]);
+            let part = parts
+                .iter()
+                .find(|part| part.source == content.trim_end())
+                .unwrap();
+            assert!(if name == "Write" {
+                matches!(part.body, Body::Prose(true))
+            } else {
+                matches!(part.body, Body::Markdown)
+            });
+            let lines = part.lines(100, Style::default(), chrono::DateTime::UNIX_EPOCH);
+            assert_eq!(
+                lines[0].to_string().trim(),
+                "agents: clickable paths and image links"
+            );
+            assert!(lines[0].spans.iter().any(|span| {
+                span.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            }));
+            snapshot.push_str(&format!("{name} .{extension}\n"));
+            for line in lines.iter().take(8) {
+                snapshot.push_str(line.to_string().trim_end());
+                snapshot.push('\n');
+            }
+            snapshot.push('\n');
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/ui_snapshots/markdown_file_calls.txt");
+        if std::env::var_os("UPDATE_MARKDOWN_FILE_SNAPSHOT").is_some() {
+            std::fs::write(&path, &snapshot).unwrap();
+        }
+        assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+    }
+
+    #[test]
     fn codex_agent_message_has_a_named_title_and_no_output_arrow() {
         let events = codex_fixture_events("tests/fixtures/codex-agent-messages/new-task.jsonl");
         let event = events.first().unwrap();
