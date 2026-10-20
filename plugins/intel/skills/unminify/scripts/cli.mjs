@@ -8,13 +8,13 @@ import { resolve, join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
-const defaults = { concurrency: 20, contextTokens: 100000, shortLen: 3 };
+const defaults = { concurrency: 20, maxInputTokens: 100000, minSymbolLength: 4 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const help = 'unminify <path>... [--ignore <file>] [--concurrency 20] [--context-tokens 100000] [--short-len 3]';
+const help = 'unminify <path>... [--ignore <file>] [--concurrency 20] [--max-input-tokens 100000] [--min-symbol-length 4]';
 
 export function parseArgs(args) {
   const options = { ...defaults };
-  const flags = { '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--context-tokens': 'contextTokens', '--short-len': 'shortLen' };
+  const flags = { '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--max-input-tokens': 'maxInputTokens', '--min-symbol-length': 'minSymbolLength' };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
@@ -88,7 +88,7 @@ export async function run(options, dependencies) {
       })) listed.add(file);
     }
     const files = [...listed];
-    const planOptions = { shortLen: settings.shortLen, contextTokens: settings.contextTokens };
+    const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
     summary.files = files.length;
     selectionEnd(); selectionEnd = null;
     let stop = null, active = 0;

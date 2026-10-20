@@ -1,7 +1,7 @@
 import { estimateInputTokens } from './prompt.mjs';
 
 /** Pack one file's pending stage, measuring the complete naming input. */
-export function packBatches(batches, render, { contextTokens }) {
+export function packBatches(batches, render, { maxInputTokens }) {
   const requests = [];
   const placeholderCount = batches.reduce((sum, batch) => sum + batch.keys.length, 0);
   for (let start = 0; start < batches.length;) {
@@ -26,18 +26,18 @@ export function packBatches(batches, render, { contextTokens }) {
     }
     const remaining = batches.length - start;
     let length = 1;
-    if (requestFor(1).estimated_input_tokens > contextTokens)
-      throw new Error(`Batch ${batches[start].id} cannot fit the input token budget (${contextTokens}) after context truncation`);
+    if (requestFor(1).estimated_input_tokens > maxInputTokens)
+      throw new Error(`Batch ${batches[start].id} cannot fit the input token budget (${maxInputTokens}) after context truncation`);
     // Exponential growth avoids encoding every prefix of a large request.
     let upper = 2;
-    while (upper <= remaining && requestFor(upper).estimated_input_tokens <= contextTokens) {
+    while (upper <= remaining && requestFor(upper).estimated_input_tokens <= maxInputTokens) {
       length = upper;
       upper *= 2;
     }
     let high = Math.min(upper - 1, remaining);
     while (length < high) {
       const middle = Math.ceil((length + high) / 2);
-      if (requestFor(middle).estimated_input_tokens <= contextTokens) length = middle;
+      if (requestFor(middle).estimated_input_tokens <= maxInputTokens) length = middle;
       else high = middle - 1;
     }
     requests.push(requestFor(length));

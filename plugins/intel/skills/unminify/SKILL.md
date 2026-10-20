@@ -25,17 +25,17 @@ before rewriting so existing work is visible.
 
 ```bash
 node "$SKILL_DIR/scripts/cli.mjs" <path>... \
-  --concurrency 20 --context-tokens 100000 --short-len 3
+  --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
 ```
 
 The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user's Codex login
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
 Never print credentials.
 
-The command selects parseable `.js`/`.mjs` files, asks for names of short non-import bindings,
+The command selects parseable `.js`/`.mjs` files, asks for names of non-import bindings shorter than `--min-symbol-length`,
 resolves naming conflicts, checks each completed file and writes it atomically. Top-level
 batches finish before function batches. Within each file and stage, pending batches are greedily
-packed in order within `--context-tokens` (default 100000), with no name-count cap.
+packed in order within `--max-input-tokens` (default 100000), with no name-count cap.
 Planning and packing count the actual instructions, prompt and rendered context using
 `js-tiktoken` 1.0.21 with `o200k_base`. Oversized contexts are shortened; an irreducible
 batch that still cannot fit fails before sending. Placeholders are unique across

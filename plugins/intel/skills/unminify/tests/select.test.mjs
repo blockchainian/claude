@@ -10,7 +10,7 @@ import { estimateInputTokens } from '../scripts/prompt.mjs';
 import { listFiles, planFile, renderBatch } from '../scripts/select.mjs';
 const traverse = traverseModule.default ?? traverseModule;
 const source = await readFile(new URL('./fixtures/preact-hooks.mjs', import.meta.url), 'utf8');
-const options = { shortLen: 3, contextTokens: 2000 };
+const options = { minSymbolLength: 4, maxInputTokens: 2000 };
 function bindings(code) {
   const result = new Map();
   traverse(parse(code, { sourceType: 'module' }), { Scope(p) {
@@ -59,12 +59,12 @@ console.log(a([1, 5, 9], 4));`;
   assert.doesNotThrow(()=>parse(context,{sourceType:'module'}));
 });
 test('large Preact module contexts retain function bodies within the token budget', () => {
-  for (const contextTokens of [2000, 700]) {
-    const plan = planFile(source, { ...options, contextTokens });
+  for (const maxInputTokens of [2000, 700]) {
+    const plan = planFile(source, { ...options, maxInputTokens });
     assert.equal(plan.stages.length, 2);
     for (const batch of plan.stages[0]) {
       const { context } = renderBatch(source, batch, new Map());
-      assert.ok(estimateInputTokens({ context, placeholders: Object.fromEntries(batch.keys.map((key, i) => [`v${i + 1}`, key])) }) <= contextTokens);
+      assert.ok(estimateInputTokens({ context, placeholders: Object.fromEntries(batch.keys.map((key, i) => [`v${i + 1}`, key])) }) <= maxInputTokens);
       assert.doesNotThrow(()=>parse(context,{sourceType:'module'}));
       const ast = parse(context,{sourceType:'module'});
       let bodyStatements = 0;
@@ -83,16 +83,16 @@ test('real Preact artifact: candidates exclude imports and long names; stages pa
   assert.deepEqual(planFile(source, options), plan);
   for (const batch of plan.stages[0]) for (const key of batch.keys) assert.equal(bs.get(key).scope.path.type, 'Program');
   assert.ok(plan.stages[1].length > 0);
-  const small = planFile(source, { ...options, shortLen: 1 });
+  const small = planFile(source, { ...options, minSymbolLength: 2 });
   assert.ok(allBatches(small).flatMap(b=>b.keys).every(k=>bs.get(k).identifier.name.length===1));
 });
 test('token boundaries split without duplicates or omissions', () => {
   const base = planFile(source, options);
-  for (const overrides of [{ contextTokens: 700 }, { contextTokens: 400 }, { contextTokens: 120 }]) {
+  for (const overrides of [{ maxInputTokens: 700 }, { maxInputTokens: 400 }, { maxInputTokens: 120 }]) {
     const settings = { ...options, ...overrides };
     const plan = planFile(source, settings);
     assert.deepEqual(allBatches(plan).flatMap(b=>b.keys).sort((a,b)=>a-b), allBatches(base).flatMap(b=>b.keys).sort((a,b)=>a-b));
-    assert.ok(allBatches(plan).every(b=>estimateInputTokens(renderBatch(source,b))<=settings.contextTokens));
+    assert.ok(allBatches(plan).every(b=>estimateInputTokens(renderBatch(source,b))<=settings.maxInputTokens));
     assert.ok(allBatches(plan).length > allBatches(base).length);
     for (const b of allBatches(plan)) assert.doesNotThrow(()=>parse(renderBatch(source,b,new Map()).context,{sourceType:'module'}));
     assert.deepEqual(plan, planFile(source, settings));
@@ -155,7 +155,7 @@ test('render handles shorthand, destructuring, exports and preexisting placehold
 });
 test('module and function ranges starting at zero remain distinguishable', () => {
   const code = 'function f(e) { return e; }';
-  const plan = planFile(code,{...options,contextTokens:estimateInputTokens(renderBatch(code, planFile(code).stages[0][0])) - 1});
+  const plan = planFile(code,{...options,maxInputTokens:estimateInputTokens(renderBatch(code, planFile(code).stages[0][0])) - 1});
   assert.equal(plan.stages[0].length,1);
   assert.equal(plan.stages[1].length,1);
   assert.notEqual(plan.stages[0][0].id,plan.stages[1][0].id);
@@ -167,7 +167,7 @@ test('module and function ranges starting at zero remain distinguishable', () =>
 });
 test('budget contexts retain every selected binding, including classes and nested methods', () => {
   const code = source + '\nclass Short { #value=1; method(e) { const t=this.#value; return e+t; } }';
-  for (const batch of [120,2000].flatMap(contextTokens=>allBatches(planFile(code,{...options,contextTokens})))) {
+  for (const batch of [120,2000].flatMap(maxInputTokens=>allBatches(planFile(code,{...options,maxInputTokens})))) {
     const {context,placeholders}=renderBatch(code,batch,new Map());
     assert.doesNotThrow(()=>parse(context,{sourceType:'module'}));
     for (const placeholder of Object.keys(placeholders)) assert.match(context,new RegExp(`\\b${placeholder}\\b`));
@@ -177,7 +177,7 @@ test('resolved names cannot collide with intermediate names during rendering', (
   const code = 'let a=1,b=2;function f(e){return a+b+e}';
   const bs = bindings(code);
   const key = name => [...bs].find(([,b])=>b.identifier.name===name)[0];
-  const batch = planFile(code,{...options,contextTokens:estimateInputTokens(renderBatch(code, planFile(code).stages[0][0])) - 1}).stages[1][0];
+  const batch = planFile(code,{...options,maxInputTokens:estimateInputTokens(renderBatch(code, planFile(code).stages[0][0])) - 1}).stages[1][0];
   const {context}=renderBatch(code,batch,new Map([[key('a'),'_binding2'],[key('b'),'_binding']]));
   assert.match(context,/_binding2 \+ _binding \+ v1/);
 });
@@ -189,16 +189,16 @@ test('a real function fits exactly at the complete input token boundary', () => 
   assert.ok(functionSource);
   const count=bindings(functionSource).size;
   const budget=estimateInputTokens(renderBatch(functionSource,planFile(functionSource).stages[0][0]));
-  const exact=planFile(functionSource,{...options,contextTokens:budget});
+  const exact=planFile(functionSource,{...options,maxInputTokens:budget});
   assert.equal(exact.stages.length,1);
   assert.equal(allBatches(exact).length,1);
   assert.equal(exact.stages[0][0].keys.length, count);
-  assert.ok(allBatches(planFile(functionSource,{...options,contextTokens:budget-1})).length>1);
+  assert.ok(allBatches(planFile(functionSource,{...options,maxInputTokens:budget-1})).length>1);
 });
 
 test('request placeholder offsets reserve names across detached contexts', () => {
   const source = 'const v3 = 10; function operation(a) { return a + v3; }\nconsole.log(' + JSON.stringify('x '.repeat(300)) + ');';
-  const { stages } = planFile(source, { contextTokens: 120 });
+  const { stages } = planFile(source, { maxInputTokens: 120 });
   const batch = stages[1][0];
   const payload = renderBatch(source, batch, new Map(), { placeholderOffset: 1, placeholderCount: 3 });
   assert.deepEqual(Object.keys(payload.placeholders), ['v2']);

@@ -68,9 +68,9 @@ export function contracts(files = ['a.js'], controls = {}) {
 }
 test('arguments enforce the fixed model and positive integer limits', () => {
   assert.equal(parseArgs(['src', '--concurrency', '2']).concurrency, 2);
-  assert.equal(parseArgs(['src']).contextTokens, 100000);
+  assert.equal(parseArgs(['src']).maxInputTokens, 100000);
   assert.deepEqual(parseArgs(['src/a', '--concurrency', '2', 'src/b']).paths.map(dir => dir.split('/').slice(-2).join('/')), ['src/a', 'src/b']);
-  for (const args of [[], ['src', '--model', 'other'], ['src', '--max-ids', '60'], ['src', '--context-bytes', '8000'], ['src', '--context-tokens', '0'], ['src', '--short-len', '1.5'], ['src', '--ignore']]) assert.throws(() => parseArgs(args));
+  for (const args of [[], ['src', '--model', 'other'], ['src', '--max-ids', '60'], ['src', '--context-bytes', '8000'], ['src', '--max-input-tokens', '0'], ['src', '--min-symbol-length', '1.5'], ['src', '--ignore']]) assert.throws(() => parseArgs(args));
 });
 test('one run renames the files of every given path once', async t => {
   const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });
