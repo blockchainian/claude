@@ -1841,3 +1841,25 @@ fn new_draft_starts_in_name_editor() {
     assert_eq!(view.rename.text(), "x");
     assert!(view.input_box.editor.text().is_empty());
 }
+
+#[test]
+fn wizard_finishes_at_empty_prompt_and_enter_creates() {
+    let (directory, mut view) = git_draft();
+    view.set_active_panel(Panel::TaskList);
+    assert!(matches!(key(&mut view, KeyCode::Char('n')), Some(Action::NewDraft { .. })));
+    let id = view.add_draft(setup(directory.path()));
+    view.handle_paste("wizard");
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    let selected = view.selector.as_ref().unwrap().selected;
+    let Some(Action::ChangeDraftDirectory { cwd, .. }) = view.apply_choice(selected) else {
+        panic!("repository selection");
+    };
+    view.draft_directory_changed(id, cwd, "main".into());
+    assert_eq!(view.selector.as_ref().unwrap().field(), Field::Branch);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(view.active_panel, Panel::Prompt);
+    assert!(view.input_box.editor.text().is_empty());
+    assert!(view.selector.is_none());
+    view.handle_paste("build it");
+    assert!(matches!(key(&mut view, KeyCode::Enter), Some(Action::CreateTask { request, .. }) if request.prompt == "build it"));
+}

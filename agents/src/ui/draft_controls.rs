@@ -275,6 +275,7 @@ impl View {
             return self.create_task(id);
         } else {
             self.close_selector();
+            self.set_active_panel(Panel::Prompt);
         }
         None
     }
