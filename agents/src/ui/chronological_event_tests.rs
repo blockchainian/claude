@@ -39,7 +39,7 @@ fn draw(view: &View) {
 impl View {
     pub(crate) fn assert_event_tail(&self) {
         assert_eq!(
-            self.event_selected,
+            self.event_list.cursor,
             self.matching_event_count().checked_sub(1)
         );
         assert_eq!(self.event_scroll(), self.event_max_scroll());
@@ -92,8 +92,8 @@ fn chronological_rows_follow_appends_at_bottom() {
     view.set_event(events[..10].to_vec());
     draw(&view);
     assert_eq!(view.viewport.borrow().event_rows, vec![6, 7, 8, 9]);
-    assert_eq!(view.event_selected, Some(9));
-    assert_eq!(view.viewport.borrow().event_unseen, 0);
+    assert_eq!(view.event_list.cursor, Some(9));
+    assert_eq!(view.event_list.unseen.get(), 0);
 }
 
 #[test]
@@ -102,8 +102,8 @@ fn sending_a_prompt_preserves_the_event_view_through_refresh() {
     view.set_event(events[..8].to_vec());
     draw(&view);
     view.select_event(Some(2));
-    view.viewport.borrow_mut().event_scroll = 1;
-    view.viewport.borrow_mut().event_detail_scroll = 3;
+    view.event_list.scroll.set(1);
+    view.event_detail.scroll.borrow_mut().offset = 3;
     draw(&view);
     assert!(!view.following_event());
     let id = view.selected_id().unwrap().clone();
@@ -121,9 +121,9 @@ fn sending_a_prompt_preserves_the_event_view_through_refresh() {
     view.input_sending(&id, &input);
     draw(&view);
     assert!(!view.following_event());
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     assert_eq!(view.event_scroll(), 1);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 3);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 3);
     view.input_complete(&id, &input, Ok(()));
     let mut rows = view.rows.clone();
     rows[view.selected].status = SessionStatus::Working;
@@ -133,11 +133,11 @@ fn sending_a_prompt_preserves_the_event_view_through_refresh() {
     draw(&view);
     assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(view.viewport.borrow().scroll, task_scroll);
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     assert_eq!(view.visible_event(), Some(&events[2]));
     assert_eq!(view.event_scroll(), 1);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 3);
-    assert_eq!(view.viewport.borrow().event_unseen, 2);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 3);
+    assert_eq!(view.event_list.unseen.get(), 2);
 }
 
 #[test]
@@ -149,8 +149,8 @@ fn transcript_reset_preserves_the_selected_event() {
     draw(&view);
     assert!(view.event_panel.len() > 4);
     view.select_event(Some(2));
-    view.viewport.borrow_mut().event_scroll = 1;
-    view.viewport.borrow_mut().event_detail_scroll = 3;
+    view.event_list.scroll.set(1);
+    view.event_detail.scroll.borrow_mut().offset = 3;
     let selected = view.visible_event().unwrap().clone();
     // Replacing the file causes the real reader to replay the same transcript.
     let replacement = path.with_extension("replacement");
@@ -161,9 +161,9 @@ fn transcript_reset_preserves_the_selected_event() {
     view.apply_event_update(update);
     draw(&view);
     assert_eq!(view.visible_event(), Some(&selected));
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     assert_eq!(view.event_scroll(), 1);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 3);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 3);
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn sending_a_prompt_keeps_existing_live_tail() {
         let (_dir, mut view, events) = fixture();
         view.set_event(events[..8].to_vec());
         draw(&view);
-        view.event_selected = selection;
+        view.event_list.cursor = selection;
         let id = view.selected_id().unwrap().clone();
         view.input_sending(&id, &crate::providers::SessionInput::Prompt("next".into()));
         view.set_event(events[..10].to_vec());
@@ -230,16 +230,16 @@ fn sending_to_attention_task_returns_to_interrupted_task_when_it_starts_working(
     assert_eq!(view.selected_id(), Some(&waiting.id));
     view.set_event(events[..8].to_vec());
     view.select_event(Some(2));
-    view.viewport.borrow_mut().event_scroll = 1;
-    view.viewport.borrow_mut().event_detail_scroll = 3;
+    view.event_list.scroll.set(1);
+    view.event_detail.scroll.borrow_mut().offset = 3;
     view.prepare_prompt();
     view.input_sending(
         &waiting.id,
         &crate::providers::SessionInput::Prompt("next".into()),
     );
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     assert_eq!(view.event_scroll(), 1);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 3);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 3);
     waiting.status = SessionStatus::Working;
     view.set_sessions(vec![original.clone(), waiting], false);
     assert_eq!(view.selected_id(), Some(&original.id));
@@ -300,8 +300,8 @@ fn chronological_appends_preserve_older_view_and_count_new_rows() {
     draw(&view);
     assert_eq!(view.viewport.borrow().event_rows, rows);
     assert_eq!(view.event_scroll(), 0);
-    assert_eq!(view.event_selected, Some(0));
-    assert_eq!(view.viewport.borrow().event_unseen, 2);
+    assert_eq!(view.event_list.cursor, Some(0));
+    assert_eq!(view.event_list.unseen.get(), 2);
     let area = Rect::new(0, 5, 100, 1);
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 6));
     view.render_event_jump(area, &mut buf);
@@ -310,7 +310,7 @@ fn chronological_appends_preserve_older_view_and_count_new_rows() {
     view.show_newest_event();
     draw(&view);
     assert_eq!(view.viewport.borrow().event_rows.last(), Some(&9));
-    assert_eq!(view.viewport.borrow().event_unseen, 0);
+    assert_eq!(view.event_list.unseen.get(), 0);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn chronological_jump_only_shows_and_accepts_clicks_for_new_events() {
         }
     };
     click(&mut view, former);
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
     view.set_event(events[..10].to_vec());
     view.render_at(area, &mut buf, Utc::now());
     let jump = view.viewport.borrow().event_jump;
@@ -353,7 +353,7 @@ fn chronological_jump_only_shows_and_accepts_clicks_for_new_events() {
     assert_eq!(label, " ↓ 2 New ");
     view.pending_click = None;
     click(&mut view, jump);
-    assert_eq!(view.event_selected, Some(9));
+    assert_eq!(view.event_list.cursor, Some(9));
     assert!(view.following_event());
     view.render_at(area, &mut buf, Utc::now());
     assert!(view.viewport.borrow().event_jump.is_empty());
@@ -380,8 +380,8 @@ fn chronological_prepend_anchors_rows_and_selection() {
     assert_eq!(view.event_scroll(), 3);
     assert_eq!(view.viewport.borrow().event_rows, vec![3, 4, 5, 6]);
     assert_eq!(view.visible_event(), Some(&selected));
-    assert_eq!(view.event_selected, Some(4));
-    assert_eq!(view.viewport.borrow().event_unseen, 0);
+    assert_eq!(view.event_list.cursor, Some(4));
+    assert_eq!(view.event_list.unseen.get(), 0);
 }
 
 #[test]
@@ -391,16 +391,16 @@ fn chronological_keys_move_in_screen_direction_and_page_at_top() {
     draw(&view);
     view.navigate_event(KeyCode::Home);
     view.navigate_event(KeyCode::Down);
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     view.navigate_event(KeyCode::PageDown);
-    assert_eq!(view.event_selected, Some(5));
+    assert_eq!(view.event_list.cursor, Some(5));
     view.navigate_event(KeyCode::PageUp);
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     view.navigate_event(KeyCode::Up);
     view.navigate_event(KeyCode::Up);
     assert!(view.event_page_pending());
     view.navigate_event(KeyCode::End);
-    assert_eq!(view.event_selected, Some(9));
+    assert_eq!(view.event_list.cursor, Some(9));
     assert!(!view.event_page_pending());
 }
 
@@ -425,7 +425,7 @@ fn chronological_border_double_clicks_select_their_screen_end() {
                 });
             }
         }
-        assert_eq!(view.event_selected, Some(selected));
+        assert_eq!(view.event_list.cursor, Some(selected));
     }
 }
 
@@ -433,7 +433,7 @@ fn chronological_border_double_clicks_select_their_screen_end() {
 fn chronological_direct_render_uses_its_geometry_and_clamps_without_selection() {
     let (_dir, mut view, events) = fixture();
     view.set_event(events[..8].to_vec());
-    view.event_selected = None;
+    view.event_list.cursor = None;
     assert!(view.viewport.borrow().event_panel.is_empty());
     let area = Rect::new(3, 2, 100, 4);
     let mut buf = Buffer::empty(Rect::new(0, 0, 110, 10));
@@ -466,7 +466,7 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
         prepended: 12,
         ..Default::default()
     });
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
     assert!(!view.event_page_pending());
 }
 
@@ -485,7 +485,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
             view.rows[view.selected].model =
                 Some("provider/model-with-a-very-long-display-name".into());
             view.rows[view.selected].effort = Some("a-very-long-effort-label".into());
-            view.viewport.borrow_mut().event_unseen = unseen;
+            view.event_list.unseen.set(unseen);
             let area = Rect::new(0, 0, width, 45);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, Utc::now());
@@ -534,7 +534,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                     });
                 }
             }
-            assert_eq!(view.event_selected, Some(0));
+            assert_eq!(view.event_list.cursor, Some(0));
             for kind in [
                 MouseEventKind::Down(MouseButton::Left),
                 MouseEventKind::Up(MouseButton::Left),
@@ -547,10 +547,10 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                 });
             }
             assert_eq!(
-                view.event_selected,
+                view.event_list.cursor,
                 view.matching_event_count().checked_sub(1)
             );
-            assert_eq!(view.viewport.borrow().event_unseen, 0);
+            assert_eq!(view.event_list.unseen.get(), 0);
         }
     }
 }
@@ -568,21 +568,21 @@ fn duration_updates_preserve_screen_row_and_follow_slowest() {
     view.active_panel = Panel::EventList;
     view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
     view.select_event(Some(5));
-    view.viewport.borrow_mut().event_scroll = 4;
+    view.event_list.scroll.set(4);
     draw(&view);
-    let screen_row = view.event_selected.unwrap() - view.event_scroll();
+    let screen_row = view.event_list.cursor.unwrap() - view.event_scroll();
     events[8].duration = Some(chrono::Duration::seconds(1));
     view.set_event(events[..9].to_vec());
     draw(&view);
     assert_eq!(
         view.shown_events()
-            .nth(view.event_selected.unwrap())
+            .nth(view.event_list.cursor.unwrap())
             .unwrap()
             .0,
         5
     );
     assert_eq!(
-        view.event_selected.unwrap() - view.event_scroll(),
+        view.event_list.cursor.unwrap() - view.event_scroll(),
         screen_row
     );
     let scroll_before = view.event_scroll();
@@ -592,10 +592,10 @@ fn duration_updates_preserve_screen_row_and_follow_slowest() {
     assert_eq!(view.event_scroll(), scroll_before - 1);
     draw(&view);
     assert_eq!(
-        view.event_selected.unwrap() - view.event_scroll(),
+        view.event_list.cursor.unwrap() - view.event_scroll(),
         screen_row
     );
-    assert_eq!(view.viewport.borrow().event_unseen, 0);
+    assert_eq!(view.event_list.unseen.get(), 0);
     let area = Rect::new(0, 5, 100, 1);
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 6));
     view.render_event_jump(area, &mut buf);
@@ -616,7 +616,7 @@ fn duration_updates_preserve_screen_row_and_follow_slowest() {
         reset: true,
         ..Default::default()
     });
-    assert_eq!(view.event_sort, EventSort::Duration);
+    assert_eq!(view.event_list.sort, EventSort::Duration);
     assert_eq!(view.event_order, [0, 1, 2]);
 }
 
@@ -635,7 +635,7 @@ fn duration_updates_cancel_list_drag_only_when_event_order_changes() {
         view.active_panel = Panel::EventList;
         view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
         view.select_event(Some(0));
-        view.viewport.borrow_mut().event_scroll = 0;
+        view.event_list.scroll.set(0);
         draw(&view);
         view.begin_text_selection(0, 1);
         view.extend_text_selection(99, 2);
@@ -726,7 +726,7 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
                 event.previous_end = None;
             }
             for sort in [EventSort::Time, EventSort::Duration] {
-                view.event_sort = sort;
+                view.event_list.sort = sort;
                 if sort == EventSort::Duration {
                     event.calls[0].started_at = Some(event.started_at);
                 }
@@ -797,7 +797,7 @@ fn duration_running_rows_redraw_only_while_visible_and_keep_update_order() {
         label: None,
         started_at: None,
     });
-    view.event_sort = EventSort::Duration;
+    view.event_list.sort = EventSort::Duration;
     view.set_event(events);
     view.select_event(Some(1));
     let area = Rect::new(0, 0, 100, 1);

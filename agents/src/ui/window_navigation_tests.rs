@@ -303,3 +303,62 @@ fn output_panel_keeps_activation_when_terminal_contents_change() {
         );
     }
 }
+
+#[test]
+fn task_search_editors_park_on_panel_leave_and_resume_typing() {
+    for panel in [Panel::EventList, Panel::EventDetail] {
+        let (mut view, now) = event_fixture();
+        view.rows[view.selected].process = None;
+        event_screen(&view, 200, 45, now);
+        view.set_active_panel(panel);
+        key(&mut view, KeyCode::Char('/'));
+        key(&mut view, KeyCode::Char('a'));
+        view.set_active_panel(Panel::Prompt);
+        let search = if panel == Panel::EventList {
+            &view.event_list.search
+        } else {
+            &view.event_detail.search
+        };
+        assert!(search.editing);
+        assert_eq!(search.query.text(), "a");
+        key(&mut view, KeyCode::Char('p'));
+        assert_eq!(view.input_box.editor.text(), "p");
+        view.set_active_panel(panel);
+        key(&mut view, KeyCode::Char('b'));
+        let search = if panel == Panel::EventList {
+            &view.event_list.search
+        } else {
+            &view.event_detail.search
+        };
+        assert!(search.editing);
+        assert_eq!(search.query.text(), "ab");
+    }
+}
+
+#[test]
+fn task_search_editors_survive_task_list_switches() {
+    for panel in [Panel::EventList, Panel::EventDetail] {
+        let (mut view, _) = event_fixture();
+        let first = view.selected_id().unwrap().clone();
+        let mut other = view.rows[0].clone();
+        other.id = session_key("search-other");
+        view.set_sessions(vec![view.rows[0].clone(), other.clone()], false);
+        view.select(view.rows.iter().position(|row| row.id == first).unwrap());
+        view.set_active_panel(panel);
+        key(&mut view, KeyCode::Char('/'));
+        key(&mut view, KeyCode::Char('a'));
+        view.set_active_panel(Panel::TaskList);
+        view.select(view.rows.iter().position(|row| row.id == other.id).unwrap());
+        assert_eq!(view.active_panel, Panel::TaskList);
+        view.select(view.rows.iter().position(|row| row.id == first).unwrap());
+        assert_eq!(view.active_panel, Panel::TaskList);
+        view.set_active_panel(panel);
+        let search = if panel == Panel::EventList {
+            &view.event_list.search
+        } else {
+            &view.event_detail.search
+        };
+        assert!(search.editing);
+        assert_eq!(search.query.text(), "a");
+    }
+}

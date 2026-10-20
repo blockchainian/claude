@@ -56,15 +56,15 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
 fn right_click_outside_preserves_input_focus_and_event_selection() {
     let (mut view, now) = event_fixture();
     view.select_fixture_event(Some(view.event_panel[0].clone()));
-    let expected = view.event_selected;
+    let expected = view.event_list.cursor;
     event_screen(&view, 120, 40, now);
     view.active_panel = Panel::Prompt;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
     assert!(view.prompt_focused());
-    assert_eq!(view.event_selected, expected);
+    assert_eq!(view.event_list.cursor, expected);
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
     assert!(view.prompt_focused());
-    assert_eq!(view.event_selected, expected);
+    assert_eq!(view.event_list.cursor, expected);
 }
 
 #[test]

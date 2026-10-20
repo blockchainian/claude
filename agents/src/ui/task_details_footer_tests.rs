@@ -148,7 +148,8 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
                 selected.effort = effort.map(str::to_owned);
                 view.event_panel = super::event_fixture().0.event_panel;
                 view.select_event(Some(0));
-                view.viewport.borrow_mut().event_unseen = unseen;
+                view.event_list.unseen.set(unseen);
+                view.event_list.restoring = false;
                 let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
                 view.render(buf.area, &mut buf);
                 let viewport = view.viewport.borrow();

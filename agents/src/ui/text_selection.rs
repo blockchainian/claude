@@ -256,6 +256,7 @@ impl View {
 
     /// Move the held gesture's panel by one row; render remaps its endpoint afterward.
     pub(crate) fn tick_text_selection(&mut self) -> bool {
+        let mut detail = self.event_detail.scroll.borrow_mut();
         let selection = self.text_selection.borrow();
         let Some(selection) = selection.as_ref().filter(|selection| selection.dragged) else {
             return false;
@@ -283,22 +284,22 @@ impl View {
                 previous != viewport.scroll
             }
             Panel::EventList => {
-                let previous = viewport.event_scroll;
-                viewport.event_scroll = if forward {
+                let previous = self.event_list.scroll.get();
+                self.event_list.scroll.set(if forward {
                     previous.saturating_add(1)
                 } else {
                     previous.saturating_sub(1)
-                };
-                previous != viewport.event_scroll
+                });
+                previous != self.event_list.scroll.get()
             }
             Panel::Event => {
-                let previous = viewport.event_detail_scroll;
-                viewport.event_detail_scroll = if forward {
+                let previous = detail.offset;
+                detail.offset = if forward {
                     previous.saturating_add(1).min(viewport.event_detail_max)
                 } else {
                     previous.saturating_sub(1)
                 };
-                previous != viewport.event_detail_scroll
+                previous != detail.offset
             }
             Panel::TaskDetails => {
                 let state = &mut viewport.task_details_scroll;

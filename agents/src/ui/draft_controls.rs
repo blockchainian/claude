@@ -15,10 +15,19 @@ pub(super) enum Field {
     Branch,
     Directory,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum TaskKey {
     Draft(DraftKey),
     Session(SessionKey),
+}
+
+impl TaskKey {
+    pub(super) fn session(&self) -> Option<&SessionKey> {
+        match self {
+            Self::Session(id) => Some(id),
+            Self::Draft(_) => None,
+        }
+    }
 }
 
 /// The list the task details panel shows to choose a new task's repository or branch, or a task's
@@ -393,37 +402,6 @@ impl View {
             self.advance_draft(false)
         } else {
             None
-        }
-    }
-
-    /// Saves a branch editor on panel blur without advancing the wizard.
-    pub(super) fn save_branch_editor(&mut self) {
-        let Some(Selector {
-            kind:
-                SelectorKind::Branch {
-                    draft,
-                    editor,
-                    editing: true,
-                    ..
-                },
-            ..
-        }) = &self.selector
-        else {
-            return;
-        };
-        let id = *draft;
-        let name = editor.text().trim().to_owned();
-        if name.is_empty() {
-            if let Some(Selector {
-                kind: SelectorKind::Branch { editing, .. },
-                ..
-            }) = &mut self.selector
-            {
-                *editing = false;
-            }
-            self.close_selector();
-        } else {
-            self.choose_branch(id, name, true, false);
         }
     }
 
@@ -1045,6 +1023,45 @@ mod tests {
                     .to_owned()
             })
             .collect()
+    }
+
+    #[test]
+    fn draft_selector_and_branch_editor_park_across_switches() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = repository(directory.path());
+        let mut view = draft_view(&repository, directory.path());
+        prompt_step(&mut view);
+        let first = view.selected_draft.unwrap();
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        view.handle_paste("feature/half");
+        view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        let selector = view.selector.as_ref().unwrap();
+        let selected = selector.selected;
+        let caret = selector.branch_editor().unwrap().window(80).1;
+        let branch = view.selected_draft().unwrap().branch.clone();
+        view.set_active_panel(Panel::Prompt);
+        assert_eq!(view.selected_draft().unwrap().branch, branch);
+        assert!(view.selector.as_ref().unwrap().branch_editor().is_some());
+        view.set_active_panel(Panel::TaskDetails);
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd: directory.path().into(),
+            model: None,
+            effort: None,
+            branch: String::new(),
+        });
+        view.select_draft(first);
+        assert_eq!(view.active_panel, Panel::TaskDetails);
+        let selector = view.selector.as_ref().unwrap();
+        assert_eq!(selector.selected, selected);
+        assert_eq!(selector.branch_editor().unwrap().text(), "feature/half");
+        assert_eq!(selector.branch_editor().unwrap().window(80).1, caret);
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            view.selected_draft().unwrap().branch,
+            DraftBranch::New("feature/half".into())
+        );
+        assert!(view.selector.is_none());
     }
 
     fn prompt_step(view: &mut View) {

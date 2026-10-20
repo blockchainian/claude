@@ -197,14 +197,20 @@ fn escape_closes_overlays_without_consuming_history() {
                     confirm: false,
                 })
             }
-            3 => view.event_search.editing = true,
-            4 => view.event_detail_search.editing = true,
+            3 => {
+                view.set_active_panel(Panel::EventList);
+                view.event_list.search.editing = true;
+            }
+            4 => {
+                view.set_active_panel(Panel::EventDetail);
+                view.event_detail.search.editing = true;
+            }
             _ => unreachable!(),
         }
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), second.as_ref());
         assert!(!view.help && view.rename_target.is_none() && view.confirm_dialog.is_none());
-        assert!(!view.event_search.editing && !view.event_detail_search.editing);
+        assert!(!view.event_list.search.editing && !view.event_detail.search.editing);
         view.set_active_panel(Panel::TaskList);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());

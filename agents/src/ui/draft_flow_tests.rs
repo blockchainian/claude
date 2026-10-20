@@ -126,6 +126,7 @@ fn acknowledged_job_refresh_drops_its_draft_and_selects_real_session() {
     arrived.updated_at = Utc::now();
     view.add_draft(setup(directory.path()));
     view.set_active_panel(Panel::TaskDetails);
+    view.discard_selected_draft();
     let selected = view.add_draft(setup(directory.path()));
     view.set_active_panel(Panel::TaskDetails);
     assert_eq!(view.drafts.len(), 1);
@@ -1160,63 +1161,26 @@ fn control_enter_uses_the_draft_rule_instead_of_sending_to_a_provider_session() 
 }
 
 #[test]
-fn draft_name_saves_when_mouse_activates_another_panel() {
-    for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+fn draft_name_parks_when_mouse_activates_another_panel() {
+    for button in [MouseButton::Left, MouseButton::Middle] {
         for (x, y) in [(0, 0), (2, 5), (80, 5), (158, 38)] {
             let (directory, mut view) = fixture();
             let id = view.add_draft(setup(directory.path()));
-            view.set_active_panel(Panel::TaskDetails);
-            view.handle_paste("  Saved on blur  ");
+            view.handle_paste("  Parked on blur  ");
             render(&view);
-            assert!(!view.viewport.borrow().title_input.contains((x, y).into()));
-            let action = view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Down(button),
-                column: x,
-                row: y,
-                modifiers: KeyModifiers::NONE,
-            });
-            let pressed_panel = view.active_panel;
-            view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Up(button),
-                column: x,
-                row: y,
-                modifiers: KeyModifiers::NONE,
-            });
-            if button == MouseButton::Middle && view.active_panel == Panel::TaskDetails {
-                assert_eq!(action, None);
-                assert_eq!(view.name_target, Some(id));
-                assert!(view.selector.is_none());
-                assert_eq!(view.rename.text(), "  Saved on blur  ");
-                assert!(
-                    view.drafts
-                        .iter()
-                        .find(|d| d.id == id)
-                        .unwrap()
-                        .name
-                        .is_none()
-                );
-                continue;
+            for kind in [MouseEventKind::Down(button), MouseEventKind::Up(button)] {
+                view.handle_mouse(MouseEvent {
+                    kind,
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                });
             }
-            assert!(view.name_target.is_none());
-            assert!(view.selector.is_none());
-            if button == MouseButton::Right && pressed_panel == Panel::TaskDetails {
-                assert!(view.drafts.iter().all(|draft| draft.id != id));
-                assert_eq!(view.active_panel, Panel::TaskList);
-            } else {
-                assert_eq!(
-                    view.drafts
-                        .iter()
-                        .find(|d| d.id == id)
-                        .unwrap()
-                        .name
-                        .as_deref(),
-                    Some("Saved on blur")
-                );
-                assert!(matches!(
-                    view.take_drafts_action(),
-                    Some(Action::PersistDrafts)
-                ));
-            }
+            view.select_draft(id);
+            assert_eq!(view.name_target, Some(id));
+            assert_eq!(view.rename.text(), "  Parked on blur  ");
+            assert!(view.selected_draft().unwrap().name.is_none());
+            assert!(view.stored_drafts().is_empty());
         }
     }
 }
@@ -1250,9 +1214,10 @@ fn named_draft_json_lives_until_the_real_session_arrives() {
         render(&view);
         if blur {
             click(&mut view, 0, 0);
-        } else {
-            key(&mut view, KeyCode::Enter);
+            assert!(view.stored_drafts().is_empty());
+            view.set_active_panel(Panel::TaskDetails);
         }
+        key(&mut view, KeyCode::Enter);
         let save = |view: &mut View| {
             assert!(matches!(
                 view.take_drafts_action(),
@@ -1556,8 +1521,10 @@ fn assert_name_field_click(fields: &[Field], named: bool) {
         click_field(&mut view, field);
         assert_eq!(
             view.selected_draft().unwrap().name.as_deref(),
-            Some("Clicked name")
+            named.then_some("probe")
         );
+        assert_eq!(view.rename.text(), "Clicked name");
+        assert_eq!(view.name_target, Some(id));
         assert_eq!(view.selector.as_ref().unwrap().field(), field);
         assert_eq!(view.selector.as_ref().unwrap().origin, Origin::Border);
         if field == Field::Directory {
@@ -1591,14 +1558,12 @@ fn assert_name_prompt_click(name: &str) {
     let prompt = view.viewport.borrow().prompt;
     click(&mut view, prompt.x + 2, prompt.y);
     assert!(view.prompt_focused());
-    assert!(view.name_target.is_none());
+    assert!(view.name_target.is_some());
+    assert_eq!(view.rename.text(), name);
     assert!(view.selector.is_none());
     key(&mut view, KeyCode::Char('p'));
     assert_eq!(view.input_box.editor.text(), "p");
-    assert_eq!(
-        view.selected_draft().unwrap().name.as_deref(),
-        (!name.is_empty()).then_some(name)
-    );
+    assert_eq!(view.selected_draft().unwrap().name.as_deref(), None);
     if name.is_empty() {
         key(&mut view, KeyCode::Enter);
         assert!(view.name_target.is_some());
@@ -1629,8 +1594,11 @@ fn draft_name_click_other_task_keeps_click() {
             .unwrap()
             .name
             .as_deref(),
-        Some("Leave draft")
+        None
     );
+    view.select_draft(id);
+    assert_eq!(view.rename.text(), "Leave draft");
+    assert!(view.name_target.is_some());
     assert!(view.selector.is_none());
 }
 
@@ -1666,6 +1634,7 @@ fn type_pending_branch(view: &mut View) {
     render(view);
     click_field(view, Field::Branch);
     let create = view.selector.as_ref().unwrap().len() - 1;
+    view.selector.as_mut().unwrap().selected = create;
     view.apply_choice(create);
     view.handle_paste("feature/pending");
     assert_eq!(
@@ -1719,19 +1688,19 @@ fn draft_branch_edit_field_toggle_closes_once_and_keeps_text() {
 }
 
 #[test]
-fn draft_branch_edit_prompt_click_saves_and_enter_creates() {
+fn draft_branch_edit_prompt_click_parks_until_branch_enter() {
     let (_directory, mut view) = git_draft();
     type_pending_branch(&mut view);
     render(&view);
     let prompt = view.viewport.borrow().prompt;
     click(&mut view, prompt.x + 2, prompt.y);
-    assert!(view.selector.is_none());
+    assert!(view.selector.is_some());
     assert!(view.prompt_focused());
     view.handle_paste("Prompt kept");
-    assert_eq!(
-        view.selected_draft().unwrap().branch,
-        DraftBranch::New("feature/pending".into())
-    );
+    assert_eq!(view.selected_draft().unwrap().branch, DraftBranch::Unchosen);
+    view.set_active_panel(Panel::TaskDetails);
+    key(&mut view, KeyCode::Enter);
+    view.set_active_panel(Panel::Prompt);
     assert!(
         matches!(key(&mut view, KeyCode::Enter), Some(Action::CreateTask { branch: Some(crate::tasks::BranchChoice::New(ref name)), .. }) if name == "feature/pending")
     );
@@ -1751,8 +1720,7 @@ fn draft_branch_edit_survives_selecting_another_task() {
     view.select(session);
     assert!(view.selector.is_none());
     view.select_draft(id);
-    render(&view);
-    click_field(&mut view, Field::Branch);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_pending_branch(&view);
 }
 
@@ -1952,7 +1920,7 @@ fn saved_new_branch_row_shows_name_and_reopens_prefilled() {
 }
 
 #[test]
-fn branch_editor_saves_when_task_details_loses_focus_without_advancing() {
+fn branch_editor_parks_when_task_details_loses_focus_without_advancing() {
     for exit in [0, 1, 2] {
         for name in ["  foo  ", "   "] {
             let (_directory, mut view) = git_draft();
@@ -1973,16 +1941,17 @@ fn branch_editor_saves_when_task_details_loses_focus_without_advancing() {
                 }
                 _ => view.set_active_panel(Panel::EventDetail),
             }
-            assert_eq!(
-                view.selected_draft().unwrap().branch,
-                if name.trim().is_empty() {
-                    DraftBranch::Unchosen
-                } else {
-                    DraftBranch::New("foo".into())
-                }
-            );
+            assert_eq!(view.selected_draft().unwrap().branch, DraftBranch::Unchosen);
             assert!(view.selected_draft().unwrap().pending_branch.is_none());
-            assert!(view.selector.is_none());
+            assert_eq!(
+                view.selector
+                    .as_ref()
+                    .unwrap()
+                    .branch_editor()
+                    .unwrap()
+                    .text(),
+                name
+            );
             assert!(!view.selected_draft().unwrap().working);
             assert_eq!(
                 view.active_panel,
@@ -1997,7 +1966,7 @@ fn branch_editor_saves_when_task_details_loses_focus_without_advancing() {
 }
 
 #[test]
-fn panel_blur_does_not_reopen_name_or_save_twice() {
+fn panel_blur_keeps_editors_without_saving() {
     for target in [Panel::Prompt, Panel::TaskList, Panel::EventDetail] {
         for branch in [false, true] {
             let (directory, mut view) = git_draft();
@@ -2013,8 +1982,8 @@ fn panel_blur_does_not_reopen_name_or_save_twice() {
             }
             view.set_active_panel(target);
             assert_eq!(view.active_panel, target);
-            assert!(view.name_target.is_none());
-            assert!(view.selector.is_none());
+            assert_eq!(view.name_target, Some(id));
+            assert_eq!(view.selector.is_some(), branch);
             let updated = view.selected_draft().unwrap().updated_at;
             view.set_active_panel(target);
             view.set_active_panel(Panel::TaskDetails);
@@ -2024,16 +1993,10 @@ fn panel_blur_does_not_reopen_name_or_save_twice() {
             assert_eq!(view.selected_draft, Some(id));
             assert!(view.take_pending_action().is_none());
             if branch {
-                assert_eq!(
-                    view.selected_draft().unwrap().branch,
-                    DraftBranch::New("foo".into())
-                );
+                assert_eq!(view.selected_draft().unwrap().branch, DraftBranch::Unchosen);
                 assert!(view.selected_draft().unwrap().name.is_none());
             } else {
-                assert_eq!(
-                    view.selected_draft().unwrap().name.as_deref(),
-                    Some("saved title")
-                );
+                assert_eq!(view.selected_draft().unwrap().name.as_deref(), None);
             }
         }
     }

@@ -48,28 +48,27 @@ enum PasteTarget {
 
 impl View {
     pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
+        self.event_list.sort_initialized = true;
         let following = self.following_event();
         let full = self
-            .event_selected
+            .event_list.cursor
             .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
-        let background_full = self
-            .event_background_return
-            .as_ref()
+        let background_full = self.event_list.background_return.as_ref()
             .and_then(|saved| saved.event)
             .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
-        self.event_sort = sorting;
+        self.event_list.sort = sorting;
         self.prepare_event_search();
-        self.event_selected = full.and_then(|full| self.shown_position(full));
+        self.event_list.cursor = full.and_then(|full| self.shown_position(full));
         let background_event = background_full.and_then(|full| self.shown_position(full));
-        if let Some(saved) = &mut self.event_background_return {
+        if let Some(saved) = &mut self.event_list.background_return {
             saved.event = background_event;
         }
-        self.event_pending_older = 0;
-        self.viewport.borrow_mut().event_unseen = 0;
-        if self.event_background_return.is_none() {
+        self.event_list.pending_older = 0;
+        self.event_list.unseen.set(0);
+        if self.event_list.background_return.is_none() {
             self.show_newest_event();
         } else if following {
-            self.viewport.borrow_mut().event_scroll = self.event_max_scroll();
+            self.event_list.scroll.set(self.event_max_scroll());
         } else {
             self.reveal_event_selection();
         }
@@ -112,7 +111,7 @@ impl View {
                             })
                 {
                     let index = self.shown_position(full);
-                    self.event_background_return = None;
+                    self.event_list.background_return = None;
                     self.select_event(index);
                 }
                 None
@@ -172,19 +171,19 @@ impl View {
         if self.prompt_focused() {
             return;
         }
-        if self.event_detail_search.editing {
-            self.event_detail_search.editing = false;
+        if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
+            self.event_detail.search.editing = false;
             return;
         }
-        if self.event_search.editing {
-            self.event_search.editing = false;
+        if self.active_panel == Panel::EventList && self.event_list.search.editing {
+            self.event_list.search.editing = false;
             return;
         }
-        if let Some(previous) = self.event_background_return.take() {
+        if let Some(previous) = self.event_list.background_return.take() {
             self.select_event(previous.event);
 
-            self.event_detail_search = previous.search;
-            self.viewport.borrow_mut().event_detail_scroll = previous.scroll;
+            self.event_detail.search = previous.search;
+            self.event_detail.scroll.borrow_mut().offset = previous.scroll;
         } else {
             self.show_newest_event();
         }
@@ -201,15 +200,15 @@ impl View {
                 return;
             }
         };
-        if self.event_background_return.is_none() {
-            self.event_background_return = Some(BackgroundReturn {
-                event: self.event_selected,
+        if self.event_list.background_return.is_none() {
+            self.event_list.background_return = Some(BackgroundReturn {
+                event: self.event_list.cursor,
 
-                scroll: self.viewport.borrow().event_detail_scroll,
-                search: std::mem::take(&mut self.event_detail_search),
+                scroll: self.event_detail.scroll.borrow().offset,
+                search: std::mem::take(&mut self.event_detail.search),
             });
         }
-        self.background_event = Some(crate::event::Event {
+        self.event_list.background = Some(crate::event::Event {
             kind: crate::event::Kind::Tool,
             source: None,
             completed_time: false,
@@ -246,7 +245,7 @@ impl View {
         });
 
         self.viewport.borrow_mut().event_detail_layout = None;
-        self.viewport.borrow_mut().event_detail_scroll = 0;
+        self.event_detail.scroll.borrow_mut().offset = 0;
     }
 
     fn set_filter(&mut self, idx: usize) {
@@ -322,14 +321,6 @@ impl View {
         let paste_target = middle.then(|| self.paste_target(mouse)).flatten();
         if middle && paste_target.is_none() {
             return None;
-        }
-        if self.name_target.is_some()
-            && self.title_editor().is_some()
-            && !self.rename.text().trim().is_empty()
-            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && !self.viewport.borrow().title_input.contains(position)
-        {
-            self.save_title();
         }
         let previous = if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && let Some((MouseButton::Left, x, y, false)) = self.mouse_press
@@ -448,11 +439,11 @@ impl View {
             return Some(PasteTarget::Search(v.search));
         }
         let row = super::event_list::search_input_rect(v.event_panel);
-        if self.event_search.editing && row.contains(at) {
+        if self.event_list.search.editing && row.contains(at) {
             return Some(PasteTarget::EventSearch(row));
         }
         let row = super::event_list::search_input_rect(v.event_detail);
-        if self.event_detail_search.editing && row.contains(at) {
+        if self.event_detail.search.editing && row.contains(at) {
             return Some(PasteTarget::EventDetailSearch(row));
         }
         None
@@ -477,12 +468,12 @@ impl View {
             }
             PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
             PasteTarget::EventSearch(area) => {
-                self.event_search
+                self.event_list.search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
             PasteTarget::EventDetailSearch(area) => {
-                self.event_detail_search
+                self.event_detail.search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
@@ -751,7 +742,7 @@ impl View {
             }
             return None;
         }
-        if self.rename_target.is_some() || self.searching {
+        if (self.active_panel == Panel::TaskDetails && self.rename_target.is_some()) || self.searching {
             self.mouse_press = None;
             self.text_selection.borrow_mut().take();
             return None;
@@ -938,9 +929,9 @@ impl View {
                 } else if bottom {
                     self.show_newest_event();
                 } else {
-                    self.event_background_return = None;
-                    self.event_pending_older = 0;
-                    self.event_start_requested = true;
+                    self.event_list.background_return = None;
+                    self.event_list.pending_older = 0;
+                    self.event_list.start_requested = true;
                     self.select_event(Some(0));
                 }
             }
@@ -957,7 +948,7 @@ impl View {
                     .and_then(|&full| self.shown_position(full))
             };
             if let Some(event) = event {
-                self.event_background_return = None;
+                self.event_list.background_return = None;
                 self.select_event(Some(event));
             }
             let background = {
@@ -1115,7 +1106,7 @@ impl View {
                     let now = Instant::now();
                     let double = event_detail_click.is_some_and(|(last, index, at)| {
                         last == session
-                            && index == self.event_selected
+                            && index == self.event_list.cursor
                             && now.duration_since(at) < self.double_click_interval
                     });
                     if double {
@@ -1125,7 +1116,7 @@ impl View {
                             label: self.event_detail_copy_label(event),
                         });
                     }
-                    self.last_event_detail_click = Some((session, self.event_selected, now));
+                    self.last_event_detail_click = Some((session, self.event_list.cursor, now));
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {
@@ -1202,37 +1193,39 @@ impl View {
         }
         let mut viewport = self.viewport.borrow_mut();
         if over_event && over_event_detail {
-            let title_hold = viewport.event_detail_title_hold.take();
+            let mut detail = self.event_detail.scroll.borrow_mut();
+            let title_hold = detail.title_hold.take();
             if let Some((direction, left)) = title_hold
                 && wheel
                 && direction == forward
                 && viewport.event_detail_max > 0
             {
-                viewport.event_detail_title_hold = (left > 1).then_some((direction, left - 1));
+                detail.title_hold = (left > 1).then_some((direction, left - 1));
                 true
-            } else if viewport.event_detail_state.scroll_rows(forward, row, rows) {
-                viewport.event_detail_scroll = viewport.event_detail_state.position();
-                if wheel && !forward && viewport.event_detail_scroll == 0 {
-                    viewport.event_detail_title_hold = Some((false, TITLE_HOLD_WHEELS));
+            } else if detail.state.scroll_rows(forward, row, rows) {
+                detail.offset = detail.state.position();
+                if wheel && !forward && detail.offset == 0 {
+                    detail.title_hold = Some((false, TITLE_HOLD_WHEELS));
                 }
                 true
             } else {
                 drop(viewport);
-                let selected = self.event_selected;
+                drop(detail);
+                let selected = self.event_list.cursor;
                 self.move_event_selection(forward);
-                if wheel && self.event_selected != selected {
-                    let mut viewport = self.viewport.borrow_mut();
-                    viewport.event_detail_entry = Some(forward);
-                    viewport.event_detail_title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
+                if wheel && self.event_list.cursor != selected {
+                    let mut detail = self.event_detail.scroll.borrow_mut();
+                    detail.entry = Some(forward);
+                    detail.title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
                 }
                 false
             }
         } else if over_event {
-            viewport.event_scroll = if forward {
-                viewport.event_scroll.saturating_add(1)
+            self.event_list.scroll.set(if forward {
+                self.event_list.scroll.get().saturating_add(1)
             } else {
-                viewport.event_scroll.saturating_sub(1)
-            };
+                self.event_list.scroll.get().saturating_sub(1)
+            });
             true
         } else {
             let mut consumed = false;
@@ -1280,6 +1273,7 @@ impl View {
             self.prepare_event_detail_scroll();
         }
         let viewport = &mut *self.viewport.borrow_mut();
+        let mut detail = self.event_detail.scroll.borrow_mut();
         let page = if panel == Panel::TaskDetails {
             viewport.task_details.height
         } else {
@@ -1288,7 +1282,7 @@ impl View {
         let state = if panel == Panel::TaskDetails {
             &mut viewport.task_details_scroll
         } else {
-            &mut viewport.event_detail_state
+            &mut detail.state
         };
         let forward = matches!(code, KeyCode::Down | KeyCode::PageDown | KeyCode::End);
         let row = state.content_top;
@@ -1303,7 +1297,7 @@ impl View {
             state.scroll_rows(forward, row, rows);
         }
         if panel == Panel::EventDetail {
-            viewport.event_detail_scroll = viewport.event_detail_state.position();
+            detail.offset = detail.state.position();
         }
     }
 
@@ -1497,16 +1491,14 @@ impl View {
             && !self.prompt_focused()
             && self.title_editor().is_none()
             && !self.searching
-            && !self.event_search.editing
-            && !self.event_detail_search.editing
+            && !self.task_search_editing()
         {
             return None;
         }
         if self.prompt_focused()
             && self.input_disabled().is_none()
             && !self.searching
-            && !self.event_search.editing
-            && !self.event_detail_search.editing
+            && !self.task_search_editing()
         {
             if key.code == KeyCode::Esc && self.selected_draft.is_some() {
                 self.confirm_draft_delete();
@@ -1551,9 +1543,7 @@ impl View {
         if self.active_panel == Panel::TaskList
             && self.confirm_dialog.is_none()
             && !self.help
-            && self.rename_target.is_none()
-            && !self.event_search.editing
-            && !self.event_detail_search.editing
+            && !self.task_search_editing()
             && !self.searching
             && self
                 .selected_row()
@@ -1636,30 +1626,30 @@ impl View {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
-        if self.event_detail_search.editing {
+        if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
             match key.code {
-                KeyCode::Esc => self.event_detail_search.clear(),
-                KeyCode::Enter => self.event_detail_search.editing = false,
+                KeyCode::Esc => self.event_detail.search.clear(),
+                KeyCode::Enter => self.event_detail.search.editing = false,
                 _ => {
-                    self.event_detail_search.query.handle(key);
+                    self.event_detail.search.query.handle(key);
                 }
             }
             self.jump_event_detail_match();
             return None;
         }
-        if self.event_search.editing {
+        if self.active_panel == Panel::EventList && self.event_list.search.editing {
             let selected_full = self
-                .event_selected
+                .event_list.cursor
                 .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
             match key.code {
                 KeyCode::Esc => {
-                    self.event_search.clear();
+                    self.event_list.search.clear();
                 }
-                KeyCode::Enter => self.event_search.editing = false,
+                KeyCode::Enter => self.event_list.search.editing = false,
                 _ => {
-                    let before = self.event_search.query.text().to_owned();
-                    if self.event_search.query.handle(key) {
-                        if self.event_search.query.text() != before {
+                    let before = self.event_list.search.query.text().to_owned();
+                    if self.event_list.search.query.handle(key) {
+                        if self.event_list.search.query.text() != before {
                             self.rematch_event_at(selected_full);
                         }
                         return None;
@@ -1719,12 +1709,12 @@ impl View {
             match self.active_panel {
                 Panel::TaskList => self.searching = true,
                 Panel::EventList => {
-                    self.event_search.editing = true;
+                    self.event_list.search.editing = true;
 
                     self.prepare_event_search();
                 }
                 Panel::EventDetail => {
-                    self.event_detail_search.editing = true;
+                    self.event_detail.search.editing = true;
                     self.jump_event_detail_match();
                 }
                 _ => {}
@@ -1740,13 +1730,13 @@ impl View {
             return None;
         }
         if plain && key.code == KeyCode::Char('t') && self.active_panel == Panel::EventList {
-            self.set_event_sort(match self.event_sort {
+            self.set_event_sort(match self.event_list.sort {
                 EventSort::Time => EventSort::Duration,
                 EventSort::Duration => EventSort::Time,
             });
             return self.selected_id().cloned().map(|id| Action::PersistSorting {
                 id,
-                sorting: self.event_sort,
+                sorting: self.event_list.sort,
             });
         }
         if plain

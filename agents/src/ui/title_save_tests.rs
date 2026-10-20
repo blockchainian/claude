@@ -35,43 +35,31 @@ fn leave_title_with_mouse(view: &mut View) -> Option<Action> {
 }
 
 #[test]
-fn changed_title_keyboard_blur_saves_and_closes_editor() {
+fn changed_title_keyboard_blur_parks_editor() {
     for width in [100, 200] {
-        let (_directory, mut view, id, _original) = editing_title(width);
+        let (_directory, mut view, _id, _original) = editing_title(width);
         view.rename.set_text("  Saved by keyboard  ");
-        assert_eq!(
-            leave_title_with_keyboard(&mut view),
-            Some(Action::Rename {
-                id,
-                name: "Saved by keyboard".into(),
-            })
-        );
+        assert_eq!(leave_title_with_keyboard(&mut view), None);
         assert_eq!(view.active_panel, Panel::TaskList);
-        assert!(view.rename_target.is_none());
+        assert!(view.rename_target.is_some());
         assert_eq!(view.take_pending_action(), None);
     }
 }
 
 #[test]
-fn changed_title_mouse_down_saves_and_closes_editor() {
+fn changed_title_mouse_down_parks_editor() {
     for width in [100, 200] {
-        let (_directory, mut view, id, _original) = editing_title(width);
+        let (_directory, mut view, _id, _original) = editing_title(width);
         view.rename.set_text("  Saved by mouse  ");
-        assert_eq!(
-            leave_title_with_mouse(&mut view),
-            Some(Action::Rename {
-                id,
-                name: "Saved by mouse".into(),
-            })
-        );
+        assert_eq!(leave_title_with_mouse(&mut view), None);
         assert_eq!(view.active_panel, Panel::Prompt);
-        assert!(view.rename_target.is_none());
+        assert!(view.rename_target.is_some());
         assert_eq!(view.take_pending_action(), None);
     }
 }
 
 #[test]
-fn changed_title_automatic_panel_change_closes_editor() {
+fn changed_title_automatic_panel_change_parks_editor() {
     for width in [100, 200] {
         for terminal in [false, true] {
             let (_directory, mut view, id, _original) = editing_title(width);
@@ -87,14 +75,7 @@ fn changed_title_automatic_panel_change_closes_editor() {
                 view.set_active_panel(Panel::EventDetail);
             }
             assert_eq!(view.active_panel, Panel::EventDetail);
-            assert!(view.rename_target.is_none());
-            assert_eq!(
-                view.take_pending_action(),
-                Some(Action::Rename {
-                    id,
-                    name: "Saved automatically".into(),
-                })
-            );
+            assert!(view.rename_target.is_some());
             assert_eq!(view.take_pending_action(), None);
         }
     }
@@ -119,7 +100,7 @@ fn unchanged_title_enter_closes_without_provider_request() {
 }
 
 #[test]
-fn unchanged_title_blur_closes_without_provider_request() {
+fn unchanged_title_blur_parks_without_provider_request() {
     for width in [100, 200] {
         for route in ["keyboard", "mouse", "automatic"] {
             let (_directory, mut view, _id, original) = editing_title(width);
@@ -134,7 +115,7 @@ fn unchanged_title_blur_closes_without_provider_request() {
                 _ => unreachable!(),
             };
             assert_eq!(action, None, "{route}, width={width}");
-            assert!(view.rename_target.is_none(), "{route}, width={width}");
+            assert!(view.rename_target.is_some(), "{route}, width={width}");
             assert_eq!(view.take_pending_action(), None, "{route}, width={width}");
         }
     }
@@ -148,6 +129,107 @@ fn activating_task_details_again_keeps_title_editing() {
         view.set_active_panel(Panel::TaskDetails);
         assert_eq!(view.rename_target.as_ref(), Some(&id));
         assert_eq!(view.rename.text(), "Still editing");
+        assert_eq!(view.take_pending_action(), None);
+    }
+}
+
+#[test]
+fn task_title_and_focus_park_across_task_switches() {
+    let (_directory, mut view, id, _) = editing_title(200);
+    view.rename.set_text("Half title");
+    view.rename
+        .handle(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    let caret = view.rename.window(80).1;
+    view.set_active_panel(Panel::TaskList);
+    assert_eq!(view.take_pending_action(), None);
+    let other = view.rows.iter().position(|row| row.id != id).unwrap();
+    view.select(other);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    view.set_active_panel(Panel::EventDetail);
+    let original = view.rows.iter().position(|row| row.id == id).unwrap();
+    view.select(original);
+    assert_eq!(view.active_panel, Panel::TaskDetails);
+    assert_eq!(view.rename.text(), "Half title");
+    assert_eq!(view.rename.window(80).1, caret);
+    assert!(view.title_editor().is_some());
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(Action::Rename {
+            id,
+            name: "Half title".into()
+        })
+    );
+    assert!(view.title_editor().is_none());
+}
+
+#[test]
+fn parked_title_escape_discards_without_rename() {
+    let (_directory, mut view, _, original) = editing_title(200);
+    view.rename.set_text("Unsubmitted title");
+    view.set_active_panel(Panel::Prompt);
+    assert_eq!(view.take_pending_action(), None);
+    assert!(view.title_editor().is_some());
+    view.set_active_panel(Panel::TaskDetails);
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        None
+    );
+    assert!(view.title_editor().is_none());
+    assert_eq!(view.selected_row().unwrap().display_title(), original);
+}
+
+#[test]
+fn task_list_navigation_preserves_each_task_focus() {
+    let (_dir, mut view, first, _) = editing_title(200);
+    let second = view
+        .rows
+        .iter()
+        .find(|row| row.id != first)
+        .unwrap()
+        .id
+        .clone();
+    view.rename.set_text("parked");
+    view.set_active_panel(Panel::TaskList);
+    view.select(view.rows.iter().position(|row| row.id == second).unwrap());
+    assert_eq!(view.active_panel, Panel::TaskList);
+    view.set_active_panel(Panel::EventDetail);
+    view.set_active_panel(Panel::TaskList);
+    view.select(view.rows.iter().position(|row| row.id == first).unwrap());
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert_eq!(view.task_focus(), task_ui::Focus::Title);
+    view.set_active_panel(Panel::TaskDetails);
+    assert_eq!(view.rename.text(), "parked");
+    view.select(view.rows.iter().position(|row| row.id == second).unwrap());
+    assert_eq!(view.active_panel, Panel::EventDetail);
+}
+
+#[test]
+fn attention_returns_to_parked_title_without_submitting() {
+    for from_list in [false, true] {
+        let (_dir, mut view, first, _) = editing_title(200);
+        view.rename.set_text("interrupted title");
+        if from_list {
+            view.set_active_panel(Panel::TaskList);
+            view.handle_key(KeyCode::Char('/').into());
+            assert!(view.searching);
+        }
+        let mut rows = view.rows.clone();
+        let second = rows.iter_mut().find(|row| row.id != first).unwrap();
+        second.status = SessionStatus::NeedsInput;
+        let second_key = second.id.clone();
+        view.set_sessions(rows, false);
+        assert_eq!(view.selected_id(), Some(&second_key));
+        assert_eq!(view.active_panel, Panel::Prompt);
+        assert!(!view.searching);
+        let mut rows = view.rows.clone();
+        rows.iter_mut()
+            .find(|row| row.id == second_key)
+            .unwrap()
+            .status = SessionStatus::Ready;
+        view.set_sessions(rows, false);
+        assert_eq!(view.selected_id(), Some(&first));
+        assert_eq!(view.active_panel, Panel::TaskDetails);
+        assert_eq!(view.rename.text(), "interrupted title");
         assert_eq!(view.take_pending_action(), None);
     }
 }

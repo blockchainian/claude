@@ -1,5 +1,4 @@
 //! Per-task interface state parked while another task is shown.
-#![allow(dead_code)]
 
 use super::{
     SectionScroll, draft_controls::Selector, event_search::EventSearch, line_edit::LineEdit,
@@ -14,21 +13,33 @@ pub(super) struct TaskUi {
     pub event_detail: EventDetail,
     pub task_details: TaskDetails,
     pub prompt: PromptBox,
+    #[allow(dead_code)]
     pub question: Option<QuestionView>,
 }
 
 #[derive(Default)]
-pub(super) struct EventList {
-    pub position: EventPosition,
-    pub selected: Option<EventId>,
+pub(crate) struct EventList {
+    pub(super) position: EventPosition,
+    pub(super) selected: Option<EventId>,
     pub search: EventSearch,
     pub sort: EventSort,
+    pub sort_initialized: bool,
+    pub unseen: std::cell::Cell<usize>,
+    pub pending_older: usize,
+    pub start_requested: bool,
+    pub background: Option<Event>,
+    pub(super) background_return: Option<super::BackgroundReturn>,
+    /// Window-relative caches, discarded when the task is parked.
+    pub cursor: Option<usize>,
+    pub scroll: std::cell::Cell<usize>,
+    pub restoring: bool,
+    pub(super) tail: Option<EventId>,
 }
 
 #[derive(Default)]
 pub(super) struct EventDetail {
     pub mode: EventDetailMode,
-    pub scroll: SectionScroll,
+    pub scroll: std::cell::RefCell<super::event_detail::EventDetailScroll>,
     pub search: EventSearch,
 }
 

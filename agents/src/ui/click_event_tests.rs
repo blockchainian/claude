@@ -342,7 +342,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     *text = text.replacen("decks.txt", "output/decks.txt", 1);
     view.rows[view.selected].cwd = directory.path().into();
     view.select_fixture_event(Some(event));
-    view.event_detail_search.query.set_text("decks.txt");
+    view.event_detail.search.query.set_text("decks.txt");
     let buf = event_detail_buffer(&view, 200, now);
     let (rect, target) = view
         .viewport
@@ -421,7 +421,7 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert!(
-        view.event_selected.is_some(),
+        view.event_list.cursor.is_some(),
         "Background double click must open its full log"
     );
     assert!(
@@ -449,11 +449,11 @@ fn background_double_click_restores_previous_detail_and_scroll() {
         .clone();
     view.select_fixture_event(Some(previous.clone()));
     event_screen(&view, 160, 40, now);
-    view.viewport.borrow_mut().event_detail_scroll = 2;
+    view.event_detail.scroll.borrow_mut().offset = 2;
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), Some(&previous));
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 2);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 2);
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), view.event_panel.last());
 }
@@ -479,7 +479,7 @@ fn selected_detail_refreshes_and_event_wheel_changes_it() {
 fn event_detail_slash_search_jumps_and_highlights_without_closing() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
-    let expected = view.event_selected;
+    let expected = view.event_list.cursor;
     event_screen(&view, 100, 25, now);
     assert_eq!(
         {
@@ -489,15 +489,15 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
         None
     );
     assert_eq!(
-        view.event_selected, expected,
+        view.event_list.cursor, expected,
         "Search must keep the open event"
     );
     for ch in "globalState".chars() {
         assert_eq!(key(&mut view, KeyCode::Char(ch)), None);
     }
-    assert!(view.event_detail_search.editing);
+    assert!(view.event_detail.search.editing);
     assert!(
-        !view.event_search.active(),
+        !view.event_list.search.active(),
         "detail search must not filter the list"
     );
     // Wide enough that the matching line is not truncated before the match.
@@ -509,7 +509,7 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
         .join("\n");
     let (x, y) = rendered_cell(&body, "globalState");
     assert!(
-        view.viewport.borrow().event_detail_scroll > 0,
+        view.event_detail.scroll.borrow().offset > 0,
         "search must reveal the matching line"
     );
     let mut buffer = Buffer::empty(Rect::new(0, 0, 300, 25));
@@ -520,10 +520,10 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
             .contains(ratatui::style::Modifier::BOLD),
         "matched text must be highlighted"
     );
-    assert_eq!(view.event_selected, expected);
+    assert_eq!(view.event_list.cursor, expected);
     key(&mut view, KeyCode::Enter);
-    assert!(!view.event_detail_search.editing);
-    assert_eq!(view.event_selected, expected);
+    assert!(!view.event_detail.search.editing);
+    assert_eq!(view.event_list.cursor, expected);
 }
 
 #[test]
@@ -558,11 +558,11 @@ fn background_detail_survives_refresh_with_matching_tool_timestamp() {
         .started_at;
     view.rows[view.selected].background[0].started_at = tool_time;
     open_background(&mut view, now);
-    let expected = view.event_selected;
+    let expected = view.event_list.cursor;
     assert_eq!(view.visible_event().unwrap().started_at, tool_time);
     view.set_event(view.event_panel.clone());
     assert_eq!(
-        view.event_selected, expected,
+        view.event_list.cursor, expected,
         "transcript Tool events must not replace a Background detail sharing their timestamp"
     );
 }
@@ -574,11 +574,11 @@ fn background_return_restores_detail_search() {
     view.select_fixture_event(Some(previous.clone()));
     let text = event_list::open_text(&previous);
     let query = text.split_whitespace().next().unwrap();
-    view.event_detail_search.query.set_text(query);
+    view.event_detail.search.query.set_text(query);
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), Some(&previous));
-    assert_eq!(view.event_detail_search.query.text(), query);
+    assert_eq!(view.event_detail.search.query.text(), query);
 }
 
 #[test]

@@ -167,7 +167,7 @@ impl View {
                 .selected_draft()
                 .is_some_and(|draft| draft.name.is_some())
         {
-            self.panels_task = self.selected_id().cloned();
+            self.panels_task = self.selected_task_key();
         }
     }
 
@@ -299,17 +299,14 @@ impl View {
 
     pub(super) fn leave_draft(&mut self) {
         if let Some(id) = self.selected_draft.take() {
-            self.close_draft_selector(id);
-            if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id)
-                && draft.name.is_some()
-            {
-                self.input_box.editor.preserve_images();
+            if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
+                if draft.name.is_some() {
+                    self.input_box.editor.preserve_images();
+                    draft.updated_at = chrono::Utc::now();
+                    self.drafts_dirty = true;
+                }
                 draft.input = std::mem::take(&mut self.input_box);
-                draft.updated_at = chrono::Utc::now();
-                self.drafts_dirty = true;
             }
-            self.drafts
-                .retain(|draft| draft.id != id || draft.name.is_some());
             self.input_box = prompt_box::PromptBox::default();
         }
     }
@@ -334,6 +331,7 @@ impl View {
             self.input_box = prompt_box::PromptBox::default();
         }
         self.drafts.retain(|draft| draft.id != id);
+        self.task_uis.remove(&draft_controls::TaskKey::Draft(id));
         self.drafts_dirty = true;
         self.refresh_draft_rows();
         self.reconcile_selection();
@@ -415,8 +413,6 @@ impl View {
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             self.input_box = std::mem::take(&mut draft.input);
         }
-
-        self.prepare_prompt();
     }
 
     pub(super) fn submit_draft(&mut self, id: DraftKey) {
@@ -452,7 +448,30 @@ impl View {
             .find(|(id, _)| self.selected_draft == Some(*id))
             .or_else(|| arrived.last())
             .map(|(_, key)| key.clone());
+        let selected_draft = self.selected_draft;
         self.leave_draft();
+        for (draft_id, session) in &arrived {
+            let draft = self
+                .drafts
+                .iter_mut()
+                .find(|draft| draft.id == *draft_id)
+                .expect("arrived draft exists");
+            let draft_key = draft_controls::TaskKey::Draft(*draft_id);
+            let session_key = draft_controls::TaskKey::Session(session.clone());
+            if selected_draft == Some(*draft_id) {
+                self.input_box = std::mem::take(&mut draft.input);
+                self.panels_task = Some(session_key.clone());
+                if self.name_target.take().is_some() {
+                    self.rename_target = Some(session.clone());
+                }
+            }
+            if let Some(mut ui) = self.task_uis.remove(&draft_key) {
+                if selected_draft != Some(*draft_id) {
+                    ui.prompt = std::mem::take(&mut draft.input);
+                }
+                self.task_uis.insert(session_key, ui);
+            }
+        }
         self.drafts
             .retain(|draft| !arrived.iter().any(|(id, _)| *id == draft.id));
         self.drafts_dirty = true;
@@ -605,10 +624,30 @@ mod tests {
         assert!(view.input_box.editor.is_empty());
     }
     #[test]
+    fn unnamed_draft_keeps_prompt_and_title_while_parked() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut view = View::default();
+        let first = view.add_draft(setup(directory.path()));
+        view.handle_paste("half title");
+        view.set_active_panel(Panel::Prompt);
+        view.handle_paste("half prompt");
+        view.handle_key(KeyCode::Left.into());
+        let caret = view.input_box.editor.cursor();
+        view.add_draft(setup(directory.path()));
+        view.select_draft(first);
+        assert_eq!(view.active_panel, Panel::Prompt);
+        assert_eq!(view.rename.text(), "half title");
+        assert_eq!(view.input_box.editor.text(), "half prompt");
+        assert_eq!(view.input_box.editor.cursor(), caret);
+        assert!(view.stored_drafts().is_empty());
+    }
+
+    #[test]
     fn worker_results_target_stable_draft_not_a_replaced_one() {
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
+        view.discard_selected_draft();
         let second = view.add_draft(setup(directory.path()));
         view.draft_worktree_created(first, Ok((directory.path().join("stale"), "stale".into())));
         view.draft_worktree_created(
@@ -719,6 +758,40 @@ mod recovery_tests {
         view.set_active_panel(Panel::Prompt);
         id
     }
+    #[test]
+    fn launched_draft_keeps_focus_prompt_and_caret() {
+        for parked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut view = View::default();
+            let draft = named(&mut view, dir.path(), "Launching");
+            view.handle_paste("half prompt");
+            view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+            let caret = view.input_box.editor.cursor();
+            view.set_active_panel(Panel::EventDetail);
+            view.draft_created(draft, Ok("launch-job".into()));
+            if parked {
+                named(&mut view, dir.path(), "Other");
+            }
+            let mut row = session();
+            row.background_job = Some(crate::model::BackgroundJob {
+                id: "launch-job".into(),
+                needs: None,
+                awaits_prompt: false,
+            });
+            let key = row.id.clone();
+            view.set_sessions(vec![row], false);
+            assert_eq!(view.selected_id(), Some(&key));
+            assert_eq!(view.active_panel, Panel::EventDetail);
+            assert_eq!(view.input_box.editor.text(), "half prompt");
+            assert_eq!(view.input_box.editor.cursor(), caret);
+            assert!(
+                !view
+                    .task_uis
+                    .contains_key(&draft_controls::TaskKey::Draft(draft))
+            );
+        }
+    }
+
     #[test]
     fn two_drafts_restore_fields_text_images_and_focus_when_selected_by_row() {
         let dir = tempfile::tempdir().unwrap();

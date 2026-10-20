@@ -55,10 +55,10 @@ fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
         view.set_event(vec![event.clone()]);
         view.prepare_event_search();
         assert_eq!(
-            view.event_search.bodies[0].to_string(),
+            view.event_list.search.bodies[0].to_string(),
             format!("Error {body} exec_command")
         );
-        view.event_search.query.set_text("exec_command");
+        view.event_list.search.query.set_text("exec_command");
         view.rematch_event();
         assert_eq!(view.matching_event_count(), 1, "{body}");
         assert_eq!(view.visible_event(), Some(&event), "{body}");
@@ -93,7 +93,7 @@ fn list_search_discards_layout_when_the_selected_event_changes() {
     key(&mut view, KeyCode::Char('/'));
     draw_event_detail(&view);
     let selected = view.visible_event().unwrap().clone();
-    view.event_search.query.set_text("run_in_background");
+    view.event_list.search.query.set_text("run_in_background");
     view.rematch_event();
     assert_ne!(view.visible_event(), Some(&selected));
     assert!(view.viewport.borrow().event_detail_layout.is_none());
@@ -105,7 +105,7 @@ fn list_search_reuses_bodies_and_preserves_smart_matching() {
     let (_dir, mut view) = fixture();
     view.active_panel = Panel::EventList;
     key(&mut view, KeyCode::Char('/'));
-    let bodies = view.event_search.bodies.as_ptr();
+    let bodies = view.event_list.search.bodies.as_ptr();
     for query in [
         "Stop",
         "Sto",
@@ -116,9 +116,9 @@ fn list_search_reuses_bodies_and_preserves_smart_matching() {
         "",
         "Claude",
     ] {
-        view.event_search.query.set_text(query);
+        view.event_list.search.query.set_text(query);
         view.rematch_event();
-        let pattern = view.event_search.pattern();
+        let pattern = view.event_list.search.pattern();
         let mut matcher = Matcher::new(Config::DEFAULT);
         let mut buffer = Vec::new();
         let cwd = &view.selected_row().unwrap().cwd;
@@ -137,11 +137,11 @@ fn list_search_reuses_bodies_and_preserves_smart_matching() {
                     .map(|_| index)
             })
             .collect();
-        assert_eq!(view.event_search.matches, expected, "{query}");
-        assert_eq!(view.event_search.bodies.as_ptr(), bodies);
+        assert_eq!(view.event_list.search.matches, expected, "{query}");
+        assert_eq!(view.event_list.search.bodies.as_ptr(), bodies);
     }
     key(&mut view, KeyCode::Esc);
-    assert_eq!(view.event_search.bodies.as_ptr(), bodies);
+    assert_eq!(view.event_list.search.bodies.as_ptr(), bodies);
 }
 
 #[test]
@@ -151,16 +151,16 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
     let (_dir, mut view) = fixture();
     view.active_panel = Panel::EventList;
     key(&mut view, KeyCode::Char('/'));
-    view.event_search.query.set_text("hooks");
+    view.event_list.search.query.set_text("hooks");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 1);
     let event = view.visible_event().unwrap().clone();
-    view.event_selected = None;
+    view.event_list.cursor = None;
     let cwd = &view.selected_row().unwrap().cwd;
     for width in 11..100 {
         let content_width = width - 10;
         let mut expected = super::super::event_list::body_line(&event, content_width as usize, cwd);
-        let indices = view.event_search.indices(&expected.to_string());
+        let indices = view.event_list.search.indices(&expected.to_string());
         let mut offset = 0;
         expected.spans = expected
             .spans
@@ -310,10 +310,10 @@ fn duration_keys_include_messages_none_ties_and_running_update_time() {
     let text: String = (0..100).map(|x| first[(x, row)].symbol()).collect();
     assert!(text.trim_end().ends_with("5s"), "{text}");
     assert!(view.shown_position(6).unwrap() < view.shown_position(1).unwrap());
-    view.event_search.query.set_text("no matching row");
+    view.event_list.search.query.set_text("no matching row");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 0);
-    view.event_search.clear();
+    view.event_list.search.clear();
     view.rematch_event();
     assert_eq!(view.event_order, before);
 }
@@ -371,7 +371,7 @@ fn duration_toggle_preserves_background_return_event() {
                     });
                 }
             }
-            assert!(view.event_background_return.is_some());
+            assert!(view.event_list.background_return.is_some());
             view.active_panel = Panel::EventList;
             key(&mut view, KeyCode::Char('t'));
             if update_before_return {
@@ -403,15 +403,15 @@ fn duration_empty_toggle_and_top_navigation_do_not_page() {
     view.set_event(Vec::new());
     view.active_panel = Panel::EventList;
     key(&mut view, KeyCode::Char('t'));
-    assert_eq!(view.event_sort, EventSort::Duration);
+    assert_eq!(view.event_list.sort, EventSort::Duration);
     assert!(view.event_order.is_empty());
-    assert_eq!(view.event_selected, None);
+    assert_eq!(view.event_list.cursor, None);
     key(&mut view, KeyCode::Char('t'));
-    assert_eq!(view.event_sort, EventSort::Time);
+    assert_eq!(view.event_list.sort, EventSort::Time);
     let (_other, mut view) = fixture();
     view.active_panel = Panel::EventList;
     key(&mut view, KeyCode::Char('t'));
     view.select_event(Some(0));
     view.move_event_selection(false);
-    assert_eq!(view.event_pending_older, 0);
+    assert_eq!(view.event_list.pending_older, 0);
 }

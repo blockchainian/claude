@@ -593,7 +593,11 @@ impl App {
     }
 
     fn refresh_event(&mut self, visible: usize) {
-        let count = if self.view.event_start_requested || self.view.transcript_fully_loaded() {
+        if let Some(id) = self.view.selected_id() {
+            let sorting = self.preferences.task_sort(id);
+            self.view.initialize_event_sort(sorting);
+        }
+        let count = if self.view.event_list.start_requested || self.view.transcript_fully_loaded() || self.view.restoring_event_position() {
             usize::MAX
         } else {
             self.view
@@ -632,10 +636,8 @@ impl App {
                     self.transcript = Some((selected.id.clone(), path.clone(), reader));
                     self.transcript_oldest_offset = u64::MAX;
                     if self.view.event_session.as_ref() != Some(&selected.id) {
-                        self.view.apply_event_update(crate::event::Update {
-                            reset: true,
-                            ..Default::default()
-                        });
+                        self.view.event_panel.clear();
+                        self.view.prepare_event_search();
                         self.view.event_session = Some(selected.id.clone());
                     }
                 }
@@ -645,7 +647,7 @@ impl App {
                 }
             }
         }
-        if self.view.transcript_fully_loaded() && self.transcript_oldest_offset > 0 {
+        if (self.view.transcript_fully_loaded() || self.view.restoring_event_position()) && self.transcript_oldest_offset > 0 {
             let (session, path, mut reader) = self.transcript.take().expect("reader checked");
             self.transcript_request += 1;
             let token = self.transcript_request;
@@ -732,7 +734,7 @@ impl App {
                 self.transcript_parsed_bytes += update.parsed_bytes;
                 self.transcript_oldest_offset = update.oldest_offset;
                 debug_assert!(update.oldest_offset <= update.read_offset);
-                let changed = self.view.event_page_pending()
+                let changed = self.view.event_list.restoring || self.view.event_page_pending()
                     || update.reset
                     || update.prepended > 0
                     || update.appended > 0
@@ -757,7 +759,7 @@ impl App {
                 self.transcript_oldest_offset = 0;
                 self.transcript_stamp = None;
                 self.full_transcript_stamp = None;
-                if self.view.event_sort != crate::ui::EventSort::Duration {
+                if self.view.event_list.sort != crate::ui::EventSort::Duration {
                     self.view.event_panel.clear();
                     self.view.prepare_event_search();
                     self.view.event_session = None;

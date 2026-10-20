@@ -354,7 +354,7 @@ fn event_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
 }
 
 #[test]
-fn event_selection_switching_tasks_resets_following_through_app() {
+fn event_selection_switching_tasks_restores_selection_through_app() {
     for width in [120, 180] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -379,11 +379,12 @@ fn event_selection_switching_tasks_resets_following_through_app() {
         assert!(event_detail_content(&buffer).contains("decision"));
         assert_event_cursor(&buffer, event_position(&buffer, "对").1);
         key(&mut app, KeyCode::Up);
+        draw(&mut app, width);
+        super::event_search_tests::finish_search(&mut app);
         let buffer = draw(&mut app, width);
         assert_eq!(app.view.selected_id(), Some(&first));
-        assert!(event_detail_content(&buffer).contains("decision"));
-        assert_event_cursor(&buffer, event_position(&buffer, "对").1);
-        assert!(!lines(&buffer).join("\n").contains("↓ Latest"));
+        assert!(event_detail_content(&buffer).contains("codex thread"));
+        assert_event_cursor(&buffer, event_position(&buffer, "Stop hook error").1);
     }
 }
 
@@ -1392,15 +1393,15 @@ fn terminal_restore_round_trip(app: &mut App, id: &SessionKey) {
 }
 
 #[test]
-fn terminal_stays_closed_when_the_task_is_selected_again() {
+fn terminal_reopens_when_the_task_is_selected_again() {
     let (_directory, mut app, id) = terminal_restore_fixture();
     terminal_restore_round_trip(&mut app, &id);
     assert!(app.terminal.is_none());
     assert!(
-        !lines(&draw(&mut app, 200))
+        lines(&draw(&mut app, 200))
             .join("\n")
             .contains("Directory no longer exists:"),
-        "returning must show the log detail without reopening the terminal"
+        "returning must retry opening the terminal and report the missing directory"
     );
 }
 

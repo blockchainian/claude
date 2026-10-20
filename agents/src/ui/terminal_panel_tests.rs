@@ -270,3 +270,22 @@ fn loading_terminal_shows_running_dots_without_a_cursor() {
         include_str!("../../tests/ui_snapshots/terminal_loading.txt")
     );
 }
+
+#[test]
+fn restoring_terminal_preserves_the_tasks_panel_focus() {
+    for panel in [Panel::TaskList, Panel::Prompt, Panel::EventList] {
+        let (mut view, now) = event_fixture();
+        event_screen(&view, 100, 45, now);
+        view.set_active_panel(panel);
+        view.request_terminal();
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(TerminalScreen::new(10, 40)));
+        {
+            let mut screen = screen.lock().unwrap();
+            screen.process(b"restored terminal");
+            screen.check_ready(std::time::Instant::now(), |_| false);
+        }
+        view.show_terminal(session_key("log"), screen);
+        assert_eq!(view.active_panel, panel);
+        assert!(event_screen(&view, 100, 45, now).contains("restored terminal"));
+    }
+}

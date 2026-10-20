@@ -139,8 +139,7 @@ impl View {
             || self.help
             || self.confirm_dialog.is_some()
             || self.searching
-            || self.event_list.search.editing
-            || self.event_detail.search.editing
+            || self.task_search_editing()
         {
             return None;
         }
@@ -554,6 +553,35 @@ mod tests {
         let answer = &answer.answers["Probe single choice?"];
         assert!(answer.answers.is_empty());
         assert_eq!(answer.other.as_deref(), Some("剪贴板贴🦀后"));
+    }
+
+    #[test]
+    fn parked_task_search_does_not_block_question_keys_or_paste() {
+        for panel in [Panel::EventList, Panel::EventDetail] {
+            let mut view = fixture();
+            view.set_active_panel(panel);
+            view.handle_key(KeyCode::Char('/').into());
+            view.handle_key(KeyCode::Char('a').into());
+            view.set_active_panel(Panel::Prompt);
+            view.handle_key(KeyCode::Char('4').into());
+            let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+            view.handle_paste(text);
+            let Some(Action::AnswerQuestions { answer, .. }) = view.handle_key(KeyCode::Enter.into())
+            else {
+                panic!("parked search blocked the active question")
+            };
+            assert_eq!(
+                answer.answers["Probe single choice?"].other.as_deref(),
+                Some(text)
+            );
+            let search = if panel == Panel::EventList {
+                &view.event_list.search
+            } else {
+                &view.event_detail.search
+            };
+            assert!(search.editing);
+            assert_eq!(search.query.text(), "a");
+        }
     }
 
     #[test]

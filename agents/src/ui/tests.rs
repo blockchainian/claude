@@ -357,7 +357,7 @@ fn mouse_event_wheel_shifts_rendered_rows_and_hides_live_time() {
             .any(|line| line.contains("Tool") && line.ends_with("35s"))
     );
     view.select_fixture_event(None);
-    view.viewport.borrow_mut().event_scroll = 0;
+    view.event_list.scroll.set(0);
     assert!(
         event_screen(&view, 100, 32, now)
             .lines()
@@ -566,7 +566,7 @@ fn switching_tasks_resets_event_to_newest_and_clears_unseen() {
     let newer = with_newer_event(&view, now);
     show_task_event(&mut view, other, Vec::new());
     assert_eq!(view.event_scroll(), 0);
-    assert!(view.event_selected.is_none());
+    assert!(view.event_list.cursor.is_none());
     show_task_event(&mut view, event_panel, newer);
     assert_eq!(view.event_scroll(), view.event_max_scroll());
     assert_eq!(view.visible_event(), view.event_panel.last());
@@ -592,15 +592,15 @@ fn task_search_returns_but_selected_detail_resets_to_newest() {
         key(&mut view, KeyCode::Char(letter));
     }
     view.select_fixture_event(Some(events[2].clone()));
-    view.viewport.borrow_mut().event_detail_scroll = 5;
+    view.event_detail.scroll.borrow_mut().offset = 5;
     event_screen(&view, 100, 25, now);
     show_task_event(&mut view, other, Vec::new());
-    assert!(!view.event_search.active());
-    assert!(view.event_selected.is_none());
+    assert!(!view.event_list.search.active());
+    assert!(view.event_list.cursor.is_none());
     show_task_event(&mut view, event_panel, events);
-    assert_eq!(view.event_search.query.text(), "tool");
+    assert_eq!(view.event_list.search.query.text(), "tool");
     assert_eq!(view.visible_event(), view.event_panel.last());
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 0);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 0);
     assert_eq!(view.event_scroll(), 0);
     assert!(event_screen(&view, 100, 25, now).contains("run tests"));
 }
@@ -635,7 +635,7 @@ fn mouse_event_selection_tracks_selected_session_identity() {
     event_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().event_panel;
     view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
-    let selected = view.event_selected;
+    let selected = view.event_list.cursor;
     assert_eq!(
         view.visible_event(),
         view.event_panel.get(view.event_panel.len() - 2)
@@ -645,14 +645,14 @@ fn mouse_event_selection_tracks_selected_session_identity() {
     rows.push(session("recent", "Recent", SessionStatus::Working, -7200));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.event_selected, selected);
+    assert_eq!(view.event_list.cursor, selected);
     rows.retain(|row| row.id != id);
     for row in &mut rows {
         row.transcript = Some(row.cwd.join("session.jsonl"));
     }
     view.set_sessions(rows, false);
     assert_eq!(view.event_scroll(), 0);
-    assert!(view.event_selected.is_none());
+    assert!(view.event_list.cursor.is_none());
     view.set_event(view.event_panel.clone());
     assert_eq!(view.visible_event(), view.event_panel.last());
 }
@@ -2515,7 +2515,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
 }
 
 #[test]
-fn rename_drops_inactive_removed_or_hidden_target() {
+fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
     let mut view = fixture();
     view.status_filter = TASK_FILTERS
         .iter()
@@ -2532,10 +2532,15 @@ fn rename_drops_inactive_removed_or_hidden_target() {
     assert_eq!(view.selected_id(), Some(&session_key("46")));
     assert!(!screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert!(view.task_uis[&draft_controls::TaskKey::Session(session_key("42"))]
+        .task_details.title.is_some());
+    view.set_active_panel(Panel::TaskList);
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
     view.hide(&session_key("46"));
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert_ne!(view.rename_target.as_ref(), Some(&session_key("46")));
+    assert!(view.task_uis[&draft_controls::TaskKey::Session(session_key("46"))]
+        .task_details.title.is_some());
     let mut view = fixture();
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
@@ -3751,7 +3756,7 @@ mod task_details_header {
         let (mut view, now) = event_fixture();
         view.select_fixture_event(Some(view.event_panel[6].clone()));
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
-        view.viewport.borrow_mut().event_unseen = 1;
+        view.event_list.unseen.set(1);
         view.set_activity([crate::usage::bin_of(now)].into());
         for width in [112, 200] {
             for with_event in [true, false] {
@@ -4861,7 +4866,7 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 .find(|event| event.kind == crate::event::Kind::Tool)
                 .unwrap()
                 .clone();
-            view.event_search.editing = search;
+            view.event_list.search.editing = search;
             let body_event = event.clone();
             view.set_event(vec![event; 100]);
             let area = Rect::new(0, 0, width, 60);
@@ -5115,8 +5120,9 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
 fn dashboard_event_search_uses_the_row_padding() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = column_padding_fixture();
-        view.event_search.editing = true;
-        view.event_search.query.set_text("Tool");
+        view.set_active_panel(Panel::EventList);
+        view.event_list.search.editing = true;
+        view.event_list.search.query.set_text("Tool");
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
@@ -5131,7 +5137,7 @@ fn dashboard_event_search_uses_the_row_padding() {
             .collect();
         assert_eq!(input, "Search ❯ Tool");
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
-        view.event_search.editing = false;
+        view.event_list.search.editing = false;
         view.render_at(area, &mut buf, now);
         let query: String = (width - 5..width - 1)
             .map(|x| cell_text(buf[(x, y)].symbol()))
@@ -5304,12 +5310,12 @@ fn codex_inner_task_event_snapshot() {
     update_event_snapshot_body(&path, &rendered);
     assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
     view.prepare_event_search();
-    view.event_search.query.set_text("ImageView");
+    view.event_list.search.query.set_text("ImageView");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 1);
     assert!(view.event_matches(4));
     for query in ["type", "exec_command"] {
-        view.event_search.query.set_text(query);
+        view.event_list.search.query.set_text(query);
         view.rematch_event();
         assert_eq!(view.matching_event_count(), 1, "{query}");
         assert!(view.event_matches(0));
@@ -5585,15 +5591,15 @@ fn selected_event_row_preserves_foreground_and_adds_bold() {
                         older.started_at -= Duration::seconds(1);
                         view.set_event(vec![older, event]);
                         if search {
-                            view.event_search.query.set_text("Read");
+                            view.event_list.search.query.set_text("Read");
                             view.rematch_event();
                         }
                         let area = Rect::new(0, 0, width, 60);
                         let event_panel = view.center_layout(area).event_panel;
-                        view.event_selected = None;
+                        view.event_list.cursor = None;
                         for index in 0..2 {
                             let mut baseline = Buffer::empty(area);
-                            view.event_selected = None;
+                            view.event_list.cursor = None;
                             view.render_event(event_panel, &mut baseline, now);
                             view.select_fixture_event(Some(view.event_panel[index].clone()));
                             let mut selected = Buffer::empty(area);
@@ -5669,7 +5675,7 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
     use ratatui::style::Modifier;
     let (mut view, now) = event_fixture();
     view.event_panel.truncate(5);
-    view.event_selected = None;
+    view.event_list.cursor = None;
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
@@ -6278,7 +6284,8 @@ mod event_search {
                 key(&mut view, KeyCode::Esc);
                 view.active_panel = Panel::EventDetail;
             }
-            assert!(!view.event_search.active());
+            assert_eq!(view.event_list.search.active(), mouse_exit);
+            assert_eq!(view.event_list.search.editing, mouse_exit);
             assert_eq!(view.visible_event(), Some(&selected));
             let area = Rect::new(0, 0, 100, 40);
             let mut buf = Buffer::empty(area);
@@ -6288,7 +6295,7 @@ mod event_search {
             for c in "files".chars() {
                 key(&mut view, KeyCode::Char(c));
             }
-            assert!(view.event_detail_search.editing);
+            assert!(view.event_detail.search.editing);
             let mut buf = Buffer::empty(area);
             view.render_event_detail(area, &mut buf, now);
             assert!(text(&buf).contains("I will check the files"));
@@ -6534,10 +6541,10 @@ mod input_row {
             event_panel.active_panel = Panel::EventList;
             event_panel.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         };
-        event_panel.event_search.query.set_text(query);
+        event_panel.event_list.search.query.set_text(query);
         if left {
             task.search.left();
-            event_panel.event_search.query.left();
+            event_panel.event_list.search.query.left();
         }
         let mut task_buf = Buffer::empty(area);
         task.render_at(area, &mut task_buf, now);
@@ -6567,7 +6574,7 @@ mod input_row {
                     event_row.width = task_row.width;
                     super::super::render::render_input_row(
                         "Search ❯ ",
-                        &event_view.event_search.query,
+                        &event_view.event_list.search.query,
                         event_row,
                         &mut event_panel,
                     );
@@ -6614,7 +6621,7 @@ mod input_row {
                         Some((task_row.x + expected, task_row.y))
                     );
                     let event_expected = (9 + event_panel
-                        .event_search
+                        .event_list.search
                         .query
                         .window(usize::from(event_row.width.saturating_sub(9)))
                         .1)
@@ -8255,7 +8262,7 @@ fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
     assert_eq!(click_text(&mut view, &list, "run tests"), None);
-    assert!(view.event_selected.is_some());
+    assert!(view.event_list.cursor.is_some());
 }
 
 #[test]
@@ -8501,7 +8508,7 @@ fn task_event_selected_event_closes_when_selection_changes() {
     let (mut view, now) = event_fixture();
     let list = event_screen(&view, 100, 25, now);
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
-    assert!(view.event_selected.is_some());
+    assert!(view.event_list.cursor.is_some());
     let mut other = session("other", "Other task", SessionStatus::Working, 1);
     other.transcript = Some("/tmp/other.jsonl".into());
     let mut rows = view.rows.clone();
@@ -8513,7 +8520,7 @@ fn task_event_selected_event_closes_when_selection_changes() {
             .position(|row| row.id.id == "other")
             .unwrap(),
     );
-    assert!(view.event_selected.is_none());
+    assert!(view.event_list.cursor.is_none());
 }
 
 fn double_click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
@@ -8833,7 +8840,7 @@ fn open_view_scrollbar() {
     for y in area.top()..area.bottom() {
         assert_ne!(buf[(area.right() - 1, y)].symbol(), "▕");
     }
-    view.viewport.borrow_mut().event_detail_scroll = usize::MAX;
+    view.event_detail.scroll.borrow_mut().offset = usize::MAX;
     event_screen(&view, 100, 25, now);
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "▕");
@@ -9141,7 +9148,7 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         );
         assert_eq!(view.visible_event(), view.event_panel.get(7));
         assert_eq!(click_text(&mut view, &rendered, "deadbeef"), None);
-        assert!(view.event_selected.is_some());
+        assert!(view.event_list.cursor.is_some());
         let rendered = event_screen(&view, 120, 40, now);
         assert_eq!(
             click_text(&mut view, &rendered, sha),
@@ -9306,8 +9313,8 @@ fn event_new_button_keeps_right_alignment_and_target() {
             view.event_panel[6] = event;
             view.select_event(Some(6));
             event_screen(&view, width, 40, now);
-            view.viewport.borrow_mut().event_detail_scroll = 1;
-            view.viewport.borrow_mut().event_unseen = unseen;
+            view.event_detail.scroll.borrow_mut().offset = 1;
+            view.event_list.unseen.set(unseen);
             let screen = event_screen(&view, width, 40, now);
             let layout = view.center_layout(Rect::new(0, 0, width, 40));
             let viewport = view.viewport.borrow();
@@ -9337,7 +9344,7 @@ fn event_new_button_keeps_right_alignment_and_target() {
                 },
             );
             assert!(view.following_event());
-            assert_eq!(view.viewport.borrow().event_unseen, 0);
+            assert_eq!(view.event_list.unseen.get(), 0);
         }
     }
 }
@@ -9658,7 +9665,7 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
         view.flush_pending_click(Instant::now() + view.double_click_interval),
         None
     );
-    assert!(view.event_selected.is_none());
+    assert!(view.event_list.cursor.is_none());
 }
 
 #[test]
@@ -9863,9 +9870,9 @@ mod event_navigation {
                 view.active_panel = Panel::EventList;
                 if search {
                     view.prepare_event_search();
-                    view.event_search.query.set_text("a");
+                    view.event_list.search.query.set_text("a");
                     view.rematch_event();
-                    view.event_search.editing = editing;
+                    view.event_list.search.editing = editing;
                 }
                 screen(&view, 200, 45);
                 let rect = view.viewport.borrow().event_panel;
@@ -9887,7 +9894,7 @@ mod event_navigation {
                 let consumed = editing && editor.handle(key);
                 if consumed {
                     view.handle_key(key);
-                    assert_eq!(view.event_search.query.text(), editor.text());
+                    assert_eq!(view.event_list.search.query.text(), editor.text());
                     continue;
                 }
                 let target = if edge {
@@ -10075,7 +10082,7 @@ fn event_border_double_clicks_respect_shared_output_border() {
         // New arrivals provide a single-click return path after jumping to the oldest.
         click(&mut view, event_panel.y - 1);
         click(&mut view, event_panel.y - 1);
-        view.viewport.borrow_mut().event_unseen = 1;
+        view.event_list.unseen.set(1);
         event_screen(&view, width, 20, now);
         let jump = view.viewport.borrow().event_jump;
         click_mouse(

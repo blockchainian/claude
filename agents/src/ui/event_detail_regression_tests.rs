@@ -364,15 +364,15 @@ fn assert_hidden_suffix_search(width: u16) {
         let drawn = layout.lines[target].to_string();
         assert!(drawn.ends_with('…'));
         assert!(!drawn.contains("HIDDEN_NEEDLE"));
-        assert_eq!(viewport.event_detail_scroll, 0);
+        assert_eq!(view.event_detail.scroll.borrow().offset, 0);
         target
     };
-    view.event_detail_search.query.insert("HIDDEN_NEEDLE");
+    view.event_detail.search.query.insert("HIDDEN_NEEDLE");
     view.jump_event_detail_match();
-    assert_eq!(view.viewport.borrow().event_detail_scroll, target);
+    assert_eq!(view.event_detail.scroll.borrow().offset, target);
     view.render_at(area, &mut buf, now);
     let viewport = view.viewport.borrow();
-    assert!(viewport.event_detail_scroll > 0);
+    assert!(view.event_detail.scroll.borrow().offset > 0);
     assert!(viewport.event_text.rows.iter().any(|row| {
         row.cells.iter().any(|(_, bytes)| {
             viewport.event_text.sources[row.segment].text[bytes.clone()].contains("HIDDEN_NEEDLE")

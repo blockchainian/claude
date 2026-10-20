@@ -18,16 +18,17 @@ impl View {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
-        } else if self.title_editor().is_some() {
+        } else if self.active_panel == Panel::TaskDetails && self.title_editor().is_some() {
             if self.name_target.is_some() {
                 hint_line(&[("esc", "cancel"), ("enter", "next")])
             } else {
                 hint_line(&[("esc", "back"), ("enter", "rename")])
             }
-        } else if self.active_question().is_some() {
+        } else if self.active_panel == Panel::Prompt && self.active_question().is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
         } else if self.selected_draft().is_some()
-            && (self.prompt_focused() || self.selector.is_some())
+            && (self.prompt_focused()
+                || (self.active_panel == Panel::TaskDetails && self.selector.is_some()))
         {
             if self.prompt_focused() {
                 hint_line(&[("esc", "cancel"), ("enter", "next")])
@@ -36,7 +37,7 @@ impl View {
             } else {
                 hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
             }
-        } else if self.event_search.editing || self.event_detail_search.editing {
+        } else if self.task_search_editing() {
             hint_line(&[("esc", "back"), ("enter", "keep")])
         } else if self
             .selected_row()
@@ -62,14 +63,14 @@ impl View {
     }
     /// Whether the footer shows the task hints rather than a dialog's, an editor's or a search's.
     pub(super) fn footer_shows_task_hints(&self) -> bool {
-        self.confirm_dialog.is_none()
-            && !self.help
-            && self.title_editor().is_none()
-            && self.active_question().is_none()
-            && !(self.selected_draft().is_some()
-                && (self.prompt_focused() || self.selector.is_some()))
-            && !self.event_search.editing
-            && !self.event_detail_search.editing
+        !(self.confirm_dialog.is_some()
+            || self.help
+            || (self.active_panel == Panel::TaskDetails && self.title_editor().is_some())
+            || (self.active_panel == Panel::Prompt && self.active_question().is_some())
+            || (self.selected_draft().is_some()
+                && (self.prompt_focused()
+                    || (self.active_panel == Panel::TaskDetails && self.selector.is_some())))
+            || self.task_search_editing())
     }
 
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -199,8 +200,14 @@ mod tests {
                     view.rename_target = Some(id);
                     view.set_active_panel(Panel::TaskDetails);
                 }
-                4 => view.event_search.editing = true,
-                5 => view.event_detail_search.editing = true,
+                4 => {
+                    view.set_active_panel(Panel::EventList);
+                    view.event_list.search.editing = true;
+                }
+                5 => {
+                    view.set_active_panel(Panel::EventDetail);
+                    view.event_detail.search.editing = true;
+                }
                 6 => view.searching = true,
                 _ => unreachable!(),
             }

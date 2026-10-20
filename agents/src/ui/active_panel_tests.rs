@@ -53,16 +53,16 @@ fn task_details_position(view: &View, panel: Panel) -> usize {
     let viewport = view.viewport.borrow();
     match panel {
         Panel::TaskDetails => viewport.task_details_scroll.position(),
-        Panel::EventDetail => viewport.event_detail_state.position(),
+        Panel::EventDetail => view.event_detail.scroll.borrow().state.position(),
         _ => unreachable!("details panel"),
     }
 }
 
 fn assert_lists_unchanged(view: &View, selected: usize, event: Option<usize>, scroll: usize) {
     assert_eq!(view.selected, selected, "task selection changed");
-    assert_eq!(view.event_selected, event, "log selection changed");
+    assert_eq!(view.event_list.cursor, event, "log selection changed");
     assert_eq!(
-        view.viewport.borrow().event_scroll,
+        view.event_list.scroll.get(),
         scroll,
         "log list moved"
     );
@@ -76,8 +76,8 @@ fn active_panel_task_details_navigation_scrolls_only_its_content() {
                 let (mut view, now) = panel_fixture(width);
                 view.set_active_panel(panel);
                 let selected = view.selected;
-                let event = view.event_selected;
-                let scroll = view.viewport.borrow().event_scroll;
+                let event = view.event_list.cursor;
+                let scroll = view.event_list.scroll.get();
                 let other = if panel == Panel::TaskDetails {
                     Panel::EventDetail
                 } else {
@@ -111,8 +111,8 @@ fn active_panel_detail_boundaries_do_not_navigate_lists() {
                 let (mut view, now) = panel_fixture(width);
                 view.set_active_panel(panel);
                 let selected = view.selected;
-                let event = view.event_selected;
-                let scroll = view.viewport.borrow().event_scroll;
+                let event = view.event_list.cursor;
+                let scroll = view.event_list.scroll.get();
                 key(&mut view, KeyCode::End);
                 event_screen(&view, width, 45, now);
                 let bottom = task_details_position(&view, panel);
@@ -145,8 +145,8 @@ fn active_panel_short_event_detail_does_not_change_event() {
             view.set_active_panel(Panel::EventDetail);
             event_screen(&view, width, 45, now);
             let selected = view.selected;
-            let event = view.event_selected;
-            let scroll = view.viewport.borrow().event_scroll;
+            let event = view.event_list.cursor;
+            let scroll = view.event_list.scroll.get();
             view.handle_key(forward);
             view.handle_key(backward);
             assert_lists_unchanged(&view, selected, event, scroll);
@@ -170,13 +170,13 @@ fn active_panel_lists_keep_their_navigation_bindings() {
                     assert_ne!(view.selected, after, "width={width}, key={backward:?}");
                 } else {
                     let selected = view.selected;
-                    let event = view.event_selected;
+                    let event = view.event_list.cursor;
                     view.handle_key(forward);
-                    assert_ne!(view.event_selected, event, "width={width}, key={forward:?}");
-                    let after = view.event_selected;
+                    assert_ne!(view.event_list.cursor, event, "width={width}, key={forward:?}");
+                    let after = view.event_list.cursor;
                     view.handle_key(backward);
                     assert_ne!(
-                        view.event_selected, after,
+                        view.event_list.cursor, after,
                         "width={width}, key={backward:?}"
                     );
                     assert_eq!(view.selected, selected);
@@ -200,8 +200,8 @@ fn active_panel_disabled_prompt_consumes_navigation_without_fallback() {
             assert!(view.input_disabled().is_some());
             event_screen(&view, width, 45, now);
             let selected = view.selected;
-            let event = view.event_selected;
-            let scroll = view.viewport.borrow().event_scroll;
+            let event = view.event_list.cursor;
+            let scroll = view.event_list.scroll.get();
             let task_details = task_details_position(&view, Panel::TaskDetails);
             let event_detail_position = task_details_position(&view, Panel::EventDetail);
             assert_eq!(view.handle_key(forward), None);
@@ -309,7 +309,7 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
                 });
             }
             let selected = view.selected;
-            let event = view.event_selected;
+            let event = view.event_list.cursor;
             for code in [
                 KeyCode::Right,
                 KeyCode::Char('f'),
@@ -322,7 +322,7 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
             ] {
                 assert_eq!(key(&mut view, code), None, "panel={panel:?} code={code:?}");
                 assert_eq!(view.selected, selected);
-                assert_eq!(view.event_selected, event);
+                assert_eq!(view.event_list.cursor, event);
                 assert!(view.confirm_dialog.is_none());
                 assert!(view.rename_target.is_none());
             }
@@ -335,9 +335,9 @@ fn active_panel_sort_key_belongs_to_event_list() {
     for panel in [Panel::TaskList, Panel::TaskDetails, Panel::EventDetail] {
         let (mut view, _) = panel_fixture(200);
         view.set_active_panel(panel);
-        let sort = view.event_sort;
+        let sort = view.event_list.sort;
         assert_eq!(key(&mut view, KeyCode::Char('t')), None);
-        assert_eq!(view.event_sort, sort);
+        assert_eq!(view.event_list.sort, sort);
     }
 }
 
@@ -353,6 +353,7 @@ fn active_panel_title_editor_does_not_take_other_panels_keys_or_cursor() {
         assert_eq!(view.cursor_pos(Rect::new(0, 0, width, 45)), None);
         view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         assert_ne!(view.selected, selected);
+        view.select(selected);
         assert_eq!(view.rename.text(), "rename draft");
     }
 }
@@ -370,8 +371,8 @@ fn active_panel_prompt_moves_its_caret_without_moving_other_panels() {
         key(&mut view, KeyCode::Home);
         let caret = view.input_box.editor.cursor();
         let selected = view.selected;
-        let event = view.event_selected;
-        let scroll = view.viewport.borrow().event_scroll;
+        let event = view.event_list.cursor;
+        let scroll = view.event_list.scroll.get();
         let task_details = task_details_position(&view, Panel::TaskDetails);
         let output = task_details_position(&view, Panel::EventDetail);
         view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
@@ -403,14 +404,14 @@ fn assert_mouse_panel_paging(view: &mut View, panel: Panel) {
     key(view, KeyCode::Home);
     let before = (
         view.selected,
-        view.event_selected,
+        view.event_list.cursor,
         task_details_position(view, Panel::TaskDetails),
         task_details_position(view, Panel::EventDetail),
     );
     view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
     let after = (
         view.selected,
-        view.event_selected,
+        view.event_list.cursor,
         task_details_position(view, Panel::TaskDetails),
         task_details_position(view, Panel::EventDetail),
     );

@@ -268,7 +268,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
         assert!(view.tick_text_selection());
         render(&view);
     }
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 10);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 10);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.x,
@@ -276,7 +276,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
     ));
     assert!(view.tick_text_selection());
     render(&view);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 9);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 9);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.right(),
@@ -645,7 +645,7 @@ fn event_list_click_selects_cut_row_and_stationary_double_click_copies_nothing()
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), at.0, at.1))
             .is_none()
     );
-    assert!(view.event_selected.is_some());
+    assert!(view.event_list.cursor.is_some());
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
             .is_none()
@@ -677,7 +677,7 @@ fn event_list_edge_drag_caches_rows_beyond_first_screen() {
             let viewport = view.viewport.borrow();
             for offset in 0..viewport.event_rows.len() {
                 rows.insert(
-                    viewport.event_scroll + offset,
+                    view.event_list.scroll.get() + offset,
                     drawn_cells(
                         buf,
                         event_panel.y + offset as u16,
@@ -940,12 +940,12 @@ fn second_task_press_drag_is_not_a_double_click() {
 fn right_drag_does_not_close_open_event() {
     let mut view = path_event_fixture();
     view.select_fixture_event(Some(view.event_panel[0].clone()));
-    let event = view.event_selected;
+    let event = view.event_list.cursor;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20));
-    assert_eq!(view.event_selected, event);
+    assert_eq!(view.event_list.cursor, event);
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Right), 3, 20));
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 3, 20));
-    assert_eq!(view.event_selected, event);
+    assert_eq!(view.event_list.cursor, event);
 }
 
 #[test]
@@ -959,12 +959,12 @@ fn right_click_selects_newest_only_on_release() {
     events.push(newest);
     view.set_event(events);
     view.select_fixture_event(Some(view.event_panel[0].clone()));
-    let event = view.event_selected;
+    let event = view.event_list.cursor;
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20))
             .is_none()
     );
-    assert_eq!(view.event_selected, event);
+    assert_eq!(view.event_list.cursor, event);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 2, 20))
             .is_none()

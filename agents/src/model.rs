@@ -186,7 +186,7 @@ impl Session {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct DraftKey {
     pub millis: u64,
     pub counter: u64,

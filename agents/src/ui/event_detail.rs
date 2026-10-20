@@ -58,3 +58,39 @@ pub(super) struct Group {
 pub(super) struct EventDetailContent {
     pub sections: Vec<Section>,
 }
+
+/// Scroll state belongs to the task; panel geometry stays in Viewport.
+#[derive(Default)]
+pub(super) struct EventDetailScroll {
+    pub restoring: bool,
+    /// Lines of the selected event scrolled off the top.
+    pub offset: usize,
+    pub state: super::SectionScroll,
+    pub key: Option<u64>,
+    pub event: Option<super::task_ui::EventId>,
+    /// The wheel direction that selected the entry, until its layout starts it at that end.
+    pub entry: Option<bool>,
+    /// The wheel direction the selected entry's title holds reports against, and how many remain.
+    pub title_hold: Option<(bool, usize)>,
+    pub saved: std::collections::HashMap<u64, super::SectionScroll>,
+}
+
+impl super::View {
+    pub(super) fn restore_event_detail(&self) {
+        let mut scroll = self.event_detail.scroll.borrow_mut();
+        if !scroll.restoring {
+            return;
+        }
+        let selected = self
+            .visible_event()
+            .and_then(super::task_ui::EventId::from_event);
+        if selected.is_none() || selected != scroll.event {
+            *scroll = EventDetailScroll::default();
+        } else {
+            scroll.restoring = false;
+            if scroll.state.left_keys.is_none() {
+                scroll.state.left_keys = Some(std::mem::take(&mut scroll.state.keys));
+            }
+        }
+    }
+}

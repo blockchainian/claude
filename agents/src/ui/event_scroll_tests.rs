@@ -99,7 +99,7 @@ fn sending_preserves_scrolled_event_detail_after_append() {
             panel(&view, now);
         }
         let before = panel(&view, now);
-        let scroll = view.viewport.borrow().event_detail_scroll;
+        let scroll = view.event_detail.scroll.borrow().offset;
         assert!(scroll > 0);
         let id = view.selected_id().unwrap().clone();
         let input = if images {
@@ -116,8 +116,8 @@ fn sending_preserves_scrolled_event_detail_after_append() {
         let mut events = view.event_panel.clone();
         events.push(events.last().unwrap().clone());
         view.set_event(events);
-        assert_eq!(view.event_selected, Some(1));
-        assert_eq!(view.viewport.borrow().event_detail_scroll, scroll);
+        assert_eq!(view.event_list.cursor, Some(1));
+        assert_eq!(view.event_detail.scroll.borrow().offset, scroll);
         assert_eq!(panel(&view, now), before);
     }
 }
@@ -127,10 +127,10 @@ fn event_scroll_short_content_moves_one_event_per_wheel() {
     let (mut view, now) = fixture(false);
     panel(&view, now);
     wheel(&mut view, true);
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     panel(&view, now);
     wheel(&mut view, false);
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
 }
 
 #[test]
@@ -143,30 +143,30 @@ fn event_scroll_long_content_reveals_then_moves_at_both_boundaries() {
     );
     wheel(&mut view, true);
     let scrolled = panel(&view, now);
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     assert_ne!(scrolled, initial);
     for _ in 0..60 {
         wheel(&mut view, true);
         let text = panel(&view, now);
-        if view.event_selected == Some(2) {
+        if view.event_list.cursor == Some(2) {
             assert!(text.contains("after"));
             break;
         }
     }
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     // Returning to an unchanged entry restores its open curtain, like task details.
     wheel(&mut view, false);
     let returned = panel(&view, now);
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     assert!(returned.contains("detail row 30"), "{returned}");
     for _ in 0..60 {
         wheel(&mut view, false);
         panel(&view, now);
-        if view.event_selected == Some(0) {
+        if view.event_list.cursor == Some(0) {
             break;
         }
     }
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
 }
 
 #[test]
@@ -174,15 +174,15 @@ fn event_scroll_keyboard_uses_list_bindings_inside_event_detail() {
     let (mut view, now) = fixture(true);
     let initial = panel(&view, now);
     view.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     assert_ne!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
     assert_eq!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     assert_eq!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     assert_ne!(panel(&view, now), initial);
 }
 
@@ -223,12 +223,12 @@ fn event_scroll_sections_reveal_under_pointer_and_keep_later_sections_visible() 
     let before = panel_at(&view, now, 14);
     assert!(before.contains("Second tool"), "{before}");
     assert!(before.contains('…'));
-    let pointer = view.viewport.borrow().event_detail_state.content_top
-        + view.viewport.borrow().event_detail_state.bodies[0].start as u16;
+    let pointer = view.event_detail.scroll.borrow().state.content_top
+        + view.event_detail.scroll.borrow().state.bodies[0].start as u16;
     view.scroll_content_row(true, true, pointer);
     let after = panel_at(&view, now, 14);
     assert_ne!(before, after);
-    assert_eq!(view.viewport.borrow().event_detail_state.reveal, vec![1, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![1, 0]);
     assert!(after.contains("Second tool"), "{after}");
     assert!(after.contains("second body"), "{after}");
 }
@@ -248,7 +248,7 @@ fn event_scroll_changed_body_folds_when_returning() {
     let changed = panel(&view, now);
     assert!(changed.contains("changed row 01"));
     assert!(changed.contains('…'));
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 0);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 0);
     assert_ne!(changed, initial);
 }
 
@@ -256,14 +256,14 @@ fn event_scroll_changed_body_folds_when_returning() {
 fn event_scroll_keeps_scrolling_window_when_pointer_section_is_exhausted() {
     let (mut view, now) = tool_fixture();
     panel_at(&view, now, 14);
-    assert_eq!(view.viewport.borrow().event_detail_state.hidden[1], 0);
+    assert_eq!(view.event_detail.scroll.borrow().state.hidden[1], 0);
     let pointer = {
-        let viewport = view.viewport.borrow();
-        viewport.event_detail_state.content_top + viewport.event_detail_state.bodies[1].start as u16
+        let detail = view.event_detail.scroll.borrow();
+        detail.state.content_top + detail.state.bodies[1].start as u16
     };
     view.scroll_content_row(true, true, pointer);
     panel_at(&view, now, 14);
-    assert_eq!(view.viewport.borrow().event_detail_state.reveal, vec![1, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![1, 0]);
 }
 
 #[test]
@@ -281,13 +281,13 @@ fn event_scroll_tiny_window_restores_plain_offset() {
     panel_at(&view, now, 3);
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, 10, 12));
     panel_at(&view, now, 3);
-    let offset = view.viewport.borrow().event_detail_scroll;
+    let offset = view.event_detail.scroll.borrow().offset;
     assert!(offset > 0);
     view.select_event(Some(2));
     panel_at(&view, now, 3);
     view.select_event(Some(1));
     panel_at(&view, now, 3);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, offset);
+    assert_eq!(view.event_detail.scroll.borrow().offset, offset);
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn event_scroll_same_source_keeps_position_when_event_kind_changes() {
     panel(&view, now);
     wheel(&mut view, true);
     panel(&view, now);
-    let offset = view.viewport.borrow().event_detail_scroll;
+    let offset = view.event_detail.scroll.borrow().offset;
     view.select_event(Some(2));
     panel(&view, now);
     let mut events = view.event_panel.clone();
@@ -304,7 +304,7 @@ fn event_scroll_same_source_keeps_position_when_event_kind_changes() {
     view.set_event(events);
     view.select_event(Some(1));
     panel(&view, now);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, offset);
+    assert_eq!(view.event_detail.scroll.borrow().offset, offset);
 }
 
 #[test]
@@ -327,11 +327,11 @@ fn event_scroll_chinese_json_round_trip() {
             panel_at(&view, now, height);
         }
         for step in 0..10 {
-            let before = view.viewport.borrow().event_detail_scroll;
+            let before = view.event_detail.scroll.borrow().offset;
             view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
             panel_at(&view, now, height);
             assert!(
-                view.viewport.borrow().event_detail_scroll < before,
+                view.event_detail.scroll.borrow().offset < before,
                 "height {height}, step {step}, before {before}"
             );
         }
@@ -355,11 +355,11 @@ fn event_scroll_new_rows_do_not_consume_short_entry_navigation() {
                 .collect();
             view.set_event(events);
             view.select_event(Some(12));
-            view.viewport.borrow_mut().event_unseen = 0;
+            view.event_list.unseen.set(0);
             let draw = |view: &View| {
                 let mut buf = Buffer::empty(Rect::new(0, 0, 120, 30));
                 view.viewport.borrow_mut().event_panel = Rect::new(0, 0, 120, 9);
-                view.viewport.borrow_mut().event_scroll = 9;
+                view.event_list.scroll.set(9);
                 view.render_event(Rect::new(0, 0, 120, 9), &mut buf, now);
                 panel(view, now);
             };
@@ -372,9 +372,9 @@ fn event_scroll_new_rows_do_not_consume_short_entry_navigation() {
             }));
             view.set_event(events);
             draw(&view);
-            assert_eq!(view.viewport.borrow().event_unseen, new);
+            assert_eq!(view.event_list.unseen.get(), new);
             for forward in [true, false] {
-                let index = view.event_selected.unwrap();
+                let index = view.event_list.cursor.unwrap();
                 view.handle_mouse(mouse(
                     if forward {
                         MouseEventKind::ScrollDown
@@ -386,7 +386,7 @@ fn event_scroll_new_rows_do_not_consume_short_entry_navigation() {
                 ));
                 draw(&view);
                 assert_eq!(
-                    view.event_selected,
+                    view.event_list.cursor,
                     Some(if forward { index + 1 } else { index - 1 }),
                     "new={new}, detail={detail}"
                 );
@@ -401,22 +401,22 @@ fn event_scroll_wheel_pauses_at_title_before_changing_event() {
     panel(&view, now);
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     let scrolled = panel(&view, now);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 1);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 1);
     wheel(&mut view, false);
     assert_eq!(
-        view.event_selected,
+        view.event_list.cursor,
         Some(1),
         "first wheel must restore the title: {scrolled}"
     );
     panel(&view, now);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, 0);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 0);
     for _ in 0..2 {
         wheel(&mut view, false);
         panel(&view, now);
-        assert_eq!(view.event_selected, Some(1), "the title holds two wheels");
+        assert_eq!(view.event_list.cursor, Some(1), "the title holds two wheels");
     }
     wheel(&mut view, false);
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn event_scroll_short_entry_uses_its_layout_during_live_input_batch() {
         tail.source = Some("tail".into());
         events.push(tail);
         view.set_event(events);
-        view.viewport.borrow_mut().event_unseen = 0;
+        view.event_list.unseen.set(0);
         panel(&view, now);
         wheel(&mut view, true);
         panel(&view, now);
@@ -446,11 +446,11 @@ fn event_scroll_short_entry_uses_its_layout_during_live_input_batch() {
             events.push(event);
         }
         view.set_event(events);
-        assert_eq!(view.viewport.borrow().event_unseen, new);
-        assert_eq!(view.event_selected, Some(2));
+        assert_eq!(view.event_list.unseen.get(), new);
+        assert_eq!(view.event_list.cursor, Some(2));
         wheel(&mut view, forward);
         assert_eq!(
-            view.event_selected,
+            view.event_list.cursor,
             Some(if forward { 3 } else { 1 }),
             "short entry must leave on first wheel, new={new}"
         );
@@ -468,10 +468,10 @@ fn event_scroll_wheel_stops_at_bottom_before_changing_event() {
     }
     wheel(&mut view, true);
     panel(&view, now);
-    assert_eq!(view.event_selected, Some(1));
-    assert_eq!(view.viewport.borrow().event_detail_scroll, max);
+    assert_eq!(view.event_list.cursor, Some(1));
+    assert_eq!(view.event_detail.scroll.borrow().offset, max);
     wheel(&mut view, true);
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
 }
 
 #[test]
@@ -482,26 +482,26 @@ fn event_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_o
         panel(&view, now);
         wheel(&mut view, true);
         panel(&view, now);
-        assert_eq!(view.event_selected, Some(1));
-        assert_eq!(view.viewport.borrow().event_detail_scroll, 0);
+        assert_eq!(view.event_list.cursor, Some(1));
+        assert_eq!(view.event_detail.scroll.borrow().offset, 0);
         for _ in 0..2 {
             wheel(&mut view, true);
             panel(&view, now);
             assert_eq!(
-                view.viewport.borrow().event_detail_scroll,
+                view.event_detail.scroll.borrow().offset,
                 0,
                 "the title holds two wheels"
             );
         }
         let max = view.viewport.borrow().event_detail_max;
-        while view.viewport.borrow().event_detail_scroll < max {
+        while view.event_detail.scroll.borrow().offset < max {
             wheel(&mut view, true);
             panel(&view, now);
-            assert_eq!(view.event_selected, Some(1));
+            assert_eq!(view.event_list.cursor, Some(1));
         }
         // Reentering an entry left at its bottom starts at its title again.
         wheel(&mut view, true);
-        assert_eq!(view.event_selected, Some(2));
+        assert_eq!(view.event_list.cursor, Some(2));
     }
 }
 
@@ -512,22 +512,22 @@ fn event_scroll_wheel_entering_from_below_starts_at_bottom() {
     panel(&view, now);
     wheel(&mut view, false);
     panel(&view, now);
-    assert_eq!(view.event_selected, Some(1));
+    assert_eq!(view.event_list.cursor, Some(1));
     let max = view.viewport.borrow().event_detail_max;
     assert!(max > 0);
-    assert_eq!(view.viewport.borrow().event_detail_scroll, max);
-    while view.viewport.borrow().event_detail_scroll > 0 {
+    assert_eq!(view.event_detail.scroll.borrow().offset, max);
+    while view.event_detail.scroll.borrow().offset > 0 {
         wheel(&mut view, false);
         panel(&view, now);
-        assert_eq!(view.event_selected, Some(1));
+        assert_eq!(view.event_list.cursor, Some(1));
     }
     for _ in 0..2 {
         wheel(&mut view, false);
         panel(&view, now);
-        assert_eq!(view.event_selected, Some(1), "the title holds two wheels");
+        assert_eq!(view.event_list.cursor, Some(1), "the title holds two wheels");
     }
     wheel(&mut view, false);
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
 }
 
 #[test]
@@ -538,7 +538,7 @@ fn event_scroll_wheel_reversing_at_title_does_not_pause() {
     wheel(&mut view, true);
     panel(&view, now);
     wheel(&mut view, false);
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
 }
 
 #[test]
@@ -547,7 +547,7 @@ fn event_sort_key_only_changes_the_active_event_list() {
     assert!(view.active_panel == Panel::EventDetail);
     let action = view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
     assert_eq!(action, None);
-    assert_eq!(view.event_sort, EventSort::Time);
+    assert_eq!(view.event_list.sort, EventSort::Time);
     view.set_active_panel(Panel::EventList);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)),
@@ -746,7 +746,7 @@ fn recorded_tool_footer(forward: bool) {
         let footer = rows.last().unwrap();
         let viewport = view.viewport.borrow();
         assert!(
-            viewport.event_detail_scroll > 0,
+            view.event_detail.scroll.borrow().offset > 0,
             "title must be offscreen: {rows:?}"
         );
         let columns = viewport.event_detail_columns.unwrap();
@@ -811,14 +811,14 @@ fn output_border_jump(bottom: bool) {
             view.set_active_panel(Panel::EventDetail);
             view.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
             let buffer = draw(&view);
-            let before = view.viewport.borrow().event_detail_scroll;
+            let before = view.event_detail.scroll.borrow().offset;
             let max = view.viewport.borrow().event_detail_max;
             assert!(
                 before > 0 && before < max,
                 "{width}x{height}: {before}/{max}"
             );
-            let selected = view.event_selected;
-            let event_scroll = view.viewport.borrow().event_scroll;
+            let selected = view.event_list.cursor;
+            let event_scroll = view.event_list.scroll.get();
             let output = view.viewport.borrow().event_detail;
             let y = if bottom { height - 2 } else { output.y };
             // The narrow layout shares this rule with the event list.
@@ -838,13 +838,13 @@ fn output_border_jump(bottom: bool) {
             }
             draw(&view);
             assert_eq!(
-                view.event_selected, selected,
+                view.event_list.cursor, selected,
                 "border changed event at {width}x{height}, bottom={bottom}"
             );
-            assert_eq!(view.viewport.borrow().event_scroll, event_scroll);
+            assert_eq!(view.event_list.scroll.get(), event_scroll);
             assert!(view.active_panel == Panel::EventDetail);
             assert_eq!(
-                view.viewport.borrow().event_detail_scroll,
+                view.event_detail.scroll.borrow().offset,
                 if bottom { max } else { 0 }
             );
         }
@@ -863,7 +863,7 @@ fn output_border_terminal_without_scrollback_only_activates_output() {
         view.show_terminal(id, screen.clone());
         let area = Rect::new(0, 0, width, 30);
         view.render_at(area, &mut Buffer::empty(area), now);
-        let selected = view.event_selected;
+        let selected = view.event_list.cursor;
         let before = screen.lock().unwrap().screen().contents();
         let x = view.viewport.borrow().event_panel.x;
         let top = view.viewport.borrow().event_detail.y;
@@ -877,7 +877,7 @@ fn output_border_terminal_without_scrollback_only_activates_output() {
                     assert_eq!(view.handle_mouse(mouse(kind, x, y)), None);
                 }
             }
-            assert_eq!(view.event_selected, selected);
+            assert_eq!(view.event_list.cursor, selected);
             assert!(view.active_panel == Panel::EventDetail);
             assert_eq!(screen.lock().unwrap().screen().contents(), before);
         }
@@ -910,5 +910,71 @@ fn output_border_layout_reserves_one_row_and_keeps_hit_regions_separate() {
                 assert!(viewport.output_borders.iter().all(|rect| rect.is_empty()));
             }
         }
+    }
+}
+
+#[test]
+fn event_detail_task_switch_preserves_scroll_and_search() {
+    let (mut view, now) = fixture(true);
+    let id = view.selected_id().unwrap().clone();
+    let mut other = view.selected_row().unwrap().clone();
+    other.id.id = "detail-other".into();
+    let other_id = other.id.clone();
+    view.set_sessions(vec![view.selected_row().unwrap().clone(), other], false);
+    panel(&view, now);
+    view.event_detail.search.query.insert("detail");
+    view.event_detail.search.editing = true;
+    view.event_detail.scroll.borrow_mut().offset = 5;
+    panel(&view, now);
+    let scroll = view.event_detail.scroll.borrow().offset;
+    assert!(scroll > 0);
+    let events = view.event_panel.clone();
+    let index = view.rows.iter().position(|row| row.id == other_id).unwrap();
+    view.set_selected(index);
+    view.set_event(Vec::new());
+    assert!(!view.event_detail.search.active());
+    let index = view.rows.iter().position(|row| row.id == id).unwrap();
+    view.set_selected(index);
+    view.set_event(events);
+    view.event_session = Some(id);
+    assert_eq!(view.event_detail.search.query.text(), "detail");
+    assert!(view.event_detail.search.editing);
+    assert_eq!(view.visible_event().and_then(|event| event.source.as_deref()), Some("scroll-1"));
+    assert_eq!(view.event_detail.scroll.borrow().offset, scroll, "offset before render");
+    panel(&view, now);
+    assert_eq!(view.event_detail.scroll.borrow().offset, scroll);
+}
+
+#[test]
+fn event_detail_task_switch_discards_scroll_without_the_selected_identity() {
+    for missing_source in [false, true] {
+        let (mut view, now) = fixture(true);
+        if missing_source {
+            view.event_panel[1].source = None;
+        }
+        let id = view.selected_id().unwrap().clone();
+        let mut other = view.selected_row().unwrap().clone();
+        other.id.id = "detail-other".into();
+        let other_id = other.id.clone();
+        view.set_sessions(vec![view.selected_row().unwrap().clone(), other], false);
+        panel(&view, now);
+        view.event_detail.search.query.insert("detail");
+        view.event_detail.scroll.borrow_mut().offset = 5;
+        panel(&view, now);
+        assert!(view.event_detail.scroll.borrow().offset > 0);
+        let mut events = view.event_panel.clone();
+        if !missing_source {
+            events.remove(1);
+        }
+        let index = view.rows.iter().position(|row| row.id == other_id).unwrap();
+        view.set_selected(index);
+        view.set_event(Vec::new());
+        let index = view.rows.iter().position(|row| row.id == id).unwrap();
+        view.set_selected(index);
+        view.set_event(events);
+        view.event_session = Some(id);
+        panel(&view, now);
+        assert_eq!(view.event_detail.scroll.borrow().offset, 0);
+        assert_eq!(view.event_detail.search.query.text(), "detail");
     }
 }

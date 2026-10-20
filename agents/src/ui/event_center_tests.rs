@@ -138,10 +138,10 @@ fn event_content_centered_search_highlights_the_shifted_match() {
         let (mut view, now) = event_fixture();
         let event = view.event_panel[7].clone();
         view.set_event(vec![event]);
-        view.event_selected = None;
-        view.event_search.query.set_text("tests");
+        view.event_list.cursor = None;
+        view.event_list.search.query.set_text("tests");
         view.rematch_event();
-        view.event_selected = None;
+        view.event_list.cursor = None;
         let area = Rect::new(0, 0, width, 40);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);

@@ -216,7 +216,7 @@ impl View {
             self.center_layout(area)
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_search.active())),
+                .saturating_sub(u16::from(self.event_list.search.active())),
         )
     }
 
@@ -269,12 +269,12 @@ impl View {
                 &self.input_label(),
             );
         }
-        if (self.event_search.editing || self.event_detail_search.editing)
+        if self.task_search_editing()
             && !self.help
             && self.confirm_dialog.is_none()
             && !layout.event_panel.is_empty()
         {
-            let search_area = if self.event_detail_search.editing && !layout.event_detail.is_empty()
+            let search_area = if self.active_panel == Panel::EventDetail && !layout.event_detail.is_empty()
             {
                 layout
                     .event_detail
@@ -283,10 +283,10 @@ impl View {
                 layout.event_panel
             };
             let input = event_list::search_input_rect(search_area);
-            let search = if self.event_detail_search.editing {
-                &self.event_detail_search
+            let search = if self.active_panel == Panel::EventDetail {
+                &self.event_detail.search
             } else {
-                &self.event_search
+                &self.event_list.search
             };
             let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
             return Some((input.x + caret, input.y));
@@ -532,7 +532,7 @@ impl View {
             };
             // The duration label sits on the border between the event list and its detail in both
             // layouts; the New button, shown only in time order, shares the model's border.
-            let jump_y = if self.event_sort == EventSort::Duration {
+            let jump_y = if self.event_list.sort == EventSort::Duration {
                 layout.event_panel.bottom()
             } else {
                 model_y
@@ -2073,9 +2073,10 @@ mod background_title_tests {
             branch: "main".into(),
         });
         for width in [44, 80, 100, 149, 150, 200] {
-            view.event_sort = EventSort::Duration;
             let area = Rect::new(0, 0, width, 40);
             let mut buf = Buffer::empty(area);
+            view.event_list.sort = EventSort::Duration;
+            view.event_list.restoring = false;
             view.render(area, &mut buf);
             let viewport = view.viewport.borrow();
             let top = viewport.event_borders[0];

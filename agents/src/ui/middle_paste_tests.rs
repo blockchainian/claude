@@ -8,8 +8,8 @@ fn paste_at(view: &mut View, x: u16, y: u16) {
         "at {x},{y}; title {:?}; search {} log {} detail {}",
         view.viewport.borrow().title_input,
         view.searching,
-        view.event_search.editing,
-        view.event_detail_search.editing
+        view.event_list.search.editing,
+        view.event_detail.search.editing
     );
     view.handle_paste("贴🦀");
 }
@@ -115,8 +115,8 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
         paste_at(&mut view, area.right() - 1, area.y);
         let editor = match panel {
             Panel::TaskList => &view.search,
-            Panel::EventList => &view.event_search.query,
-            _ => &view.event_detail_search.query,
+            Panel::EventList => &view.event_list.search.query,
+            _ => &view.event_detail.search.query,
         };
         assert_eq!(editor.text(), "贴🦀");
         assert_eq!(editor.cursor(), "贴🦀".len());

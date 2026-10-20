@@ -7,6 +7,7 @@ use crate::session_terminal::SessionTerminal;
 
 impl App {
     pub(super) fn open_terminal(&mut self, id: SessionKey) {
+        let restoring = self.view.terminal_requested();
         self.close_terminal();
         let Some(session) = self.session(&id) else {
             return;
@@ -24,6 +25,7 @@ impl App {
             return;
         };
         if self.closing_terminals.contains_key(&id) {
+            self.view.request_terminal();
             self.terminal_task = Some(id);
             return;
         }
@@ -40,6 +42,9 @@ impl App {
             let _ = sender.send(Input::TerminalOutput);
         }) {
             Ok(terminal) => {
+                if restoring {
+                    self.view.request_terminal();
+                }
                 self.view.show_terminal(id, terminal.screen.clone());
                 self.terminal = Some(terminal);
             }
@@ -78,10 +83,10 @@ impl App {
     /// Detaches or ends the open terminal and shows the event detail again.
     pub(super) fn close_terminal(&mut self) {
         self.terminal_task = None;
+        self.view.hide_terminal();
         let Some(terminal) = self.terminal.take() else {
             return;
         };
-        self.view.hide_terminal();
         let id = terminal.id.clone();
         let sender = self.sender.clone();
         let thread_id = id.clone();
@@ -140,6 +145,10 @@ impl App {
                 && self.view.selected_id() == Some(&id)
             {
                 self.open_terminal(id);
+            } else if self.view.terminal_requested() {
+                if let Some(id) = self.view.selected_id().cloned() {
+                    self.open_terminal(id);
+                }
             } else if let Some(id) = waiting {
                 let awaits_prompt = self.session(&id).is_some_and(|session| {
                     session
@@ -750,6 +759,34 @@ mod tests {
         app.sync_terminal();
         assert!(app.view.pasting_prompt());
         finish_close(&mut app);
+    }
+
+    #[test]
+    fn terminal_task_switch_closes_and_queues_reopen() {
+        let (directory, mut app, id) = fixture();
+        draw(&mut app);
+        let pid = attach(&mut app, id.clone(), &directory.path().join("switch-pid"));
+        let mut other = app.sessions[0].clone();
+        other.id.id = "terminal-other".into();
+        other.status = SessionStatus::NeedsInput;
+        other.ask = None;
+        app.sessions.push(other);
+        app.view.set_sessions(app.sessions.clone(), false);
+        assert_ne!(app.view.selected_id(), Some(&id));
+        app.sync_terminal();
+        assert!(app.terminal.is_none());
+        assert!(app.closing_terminals.contains_key(&id));
+        app.sessions[0].status = SessionStatus::NeedsInput;
+        app.sessions[1].status = SessionStatus::Working;
+        app.view.set_sessions(app.sessions.clone(), false);
+        assert_eq!(app.view.selected_id(), Some(&id));
+        app.sync_terminal();
+        assert_eq!(app.terminal_task.as_ref(), Some(&id));
+        finish_close(&mut app);
+        assert_reaped(pid);
+        app.sessions[0].cwd = directory.path().join("removed-project");
+        app.sync_terminal();
+        assert!(draw(&mut app).contains("Directory no longer exists:"));
     }
 
     #[test]

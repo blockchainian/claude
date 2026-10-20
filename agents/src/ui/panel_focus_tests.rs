@@ -19,8 +19,8 @@ fn at(view: &mut View, panel: usize, kind: MouseEventKind) {
 fn editing(view: &View) -> [bool; 3] {
     [
         view.searching,
-        view.event_search.editing,
-        view.event_detail_search.editing,
+        view.event_list.search.editing,
+        view.event_detail.search.editing,
     ]
 }
 
@@ -59,11 +59,11 @@ fn panel_focus_startup_and_keyboard() {
     at(&mut view, 2, MouseEventKind::Down(MouseButton::Left));
     key(&mut view, KeyCode::Down);
     key(&mut view, KeyCode::Char('/'));
-    assert!(view.event_detail_search.editing);
+    assert!(view.event_detail.search.editing);
 }
 
 #[test]
-fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
+fn panel_focus_click_parks_task_search_and_cancels_task_list_search() {
     for panel in 0..3 {
         for destination in 0..5 {
             let (mut view, _) = event_fixture();
@@ -77,27 +77,33 @@ fn panel_focus_click_in_another_panel_cancels_search_like_escape() {
             );
             assert_eq!(
                 editing(&view),
-                [
-                    panel == 0 && destination == panel,
-                    panel == 1 && destination == panel,
-                    panel == 2 && destination == panel
-                ]
+                [panel == 0 && destination == panel, panel == 1, panel == 2]
             );
             if panel != destination {
                 assert!(view.search.is_empty());
-                assert!(view.event_search.query.is_empty());
-                assert!(view.event_detail_search.query.is_empty());
+                assert_eq!(
+                    view.event_list.search.query.text(),
+                    if panel == 1 { "a" } else { "" }
+                );
+                assert_eq!(
+                    view.event_detail.search.query.text(),
+                    if panel == 2 { "a" } else { "" }
+                );
                 key(&mut view, KeyCode::Char('/'));
                 assert_eq!(
                     editing(&view),
-                    [destination == 0, destination == 1, destination == 2]
+                    [
+                        destination == 0,
+                        panel == 1 || destination == 1,
+                        panel == 2 || destination == 2
+                    ]
                 );
             } else {
                 key(&mut view, KeyCode::Char('/'));
                 let query = match panel {
                     0 => view.search.text(),
-                    1 => view.event_search.query.text(),
-                    _ => view.event_detail_search.query.text(),
+                    1 => view.event_list.search.query.text(),
+                    _ => view.event_detail.search.query.text(),
                 };
                 assert_eq!(query, "a/");
             }
@@ -142,7 +148,7 @@ fn panel_click_event_list_takes_prompt_focus_and_opens_search() {
     view.active_panel = Panel::Prompt;
     click_panel(&mut view, 1);
     key(&mut view, KeyCode::Char('/'));
-    assert!(view.event_search.editing);
+    assert!(view.event_list.search.editing);
     assert!(view.active_panel == Panel::EventList);
     assert!(!(view.active_panel == Panel::EventDetail));
     assert!(!view.prompt_focused());
@@ -155,7 +161,7 @@ fn panel_click_event_detail_takes_prompt_focus_and_opens_search() {
     view.active_panel = Panel::Prompt;
     click_panel(&mut view, 2);
     key(&mut view, KeyCode::Char('/'));
-    assert!(view.event_detail_search.editing);
+    assert!(view.event_detail.search.editing);
     assert!(view.active_panel == Panel::EventDetail);
     assert!(!(view.active_panel == Panel::EventList));
     assert!(!view.prompt_focused());

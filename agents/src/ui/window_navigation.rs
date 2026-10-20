@@ -1,21 +1,72 @@
-use super::{Action, Panel, View};
+use super::{Action, Panel, View, task_ui::Focus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl View {
+    pub(super) fn selected_task_key(&self) -> Option<super::draft_controls::TaskKey> {
+        self.selected_draft
+            .map(super::draft_controls::TaskKey::Draft)
+            .or_else(|| {
+                self.selected_id()
+                    .cloned()
+                    .map(super::draft_controls::TaskKey::Session)
+            })
+    }
+
+    /// Remembers the task destination even while the task list owns the keyboard.
+    pub(super) fn task_focus(&self) -> Focus {
+        match self.active_panel {
+            Panel::TaskList => self
+                .panels_task
+                .as_ref()
+                .and_then(|key| self.task_uis.get(key))
+                .map_or(Focus::Prompt, |ui| ui.focus),
+            Panel::Prompt if self.active_question().is_some() => Focus::Question,
+            Panel::Prompt => Focus::Prompt,
+            Panel::TaskDetails if self.selector.as_ref().is_some_and(|s| s.input_active()) => {
+                Focus::Branch
+            }
+            Panel::TaskDetails if self.selector.is_some() => Focus::Selector,
+            Panel::TaskDetails if self.title_editing() => Focus::Title,
+            Panel::TaskDetails => Focus::TaskDetails,
+            Panel::EventList if self.event_list.search.editing => Focus::EventSearch,
+            Panel::EventList => Focus::EventList,
+            Panel::EventDetail if self.event_detail.search.editing => Focus::EventDetailSearch,
+            Panel::EventDetail => Focus::EventDetail,
+        }
+    }
+
+    pub(super) fn restore_task_focus(&mut self, focus: Focus) {
+        let panel = match focus {
+            Focus::Prompt | Focus::Question => Panel::Prompt,
+            Focus::Title | Focus::Branch | Focus::Selector | Focus::TaskDetails => {
+                Panel::TaskDetails
+            }
+            Focus::EventList | Focus::EventSearch => Panel::EventList,
+            Focus::EventDetail | Focus::EventDetailSearch => Panel::EventDetail,
+        };
+        self.set_active_panel(panel);
+    }
+
+    pub(super) fn task_search_editing(&self) -> bool {
+        match self.active_panel {
+            Panel::EventList => self.event_list.search.editing,
+            Panel::EventDetail => self.event_detail.search.editing,
+            _ => false,
+        }
+    }
+
     /// Panel interactions, editors and attention requests share this activation entry point.
     pub(super) fn set_active_panel(&mut self, panel: Panel) {
         if panel == self.active_panel {
             return;
         }
-        if self.active_panel == Panel::TaskDetails {
-            self.save_branch_editor();
-            if self.title_editor().is_some()
-                && let Some(action) = self.save_title()
-            {
-                self.pending_actions.push(action);
-            }
+        if panel == Panel::TaskList
+            && let Some(key) = self.panels_task.clone()
+        {
+            let focus = self.task_focus();
+            self.task_uis.entry(key).or_default().focus = focus;
         }
-        if (self.searching || self.event_search.editing || self.event_detail_search.editing)
+        if self.searching
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         {
             self.pending_actions.push(action);

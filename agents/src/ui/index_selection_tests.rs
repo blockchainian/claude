@@ -20,15 +20,15 @@ fn paired_notifications_move_down_to_newer_with_all_bindings() {
         view.select_event(Some(0));
         view.active_panel = Panel::EventList;
         view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
-        assert_eq!(view.event_selected, Some(1));
+        assert_eq!(view.event_list.cursor, Some(1));
         view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
-        assert_eq!(view.event_selected, Some(0));
+        assert_eq!(view.event_list.cursor, Some(0));
     }
     for _ in 0..12 {
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 1, rect.y));
-        assert_eq!(view.event_selected, Some(1));
+        assert_eq!(view.event_list.cursor, Some(1));
         view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 1, rect.y));
-        assert_eq!(view.event_selected, Some(0));
+        assert_eq!(view.event_list.cursor, Some(0));
     }
 }
 
@@ -47,14 +47,14 @@ fn structural_updates_keep_selection_and_following() {
         prepended: 2,
         ..Default::default()
     });
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     assert_eq!(view.visible_event(), Some(&selected));
     view.apply_event_update(crate::event::Update {
         events: older.clone(),
         replaced: 1,
         ..Default::default()
     });
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     let scroll = view.event_scroll();
     older.extend(events.clone());
     view.apply_event_update(crate::event::Update {
@@ -62,7 +62,7 @@ fn structural_updates_keep_selection_and_following() {
         appended: 2,
         ..Default::default()
     });
-    assert_eq!(view.event_selected, Some(2));
+    assert_eq!(view.event_list.cursor, Some(2));
     assert_eq!(view.event_scroll(), scroll);
     view.select_event(None);
     older.extend(events);
@@ -71,7 +71,7 @@ fn structural_updates_keep_selection_and_following() {
         appended: 2,
         ..Default::default()
     });
-    assert_eq!(view.event_selected, Some(7));
+    assert_eq!(view.event_list.cursor, Some(7));
 }
 
 #[test]
@@ -87,9 +87,9 @@ fn list_search_keeps_selected_full_index() {
         view.active_panel = Panel::EventList;
         view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
     };
-    assert!(view.event_search.editing);
-    assert_eq!(view.event_selected, Some(0));
-    view.event_search.query.set_text("Background command");
+    assert!(view.event_list.search.editing);
+    assert_eq!(view.event_list.cursor, Some(0));
+    view.event_list.search.query.set_text("Background command");
     view.rematch_event();
-    assert_eq!(view.event_selected, Some(0));
+    assert_eq!(view.event_list.cursor, Some(0));
 }

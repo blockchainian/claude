@@ -43,6 +43,8 @@ mod shortcut_help;
 mod structured_text;
 mod style;
 mod task_ui;
+#[cfg(test)]
+mod task_event_list_tests;
 use task_ui::TaskUi;
 mod terminal_panel;
 pub(crate) mod text;
@@ -159,10 +161,6 @@ struct Viewport {
     /// The selected task's name on the task details panel's lower rule.
     task_details_title: Rect,
     confirm_options: Vec<(Rect, bool)>,
-    /// Index of the first visible event in the chronological shown event list.
-    event_scroll: usize,
-    /// Events that arrived below the rows on screen since the event list left its newest row.
-    event_unseen: usize,
     /// Where the last render drew the button that jumps back to the newest event row.
     event_jump: Rect,
     /// Space reserved for the New button or duration label.
@@ -171,18 +169,9 @@ struct Viewport {
     output_borders: [Rect; 2],
     /// Index into the task event list of each drawn event row, top down.
     event_rows: Vec<usize>,
-    /// Lines of the selected event scrolled off the top.
-    event_detail_scroll: usize,
     event_detail_max: usize,
-    event_detail_state: SectionScroll,
-    event_detail_key: Option<u64>,
-    /// The wheel direction that selected the entry, until its layout starts it at that end.
-    event_detail_entry: Option<bool>,
-    /// The wheel direction the selected entry's title holds reports against, and how many remain.
-    event_detail_title_hold: Option<(bool, usize)>,
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
-    event_detail_saved: HashMap<u64, SectionScroll>,
     /// The selected event's layout, cached until its content or size changes.
     event_detail_layout: Option<event_list::EventDetailLayout>,
     event_detail_columns: Option<event_detail::EventDetailColumns>,
@@ -273,18 +262,10 @@ pub struct View {
     selector: Option<Selector>,
     pub(crate) event_panel: Vec<crate::event::Event>,
     pub(crate) event_session: Option<SessionKey>,
-    pub(crate) event_search: event_search::EventSearch,
+    pub(crate) event_list: task_ui::EventList,
     event_order: Vec<usize>,
-    pub(crate) event_sort: EventSort,
     last_update: DateTime<Utc>,
-    /// The selected event, shared by the list cursor and detail panel.
-    event_selected: Option<usize>,
-    background_event: Option<crate::event::Event>,
-    /// Older wheel steps waiting for App to extend the loaded transcript window.
-    event_pending_older: usize,
-    pub(crate) event_start_requested: bool,
-    event_background_return: Option<BackgroundReturn>,
-    event_detail_search: event_search::EventSearch,
+    event_detail: task_ui::EventDetail,
     input_box: prompt_box::PromptBox,
     prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
     questions: question_flow::Questions,
@@ -337,9 +318,9 @@ pub struct View {
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
     /// The task whose details and event list panels are on screen.
-    panels_task: Option<SessionKey>,
+    panels_task: Option<draft_controls::TaskKey>,
     /// The panels of each task the user left, by task.
-    task_uis: HashMap<SessionKey, TaskUi>,
+    task_uis: HashMap<draft_controls::TaskKey, TaskUi>,
     /// The context percentage of the task the app read last.
     context_usage: Option<(SessionKey, u64)>,
     /// The usage bins of the task the app read last.
@@ -406,15 +387,9 @@ impl View {
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             event_panel: Vec::new(),
             event_session: None,
-            event_selected: None,
-            background_event: None,
-            event_pending_older: 0,
-            event_start_requested: false,
-            event_background_return: None,
-            event_detail_search: event_search::EventSearch::default(),
-            event_search: event_search::EventSearch::default(),
+            event_detail: task_ui::EventDetail::default(),
+            event_list: task_ui::EventList::default(),
             event_order: Vec::new(),
-            event_sort: EventSort::Time,
             last_update: Utc::now(),
             drafts: Vec::new(),
             selected_draft: None,
@@ -539,8 +514,7 @@ impl View {
             return;
         }
         if !self.searching
-            && !self.event_search.editing
-            && !self.event_detail_search.editing
+            && !self.task_search_editing()
             && self.question_paste(text)
         {
             return;
@@ -549,11 +523,11 @@ impl View {
             self.rename.insert(text);
         } else if self.prompt_focused() && self.input_disabled().is_none() {
             self.input_box.paste(text);
-        } else if self.event_detail_search.editing {
-            self.event_detail_search.query.insert(text);
+        } else if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
+            self.event_detail.search.query.insert(text);
             self.jump_event_detail_match();
-        } else if self.event_search.editing {
-            self.event_search.query.insert(text);
+        } else if self.active_panel == Panel::EventList && self.event_list.search.editing {
+            self.event_list.search.query.insert(text);
             self.rematch_event();
             self.show_newest_event();
         } else if self.searching {
@@ -592,9 +566,7 @@ impl View {
 
     pub(crate) fn prepare_prompt(&mut self) {
         if self.input_disabled().is_none() {
-            self.dismiss_selector();
             self.set_active_panel(Panel::Prompt);
-            self.name_target = None;
         }
     }
 
@@ -602,7 +574,11 @@ impl View {
         if self.selected_id() == Some(id) {
             &mut self.input_box
         } else {
-            &mut self.task_uis.entry(id.clone()).or_default().prompt
+            &mut self
+                .task_uis
+                .entry(draft_controls::TaskKey::Session(id.clone()))
+                .or_default()
+                .prompt
         }
     }
 
@@ -702,8 +678,10 @@ impl View {
         self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
         let rows = &self.rows;
-        self.task_uis
-            .retain(|id, _| rows.iter().any(|session| &session.id == id));
+        self.task_uis.retain(|id, _| match id {
+            draft_controls::TaskKey::Session(id) => rows.iter().any(|session| &session.id == id),
+            draft_controls::TaskKey::Draft(id) => self.drafts.iter().any(|draft| &draft.id == id),
+        });
         self.has_more = has_more;
         let mut selected_index = selected
             .as_ref()
@@ -1060,12 +1038,11 @@ impl View {
         visible
     }
     pub(crate) fn event_scroll(&self) -> usize {
-        self.viewport.borrow().event_scroll
+        self.event_list.scroll.get()
     }
 
     pub(crate) fn clamp_event_scroll(&mut self, max: usize) {
-        let mut viewport = self.viewport.borrow_mut();
-        viewport.event_scroll = viewport.event_scroll.min(max);
+        self.event_list.scroll.set(self.event_list.scroll.get().min(max));
     }
 
     pub(crate) fn event_max_scroll(&self) -> usize {
@@ -1074,7 +1051,7 @@ impl View {
                 .borrow()
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_search.active())),
+                .saturating_sub(u16::from(self.event_list.search.active())),
         );
         self.matching_event_count().saturating_sub(height)
     }
@@ -1084,7 +1061,7 @@ impl View {
         if has_older
             && (self.event_page_pending() || (self.event_scroll() == 0 && !self.following_event()))
         {
-            loaded.saturating_add(visible.max(self.event_pending_older).max(1))
+            loaded.saturating_add(visible.max(self.event_list.pending_older).max(1))
         } else {
             loaded
         }
@@ -1093,15 +1070,14 @@ impl View {
     /// Selects the newest shown event and resumes following the event list.
     fn show_newest_event(&mut self) {
         self.select_event(None);
-        self.event_detail_search.clear();
+        self.event_detail.search.clear();
         let max = self.event_max_scroll();
-        let mut viewport = self.viewport.borrow_mut();
-        viewport.event_scroll = max;
-        viewport.event_detail_scroll = 0;
-        viewport.event_unseen = 0;
-        self.event_pending_older = 0;
-        self.event_start_requested = false;
-        self.event_background_return = None;
+        self.event_list.scroll.set(max);
+        self.event_detail.scroll.get_mut().offset = 0;
+        self.event_list.unseen.set(0);
+        self.event_list.pending_older = 0;
+        self.event_list.start_requested = false;
+        self.event_list.background_return = None;
     }
 
     fn set_selected(&mut self, selected: usize) {
@@ -1121,35 +1097,48 @@ impl View {
             .and_then(|row| self.draft_of(&row.id))
             .map(|draft| draft.id);
         self.show_selected_panels();
-        if let Some(id) = self.selected_draft {
-            if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
-                self.input_box = std::mem::take(&mut draft.input);
-            }
-            self.prepare_prompt();
+        if let Some(id) = self.selected_draft
+            && let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id)
+        {
+            self.input_box = std::mem::take(&mut draft.input);
         }
     }
 
     /// Keeps the details and event list panels with their task: saves what the task the user left
     /// showed, and shows what the selected task showed when the user last left it.
     fn show_selected_panels(&mut self) {
-        self.sync_questions();
-        let selected = self.selected_id().cloned();
+        let selected = self.selected_task_key();
         if self.panels_task == selected {
+            self.sync_questions();
             return;
         }
-        self.selector = None;
+        self.park_event_list();
+        let task_list_focused = self.active_panel == Panel::TaskList
+            && self.attention_selection.as_ref().is_none_or(|id| {
+                selected.as_ref().and_then(draft_controls::TaskKey::session) != Some(id)
+            });
+        let focus = self.task_focus();
+        let title = self.title_editing().then(|| std::mem::take(&mut self.rename));
+        self.rename_target = None;
+        self.name_target = None;
+        let mut selector = self.selector.take();
+        let branch = selector
+            .as_mut()
+            .and_then(Selector::active_editor)
+            .map(std::mem::take);
         self.text_selection.borrow_mut().take();
         let viewport = self.viewport.get_mut();
         let left = TaskUi {
+            focus,
+            event_detail: std::mem::take(&mut self.event_detail),
             prompt: std::mem::take(&mut self.input_box),
             task_details: task_ui::TaskDetails {
+                title,
+                branch,
+                selector,
                 scroll: std::mem::take(&mut viewport.task_details_scroll),
-                ..Default::default()
             },
-            event_list: task_ui::EventList {
-                search: std::mem::take(&mut self.event_search),
-                ..Default::default()
-            },
+            event_list: std::mem::take(&mut self.event_list),
             ..Default::default()
         };
         if let Some(id) = self.panels_task.take() {
@@ -1163,20 +1152,40 @@ impl View {
             shown.task_details.scroll.left_keys =
                 Some(std::mem::take(&mut shown.task_details.scroll.keys));
         }
+        self.selector = shown.task_details.selector;
+        if let Some(branch) = shown.task_details.branch {
+            *self
+                .selector
+                .as_mut()
+                .and_then(Selector::active_editor)
+                .expect("parked branch has an open selector") = branch;
+        }
+        if let Some(title) = shown.task_details.title {
+            self.rename = title;
+            match &selected {
+                Some(draft_controls::TaskKey::Draft(id)) => self.name_target = Some(*id),
+                Some(draft_controls::TaskKey::Session(id)) => self.rename_target = Some(id.clone()),
+                None => unreachable!("title editor belongs to a task"),
+            }
+        }
         viewport.task_details_scroll = shown.task_details.scroll;
-        viewport.event_scroll = 0;
-        viewport.event_unseen = 0;
-        viewport.event_detail_scroll = 0;
         viewport.event_detail_layout = None;
         self.input_box = shown.prompt;
-        self.event_search = shown.event_list.search;
-        self.event_selected = None;
-        self.background_event = None;
-        self.event_pending_older = 0;
-        self.event_start_requested = false;
-        self.event_background_return = None;
-        self.event_detail_search.clear();
+        self.event_list = shown.event_list;
+        self.event_list.restoring = true;
+        self.event_detail = shown.event_detail;
+        self.event_detail.scroll.get_mut().restoring = true;
         self.pending_click = None;
+        if !task_list_focused {
+            self.restore_task_focus(shown.focus);
+        }
+        self.sync_questions();
+        if task_list_focused {
+            self.active_panel = Panel::TaskList;
+        }
+        if let Some(key) = &selected {
+            self.task_uis.entry(key.clone()).or_default().focus = shown.focus;
+        }
         self.panels_task = selected;
     }
 
@@ -1246,9 +1255,7 @@ impl View {
         }
         let visible = self.selectable_indices();
         if let Some(id) = &self.rename_target
-            && !visible
-                .iter()
-                .any(|i| self.rows.get(*i).is_some_and(|s| &s.id == id))
+            && !self.rows.iter().any(|session| &session.id == id)
         {
             self.rename_target = None;
             self.rename.clear();

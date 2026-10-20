@@ -12,13 +12,33 @@ use ratatui::style::{Color, Modifier, Style};
 impl View {
     /// Shows `screen` in the event detail panel.
     pub fn show_terminal(&mut self, id: SessionKey, screen: Screen) {
+        let activate = !self.terminal_requested();
+        self.request_terminal();
         self.terminal = Some((id, screen));
-        self.set_active_panel(Panel::EventDetail);
+        if activate {
+            self.set_active_panel(Panel::EventDetail);
+        }
     }
 
     pub fn hide_terminal(&mut self) {
+        if self.terminal.as_ref().is_none_or(|(id, _)| {
+            self.panels_task
+                .as_ref()
+                .and_then(super::draft_controls::TaskKey::session)
+                == Some(id)
+        }) {
+            self.event_detail.mode = super::task_ui::EventDetailMode::Event;
+        }
         self.terminal = None;
         self.viewport.borrow_mut().terminal = Rect::default();
+    }
+
+    pub(crate) fn request_terminal(&mut self) {
+        self.event_detail.mode = super::task_ui::EventDetailMode::Terminal;
+    }
+
+    pub(crate) fn terminal_requested(&self) -> bool {
+        self.event_detail.mode == super::task_ui::EventDetailMode::Terminal
     }
 
     /// The rows and columns a terminal gets in the event detail panel, below its top rule.

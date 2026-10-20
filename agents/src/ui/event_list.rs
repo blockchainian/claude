@@ -79,54 +79,51 @@ impl View {
         if self.event_session.as_ref() != Some(&session.id) {
             return;
         }
-        if self.event_search.active() && area.height > 1 {
+        if self.event_list.search.active() && area.height > 1 {
             let input = search_input_rect(area);
-            if self.event_search.editing {
+            if self.event_list.search.editing {
                 super::render::render_input_row(
                     &format!("Search {PROMPT_MARKER} "),
-                    &self.event_search.query,
+                    &self.event_list.search.query,
                     input,
                     buf,
                 );
             } else {
-                Line::from(self.event_search.query.text().to_owned())
+                Line::from(self.event_list.search.query.text().to_owned())
                     .dim()
                     .right_aligned()
                     .render(input, buf);
             }
         }
         let max_scroll = self.event_max_scroll();
-        {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.event_scroll = viewport.event_scroll.min(max_scroll);
-        }
+        self.event_list.scroll.set(self.event_list.scroll.get().min(max_scroll));
         self.reveal_event_selection();
         let scroll = self.event_scroll();
         let matching: Vec<_> = self.shown_events().collect();
-        let selected_index = self.event_selected;
+        let selected_index = self.event_list.cursor;
         let start = scroll.min(matching.len());
         let end = (start
             + usize::from(
                 area.height
-                    .saturating_sub(u16::from(self.event_search.active())),
+                    .saturating_sub(u16::from(self.event_list.search.active())),
             ))
         .min(matching.len());
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(event_index, event)) in matching[start..end].iter().enumerate() {
-            let last = if self.event_sort == EventSort::Duration {
+            let last = if self.event_list.sort == EventSort::Duration {
                 event_index + 1 == self.event_panel.len()
             } else {
                 start + index + 1 == matching.len()
             };
-            let time = event_time(event, session, last, now, self.event_sort);
+            let time = event_time(event, session, last, now, self.event_list.sort);
             let links = render_event(
                 event,
                 &time,
                 last,
                 super::render::row(area, index as u16, 1),
                 buf,
-                Some(&self.event_search),
+                Some(&self.event_list.search),
                 &session.cwd,
             );
             if selected_index == Some(start + index) {
@@ -150,13 +147,16 @@ impl View {
     }
 
     pub(super) fn visible_event(&self) -> Option<&Event> {
-        self.background_event.as_ref().or_else(|| {
-            self.event_selected
+        self.event_list.background.as_ref().or_else(|| {
+            self.event_list.cursor
                 .and_then(|index| self.shown_events().nth(index).map(|(_, event)| event))
         })
     }
 
     pub(super) fn render_event_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+        if self.event_session.as_ref() == self.selected_id() {
+            self.restore_event_detail();
+        }
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
         if self.render_terminal(area, buf, now) {
             return;
@@ -170,7 +170,7 @@ impl View {
         let Some(event) = self.visible_event() else {
             return;
         };
-        let time = event_time(event, session, self.is_newest_shown(), now, self.event_sort);
+        let time = event_time(event, session, self.is_newest_shown(), now, self.event_list.sort);
         let list_links = self.viewport.borrow().event_links.clone();
         self.render_event_detail_content(event, &time, area, buf, &session.cwd, now);
         self.viewport.borrow_mut().event_links.extend(list_links);
@@ -182,18 +182,21 @@ impl View {
         let mut viewport = self.viewport.borrow_mut();
         viewport.event_jump = Rect::default();
         viewport.event_label = Rect::default();
-        let label = if self.event_sort == EventSort::Duration {
-            viewport.event_unseen = 0;
+        if self.event_list.restoring {
+            return;
+        }
+        let label = if self.event_list.sort == EventSort::Duration {
+            self.event_list.unseen.set(0);
             " duration ".to_owned()
         } else {
             if self.following_event() {
-                viewport.event_unseen = 0;
+                self.event_list.unseen.set(0);
                 return;
             }
-            if viewport.event_unseen == 0 {
+            if self.event_list.unseen.get() == 0 {
                 return;
             }
-            format!(" ↓ {} New ", viewport.event_unseen)
+            format!(" ↓ {} New ", self.event_list.unseen.get())
         };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
         let right = viewport
@@ -205,7 +208,7 @@ impl View {
         Clear.render(jump, buf);
         Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);
         viewport.event_label = jump;
-        if self.event_sort == EventSort::Time {
+        if self.event_list.sort == EventSort::Time {
             viewport.event_jump = jump;
         }
     }
@@ -227,18 +230,18 @@ impl View {
             EVENT_TOP,
             area.height.saturating_sub(EVENT_TOP),
         );
-        if self.event_detail_search.active() {
+        if self.event_detail.search.active() {
             body_area.height = body_area.height.saturating_sub(1);
             let input = search_input_rect(area);
-            if self.event_detail_search.editing {
+            if self.event_detail.search.editing {
                 super::render::render_input_row(
                     &format!("Search {PROMPT_MARKER} "),
-                    &self.event_detail_search.query,
+                    &self.event_detail.search.query,
                     input,
                     buf,
                 );
             } else {
-                Line::from(self.event_detail_search.query.text().to_owned())
+                Line::from(self.event_detail.search.query.text().to_owned())
                     .dim()
                     .right_aligned()
                     .render(input, buf);
@@ -262,7 +265,7 @@ impl View {
         };
         if (!shows_calls(event)
             || (event.calls.len() == 1
-                && (self.event_sort == EventSort::Duration || event.calls[0].started_at.is_none())))
+                && (self.event_list.sort == EventSort::Duration || event.calls[0].started_at.is_none())))
             && let Some((_, span)) = layout.times.first_mut()
         {
             span.content = time.to_owned().into();
@@ -366,7 +369,7 @@ impl View {
         viewport.event_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
-            highlight_matches(line, &self.event_detail_search);
+            highlight_matches(line, &self.event_detail.search);
         }
         Paragraph::new(visible).render(body_area, buf);
         for (row, time) in times {
@@ -391,6 +394,9 @@ impl View {
         body_area: Rect,
         viewport: &mut Viewport,
     ) -> super::section_scroll::SectionLayout {
+        self.restore_event_detail();
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        detail.event = super::task_ui::EventId::from_event(event);
         let record = event
             .source_records
             .first()
@@ -401,21 +407,21 @@ impl View {
             record,
             (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
         ));
-        let switched = viewport.event_detail_key != Some(key);
-        let entry = viewport.event_detail_entry.take().filter(|_| switched);
+        let switched = detail.key != Some(key);
+        let entry = detail.entry.take().filter(|_| switched);
         if switched {
-            let mut left = std::mem::take(&mut viewport.event_detail_state);
+            let mut left = std::mem::take(&mut detail.state);
             left.left_keys = Some(std::mem::take(&mut left.keys));
-            if let Some(previous) = viewport.event_detail_key.replace(key) {
-                viewport.event_detail_saved.insert(previous, left);
+            if let Some(previous) = detail.key.replace(key) {
+                detail.saved.insert(previous, left);
             }
-            let saved = viewport.event_detail_saved.remove(&key);
+            let saved = detail.saved.remove(&key);
             // Entering by wheel starts at the end the wheel came from.
-            viewport.event_detail_state = saved.filter(|_| entry.is_none()).unwrap_or_default();
+            detail.state = saved.filter(|_| entry.is_none()).unwrap_or_default();
         }
         let height = usize::from(body_area.height);
-        let requested_scroll = viewport.event_detail_scroll;
-        let state = &mut viewport.event_detail_state;
+        let requested_scroll = detail.offset;
+        let state = &mut detail.state;
         state.content_top = body_area.y;
         state.prepare(layout.body_keys.clone());
         let position = state.position();
@@ -428,7 +434,7 @@ impl View {
             .collect::<Vec<_>>();
         let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
         let allocations = if height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
-            && !self.event_detail_search.active()
+            && !self.event_detail.search.active()
             && !external_scroll
             && state.offset == 0
         {
@@ -463,7 +469,7 @@ impl View {
             );
         }
         viewport.event_detail_max = rows.max;
-        viewport.event_detail_scroll = rows.scroll;
+        detail.offset = rows.scroll;
         rows
     }
 
@@ -485,7 +491,7 @@ impl View {
             EVENT_TOP,
             area.height.saturating_sub(EVENT_TOP),
         );
-        if self.event_detail_search.active() {
+        if self.event_detail.search.active() {
             body_area.height = body_area.height.saturating_sub(1);
         }
         let layout = viewport.event_detail_layout.take().unwrap_or_else(|| {
@@ -502,7 +508,7 @@ impl View {
         let Some(event) = self.visible_event() else {
             return;
         };
-        if self.event_detail_search.query.is_empty() {
+        if self.event_detail.search.query.is_empty() {
             return;
         }
         let viewport = self.viewport.borrow();
@@ -522,7 +528,7 @@ impl View {
             .zip(&layout.rows)
             .position(|(line, (id, cells))| {
                 if !self
-                    .event_detail_search
+                    .event_detail.search
                     .indices(&line.to_string())
                     .is_empty()
                 {
@@ -535,36 +541,37 @@ impl View {
                     .reduce(|a, b| a.start.min(b.start)..a.end.max(b.end));
                 bytes.is_some_and(|bytes| {
                     !self
-                        .event_detail_search
+                        .event_detail.search
                         .indices(&layout.sources[*id].text[bytes])
                         .is_empty()
                 })
             });
         drop(viewport);
         if let Some(line) = found {
-            self.viewport.borrow_mut().event_detail_scroll = line;
+            self.event_detail.scroll.borrow_mut().offset = line;
         }
     }
 
     /// Selects an index in the shown list; `None` selects its newest row.
     pub(super) fn select_event(&mut self, index: Option<usize>) {
-        let background = self.background_event.take().is_some();
+        let background = self.event_list.background.take().is_some();
         let len = self.matching_event_count();
         let index = len
             .checked_sub(1)
             .map(|last| index.unwrap_or(last).min(last));
-        if self.event_selected != index || background {
+        if self.event_list.cursor != index || background {
             self.cancel_event_detail_selection();
-            self.event_selected = index;
-            self.event_detail_search.clear();
+            self.event_list.cursor = index;
+            self.event_detail.search.clear();
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
-            viewport.event_detail_scroll = 0;
-            viewport.event_detail_entry = None;
-            viewport.event_detail_title_hold = None;
+            let mut detail = self.event_detail.scroll.borrow_mut();
+            detail.offset = 0;
+            detail.entry = None;
+            detail.title_hold = None;
         }
         if self.following_event() {
-            self.viewport.borrow_mut().event_unseen = 0;
+            self.event_list.unseen.set(0);
         }
     }
 
@@ -586,9 +593,9 @@ impl View {
     }
 
     pub(super) fn following_event(&self) -> bool {
-        (self.event_selected.is_none()
-            || self.event_selected == self.matching_event_count().checked_sub(1))
-            && self.event_background_return.is_none()
+        (self.event_list.cursor.is_none()
+            || self.event_list.cursor == self.matching_event_count().checked_sub(1))
+            && self.event_list.background_return.is_none()
     }
 
     /// Keeps the cursor in view without moving a list being dragged for text selection.
@@ -599,26 +606,26 @@ impl View {
         {
             return;
         }
-        let Some(selected) = self.event_selected else {
+        let Some(selected) = self.event_list.cursor else {
             return;
         };
         let offset = selected;
         let max = self.event_max_scroll();
-        let mut viewport = self.viewport.borrow_mut();
+        let viewport = self.viewport.borrow();
         let height = usize::from(
             viewport
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_search.active())),
+                .saturating_sub(u16::from(self.event_list.search.active())),
         );
         if height == 0 {
             return;
         }
-        viewport.event_scroll = viewport.event_scroll.min(max);
-        if offset < viewport.event_scroll {
-            viewport.event_scroll = offset;
-        } else if offset >= viewport.event_scroll + height {
-            viewport.event_scroll = offset + 1 - height;
+        self.event_list.scroll.set(self.event_list.scroll.get().min(max));
+        if offset < self.event_list.scroll.get() {
+            self.event_list.scroll.set(offset);
+        } else if offset >= self.event_list.scroll.get() + height {
+            self.event_list.scroll.set(offset + 1 - height);
         }
     }
 
@@ -631,14 +638,14 @@ impl View {
                     .borrow()
                     .event_panel
                     .height
-                    .saturating_sub(u16::from(self.event_search.active()))
+                    .saturating_sub(u16::from(self.event_list.search.active()))
                     .max(1);
                 for _ in 0..steps {
                     self.move_event_selection(code == KeyCode::PageDown);
                 }
             }
             KeyCode::Home | KeyCode::End => {
-                self.event_pending_older = 0;
+                self.event_list.pending_older = 0;
                 self.select_event(if code == KeyCode::Home { Some(0) } else { None });
                 self.reveal_event_selection();
             }
@@ -649,13 +656,13 @@ impl View {
     /// Moves one displayed event; App loads older rows at the oldest loaded boundary.
     pub(super) fn move_event_selection(&mut self, forward: bool) {
         self.pending_click = None;
-        self.event_background_return = None;
-        self.background_event = None;
-        if forward && self.event_pending_older > 0 {
-            self.event_pending_older -= 1;
+        self.event_list.background_return = None;
+        self.event_list.background = None;
+        if forward && self.event_list.pending_older > 0 {
+            self.event_list.pending_older -= 1;
             return;
         }
-        let Some(index) = self.event_selected else {
+        let Some(index) = self.event_list.cursor else {
             self.show_newest_event();
             return;
         };
@@ -663,7 +670,7 @@ impl View {
             if self.transcript_fully_loaded() {
                 return;
             }
-            self.event_pending_older += 1;
+            self.event_list.pending_older += 1;
             return;
         }
         let next = if forward {
@@ -671,30 +678,112 @@ impl View {
         } else {
             index.saturating_sub(1)
         };
-        self.event_pending_older = 0;
+        self.event_list.pending_older = 0;
         self.select_event(Some(next));
         self.reveal_event_selection();
     }
 
     pub(crate) fn finish_event_start(&mut self) {
-        if std::mem::take(&mut self.event_start_requested) {
+        if std::mem::take(&mut self.event_list.start_requested) {
             self.select_event(Some(0));
             self.reveal_event_selection();
         }
     }
 
     pub(crate) fn event_page_pending(&self) -> bool {
-        self.event_pending_older > 0
+        self.event_list.pending_older > 0
+    }
+
+    /// Saves identities before another task takes over the loaded transcript window.
+    pub(super) fn park_event_list(&mut self) {
+        if self.event_list.restoring {
+            return;
+        }
+        let selected = self.event_list.cursor
+            .and_then(|index| self.shown_events().nth(index))
+            .and_then(|(_, event)| task_ui::EventId::from_event(event));
+        let first = self.event_scroll().min(self.matching_event_count().saturating_sub(1));
+        let anchor = self.shown_events().nth(first)
+            .and_then(|(_, event)| task_ui::EventId::from_event(event));
+        self.event_list.position = if self.following_event() {
+            task_ui::EventPosition::Live
+        } else if let (Some(anchor), Some(_)) = (anchor, &selected) {
+            task_ui::EventPosition::At { anchor }
+        } else {
+            task_ui::EventPosition::Live
+        };
+        self.event_list.selected = selected;
+        self.event_list.tail = self.event_panel.last().and_then(task_ui::EventId::from_event);
+        self.event_list.cursor = None;
+        if let Some(saved) = &mut self.event_list.background_return {
+            saved.event = None;
+        }
+        self.event_list.scroll.set(0);
+    }
+
+    pub(crate) fn initialize_event_sort(&mut self, sorting: EventSort) {
+        if !self.event_list.sort_initialized {
+            self.event_list.sort = sorting;
+            self.event_list.sort_initialized = true;
+        }
+    }
+
+    pub(crate) fn restoring_event_position(&self) -> bool {
+        self.event_list.restoring && matches!(self.event_list.position, task_ui::EventPosition::At { .. })
+    }
+
+    pub(super) fn event_position(&self, id: &task_ui::EventId) -> Option<usize> {
+        self.shown_events().position(|(_, event)| event.source.as_ref() == Some(&id.0))
+    }
+
+    fn restore_event_list(&mut self) {
+        self.event_list.restoring = false;
+        let at = match &self.event_list.position {
+            task_ui::EventPosition::Live => None,
+            task_ui::EventPosition::At { anchor } => self.event_position(anchor)
+                .zip(self.event_list.selected.as_ref().and_then(|id| self.event_position(id))),
+        };
+        if let Some((scroll, selected)) = at {
+            self.event_list.cursor = Some(selected);
+            if let Some(saved) = &mut self.event_list.background_return {
+                saved.event = Some(selected);
+            }
+            self.event_list.scroll.set(scroll);
+            if self.event_list.sort == EventSort::Time
+                && let Some(tail) = &self.event_list.tail
+                && let Some(index) = self.event_panel.iter().position(|event| event.source.as_ref() == Some(&tail.0))
+            {
+                self.event_list.unseen.set(self.event_list.unseen.get() + self.event_panel.len() - index - 1);
+            }
+        } else {
+            self.event_list.position = task_ui::EventPosition::Live;
+            self.event_list.selected = None;
+            self.event_list.cursor = self.matching_event_count().checked_sub(1);
+            self.event_list.scroll.set(self.event_max_scroll());
+            self.event_list.unseen.set(0);
+            self.event_list.pending_older = 0;
+            self.event_list.start_requested = false;
+            self.event_list.background_return = None;
+            self.event_list.background = None;
+        }
     }
 
     /// Applies structural changes without comparing row contents.
     pub(crate) fn apply_event_update(&mut self, update: crate::event::Update) {
+        if self.event_list.restoring {
+            self.last_update = Utc::now();
+            self.event_panel = update.events;
+            self.event_list.cursor = None;
+            self.prepare_event_search();
+            self.restore_event_list();
+            return;
+        }
         let following = self.following_event();
         let selected_index = self
-            .event_background_return
+            .event_list.background_return
             .as_ref()
             .and_then(|saved| saved.event)
-            .or(self.event_selected);
+            .or(self.event_list.cursor);
         let selected_full =
             selected_index.and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
         let reset_selected = selected_full.filter(|_| update.reset).and_then(|full| {
@@ -714,7 +803,7 @@ impl View {
                     _ => false,
                 })
         });
-        let selected_order = (self.event_sort == EventSort::Duration
+        let selected_order = (self.event_list.sort == EventSort::Duration
             && self.selecting_list(text_selection::Panel::EventList))
         .then(|| {
             self.shown_events()
@@ -726,7 +815,7 @@ impl View {
         self.last_update = Utc::now();
         self.event_panel = update.events;
         // Rematching below uses the explicitly shifted full-list position.
-        self.event_selected = None;
+        self.event_list.cursor = None;
         self.prepare_event_search();
         if let Some(order) = selected_order
             && (update.reset || !self.shown_events().map(|(full, _)| full).eq(order))
@@ -744,65 +833,61 @@ impl View {
             .count();
         let len = self.matching_event_count();
         let reset_selected = reset_selected.and_then(|full| self.shown_position(full));
-        self.event_selected = if following {
+        self.event_list.cursor = if following {
             len.checked_sub(1)
         } else if update.reset {
             reset_selected.or_else(|| len.checked_sub(1))
         } else {
             selected_full.and_then(|full| {
                 let full = full.saturating_add(update.prepended);
-                let full = if self.event_sort == EventSort::Time {
+                let full = if self.event_list.sort == EventSort::Time {
                     full.min(self.event_panel.len().saturating_sub(1))
                 } else {
                     full
                 };
                 self.shown_position(full)
                     .or_else(|| {
-                        (self.event_sort == EventSort::Time)
+                        (self.event_list.sort == EventSort::Time)
                             .then(|| self.shown_events().position(|(index, _)| index >= full))
                             .flatten()
                     })
                     .or_else(|| len.checked_sub(1))
             })
         };
-        let shift = if self.event_sort == EventSort::Duration {
-            self.event_selected.unwrap_or(0) as isize - selected_index.unwrap_or(0) as isize
+        let shift = if self.event_list.sort == EventSort::Duration {
+            self.event_list.cursor.unwrap_or(0) as isize - selected_index.unwrap_or(0) as isize
         } else {
             prepended as isize
         };
-        if self.event_sort == EventSort::Duration {
-            self.viewport.borrow_mut().event_unseen = 0;
+        if self.event_list.sort == EventSort::Duration {
+            self.event_list.unseen.set(0);
         }
-        if let Some(previous) = &mut self.event_background_return {
-            // Background details retain a list index, independent of their synthetic event.
-            previous.event = self.event_selected;
+        if let Some(previous) = &mut self.event_list.background_return {
+            previous.event = self.event_list.cursor;
         }
         self.cancel_event_detail_selection();
         self.viewport.borrow_mut().event_detail_layout = None;
         let max_scroll = self.event_max_scroll();
         if update.reset && (following || reset_selected.is_none()) {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.event_scroll = max_scroll;
-            viewport.event_unseen = 0;
-            viewport.event_detail_scroll = 0;
+            self.event_list.scroll.set(max_scroll);
+            self.event_list.unseen.set(0);
+            self.event_detail.scroll.borrow_mut().offset = 0;
         } else if !following || self.mouse_press.is_some() {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.event_scroll = viewport.event_scroll.saturating_add_signed(shift);
-            if self.event_sort == EventSort::Time && !update.reset {
-                viewport.event_unseen += added;
+            self.event_list.scroll.set(self.event_list.scroll.get().saturating_add_signed(shift));
+            if self.event_list.sort == EventSort::Time && !update.reset {
+                self.event_list.unseen.set(self.event_list.unseen.get() + added);
             }
-            drop(viewport);
-            if self.event_sort == EventSort::Time {
+            if self.event_list.sort == EventSort::Time {
                 self.shift_list_selection(text_selection::Panel::EventList, prepended);
             }
         } else {
-            self.viewport.borrow_mut().event_scroll = max_scroll;
+            self.event_list.scroll.set(max_scroll);
         }
-        let pending = std::mem::take(&mut self.event_pending_older);
+        let pending = std::mem::take(&mut self.event_list.pending_older);
         if pending > 0
             && self.event_panel.len() > old_len
             && !update.reset
-            && let Some(index) = self.event_selected
+            && let Some(index) = self.event_list.cursor
         {
             self.select_event(Some(index.saturating_sub(pending)));
         }
@@ -842,12 +927,12 @@ impl View {
         if self.event_session.as_ref() != Some(&session.id) {
             return None;
         }
-        if self.event_sort == EventSort::Duration {
+        if self.event_list.sort == EventSort::Duration {
             let viewport = self.viewport.borrow();
             let height = viewport
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_search.active()));
+                .saturating_sub(u16::from(self.event_list.search.active()));
             return self
                 .shown_events()
                 .skip(self.event_scroll())
@@ -857,7 +942,7 @@ impl View {
                         event,
                         session,
                         index + 1 == self.event_panel.len(),
-                        self.event_sort,
+                        self.event_list.sort,
                     )
                 })
                 .filter_map(|time| row_time_changes_in(&time, now))
@@ -873,14 +958,14 @@ impl View {
     }
 
     fn is_newest_shown(&self) -> bool {
-        self.background_event.is_none()
-            && if self.event_sort == EventSort::Duration {
-                self.event_selected
+        self.event_list.background.is_none()
+            && if self.event_list.sort == EventSort::Duration {
+                self.event_list.cursor
                     .and_then(|index| self.shown_events().nth(index))
                     .is_some_and(|(full, _)| full + 1 == self.event_panel.len())
             } else {
-                self.event_selected.is_some()
-                    && self.event_selected == self.matching_event_count().checked_sub(1)
+                self.event_list.cursor.is_some()
+                    && self.event_list.cursor == self.matching_event_count().checked_sub(1)
             }
     }
 
@@ -890,7 +975,7 @@ impl View {
 
     /// The events the search lets through, with their index in the event list.
     pub(super) fn shown_events(&self) -> impl Iterator<Item = (usize, &Event)> {
-        let order: Box<dyn Iterator<Item = usize> + '_> = if self.event_sort == EventSort::Duration
+        let order: Box<dyn Iterator<Item = usize> + '_> = if self.event_list.sort == EventSort::Duration
         {
             Box::new(self.event_order.iter().copied())
         } else {
@@ -2313,7 +2398,7 @@ mod panel_detail_tests {
                 .all(|line| !line.to_string().contains('─'))
         );
         drop(viewport);
-        view.viewport.borrow_mut().event_detail_scroll = 1;
+        view.event_detail.scroll.borrow_mut().offset = 1;
         let mut scrolled = Buffer::empty(buffer.area);
         view.render_event_detail_content(
             &event,
