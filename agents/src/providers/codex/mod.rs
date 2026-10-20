@@ -829,6 +829,7 @@ impl Provider for CodexProvider {
                 SessionInput::PromptWithImages { text, images } => {
                     app_server::thread::prompt(&mut client, &id, &text, &images)
                 }
+                SessionInput::Rename(_) => Err(io::ErrorKind::Unsupported.into()),
                 SessionInput::Interrupt => {
                     match app_server::thread::running_turn(&mut client, &id)? {
                         Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),

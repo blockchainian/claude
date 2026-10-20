@@ -1275,11 +1275,6 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
         include_bytes!("../../../tests/fixtures/subagent.jsonl"),
     )
     .unwrap();
-    app.hub
-        .provider(target.id.provider)
-        .rename(&target, "Delete fixture session")
-        .unwrap();
-    assert!(children.join("custom-title.json").is_file());
     app.refresh();
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Home);
@@ -1291,10 +1286,10 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
     }
     assert_eq!(app.view.selected_id(), Some(&target.id));
 
-    let renamed = std::fs::read(path).unwrap();
+    let before_delete = std::fs::read(path).unwrap();
     assert!(!key(&mut app, KeyCode::Backspace));
     assert!(!key(&mut app, KeyCode::Enter));
-    assert_eq!(std::fs::read(path).unwrap(), renamed);
+    assert_eq!(std::fs::read(path).unwrap(), before_delete);
     assert!(children.is_dir());
     assert!(app.session(&target.id).is_some());
 
@@ -1317,4 +1312,48 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
     app.refresh();
     assert!(app.session(&target.id).is_none());
     assert_eq!(std::fs::read(keep).unwrap(), original);
+}
+
+#[test]
+fn rename_without_attach_leaves_claude_files_untouched() {
+    for foreground in [false, true] {
+        let (_dir, mut app) = fixture();
+        let mut target = app.sessions[0].clone();
+        if foreground {
+            target.process = Some(crate::model::Process {
+                pid: std::process::id(),
+                label: None,
+                started_at: None,
+            });
+        }
+        app.sessions[0] = target.clone();
+        app.view.set_sessions(app.sessions.clone(), false);
+        let path = target.transcript.as_ref().unwrap();
+        let original = std::fs::read(path).unwrap();
+        assert!(!app.handle_action(Some(Action::Rename {
+            id: target.id.clone(),
+            name: "Do not write this title".into(),
+        })));
+        let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let Input::Sent { input, result, .. } = event else {
+            panic!("rename must use the provider input worker");
+        };
+        assert_eq!(
+            input,
+            SessionInput::Rename("Do not write this title".into())
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            if foreground {
+                crate::providers::claude::FOREGROUND_SESSION
+            } else {
+                "This input requires a live background session"
+            },
+        );
+        assert!(
+            std::fs::read(path).unwrap() == original,
+            "rename modified the transcript"
+        );
+        assert!(!path.with_extension("").join("custom-title.json").exists());
+    }
 }

@@ -89,6 +89,7 @@ pub enum SessionInput {
         transcript: PathBuf,
     },
     Interrupt,
+    Rename(String),
     SetModel(String),
     SetEffort(String),
 }
@@ -323,7 +324,9 @@ pub trait Provider {
     ) -> io::Result<Vec<event::Event>>;
     /// Returns a resume, fork or new-session command when available.
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command>;
-    fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
+    fn rename(&self, _session: &Session, _name: &str) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
     /// Returns the job that permanently deletes the session, to run off the UI thread.
     fn delete(&self, session: &Session) -> io::Result<Job>;
     /// Returns the archive job to run off the UI thread.

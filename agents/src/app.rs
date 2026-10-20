@@ -1341,6 +1341,9 @@ impl App {
             Action::New => {
                 return self.launch_new();
             }
+            Action::Rename { id, name } if id.provider == ProviderId::Claude => {
+                self.send_input(id, SessionInput::Rename(name));
+            }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
                     if session.transcript.is_some() {

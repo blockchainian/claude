@@ -118,6 +118,10 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
             id: id.clone(),
             text,
         }),
+        SessionInput::Rename(name) => Some(Action::Rename {
+            id: id.clone(),
+            name,
+        }),
         SessionInput::Interrupt => Some(Action::Stop(id.clone())),
         SessionInput::SetModel(model) => Some(Action::SetModel {
             id: id.clone(),

@@ -4,7 +4,9 @@ mod question;
 
 use crate::providers::{ScreenInput, SessionInput};
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -32,6 +34,9 @@ pub(super) fn send(
             for path in images {
                 image_path(path)?;
             }
+        }
+        SessionInput::Rename(title) => {
+            rename_command(title)?;
         }
         SessionInput::SetModel(value) | SessionInput::SetEffort(value) => {
             if value.is_empty() || value.chars().any(char::is_whitespace) {
@@ -116,6 +121,25 @@ fn validate_job_id(job_id: &str) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+fn rename_command(title: &str) -> io::Result<String> {
+    if title.trim().is_empty() || title.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid Claude title",
+        ));
+    }
+    Ok(format!("/rename {title}"))
+}
+
+fn input_lock_path(config_dir: &Path, job_id: &str) -> std::path::PathBuf {
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    config_dir.hash(&mut hash);
+    std::env::temp_dir()
+        .join("agents-attach-locks")
+        .join(format!("{:016x}", hash.finish()))
+        .join(format!("{job_id}.lock"))
 }
 
 fn validate_text(text: &str) -> io::Result<()> {
@@ -242,17 +266,18 @@ struct Terminal {
 impl Terminal {
     fn spawn(job_id: &str, cwd: &Path) -> io::Result<Self> {
         validate_job_id(job_id)?;
+        let lock_path = input_lock_path(&super::config_dir(), job_id);
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(lock_path.parent().expect("input lock directory"))?;
         let input_lock = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(
-                super::config_dir()
-                    .join("jobs")
-                    .join(job_id)
-                    .join("agents-input.lock"),
-            )?;
+            .mode(0o600)
+            .open(lock_path)?;
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
             match input_lock.try_lock() {
@@ -425,6 +450,10 @@ impl Terminal {
             }
             SessionInput::Answer { .. } => unreachable!("answers handled before prompt input"),
             SessionInput::Interrupt => self.write(b"\x1b"),
+            SessionInput::Rename(title) => {
+                self.submit(&rename_command(&title)?)?;
+                self.wait_at("rename-accepted", actual_empty)
+            }
             SessionInput::SetModel(model) => {
                 let choices = super::models::input_choices(&super::config_dir(), None);
                 let label = choices
@@ -609,6 +638,42 @@ fn known_dialog(screen: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_preserves_spaces_and_literal_special_characters() {
+        let title = "中文 task \"quoted\" 'single' $HOME `echo` /model haiku";
+        assert_eq!(rename_command(title).unwrap(), format!("/rename {title}"));
+    }
+
+    #[test]
+    fn rename_rejects_blank_names_and_terminal_controls_before_attach() {
+        for title in [
+            "",
+            "  ",
+            "one\ntwo",
+            "one\rtwo",
+            "one\ttwo",
+            "bad\u{1b}[201~",
+            "bad\u{1a}",
+        ] {
+            assert_eq!(
+                rename_command(title).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{title:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn attach_lock_is_outside_claude_config_and_is_scoped_by_config_and_job() {
+        let first = Path::new("/config/first");
+        let path = input_lock_path(first, "job");
+        assert!(!path.starts_with(first));
+        assert!(path.starts_with(std::env::temp_dir().join("agents-attach-locks")));
+        assert_eq!(path, input_lock_path(first, "job"));
+        assert_ne!(path, input_lock_path(Path::new("/config/second"), "job"));
+        assert_ne!(path, input_lock_path(first, "other"));
+    }
 
     #[test]
     fn captured_model_header_includes_the_selected_effort() {
