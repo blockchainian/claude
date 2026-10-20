@@ -459,6 +459,11 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "codex-manager list",
+        output: Some(Output::Extract(codex_thread_table)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "codex-manager interrupt",
         subject: Some(Subject::Field("threadId")),
         ..DEFAULT_RULE
@@ -921,20 +926,7 @@ fn web_search_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>>
     let links_found = stream.next()?.ok()?;
     let mut text = String::from("| Title |\n| --- |\n");
     for link in links_found {
-        let title: String = link
-            .title
-            .chars()
-            .flat_map(|character| {
-                // Search titles are literal text inside a Markdown table cell.
-                if character.is_ascii_punctuation() {
-                    vec!['\\', character]
-                } else if matches!(character, '\n' | '\r') {
-                    vec![' ']
-                } else {
-                    vec![character]
-                }
-            })
-            .collect();
+        let title = table_cell(&link.title);
         let url = link
             .url
             .replace('<', "%3C")
@@ -947,6 +939,37 @@ fn web_search_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>>
     // The decoder stops at the array boundary; preserve all following Markdown.
     text.pop();
     text.push_str(&links[stream.byte_offset()..]);
+    Some(vec![Section::Markdown {
+        label: "output".into(),
+        text,
+    }])
+}
+
+/// Literal text inside a Markdown table cell.
+fn table_cell(text: &str) -> String {
+    text.chars()
+        .flat_map(|character| {
+            if character.is_ascii_punctuation() {
+                vec!['\\', character]
+            } else if matches!(character, '\n' | '\r') {
+                vec![' ']
+            } else {
+                vec![character]
+            }
+        })
+        .collect()
+}
+
+fn codex_thread_table(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
+    let value: Value = serde_json::from_str(result.content[0]["text"].as_str()?).ok()?;
+    let mut text = String::from("| Name | State |\n| --- | --- |");
+    for thread in value["threads"].as_array()? {
+        text.push_str(&format!(
+            "\n| {} | {} |",
+            table_cell(thread["name"].as_str()?),
+            table_cell(thread["state"].as_str()?)
+        ));
+    }
     Some(vec![Section::Markdown {
         label: "output".into(),
         text,
@@ -1486,6 +1509,37 @@ mod tests {
         let mut content = record["message"]["content"][0]["content"].clone();
         content = serde_json::Value::String(content.as_str().unwrap().chars().take(0).collect());
         assert!(super::mcp_content(&content).is_empty());
+    }
+
+    #[test]
+    fn codex_manager_list_shows_a_thread_table() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-manager-list.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let name = records[0]["message"]["content"][0]["name"]
+            .as_str()
+            .unwrap();
+        let content = &records[1]["message"]["content"][0]["content"];
+        let output = super::output(
+            super::rule(name).output,
+            &serde_json::Value::Null,
+            &super::ToolResult {
+                content,
+                value: &serde_json::Value::Null,
+                text: "",
+                error: false,
+            },
+        );
+        let [crate::event::Section::Markdown { text, .. }] = output.as_slice() else {
+            panic!("expected one Markdown table, got {output:?}");
+        };
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[..2], ["| Name | State |", "| --- | --- |"]);
+        assert_eq!(rows[2], r"| 规则\:拆逗号 | completed |");
+        assert_eq!(rows.last().unwrap(), &"| 框架补三处 | inProgress |");
+        assert_eq!(rows.len(), 11);
     }
 
     #[test]
