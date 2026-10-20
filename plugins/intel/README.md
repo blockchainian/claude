@@ -70,6 +70,8 @@ Unminify plans and packs batches within each file and stage using `--context-tok
 `js-tiktoken` 1.0.21 (`o200k_base`); there is no name-count cap. Oversized contexts are
 shortened; an irreducible batch that still cannot fit fails before sending. Top-level
 naming finishes before function naming, and journals retain original batch IDs.
+Every run, including an interrupted run, updates import names in journal-completed files.
+Unfinished files supply their current export names without being rewritten, preserving resume.
 
 Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
 `.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final

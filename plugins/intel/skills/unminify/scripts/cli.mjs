@@ -221,46 +221,46 @@ export async function run(options, dependencies) {
         summary.exitCode = 1;
         emit({ file: files[index], status: 'interrupted', reason: results[index].reason.message });
       }
-      if (!summary.exitCode) {
-        const endImports = phase('followImports');
-        let changes;
+      const endImports = phase('followImports');
+      let changes;
+      try {
+        changes = await api.followImports(sources, (file, task) => {
+          const end = phase('followImports', file);
+          try { return withTimings(fileMetrics.get(file).cpu_ms, task); }
+          finally { end(); }
+        });
+      }
+      finally {
+        endImports();
+        for (const metrics of fileMetrics.values()) {
+          if (!changes?.has(metrics.file) || !journals.get(metrics.file)?.done) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
+        }
+      }
+      for (const [file, after] of changes) {
+        if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
+        // Unfinished journals retain batch positions and the original source fingerprint.
+        if (!journals.get(file)?.done) continue;
+        const metrics = fileMetrics.get(file);
+        let writtenAt = null;
+        const endWriting = phase('check_write', file);
         try {
-          changes = await api.followImports(sources, (file, task) => {
-            const end = phase('followImports', file);
-            try { return withTimings(fileMetrics.get(file).cpu_ms, task); }
-            finally { end(); }
-          });
-        }
-        finally {
-          endImports();
-          for (const metrics of fileMetrics.values()) {
-            if (!changes?.has(metrics.file)) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
+          const before = sources.get(file), journal = journals.get(file);
+          const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after)));
+          if (reason !== null) {
+            journal.rejectImports(reason);
+            summary.rejected++;
+            emit({ file, status: 'imports-rejected', reason });
+            continue;
           }
-        }
-        for (const [file, after] of changes) {
-          if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
-          const metrics = fileMetrics.get(file);
-          let writtenAt = null;
-          const endWriting = phase('check_write', file);
-          try {
-            const before = sources.get(file), journal = journals.get(file);
-            const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after)));
-            if (reason !== null) {
-              journal.rejectImports(reason);
-              summary.rejected++;
-              emit({ file, status: 'imports-rejected', reason });
-              continue;
-            }
-            journal.prepare(before, after, 'imports');
-            atomicWrite(join(root, file), after);
-            journal.complete(after, 'imports');
-            sources.set(file, after);
-            writtenAt = Date.now();
-            emit({ file, status: 'imports' });
-          } finally {
-            endWriting();
-            event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: writtenAt, at: Date.now() });
-          }
+          journal.prepare(before, after, 'imports');
+          atomicWrite(join(root, file), after);
+          journal.complete(after, 'imports');
+          sources.set(file, after);
+          writtenAt = Date.now();
+          emit({ file, status: 'imports' });
+        } finally {
+          endWriting();
+          event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: writtenAt, at: Date.now() });
         }
       }
     } finally { await namer.close(); namer = undefined; }
