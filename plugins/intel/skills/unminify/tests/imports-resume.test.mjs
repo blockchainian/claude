@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http2';
-import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { modelService } from './helpers/model-service.mjs';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -31,15 +31,10 @@ const records = data => data.trim().split('\n').map(line => JSON.parse(line));
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'unminify-imports-'));
   execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
-  const codexHome = join(root, '.auth');
-  await mkdir(codexHome);
-  const token = `e30.${Buffer.from(JSON.stringify({ exp: Date.now() / 1000 + 3600 })).toString('base64url')}.local`;
-  await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt',
-    tokens: { access_token: token, refresh_token: 'local-refresh', account_id: 'local-account' } }));
   const controls = { code: null, snapshot: null, requests: 0, refreshes: 0 };
   const read = file => readFile(join(root, file));
   const journal = file => read(`.unminify/${file}.jsonl`);
-  const server = createServer(async (req, res) => {
+  const { codexHome, baseUrl } = await modelService(t, root, async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     if (req.url === '/oauth/token') {
       controls.refreshes++;
@@ -63,12 +58,7 @@ async function fixture(t) {
       output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(names) }] }],
       usage: { input_tokens: 12, output_tokens: 3 } } })}\n\n`);
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
-    await rm(root, { recursive: true, force: true });
-  });
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => rm(root, { recursive: true, force: true }));
   const lines = [];
   const dependencies = { ...select, ...rename, ...checks, output: line => lines.push(line),
     createNamer: options => createNamer({ ...options, codexHome, baseUrl,
