@@ -91,6 +91,7 @@ impl TerminalScreen {
 pub struct SessionTerminal {
     pub id: SessionKey,
     pub screen: Screen,
+    pub cleanup: Option<crate::providers::Job>,
     pty: Pty,
     /// Bytes that detach the program instead of ending it; without them closing kills it.
     detach: Option<&'static [u8]>,
@@ -146,6 +147,7 @@ impl SessionTerminal {
         Ok(Self {
             id,
             screen,
+            cleanup: None,
             pty,
             detach,
             detach_timeout: DETACH_TIMEOUT,

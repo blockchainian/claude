@@ -254,6 +254,7 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     let mut session = session;
     session.process = None;
     session.ask = Some(ask);
+    assert!(provider.terminal_cleanup(&session).unwrap().is_none());
     let terminal = provider.terminal_command(&session).unwrap();
     assert_eq!(terminal.command.get_program(), "claude");
     assert_eq!(

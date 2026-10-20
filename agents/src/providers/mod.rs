@@ -264,6 +264,10 @@ pub trait Provider: Send {
     fn terminal_command(&self, _session: &Session) -> Result<TerminalCommand, &'static str> {
         Err("Terminal is not supported")
     }
+    /// Prepares cleanup for a session woken by opening its terminal, run after detaching.
+    fn terminal_cleanup(&self, _session: &Session) -> io::Result<Option<Job>> {
+        Ok(None)
+    }
     /// Routes input through the open terminal; `None` keeps the normal provider path.
     fn terminal_input<'a>(&self, _input: &'a SessionInput) -> Option<TerminalInput<'a>> {
         None

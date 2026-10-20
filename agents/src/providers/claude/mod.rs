@@ -138,6 +138,58 @@ fn session_entry(config_dir: &Path, session: &Session) -> io::Result<Option<regi
     Ok(Some(entry))
 }
 
+/// Finds a job woken by this terminal that has remained idle without another turn.
+fn idle_terminal_session(
+    config_dir: &Path,
+    session: &Session,
+    offset: u64,
+) -> io::Result<Option<(Session, registry::Entry)>> {
+    let Some(entry) = registry::live(config_dir).into_iter().find(|entry| {
+        entry.session_id.as_deref() == Some(&session.id.id)
+            && entry.kind.as_deref() == Some("bg")
+            && entry.job_id.as_deref() == session.id.id.get(..8)
+            && entry.status.as_deref() == Some("idle")
+    }) else {
+        return Ok(None);
+    };
+    let path = session
+        .transcript
+        .as_deref()
+        .ok_or_else(|| io::Error::other("Session has no transcript"))?;
+    let mut file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if len < offset {
+        return Ok(None);
+    }
+    let mut turn = false;
+    let mut invalid = None;
+    let end = crate::jsonl::read_lines(&mut file, offset, |line| {
+        match serde_json::from_slice::<serde_json::Value>(line) {
+            Ok(record) => turn |= matches!(record["type"].as_str(), Some("user" | "assistant")),
+            Err(error) => invalid = Some(error),
+        }
+    })?;
+    if let Some(error) = invalid {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+    }
+    // An incomplete record or rewritten transcript cannot prove that no turn started.
+    if turn || end != len {
+        return Ok(None);
+    }
+    let mut session = session.clone();
+    session.process = Some(Process {
+        pid: entry.pid.expect("live registry process"),
+        label: entry.kind.clone(),
+        started_at: entry.started_at.and_then(DateTime::from_timestamp_millis),
+    });
+    session.background_job = Some(crate::model::BackgroundJob {
+        id: entry.job_id.clone().expect("matching background job"),
+        needs: None,
+        awaits_prompt: false,
+    });
+    Ok(Some((session, entry)))
+}
+
 /// Stops a registered session through its background job or terminal process.
 fn stop_session(session: &Session, entry: &registry::Entry) -> io::Result<()> {
     let pid = entry.pid.expect("validated process id");
@@ -319,6 +371,12 @@ fn created_job(output: &std::process::Output) -> io::Result<String> {
 }
 
 impl ClaudeProvider {
+    fn terminal_question_pending(&self, session: &Session) -> bool {
+        self.ask_user_question
+            .as_ref()
+            .is_some_and(|server| server.pending().iter().any(|ask| ask.session == session.id))
+    }
+
     fn create_command(request: &crate::tasks::NewTask) -> Command {
         let mut command = Command::new("claude");
         command.arg("--bg").current_dir(&request.cwd);
@@ -814,15 +872,7 @@ impl Provider for ClaudeProvider {
     }
 
     fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
-        let ask_user_question_pending =
-            self.ask_user_question
-                .as_ref()
-                .is_some_and(|ask_user_question| {
-                    ask_user_question
-                        .pending()
-                        .iter()
-                        .any(|ask| ask.session == session.id)
-                });
+        let ask_user_question_pending = self.terminal_question_pending(session);
         let command = if ask_user_question_pending {
             let job = session
                 .background_job
@@ -861,6 +911,46 @@ impl Provider for ClaudeProvider {
             command,
             detach: Some(DETACH),
         })
+    }
+
+    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<Job>> {
+        if session.process.is_some() || self.terminal_question_pending(session) {
+            return Ok(None);
+        }
+        use std::os::unix::fs::MetadataExt;
+        let path = session
+            .transcript
+            .as_deref()
+            .ok_or_else(|| io::Error::other("Session has no transcript"))?;
+        let mut file = fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        let offset = crate::jsonl::complete_end(&mut file)?;
+        let mut boundary = crate::jsonl::Boundary::default();
+        boundary.capture(&mut file, offset)?;
+        let config_dir = self.config_dir.clone();
+        let session = session.clone();
+        Ok(Some(Box::new(move || {
+            let path = session.transcript.as_ref().expect("terminal transcript");
+            let mut file = fs::File::open(path)?;
+            let current = file.metadata()?;
+            if current.ino() != metadata.ino()
+                || current.len() < offset
+                || !boundary.matches(&mut file)?
+            {
+                return Ok(());
+            }
+            if let Some((session, entry)) = idle_terminal_session(&config_dir, &session, offset)? {
+                // Revalidate after reading the transcript, just as manual Stop validates its target.
+                let current =
+                    session_entry(&config_dir, &session)?.expect("woken session has a process");
+                if current.status.as_deref() == Some("idle")
+                    && current.proc_start == entry.proc_start
+                {
+                    stop_session(&session, &current)?;
+                }
+            }
+            Ok(())
+        })))
     }
 
     fn terminal_input<'a>(&self, input: &'a SessionInput) -> Option<TerminalInput<'a>> {
@@ -1245,6 +1335,116 @@ fn session(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn terminal_woken_job_stops_only_without_a_turn() {
+        use std::io::Write;
+        for change in [
+            "none",
+            "metadata",
+            "busy",
+            "waiting",
+            "shell",
+            "partial",
+            "truncated",
+            "changed-start",
+            "other-session",
+            "started",
+            "completed",
+            "other-job",
+            "foreground",
+            "stopped",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let id = "4165651d-b9e3-458d-8612-f8114e312363";
+            let path = transcript(directory.path(), id, 0);
+            fs::write(&path, FIXTURE).unwrap();
+            let mut provider = ClaudeProvider::new(directory.path().into());
+            let session = provider.refresh(1).sessions.remove(0);
+            let path = session.transcript.as_ref().unwrap();
+            let offset = fs::metadata(path).unwrap().len();
+            let mut entry = registry::tests::fixture(directory.path());
+            entry["sessionId"] = session.id.id.clone().into();
+            entry["kind"] = "bg".into();
+            entry["jobId"] = session.id.id[..8].into();
+            entry["status"] = "idle".into();
+            match change {
+                "busy" | "waiting" | "shell" => entry["status"] = change.into(),
+                "partial" => {
+                    let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+                    file.write_all(b"{\"type\":\"user\"").unwrap();
+                }
+                "truncated" => fs::write(path, "").unwrap(),
+                "changed-start" => entry["procStart"] = "Thu Jan  1 00:00:00 1970".into(),
+                "other-session" => entry["sessionId"] = uuid::Uuid::new_v4().to_string().into(),
+                "foreground" => entry["kind"] = "interactive".into(),
+                "other-job" => entry["jobId"] = "other-job".into(),
+                "stopped" => entry["pid"] = 999999.into(),
+                "started" | "completed" | "metadata" => {
+                    let lines = include_str!("../../../tests/fixtures/transcript.jsonl");
+                    let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+                    for line in lines.lines() {
+                        let record: serde_json::Value = serde_json::from_str(line).unwrap();
+                        let wanted = match change {
+                            "started" => record["type"] == "user",
+                            "completed" => {
+                                matches!(record["type"].as_str(), Some("user" | "assistant"))
+                            }
+                            _ => record["type"] == "ai-title",
+                        };
+                        if wanted {
+                            writeln!(file, "{line}").unwrap();
+                            if change != "completed" {
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            fs::write(
+                directory
+                    .path()
+                    .join(format!("sessions/{}.json", entry["pid"])),
+                serde_json::to_vec(&entry).unwrap(),
+            )
+            .unwrap();
+            let candidate = idle_terminal_session(directory.path(), &session, offset).unwrap();
+            assert_eq!(
+                candidate.is_some(),
+                matches!(change, "none" | "metadata"),
+                "{change}"
+            );
+            if let Some((candidate, entry)) = candidate {
+                assert_eq!(candidate.process.unwrap().pid, std::process::id());
+                assert_eq!(candidate.background_job.unwrap().id, session.id.id[..8]);
+                assert_eq!(entry.status.as_deref(), Some("idle"));
+            }
+        }
+    }
+
+    #[test]
+    fn terminal_cleanup_belongs_only_to_a_woken_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = transcript(directory.path(), "4165651d-b9e3-458d-8612-f8114e312363", 0);
+        fs::write(path, FIXTURE).unwrap();
+        let mut provider = ClaudeProvider::new(directory.path().into());
+        let mut session = provider.refresh(1).sessions.remove(0);
+        assert!(provider.terminal_cleanup(&session).unwrap().is_some());
+        session.process = Some(Process {
+            pid: std::process::id(),
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        session.background_job = Some(crate::model::BackgroundJob {
+            id: session.id.id[..8].into(),
+            needs: None,
+            awaits_prompt: false,
+        });
+        assert!(provider.terminal_cleanup(&session).unwrap().is_none());
+        session.process.as_mut().unwrap().label = None;
+        assert!(provider.terminal_cleanup(&session).unwrap().is_none());
+    }
+
     #[test]
     fn live_background_settings_override_the_previous_turn() {
         let directory = tempfile::tempdir().unwrap();
