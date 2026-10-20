@@ -34,9 +34,9 @@ export function contracts(files = ['a.js'], controls = {}) {
     events, get calls() { return calls; }, get peak() { return peak; },
     listFiles: async () => files,
     planFile: () => ({ stages: [[{ id: 'top', keys: [0] }], [{ id: 'first', keys: [2] }, { id: 'second', keys: [4] }]] }),
-    renderBatch(source, batch, renames) {
+    renderBatch(source, batch, renames, { placeholderOffset = 0 } = {}) {
       events.push(['render', batch.id, Object.fromEntries(renames)]);
-      return { context: batch.id, placeholders: { v1: batch.keys[0] } };
+      return { context: batch.id, placeholders: Object.fromEntries(batch.keys.map((key, index) => [`v${placeholderOffset + index + 1}`, key])) };
     },
     resolveNames(source, proposals) { events.push(['resolve']); return new Map(proposals); },
     applyRenames(source, renames) {
@@ -47,14 +47,17 @@ export function contracts(files = ['a.js'], controls = {}) {
     createNamer({ log }) {
       events.push(['create']);
       return {
-        async name({ placeholders }) {
-          calls++; active++; peak = Math.max(peak, active);
+        async name({ placeholders }, telemetry) {
+          const call = ++calls;
+          events.push(['request', telemetry.file, telemetry.batch_ids, { ...placeholders }]);
+          active++; peak = Math.max(peak, active);
           try {
             if (controls.killAt === calls) process.kill(process.pid, 'SIGKILL');
             if (controls.failAt === calls) throw Object.assign(new Error('stopped'), { code: controls.code ?? 'USAGE_LIMIT' });
             await new Promise(resolve => setTimeout(resolve, 5));
-            log({ kind: 'model', status: 200, duration_ms: 5, usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 3, reasoning_output_tokens: 1 }, rate_headers: { 'x-codex-primary-used-percent': String(calls) } });
-            return { names: { v1: names.get(placeholders.v1) }, usage: {} };
+            events.push(['reply', telemetry.file, telemetry.batch_ids]);
+            log({ ...telemetry, kind: 'model', status: 200, duration_ms: 5, usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 3, reasoning_output_tokens: 1 }, rate_headers: { 'x-codex-primary-used-percent': String(call) } });
+            return { names: Object.fromEntries(Object.entries(placeholders).map(([placeholder, key]) => [placeholder, names.get(key)])), usage: {} };
           } finally { active--; }
         },
         close() { events.push(['close', active]); },
@@ -72,34 +75,60 @@ test('one shared namer, stage ordering, bounded concurrency, completion replay a
   const deps = contracts(['a.js', 'b.js']);
   const result = await run({ dir: root, concurrency: 2 }, deps);
   assert.equal(result.exitCode, 0);
-  assert.equal(result.requests, 6);
-  assert.deepEqual(result.tokens, { input_tokens: 60, cached_input_tokens: 12, output_tokens: 18, reasoning_output_tokens: 6, total_tokens: 78 });
-  assert.equal(result.quota['x-codex-primary-used-percent'].before, 2);
+  assert.equal(result.requests, 4);
+  assert.deepEqual(result.tokens, { input_tokens: 40, cached_input_tokens: 8, output_tokens: 12, reasoning_output_tokens: 4, total_tokens: 52 });
+  assert.equal(result.quota['x-codex-primary-used-percent'].before, 1);
   assert.equal(deps.events.filter(e => e[0] === 'create').length, 1);
   assert.equal(deps.peak, 2);
   for (const event of deps.events.filter(e => e[0] === 'render' && e[1] !== 'top')) assert.equal(event[2]['0'], 'outer');
-  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
+  for (const file of ['a.js', 'b.js']) {
+    assert.equal(await readFile(join(root, file), 'utf8'), 'outer first second');
+    assert.deepEqual(deps.events.filter(e => e[0] === 'request' && e[1] === file).map(e => [e[2], e[3]]), [
+      [['top'], { v1: 0 }], [['first', 'second'], { v1: 2, v2: 4 }],
+    ]);
+    const topReply = deps.events.findIndex(e => e[0] === 'reply' && e[1] === file && e[2][0] === 'top');
+    const functionRequest = deps.events.findIndex(e => e[0] === 'request' && e[1] === file && e[2][0] === 'first');
+    assert(topReply < functionRequest);
+  }
   const replay = contracts(['a.js', 'b.js']);
   await run({ dir: root }, replay);
   assert.equal(replay.calls, 0);
   assert.deepEqual(deps.events.at(-1), ['close', 0]);
 });
 for (const code of ['AUTH', 'USAGE_LIMIT']) test(`${code} drains in-flight replies, persists them and resumes`, async t => {
-  const root = await workspace(t);
-  const interrupted = contracts(['a.js'], { failAt: 2, code });
+  const files = ['a.js', 'b.js'];
+  const root = await workspace(t, { 'a.js': 'a b c', 'b.js': 'a b c' });
+  const interrupted = contracts(files, { failAt: 4, code });
   const result = await run({ dir: root, concurrency: 2 }, interrupted);
   assert.equal(result.exitCode, 1);
-  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'a b c');
+  assert.equal(interrupted.calls, 4);
+  assert.equal(interrupted.peak, 2);
+  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
+  assert.equal(await readFile(join(root, 'b.js'), 'utf8'), 'a b c');
   assert.match(interrupted.lines.join('\n'), /Resume/);
   assert.deepEqual(interrupted.events.at(-1), ['close', 0]);
-  const resumed = contracts();
-  await run({ dir: root }, resumed);
+  const failureRequest = interrupted.events.findIndex(e => e[0] === 'request' && e[1] === 'b.js' && e[2][0] === 'first');
+  const drainedReply = interrupted.events.findIndex(e => e[0] === 'reply' && e[1] === 'a.js' && e[2][0] === 'first');
+  assert(drainedReply > failureRequest, 'the other packed request completes after the terminal failure');
+  const journal = async file => (await readFile(join(root, '.unminify', `${file}.jsonl`), 'utf8'))
+    .trim().split('\n').map(line => JSON.parse(line)).filter(record => record.id);
+  assert.deepEqual((await journal('a.js')).map(record => record.id), ['top', 'first', 'second']);
+  assert.deepEqual((await journal('b.js')).map(record => record.id), ['top']);
+  const resumed = contracts(files);
+  const resumedResult = await run({ dir: root }, resumed);
+  assert.equal(resumedResult.exitCode, 0);
   assert.equal(resumed.calls, 1);
-  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
+  assert.deepEqual(resumed.events.filter(e => e[0] === 'request'), [
+    ['request', 'b.js', ['first', 'second'], { v1: 2, v2: 4 }],
+  ]);
+  for (const file of files) {
+    assert.equal(await readFile(join(root, file), 'utf8'), 'outer first second');
+    assert.deepEqual((await journal(file)).map(record => record.id), ['top', 'first', 'second']);
+  }
 });
 test('SIGKILL after N replies resumes to byte-identical output', async t => {
   const root = await workspace(t);
-  const child = `import {run} from ${JSON.stringify(new URL('../scripts/cli.mjs', import.meta.url).href)}; import {contracts} from ${JSON.stringify(import.meta.url)}; await run({dir:${JSON.stringify(root)},concurrency:1},contracts(['a.js'],{killAt:3}));`;
+  const child = `import {run} from ${JSON.stringify(new URL('../scripts/cli.mjs', import.meta.url).href)}; import {contracts} from ${JSON.stringify(import.meta.url)}; await run({dir:${JSON.stringify(root)},concurrency:1},contracts(['a.js'],{killAt:2}));`;
   // Keep the child isolated from node:test registrations.
   const fixture = join(root, 'contracts.mjs');
   await writeFile(fixture, `export ${contracts.toString()}`);
@@ -110,6 +139,10 @@ test('SIGKILL after N replies resumes to byte-identical output', async t => {
   const resumed = contracts();
   await run({ dir: root, concurrency: 1 }, resumed);
   assert.equal(resumed.calls, 1);
+  assert.deepEqual(resumed.events.filter(e => e[0] === 'request'), [
+    ['request', 'a.js', ['first', 'second'], { v1: 2, v2: 4 }],
+  ]);
+  assert.equal(await readFile(join(root, 'a.js'), 'utf8'), 'outer first second');
   const uninterrupted = await workspace(t);
   await run({ dir: uninterrupted, concurrency: 1 }, contracts());
   assert.deepEqual(await readFile(join(root, 'a.js')), await readFile(join(uninterrupted, 'a.js')));

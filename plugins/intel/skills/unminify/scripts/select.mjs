@@ -175,7 +175,9 @@ function printContext(node) {
   return code;
 }
 
-export function renderBatch(source, batch, renames = new Map()) {
+export function renderBatch(source, batch, renames = new Map(), {
+  placeholderOffset = 0, placeholderCount = batch.keys.length,
+} = {}) {
   const analysis = batchAnalyses.get(batch) ?? analyze(source);
   if (analysis.source !== source) throw new Error('Batch source changed');
   const { bindings, owners, contexts, references, usedNames, exports } = analysis;
@@ -190,17 +192,18 @@ export function renderBatch(source, batch, renames = new Map()) {
   for (const key of targets.keys()) if (!bindings.has(key)) throw new Error(`Unknown binding key: ${key}`);
   for (const [index, key] of batch.keys.entries()) {
     if (!bindings.has(key)) throw new Error(`Unknown binding key: ${key}`);
-    placeholders[`v${index+1}`] = key;
-    targets.set(key, `v${index+1}`);
+    const placeholder = `v${placeholderOffset + index + 1}`;
+    placeholders[placeholder] = key;
+    targets.set(key, placeholder);
   }
   // Reserve placeholder names even when the source already has a binding named v1.
-  const reserved = new Set(Object.keys(placeholders));
+  const reserved = name => /^v[1-9]\d*$/.test(name) && Number(name.slice(1)) <= placeholderCount;
   const batchKeys = new Set(batch.keys), finalNames = new Set(targets.values());
   const contextNames = new Map();
   let suffix = 0;
   function nameFor(key) {
     const name = targets.get(key) ?? bindings.get(key).identifier.name;
-    if (batchKeys.has(key) || !reserved.has(name)) return name;
+    if (batchKeys.has(key) || !reserved(name)) return name;
     if (!contextNames.has(key)) {
       let replacement;
       do { replacement = `_context${++suffix}`; } while (usedNames.has(replacement) || finalNames.has(replacement));

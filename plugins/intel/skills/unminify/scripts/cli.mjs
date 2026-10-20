@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
+import { packBatches } from './pack.mjs';
 import { withTimings, timed, intervalMs, requestStats } from './timing.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
@@ -148,33 +149,43 @@ export async function run(options, dependencies) {
           const endModel = phase('model', file);
           try {
             for (const stage of stages) {
-              const results = await Promise.allSettled(stage.map(async batch => {
+              // Replay the whole stage before rendering any pending request.
+              for (const batch of stage) {
+                if (!journal.batches.has(batch.id)) continue;
+                for (const [key, name] of Object.entries(journal.batches.get(batch.id))) renames.set(Number(key), name);
+              }
+              if (stop) throw stop;
+              const pending = stage.filter(batch => !journal.batches.has(batch.id));
+              const packed = packBatches(pending, (batch, placeholders) =>
+                timed('renderBatch', () => api.renderBatch(source, batch, renames, placeholders)), settings);
+              const results = await Promise.allSettled(packed.map(async ({ parts, payload }) => {
                 try {
-                  if (journal.batches.has(batch.id)) {
-                    for (const [key, name] of Object.entries(journal.batches.get(batch.id))) renames.set(Number(key), name);
-                    return;
-                  }
-                  if (stop) throw stop;
                   const queuedAt = Date.now();
                   await withSlot(async () => {
-                    const payload = timed('renderBatch', () => api.renderBatch(source, batch, renames));
                     let response;
-                    try { response = await namer.name(payload, { file, batch_id: batch.id, phase: 'model', queued_at: queuedAt }); } catch (error) {
+                    const batchIds = parts.map(({ batch }) => batch.id);
+                    try { response = await namer.name(payload, { file, batch_id: batchIds.length === 1 ? batchIds[0] : null,
+                      batch_ids: batchIds, name_count: Object.keys(payload.placeholders).length,
+                      phase: 'model', queued_at: queuedAt }); } catch (error) {
                       if (error.code === 'USAGE_LIMIT' || error.code === 'AUTH') throw error;
-                      journal.batch(batch.id, new Map(), error.message);
-                      summary.failedBatches++;
-                      emit({ file, status: 'batch-failed', batch: batch.id, reason: error.message });
+                      for (const { batch } of parts) {
+                        journal.batch(batch.id, new Map(), error.message);
+                        summary.failedBatches++;
+                        emit({ file, status: 'batch-failed', batch: batch.id, reason: error.message });
+                      }
                       return;
                     }
                     const entries = Object.entries(payload.placeholders);
-                    if (!response.names || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string') || Object.keys(response.names).length !== entries.length) throw new Error(`invalid names for ${file}:${batch.id}`);
-                    const proposals = new Map(renames);
-                    for (const [placeholder, key] of entries) proposals.set(key, response.names[placeholder]);
-                    const resolved = timed('resolveNames', () => api.resolveNames(source, proposals));
-                    const names = new Map(batch.keys.filter(key => resolved.has(key)).map(key => [key, resolved.get(key)]));
-                    // Persist before exposing a reply to any later render or starting queued work.
-                    journal.batch(batch.id, names);
-                    for (const [key, name] of names) renames.set(key, name);
+                    if (!response.names || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string') || Object.keys(response.names).length !== entries.length) throw new Error(`invalid names for ${file}:${batchIds.join(',')}`);
+                    for (const { batch, payload: original } of parts) {
+                      const proposals = new Map(renames);
+                      for (const [placeholder, key] of Object.entries(original.placeholders)) proposals.set(key, response.names[placeholder]);
+                      const resolved = timed('resolveNames', () => api.resolveNames(source, proposals));
+                      const names = new Map(batch.keys.filter(key => resolved.has(key)).map(key => [key, resolved.get(key)]));
+                      // Persist each original batch before exposing it to later work.
+                      journal.batch(batch.id, names);
+                      for (const [key, name] of names) renames.set(key, name);
+                    }
                   });
                 } finally { metrics.last_batch_at = Date.now(); }
               }));

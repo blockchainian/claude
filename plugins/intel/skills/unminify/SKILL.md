@@ -32,7 +32,11 @@ Never print credentials.
 
 The command selects parseable `.js`/`.mjs` files, asks for names of short non-import bindings,
 resolves naming conflicts, checks each completed file and writes it atomically. Top-level
-batches finish before function batches. After all files finish, imports follow export names
+batches finish before function batches. Within each file and stage, pending batches are greedily
+packed in order up to `--max-ids` names and `--context-bytes` UTF-8 context bytes, including
+batch separators. An oversized original batch travels alone. Placeholders are unique across
+the request; replies and resume records stay keyed by the original batch IDs.
+After all files finish, imports follow export names
 without another model request. Public export names stay unchanged.
 
 ## Ignore and resume
@@ -45,7 +49,7 @@ Accepted replies are synced immediately to `.unminify/<relative-path>.jsonl` at 
 Git root. `.unminify/requests.jsonl` appends each model or token-refresh HTTP attempt;
 `.unminify/performance.jsonl` appends run, file, phase and shared 429 pause boundaries.
 Both use a run ID and epoch-millisecond timestamps. Attempts include queue/send/headers/end
-times, retry cause, in-flight and queued counts, file/batch/phase, body bytes and HTTP/2
+times, retry cause, in-flight and queued counts, file/batch IDs/name count/phase, body bytes and HTTP/2
 session ID (changes on reconnect), plus status, usage and safe rate headers. Credentials,
 auth-file contents and source text are never logged in these telemetry files.
 
@@ -62,7 +66,7 @@ then rerun. A failed rewrite keeps the file intact and records the reason; repor
 ## Report
 
 Parse the JSON status lines and final summary. Report changed, skipped and rejected files,
-request count, token totals and first-to-last quota percentage changes; if quota headers
+model HTTP-attempt count (including retries), median and mean names per request, token totals and first-to-last quota percentage changes; if quota headers
 were absent, report `没测到`. Inspect the Git diff and leave committing target source to the
 caller. The final summary is also appended to `performance.jsonl`: total and phase elapsed
 milliseconds, HTTP-attempt p50/p90/max, time-weighted average and peak in-flight requests,
@@ -82,5 +86,6 @@ node "$SKILL_DIR/scripts/perf.mjs" <target-repo> \
 
 The JSON report shows sends, completions, end-of-window and peak in-flight counts, mean
 completed-attempt duration and 429 responses per window, phase times and slowest files.
+It also reports model HTTP-attempt count and `names_per_request` median/mean (retries included).
 An interrupted run uses its recorded boundaries; incomplete trailing JSONL records are ignored.
 Do not run the live-model `scripts/e2e.mjs` unless the user requested it.

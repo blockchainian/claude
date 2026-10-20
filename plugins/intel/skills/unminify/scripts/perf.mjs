@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { intervalMs } from './timing.mjs';
+import { intervalMs, namingStats } from './timing.mjs';
 
 const help = 'perf <dir> [--run-id <id>] [--window-seconds 10] [--slow-files 10]';
 
@@ -99,7 +99,7 @@ export function report({ dir, runId, windowSeconds = 10, slowFiles = 10 }) {
     written_at: event.written_at, cpu_ms: event.cpu_ms,
     ...(importWrites.has(event.file) ? { followImports: importWrites.get(event.file) } : {}) }));
   files.sort((a, b) => b.total_ms - a.total_ms || a.file.localeCompare(b.file));
-  return { run_id: start.run_id, total_ms: summary ? summary.total_ms : endedAt - start.at,
+  return { run_id: start.run_id, ...namingStats(requests), total_ms: summary ? summary.total_ms : endedAt - start.at,
     phase_ms: summary ? summary.phase_ms : phaseMs, windows, slow_files: files.slice(0, slowFiles) };
 }
 
