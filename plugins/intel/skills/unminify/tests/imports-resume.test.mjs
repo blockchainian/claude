@@ -21,7 +21,7 @@ const extraContext = `function extraContext() { return "${'padding '.repeat(2000
 const added = {
   'a-ready.mjs': 'export const a = 101;\n',
   'b-fresh.mjs': "import { a as x } from './a-ready.mjs'; import { b as y } from './z-pending.mjs'; console.log(x, y);\n",
-  'c-unfinished.mjs': "import { a as x } from './a-ready.mjs'; const n = 1; function calculateInterrupted(p) { return x + n + p; }\n"
+  'c-unfinished.mjs': "import { a as x } from './a-ready.mjs'; const n = 1; function calculateInterrupted(p) { return x + n + p; }\nexport {};\n"
     + extraContext,
   'z-pending.mjs': 'export const b = 2; function calculatePending(p) { return p + b; }\n' + extraContext,
 };

@@ -19,7 +19,7 @@ const inputTokens = body => encoder.encode(body.instructions, [], []).length + e
 
 const planOptions = options => ({ minSymbolLength: 4, maxInputTokens: 1000, ...options });
 const sourceWithFunctions = (count, padding = 17000) => `const a = 7;\n${Array.from({ length: count }, (_, index) =>
-  `function calculateValue${index}(x) { const y = x + a; return y * 2; }`).join('\n')}\n/*${' padding'.repeat(Math.ceil(padding / 8))}*/\n`;
+  `function calculateValue${index}(x) { const y = x + a; return y * 2; }`).join('\n')}\n/*${' padding'.repeat(Math.ceil(padding / 8))}*/\nexport {};\n`;
 const records = async path => (await readFile(path, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
 
 // This is the local HTTP/2 Responses endpoint; all planning, rendering, validation,
@@ -220,8 +220,8 @@ test('placeholders from other packed batches cannot shadow imported context name
 });
 
 test('separate files never share a model request', async t => {
-  const first = 'const a = 1, b = 3; console.log(a, b);';
-  const second = 'const b = 2; console.log(b);';
+  const first = 'const a = 1, b = 3; console.log(a, b); export {};';
+  const second = 'const b = 2; console.log(b); export {};';
   const target = await fixture(t, first);
   await writeFile(join(target.root, 'second.mjs'), second);
   const summary = await target.run({});
@@ -250,7 +250,7 @@ test('single-batch requests preserve their original rendered context', async t =
 
 
 test('an irreducible batch over budget is rejected before HTTP and preserves source', async t => {
-  const source = 'const a = 1; console.log(a);';
+  const source = 'const a = 1; console.log(a); export {};';
   const target = await fixture(t, source);
   const summary = await target.run({ maxInputTokens: 1 });
   assert.equal(summary.exitCode, 1);

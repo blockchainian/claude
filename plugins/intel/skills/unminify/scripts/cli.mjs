@@ -205,7 +205,9 @@ export async function run(options, dependencies) {
           if (batchFailed) return;
           const endWriting = phase('check_write', file);
           try {
-            const after = timed('applyRenames', () => api.applyRenames(source, renames));
+            // Recheck replayed journal proposals against the current file policy.
+            const resolved = timed('resolveNames', () => api.resolveNames(source, renames));
+            const after = timed('applyRenames', () => api.applyRenames(source, resolved));
             const reason = await timed('checkRewrite', () => api.checkRewrite(source, after));
             if (reason !== null) {
               journal.complete(source, 'rejected', reason);

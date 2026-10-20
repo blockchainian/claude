@@ -93,7 +93,7 @@ test('checks same, ancestor, descendant bindings and global captures, but permit
 });
 
 test('reserves names within a batch, increments suffixes and omits unchanged proposals', () => {
-  const source = 'let a=1,b=2,item2=3,item3=4; function f(c){return a+b+c}';
+  const source = 'let a=1,b=2,item2=3,item3=4; function f(c){return a+b+c} export {};';
   const result = resolveNames(source, names(source, [['a', 'item2'], ['b', 'item2'], ['c', 'item4']]));
   assert.equal(result.get(key(source, 'a')), 'item4');
   assert.equal(result.get(key(source, 'b')), 'item5');
@@ -188,9 +188,9 @@ test('follows through imported exports with final local names', () => {
 
 test('does not capture global writes or destructuring assignment targets', () => {
   for (const source of [
-    'let a=1; function f(){external=2; return a}',
-    'let a=1; function f(){({external}=obj); return a}',
-    'let a=1; function f(){for(external of items) use(a)}',
+    'let a=1; function f(){external=2; return a} export {};',
+    'let a=1; function f(){({external}=obj); return a} export {};',
+    'let a=1; function f(){for(external of items) use(a)} export {};',
   ]) assert.equal(resolveNames(source, names(source, [['a', 'external']])).get(key(source, 'a')), 'external2');
 });
 
@@ -202,7 +202,7 @@ test('keeps escaped shorthand public keys and Unicode offsets intact', () => {
 });
 
 test('renames catch, loop, recursive class and nested shadowed bindings independently', () => {
-  const source = 'const a=1; function f(a){try{throw a}catch(e){for(let i of [e]) use(i,a)}} class C {m(){return C}} use(a,C);';
+  const source = 'const a=1; function f(a){try{throw a}catch(e){for(let i of [e]) use(i,a)}} class C {m(){return C}} use(a,C); export {};';
   const proposals = names(source, [['a', 'outer', 0], ['a', 'inner', 1], ['e', 'error'], ['i', 'item'], ['C', 'Component']]);
   const after = applyRenames(source, resolveNames(source, proposals));
   equivalent(source, after);
@@ -218,7 +218,7 @@ test('real open source fixture retains binding identities after batch renames', 
 });
 
 test('keeps JSX tag names lexical when a model proposes a lowercase name', () => {
-  const source = 'const C=load(); const e=<C/>;';
+  const source = 'const C=load(); const e=<C/>; export {};';
   const resolved = resolveNames(source, names(source, [['C', 'component']]));
   assert.equal(resolved.get(key(source, 'C')), 'Component');
   equivalent(source, applyRenames(source, resolved));

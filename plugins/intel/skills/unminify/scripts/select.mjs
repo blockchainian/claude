@@ -1,6 +1,7 @@
 import { countTokens, estimateInputTokens } from './prompt.mjs';
 import { timed } from './timing.mjs';
 import { isLexicalIdentifier } from './identifiers.mjs';
+import { fragmentFacts } from './fragments.mjs';
 import { readFile, readdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -13,7 +14,7 @@ import ignore from 'ignore';
 const traverse = traverseModule.default ?? traverseModule;
 const generate = generateModule.default ?? generateModule;
 const exec = promisify(execFile);
-const parseSource = source => timed('parse', () => parse(source, { sourceType: 'unambiguous' }));
+const parseSource = source => timed('parse', () => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true }));
 const inside = (node, container) => node.start >= container.start && node.end <= container.end;
 const isOwner = p => p.isFunction() || p.isClass();
 // Batches keep their file analysis alive only while their plan is in use.
@@ -27,10 +28,12 @@ export function releasePlan(stages) {
 function analyze(source) {
   const ast = parseSource(source);
   const bindings = new Map();
+  let fragment;
   const ownerKey = node => `${node.type}:${node.start}:${node.end}`;
   const owners = new Map([[ownerKey(ast.program), ast.program]]);
   const contexts = new Map(), references = new WeakMap(), usedNames = new Set(), exports = new Map();
   traverse(ast, {
+    Program(p) { ({ fragment } = fragmentFacts(p)); },
     enter(p) {
       if (!isOwner(p)) return;
       owners.set(ownerKey(p.node), p.node);
@@ -54,7 +57,7 @@ function analyze(source) {
       for (const binding of Object.values(p.scope.bindings)) bindings.set(binding.identifier.start, binding);
     },
   });
-  return { source, ast, bindings, owners, contexts, references, usedNames, exports };
+  return { source, ast, bindings, owners, contexts, references, usedNames, exports, fragment };
 }
 
 /** Selects a file or a directory's files; paths are relative to the enclosing Git root, ignore rules to their own file. */
@@ -117,7 +120,8 @@ export function planFile(source, { minSymbolLength = 4, maxInputTokens = 100000 
     }
     return { stages: stages.map(stage => stage.flatMap(fit)) };
   };
-  const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length < minSymbolLength)
+  const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length < minSymbolLength
+    && !(analysis.fragment && b.scope.path.isProgram()))
     .sort((a,b)=>a.identifier.start-b.identifier.start);
   if (!candidates.length) return { stages: [[]] };
   const whole = { id: `Program:${ast.program.start}:${ast.program.end}:${maxInputTokens}:${candidates[0].identifier.start}:file`,
