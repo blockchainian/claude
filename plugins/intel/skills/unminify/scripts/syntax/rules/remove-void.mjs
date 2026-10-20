@@ -1,6 +1,7 @@
 // Ported from wakaru 1.14.0 RemoveVoid (Apache-2.0).
 export default {
   name: 'RemoveVoid',
+  globals: ['undefined'],
   visitor(context) {
     return {
       UnaryExpression: {

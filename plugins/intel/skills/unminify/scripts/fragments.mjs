@@ -37,6 +37,12 @@ export function fragmentFacts(program, { fragment = false } = {}) {
 
 /** Index only names and flags, releasing each file's AST before reading another. */
 export function indexFragments(files) {
+  return indexFragmentContext(files).fragments;
+}
+
+/** Preserve the program-binding evidence used to authorize fragment globals. */
+export function indexFragmentContext(files) {
+  const topLevelBindings = new Set();
   const summaries = new Map(), readers = new Map(), declarations = new Map(), aliases = new Map();
   for (const [file, source] of files) {
     let ast;
@@ -46,6 +52,7 @@ export function indexFragments(files) {
       const free = Object.keys(program.scope.globals);
       const unknown = free.filter(name => !environmentGlobals.has(name) && !program.scope.hasBinding(name));
       const bindings = Object.values(program.scope.bindings);
+      for (const binding of bindings) topLevelBindings.add(binding.identifier.name);
       const unused = bindings.filter(binding => !binding.referenced).map(binding => binding.identifier.name);
       for (const binding of bindings) {
         const index = binding.kind === 'module' ? (!binding.referenced ? aliases : null) : declarations;
@@ -78,11 +85,16 @@ export function indexFragments(files) {
     const shared = facts.unused.some(name => [...(readers.get(name) ?? [])].some(reader => reader !== file));
     if (facts.fragment || (!facts.boundary && (facts.unknown.length > 0 || shared || collisions.has(file)))) fragments.add(file);
   }
-  return fragments;
+  return { fragments, topLevelBindings };
 }
 
 /** Git-root scope keeps sibling slices visible across directory-sized runs. */
 export function loadFragmentIndex(root, inputs) {
+  return loadFragmentContext(root, inputs).fragments;
+}
+
+/** Use the same Git-root/input scope for fragment flags and binding evidence. */
+export function loadFragmentContext(root, inputs) {
   let files;
   try {
     files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
@@ -100,5 +112,5 @@ export function loadFragmentIndex(root, inputs) {
       } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
   }
-  return indexFragments(sources());
+  return indexFragmentContext(sources());
 }

@@ -38,11 +38,20 @@ AST mutation alone never writes output; the source edits are authoritative. Do n
 print an entire file. Generating a replacement for a transformed node is allowed.
 
 `context.canIntroduceGlobal(path, name)` authorizes a new intrinsic reference only
-in complete files with no binding of that name anywhere in the module, no `with`,
+with no binding of that name anywhere in the current module, no `with`,
 and no unknown direct eval or known eval mentioning that name. It also records the
 name for this pass's independent free-variable check. Call it only for the exact
-intrinsic reference being synthesized. Fragments always return false: local scope
-information cannot establish an entire chunk's globals.
+intrinsic reference being synthesized. A rule declares these names in its `globals`
+array, e.g. `globals: ['undefined']`, so checkpoints track relevant global evidence.
+
+For fragments, pass `fragmentContext` from `indexFragmentContext(files)` or
+`loadFragmentContext(root, inputs)`. The latter indexes the whole Git root, falling
+back to the supplied input files outside Git. The context includes the union of all
+program binding names, including import aliases. An intrinsic is permitted only when
+absent from that union; local bindings and dynamic-scope checks still apply. Direct
+API calls without this context retain the conservative fragment policy. The CLI
+passes the context to both syntax rewriting and its independent checks. Checkpoints
+retain the shadowed intrinsic names rather than unrelated names that renaming may change.
 
 Rules must skip transformations that change fragment Program bindings, declaration
 kinds, declaration grouping or placement. Full local function transformations can
@@ -51,7 +60,7 @@ bindings and declaration layout, and rejects newly introduced free variables exc
 intrinsics explicitly authorized by the pass's guard. A rejected pass throws before
 any file write. Existing rename checks are independent and unchanged.
 
-`transformSyntax(source, { fragment, rules })` returns `{ source, steps }`; tests may
+`transformSyntax(source, { fragment, fragmentContext, rules })` returns `{ source, steps }`; tests may
 supply rule objects directly. Each step records its name and accepted source edits.
 The file checkpoint/status emits only edit counts, never source text.
 

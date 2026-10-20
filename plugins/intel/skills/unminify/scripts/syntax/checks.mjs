@@ -36,7 +36,8 @@ export function checkSyntaxRewrite(before, after, options = {}) {
   catch { return 'PARSE_FAIL'; }
   if (a.fragment && a.bindings!==b.bindings) return 'FRAGMENT_BINDINGS_CHANGED';
   if (a.fragment && a.layout!==b.layout) return 'FRAGMENT_DECLARATIONS_CHANGED';
-  const allowed = new Set(a.fragment ? [] : options.allowedGlobals ?? []);
+  const allowed = new Set((options.allowedGlobals ?? []).filter(name => !a.fragment
+    || (options.fragmentContext !== undefined && !options.fragmentContext.topLevelBindings.has(name))));
   const added = [...b.globals].filter(name=>!a.globals.has(name) && !allowed.has(name));
   return added.length ? `NEW_GLOBALS ${added.join(',')}` : null;
 }

@@ -16,7 +16,7 @@ function evalSource(node) {
     || prefix.type !== 'StringLiteral' || prefix.value !== 're') return null;
   return 'require';
 }
-export function globalGuard(ast, fragment) {
+export function globalGuard(ast, fragment, fragmentContext) {
   const declared = new Set(), evals = [];
   let withStatement = false, unknownEval = false;
   traverse(ast, {
@@ -31,6 +31,7 @@ export function globalGuard(ast, fragment) {
       else evals.push(source);
     },
   });
-  return name => !fragment && !declared.has(name) && !withStatement && !unknownEval
+  return name => (!fragment || (fragmentContext !== undefined && !fragmentContext.topLevelBindings.has(name)))
+    && !declared.has(name) && !withStatement && !unknownEval
     && !evals.some(source => new RegExp(`(^|[^a-zA-Z0-9_$])${name}($|[^a-zA-Z0-9_$])`).test(source));
 }
