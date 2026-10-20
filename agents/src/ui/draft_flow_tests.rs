@@ -1829,3 +1829,15 @@ fn resumable_session_settings_dispatch_only_a_changed_value() {
         }
     }
 }
+
+#[test]
+fn new_draft_starts_in_name_editor() {
+    let (directory, mut view) = fixture();
+    assert!(matches!(key(&mut view, KeyCode::Char('n')), Some(Action::NewDraft { .. })));
+    let id = view.add_draft(setup(directory.path()));
+    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.name_target, Some(id));
+    key(&mut view, KeyCode::Char('x'));
+    assert_eq!(view.rename.text(), "x");
+    assert!(view.input_box.editor.text().is_empty());
+}

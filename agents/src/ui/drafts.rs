@@ -217,9 +217,7 @@ impl View {
         });
         self.status_filter = 0;
         self.select_draft(id);
-        self.name_target = Some(id);
-        self.rename.clear();
-        self.set_active_panel(Panel::Prompt);
+        self.open_name(id);
         id
     }
 
