@@ -114,25 +114,31 @@ test('keeps expression-only syntax valid when it becomes a statement', () => {
   equal('(function(){}(), {answer: 7}.answer, class {}.name, done());',
     '(function(){}()); ({answer:7}.answer); (class {}.name); done();');
 });
-test('fragments preserve program declaration grouping, kind and placement', () => {
-  for (const source of [
-    'var a=(mark(), value), b=2;',
-    'let a=(mark(), value);',
-    'for (var a=(mark(), value); ready;) {}',
-    'mark(), done(); var a=2;',
-    'if (ready) { mark(), done(); var shared=2; }',
-    'if (mark(), ready) var shared=2;',
-  ]) assert.equal(run(source, true), source);
+test('fragments allow splitting declarations and expressions in evaluation order', () => {
+  for (const [source, expected] of [
+    ['var a=(mark(), value), b=2;', 'mark(); var a = value; var b=2;'],
+    ['let a=(mark(), value);', 'mark(); let a = value;'],
+    ['for (var a=(mark(), value); ready;) {}', 'mark(); for (var a = (value); ready;) {}'],
+    ['mark(), done(); var a=2;', 'mark(); done(); var a=2;'],
+    ['if (ready) { mark(), done(); var shared=2; }', 'if (ready) { mark(); done(); var shared=2; }'],
+    ['if (mark(), ready) var shared=2;', 'mark(); if (ready) var shared=2;'],
+  ]) assert.equal(run(source, true), expected);
+});
+test('fragment declaration splitting preserves names, kinds and evaluation order', () => {
+  equal('var first=(mark(), value), second=next(); let third=(done(), last); const fourth=finish();',
+    'mark(); var first=value; var second=next(); done(); let third=last; const fourth=finish();', true);
+  const source = 'var events=[]; function mark(s){events.push(s);return s;} var first=(mark("prefix"),mark("first")), second=mark("second"); let third=(mark("middle"),mark("third")); const fourth=mark("fourth"); JSON.stringify(events);';
+  assert.equal(runInNewContext(run(source, true)), '["prefix","first","second","middle","third","fourth"]');
 });
 test('fragments still simplify complete function scopes and trailing expressions', () => {
   equal('var shared=2; function inspect(){ let a=(mark(), value), b=2; return (log(), a); } done(), finish();',
     'var shared=2; function inspect(){ mark(); let a=value; let b=2; log(); return a; } done(); finish();', true);
   equal('var fn=(mark(), function(){return (log(), value);}), sibling=2;',
-    'var fn=(mark(), function(){log(); return value;}), sibling=2;', true);
+    'mark(); var fn=function(){log(); return value;}; var sibling=2;', true);
 });
 test('detects unbound-export fragments without an explicit fragment option', () => {
   const source = 'var shared=(mark(), value), sibling=2; export { missing };';
-  assert.equal(run(source), source);
+  assert.equal(run(source), 'mark(); var shared = value; var sibling=2; export { missing };');
 });
 test('preserves actual initializer evaluation order', () => {
   const source = 'const events=[]; function mark(s){events.push(s);return 1;} for(var a=mark("first"), b=(mark("prefix"),mark("middle")), c=(mark("later"),mark("last"));false;){} JSON.stringify(events);';
