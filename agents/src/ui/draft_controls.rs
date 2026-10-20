@@ -1280,8 +1280,7 @@ mod tests {
                     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
                 };
                 assert_eq!(action, None);
-                assert!(!view.prompt_focused());
-                view.set_active_panel(Panel::Prompt);
+                assert!(view.prompt_focused());
                 let action = view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
                 let Some(Action::CreateTask {
                     request, branch, ..

@@ -150,8 +150,6 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
 
 fn begin_named_draft(tmux: &Tmux, name: &str) {
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
-    tmux.run(&["send-keys", "-t", "probe", "k"]);
     assert_title_caret(tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "-l", name]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);

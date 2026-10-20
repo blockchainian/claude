@@ -91,9 +91,8 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
 /// Starts after repository selection, names the task and focuses its prompt.
 fn named_draft(view: &mut View, cwd: &std::path::Path, name: &str) -> crate::model::DraftId {
     let id = view.add_draft(setup(cwd));
-    view.set_active_panel(Panel::Details);
-    view.open_name(id);
-    view.set_active_panel(Panel::Details);
+    assert_eq!(view.active_panel, Panel::Details);
+    assert_eq!(view.name_target, Some(id));
     view.handle_paste(name);
     assert_eq!(key(view, KeyCode::Enter), None);
     assert!(view.selected_draft().unwrap().name.is_some());
@@ -464,7 +463,7 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
 fn wizard_name_opens_repository_before_prompt() {
     let (directory, mut view) = fixture();
     view.add_draft(setup(directory.path()));
-    view.set_active_panel(Panel::Details);
+    assert_eq!(view.active_panel, Panel::Details);
     view.handle_paste("wizard task");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert!(matches!(
@@ -719,7 +718,6 @@ fn prompt_enter_opens_missing_branch_and_wizard_pick_keeps_prompt() {
         DraftBranch::Existing("main".into())
     );
     assert!(view.selector.is_none());
-    view.set_active_panel(Panel::Prompt);
     assert!(view.prompt_focused());
     assert_eq!(view.input_box.editor.text(), "half prompt");
     assert!(matches!(
@@ -866,8 +864,7 @@ fn saving_existing_name_is_a_side_edit_and_does_not_create() {
         Some("renamed")
     );
     assert!(view.selector.is_none());
-    view.set_active_panel(Panel::Prompt);
-    assert!(view.prompt_focused());
+    assert_eq!(view.active_panel, Panel::Details);
     assert_eq!(view.input_box.editor.text(), "half prompt");
 }
 
@@ -1033,7 +1030,7 @@ fn wizard_same_root_repository_pick_keeps_side_branch_from_a_subdirectory() {
         DraftBranch::Existing("feature/x".into())
     );
     assert!(!view.drafts[0].working);
-    view.set_active_panel(Panel::Prompt);
+    assert_eq!(view.active_panel, Panel::Prompt);
     assert!(matches!(
         key(&mut view, KeyCode::Enter),
         Some(Action::CreateTask { .. })
@@ -2032,3 +2029,4 @@ fn panel_blur_does_not_reopen_name_or_save_twice() {
         }
     }
 }
+

@@ -214,8 +214,6 @@ fn save_title_capture(tmux: &Tmux, name: &str) {
 fn terminal_task_names_edit_on_details_rule() {
     let (_directory, tmux, _transcript) = start_probe("inline-task-name");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
-    tmux.run(&["send-keys", "-t", "probe", "k"]);
     assert_title_caret(&tmux, "New task", 0);
     save_title_capture(&tmux, "01-new-task-placeholder");
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
@@ -247,8 +245,6 @@ fn terminal_task_names_edit_on_details_rule() {
     tmux.wait_for(|capture| !capture.contains("就地任务 ❯"));
     tmux.mouse(0, 2, 2, true);
     tmux.run(&["send-keys", "-t", "probe", "n"]);
-    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
-    tmux.run(&["send-keys", "-t", "probe", "k"]);
     assert_title_caret(&tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "Escape"]);
     tmux.wait_for(|capture| title_rule_position(capture, "New task").is_none());
@@ -367,8 +363,6 @@ fn terminal_draft_name_blur_persists_without_enter() {
         let (directory, tmux, _transcript) =
             start_probe(if blur { "name-blur" } else { "name-enter" });
         tmux.run(&["send-keys", "-t", "probe", "n"]);
-        tmux.run(&["send-keys", "-t", "probe", "C-w"]);
-        tmux.run(&["send-keys", "-t", "probe", "k"]);
         assert_title_caret(&tmux, "New task", 0);
         tmux.run(&["send-keys", "-t", "probe", "-l", "Persistent terminal name"]);
         assert_title_caret(&tmux, "Persistent terminal name", 24);
@@ -377,11 +371,15 @@ fn terminal_draft_name_blur_persists_without_enter() {
         } else {
             tmux.run(&["send-keys", "-t", "probe", "Enter"]);
         }
-        tmux.wait_for(|capture| {
-            capture
-                .lines()
-                .any(|line| line.split('│').any(|part| part.trim() == ".."))
-        });
+        if blur {
+            tmux.wait_for(|capture| capture.contains("Persistent terminal name ❯"));
+        } else {
+            tmux.wait_for(|capture| {
+                capture
+                    .lines()
+                    .any(|line| line.split('│').any(|part| part.trim() == ".."))
+            });
+        }
         let path = directory.path().join("claude/agents.json");
         let document: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -389,8 +387,10 @@ fn terminal_draft_name_blur_persists_without_enter() {
             document["state"]["drafts"][0]["name"],
             "Persistent terminal name"
         );
-        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| capture.contains("Persistent terminal name ❯"));
+        if !blur {
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            tmux.wait_for(|capture| capture.contains("Persistent terminal name ❯"));
+        }
         save_title_capture(&tmux, if blur { "blur-saved" } else { "enter-saved" });
         tmux.run(&["send-keys", "-t", "probe", "C-c"]);
         let document: serde_json::Value =
@@ -675,5 +675,165 @@ fn terminal_title_blur_saves_and_unchanged_enter_closes() {
         serde_json::to_vec_pretty(&verdict).unwrap(),
     )
     .unwrap();
+    println!("{verdict}");
+}
+
+fn assert_draft_prompt_caret(tmux: &Tmux, name: &str, offset: usize) {
+    let prefix = format!("{name} ❯");
+    tmux.capture_when(|capture| {
+        let Some((row, line)) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(&prefix))
+        else {
+            return false;
+        };
+        let column = line[..line.find(&prefix).unwrap()].width() + prefix.width() + 1 + offset;
+        let cursor = tmux.run(&[
+            "display-message",
+            "-t",
+            "probe",
+            "-p",
+            "#{cursor_x},#{cursor_y},#{cursor_flag}",
+        ]);
+        cursor.trim() == format!("{column},{row},1")
+    });
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_draft_wizard_focus_order_and_clicks() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut checks = Vec::new();
+    for width in [120, 200] {
+        for out_of_order in [false, true] {
+            println!("wizard width={width} out_of_order={out_of_order}: start");
+            let root = tempfile::tempdir().unwrap();
+            let source = root.path().join("source");
+            repository(&source, "main");
+            let started = root.path().join("checkout-started");
+            let hook = source.join(".git/hooks/post-checkout");
+            // A real failed checkout proves creation reached git without starting a provider.
+            std::fs::write(&hook, format!(
+                "#!/usr/bin/env python3\nimport pathlib, sys\npathlib.Path({}).touch()\nprint('wizard checkout rejected', file=sys.stderr)\nsys.exit(1)\n",
+                serde_json::to_string(started.to_str().unwrap()).unwrap(),
+            )).unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let (directory, tmux, _) = start_probe_with_setup(
+                "wizard-focus",
+                &transcript_at(&source),
+                |directory| {
+                    std::fs::write(directory.join("claude/agents.json"), serde_json::to_vec(
+                        &serde_json::json!({"config":{"worktree_root":root.path().join("trees"),"grouping":"project"},"state":{"pinned":[]}})
+                    ).unwrap()).unwrap();
+                },
+            );
+            tmux.run(&[
+                "resize-window",
+                "-t",
+                "probe",
+                "-x",
+                &width.to_string(),
+                "-y",
+                "50",
+            ]);
+            tmux.run(&["send-keys", "-t", "probe", "n"]);
+            assert_title_caret(&tmux, "New task", 0);
+            tmux.run(&["send-keys", "-t", "probe", "-l", "Wizard task"]);
+            assert_title_caret(&tmux, "Wizard task", 11);
+            if out_of_order {
+                let capture = tmux
+                    .capture_when(|capture| title_rule_position(capture, "Wizard task").is_some());
+                let (row, line) = capture
+                    .lines()
+                    .enumerate()
+                    .find(|(_, line)| {
+                        line.contains("Wizard task") && line.contains("main") && line.contains('─')
+                    })
+                    .unwrap();
+                tmux.mouse(0, line[..line.find("main").unwrap()].width(), row, true);
+            } else {
+                tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+                tmux.wait_for(|capture| {
+                    capture
+                        .lines()
+                        .any(|line| line.split('│').any(|part| part.trim() == ".."))
+                });
+                tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+            }
+            tmux.wait_for(|capture| capture.contains("Create new branch"));
+            tmux.run(&["send-keys", "-t", "probe", "End"]);
+            tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+            tmux.wait_for(|capture| capture.contains("New branch ❯"));
+            tmux.run(&["send-keys", "-t", "probe", "-l", "foo"]);
+            tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+            tmux.wait_for(|capture| {
+                !capture.contains("New branch ❯") && !capture.contains("Create new branch")
+            });
+            println!("wizard width={width} out_of_order={out_of_order}: branch saved");
+            let name = if out_of_order {
+                let capture = tmux
+                    .capture_when(|capture| title_rule_position(capture, "Wizard task").is_some());
+                let (column, row) = title_rule_position(&capture, "Wizard task").unwrap();
+                tmux.mouse(0, column, row, true);
+                tmux.mouse(0, column, row, true);
+                assert_title_caret(&tmux, "Wizard task", 11);
+                tmux.run(&["send-keys", "-t", "probe", "C-u"]);
+                tmux.run(&["send-keys", "-t", "probe", "-l", "Renamed wizard"]);
+                tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+                "Renamed wizard"
+            } else {
+                "Wizard task"
+            };
+            let capture = tmux.capture_when(|capture| capture.contains(&format!("{name} ❯")));
+            assert!(!capture.contains("wizard prompt"), "{capture}");
+            if out_of_order {
+                let prefix = format!("{name} ❯");
+                let (row, line) = capture
+                    .lines()
+                    .enumerate()
+                    .find(|(_, line)| line.contains(&prefix))
+                    .unwrap();
+                let column = line[..line.find(&prefix).unwrap()].width() + prefix.width() + 1;
+                tmux.mouse(0, column, row, true);
+            }
+            println!("wizard width={width} out_of_order={out_of_order}: prompt caret");
+            assert_draft_prompt_caret(&tmux, name, 0);
+            tmux.run(&["send-keys", "-t", "probe", "-l", "wizard prompt"]);
+            tmux.wait_for(|capture| capture.contains(&format!("{name} ❯ wizard prompt")));
+            assert_draft_prompt_caret(&tmux, name, "wizard prompt".width());
+            let document: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
+            )
+            .unwrap();
+            let draft = &document["state"]["drafts"][0];
+            assert_eq!(draft["name"], name);
+            assert_eq!(draft["branch"], serde_json::json!({"new":"foo"}));
+            tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+            tmux.wait_for(|capture| {
+                capture.contains("wizard checkout rejected")
+                    && capture.contains(&format!("{name} ❯ wizard prompt"))
+            });
+            assert!(started.exists());
+            let document: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                document["state"]["drafts"][0]["input"]["text"],
+                "wizard prompt"
+            );
+            checks.push(serde_json::json!({"width":width,"out_of_order":out_of_order,"name_focus":true,"branch":"foo","prompt_focus":true,"create_reached_git":true}));
+        }
+    }
+    let verdict = serde_json::json!({"verdict":"pass","checks":checks});
+    if let Some(directory) = std::env::var_os("AGENTS_PROBE_CAPTURE_DIR") {
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            Path::new(&directory).join("wizard-verdict.json"),
+            serde_json::to_vec_pretty(&verdict).unwrap(),
+        )
+        .unwrap();
+    }
     println!("{verdict}");
 }

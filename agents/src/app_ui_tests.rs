@@ -426,23 +426,10 @@ fn draft_without_transcript_draws_and_accepts_paste_in_wide_layout() {
         let buffer = draw(&mut app, width);
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("New task"), "{rendered}");
-        app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('w'),
-            KeyModifiers::CONTROL,
-        )));
-        key(&mut app, KeyCode::Char('h'));
-        app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('w'),
-            KeyModifiers::CONTROL,
-        )));
-        key(&mut app, KeyCode::Char('l'));
         assert!(!app.handle_event(Event::Paste("draft".into())));
         let rendered = lines(&draw(&mut app, width)).join("\n");
         assert!(rendered.contains("draft"), "{rendered}");
-        app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        )));
+        key(&mut app, KeyCode::Esc);
     }
 }
 

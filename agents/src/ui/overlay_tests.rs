@@ -140,15 +140,21 @@ fn picker(kind: &str, check_underlines: bool) {
                 dir: _directory.path().into(),
                 entries: crate::repository::browse_entries(_directory.path()),
             },
-            "branch" => SelectorKind::Branch {
-                draft: crate::model::DraftId {
-                    millis: 0,
-                    counter: 0,
-                },
-                branches: vec!["main".into()],
-                editor: super::super::line_edit::LineEdit::default(),
-                editing: false,
-            },
+            "branch" => {
+                let draft = view.add_draft(DraftSetup {
+                    provider: ProviderId::Claude,
+                    cwd: _directory.path().into(),
+                    model: None,
+                    effort: None,
+                    branch: "main".into(),
+                });
+                SelectorKind::Branch {
+                    draft,
+                    branches: vec!["main".into()],
+                    editor: super::super::line_edit::LineEdit::default(),
+                    editing: false,
+                }
+            }
             _ => unreachable!(),
         };
         view.selector = Some(Selector::new(choice, 0));

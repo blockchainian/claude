@@ -259,7 +259,8 @@ fn opening_editors_activates_them_but_updates_preserve_activation() {
         effort: None,
         branch: String::new(),
     });
-    assert_eq!(view.active_panel, Panel::Prompt);
+    assert_eq!(view.active_panel, Panel::Details);
+    assert!(view.name_target.is_some());
     view.close_selector();
     assert_eq!(view.active_panel, Panel::Details);
     view.set_active_panel(Panel::Output);
