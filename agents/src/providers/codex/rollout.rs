@@ -697,7 +697,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                 .filter_map(|(_, change)| {
                     Some(Section::Diff {
                         label: String::new(),
-                        text: change["unified_diff"].as_str()?.to_owned(),
+                        text: file_change_diff(change)?,
                     })
                 })
                 .collect();
@@ -782,6 +782,26 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     };
     crate::providers::tool::annotate(&mut call);
     call
+}
+
+// Codex records an added or deleted file as its whole content, not a diff.
+fn file_change_diff(change: &Value) -> Option<String> {
+    let sign = match change["type"].as_str()? {
+        "add" => '+',
+        "delete" => '-',
+        _ => return change["unified_diff"].as_str().map(str::to_owned),
+    };
+    let lines: Vec<&str> = change["content"].as_str()?.lines().collect();
+    let range = match sign {
+        '+' => format!("@@ -0,0 +1,{} @@", lines.len()),
+        _ => format!("@@ -1,{} +0,0 @@", lines.len()),
+    };
+    Some(
+        std::iter::once(range)
+            .chain(lines.iter().map(|line| format!("{sign}{line}")))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 fn required_text<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
@@ -3241,6 +3261,28 @@ mod tests {
             label: String::new(),
             text: record["payload"]["item"]["changes"]["/workspace/agents/src/processes.rs"]["unified_diff"].as_str().unwrap().to_owned(),
         }]));
+    }
+
+    #[test]
+    fn added_and_deleted_files_show_their_content_as_diff() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/codex-file-changes.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let outputs: Vec<_> = records
+            .iter()
+            .map(|record| completed_tool(record).unwrap().unwrap().calls[0].output.clone())
+            .collect();
+        assert_eq!(outputs, [
+            Some(vec![Section::Diff {
+                label: String::new(),
+                text: "@@ -0,0 +1,2 @@\n+// Ported from wakaru v1.14.0 SimplifySequence (Apache-2.0).\n+export default { name: 'SimplifySequence', visitor() { return {}; } };".to_owned(),
+            }]),
+            Some(vec![Section::Diff {
+                label: String::new(),
+                text: "@@ -1,7 +0,0 @@\n-                 Prompt\n-Current prompt Current prompt Current\n-prompt Current prompt Current prompt\n-Current prompt Current prompt Current\n-prompt Current prompt Current prompt\n-Current prompt Current prompt\n-Queued prompt that extends beyond the".to_owned(),
+            }]),
+        ]);
     }
 
     #[test]
