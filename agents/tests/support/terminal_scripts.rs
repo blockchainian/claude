@@ -104,39 +104,7 @@ fn terminal_shell_file_read_colors() {
         ] {
             let body = "let answer = \"file-read-highlight\";";
             let name = format!("file-read-{provider}-{highlighted}");
-            let (_directory, tmux) = if provider == "claude" {
-                let mut records: Vec<serde_json::Value> =
-                    include_str!("../fixtures/transcript.jsonl")
-                        .lines()
-                        .map(|line| serde_json::from_str(line).unwrap())
-                        .collect();
-                let mut calls: Vec<serde_json::Value> =
-                    include_str!("../fixtures/claude-tool-calls.jsonl")
-                        .lines()
-                        .take(2)
-                        .map(|line| serde_json::from_str(line).unwrap())
-                        .collect();
-                calls[0]["message"]["content"][0]["input"]["command"] = command.into();
-                calls[1]["toolUseResult"]["stdout"] = body.into();
-                calls[1]["toolUseResult"]["stderr"] = "".into();
-                calls[1]["message"]["content"][0]["content"] = body.into();
-                records.extend(calls);
-                let transcript = records
-                    .iter()
-                    .map(|record| format!("{record}\n"))
-                    .collect::<String>();
-                let (directory, tmux, _) = start_probe_with_transcript(&name, &transcript);
-                (directory, tmux)
-            } else {
-                let mut record = include_str!("../fixtures/codex-tool-calls.jsonl")
-                    .lines()
-                    .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-                    .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
-                    .unwrap();
-                record["payload"]["item"]["command"][2] = command.into();
-                record["payload"]["item"]["aggregated_output"] = body.into();
-                terminal_codex_exit::start_codex_probe(&name, &format!("{record}\n"))
-            };
+            let (_directory, tmux) = start_shell_output_probe(&name, command, body, provider);
             tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "50"]);
             tmux.run(&["send-keys", "-t", "probe", "End"]);
             let capture = tmux.capture_when(|capture| capture.contains(body));
@@ -171,25 +139,97 @@ fn terminal_shell_file_read_colors() {
     }
 }
 
+fn start_shell_output_probe(
+    name: &str,
+    command: &str,
+    body: &str,
+    provider: &str,
+) -> (tempfile::TempDir, Tmux) {
+    if provider == "claude" {
+        let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut calls: Vec<serde_json::Value> = include_str!("../fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .take(2)
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        calls[0]["message"]["content"][0]["input"]["command"] = command.into();
+        calls[1]["toolUseResult"]["stdout"] = body.into();
+        calls[1]["toolUseResult"]["stderr"] = "".into();
+        calls[1]["message"]["content"][0]["content"] = body.into();
+        records.extend(calls);
+        let transcript = records
+            .iter()
+            .map(|record| format!("{record}\n"))
+            .collect::<String>();
+        let (directory, tmux, _) = start_probe_with_transcript(name, &transcript);
+        (directory, tmux)
+    } else {
+        let mut record = include_str!("../fixtures/codex-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        record["payload"]["item"]["command"][2] = command.into();
+        record["payload"]["item"]["aggregated_output"] = body.into();
+        terminal_codex_exit::start_codex_probe(name, &format!("{record}\n"))
+    }
+}
+
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shell_line_format_filters_colors() {
-    for (name, filter) in [
-        ("head", "head -25"),
-        ("tail", "tail -n 25"),
-        ("sed", "sed -n 1,25p"),
-    ] {
+    for provider in ["claude", "codex"] {
+        for (name, filter) in [
+            ("head", "head -25"),
+            ("tail", "tail -n 25"),
+            ("sed", "sed -n 1,25p"),
+        ] {
+            probe_shell_output_colors(
+                &format!("line-format-{provider}-{name}"),
+                provider,
+                &format!("sed -n 140,190p a.rs; rg -n answer a.rs | {filter}"),
+                &[
+                    "let answer = \"file-read-highlight\";",
+                    "72:let plain = \"search-output\";",
+                ],
+                &[(0, "answer", "file-read-highlight")],
+                &[(1, "plain =", "search-output")],
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_shell_output_boundaries_colors() {
+    for provider in ["claude", "codex"] {
         probe_shell_output_colors(
-            &format!("line-format-{name}"),
-            &format!("sed -n 140,190p a.rs; rg -n answer a.rs | {filter}"),
+            &format!("literal-marker-{provider}"),
+            provider,
+            "cat a.rs; rg -n marker a.rs | head -25",
             &[
                 "let answer = \"file-read-highlight\";",
-                "72:let plain = \"search-output\";",
+                "72:let plain = \"…133 tokens truncated…\";",
             ],
             &[(0, "answer", "file-read-highlight")],
-            &[(1, "plain =", "search-output")],
+            &[(1, "plain =", "133 tokens")],
         );
     }
+    probe_shell_output_colors(
+        "merged-diagnostic",
+        "codex",
+        "cat a.rs; rg -n answer missing.rs a.rs | head -25",
+        &[
+            "let answer = \"file-read-highlight\";",
+            "rg: missing.rs: No such file or directory",
+            "72:let plain = \"search-output\";",
+        ],
+        &[(0, "answer", "file-read-highlight")],
+        &[(1, "rg:", "missing.rs"), (2, "plain =", "search-output")],
+    );
 }
 
 #[test]
@@ -204,6 +244,7 @@ fn terminal_shell_multi_file_read_colors() {
     ];
     probe_shell_output_colors(
         "multi-file-read",
+        "claude",
         command,
         &lines,
         &[
@@ -220,6 +261,7 @@ fn terminal_shell_multi_file_read_colors() {
 fn terminal_shell_reads_before_other_commands_colors() {
     probe_shell_output_colors(
         "read-tail",
+        "claude",
         "sed -n '1p' a.rs; sed -n '2p' a.rs; rg foo src",
         &[
             "let first = \"first-output\";",
@@ -233,31 +275,15 @@ fn terminal_shell_reads_before_other_commands_colors() {
 
 fn probe_shell_output_colors(
     name: &str,
+    provider: &str,
     command: &str,
     lines: &[&str],
     highlighted: &[(usize, &str, &str)],
     plain: &[(usize, &str, &str)],
 ) {
     let body = lines.join("\n");
-    let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    let mut calls: Vec<serde_json::Value> = include_str!("../fixtures/claude-tool-calls.jsonl")
-        .lines()
-        .take(2)
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    calls[0]["message"]["content"][0]["input"]["command"] = command.into();
-    calls[1]["toolUseResult"]["stdout"] = body.clone().into();
-    calls[1]["toolUseResult"]["stderr"] = "".into();
-    calls[1]["message"]["content"][0]["content"] = body.into();
-    records.extend(calls);
-    let transcript = records
-        .iter()
-        .map(|record| format!("{record}\n"))
-        .collect::<String>();
-    let (_directory, tmux, _) = start_probe_with_transcript(name, &transcript);
+    let (_directory, tmux) = start_shell_output_probe(name, command, &body, provider);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "50"]);
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     let capture = tmux.capture_when(|capture| capture.contains(lines.last().unwrap()));
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);

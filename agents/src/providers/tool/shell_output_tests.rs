@@ -295,6 +295,61 @@ fn shell_output_provider_rules() {
     let cases: &[StreamCase<'_>] = &[
         ("echo; cat a.rs; echo", "a\nb", claude, &[(0, 2, "rs")]),
         (
+            "cat a.rs; rg -n foo missing.rs a.rs | head -25",
+            "fn a() {}\nrg: missing.rs: No such file or directory\n72:foo\n",
+            codex,
+            &[(0, 1, "rs")],
+        ),
+        (
+            "rg -n foo missing.rs a.rs | head -25; cat b.py",
+            "72:foo\nrg: missing.rs: No such file or directory\nprint(1)\n",
+            codex,
+            &[(2, 3, "py")],
+        ),
+        (
+            "cat missing.py | head -25; cat b.py",
+            "cat: missing.py: No such file or directory\nprint(1)\n",
+            codex,
+            &[(1, 2, "py")],
+        ),
+        (
+            "cat a.rs; cat missing.rs | head -25",
+            "fn a() {}\ncat: missing.rs: No such file or directory\n",
+            codex,
+            &[(0, 1, "rs")],
+        ),
+        (
+            "cat a.rs; echo footer",
+            "cat: missing.rs: No such file or directory\nfn a() {}\nfooter\n",
+            codex,
+            &[(1, 2, "rs")],
+        ),
+        (
+            "cat a.yml",
+            "cat: literal file content\n",
+            claude,
+            &[(0, 1, "yml")],
+        ),
+        ("cat a.rs", "rg: unrelated prefix\n", codex, &[(0, 1, "rs")]),
+        (
+            "rg -n marker a.rs; cat b.rs",
+            "1:contains(\"…133 tokens truncated…\")\n2:next hit\nfn b() {}\n",
+            codex,
+            &[(2, 3, "rs")],
+        ),
+        (
+            "cat b.rs; rg -n marker a.rs",
+            "fn b() {}\n1:contains(\"[... omitted end of long line]\")\n2:next hit\n",
+            codex,
+            &[(0, 1, "rs")],
+        ),
+        (
+            "cat a.rs",
+            "let text = \"…133 tokens truncated…\";\n",
+            codex,
+            &[(0, 1, "rs")],
+        ),
+        (
             "printf '\\n'; cat a.rs; printf '\\n'",
             "a",
             claude,
@@ -357,15 +412,15 @@ fn shell_output_provider_rules() {
         ),
         (
             "head -n 1 a.rs",
-            "a\n…238 tokens truncated…\nb\nc",
+            "Total output lines: 100\n\na\n…238 tokens truncated…\nb\nc",
             codex,
-            &[(0, 1, "rs"), (2, 4, "rs")],
+            &[(2, 3, "rs"), (4, 6, "rs")],
         ),
         (
             "cat a.rs",
             "a\n[... omitted end of long line]\nb",
             codex,
-            &[(0, 1, "rs"), (2, 3, "rs")],
+            &[(0, 3, "rs")],
         ),
         (
             "head -n 1 a.rs; cat b.py",
@@ -387,9 +442,9 @@ fn shell_output_provider_rules() {
         ),
         (
             "echo header; cat a.rs; echo footer",
-            "header\na\n…238 tokens truncated…\nb\nfooter",
+            "Total output lines: 100\n\nheader\na\n…238 tokens truncated…\nb\nfooter",
             codex,
-            &[(1, 2, "rs"), (3, 4, "rs")],
+            &[(3, 4, "rs"), (5, 6, "rs")],
         ),
     ];
     for &(command, stdout, stream, expected) in cases {
@@ -439,6 +494,17 @@ fn language_scope(language: &str) -> String {
 }
 
 #[test]
+fn shell_output_diff_and_patch_share_scope() {
+    assert_eq!(language_scope("patch"), language_scope("diff"));
+}
+
+#[derive(Deserialize)]
+struct ScopeInput {
+    paths: Vec<String>,
+    languages: Vec<String>,
+}
+
+#[test]
 fn shell_output_repository_corpus_has_no_wrong_colors() {
     let mut colored = 0;
     let mut wrong = Vec::new();
@@ -480,6 +546,34 @@ fn shell_output_repository_corpus_has_no_wrong_colors() {
 fn shell_output_audit() {
     let input = std::env::var("SHELL_OUTPUT_INPUT").expect("SHELL_OUTPUT_INPUT");
     let report = std::env::var("SHELL_OUTPUT_REPORT").expect("SHELL_OUTPUT_REPORT");
+    let scope_input = std::env::var("SHELL_OUTPUT_SCOPE_INPUT").expect("SHELL_OUTPUT_SCOPE_INPUT");
+    let scope_report =
+        std::env::var("SHELL_OUTPUT_SCOPE_REPORT").expect("SHELL_OUTPUT_SCOPE_REPORT");
+    let scope_input: ScopeInput =
+        serde_json::from_str(&std::fs::read_to_string(scope_input).expect("read scope input"))
+            .expect("valid scope input");
+    let resolve = |language: &str| {
+        crate::ui::highlight::find_syntax(language.strip_prefix("numbered:").unwrap_or(language))
+            .map(|syntax| syntax.scope.to_string())
+    };
+    let mut languages: std::collections::BTreeMap<String, Option<String>> = scope_input
+        .languages
+        .into_iter()
+        .map(|language| {
+            let scope = resolve(&language);
+            (language, scope)
+        })
+        .collect();
+    let paths: std::collections::BTreeMap<String, Option<String>> = scope_input
+        .paths
+        .into_iter()
+        .map(|path| {
+            let language = super::file_language(&path);
+            let scope = resolve(language);
+            languages.insert(language.to_owned(), scope.clone());
+            (path, scope)
+        })
+        .collect();
     let source = std::fs::read_to_string(input).expect("read audit input");
     let calls: Vec<Call> = source
         .lines()
@@ -497,6 +591,9 @@ fn shell_output_audit() {
         let actual = output
             .map(|output| spans(&output, &call.stdout))
             .unwrap_or_default();
+        for span in &actual {
+            languages.insert(span.language.clone(), resolve(&span.language));
+        }
         serde_json::to_writer(
             &mut file,
             &serde_json::json!({"provider":call.provider,"command":call.command,"actual":actual}),
@@ -505,6 +602,14 @@ fn shell_output_audit() {
         writeln!(file).expect("write audit newline");
     }
     file.flush().expect("flush audit report");
+    std::fs::write(
+        scope_report,
+        serde_json::to_vec(&serde_json::json!({
+            "paths": paths, "languages": languages,
+        }))
+        .expect("serialize scopes"),
+    )
+    .expect("write scope report");
     println!(
         "{}",
         serde_json::json!({"calls":calls.len(),"elapsed_seconds":elapsed})

@@ -587,7 +587,7 @@ fn redirects(source: &str) -> Option<(String, Vec<usize>, bool, usize)> {
     Some((out, silent, merged, stage))
 }
 
-fn pipeline(source: &str) -> Segment {
+fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
     let Some((literal, silent, merged, last)) = redirects(source) else {
         return Segment::unknown();
     };
@@ -603,6 +603,14 @@ fn pipeline(source: &str) -> Segment {
     let Some(stages) = shell_summary::pipeline_words(&literal) else {
         return Segment::unknown();
     };
+    for stage in &stages {
+        if let Some(program) = stage
+            .first()
+            .and_then(|word| std::path::Path::new(word).file_name())
+        {
+            programs.push(program.to_string_lossy().into_owned());
+        }
+    }
     let mut stages = stages.iter();
     let Some(first) = stages.next() else {
         return Segment::unknown();
@@ -770,11 +778,12 @@ pub(super) fn sections(
 ) -> Option<Vec<Section>> {
     let commands = crate::ui::shell_commands::split(command)?;
     let mut segments = Vec::new();
+    let mut programs = Vec::new();
     for c in commands {
         let source = &command[c.range];
         let alternatives = alternatives(source)?;
         for (index, source) in alternatives.into_iter().enumerate() {
-            let mut segment = pipeline(source);
+            let mut segment = pipeline(source, &mut programs);
             if index > 0 {
                 segment.size = Size::Unknown;
                 segment.lines = None;
@@ -828,17 +837,30 @@ pub(super) fn sections(
         }
     }
     let body = &text[prefix..];
-    let lines: Vec<_> = body.split_inclusive('\n').collect();
-    let mut ends = vec![prefix];
-    for line in &lines {
-        ends.push(ends.last().unwrap() + line.len());
+    // Merged stderr diagnostics keep their physical position, but do not
+    // contribute to stdout counts or line-format boundaries.
+    let mut lines = Vec::new();
+    let mut ranges = Vec::new();
+    let mut offset = prefix;
+    for line in body.split_inclusive('\n') {
+        let end = offset + line.len();
+        let diagnostic = stream.merged_stderr
+            && programs.iter().any(|program| {
+                line.strip_prefix(program)
+                    .is_some_and(|rest| rest.starts_with(':'))
+            });
+        if !diagnostic {
+            lines.push(line);
+            ranges.push(offset..end);
+        }
+        offset = end;
     }
     let markers: Vec<_> = lines
         .iter()
         .enumerate()
         .filter_map(|(i, l)| {
-            (l.contains("[... omitted end of long line]")
-                || l.split_once(" tokens truncated").is_some_and(|(p, _)| {
+            (prefix > 0
+                && l.split_once(" tokens truncated").is_some_and(|(p, _)| {
                     p.trim_end_matches(|c: char| c.is_ascii_digit())
                         .ends_with('…')
                         && p.ends_with(|c: char| c.is_ascii_digit())
@@ -881,14 +903,26 @@ pub(super) fn sections(
     if prefix > 0 {
         output.push(text_section(label, &text[..prefix]));
     }
+    let mut cursor = prefix;
     for (a, b, s) in spans {
-        if a < b {
-            output.push(section(
-                label,
-                s.map(|s| &segments[s]),
-                &text[ends[a]..ends[b]],
-            ));
+        let mut index = a;
+        while index < b {
+            let start = ranges[index].start;
+            if cursor < start {
+                output.push(text_section(label, &text[cursor..start]));
+            }
+            let mut end = ranges[index].end;
+            index += 1;
+            while index < b && ranges[index].start == end {
+                end = ranges[index].end;
+                index += 1;
+            }
+            output.push(section(label, s.map(|s| &segments[s]), &text[start..end]));
+            cursor = end;
         }
+    }
+    if cursor < text.len() {
+        output.push(text_section(label, &text[cursor..]));
     }
     Some(output)
 }

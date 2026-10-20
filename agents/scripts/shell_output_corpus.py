@@ -9,6 +9,10 @@ Generated records also contain expected, a list of {start, end, language} spans
 with zero-based half-open line ranges. Omitted lines are plain text. Ground truth
 comes from separately executing each command stage, never from the segmenter.
 Only repository files named below are read by generate; private inputs stay local.
+Baselines store counts and spans bound to exact input hashes. Calls fail on count
+loss except proven diagnostic removals. Replay fails when a previously correct
+highlight becomes incorrect; corrections of baseline errors are reported separately.
+Count-only baselines use the stricter count rule for both datasets.
 """
 
 import argparse
@@ -75,6 +79,18 @@ PIPELINE_CASES = [
 ]
 
 
+BOUNDARY_CASES = [
+    [('rg -n "tokens truncated" agents/src/providers/codex/rollout.rs', None),
+     ('head -n 5 agents/src/main.rs', 'rs')],
+    [('head -n 5 agents/src/main.rs', 'rs'),
+     ('rg -n "omitted end of long line" agents/src/providers/tool/shell_output_tests.rs', None)],
+    [('head -n 5 agents/src/main.rs', 'rs'),
+     ('rg -n package agents/not-a-file.rs agents/Cargo.toml | head -25', None)],
+    [('cat agents/not-a-file.py | head -25', None),
+     ('head -n 5 agents/themes/build.py', 'py')],
+]
+
+
 def execute_case(stages, provider):
     """Run stages separately, preserving cd state and && short-circuiting."""
     cwd = ROOT
@@ -119,7 +135,7 @@ def generate(args):
     records = [execute_case(stages, provider)
                for provider in ('claude', 'codex') for stages in CASES]
     for provider in ('claude', 'codex'):
-        for stages in PIPELINE_CASES:
+        for stages in PIPELINE_CASES + BOUNDARY_CASES:
             record = execute_case(stages, provider)
             record['minimum_highlighted'] = sum(s['end'] - s['start'] for s in record['expected'])
             records.append(record)
@@ -152,29 +168,7 @@ def segments(command):
     return result
 
 
-ALIASES = {'mjs': 'js', 'cjs': 'js', 'jsx': 'js', 'yml': 'yaml',
-           'bash': 'sh', 'zsh': 'sh', 'jsonc': 'json', 'cc': 'cpp', 'hpp': 'cpp'}
-LANGUAGES = set('rs py js mjs cjs ts tsx jsx json jsonc toml yaml yml sh bash zsh md swift go c h cc cpp hpp java kt rb css scss html xml sql lua'.split())
-
-# Additional replay file types accepted by the dashboard syntax set.
-SCOPE_LANGUAGES = LANGUAGES | {'log', 'txt', 'tsv'}
-
-
-def language_name(language, expanded=True):
-    if language is None:
-        return None
-    language = language.removeprefix('numbered:')
-    # Reference scoring retains the prototype language set. Expanded scoring
-    # includes the additional file syntaxes present in the replay corpus.
-    return ALIASES.get(language, language) if language in (SCOPE_LANGUAGES if expanded else LANGUAGES) or language == 'diff' else None
-
-
-def file_language(path):
-    suffix = Path(path).suffix.lstrip('.').lower()
-    return suffix if suffix in SCOPE_LANGUAGES else None
-
-
-def stage_language(words):
+def stage_source(words):
     """Ground truth classifies each actual stage, never guesses its output length."""
     while words and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', words[0]):
         words = words[1:]
@@ -197,21 +191,20 @@ def stage_language(words):
           and re.fullmatch(r'\d+(?:,(?:\d+|\$))?p', words[2])):
         paths = words[-1:]
     elif len(words) == 3 and words[:2] == ['git', 'show'] and ':' in words[2]:
-        return file_language(words[2].split(':', 1)[1])
+        return ('files', [words[2].split(':', 1)[1]])
     elif words[:2] in (['git', 'diff'], ['git', 'show'], ['git', 'log']):
         summary = ('--stat', '--name-only', '--name-status', '--shortstat', '--numstat',
                    '--quiet', '--check', '-s', '--no-patch', '--oneline', '--summary', '--dirstat')
         if any(w in summary or w.startswith(('--format', '--pretty', '--stat')) or ':' in w
                for w in words[2:]):
             return None
-        return 'diff' if words[1] != 'log' or any(w in ('-p', '--patch') for w in words[2:]) else None
+        return ('diff', []) if words[1] != 'log' or any(w in ('-p', '--patch') for w in words[2:]) else None
     else:
         return None
-    languages = {language_name(file_language(p)) for p in paths}
-    return next(iter(languages)) if len(languages) == 1 else None
+    return ('files', paths)
 
 
-def pipeline_language(words):
+def pipeline_source(words):
     stages, stage = [], []
     for word in words:
         if word == '|':
@@ -220,38 +213,80 @@ def pipeline_language(words):
         else:
             stage.append(word)
     stages.append(stage)
-    language = stage_language(stages[0])
+    source = stage_source(stages[0])
     for stage in stages[1:]:
         if not stage or stage[0] not in ('cat', 'head', 'tail', 'sed'):
             return None
-    return language
+    return source
 
 
-def truth(record):
+def scope_inputs(records, baseline_spans=()):
+    paths, languages = set(), {'diff'}
+    for record in records:
+        for words in segments(record['command']) or []:
+            source = pipeline_source(words)
+            if source is not None:
+                paths.update(source[1])
+        languages.update(span['language'] for span in record.get('expected', []))
+    for spans in baseline_spans:
+        languages.update(span['language'] for span in spans)
+    return {'paths': sorted(paths), 'languages': sorted(languages)}
+
+
+def source_scope(source, scopes):
+    if source is None:
+        return None
+    kind, paths = source
+    if kind == 'diff':
+        return scopes['languages']['diff']
+    resolved = {scopes['paths'][path] for path in paths}
+    return next(iter(resolved)) if len(resolved) == 1 else None
+
+
+def diagnostic_lines(record):
+    if record['provider'] != 'codex':
+        return set()
+    commands = segments(record['command'])
+    if commands is None:
+        return set()
+    programs = set()
+    for words in commands:
+        starts = [0] + [index + 1 for index, word in enumerate(words) if word == '|']
+        for index in starts:
+            if index < len(words):
+                programs.add(Path(words[index]).name)
+    return {index for index, line in enumerate(record['stdout'].splitlines())
+            if any(line.startswith(program + ':') for program in programs)}
+
+
+def truth(record, scopes):
     rows = record['stdout'].splitlines()
     expected = [None] * len(rows)
     if 'expected' in record:
         for span in record['expected']:
             for index in range(span['start'], span['end']):
-                expected[index] = language_name(span['language'])
-        return expected
-    commands = segments(record['command'])
-    parts = record['parts']
-    if commands is None or len(commands) != len(parts):
-        raise ValueError(f'Parts do not align: {record["command"]!r}')
-    joined = ''.join(parts)
-    lead = len(joined) - len(joined.lstrip('\n')) if record['provider'] == 'claude' else 0
-    offset = 0
-    for command, part in zip(commands, parts):
-        count = len(part.splitlines())
-        language = pipeline_language(command)
-        for index in range(max(0, offset - lead), min(len(rows), offset + count - lead)):
-            expected[index] = language
-        offset += count
+                expected[index] = scopes['languages'][span['language']]
+    else:
+        commands = segments(record['command'])
+        parts = record['parts']
+        if commands is None or len(commands) != len(parts):
+            raise ValueError(f'Parts do not align: {record["command"]!r}')
+        joined = ''.join(parts)
+        lead = len(joined) - len(joined.lstrip('\n')) if record['provider'] == 'claude' else 0
+        offset = 0
+        for command, part in zip(commands, parts):
+            count = len(part.splitlines())
+            language = source_scope(pipeline_source(command), scopes)
+            for index in range(max(0, offset - lead), min(len(rows), offset + count - lead)):
+                expected[index] = language
+            offset += count
+    # A file-reading stage's merged output can also contain its stderr.
+    for index in diagnostic_lines(record):
+        expected[index] = None
     return expected
 
 
-def score(records, observed, expanded=True, line_report=None):
+def score(records, observed, scopes, line_report=None):
     if len(records) != len(observed):
         raise ValueError('Rust report record count differs from input')
     totals = {provider: {'right': 0, 'wrong': 0, 'missed': 0} for provider in ('claude', 'codex')}
@@ -259,11 +294,11 @@ def score(records, observed, expanded=True, line_report=None):
     for record_index, (record, result) in enumerate(zip(records, observed), 1):
         if result['command'] != record['command'] or result['provider'] != record['provider']:
             raise ValueError('Rust report order differs from input')
-        expected = [language_name(value, expanded) for value in truth(record)]
+        expected = truth(record, scopes)
         actual = [None] * len(expected)
         for span in result['actual']:
             for index in range(max(0, span['start']), min(len(actual), span['end'])):
-                actual[index] = language_name(span['language'], expanded)
+                actual[index] = scopes['languages'][span['language']]
         for index, (want, got) in enumerate(zip(expected, actual)):
             if want is None and got is None:
                 continue
@@ -302,22 +337,84 @@ def highlight_counts(records, observed):
     return counts
 
 
-def compare_highlights(records, counts, baseline):
+def compare_highlights(records, counts, baseline, *, observed=None, baseline_spans=None, scopes=None):
     if len(counts) != len(baseline) or any(type(n) is not int or n < 0 for n in baseline):
         raise ValueError('Baseline must contain one nonnegative count per call')
     providers = {provider: {'before': 0, 'after': 0, 'delta': 0}
                  for provider in ('claude', 'codex')}
     regressions = []
+    corrections = []
+    corrected_colors = []
+    if baseline_spans is not None and len(baseline_spans) != len(records):
+        raise ValueError('Baseline spans must contain one entry per call')
     for index, (record, before, after) in enumerate(zip(records, baseline, counts), 1):
         totals = providers[record['provider']]
         totals['before'] += before
         totals['after'] += after
         totals['delta'] += after - before
+        if scopes is not None and baseline_spans is not None and observed is not None:
+            expected = truth(record, scopes)
+            previous = {line: scopes['languages'][span['language']]
+                        for span in baseline_spans[index - 1]
+                        for line in range(span['start'], span['end'])}
+            current = {line: scopes['languages'][span['language']]
+                       for span in observed[index - 1]['actual']
+                       for line in range(span['start'], span['end'])}
+            if len(previous) != before or len(current) != after:
+                raise ValueError('Baseline or observed spans disagree with counts')
+            regressed = [line + 1 for line, color in previous.items()
+                         if color is not None and color == expected[line]
+                         and current.get(line) != color]
+            corrected = {line for line, color in previous.items()
+                         if color is not None and color != expected[line]
+                         and current.get(line) == expected[line]}
+            detail = {'record': index, 'provider': record['provider'],
+                      'command': record['command'], 'before': before, 'after': after}
+            if regressed:
+                regressions.append(dict(detail, regressed_lines=sorted(regressed)))
+            diagnostics = diagnostic_lines(record)
+            for target, lines in ((corrections, corrected & diagnostics),
+                                  (corrected_colors, corrected - diagnostics)):
+                if lines:
+                    target.append(dict(detail, lines=[line + 1 for line in sorted(lines)],
+                                       count=len(lines)))
+            continue
         if after < before:
-            regressions.append({'record': index, 'provider': record['provider'],
-                                'command': record['command'], 'before': before,
-                                'after': after, 'lost': before - after})
-    return {'providers': providers, 'regressed_calls': regressions}
+            loss = {'record': index, 'provider': record['provider'],
+                    'command': record['command'], 'before': before,
+                    'after': after, 'lost': before - after}
+            corrected = False
+            if baseline_spans is not None and observed is not None:
+                previous = {line for span in baseline_spans[index - 1]
+                            for line in range(span['start'], span['end'])}
+                current = {line for span in observed[index - 1]['actual']
+                           for line in range(span['start'], span['end'])}
+                if len(previous) != before or len(current) != after:
+                    raise ValueError('Baseline or observed spans disagree with counts')
+                removed = previous - current
+                corrected = bool(removed) and removed <= diagnostic_lines(record)
+                loss['removed_lines'] = [line + 1 for line in sorted(removed)]
+            (corrections if corrected else regressions).append(loss)
+    return {'providers': providers, 'regressed_calls': regressions,
+            'corrected_diagnostics': corrections, 'corrected_colors': corrected_colors}
+
+
+def audit(path, observed_path, log_path, inputs, timeout):
+    input_path = observed_path.with_suffix('.scope-input.json')
+    scope_path = observed_path.with_suffix('.scopes.json')
+    input_path.write_text(json.dumps(inputs))
+    environment = dict(os.environ, SHELL_OUTPUT_INPUT=str(path.resolve()),
+                       SHELL_OUTPUT_REPORT=str(observed_path.resolve()),
+                       SHELL_OUTPUT_SCOPE_INPUT=str(input_path.resolve()),
+                       SHELL_OUTPUT_SCOPE_REPORT=str(scope_path.resolve()))
+    command = ['cargo', 'test', '--release', '--bin', 'agents', 'shell_output_audit',
+               '--', '--ignored', '--nocapture']
+    with log_path.open('w') as log:
+        process = subprocess.run(command, cwd=AGENTS, env=environment, stdout=log,
+                                 stderr=subprocess.STDOUT, timeout=timeout, check=False)
+    if process.returncode:
+        raise RuntimeError(f'Rust audit failed ({process.returncode}); see {log_path}')
+    return read_jsonl(observed_path), json.loads(scope_path.read_text())
 
 
 def check(args):
@@ -333,15 +430,10 @@ def check(args):
     for name, path in (('calls', args.calls), ('replay', args.replay)):
         observed_path = args.report.with_name(args.report.stem + '-' + name + '.jsonl')
         log_path = args.report.with_name(args.report.stem + '-' + name + '.log')
-        environment = dict(os.environ, SHELL_OUTPUT_INPUT=str(path.resolve()),
-                           SHELL_OUTPUT_REPORT=str(observed_path.resolve()))
-        command = ['cargo', 'test', '--release', 'shell_output_audit', '--', '--ignored', '--nocapture']
-        with log_path.open('w') as log:
-            process = subprocess.run(command, cwd=AGENTS, env=environment, stdout=log,
-                                     stderr=subprocess.STDOUT, timeout=args.timeout, check=False)
-        if process.returncode:
-            raise RuntimeError(f'Rust audit failed ({process.returncode}); see {log_path}')
-        records, observed = read_jsonl(path), read_jsonl(observed_path)
+        records = read_jsonl(path)
+        previous_spans = baseline[name].get('spans', []) if baseline is not None else []
+        observed, scopes = audit(path, observed_path, log_path,
+                                 scope_inputs(records, previous_spans), args.timeout)
         if len(records) != len(observed):
             raise ValueError(f'Rust audit record count differs: {name}')
         timings = []
@@ -360,7 +452,8 @@ def check(args):
         report[name] = {'count': len(records), 'elapsed_seconds': timing['elapsed_seconds']}
         counts = highlight_counts(records, observed)
         fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
-        saved_baseline[name] = {'input_sha256': fingerprint, 'highlighted_lines': counts}
+        saved_baseline[name] = {'input_sha256': fingerprint, 'highlighted_lines': counts,
+                                'spans': [r['actual'] for r in observed]}
         report[name]['highlighted_lines'] = sum(counts)
         report[name]['providers'] = {
             provider: {'calls': sum(r['provider'] == provider for r in records),
@@ -370,14 +463,15 @@ def check(args):
         if baseline is not None:
             if baseline[name]['input_sha256'] != fingerprint:
                 raise ValueError(f'Baseline input differs: {name}')
-            comparison = compare_highlights(records, counts, baseline[name]['highlighted_lines'])
+            comparison = compare_highlights(records, counts, baseline[name]['highlighted_lines'],
+                                            observed=observed, baseline_spans=baseline[name].get('spans'),
+                                            scopes=scopes if name == 'replay' else None)
             report[name]['comparison'] = comparison
             failed |= bool(comparison['regressed_calls'])
         if name == 'replay':
-            report[name]['reference'] = score(records, observed, expanded=False)
             line_path = args.report.with_name(args.report.stem + '-lines.jsonl')
             with line_path.open('w') as line_report:
-                report[name]['scope'] = score(records, observed, line_report=line_report)
+                report[name]['scope'] = score(records, observed, scopes, line_report=line_report)
             report[name]['line_report'] = str(line_path)
             failed |= bool(report[name]['scope']['wrong_lines'])
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
@@ -403,7 +497,7 @@ def main():
     audit.add_argument('--report', type=Path, required=True)
     audit.add_argument('--timeout', type=int, default=600)
     audit.add_argument('--baseline', type=Path,
-                       help='fail if any call highlights fewer lines than this baseline')
+                       help='fail on per-call highlight loss, except proven diagnostic corrections')
     audit.add_argument('--write-baseline', type=Path,
                        help='save per-call highlighted line counts for these exact inputs')
     audit.set_defaults(run=check)
