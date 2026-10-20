@@ -53,6 +53,14 @@ struct PromptLayout {
     caret: (u16, usize),
 }
 
+fn prompt_heading(label: &str, marker: &str) -> String {
+    if label.is_empty() {
+        marker.to_owned()
+    } else {
+        format!("{label} {marker}")
+    }
+}
+
 impl PromptBox {
     fn layout(&self, width: u16, label: &str) -> PromptLayout {
         use unicode_segmentation::UnicodeSegmentation;
@@ -91,7 +99,7 @@ impl PromptBox {
             usize::from(width / 3).min(prefix_budget.saturating_sub(3))
         };
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
-        let heading = format!("{label} {PROMPT_MARKER} ");
+        let heading = format!("{} ", prompt_heading(&label, PROMPT_MARKER));
         let prefix = clip(&heading, prefix_budget);
         let inset = prefix.width() as u16;
         self.text_width
@@ -142,7 +150,7 @@ impl PromptBox {
         }
         if let Some(reason) = disabled {
             let reason = reason.lines().next().unwrap_or("");
-            let mut heading = format!("{label} {DISABLED_PROMPT_MARKER}");
+            let mut heading = prompt_heading(label, DISABLED_PROMPT_MARKER);
             if !reason.is_empty() {
                 heading.push(' ');
                 heading.push_str(reason);
@@ -305,6 +313,55 @@ mod tests {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn empty_label_heading_starts_at_first_cell_and_moves_caret_and_clicks() {
+        let mut editor = focused();
+        let area = Rect::new(8, 4, 35, 1);
+        let mut buffer = Buffer::empty(area);
+        editor.render(area, &mut buffer, "", None, true);
+        assert_eq!(buffer[(8, 4)].symbol(), "❯");
+        assert_eq!(editor.cursor(area, ""), Some((10, 4)));
+        editor.paste("abc");
+        editor.render(area, &mut buffer, "", None, true);
+        assert_eq!(buffer[(10, 4)].symbol(), "a");
+        assert_eq!(editor.cursor(area, ""), Some((13, 4)));
+        editor.select_mouse(
+            area,
+            "",
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 11,
+                row: 4,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(editor.editor.cursor(), 1);
+        assert_eq!(editor.cursor(area, ""), Some((11, 4)));
+    }
+
+    #[test]
+    fn disabled_empty_label_heading_starts_at_first_cell() {
+        let editor = focused();
+        let area = Rect::new(8, 4, 35, 1);
+        for (reason, expected) in [("", "❮"), ("/bg", "❮ /bg")] {
+            let mut buffer = Buffer::empty(area);
+            editor.render(area, &mut buffer, "", Some(reason), true);
+            let screen: String = (area.x..area.right())
+                .map(|column| buffer[(column, area.y)].symbol())
+                .collect();
+            assert_eq!(screen.trim_end(), expected);
+        }
+    }
+
+    #[test]
+    fn nonempty_label_heading_keeps_spacing() {
+        let editor = focused();
+        assert_eq!(rendered(&editor, 35, None).trim_end(), "Task ❯");
+        assert_eq!(editor.layout(35, "Task").prefix, "Task ❯ ");
+        assert_eq!(editor.cursor(Rect::new(8, 4, 35, 1), "Task"), Some((15, 4)));
+        assert_eq!(rendered(&editor, 35, Some("/bg")).trim_end(), "Task ❮ /bg");
     }
 
     #[test]
