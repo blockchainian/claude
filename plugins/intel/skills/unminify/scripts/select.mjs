@@ -19,6 +19,11 @@ const isOwner = p => p.isFunction() || p.isClass();
 // Batches keep their file analysis alive only while their plan is in use.
 const batchAnalyses = new WeakMap();
 
+/** Detach file analysis before a worker starts another file, even if batches survive. */
+export function releasePlan(stages) {
+  for (const stage of stages) for (const batch of stage) batchAnalyses.delete(batch);
+}
+
 function analyze(source) {
   const ast = parseSource(source);
   const bindings = new Map();
