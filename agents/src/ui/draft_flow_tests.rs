@@ -2030,3 +2030,5 @@ fn panel_blur_does_not_reopen_name_or_save_twice() {
     }
 }
 
+#[path = "draft_escape_tests.rs"]
+mod escape_tests;

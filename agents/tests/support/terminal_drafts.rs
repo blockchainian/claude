@@ -837,3 +837,131 @@ fn terminal_draft_wizard_focus_order_and_clicks() {
     }
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_draft_escape_follows_details_and_prompt_focus() {
+    let mut checks = Vec::new();
+    for width in [120, 200] {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        repository(&source, "main");
+        let (directory, tmux, _) =
+            start_probe_with_transcript("draft-escape-focus", &transcript_at(&source));
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        begin_named_draft(&tmux, "Escape focus");
+        let capture = tmux.capture_when(|capture| {
+            title_rule_position(capture, "Escape focus").is_some()
+                && !capture.contains("enter select")
+        });
+        assert!(!capture.contains("enter select"), "{capture}");
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| {
+                line.contains("Escape focus") && line.contains("main") && line.contains('─')
+            })
+            .unwrap();
+        tmux.mouse(0, line[..line.find("main").unwrap()].width(), row, true);
+        tmux.wait_for(|capture| capture.contains("Create new branch"));
+        // Closing the branch selector leaves Details active with no child UI open.
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| !capture.contains("enter select"));
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| capture.contains("Permanently delete “Escape focus”"));
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        let capture = tmux.capture_when(|capture| {
+            !capture.contains("Permanently delete “")
+                && title_rule_position(capture, "Escape focus").is_some()
+        });
+        assert!(!capture.contains("enter select"), "{capture}");
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| {
+                line.contains("Escape focus") && line.contains("main") && line.contains('─')
+            })
+            .unwrap();
+        tmux.mouse(0, line[..line.find("main").unwrap()].width(), row, true);
+        let capture = tmux.capture_when(|capture| capture.contains("Create new branch"));
+        let prefix = "Escape focus ❯";
+        assert!(capture.contains(prefix), "{capture}");
+        tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+        tmux.run(&["send-keys", "-t", "probe", "j"]);
+        assert_draft_prompt_caret(&tmux, "Escape focus", 0);
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(capture.contains("Create new branch"), "{capture}");
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| capture.contains("Permanently delete “Escape focus”"));
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| {
+            !capture.contains("Permanently delete “")
+                && title_rule_position(capture, "Escape focus").is_some()
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| {
+                line.contains("Escape focus") && line.contains("main") && line.contains('─')
+            })
+            .unwrap();
+        tmux.mouse(0, line[..line.find("main").unwrap()].width(), row, true);
+        click_text(&tmux, "Create new branch");
+        tmux.wait_for(|capture| capture.contains("New branch ❯"));
+        tmux.run(&["send-keys", "-t", "probe", "-l", "foo"]);
+        let capture = tmux.capture_when(|capture| capture.contains("New branch ❯ foo"));
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(prefix))
+            .unwrap();
+        let column = line[..line.find(prefix).unwrap()].width() + prefix.width() + 1;
+        tmux.mouse(0, column, row, true);
+        assert_draft_prompt_caret(&tmux, "Escape focus", 0);
+        let capture = tmux.capture_when(|capture| !capture.contains("New branch ❯"));
+        let document: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            document["state"]["drafts"][0]["branch"],
+            serde_json::json!({"new":"foo"})
+        );
+        let (row, line) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| {
+                line.contains("Escape focus") && line.contains("foo") && line.contains('─')
+            })
+            .unwrap();
+        tmux.mouse(0, line[..line.find("foo").unwrap()].width(), row, true);
+        click_text(&tmux, "foo");
+        tmux.wait_for(|capture| capture.contains("New branch ❯ foo"));
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| {
+            !capture.contains("New branch ❯") && capture.contains("enter select")
+        });
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|capture| !capture.contains("enter select"));
+        checks.push(serde_json::json!({"width":width,"details_empty_escape":"delete_confirmation","prompt_with_branch_selector_escape":"delete_confirmation","cancel_preserves_draft":true,"branch_blur_saved":"foo","branch_reopen_prefilled":true,"branch_escape_layers":true}));
+    }
+    let verdict = serde_json::json!({"verdict":"pass","checks":checks});
+    if let Some(directory) = std::env::var_os("AGENTS_PROBE_CAPTURE_DIR") {
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            Path::new(&directory).join("escape-verdict.json"),
+            serde_json::to_vec_pretty(&verdict).unwrap(),
+        )
+        .unwrap();
+    }
+    println!("{verdict}");
+}

@@ -1727,6 +1727,14 @@ impl View {
             });
             return Some(Action::PersistSorting(self.log_sort));
         }
+        if plain
+            && key.code == KeyCode::Esc
+            && self.active_panel == Panel::Details
+            && self.selected_draft.is_some()
+        {
+            self.confirm_draft_delete();
+            return None;
+        }
         // A panel that did not handle a key never borrows the task list's bindings.
         if self.active_panel != Panel::TaskList {
             return None;
