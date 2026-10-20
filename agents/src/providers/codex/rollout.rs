@@ -708,12 +708,26 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             )
         }
         "McpToolCall" => {
+            let name = format!(
+                "mcp__{}__{}",
+                item["server"].as_str().unwrap(),
+                item["tool"].as_str().unwrap()
+            );
             let output = item
                 .get("result")
                 .filter(|result| !result.is_null())
                 .map(|result| {
                     if result.is_object() {
-                        let mut sections = crate::providers::tool::mcp_content(&result["content"]);
+                        let mut sections = tool::output(
+                            tool::rule(&name).output,
+                            &item["arguments"],
+                            &tool::ToolResult {
+                                content: &result["content"],
+                                value: result,
+                                text: "",
+                                error: result["isError"] == true,
+                            },
+                        );
                         if let Some(structured) = result
                             .get("structuredContent")
                             .filter(|value| !value.is_null())
@@ -735,15 +749,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                         .as_str()
                         .map(|text| vec![result_section(text)])
                 });
-            (
-                format!(
-                    "mcp__{}__{}",
-                    item["server"].as_str().unwrap(),
-                    item["tool"].as_str().unwrap()
-                ),
-                item["arguments"].clone(),
-                output,
-            )
+            (name, item["arguments"].clone(), output)
         }
         _ => (item_type.to_owned(), item.clone(), None),
     };
@@ -3356,7 +3362,7 @@ mod tests {
             matches!(&event.calls[0].input[0], Section::Markdown {label, text} if label == "text" && text == mcp["payload"]["item"]["arguments"]["text"].as_str().unwrap())
         );
         assert!(
-            matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text == "Delivered to Claude.")
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Markdown { text, .. } if text == "Delivered to Claude.")
         );
         let mut no_result = mcp.clone();
         no_result["payload"]["item"]["result"] = Value::Null;
@@ -3368,7 +3374,7 @@ mod tests {
         json_result["payload"]["item"]["result"]["content"][0]["text"] = r#"{"ok":true}"#.into();
         let event = completed_tool(&json_result).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text == r#"{"ok":true}"#)
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Markdown { text, .. } if text == r#"{"ok":true}"#)
         );
         let mut command = records
             .iter()

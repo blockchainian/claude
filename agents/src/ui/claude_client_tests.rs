@@ -40,6 +40,16 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         assert_eq!(events[0].body, format!("{display_name} {input}"));
         assert_eq!(call.event_detail_left, "");
         assert_eq!(call.event_detail_title, display_name);
+        let reply = record["payload"]["item"]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            call.output,
+            Some(vec![crate::event::Section::Markdown {
+                label: "output".into(),
+                text: reply.into(),
+            }])
+        );
         let now = events[0].ended_at.unwrap();
         let (mut view, _) = event_fixture();
         view.set_event(events);

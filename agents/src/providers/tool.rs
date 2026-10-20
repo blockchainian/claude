@@ -435,12 +435,14 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
         name: "claude-client ask_claude",
         input: Some((Input::Field("text"), Format::Markdown)),
+        output: Some(Output::Extract(mcp_markdown_output)),
         list_input: true,
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "claude-client notify_claude",
         input: Some((Input::Field("text"), Format::Markdown)),
+        output: Some(Output::Extract(mcp_markdown_output)),
         list_input: true,
         ..DEFAULT_RULE
     },
@@ -893,6 +895,18 @@ fn markdown_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
         label: "output".into(),
         text: result.text.to_owned(),
     }])
+}
+
+fn mcp_markdown_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
+    Some(
+        mcp_content(result.content)
+            .into_iter()
+            .map(|section| match section {
+                Section::Text { label, text } => Section::Markdown { label, text },
+                section => section,
+            })
+            .collect(),
+    )
 }
 
 fn web_search_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
