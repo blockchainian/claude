@@ -1477,12 +1477,13 @@ fn needs_input_queue_handles_longest_wait_first_without_interrupting() {
 }
 
 #[test]
-fn needs_input_queue_continues_after_sending_and_keeps_last_task() {
+fn needs_input_queue_continues_after_sending_and_returns_to_original_tab() {
     let mut view = test_view(Grouping::Project, false);
-    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let original = session("original", "Original", SessionStatus::Inactive, 300);
     let mut first = session("first", "First", SessionStatus::Working, 120);
     let mut second = session("second", "Second", SessionStatus::Working, 60);
     view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    key(&mut view, KeyCode::Tab);
     view.select(
         view.rows
             .iter()
@@ -1495,6 +1496,8 @@ fn needs_input_queue_continues_after_sending_and_keeps_last_task() {
     view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
     assert_eq!(view.selected_id(), Some(&first.id));
 
+    assert_eq!(view.status_filter, 0);
+
     let input = crate::providers::SessionInput::Prompt("continue".into());
     view.input_sending(&first.id, &input);
     first.status = SessionStatus::Working;
@@ -1503,8 +1506,9 @@ fn needs_input_queue_continues_after_sending_and_keeps_last_task() {
 
     view.input_sending(&second.id, &input);
     second.status = SessionStatus::Working;
-    view.set_sessions(vec![original, first, second.clone()], false);
-    assert_eq!(view.selected_id(), Some(&second.id));
+    view.set_sessions(vec![original.clone(), first, second], false);
+    assert_eq!(view.selected_id(), Some(&original.id));
+    assert_eq!(view.status_filter, tab_for_status(original.status));
     assert!(view.attention_selection.is_none());
     assert!(view.interrupted_selection.is_none());
 }

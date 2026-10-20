@@ -217,7 +217,7 @@ fn sending_refresh_preserves_task_selection_and_scroll_after_reordering() {
 }
 
 #[test]
-fn sending_to_attention_task_keeps_that_task_when_it_starts_working() {
+fn sending_to_attention_task_returns_to_interrupted_task_when_it_starts_working() {
     let (_dir, mut view, events) = fixture();
     let mut original = view.rows[0].clone();
     original.status = SessionStatus::Ready;
@@ -237,12 +237,14 @@ fn sending_to_attention_task_keeps_that_task_when_it_starts_working() {
         &waiting.id,
         &crate::providers::SessionInput::Prompt("next".into()),
     );
-    waiting.status = SessionStatus::Working;
-    view.set_sessions(vec![original, waiting.clone()], false);
-    assert_eq!(view.selected_id(), Some(&waiting.id));
     assert_eq!(view.event_selected, Some(2));
     assert_eq!(view.event_scroll(), 1);
     assert_eq!(view.viewport.borrow().event_detail_scroll, 3);
+    waiting.status = SessionStatus::Working;
+    view.set_sessions(vec![original.clone(), waiting], false);
+    assert_eq!(view.selected_id(), Some(&original.id));
+    assert!(view.attention_selection.is_none());
+    assert!(view.interrupted_selection.is_none());
 }
 
 #[test]
