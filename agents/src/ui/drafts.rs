@@ -338,13 +338,11 @@ impl View {
         self.refresh_draft_rows();
         self.reconcile_selection();
         self.show_selected_panels();
+        self.set_active_panel(Panel::TaskList);
     }
 
     pub(super) fn cancel_confirmation(&mut self) {
         self.confirm_dialog = None;
-        if self.selected_draft.is_some() {
-            self.prepare_prompt();
-        }
     }
 
     pub(super) fn confirm_draft_delete(&mut self) {

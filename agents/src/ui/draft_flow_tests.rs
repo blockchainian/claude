@@ -1168,6 +1168,7 @@ fn draft_name_saves_when_mouse_activates_another_panel() {
                 row: y,
                 modifiers: KeyModifiers::NONE,
             });
+            let pressed_panel = view.active_panel;
             view.handle_mouse(MouseEvent {
                 kind: MouseEventKind::Up(button),
                 column: x,
@@ -1191,8 +1192,9 @@ fn draft_name_saves_when_mouse_activates_another_panel() {
             }
             assert!(view.name_target.is_none());
             assert!(view.selector.is_none());
-            if button == MouseButton::Right && view.active_panel == Panel::Details {
+            if button == MouseButton::Right && pressed_panel == Panel::Details {
                 assert!(view.drafts.iter().all(|draft| draft.id != id));
+                assert_eq!(view.active_panel, Panel::TaskList);
             } else {
                 assert_eq!(
                     view.drafts
