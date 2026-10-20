@@ -157,6 +157,7 @@ impl Event {
 /// Structural changes produced by one persistent transcript-reader refresh.
 #[derive(Default)]
 pub(crate) struct Update {
+    /// Complete shown rows for a structural change; may be empty for an unchanged read.
     pub events: Vec<Event>,
     pub prepended: usize,
     pub appended: usize,

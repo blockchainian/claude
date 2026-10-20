@@ -792,7 +792,7 @@ impl View {
             .position(|(_, event)| event.source.as_ref() == Some(&id.0))
     }
 
-    fn restore_event_list(&mut self) {
+    pub(crate) fn restore_event_list(&mut self) {
         self.event_list.restoring = false;
         let at = match &self.event_list.position {
             task_ui::EventPosition::Live => None,

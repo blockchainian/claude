@@ -1,5 +1,9 @@
 //! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
+#[path = "app_transcript.rs"]
+mod transcript_cache;
+use transcript_cache::{ActivityCache, FileStamp};
+
 use crate::model::Action;
 use crate::model::{DraftKey, Session, SessionStatus};
 use crate::providers::Snapshot;
@@ -154,15 +158,17 @@ pub struct App {
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
     /// When each recently active transcript's turns ran.
-    activity: std::collections::HashMap<PathBuf, crate::activity::Turns>,
+    activity: ActivityCache,
+    usage_stamps: std::collections::HashMap<PathBuf, FileStamp>,
+    #[cfg(test)]
+    usage_reads: usize,
 }
 
 #[derive(PartialEq, Eq)]
 struct TranscriptStamp {
     session: SessionKey,
     path: PathBuf,
-    modified: std::time::SystemTime,
-    length: u64,
+    file: FileStamp,
     count: usize,
 }
 
@@ -254,7 +260,10 @@ impl App {
             transcript_oldest_offset: 0,
             transcript_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
-            activity: std::collections::HashMap::new(),
+            activity: ActivityCache::default(),
+            usage_stamps: std::collections::HashMap::new(),
+            #[cfg(test)]
+            usage_reads: 0,
         }
     }
 
@@ -597,7 +606,10 @@ impl App {
             let sorting = self.preferences.task_sort(id);
             self.view.initialize_event_sort(sorting);
         }
-        let count = if self.view.event_list.start_requested || self.view.transcript_fully_loaded() || self.view.restoring_event_position() {
+        let count = if self.view.event_list.start_requested
+            || self.view.transcript_fully_loaded()
+            || self.view.restoring_event_position()
+        {
             usize::MAX
         } else {
             self.view
@@ -626,11 +638,16 @@ impl App {
             }
             self.pending_transcript = None;
         }
-        if self
+        let first_load = self
             .transcript
             .as_ref()
-            .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path)
-        {
+            .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path);
+        let previous_reader = if first_load {
+            self.transcript.take()
+        } else {
+            None
+        };
+        if first_load {
             match crate::providers::event_reader(&selected) {
                 Ok(reader) => {
                     self.transcript = Some((selected.id.clone(), path.clone(), reader));
@@ -647,7 +664,10 @@ impl App {
                 }
             }
         }
-        if (self.view.transcript_fully_loaded() || self.view.restoring_event_position()) && self.transcript_oldest_offset > 0 {
+        if first_load
+            || ((self.view.transcript_fully_loaded() || self.view.restoring_event_position())
+                && self.transcript_oldest_offset > 0)
+        {
             let (session, path, mut reader) = self.transcript.take().expect("reader checked");
             self.transcript_request += 1;
             let token = self.transcript_request;
@@ -659,19 +679,21 @@ impl App {
             });
             let sender = self.sender.clone();
             thread::spawn(move || {
-                let result = reader.refresh(usize::MAX).and_then(|update| {
-                    let metadata = std::fs::metadata(&path)?;
+                drop(previous_reader);
+                let result = (|| {
+                    // Capture inputs before reading, so writes during the read are checked again.
+                    let file = FileStamp::read(&path)?;
+                    let update = reader.refresh(count)?;
                     Ok((
                         TranscriptStamp {
                             session,
                             path,
-                            modified: metadata.modified()?,
-                            length: metadata.len(),
-                            count: usize::MAX,
+                            file,
+                            count,
                         },
                         update,
                     ))
-                });
+                })();
                 let _ = sender.send(Input::EventsLoaded {
                     token,
                     reader,
@@ -680,24 +702,40 @@ impl App {
             });
             return;
         }
-        let result = (|| -> io::Result<(TranscriptStamp, crate::event::Update)> {
+        let result = (|| -> io::Result<Option<(TranscriptStamp, crate::event::Update)>> {
+            let file = FileStamp::read(path)?;
+            let stamp = TranscriptStamp {
+                session: selected.id.clone(),
+                path: path.clone(),
+                file,
+                count,
+            };
+            let previous = self
+                .transcript_stamp
+                .as_ref()
+                .or(self.full_transcript_stamp.as_ref());
+            if previous.is_some_and(|previous| {
+                previous.session == stamp.session
+                    && previous.path == stamp.path
+                    && previous.file == stamp.file
+                    && (previous.count >= count || self.transcript_oldest_offset == 0)
+            }) {
+                self.finish_event_refresh(stamp, visible);
+                return Ok(None);
+            }
             let update = self
                 .transcript
                 .as_mut()
                 .expect("reader opened")
                 .2
                 .refresh(count)?;
-            let metadata = std::fs::metadata(path)?;
-            let stamp = TranscriptStamp {
-                session: selected.id.clone(),
-                path: path.clone(),
-                modified: metadata.modified()?,
-                length: metadata.len(),
-                count,
-            };
-            Ok((stamp, update))
+            Ok(Some((stamp, update)))
         })();
-        self.apply_event_result(result, visible);
+        match result {
+            Ok(None) => {}
+            Ok(Some(result)) => self.apply_event_result(Ok(result), visible),
+            Err(error) => self.apply_event_result(Err(error), visible),
+        }
     }
 
     fn finish_event_load(
@@ -734,25 +772,14 @@ impl App {
                 self.transcript_parsed_bytes += update.parsed_bytes;
                 self.transcript_oldest_offset = update.oldest_offset;
                 debug_assert!(update.oldest_offset <= update.read_offset);
-                let changed = self.view.event_list.restoring || self.view.event_page_pending()
-                    || update.reset
+                let changed = update.reset
                     || update.prepended > 0
                     || update.appended > 0
                     || update.replaced > 0;
                 if changed {
                     self.view.apply_event_update(update);
                 }
-                self.view.finish_event_start();
-                self.view.event_session = Some(stamp.session.clone());
-                self.view
-                    .clamp_event_scroll(self.view.matching_event_count().saturating_sub(visible));
-                if self.view.transcript_fully_loaded() {
-                    self.full_transcript_stamp = Some(stamp);
-                    self.transcript_stamp = None;
-                } else {
-                    self.full_transcript_stamp = None;
-                    self.transcript_stamp = Some(stamp);
-                }
+                self.finish_event_refresh(stamp, visible);
             }
             Err(error) => {
                 self.transcript = None;
@@ -770,32 +797,30 @@ impl App {
         }
     }
 
-    /// Reads when each task worked within a timeline `width` cells wide and hands the view the
-    /// bins any of them worked in; a task idle since before the timeline is not read.
-    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
-        let since = now - chrono::Duration::seconds(crate::ui::timeline_seconds(width));
-        let mut bins = std::collections::BTreeSet::new();
-        for session in &self.sessions {
-            let Some(path) = &session.transcript else {
-                continue;
-            };
-            let works = session.status == crate::model::SessionStatus::Working;
-            let recent = std::fs::metadata(path)
-                .and_then(|metadata| metadata.modified())
-                .is_ok_and(|at| chrono::DateTime::<chrono::Utc>::from(at) >= since);
-            if !works && !recent {
-                self.activity.remove(path);
-                continue;
-            }
-            let turns = self.activity.entry(path.clone()).or_default();
-            if turns.update(path, session.id.provider, since).is_err() {
-                continue;
-            }
-            for (start, end) in turns.spans(now, works) {
-                bins.extend(crate::usage::bin_of(start.max(since))..=crate::usage::bin_of(end));
-            }
+    fn finish_event_refresh(&mut self, stamp: TranscriptStamp, visible: usize) {
+        if self.view.event_list.restoring {
+            self.view.prepare_event_search();
+            self.view.restore_event_list();
         }
-        self.view.set_activity(bins);
+        self.view.event_list.pending_older = 0;
+        self.view.finish_event_start();
+        self.view.event_session = Some(stamp.session.clone());
+        self.view
+            .clamp_event_scroll(self.view.matching_event_count().saturating_sub(visible));
+        if self.view.transcript_fully_loaded() {
+            self.full_transcript_stamp = Some(stamp);
+            self.transcript_stamp = None;
+        } else {
+            self.full_transcript_stamp = None;
+            self.transcript_stamp = Some(stamp);
+        }
+    }
+
+    /// Updates file inputs on session changes and polling ticks, and bins when time moves.
+    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
+        if let Some(bins) = self.activity.update(&self.sessions, width, now) {
+            self.view.set_activity(bins);
+        }
     }
 
     /// Reads what the selected task's transcript gained and hands its usage to the view.
@@ -810,9 +835,29 @@ impl App {
         let Some(path) = &session.transcript else {
             return;
         };
-        let series = self.usage.entry(path.clone()).or_default();
-        let Ok(changed) = series.update(path, session.id.provider) else {
+        let Ok(stamp) = FileStamp::read(path) else {
             return;
+        };
+        let previous = self.usage_stamps.get(path);
+        if previous == Some(&stamp) && self.view.usage_session() == Some(&session.id) {
+            return;
+        }
+        let series = self.usage.entry(path.clone()).or_default();
+        let changed = if previous == Some(&stamp) {
+            false
+        } else {
+            if previous.is_some_and(|previous| !stamp.appended_to(previous)) {
+                *series = Default::default();
+            }
+            #[cfg(test)]
+            {
+                self.usage_reads += 1;
+            }
+            let Ok(changed) = series.update(path, session.id.provider) else {
+                return;
+            };
+            self.usage_stamps.insert(path.clone(), stamp);
+            changed
         };
         self.view
             .set_context_usage(&session.id, series.context_percent());
@@ -1593,3 +1638,7 @@ mod weekly_usage_tests;
 #[cfg(test)]
 #[path = "app_reset_credit_tests.rs"]
 mod reset_credit_tests;
+
+#[cfg(test)]
+#[path = "app_transcript_tests.rs"]
+mod transcript_tests;

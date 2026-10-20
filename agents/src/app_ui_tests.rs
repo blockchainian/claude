@@ -42,8 +42,24 @@ fn draw(app: &mut App, width: u16) -> ratatui::buffer::Buffer {
 }
 
 fn draw_size(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    draw_size_at(app, width, height, chrono::Utc::now())
+}
+
+fn draw_size_at(
+    app: &mut App,
+    width: u16,
+    height: u16,
+    now: chrono::DateTime<chrono::Utc>,
+) -> ratatui::buffer::Buffer {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    app.draw(&mut terminal).unwrap();
+    app.draw_at(&mut terminal, now).unwrap();
+    if app.pending_transcript.is_some()
+        && !app.view.transcript_fully_loaded()
+        && !app.view.restoring_event_position()
+    {
+        super::event_search_tests::finish_search(app);
+        app.draw_at(&mut terminal, now).unwrap();
+    }
     terminal.backend().buffer().clone()
 }
 
@@ -956,8 +972,9 @@ fn segment(buffer: &ratatui::buffer::Buffer, x: std::ops::Range<u16>, y: u16) ->
 #[test]
 fn wide_border_labels_stay_in_their_columns() {
     let (_directory, mut app) = border_fixture();
+    let now = app.sessions[0].started_at.unwrap() + chrono::Duration::seconds(120);
     for width in [150, 200] {
-        let buffer = draw(&mut app, width);
+        let buffer = draw_size_at(&mut app, width, 40, now);
         let rendered = lines(&buffer);
         let separators: Vec<_> = (0..width - 1)
             .filter(|&x| buffer[(x, 2)].symbol() == "│")

@@ -29,6 +29,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, App) {
     app.sessions[0].status = SessionStatus::Ready;
     app.view.set_sessions(app.sessions.clone(), false);
     app.refresh_event(8);
+    super::event_search_tests::finish_search(&mut app);
     (dir, app)
 }
 
@@ -41,7 +42,17 @@ fn replace_transcript(path: &std::path::Path, content: impl AsRef<[u8]>) {
 
 pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    // A confirmed action has its own completion; do not consume it while settling a draw.
+    if code == KeyCode::Enter {
+        return quit;
+    }
     app.refresh_event(8);
+    if app.pending_transcript.is_some()
+        && !app.view.transcript_fully_loaded()
+        && !app.view.restoring_event_position()
+    {
+        super::event_search_tests::finish_search(app);
+    }
     quit
 }
 
@@ -94,6 +105,7 @@ fn task_event_cache_rereads_when_event_count_changes() {
     key(&mut app, KeyCode::BackTab);
     app.refresh();
     app.refresh_event(8);
+    super::event_search_tests::finish_search(&mut app);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
@@ -621,6 +633,7 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     key(&mut app, KeyCode::BackTab);
     app.refresh();
     app.refresh_event(8);
+    super::event_search_tests::finish_search(&mut app);
     assert_eq!(app.view.event_panel.len(), 2);
     let path = app.sessions[0].transcript.clone().unwrap();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();

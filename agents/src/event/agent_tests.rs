@@ -67,7 +67,13 @@ fn claude_peer_exchange_merges_live_deliveries_and_keeps_boundaries() {
         crate::providers::claude::event_reader::tail(file.path(), 10).unwrap(),
         update.events
     );
-    assert_eq!(reader.refresh(10).unwrap().events, update.events);
+    let unchanged = reader.refresh(10).unwrap();
+    assert!(unchanged.events.is_empty());
+    assert_eq!(
+        (unchanged.prepended, unchanged.appended, unchanged.replaced),
+        (0, 0, 0)
+    );
+    assert!(!unchanged.reset);
 }
 
 #[test]

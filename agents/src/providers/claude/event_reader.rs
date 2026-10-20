@@ -480,6 +480,14 @@ impl Reader {
             .saturating_sub(shown_before)
             .saturating_sub(appended);
         self.boundary.capture(&mut file, metadata.len())?;
+        if !reset && prepended == 0 && appended == 0 && replaced == 0 {
+            return Ok(crate::event::Update {
+                parsed_bytes,
+                oldest_offset: self.oldest_offset,
+                read_offset: self.read_offset,
+                ..Default::default()
+            });
+        }
         Ok(crate::event::Update {
             events: clip_turn_start(
                 crate::event::agent::merge(
@@ -1549,6 +1557,7 @@ pub(crate) mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         let mut reader = super::Reader::new(file.path().to_owned(), false);
         let mut enqueued = Vec::new();
+        let mut loaded = Vec::new();
         for line in fixture.lines() {
             let record: serde_json::Value = serde_json::from_str(line).unwrap();
             writeln!(file, "{line}").unwrap();
@@ -1556,11 +1565,17 @@ pub(crate) mod tests {
                 enqueued.push(record.clone());
             }
             let update = reader.refresh(usize::MAX).unwrap();
+                let changed = update.reset || update.prepended > 0 || update.appended > 0 || update.replaced > 0;
+                if changed {
+                    loaded = update.events;
+                } else {
+                    assert!(update.events.is_empty(), "unchanged updates carry no event copies");
+                }
             if record["type"] != "queue-operation" {
                 assert_eq!(update.appended, 0, "delivery must not append a row");
             }
             let events = super::tail(file.path(), usize::MAX).unwrap();
-            assert_eq!(update.events, events);
+            assert_eq!(loaded, events);
             assert_eq!(events.len(), enqueued.len(), "delivery must not add a row");
             for enqueue in &enqueued {
                 let text = enqueue["content"].as_str().unwrap();
@@ -1738,10 +1753,17 @@ pub(crate) mod tests {
         ] {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             let mut reader = super::Reader::new(file.path().to_owned(), false);
+            let mut loaded = Vec::new();
             for line in fixture.split_inclusive('\n') {
                 file.write_all(line.as_bytes()).unwrap();
                 let update = reader.refresh(usize::MAX).unwrap();
-                assert_eq!(update.events, super::tail(file.path(), usize::MAX).unwrap());
+                let changed = update.reset || update.prepended > 0 || update.appended > 0 || update.replaced > 0;
+                if changed {
+                    loaded = update.events;
+                } else {
+                    assert!(update.events.is_empty(), "unchanged updates carry no event copies");
+                }
+                assert_eq!(loaded, super::tail(file.path(), usize::MAX).unwrap());
                 assert_eq!(update.parsed_bytes, line.len() as u64);
             }
             assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
@@ -3626,5 +3648,24 @@ pub(crate) mod tests {
             ["before", "after"]
         );
         assert_eq!(events[1].previous_end, Some(at(1)));
+    }
+}
+
+#[cfg(test)]
+mod refresh_work_tests {
+    #[test]
+    fn unchanged_transcript_returns_no_event_copies() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            include_bytes!("../../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut reader = super::Reader::new(file.path().into(), false);
+        let first = reader.refresh(8).unwrap();
+        assert!(!first.events.is_empty());
+        let unchanged = reader.refresh(8).unwrap();
+        assert!(unchanged.events.is_empty(), "unchanged events were cloned");
+        assert_eq!(unchanged.parsed_bytes, 0);
     }
 }

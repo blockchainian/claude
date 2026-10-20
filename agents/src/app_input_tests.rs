@@ -42,6 +42,8 @@ fn registry_app(kind: &str) -> (tempfile::TempDir, App, PathBuf, serde_json::Val
     );
     app.refresh();
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+    app.refresh_event(8);
+    super::event_search_tests::finish_search(&mut app);
     (directory, app, path, registry)
 }
 
@@ -58,7 +60,19 @@ fn screen(app: &mut App) -> String {
 }
 
 fn complete_input(app: &mut App, expected: &str) {
-    let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    let event = loop {
+        let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        if let Input::EventsLoaded {
+            token,
+            reader,
+            result,
+        } = input
+        {
+            app.finish_event_load(token, reader, result);
+        } else {
+            break input;
+        }
+    };
     assert!(
         matches!(&event, Input::Sent { result: Err(error), .. } if error.to_string().contains(expected)),
         "unexpected provider completion"

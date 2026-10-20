@@ -42,6 +42,8 @@ fn idle_loop_finishes_click_without_delaying_event_selection() {
     )));
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     app.draw_at(&mut terminal, now).unwrap();
+    super::event_search_tests::finish_search(&mut app);
+    app.draw_at(&mut terminal, now).unwrap();
     let before = screen(&terminal);
     let (row, line) = before
         .iter()

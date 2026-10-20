@@ -46,9 +46,11 @@ fn start_search(app: &mut App) {
 }
 
 pub(super) fn finish_search(app: &mut App) {
-    let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
     let mut schedule = RefreshSchedule::new(Instant::now(), FALLBACK_INTERVAL);
-    app.handle_inputs(input, &mut None, &mut schedule).unwrap();
+    while app.pending_transcript.is_some() {
+        let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        app.handle_inputs(input, &mut None, &mut schedule).unwrap();
+    }
 }
 
 #[test]
@@ -133,8 +135,15 @@ fn completed_history_does_not_replace_another_task_or_request() {
     app.refresh_event(8);
     let second_event = app.view.event_panel.clone();
     assert_eq!(app.view.selected_id(), Some(&second.id));
-    let mut schedule = RefreshSchedule::new(Instant::now(), FALLBACK_INTERVAL);
-    app.handle_inputs(stale, &mut None, &mut schedule).unwrap();
+    let Input::EventsLoaded {
+        token,
+        reader,
+        result,
+    } = stale
+    else {
+        panic!("expected a transcript completion");
+    };
+    app.finish_event_load(token, reader, result);
     assert_eq!(app.view.event_panel, second_event);
     assert_eq!(app.view.event_session.as_ref(), Some(&second.id));
     app.sessions = vec![first.clone()];
@@ -313,7 +322,8 @@ fn saved_duration_loads_full_history_on_first_refresh() {
     app.sessions = vec![second];
     app.view.set_sessions(app.sessions.clone(), false);
     app.refresh_event(1);
-    assert!(app.pending_transcript.is_none());
+    assert!(app.pending_transcript.is_some());
+    finish_search(&mut app);
     assert_eq!(app.view.event_list.sort, crate::ui::EventSort::Time);
     assert!(!app.view.transcript_fully_loaded());
 }
@@ -360,7 +370,8 @@ fn parked_event_position_loads_history_before_restoring_selection() {
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
     assert_eq!(app.view.selected_id(), Some(&second));
     app.refresh_event(1);
-    assert!(app.pending_transcript.is_none());
+    assert!(app.pending_transcript.is_some());
+    finish_search(&mut app);
     assert!(app.view.event_panel.len() < 24);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
     assert_eq!(app.view.selected_id(), Some(&first));
