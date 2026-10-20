@@ -4808,6 +4808,10 @@ fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
             assert_eq!(view.selected_id(), Some(&expected));
         }
     }
+            let bottom = list.y + list.height - 1;
+            assert!(
+                (list.x..list.right()).all(|x| !matches!(buf[(x, bottom)].symbol(), "↑" | "↓"))
+            );
 }
 
 #[test]

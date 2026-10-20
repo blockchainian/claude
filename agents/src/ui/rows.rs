@@ -272,14 +272,6 @@ impl View {
                 fill_list_row(rect, buf, cursor_style());
             }
         }
-        if padding > 0 && start > 0 {
-            Line::from("↑".dim())
-                .right_aligned()
-                .render(row(area, area.height - 1, 1), buf);
-        }
-        if padding > 0 && start + height < entries.len() {
-            line("↓".dim(), row(area, area.height.saturating_sub(1), 1), buf);
-        }
         let text_area = state.list_rows;
         drop(state);
         self.capture_list_text(text_selection::Panel::Tasks, text_area, start, buf);
