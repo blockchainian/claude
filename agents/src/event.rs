@@ -164,6 +164,8 @@ pub(crate) struct Update {
     pub replaced: usize,
     pub reset: bool,
     pub parsed_bytes: u64,
+    /// Older rows remain on disk or decoded outside the shown window.
+    pub has_older: bool,
     pub oldest_offset: u64,
     pub read_offset: u64,
 }

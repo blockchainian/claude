@@ -1442,6 +1442,7 @@ impl Reader {
             appended: 0,
             replaced: 0,
             prepended: 0,
+            has_older: false,
             oldest_offset: 0,
             read_offset: self.read,
         })
@@ -1797,6 +1798,7 @@ impl Reader {
             replaced,
             reset,
             parsed_bytes,
+            has_older: self.oldest > 0 || skip > 0,
             oldest_offset: self.oldest,
             read_offset: self.read,
         })

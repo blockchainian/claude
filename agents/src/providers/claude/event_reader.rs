@@ -524,9 +524,11 @@ impl Reader {
             .saturating_sub(shown_before)
             .saturating_sub(appended);
         self.boundary.capture(&mut file, metadata.len())?;
+        let has_older = self.oldest_offset > 0 || self.shown < self.entries.len();
         if !reset && prepended == 0 && appended == 0 && replaced == 0 {
             return Ok(crate::event::Update {
                 parsed_bytes,
+                has_older,
                 oldest_offset: self.oldest_offset,
                 read_offset: self.read_offset,
                 ..Default::default()
@@ -551,6 +553,7 @@ impl Reader {
             replaced: replaced.min(shown_before),
             reset,
             parsed_bytes,
+            has_older,
             oldest_offset: self.oldest_offset,
             read_offset: self.read_offset,
         })

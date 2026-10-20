@@ -159,7 +159,7 @@ pub struct App {
     transcript: Option<(SessionKey, PathBuf, Box<dyn crate::event::Reader>)>,
     pending_transcript: Option<PendingTranscript>,
     transcript_request: u64,
-    transcript_oldest_offset: u64,
+    transcript_has_older: bool,
     transcript_parsed_bytes: u64,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
@@ -265,7 +265,7 @@ impl App {
             transcript: None,
             pending_transcript: None,
             transcript_request: 0,
-            transcript_oldest_offset: 0,
+            transcript_has_older: false,
             transcript_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
             activity: ActivityCache::default(),
@@ -643,7 +643,7 @@ impl App {
             usize::MAX
         } else {
             self.view
-                .event_read_count(visible, self.transcript_oldest_offset > 0)
+                .event_read_count(visible, self.transcript_has_older)
         };
         let selected = self
             .view
@@ -655,7 +655,7 @@ impl App {
             self.full_transcript_stamp = None;
             self.transcript = None;
             self.pending_transcript = None;
-            self.transcript_oldest_offset = 0;
+            self.transcript_has_older = false;
             self.view.event_panel.clear();
             self.view.prepare_event_search();
             self.view.event_session = None;
@@ -681,7 +681,7 @@ impl App {
             match crate::providers::event_reader(&selected) {
                 Ok(reader) => {
                     self.transcript = Some((selected.id.clone(), path.clone(), reader));
-                    self.transcript_oldest_offset = u64::MAX;
+                    self.transcript_has_older = true;
                     if self.view.event_session.as_ref() != Some(&selected.id) {
                         self.view.event_panel.clear();
                         self.view.prepare_event_search();
@@ -696,7 +696,7 @@ impl App {
         }
         if first_load
             || ((self.view.transcript_fully_loaded() || self.view.restoring_event_position())
-                && self.transcript_oldest_offset > 0)
+                && self.transcript_has_older)
         {
             let (session, path, mut reader) = self.transcript.take().expect("reader checked");
             self.transcript_request += 1;
@@ -748,7 +748,7 @@ impl App {
                 previous.session == stamp.session
                     && previous.path == stamp.path
                     && previous.file == stamp.file
-                    && (previous.count >= count || self.transcript_oldest_offset == 0)
+                    && (previous.count >= count || !self.transcript_has_older)
             }) {
                 self.finish_event_refresh(stamp, visible);
                 return Ok(None);
@@ -800,7 +800,7 @@ impl App {
         match result {
             Ok((stamp, update)) => {
                 self.transcript_parsed_bytes += update.parsed_bytes;
-                self.transcript_oldest_offset = update.oldest_offset;
+                self.transcript_has_older = update.has_older;
                 debug_assert!(update.oldest_offset <= update.read_offset);
                 let changed = update.reset
                     || update.prepended > 0
@@ -813,7 +813,7 @@ impl App {
             }
             Err(error) => {
                 self.transcript = None;
-                self.transcript_oldest_offset = 0;
+                self.transcript_has_older = false;
                 self.transcript_stamp = None;
                 self.full_transcript_stamp = None;
                 if self.view.event_list.sort != crate::ui::EventSort::Duration {
@@ -1672,3 +1672,7 @@ mod transcript_tests;
 #[cfg(test)]
 #[path = "app_refresh_tests.rs"]
 mod refresh_tests;
+
+#[cfg(test)]
+#[path = "app_codex_paging_tests.rs"]
+mod codex_paging_tests;
