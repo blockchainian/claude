@@ -55,9 +55,8 @@ impl EventFilter {
 
     pub fn includes(self, kind: &Kind) -> bool {
         let category = match kind {
-            Kind::User
-            | Kind::QueuedUser
-            | Kind::Assistant
+            Kind::User | Kind::QueuedUser => Self::All,
+            Kind::Assistant
             | Kind::Compaction
             | Kind::QueuedSystem
             | Kind::Agent

@@ -59,16 +59,16 @@ fn space(view: &mut View) {
     }
 }
 
+fn tool(kind: &Kind) -> bool {
+    matches!(kind, Kind::Tool | Kind::Error | Kind::Denied)
+}
+
 fn message(kind: &Kind) -> bool {
     match kind {
-        Kind::User
-        | Kind::QueuedUser
-        | Kind::Assistant
-        | Kind::Compaction
-        | Kind::QueuedSystem
-        | Kind::Agent
-        | Kind::Session => true,
-        Kind::Tool | Kind::Error | Kind::Denied => false,
+        Kind::Assistant | Kind::Compaction | Kind::QueuedSystem | Kind::Agent | Kind::Session => {
+            true
+        }
+        Kind::User | Kind::QueuedUser | Kind::Tool | Kind::Error | Kind::Denied => false,
     }
 }
 
@@ -135,10 +135,16 @@ fn space_cycles_all_messages_tools_and_keeps_pins() {
         .filter(|(_, e)| message(&e.kind))
         .map(|(i, _)| i)
         .collect();
-    for kind in [Kind::User, Kind::QueuedUser, Kind::Assistant] {
+    for kind in [
+        Kind::Assistant,
+        Kind::Compaction,
+        Kind::QueuedSystem,
+        Kind::Agent,
+        Kind::Session,
+    ] {
         assert!(expected.iter().any(|&i| view.event_panel[i].kind == kind));
     }
-    assert!(expected.len() < all.len());
+    assert_eq!(expected.len(), 5);
     space(&mut view);
     assert_eq!(view.event_list.filter, EventFilter::Message);
     assert_eq!(
@@ -154,7 +160,7 @@ fn space_cycles_all_messages_tools_and_keeps_pins() {
         .event_panel
         .iter()
         .enumerate()
-        .filter(|(_, e)| !message(&e.kind))
+        .filter(|(_, e)| tool(&e.kind))
         .map(|(i, _)| i)
         .collect();
     assert_eq!(
@@ -184,7 +190,7 @@ fn space_preserves_message_selection_and_rematches_hidden_rows_in_both_sorts() {
         space(&mut view);
         assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(full)));
         space(&mut view);
-        assert!(view.shown_events().all(|(_, e)| !message(&e.kind)));
+        assert!(view.shown_events().all(|(_, e)| tool(&e.kind)));
         space(&mut view);
         view.select_event(view.shown_row_position(EventRow::Timeline(full)));
         assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(full)));
@@ -223,7 +229,7 @@ fn space_combines_with_search_without_changing_event_matches() {
     let matches: Vec<_> = (0..view.event_panel.len())
         .map(|i| view.event_matches(i))
         .collect();
-    assert!(view.shown_events().any(|(_, e)| !message(&e.kind)));
+    assert!(view.shown_events().any(|(_, e)| tool(&e.kind)));
     space(&mut view);
     assert!(view.shown_events().all(|(_, e)| message(&e.kind)));
     assert_eq!(
@@ -234,7 +240,7 @@ fn space_combines_with_search_without_changing_event_matches() {
     );
     view.event_list.search.query.set_text("User");
     view.rematch_event();
-    assert!(view.shown_events().next().is_some());
+    assert!(view.shown_events().next().is_none());
     assert!(
         view.shown_events()
             .all(|(i, e)| message(&e.kind) && view.event_matches(i))
@@ -277,7 +283,7 @@ fn space_while_searching_counts_and_navigates_only_current_mode_matches() {
                 .collect();
             let tools: Vec<_> = view
                 .shown_events()
-                .filter(|(_, e)| !message(&e.kind))
+                .filter(|(_, e)| tool(&e.kind))
                 .map(|(i, _)| EventRow::Timeline(i))
                 .collect();
             for expected in [&messages, &tools, &all] {
@@ -374,5 +380,70 @@ fn filters_restore_when_reopening_a_task() {
                 .shown_events()
                 .all(|(_, e)| filter.next().includes(&e.kind))
         );
+    }
+}
+
+#[test]
+fn filtered_event_border_labels_have_layout_coordinates() {
+    for width in [100, 149, 150, 200] {
+        let (_dir, mut view) = fixture();
+        let area = Rect::new(0, 0, width, 40);
+        let mut rows = String::new();
+        for (filter, title) in [
+            (EventFilter::All, ""),
+            (EventFilter::Message, "Assistant"),
+            (EventFilter::Tool, "Tool"),
+        ] {
+            view.event_list.filter = filter;
+            let mut buf = Buffer::empty(area);
+            view.render(area, &mut buf);
+            let layout = view.center_layout(area);
+            let viewport = view.viewport.borrow();
+            let border = viewport.event_borders[0];
+            let y = if width >= render::WIDE_LAYOUT_COLUMNS {
+                border.y
+            } else {
+                layout.prompt.bottom()
+            };
+            let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+            if title.is_empty() {
+                assert!(!row.contains("Assistant"), "{row}");
+                assert!(!row.contains("Tool"), "{row}");
+            } else {
+                let length = title.len() as u16;
+                let x = if width >= render::WIDE_LAYOUT_COLUMNS {
+                    border.x + (border.width - length) / 2
+                } else {
+                    layout.gap.x + render::HORIZONTAL_PADDING - 2 - length
+                };
+                let actual: String = (x..x + length).map(|x| buf[(x, y)].symbol()).collect();
+                assert_eq!(actual, title, "width {width}: {row}");
+                assert_eq!(buf[(x - 1, y)].symbol(), "╴");
+                for column in x - 1..x + length {
+                    assert!(
+                        buf[(column, y)]
+                            .modifier
+                            .contains(ratatui::style::Modifier::DIM)
+                    );
+                    assert_eq!(buf[(column, y)].fg, ratatui::style::Color::Reset);
+                }
+                let label = Rect::new(x - 1, y, length + 2, 1);
+                assert!(!label.intersects(viewport.event_label));
+                for (target, _) in &viewport.field_targets {
+                    assert!(!label.intersects(*target));
+                }
+            }
+            rows.push_str(&row);
+            rows.push('\n');
+        }
+        if [100, 200].contains(&width) {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "tests/ui_snapshots/event_filter_labels_{width}.txt"
+            ));
+            if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+                std::fs::write(&path, &rows).unwrap();
+            }
+            assert_eq!(rows, std::fs::read_to_string(path).unwrap());
+        }
     }
 }

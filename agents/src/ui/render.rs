@@ -559,6 +559,13 @@ impl View {
                 ),
                 buf,
             );
+            let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+            let filter_rule = if wide {
+                self.viewport.borrow().event_borders[0]
+            } else {
+                Rect::new(area.x, model_y, model_left.saturating_sub(area.x), 1)
+            };
+            self.render_event_filter(filter_rule, wide, buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
@@ -917,6 +924,37 @@ impl View {
         }
         super::links::underline(buf, &links);
         viewport.task_details_links.extend(links);
+    }
+
+    fn render_event_filter(&self, rule: Rect, centered: bool, buf: &mut Buffer) {
+        let title = match self.event_list.filter {
+            crate::event::EventFilter::All => return,
+            crate::event::EventFilter::Message => "Assistant",
+            crate::event::EventFilter::Tool => "Tool",
+        };
+        let width = title.width() as u16;
+        // Leave room for the left joint, trailing space, and the midline gap.
+        if rule.is_empty() || rule.width < width + 3 {
+            return;
+        }
+        let x = if centered {
+            rule.x + (rule.width - width) / 2
+        } else {
+            rule.right() - 2 - width
+        };
+        let label = Rect::new(x - 1, rule.y, width + 2, 1);
+        let viewport = self.viewport.borrow();
+        if label.intersects(viewport.event_label)
+            || viewport
+                .field_targets
+                .iter()
+                .any(|(target, _)| label.intersects(*target))
+        {
+            return;
+        }
+        Line::from(format!("╴{title} "))
+            .style(style::time_style())
+            .render(label, buf);
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.

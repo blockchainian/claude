@@ -349,7 +349,7 @@ fn start_probe_with_command(
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    tmux.wait_for(|capture| capture.contains("Update"));
+    tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
     (directory, tmux, transcript)
 }
 
@@ -3347,3 +3347,146 @@ mod terminal_window_navigation;
 
 #[path = "support/terminal_transcript.rs"]
 mod terminal_transcript;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_filtered_event_labels_and_typed_prompts() {
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/filter-label-probe");
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(output.join("verdict.json"), r#"{"verdict":"incomplete"}"#).unwrap();
+    let mut results = Vec::new();
+    for width in [200_usize, 112] {
+        let (_directory, tmux, _transcript) = start_probe_with_transcript(
+            &format!("filtered-event-labels-{width}"),
+            include_str!("fixtures/claude-main-model-history.jsonl"),
+        );
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        let initial = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .any(|row| row.contains("medium") && row.width() == width)
+                && capture.contains("看 Codex 结果")
+        });
+        let rows: Vec<_> = initial.lines().collect();
+        let model_y = rows.iter().position(|row| row.contains("medium")).unwrap();
+        let wide = width >= 150;
+        let midline = rows[2][..rows[2].find('│').unwrap()].width();
+        let event_left = if wide {
+            rows[2][..rows[2].rfind('│').unwrap()].width() + 2
+        } else {
+            1
+        };
+        let border_y = if wide { 1 } else { model_y };
+        let event_top = if wide { 2 } else { model_y + 1 };
+        let event_bottom = if wide {
+            model_y
+        } else {
+            (event_top..rows.len())
+                .find(|&y| rows[y].matches('─').count() > width / 2)
+                .unwrap()
+        };
+        tmux.mouse(0, event_left + 1, event_top, true);
+        for (mode, label) in [
+            ("all", None),
+            ("messages", Some("Assistant")),
+            ("tools", Some("Tool")),
+        ] {
+            if label.is_some() {
+                tmux.run(&["send-keys", "-t", "probe", "Space"]);
+            }
+            let capture = tmux.capture_when(|capture| {
+                let Some(border) = capture.lines().nth(border_y) else {
+                    return false;
+                };
+                match label {
+                    Some(label) => border.contains(&format!("╴{label} ")),
+                    None => !border.contains("╴Assistant ") && !border.contains("╴Tool "),
+                }
+            });
+            let rows: Vec<_> = capture.lines().collect();
+            let border = rows[border_y];
+            let screen = captured_screen(&capture, width as u16, 50);
+            let list = (event_top..event_bottom)
+                .map(|y| {
+                    (event_left..width)
+                        .map(|x| screen.screen().cell(y as u16, x as u16).unwrap().contents())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            match mode {
+                "all" => assert!(
+                    list.contains("那个 agent command center"),
+                    "typed prompt missing: {capture}"
+                ),
+                "messages" => {
+                    assert!(
+                        !list.contains("那个 agent command center"),
+                        "typed prompt leaked: {capture}"
+                    );
+                    assert!(!list.contains("看 Codex 结果"), "tool leaked: {capture}");
+                }
+                "tools" => {
+                    assert!(
+                        !list.contains("那个 agent command center"),
+                        "typed prompt leaked: {capture}"
+                    );
+                    assert!(list.contains("看 Codex 结果"), "tool missing: {capture}");
+                }
+                _ => unreachable!(),
+            }
+            let label_column = label.map(|label| {
+                let column = border[..border.find(label).unwrap()].width();
+                let expected = if wide {
+                    event_left + (width - event_left - 1 - label.width()) / 2
+                } else {
+                    midline - 2 - label.width()
+                };
+                assert_eq!(column, expected, "{mode}, width {width}: {border}");
+                if !wide {
+                    let model = if border.contains("claude-opus-5-5") {
+                        "claude-opus-5-5"
+                    } else {
+                        "Opus 5.5"
+                    };
+                    let model_column = border[..border.find(model).unwrap()].width();
+                    assert_eq!(model_column, midline + 2, "{border}");
+                }
+                column
+            });
+            let stem = format!("{width}-{mode}");
+            std::fs::write(output.join(format!("{stem}-screen.txt")), &capture).unwrap();
+            std::fs::write(
+                output.join(format!("{stem}-border.txt")),
+                format!("{border}\n"),
+            )
+            .unwrap();
+            results.push(serde_json::json!({
+                "width": width, "mode": mode, "border_y": border_y,
+                "label_column": label_column, "border": border,
+            }));
+        }
+        tmux.run(&["send-keys", "-t", "probe", "Space"]);
+        tmux.wait_for(|capture| {
+            capture
+                .lines()
+                .nth(border_y)
+                .is_some_and(|border| !border.contains("╴Assistant ") && !border.contains("╴Tool "))
+        });
+    }
+    let verdict = serde_json::json!({"verdict":"pass", "cases": results});
+    std::fs::write(
+        output.join("verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}
