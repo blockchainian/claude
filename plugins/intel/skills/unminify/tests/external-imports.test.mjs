@@ -45,7 +45,7 @@ test('external named aliases restore long imported names and retain short import
 test('external named alias collisions use the existing scope resolver', () => {
   const files = new Map([['main.js', 'import { homedir as b } from "os"; const homedir = 1; console.log(b, homedir);']]);
   const after = followImports(files).get('main.js');
-  assert.equal(after, 'import { homedir as homedir2 } from "os"; const homedir = 1; console.log(homedir2, homedir);');
+  assert.equal(after, 'import { homedir as osHomedir } from "os"; const homedir = 1; console.log(osHomedir, homedir);');
   assert.equal(checkRewrite(files.get('main.js'), after), null);
 });
 
@@ -90,9 +90,9 @@ test('chunk collision suffixes reach a fixed point when restoring external alias
   await writeFile(chunks, JSON.stringify({ version: 1, chunks: [{ id: 'queue', files: ['imports.js', 'uses.js'] }] }));
   const options = { paths: [root], chunks };
   assert.equal((await run(options)).exitCode, 0);
-  const expected = 'import { homedir as homedir2 } from "os";\n';
+  const expected = 'import { homedir as osHomedir } from "os";\n';
   assert.equal(await readFile(join(root, 'imports.js'), 'utf8'), expected);
-  assert.equal(await readFile(join(root, 'uses.js'), 'utf8'), 'const homedir = 1; console.log(homedir2, homedir);\n');
+  assert.equal(await readFile(join(root, 'uses.js'), 'utf8'), 'const homedir = 1; console.log(osHomedir, homedir);\n');
   assert.equal((await run(options)).exitCode, 0);
   assert.equal(await readFile(join(root, 'imports.js'), 'utf8'), expected);
 });

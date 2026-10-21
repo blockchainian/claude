@@ -180,13 +180,13 @@ export async function createChunkRun(root, settings) {
             if (!byKey.has(key)) throw new Error(`unknown chunk import key: ${file}:${key}`);
             all.set(byKey.get(key), name);
           }
-          const resolved = resolveChunkNames(state.sources, all, { selected, ignored, chunkSiblings: !!settings.chunkSiblings, allowImports: true });
+          const resolved = resolveChunkNames(state.sources, all, { selected, ignored, chunkSiblings: !!settings.chunkSiblings, allowImports: true, restoreExternalImports: true });
           return new Map([...resolved].filter(([name]) => analysis.bindings.get(name).file === file).map(([name, value]) => [analysis.bindings.get(name).key, value]));
         },
         apply(sources, emit, summary) {
           for (const [id, state] of completed) {
             const proposals = plans.get(id) ?? new Map();
-            const names = resolveChunkNames(state.sources, proposals, { selected, ignored, chunkSiblings: !!settings.chunkSiblings, allowImports: true });
+            const names = resolveChunkNames(state.sources, proposals, { selected, ignored, chunkSiblings: !!settings.chunkSiblings, allowImports: true, restoreExternalImports: true });
             const after = applyChunkRenames(state.sources, names);
             const reason = checkChunkRewrite(state.sources, after);
             if (reason) {
