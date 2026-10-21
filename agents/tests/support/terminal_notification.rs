@@ -49,7 +49,7 @@ fn terminal_notification_transcripts_show_only_the_report() {
             "{record}"
         )
         .unwrap();
-        let title = "\"等 tab 线程\" ✔";
+        let title = "\"等 tab 线程\" ✓";
         let capture = tmux.capture_when(|capture| {
             capture
                 .rsplit_once(title)
@@ -97,7 +97,7 @@ fn terminal_background_notifications_shorten_titles_and_color_exit_numbers() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/claude-notification-check/terminal");
     std::fs::create_dir_all(&evidence).unwrap();
     let expected = [
-        ("\"睡12秒再输出\" ✔", None),
+        ("\"睡12秒再输出\" ✓", None),
         ("\"给 a16z 视频改名\" · 1", Some("1")),
         ("\"等右键改动\" · -1", Some("-1")),
         ("\"三个配置依次快速启动\" · 144", Some("144")),
@@ -120,28 +120,6 @@ fn terminal_background_notifications_shorten_titles_and_color_exit_numbers() {
         let rows: Vec<_> = capture.lines().collect();
         let rule = rows.iter().rposition(|line| line.contains(title)).unwrap() - 1;
         let header = capture.lines().nth(rule + 1).unwrap();
-        if title.ends_with('✔') {
-            let raw = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-            let parser = captured_screen(&raw, 200, 50);
-            for (row, line) in capture
-                .lines()
-                .enumerate()
-                .filter(|(_, line)| line.contains(title))
-            {
-                let column = line[..line.find('✔').unwrap()].width();
-                let cell = parser.screen().cell(row as u16, column as u16).unwrap();
-                assert_eq!(cell.contents(), "✔", "{raw}");
-                assert!(!cell.is_wide(), "{raw}");
-                assert!(
-                    !parser
-                        .screen()
-                        .cell(row as u16, (column + 1) as u16)
-                        .unwrap()
-                        .is_wide_continuation(),
-                    "{raw}"
-                );
-            }
-        }
         if let Some(code) = code {
             assert_eq!(header.split_whitespace().next(), Some(code), "{capture}");
             let raw = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);

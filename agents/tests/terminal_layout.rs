@@ -1593,7 +1593,7 @@ fn terminal_task_notification_shows_summary_without_id_and_missing_file() {
         "{record}"
     )
     .unwrap();
-    let summary = "\"等 tab 线程\" ✔";
+    let summary = "\"等 tab 线程\" ✓";
     tmux.wait_for(|capture| capture.contains(summary));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     println!("{capture}");
