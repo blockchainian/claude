@@ -1070,6 +1070,13 @@ impl View {
                 return Some(Action::OpenPath(target));
             }
         }
+        let fold_toggle = self
+            .viewport
+            .borrow()
+            .fold_toggles
+            .iter()
+            .find(|(area, _)| area.contains(position))
+            .map(|(_, id)| id.clone());
         let (tab, over_tabs, over_list, over_task_details, over_event, entry, event_row, copy_text) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
@@ -1136,13 +1143,13 @@ impl View {
                     if self.task_entry_pending {
                         self.enter_task();
                     }
-                    if double {
-                        let id = self.rows[task].id.clone();
-                        if !self.collapsed.remove(&id)
-                            && self.rows.iter().any(|row| row.parent.as_ref() == Some(&id))
-                        {
+                    if let Some(id) = fold_toggle.filter(|id| *id == self.rows[task].id) {
+                        if !self.collapsed.remove(&id) {
                             self.collapsed.insert(id);
                         }
+                        return None;
+                    }
+                    if double {
                         return None;
                     }
                     self.last_click = Some((task, now));

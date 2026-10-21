@@ -146,6 +146,8 @@ struct Viewport {
     list: Rect,
     search: Rect,
     list_rows: Rect,
+    /// Status dots of task rows with subtasks; a click folds or unfolds that task's subtree.
+    fold_toggles: Vec<(Rect, SessionKey)>,
     first_entry: usize,
     event_panel: Rect,
     event_detail: Rect,

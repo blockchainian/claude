@@ -92,6 +92,7 @@ impl View {
         state.list_links.clear();
         state.list = area;
         state.list_rows = Rect::default();
+        state.fold_toggles.clear();
         state.first_entry = 0;
         let row_width = area.width;
         if area.is_empty() {
@@ -111,6 +112,12 @@ impl View {
                 has_next_sibling[*index] = !parents.insert(parent);
             }
         }
+        let with_subtasks: std::collections::HashSet<_> = self
+            .rows
+            .iter()
+            .filter(|row| !self.hidden.contains(&row.id))
+            .filter_map(|row| row.parent.as_ref())
+            .collect();
         // Hand out accents top to bottom before drawing.
         for entry in &entries {
             if let CenterRow::Task(index) | CenterRow::Parent(index) = entry {
@@ -234,16 +241,16 @@ impl View {
                     buf,
                 );
             }
-            line(
-                Line::from(dot),
-                Rect::new(
-                    rect.x + rect.width.min(indent),
-                    rect.y,
-                    rect.width.saturating_sub(indent).min(1),
-                    1,
-                ),
-                buf,
+            let dot_area = Rect::new(
+                rect.x + rect.width.min(indent),
+                rect.y,
+                rect.width.saturating_sub(indent).min(1),
+                1,
             );
+            line(Line::from(dot), dot_area, buf);
+            if !header && with_subtasks.contains(&task.id) {
+                state.fold_toggles.push((dot_area, task.id.clone()));
+            }
             let (title, status_area, updated) = columns(rect, indent);
             let title_style = if header {
                 style

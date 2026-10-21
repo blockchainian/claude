@@ -20,29 +20,45 @@ fn visible_titles(view: &View) -> Vec<String> {
         .collect()
 }
 
-fn double_click(view: &mut View, title: &str) {
+fn click_dot(view: &mut View, title: &str) {
     let rendered = subagent_rows::screen(view, 120, 30);
     let (x, y) = rendered_cell(&rendered, &format!("● {title}"));
+    let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+    assert!(click_mouse(view, click).is_none());
+}
+
+fn double_click_title(view: &mut View, title: &str) {
+    let rendered = subagent_rows::screen(view, 120, 30);
+    let (x, y) = rendered_cell(&rendered, title);
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     assert!(click_mouse(view, click).is_none());
     assert!(click_mouse(view, click).is_none());
 }
 
 #[test]
-fn double_click_folds_only_that_parent_and_unfolding_keeps_nested_state() {
+fn dot_click_folds_only_that_parent_and_unfolding_keeps_nested_state() {
     let mut view = tree();
     let all = ["Root task", "Middle task", "Leaf task", "Grandchild task"];
     assert_eq!(visible_titles(&view), all);
 
-    double_click(&mut view, "Leaf task");
+    click_dot(&mut view, "Leaf task");
     assert_eq!(visible_titles(&view), all[..3]);
 
-    double_click(&mut view, "Middle task");
+    click_dot(&mut view, "Middle task");
     assert_eq!(visible_titles(&view), all[..2]);
 
-    double_click(&mut view, "Middle task");
+    click_dot(&mut view, "Middle task");
     assert_eq!(visible_titles(&view), all[..3]);
 
-    double_click(&mut view, "Leaf task");
+    click_dot(&mut view, "Leaf task");
+    assert_eq!(visible_titles(&view), all);
+}
+
+#[test]
+fn title_double_click_and_childless_dot_click_do_not_fold() {
+    let mut view = tree();
+    let all = ["Root task", "Middle task", "Leaf task", "Grandchild task"];
+    double_click_title(&mut view, "Middle task");
+    click_dot(&mut view, "Grandchild task");
     assert_eq!(visible_titles(&view), all);
 }
