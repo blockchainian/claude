@@ -71,7 +71,8 @@ spacing and comments are preserved. Public export names stay unchanged.
 
 Use `--chunks <manifest.json>` when files share one program scope without importing
 one another. The command validates the manifest against `scripts/chunks.schema.json`
-(JSON Schema 2020-12). It reads no recovery mapping or source-file header.
+(JSON Schema 2020-12). It reads no recovery mapping. Recovered fragment headers
+(`// Recovered from <chunk> lines A-B`) determine original import order.
 
 ```json
 {
@@ -83,7 +84,7 @@ one another. The command validates the manifest against `scripts/chunks.schema.j
 Paths use forward slashes and are relative to the manifest's directory. Every file must
 exist inside the target Git root, every chunk ID must be unique, and each actual file can
 belong to only one chunk, including path or symlink aliases. Unlisted files retain the
-ordinary file workflow. Without `--chunks`, behavior is unchanged.
+ordinary file workflow.
 
 ```bash
 node "$SKILL_DIR/scripts/cli.mjs" <path>... --chunks <manifest.json> \
@@ -113,7 +114,19 @@ External named imports use the same length threshold and deterministic restorati
 ordinary files. Short default and namespace import locals are model candidates, including
 their references in authorized sibling files.
 
-A chunk prepares selected-file syntax changes in memory, names its program bindings,
+Before naming, a separate stage merges duplicate external imports by `(source, imported)`
+within each chunk, or within an ordinary single file. External sources do not start with
+`.`; named, default and namespace imports are handled, including mixed declarations.
+The earliest recovered fragment line keeps its binding; within a file, source order wins.
+References, shorthand properties and export locals follow that binding. Any inner binding
+that would capture a redirected reference freezes the entire group. Selection, sibling
+authorization, ignores and dynamic-scope restrictions still apply. Its dedicated guard
+checks every reference's import identity, first external-module load order and all other
+bindings, and permits only the planned source edits. Naming checks use the merged code
+as their baseline. Ordinary files have independent `.unminify/merge-imports/` checkpoints;
+chunk merges replay in memory under the chunk journal's pipeline options and transaction.
+
+A chunk prepares selected-file syntax changes in memory, merges imports, names its program bindings,
 then names selected-file function bindings and follows import names. Individual-file checks and chunk binding,
 global, export-interface and source-text checks must all pass before any member is written.
 A parse or scope-check failure leaves the whole chunk intact. Each source fragment must

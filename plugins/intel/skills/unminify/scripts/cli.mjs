@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runMergeFile } from './merge-imports.mjs';
 import { loadFragmentContext } from './fragments.mjs';
 import { randomUUID } from 'node:crypto';
 import { reconsiderNames } from './collision.mjs';
@@ -124,10 +125,20 @@ export async function run(options, dependencies) {
     if (api.runSyntaxFile) {
       for (const file of files) {
         if (chunkDriver?.files.has(file)) continue;
+        // Merge checkpoints own the text after syntax, including the write/complete window.
+        if (existsSync(join(root, '.unminify', 'merge-imports', `${file}.jsonl`))) {
+          emit({ file, status: 'syntax-skipped' });
+          continue;
+        }
         const endSyntax = phase('syntax', file);
         try { emit(api.runSyntaxFile(root, file, { fragment: fragments.has(file), fragmentContext })); }
         finally { endSyntax(); }
       }
+    }
+    for (const file of files) {
+      if (chunkDriver?.files.has(file)) continue;
+      const endMerge = phase('selection_plan');
+      try { emit(runMergeFile(root, file)); } finally { endMerge(); }
     }
     namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
       event(record) {
