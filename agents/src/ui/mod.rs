@@ -1370,8 +1370,6 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
     left
 }
 
-#[cfg(test)]
-mod background_order_tests;
 
 impl Viewport {
     fn event_row_at(&self, offset: usize) -> Option<EventRow> {
@@ -1383,3 +1381,6 @@ impl Viewport {
         self.event_rows.get(offset).copied()
     }
 }
+
+#[cfg(test)]
+mod background_order_tests;

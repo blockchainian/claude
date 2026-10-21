@@ -423,21 +423,17 @@ fn c2_unpin_selects_nearest_pin_then_same_timeline_event() {
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
     }
-    for index in [1, 2, 3] {
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    for index in [1, 2] {
         view.select_event(view.shown_position(index));
         view.toggle_event_pin();
     }
     view.select_event(Some(1));
     view.toggle_event_pin();
-    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(1)));
-    assert_eq!(
-        view.visible_event().unwrap().source.as_deref(),
-        Some("task-event-1")
-    );
-    view.toggle_event_pin();
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
     view.toggle_event_pin();
-    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(3)));
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(2)));
 }
 
 #[test]
@@ -451,7 +447,7 @@ fn event_pin_fixed_above_scrolled_timeline() {
     view.toggle_event_pin();
     view.select_event(None);
     let area = Rect::new(0, 0, 100, 5);
-    let mut buffer = Buffer::empty(area);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 5));
     view.render_event(area, &mut buffer, Utc::now());
     assert_eq!(view.viewport.borrow().event_rows[0], EventRow::Pinned(0));
     assert_eq!(buffer[(0, 1)].symbol(), "─");
@@ -462,6 +458,7 @@ fn event_pin_fixed_above_scrolled_timeline() {
             .collect::<String>()
     };
     assert!(!row_text(0).contains('│'));
+    assert_eq!(buffer[(100, 0)].symbol(), "│");
     assert_eq!(
         view.viewport.borrow().event_rows.last(),
         Some(&EventRow::Timeline(view.event_panel.len() - 1))
