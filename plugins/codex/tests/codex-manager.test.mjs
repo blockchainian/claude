@@ -1696,25 +1696,7 @@ test("mcp starts a thread on an allowed model and effort, and refuses any other 
     assert.deepEqual(schema.properties.effort.enum, ["medium", "high"]);
     assert.deepEqual(schema.required, ["cwd", "prompt"]);
 
-    for (const [args, error] of [
-      [{ model: "gpt-6-luna", effort: "medium" }, "gpt-6-luna runs only at high effort"],
-      [{ model: "gpt-6-luna", effort: "low" }, "gpt-6-luna runs only at high effort"],
-      [{ model: "gpt-6.1-sol", effort: "high" }, "gpt-6.1-sol runs only at medium effort"],
-      [{ model: "gpt-6-luna" }, "gpt-6-luna runs only at high effort"],
-      [{ model: "gpt-6.1-sol" }, "gpt-6.1-sol runs only at medium effort"],
-      [{ effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: "other", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: "toString", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: null, effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: "gpt-6-luna", effort: null }, "gpt-6-luna runs only at high effort"]
-    ]) {
-      const refused = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", ...args });
-      assert.equal(refused.isError, true);
-      assert.equal(refused.text, error);
-      assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
-    }
-
-    for (const [model, effort] of [["gpt-6-luna", "high"], ["gpt-6.1-sol", "medium"]]) {
+    for (const [model, effort] of [["gpt-6-luna", "medium"], ["gpt-6-luna", "high"], ["gpt-6.1-sol", "medium"]]) {
       const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", model, effort });
       assert.equal(started.isError, false, started.text);
       const start = script.messages.filter((message) => message.method === "thread/start").at(-1).params;
@@ -1724,6 +1706,24 @@ test("mcp starts a thread on an allowed model and effort, and refuses any other 
         "mcp_servers.claude-client": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" },
         model_reasoning_effort: effort
       });
+    }
+
+    const startCount = script.messages.filter((message) => message.method === "thread/start").length;
+    for (const [args, error] of [
+      [{ model: "gpt-6-luna", effort: "low" }, "gpt-6-luna runs only at medium or high effort"],
+      [{ model: "gpt-6.1-sol", effort: "high" }, "gpt-6.1-sol runs only at medium effort"],
+      [{ model: "gpt-6-luna" }, "gpt-6-luna runs only at medium or high effort"],
+      [{ model: "gpt-6.1-sol" }, "gpt-6.1-sol runs only at medium effort"],
+      [{ effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "other", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "toString", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: null, effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "gpt-6-luna", effort: null }, "gpt-6-luna runs only at medium or high effort"]
+    ]) {
+      const refused = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", ...args });
+      assert.equal(refused.isError, true);
+      assert.equal(refused.text, error);
+      assert.equal(script.messages.filter((message) => message.method === "thread/start").length, startCount);
     }
   } finally {
     await mcp.close();
