@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { readFileSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { availableParallelism } from 'node:os';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 
@@ -40,52 +41,77 @@ export function indexFragments(files) {
   return indexFragmentContext(files).fragments;
 }
 
-/** Preserve the program-binding evidence used to authorize fragment globals. */
-export function indexFragmentContext(files) {
+/** Return cloneable binding evidence without retaining the file's syntax tree. */
+export function summarizeFragmentSource(source) {
+  let ast;
+  try { ast = parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, plugins: ['jsx'] }); }
+  catch (error) { if (error instanceof SyntaxError) return null; throw error; }
+  let summary;
+  traverse(ast, { Program(program) {
+    const free = Object.keys(program.scope.globals);
+    const unknown = free.filter(name => !environmentGlobals.has(name) && !program.scope.hasBinding(name));
+    const bindings = Object.values(program.scope.bindings);
+    const topLevelBindings = bindings.map(binding => binding.identifier.name);
+    const unused = bindings.filter(binding => !binding.referenced).map(binding => binding.identifier.name);
+    const declarations = bindings.filter(binding => binding.kind !== 'module').map(binding => binding.identifier.name);
+    const aliases = bindings.filter(binding => binding.kind === 'module' && !binding.referenced).map(binding => binding.identifier.name);
+    const boundary = program.node.body.some(node => node.type.startsWith('Export'))
+      || free.some(name => ['require', 'module', 'exports'].includes(name));
+    const facts = fragmentFacts(program);
+    summary = { topLevelBindings, declarations, aliases, free,
+      facts: { ...facts, unboundExports: [...facts.unboundExports], unknown, unused, boundary } };
+    program.stop();
+  } });
+  return summary;
+}
+
+/** Skip the same missing paths and non-files in serial and worker indexing. */
+export function summarizeFragmentFile(path) {
+  try {
+    return lstatSync(path).isFile() ? summarizeFragmentSource(readFileSync(path, 'utf8')) : null;
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+/** Merge file summaries in input order so every Set and Map keeps serial ordering. */
+function createFragmentIndex() {
   const topLevelBindings = new Set();
   const summaries = new Map(), readers = new Map(), declarations = new Map(), aliases = new Map();
-  for (const [file, source] of files) {
-    let ast;
-    try { ast = parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, plugins: ['jsx'] }); }
-    catch (error) { if (error instanceof SyntaxError) continue; throw error; }
-    traverse(ast, { Program(program) {
-      const free = Object.keys(program.scope.globals);
-      const unknown = free.filter(name => !environmentGlobals.has(name) && !program.scope.hasBinding(name));
-      const bindings = Object.values(program.scope.bindings);
-      for (const binding of bindings) topLevelBindings.add(binding.identifier.name);
-      const unused = bindings.filter(binding => !binding.referenced).map(binding => binding.identifier.name);
-      for (const binding of bindings) {
-        const index = binding.kind === 'module' ? (!binding.referenced ? aliases : null) : declarations;
-        if (!index) continue;
-        const name = binding.identifier.name;
+  function add(file, summary) {
+    if (!summary) return;
+    for (const name of summary.topLevelBindings) topLevelBindings.add(name);
+    for (const [index, names] of [[declarations, summary.declarations], [aliases, summary.aliases], [readers, summary.free]]) {
+      for (const name of names) {
         if (!index.has(name)) index.set(name, new Set());
         index.get(name).add(file);
       }
-      const boundary = program.node.body.some(node => node.type.startsWith('Export'))
-        || free.some(name => ['require', 'module', 'exports'].includes(name));
-      summaries.set(file, { ...fragmentFacts(program), unknown, unused, boundary });
-      for (const name of free) {
-        if (!readers.has(name)) readers.set(name, new Set());
-        readers.get(name).add(file);
-      }
-      program.stop();
-    } });
-  }
-  const collisions = new Set();
-  for (const [name, importers] of aliases) {
-    for (const importer of importers) for (const declarer of declarations.get(name) ?? []) {
-      if (importer !== declarer) { collisions.add(importer); collisions.add(declarer); }
     }
+    summaries.set(file, summary.facts);
   }
-  const fragments = new Set();
-  for (const [file, facts] of summaries) {
-    // Explicit module boundaries also occur in sliced files with missing exports.
-    // Otherwise CJS/UMD contracts take precedence over accidental short-name
-    // matches between unrelated packages in the same repository.
-    const shared = facts.unused.some(name => [...(readers.get(name) ?? [])].some(reader => reader !== file));
-    if (facts.fragment || (!facts.boundary && (facts.unknown.length > 0 || shared || collisions.has(file)))) fragments.add(file);
+  function finish() {
+    const collisions = new Set();
+    for (const [name, importers] of aliases) {
+      for (const importer of importers) for (const declarer of declarations.get(name) ?? []) {
+        if (importer !== declarer) { collisions.add(importer); collisions.add(declarer); }
+      }
+    }
+    const fragments = new Set();
+    for (const [file, facts] of summaries) {
+      // Explicit module boundaries also occur in sliced files with missing exports.
+      // Otherwise CJS/UMD contracts take precedence over accidental short-name
+      // matches between unrelated packages in the same repository.
+      const shared = facts.unused.some(name => [...(readers.get(name) ?? [])].some(reader => reader !== file));
+      if (facts.fragment || (!facts.boundary && (facts.unknown.length > 0 || shared || collisions.has(file)))) fragments.add(file);
+    }
+    return { fragments, topLevelBindings };
   }
-  return { fragments, topLevelBindings };
+  return { add, finish };
+}
+
+/** Preserve the program-binding evidence used to authorize fragment globals. */
+export function indexFragmentContext(files) {
+  const index = createFragmentIndex();
+  for (const [file, source] of files) index.add(file, summarizeFragmentSource(source));
+  return index.finish();
 }
 
 /** Git-root scope keeps sibling slices visible across directory-sized runs. */
@@ -94,7 +120,7 @@ export function loadFragmentIndex(root, inputs) {
 }
 
 /** Use the same Git-root/input scope for fragment flags and binding evidence. */
-export function loadFragmentContext(root, inputs) {
+export function loadFragmentContext(root, inputs, pool) {
   let files;
   try {
     files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
@@ -103,14 +129,22 @@ export function loadFragmentContext(root, inputs) {
     if (!String(error.stderr).includes('not a git repository')) throw error;
     files = inputs;
   }
-  function* sources() {
-    for (const file of new Set([...files, ...inputs])) {
-      if (!/\.[cm]?js$/.test(file)) continue;
-      const path = join(root, file);
-      try {
-        if (lstatSync(path).isFile()) yield [file, readFileSync(path, 'utf8')];
-      } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    }
+  const paths = [...new Set([...files, ...inputs])].filter(file => /\.[cm]?js$/.test(file));
+  if (pool) return loadParallelFragmentContext(root, paths, pool);
+  const index = createFragmentIndex();
+  for (const file of paths) index.add(file, summarizeFragmentFile(join(root, file)));
+  return index.finish();
+}
+
+async function loadParallelFragmentContext(root, files, pool) {
+  const index = createFragmentIndex(), width = availableParallelism();
+  // Queue paths only, one bounded window at a time; workers read their own source.
+  for (let offset = 0; offset < files.length; offset += width) {
+    const batch = files.slice(offset, offset + width);
+    const results = await Promise.allSettled(batch.map(file => pool.run({ kind: 'fragment', path: join(root, file) })));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
+    for (const [position, file] of batch.entries()) index.add(file, results[position].value);
   }
-  return indexFragmentContext(sources());
+  return index.finish();
 }

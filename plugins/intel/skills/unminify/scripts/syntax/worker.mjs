@@ -2,6 +2,7 @@ import { parse } from '@babel/parser';
 import { parentPort } from 'node:worker_threads';
 import { transformSyntax } from './runner.mjs';
 import { mergeExternalImports } from '../merge-imports.mjs';
+import { summarizeFragmentFile } from '../fragments.mjs';
 
 parentPort.on('message', task => {
   try {
@@ -12,7 +13,8 @@ parentPort.on('message', task => {
       try { parse(task.source, { sourceType: 'unambiguous', allowUndeclaredExports: true }); }
       catch (error) { if (error instanceof SyntaxError) parseable = false; else throw error; }
       result = { parseable, elapsed: performance.now() - started };
-    } else if (task.kind === 'transform') {
+    } else if (task.kind === 'fragment') result = summarizeFragmentFile(task.path);
+    else if (task.kind === 'transform') {
       const { source, steps } = transformSyntax(task.source, task.options);
       result = { source, steps: steps.map(({ name, edits }) => ({ name, edits: edits.length })) };
     } else if (task.kind === 'merge') result = mergeExternalImports(task.sources, task.options);

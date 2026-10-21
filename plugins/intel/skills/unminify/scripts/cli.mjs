@@ -117,7 +117,7 @@ export async function run(options, dependencies) {
     const siblings = chunkDriver.jobs.flatMap(chunk => chunk.files).filter(file => !listed.has(file));
     for (const file of await api.listFiles(siblings.map(file => join(root, file)), { root, ignores, pool: syntaxPool })) listed.add(file);
     const files = [...listed].sort();
-    const fragmentContext = loadFragmentContext(root, files);
+    const fragmentContext = await loadFragmentContext(root, files, syntaxPool);
     const { fragments } = fragmentContext;
     chunkDriver.select(selectedFiles, fragments);
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };

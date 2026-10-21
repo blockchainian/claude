@@ -32,8 +32,10 @@ node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --min-symbol-length 4
 
 Each command selects parseable `.js`/`.mjs` files and applies the ignore rules first.
 Selection checks parseability in the syntax worker pool, returning only a boolean and
-parse time. Git root and ignore rules are loaded once per run; chunk siblings are
-selected together with the same rules.
+parse time. The same pool reads and indexes repository fragment context in bounded
+windows, returning only per-file binding summaries. The main thread merges summaries
+in file order within `selection_plan`. Git root and ignore rules are loaded once per run;
+chunk siblings are selected together with the same rules.
 All commands accept `--ignore <file>` and `--chunks <file>`. Only `rename-bindings` accepts
 `--concurrency` and `--max-input-tokens`; `--min-symbol-length` belongs to
 `rename-bindings` and `sync-imports`. Other options fail with `invalid option`. A missing
