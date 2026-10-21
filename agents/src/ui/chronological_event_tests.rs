@@ -87,11 +87,27 @@ fn chronological_rows_follow_appends_at_bottom() {
     let (_dir, mut view, events) = fixture();
     view.set_event(events[..8].to_vec());
     draw(&view);
-    assert_eq!(view.viewport.borrow().event_rows, vec![4, 5, 6, 7]);
+    assert_eq!(
+        view.viewport.borrow().event_rows,
+        vec![
+            EventRow::Timeline(4),
+            EventRow::Timeline(5),
+            EventRow::Timeline(6),
+            EventRow::Timeline(7)
+        ]
+    );
     assert_eq!(view.event_scroll(), 4);
     view.set_event(events[..10].to_vec());
     draw(&view);
-    assert_eq!(view.viewport.borrow().event_rows, vec![6, 7, 8, 9]);
+    assert_eq!(
+        view.viewport.borrow().event_rows,
+        vec![
+            EventRow::Timeline(6),
+            EventRow::Timeline(7),
+            EventRow::Timeline(8),
+            EventRow::Timeline(9)
+        ]
+    );
     assert_eq!(view.event_list.cursor, Some(9));
     assert_eq!(view.event_list.unseen.get(), 0);
 }
@@ -309,7 +325,10 @@ fn chronological_appends_preserve_older_view_and_count_new_rows() {
     assert!(label.contains("↓ 2 New"), "{label}");
     view.show_newest_event();
     draw(&view);
-    assert_eq!(view.viewport.borrow().event_rows.last(), Some(&9));
+    assert_eq!(
+        view.viewport.borrow().event_rows.last(),
+        Some(&EventRow::Timeline(9))
+    );
     assert_eq!(view.event_list.unseen.get(), 0);
 }
 
@@ -378,7 +397,15 @@ fn chronological_prepend_anchors_rows_and_selection() {
     });
     draw(&view);
     assert_eq!(view.event_scroll(), 3);
-    assert_eq!(view.viewport.borrow().event_rows, vec![3, 4, 5, 6]);
+    assert_eq!(
+        view.viewport.borrow().event_rows,
+        vec![
+            EventRow::Timeline(3),
+            EventRow::Timeline(4),
+            EventRow::Timeline(5),
+            EventRow::Timeline(6)
+        ]
+    );
     assert_eq!(view.visible_event(), Some(&selected));
     assert_eq!(view.event_list.cursor, Some(4));
     assert_eq!(view.event_list.unseen.get(), 0);
@@ -440,13 +467,21 @@ fn chronological_direct_render_uses_its_geometry_and_clamps_without_selection() 
     view.render_event(area, &mut buf, Utc::now());
     assert_eq!(view.viewport.borrow().event_panel, area);
     assert_eq!(view.event_scroll(), 4);
-    assert_eq!(view.viewport.borrow().event_rows, vec![4, 5, 6, 7]);
+    assert_eq!(
+        view.viewport.borrow().event_rows,
+        vec![
+            EventRow::Timeline(4),
+            EventRow::Timeline(5),
+            EventRow::Timeline(6),
+            EventRow::Timeline(7)
+        ]
+    );
     let area = Rect::new(3, 2, 100, 8);
     view.render_event(area, &mut buf, Utc::now());
     assert_eq!(view.event_scroll(), 0);
     assert_eq!(
         view.viewport.borrow().event_rows,
-        (0..8).collect::<Vec<_>>()
+        (0..8).map(EventRow::Timeline).collect::<Vec<_>>()
     );
 }
 

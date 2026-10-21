@@ -14,7 +14,7 @@ pub(super) enum ClickTarget {
         bottom: bool,
     },
     Event {
-        index: usize,
+        index: EventRow,
     },
     TaskDetails {
         session: SessionKey,
@@ -51,21 +51,27 @@ impl View {
         self.event_list.sort_initialized = true;
         let following = self.following_event();
         let full = self
-            .event_list.cursor
-            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
-        let background_full = self.event_list.background_return.as_ref()
+            .event_list
+            .cursor
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
+        let background_full = self
+            .event_list
+            .background_return
+            .as_ref()
             .and_then(|saved| saved.event)
-            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         self.event_list.sort = sorting;
         self.prepare_event_search();
-        self.event_list.cursor = full.and_then(|full| self.shown_position(full));
-        let background_event = background_full.and_then(|full| self.shown_position(full));
+        self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        let background_event = background_full.and_then(|full| self.shown_row_position(full));
         if let Some(saved) = &mut self.event_list.background_return {
             saved.event = background_event;
         }
         self.event_list.pending_older = 0;
         self.event_list.unseen.set(0);
-        if self.event_list.background_return.is_none() {
+        if matches!(full, Some(EventRow::Pinned(_))) {
+            self.reveal_event_selection();
+        } else if self.event_list.background_return.is_none() {
             self.show_newest_event();
         } else if following {
             self.event_list.scroll.set(self.event_max_scroll());
@@ -509,12 +515,14 @@ impl View {
             }
             PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
             PasteTarget::EventSearch(area) => {
-                self.event_list.search
+                self.event_list
+                    .search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
             PasteTarget::EventDetailSearch(area) => {
-                self.event_detail.search
+                self.event_detail
+                    .search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
@@ -998,7 +1006,7 @@ impl View {
                     .contains(position)
                     .then(|| usize::from(mouse.row - viewport.event_panel.y))
                     .and_then(|row| viewport.event_rows.get(row))
-                    .and_then(|&full| self.shown_position(full))
+                    .and_then(|&full| self.shown_row_position(full))
             };
             if let Some(event) = event {
                 self.event_list.background_return = None;
@@ -1680,8 +1688,9 @@ impl View {
         }
         if self.active_panel == Panel::EventList && self.event_list.search.editing {
             let selected_full = self
-                .event_list.cursor
-                .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+                .event_list
+                .cursor
+                .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
             match key.code {
                 KeyCode::Esc => {
                     self.event_list.search.clear();
@@ -1766,6 +1775,9 @@ impl View {
             self.jump_event_agent();
             return None;
         }
+        if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
+            return self.toggle_event_pin();
+        }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);
             return None;
@@ -1775,10 +1787,13 @@ impl View {
                 EventSort::Time => EventSort::Duration,
                 EventSort::Duration => EventSort::Time,
             });
-            return self.selected_id().cloned().map(|id| Action::PersistSorting {
-                id,
-                sorting: self.event_list.sort,
-            });
+            return self
+                .selected_id()
+                .cloned()
+                .map(|id| Action::PersistSorting {
+                    id,
+                    sorting: self.event_list.sort,
+                });
         }
         if plain
             && key.code == KeyCode::Esc

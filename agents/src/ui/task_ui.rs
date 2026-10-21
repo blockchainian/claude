@@ -21,7 +21,8 @@ pub(super) struct TaskUi {
 #[derive(Default)]
 pub(crate) struct EventList {
     pub(super) position: EventPosition,
-    pub(super) selected: Option<EventId>,
+    pub(super) selected: Option<(bool, EventId)>,
+    pub pinned: Vec<PinnedRow>,
     pub search: EventSearch,
     pub sort: EventSort,
     pub sort_initialized: bool,
@@ -83,6 +84,7 @@ pub(super) enum EventPosition {
     Live,
     At {
         anchor: EventId,
+        pinned: bool,
     },
 }
 
@@ -91,4 +93,16 @@ pub(super) enum EventDetailMode {
     #[default]
     Event,
     Terminal,
+}
+
+/// An immutable event snapshot and its persisted record positions.
+pub struct PinnedRow {
+    pub pin: crate::state::PinnedEvent,
+    pub event: Event,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EventRow {
+    Pinned(usize),
+    Timeline(usize),
 }

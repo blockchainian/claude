@@ -42,10 +42,11 @@ pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;
-mod task_ui;
 #[cfg(test)]
 mod task_event_list_tests;
-use task_ui::TaskUi;
+mod task_ui;
+pub use task_ui::PinnedRow;
+use task_ui::{EventRow, TaskUi};
 mod terminal_panel;
 pub(crate) mod text;
 mod text_selection;
@@ -168,7 +169,7 @@ struct Viewport {
     event_borders: [Rect; 2],
     output_borders: [Rect; 2],
     /// Index into the task event list of each drawn event row, top down.
-    event_rows: Vec<usize>,
+    event_rows: Vec<EventRow>,
     event_detail_max: usize,
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
@@ -516,10 +517,7 @@ impl View {
         if self.selector.is_some() && task_details_active {
             return;
         }
-        if !self.searching
-            && !self.task_search_editing()
-            && self.question_paste(text)
-        {
+        if !self.searching && !self.task_search_editing() && self.question_paste(text) {
             return;
         }
         if task_details_active && self.title_editor().is_some() {
@@ -1077,7 +1075,9 @@ impl View {
     }
 
     pub(crate) fn clamp_event_scroll(&mut self, max: usize) {
-        self.event_list.scroll.set(self.event_list.scroll.get().min(max));
+        self.event_list
+            .scroll
+            .set(self.event_list.scroll.get().min(max));
     }
 
     pub(crate) fn event_max_scroll(&self) -> usize {
@@ -1094,7 +1094,10 @@ impl View {
     pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
         let loaded = self.event_panel.len().max(visible);
         if has_older
-            && (self.event_page_pending() || (self.event_scroll() == 0 && !self.following_event()))
+            && (self.event_page_pending()
+                || (self.event_scroll() == 0
+                    && !self.following_event()
+                    && !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))))
         {
             loaded.saturating_add(visible.max(self.event_list.pending_older).max(1))
         } else {
@@ -1157,7 +1160,9 @@ impl View {
             .as_ref()
             .and_then(|key| self.task_uis.get(key))
             .and_then(|ui| ui.focus);
-        let title = self.title_editing().then(|| std::mem::take(&mut self.rename));
+        let title = self
+            .title_editing()
+            .then(|| std::mem::take(&mut self.rename));
         self.rename_target = None;
         self.name_target = None;
         let mut selector = self.selector.take();

@@ -5168,7 +5168,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
                     .borrow()
                     .event_rows
                     .iter()
-                    .position(|&index| index == view.event_panel.len() - 2)
+                    .position(|&index| index == EventRow::Timeline(view.event_panel.len() - 2))
                     .unwrap() as u16;
             let row: String = (0..width)
                 .map(|x| cell_text(buf[(x, y)].symbol()))
@@ -5190,7 +5190,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
                 let index = viewport.event_rows[usize::from(y - viewport.event_panel.y)];
                 assert_eq!(viewport.event_list_text.area.x, left);
                 assert_eq!(viewport.event_list_text.area.right(), width - 2);
-                view.event_panel[index].clone()
+                match index { EventRow::Timeline(index) => view.event_panel[index].clone(), EventRow::Pinned(_) => panic!("expected timeline row") }
             };
             let x = if edge { width - 2 } else { left };
             click_mouse(
@@ -9765,7 +9765,7 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(view.visible_event(), Some(&expected), "{label}\n{rendered}");
     event_screen(&view, 160, 45, now);
-    assert!(view.viewport.borrow().event_rows.contains(&index));
+    assert!(view.viewport.borrow().event_rows.contains(&EventRow::Timeline(index)));
     assert_eq!(view.visible_event() == view.event_panel.last(), index == 7);
     view.set_event(Vec::new());
     event_screen(&view, 160, 45, now);
@@ -10169,7 +10169,7 @@ fn event_border_double_clicks_respect_shared_output_border() {
         assert_eq!(click(&mut view, event_panel.y - 1), None);
         assert_eq!(view.visible_event(), Some(&oldest), "width {width}");
         event_screen(&view, width, 20, now);
-        assert!(view.viewport.borrow().event_rows.contains(&0));
+        assert!(view.viewport.borrow().event_rows.contains(&EventRow::Timeline(0)));
         assert_eq!(view.event_scroll(), 0);
         assert!(view.viewport.borrow().event_jump.is_empty());
         click(&mut view, event_panel.bottom());
