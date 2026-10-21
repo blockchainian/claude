@@ -608,7 +608,6 @@ impl crate::event::Reader for Reader {
                         return Ok(None);
                     }
                     let mut event = events.remove(0);
-                    event.turn = None;
                     event.previous_end = None;
                     Ok(Some(event))
                 };

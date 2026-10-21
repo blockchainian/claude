@@ -845,12 +845,10 @@ impl App {
         let rows = pinned
             .into_iter()
             .filter_map(|(pin, event)| {
-                let mut event = event?;
+                let event = event?;
                 if event.source.as_deref() != Some(pin.source.as_str()) {
                     return None;
                 }
-                event.turn = None;
-                event.previous_end = None;
                 Some(crate::ui::PinnedRow { pin, event })
             })
             .collect::<Vec<_>>();
@@ -901,6 +899,7 @@ impl App {
     }
 
     fn finish_event_refresh(&mut self, stamp: TranscriptStamp, visible: usize) {
+        self.view.event_list.has_older = self.transcript_has_older;
         if self.view.event_list.restoring {
             self.view.prepare_event_search();
             self.view.restore_event_list();

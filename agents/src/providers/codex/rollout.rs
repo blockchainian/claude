@@ -1930,10 +1930,7 @@ impl crate::event::Reader for Reader {
                     if events.len() != 1 {
                         return Ok(None);
                     }
-                    let mut event = events.remove(0);
-                    event.turn = None;
-                    event.previous_end = None;
-                    Ok(Some(event))
+                    Ok(Some(events.remove(0)))
                 };
                 decode().ok().flatten()
             })
