@@ -1,5 +1,5 @@
 import { timed } from './timing.mjs';
-import { isLexicalIdentifier, isLexicalReference, restoredImportEdit } from './identifiers.mjs';
+import { isLexicalIdentifier, isLexicalReference, restoredImportEdit, identifierBinding } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
@@ -158,6 +158,7 @@ function shorthandProperty(path) {
 export function applyRenames(source, renames) {
   if (!renames.size) return source;
   const { ast, bindings, jsxTags } = analyze(source);
+  const declarations = new Map([...bindings.values()].map(({ binding }) => [binding.identifier, binding]));
   for (const [key, name] of renames) {
     if (!bindings.has(key)) throw new Error(`Unknown binding key: ${key}`);
     if (jsxTags.has(key) && /^[a-z]/.test(name)) throw new Error(`JSX tag binding must retain a lexical tag name: ${name}`);
@@ -174,7 +175,7 @@ export function applyRenames(source, renames) {
     'Identifier|JSXIdentifier'(path) {
       if (!isLexicalIdentifier(path)) return;
       const parent = path.parentPath;
-      const binding = path.scope.getBinding(path.node.name);
+      const binding = identifierBinding(path, declarations);
       const name = binding && renames.get(binding.identifier.start);
       if (!name || name === path.node.name) return;
       const restored = restoredImportEdit(path, source, name);

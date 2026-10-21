@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
-import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit } from './identifiers.mjs';
+import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit, identifierBinding } from './identifiers.mjs';
 import { toIdentifier, applyRenames, bindingContext } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
 import { estimateInputTokens } from './prompt.mjs';
@@ -276,9 +276,10 @@ function identityFacts(analysis) {
       }
     });
     local.sort((a, b) => a.identifier.start - b.identifier.start);
+    const declarations = new Map(local.map(binding => [binding.identifier, binding]));
     result.push([file, record.lexical.filter(path => !path.parentPath.isExportSpecifier()).map(path => {
       const name = path.node.name,
-        binding = path.scope.getBinding(name),
+        binding = identifierBinding(path, declarations),
         owners = analysis.declarations.get(name);
       if (binding && binding.scope !== record.program.scope) return `local:${local.indexOf(binding)}`;
       if (owners?.length === 1) {

@@ -41,3 +41,8 @@ export function restoredImportEdit(path, source, name) {
   if (source.slice(imported.end, path.node.start) !== ' as ') return null;
   return { start: imported.end, end: path.node.end, text: '' };
 }
+
+/** Declaration nodes use their owning binding; uses resolve in their lexical scope. */
+export function identifierBinding(path, declarations) {
+  return declarations.has(path.node) ? declarations.get(path.node) : path.scope.getBinding(path.node.name);
+}
