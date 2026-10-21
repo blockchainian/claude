@@ -105,3 +105,31 @@ fn codex_reader_distinguishes_decoded_history_from_shown_history() {
     assert!(!full.has_older);
     assert_eq!(full.parsed_bytes, 0);
 }
+
+#[test]
+fn c2_pins_do_not_block_loading_older_timeline_events() {
+    let (_dir, mut app) = fixture();
+    super::tests::click_event(&mut app);
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('p'),
+        KeyModifiers::NONE,
+    )));
+    assert!(app.view.has_pinned_events(&app.sessions[0].id));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
+    assert!(
+        app.view.event_page_pending(),
+        "load history before entering pins"
+    );
+    assert_eq!(app.view.event_list.cursor, Some(1));
+    app.refresh_event(2);
+    super::event_search_tests::finish_search(&mut app);
+    assert!(!app.transcript_has_older);
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
+    assert!(!app.view.event_page_pending());
+    assert_eq!(app.view.event_list.cursor, Some(0));
+}
