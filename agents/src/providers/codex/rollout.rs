@@ -4544,9 +4544,10 @@ mod summary_cache_tests {
             let mut tasks = Tasks::default();
             for line in text.split_inclusive('\n') {
                 file.write_all(line.as_bytes()).unwrap();
-                assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+                let want = expected(file.path());
+                assert_eq!(tasks.summary(file.path()).unwrap(), want);
                 let parsed = tasks.parsed_bytes;
-                assert_eq!(tasks.summary(file.path()).unwrap(), expected(file.path()));
+                assert_eq!(tasks.summary(file.path()).unwrap(), want);
                 assert_eq!(
                     tasks.parsed_bytes, parsed,
                     "unchanged file was parsed again"
