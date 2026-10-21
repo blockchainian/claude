@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
-import { isLexicalIdentifier, isModelBinding, restoredImportEdit } from './identifiers.mjs';
+import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit } from './identifiers.mjs';
 import { toIdentifier, applyRenames, bindingContext } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
 import { estimateInputTokens } from './prompt.mjs';
@@ -65,6 +65,7 @@ function inspect(sources) {
       });
     }
     for (const path of lexical) {
+      if (!isLexicalReference(path)) continue;
       const name = path.node.name,
         binding = path.scope.getBinding(name);
       if (!binding || binding.scope === program.scope) {
@@ -142,9 +143,10 @@ export function analyzeChunk(sources, {
     bindings.set(name, record);
     let reason;
     if (dynamicScope) reason = 'dynamicScope';else if (declarationsForName.length > 1) reason = 'duplicate';else if ([...touched].some(file => ignored.has(file))) reason = 'ignored';else if (knownGlobals.has(name)) reason = 'knownGlobal';else if (!chunkSiblings && [...touched].some(file => !selected.has(file))) reason = 'outsideSelection';
-    // Model candidates start at selected declarations; import following can
-    // include outside declarations when an authorized selected sibling uses them.
-    else if (!selected.has(declaration.file) && !(allowImports && chunkSiblings && record.kind === 'module' && [...touched].some(file => selected.has(file)))) reason = 'outsideSelection';
+    // Import following also restores external named imports in authorized siblings.
+    else if (!selected.has(declaration.file) && !(allowImports && chunkSiblings && record.kind === 'module'
+      && ([...touched].some(file => selected.has(file)) || declaration.binding.path.isImportSpecifier()
+        && !/^\.{1,2}\//.test(declaration.binding.path.parent.source.value)))) reason = 'outsideSelection';
     if (reason) {
       frozen.set(name, reason);
       statistics[reason]++;
@@ -178,16 +180,18 @@ export function resolveChunkNames(sources, proposals, options = {}) {
       path
     }) => path.isJSXIdentifier()) && /^[a-z]/.test(stem)) stem = stem[0].toUpperCase() + stem.slice(1);
     if (stem === name) continue;
-    const collides = candidate => candidate !== name && occupied.has(candidate) || free.has(candidate) || knownGlobals.has(candidate) || binding.references.some(({
+    const collides = candidate => candidate !== name && occupied.has(candidate) || free.has(candidate) || binding.references.some(({
       path
     }) => {
       const other = path.scope.getBinding(candidate);
-      return other && other !== binding.declarations[0].binding;
+      return other && !other.scope.path.isProgram()
+        && other !== binding.declarations[0].binding;
     });
     let candidate = stem,
       suffix = 2;
-    if (collides(candidate)) options.onCollision?.({ key: name, proposed: stem, occupied: [...new Set([...occupied, ...free, ...(knownGlobals.has(stem) ? [stem] : []), ...binding.references.flatMap(({ path }) => Object.keys(path.scope.getAllBindings()))])].filter(collides), context: bindingContext(sources.get(binding.file), binding.declarations[0].binding) });
+    if (collides(candidate)) options.onCollision?.({ key: name, proposed: stem, occupied: [...new Set([...occupied, ...free, ...binding.references.flatMap(({ path }) => Object.keys(path.scope.getAllBindings()))])].filter(collides), context: bindingContext(sources.get(binding.file), binding.declarations[0].binding) });
     while (collides(candidate)) candidate = `${stem}${suffix++}`;
+    occupied.delete(name);
     occupied.add(candidate);
     if (candidate !== name) result.set(name, candidate);
   }

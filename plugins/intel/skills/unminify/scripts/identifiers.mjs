@@ -14,6 +14,18 @@ export function isLexicalIdentifier(path) {
   return path.isReferencedIdentifier() || path.isBindingIdentifier();
 }
 
+/** Reads and assignment targets count as uses; declaration sites do not. */
+export function isLexicalReference(path) {
+  if (!isLexicalIdentifier(path)) return false;
+  if (path.isJSXIdentifier() || path.isReferencedIdentifier()) return true;
+  let target = path;
+  while (target.parentPath && (target.parentPath.isObjectProperty()
+    || target.parentPath.isObjectPattern() || target.parentPath.isArrayPattern()
+    || target.parentPath.isRestElement() || target.parentPath.isAssignmentPattern())) target = target.parentPath;
+  const parent = target.parentPath;
+  return target.key === 'left' && (parent?.isAssignmentExpression() || parent?.isForInStatement() || parent?.isForOfStatement());
+}
+
 /** Named imports follow exports; default and namespace locals can use model names. */
 export function isModelBinding(binding) {
   return binding.kind !== 'module' || !binding.path.isImportSpecifier();

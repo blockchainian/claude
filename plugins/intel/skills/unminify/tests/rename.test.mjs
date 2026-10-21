@@ -83,7 +83,7 @@ test('normalizes separators, punctuation, Unicode, reserved words and invalid st
 
 test('checks same, ancestor, descendant bindings and global captures, but permits siblings', () => {
   const source = 'let value=0; function f(a){ function g(){let taken=1; return a+taken+globalValue} return a } function h(b){return b}';
-  for (const [proposal, expected] of [['value', 'value2'], ['taken', 'taken2'], ['globalValue', 'globalValue2']]) {
+  for (const [proposal, expected] of [['value', 'value'], ['taken', 'taken2'], ['globalValue', 'globalValue2']]) {
     assert.equal(resolveNames(source, names(source, [['a', proposal]])).get(key(source, 'a')), expected);
   }
   const result = resolveNames(source, names(source, [['a', 'item'], ['b', 'item']]));
