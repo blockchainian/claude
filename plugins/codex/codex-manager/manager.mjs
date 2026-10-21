@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
 import { runClaude } from "./claude.mjs";
-import { SessionStore, askTimeoutSeconds, writeSupervisor } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "./inbox.mjs";
 import { parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -19,6 +19,7 @@ const adversarialStancePath = path.join(path.dirname(scriptPath), "adversarial-r
 const usage = `usage:
   manager.mjs mcp                                   serve Claude's codex tools over stdio
   manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
+  manager.mjs detach --thread <id>                   release a thread from its owning session
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
   manager.mjs owner                                 PostToolUse hook: record the thread's starting agent
   manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
@@ -216,14 +217,14 @@ class Manager {
     return Boolean(this.client);
   }
 
-  async connect() {
+  async connect({ adopt = true } = {}) {
     if (this.client) return this.client;
     if (this.connecting) return this.connecting;
-    this.connecting = this.connectInner().finally(() => { this.connecting = undefined; });
+    this.connecting = this.connectInner({ adopt }).finally(() => { this.connecting = undefined; });
     return this.connecting;
   }
 
-  async connectInner() {
+  async connectInner({ adopt }) {
     const client = new WebSocketClient(this.socketPath);
     client.onNotification = (message) => this.onNotification(message);
     client.onServerRequest = (message) => this.onServerRequest(client, message);
@@ -240,7 +241,7 @@ class Manager {
     client.send({ method: "initialized", params: {} });
     this.client = client;
     this.reconnectAttempt = 0;
-    await this.adopt(client);
+    if (adopt) await this.adopt(client);
     return client;
   }
 
@@ -551,14 +552,14 @@ class Manager {
     if (thread.attached) {
       const { status } = await client.request("thread/unsubscribe", { threadId });
       this.updateThread(threadId, { detached: true });
-      return { threadId, detached: true, status };
+      return { threadId, name: thread.name ?? undefined, detached: true, status };
     }
     await client.request("thread/archive", { threadId });
     this.updateThread(threadId, { detached: true });
-    return { threadId, detached: true, archived: true };
+    return { threadId, name: thread.name ?? undefined, detached: true, archived: true };
   }
 
-  async list() {
+  async list({ state } = {}) {
     if (!this.client) await this.connect().catch((error) => log(`not connected: ${error.message}`));
     if (this.client && this.state().threads.length) {
       const registered = new Set(this.state().threads.map((thread) => thread.id));
@@ -581,7 +582,13 @@ class Manager {
         return changed;
       });
     }
-    const threads = this.state().threads.map((thread) => ({ ...thread, waiting: this.waiting(thread), unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) }));
+    const threads = this.state().threads
+      .map((thread) => {
+        const waiting = this.waiting(thread);
+        const state = thread.detached ? "detached" : waiting.length ? "waiting" : thread.lastStatus;
+        return { ...thread, state, waiting, unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) };
+      })
+      .filter((thread) => state === undefined || state.includes(thread.state));
     return { connected: this.connected(), sessionDir: this.store.dir, threads };
   }
 }
@@ -596,7 +603,7 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
   return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
-const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list the threads and detach every finished one. When a thread asks, check list for waiting requests before you reply: await can return an ask already answered.`;
+const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
 
 const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "prompt"] } },
@@ -604,7 +611,7 @@ const TOOLS = [
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. The text becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
-  { name: "list", description: "List the codex threads this session started or attached, with each one's last turn status, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
+  { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask or approval, then the last turn status applies." } } } },
   { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "review", description: "Review the commits since a base sha in a read-only thread with codex's built-in review mode, and save the rendered review, priority-tagged findings with an overall verdict, to a file. Pass `stance: \"adversarial\"` for a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
@@ -664,10 +671,37 @@ async function runMcp() {
 
 // --- entry -------------------------------------------------------------------
 
+async function runDetach(options) {
+  let manager;
+  try {
+    if (!options.thread) throw new Error("--thread is required");
+    const supervisor = readSupervisor(options.thread);
+    if (!supervisor?.sessionId) throw new Error(`unknown thread: ${options.thread}`);
+    const store = new SessionStore(supervisor.sessionId);
+    const plugin = JSON.parse(await readFile(pluginManifestPath, "utf8"));
+    manager = new Manager(store, daemonSocketPath(process.env.CODEX_DAEMON_SOCKET), plugin.version);
+    manager.thread(options.thread);
+    // This caller releases one thread without taking over the session's other threads or supervisor pid.
+    const client = await manager.connect({ adopt: false });
+    client.onServerRequest = () => {};
+    const latest = await manager.subscribe(client, options.thread);
+    manager.updateThread(options.thread, { turnId: latest?.id, lastStatus: latest?.status ?? "idle" });
+    const result = await manager.detach({ threadId: options.thread });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return 0;
+  } catch (error) {
+    process.stderr.write(`${error.message.replace(/[\r\n]+/g, " ")}\n`);
+    return error.exitCode || 2;
+  } finally {
+    manager?.client?.close();
+  }
+}
+
 export async function main(argv) {
   const { command, options } = parseArgs(argv);
   if (command === "mcp") return runMcp();
   if (command === "await") return runAwait(options);
+  if (command === "detach") return runDetach(options);
   if (command === "pending") return runPending();
   if (command === "owner") return runOwner();
   if (command === "claude") return runClaude(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);

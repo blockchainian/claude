@@ -75,7 +75,7 @@ with its app-server daemon running (`codex agents` starts one).
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
 | `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
-| `list()` | The threads this Claude session started or attached, their last turn status, and the unread inbox count per thread. |
+| `list(state?)` | The threads this Claude session started or attached, their `state`, and the unread inbox count per thread. State is `detached` first, then `waiting` for a pending ask or approval, otherwise `lastStatus`: `inProgress`, `completed`, `failed`, `interrupted`, `idle` (no turn yet), or `unavailable` (resume failed). Pass an array of states to include; omit for all threads, or pass `[]` for none. |
 | `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents, and a later `send` is refused. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
 | `review(cwd, base, out, plan?, decisions?, name?, stance?, focus?)` | A read-only thread running codex's own review mode (`review/start`, its rubric and P0–P3 priorities) over the commits since `base`; the rendered review — an overall verdict and one finding per line with its file and lines — is saved to `out`. With `plan`, the reviewer reads the spec first and does not flag a behaviour change the spec asks for. With `decisions`, the reviewer also reads the rules decided during the run: it does not report one as a departure from the spec, and judges each on its own, tracing what reads the result, also in code the changes did not touch. `stance: "adversarial"` adds a challenge stance (`codex-manager/adversarial-review.md`): the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. `focus` names what it should weigh most. |
 
@@ -96,14 +96,16 @@ reach Claude, because they do not travel through the daemon's requests.
 
 The MCP initialize response supplies concise lifecycle instructions even before
 tools are loaded: start a thread, run its await command in the background,
-answer asks with `reply` after checking `list` for `waiting` (an await can
+answer asks with `reply` after checking `list(state: ["waiting"])` (an await can
 deliver an already answered ask). A thread is finished only when its turn
 completed (not failed, interrupted or waiting on an ask), its result has been
 checked and accepted, and no further message is planned. Blocked threads and
 results still being checked are not finished. Once finished, `detach` in the
 same turn; a thread the session started is then archived and takes no further
-`send`. Before ending a multi-thread run, `list` and detach every finished
-thread.
+`send`. Before ending a multi-thread run, `list(state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"])`
+and detach every finished thread.
+
+`node <plugin>/codex-manager/manager.mjs detach --thread <id>` releases a thread through its owning session, even after that session exits.
 
 Every `start`/`send`/`review` result carries an await command. Run it with
 `run_in_background`:

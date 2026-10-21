@@ -3,7 +3,8 @@
 Research skills for Claude Code and Codex. They turn long-form sources (articles, podcasts, videos,
 live streams, PDFs and whole books) into transcripts, highlights and translations, archive and
 analyze what people say about an app on X, TikTok and the App Store, research creators in depth,
-find book downloads and check which brand domains are still registrable. They also archive and
+find book downloads, check which brand domains are still registrable and give minified
+JavaScript identifiers meaningful names. They also archive and
 measure the X Following feed and trending topics, save feed digests, and preview or perform
 X account actions through opencli.
 
@@ -60,9 +61,45 @@ path.
 | `analyze-x-users` | Profile the accounts that mention an app. |
 | `analyze-x-user` | Profile one X account from its own timeline. |
 | `fetch-tiktok-mentions` | Archive a brand's TikTok videos, comments and video files. |
+| `unminify` | Rename short JavaScript identifiers with model-suggested, scope-checked names. |
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
+Unminify plans and packs batches within each file and stage using `--context-tokens`
+(default 100000). The budget counts instructions, prompt and rendered context with
+`js-tiktoken` 1.0.21 (`o200k_base`); there is no name-count cap. Oversized contexts are
+shortened; an irreducible batch that still cannot fit fails before sending. Top-level
+naming finishes before function naming, and journals retain original batch IDs.
+Every run, including an interrupted run, updates import names in journal-completed files.
+Unfinished files supply their current export names without being rewritten, preserving resume.
+
+Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
+`.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
+performance summaries to `.unminify/performance.jsonl` in the target Git root. Telemetry
+contains no credentials or source text. Analyze the latest run locally with
+`node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo>`; optional `--run-id <id>`,
+`--window-seconds 10` and `--slow-files 10` select the run, window size and slow-file count.
+The JSON report and run summary include model HTTP-attempt count and median/mean names per
+request (retries included); attempt logs list batch IDs, name count and `estimated_input_tokens`.
+Summary and perf reports compare total `estimated_input_tokens` with server `input_tokens`
+(including retries). Estimates count input text; server framing and schema accounting may differ.
+The report also includes windowed throughput, concurrency, latency and 429 counts, phase
+elapsed times and slow files. Summary latency/throughput include refresh HTTP attempts;
+local-step times include nested work and phase totals can overlap.
+
+
 ## Tests
 
-Run `npm run test:intel` from the marketplace root.
+Run `npm run test:intel` from the marketplace root. The unminify real-model test is skipped
+unless `UNMINIFY_E2E=1`. Run its authored small JavaScript modules with the current Codex login:
+
+```sh
+npm run test:intel:unminify:e2e
+```
+
+It checks syntax checkpoints, binding safety, preserved exports, renamed imports and execution.
+To inspect a real-model run on your own sample files, use:
+
+```sh
+node plugins/intel/skills/unminify/scripts/e2e.mjs <sample.js>...
+```
