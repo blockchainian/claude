@@ -1,9 +1,9 @@
+#[path = "middle_paste_tests.rs"]
+mod middle_paste_tests;
 #[path = "subagent_handback_tests.rs"]
 mod subagent_handback_tests;
 #[path = "web_search_tests.rs"]
 mod web_search_tests;
-#[path = "middle_paste_tests.rs"]
-mod middle_paste_tests;
 
 #[path = "claude_client_tests.rs"]
 mod claude_client_tests;
@@ -1592,18 +1592,34 @@ fn needs_input_manual_selection_cancels_until_another_task_starts_waiting() {
 
 #[test]
 fn needs_input_queue_uses_question_time_before_session_update() {
-    use crate::providers::{Provider, claude::ClaudeProvider};
-    let directory = tempfile::tempdir().unwrap();
-    let project = directory.path().join("projects/project");
-    std::fs::create_dir_all(&project).unwrap();
-    std::fs::write(
-        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
-        include_str!("../../tests/fixtures/claude-questions-pending.jsonl"),
-    )
+    let payload: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/claude-ask-user-question/post.json"
+    ))
     .unwrap();
-    let mut provider = ClaudeProvider::new(directory.path().into());
-    let mut question = provider.refresh(1).sessions.remove(0);
-    let since = question.ask.as_ref().unwrap().since;
+    let mut question = session("question", "Question", SessionStatus::NeedsInput, 0);
+    let since = question.updated_at;
+    question.ask = Some(crate::ask::Ask {
+        id: payload["tool_use_id"].as_str().unwrap().into(),
+        session: question.id.clone(),
+        since,
+        kind: crate::ask::AskKind::Questions {
+            blocking: true,
+            questions: payload["tool_input"]["questions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|raw| crate::ask::Question {
+                    id: raw["question"].as_str().unwrap().into(),
+                    text: raw["question"].as_str().unwrap().into(),
+                    header: raw["header"].as_str().unwrap().into(),
+                    multi: raw["multiSelect"].as_bool().unwrap(),
+                    other: true,
+                    secret: false,
+                    options: serde_json::from_value(raw["options"].clone()).unwrap(),
+                })
+                .collect(),
+        },
+    });
     question.status = SessionStatus::Working;
     question.updated_at = since + Duration::seconds(120);
     let original = session("original", "Original", SessionStatus::Ready, 300);
@@ -2568,15 +2584,23 @@ fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
     assert_eq!(view.selected_id(), Some(&session_key("46")));
     assert!(!screen(&view, 88, 16).contains("Rename ❯"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert!(view.task_uis[&draft_controls::TaskKey::Session(session_key("42"))]
-        .task_details.title.is_some());
+    assert!(
+        view.task_uis[&draft_controls::TaskKey::Session(session_key("42"))]
+            .task_details
+            .title
+            .is_some()
+    );
     view.set_active_panel(Panel::TaskList);
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
     view.hide(&session_key("46"));
     assert_ne!(view.rename_target.as_ref(), Some(&session_key("46")));
-    assert!(view.task_uis[&draft_controls::TaskKey::Session(session_key("46"))]
-        .task_details.title.is_some());
+    assert!(
+        view.task_uis[&draft_controls::TaskKey::Session(session_key("46"))]
+            .task_details
+            .title
+            .is_some()
+    );
     let mut view = fixture();
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
@@ -4832,6 +4856,10 @@ fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
             let expected = view.rows[index].id.clone();
             let y = list.y + offset as u16;
             assert_ne!(buf[(list.x, list.y)].symbol(), "↑");
+            let bottom = list.y + list.height - 1;
+            assert!(
+                (list.x..list.right()).all(|x| !matches!(buf[(x, bottom)].symbol(), "↑" | "↓"))
+            );
             drop(viewport);
             click_mouse(
                 &mut view,
@@ -4840,10 +4868,6 @@ fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
             assert_eq!(view.selected_id(), Some(&expected));
         }
     }
-            let bottom = list.y + list.height - 1;
-            assert!(
-                (list.x..list.right()).all(|x| !matches!(buf[(x, bottom)].symbol(), "↑" | "↓"))
-            );
 }
 
 #[test]
@@ -5407,7 +5431,9 @@ fn task_event_background_record_has_no_marker_and_keeps_its_time() {
                 .unwrap_or_else(|| panic!("{rendered}"));
             assert!(!row.contains(" *"), "{row}");
             assert!(
-                row.trim_end_matches(['┌', '│', '└']).trim_end().ends_with(expected_time),
+                row.trim_end_matches(['┌', '│', '└'])
+                    .trim_end()
+                    .ends_with(expected_time),
                 "{row}"
             );
         }
@@ -6672,7 +6698,8 @@ mod input_row {
                         Some((task_row.x + expected, task_row.y))
                     );
                     let event_expected = (9 + event_panel
-                        .event_list.search
+                        .event_list
+                        .search
                         .query
                         .window(usize::from(event_row.width.saturating_sub(9)))
                         .1)

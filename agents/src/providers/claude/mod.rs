@@ -5,14 +5,14 @@ mod api;
 mod attach;
 #[cfg(test)]
 mod attach_live_tests;
-#[cfg(test)]
-mod rename_live_tests;
 mod background;
 pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;
 mod defaults;
 mod models;
+#[cfg(test)]
+mod rename_live_tests;
 #[cfg(test)]
 mod settings_tests;
 #[cfg(test)]
@@ -640,6 +640,10 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
+        sessions.extend(unchanged);
+        for session in &mut sessions {
+            session.ask = None;
+        }
         if let Some(ask_user_question) = &self.ask_user_question {
             for ask in ask_user_question.pending() {
                 if let Some(session) = sessions
@@ -654,7 +658,6 @@ impl ClaudeProvider {
                 }
             }
         }
-        sessions.extend(unchanged);
         Snapshot { sessions, has_more }
     }
 
@@ -1098,6 +1101,11 @@ impl Provider for ClaudeProvider {
                 let answer = answer.clone();
                 return Some(Box::new(move || server.answer(&pending, &answer)));
             }
+            return Some(Box::new(|| {
+                Err(io::Error::other(
+                    "Claude AskUserQuestion is no longer pending",
+                ))
+            }));
         }
         if !session.can_resume() {
             return None;
@@ -1315,15 +1323,7 @@ fn session(
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,
-        ask: summary.ask.map(|ask| crate::ask::Ask {
-            id: ask.id,
-            kind: ask.kind,
-            session: SessionKey {
-                provider: ProviderId::Claude,
-                id: id.clone(),
-            },
-            since: ask.since,
-        }),
+        ask: None,
         tasks: summary.tasks,
         pending_questions: summary.pending_questions,
         background: summary.background,
@@ -1566,116 +1566,8 @@ mod tests {
             let sessions = provider.refresh(1).sessions;
             assert_eq!(sessions.len(), 1);
             assert_eq!(sessions[0].pending_questions, questions);
+            assert!(sessions[0].ask.is_none());
         }
-    }
-
-    #[test]
-    fn ask_user_question_preserves_structured_pending_ask() {
-        let dir = tempfile::tempdir().unwrap();
-        let id = "00000000-0000-4000-8000-000000000001";
-        let path = transcript(dir.path(), id, 0);
-        let pending = include_str!("../../../tests/fixtures/claude-questions-pending.jsonl");
-        let raw: serde_json::Value = serde_json::from_str(pending).unwrap();
-        let call = &raw["message"]["content"][0];
-        let mut provider = ClaudeProvider::new(dir.path().into());
-        for fixture in [
-            pending,
-            include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
-            include_str!("../../../tests/fixtures/claude-questions-rejected.jsonl"),
-            pending,
-        ] {
-            fs::write(&path, fixture).unwrap();
-            let sessions = provider.refresh(1).sessions;
-            let session = &sessions[0];
-            if fixture != pending {
-                assert!(session.ask.is_none());
-                continue;
-            }
-            let ask = session.ask.as_ref().unwrap();
-            assert_eq!(ask.id, call["id"].as_str().unwrap());
-            assert_eq!(ask.session, session.id);
-            assert_eq!(
-                ask.since,
-                "2026-10-13T17:45:13.548Z".parse::<DateTime<Utc>>().unwrap()
-            );
-            let crate::ask::AskKind::Questions {
-                questions,
-                blocking,
-            } = &ask.kind;
-            assert!(!*blocking);
-            assert_eq!(questions.len(), 2);
-            for (question, raw) in questions
-                .iter()
-                .zip(call["input"]["questions"].as_array().unwrap())
-            {
-                assert_eq!(question.id, raw["question"].as_str().unwrap());
-                assert_eq!(question.header, raw["header"].as_str().unwrap());
-                assert_eq!(question.text, raw["question"].as_str().unwrap());
-                assert_eq!(question.multi, raw["multiSelect"].as_bool().unwrap());
-                assert!(question.other);
-                assert!(!question.secret);
-                assert_eq!(
-                    question.options.len(),
-                    raw["options"].as_array().unwrap().len()
-                );
-                for (option, raw) in question
-                    .options
-                    .iter()
-                    .zip(raw["options"].as_array().unwrap())
-                {
-                    assert_eq!(option.label, raw["label"].as_str().unwrap());
-                    assert_eq!(option.description, raw["description"].as_str().unwrap());
-                    assert_eq!(option.preview.as_deref(), raw["preview"].as_str());
-                }
-            }
-            assert_eq!(
-                session.pending_questions,
-                questions
-                    .iter()
-                    .map(|question| question.text.clone())
-                    .collect::<Vec<_>>()
-            );
-        }
-    }
-
-    #[test]
-    fn ask_user_question_preserves_multiple_choice_and_clears_after_result() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = transcript(dir.path(), "00000000-0000-4000-8000-000000000001", 0);
-        let mut provider = ClaudeProvider::new(dir.path().into());
-        fs::write(
-            &path,
-            include_str!("../../../tests/fixtures/claude-questions/multi-pending.jsonl"),
-        )
-        .unwrap();
-        let sessions = provider.refresh(1).sessions;
-        let ask = sessions[0].ask.as_ref().unwrap();
-        let crate::ask::AskKind::Questions { questions, .. } = &ask.kind;
-        assert_eq!(questions.len(), 1);
-        let question = &questions[0];
-        assert_eq!(question.header, "Multi");
-        assert_eq!(question.text, "Probe multiple choices?");
-        assert!(question.multi);
-        assert_eq!(
-            question
-                .options
-                .iter()
-                .map(|option| option.label.as_str())
-                .collect::<Vec<_>>(),
-            ["Red", "Green", "Blue"]
-        );
-        assert!(
-            question
-                .options
-                .iter()
-                .all(|option| option.preview.is_none())
-        );
-        fs::write(
-            &path,
-            include_str!("../../../tests/fixtures/claude-questions/transcript.jsonl"),
-        )
-        .unwrap();
-        assert!(provider.refresh(1).sessions[0].ask.is_none());
     }
 
     #[test]

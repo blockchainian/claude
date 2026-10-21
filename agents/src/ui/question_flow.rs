@@ -20,8 +20,12 @@ impl Questions {
             |ask: &crate::ask::Ask| matches!(ask.kind, crate::ask::AskKind::Questions { .. });
         let can_answer = |row: &Session| {
             row.id.provider == ProviderId::Codex
-                || row.is_live_background()
-                || (row.id.provider == ProviderId::Claude && row.background_job.is_some())
+                || row.ask.as_ref().is_some_and(|ask| {
+                    matches!(
+                        ask.kind,
+                        crate::ask::AskKind::Questions { blocking: true, .. }
+                    )
+                })
         };
         let pending = |id: &SessionKey| {
             rows.iter()
@@ -657,18 +661,39 @@ mod tests {
     }
 
     #[test]
-    fn transcript_questions_remain_answerable_after_refresh() {
+    fn claude_questions_without_held_hook_do_not_open_question_view() {
         let mut view = fixture();
         assert!(view.active_question().is_some());
         let mut rows = view.rows.clone();
         let crate::ask::AskKind::Questions { blocking, .. } =
             &mut rows[0].ask.as_mut().unwrap().kind;
         *blocking = false;
-        view.set_sessions(rows, false);
+        view.set_sessions(rows.clone(), false);
+        assert!(view.active_question().is_none());
+        assert!(view.questions.views.is_empty());
+        assert_eq!(view.rows[0].status, SessionStatus::NeedsInput);
 
+        let mut restarted = View::default();
+        restarted.set_sessions(rows, false);
+        assert!(restarted.active_question().is_none());
+        assert!(restarted.questions.views.is_empty());
+    }
+
+    #[test]
+    fn codex_questions_remain_answerable_without_held_claude_hook() {
+        let mut view = fixture();
+        let mut row = view.rows[0].clone();
+        row.id.provider = ProviderId::Codex;
+        row.process = None;
+        row.background_job = None;
+        let ask = row.ask.as_mut().unwrap();
+        ask.session = row.id.clone();
+        let crate::ask::AskKind::Questions { blocking, .. } = &mut ask.kind;
+        *blocking = false;
+        view.set_sessions(vec![row], false);
         assert!(view.active_question().is_some());
         assert!(matches!(
-            view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            view.handle_key(KeyCode::Char('2').into()),
             Some(Action::AnswerQuestions { .. })
         ));
     }

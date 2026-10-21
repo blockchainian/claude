@@ -1,7 +1,5 @@
 //! Sends input through a temporary, screen-checked Claude attach client.
 
-mod question;
-
 use crate::providers::{ScreenInput, SessionInput};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -35,7 +33,9 @@ pub(super) fn send(
                 image_path(path)?;
             }
         }
-        SessionInput::Rename(_) => return Err(io::ErrorKind::Unsupported.into()),
+        SessionInput::Rename(_) | SessionInput::Answer { .. } => {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
         SessionInput::SetModel(value) | SessionInput::SetEffort(value) => {
             if value.is_empty() || value.chars().any(char::is_whitespace) {
                 return Err(io::Error::new(
@@ -45,7 +45,7 @@ pub(super) fn send(
             }
             validate_text(value)?;
         }
-        SessionInput::Interrupt | SessionInput::Answer { .. } => {}
+        SessionInput::Interrupt => {}
     }
     let restore = matches!(
         input,
@@ -397,14 +397,6 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
-        if let SessionInput::Answer {
-            ask,
-            answer,
-            transcript,
-        } = input
-        {
-            return self.answer_question(&ask, &answer, &transcript);
-        }
         clear_left_input(self)?;
         self.wait_at("initial-ready", ready)?;
         match input {
@@ -436,9 +428,10 @@ impl Terminal {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
-            SessionInput::Answer { .. } => unreachable!("answers handled before prompt input"),
             SessionInput::Interrupt => self.write(b"\x1b"),
-            SessionInput::Rename(_) => Err(io::ErrorKind::Unsupported.into()),
+            SessionInput::Rename(_) | SessionInput::Answer { .. } => {
+                Err(io::ErrorKind::Unsupported.into())
+            }
             SessionInput::SetModel(model) => {
                 let choices = super::models::input_choices(&super::config_dir(), None);
                 let label = choices

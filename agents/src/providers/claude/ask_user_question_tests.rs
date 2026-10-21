@@ -235,12 +235,16 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     assert_eq!(session.status, SessionStatus::NeedsInput);
     assert_eq!(session.ask.as_ref(), Some(&ask));
     assert_eq!(session.pending_questions, ["Hook color?"]);
+    let cached = provider.snapshot_sessions(1, Some(&[]), std::slice::from_ref(&session));
+    assert_eq!(cached.sessions[0].ask.as_ref(), Some(&ask));
     stream.shutdown(Shutdown::Both).unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     while !server.pending().is_empty() {
         assert!(std::time::Instant::now() < deadline);
         thread::sleep(Duration::from_millis(10));
     }
+    let cached = provider.snapshot_sessions(1, Some(&[]), &cached.sessions);
+    assert!(cached.sessions[0].ask.is_none());
     let session = provider
         .refresh(1)
         .sessions
@@ -253,7 +257,7 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     let ask = await_pending(&server);
     let mut session = session;
     session.process = None;
-    session.ask = Some(ask);
+    session.ask = Some(ask.clone());
     assert!(provider.terminal_cleanup(&session).unwrap().is_none());
     let terminal = provider.terminal_command(&session).unwrap();
     assert_eq!(terminal.command.get_program(), "claude");
@@ -266,11 +270,25 @@ fn provider_marks_pending_questions_and_releases_them_on_attach_or_disconnect() 
     assert!(response.starts_with("HTTP/1.1 200"));
     assert!(response.ends_with("\r\n\r\n"));
     assert!(server.pending().is_empty());
-    // A fresh hook takes precedence even if the view still holds the transcript request.
+    let input = crate::providers::SessionInput::Answer {
+        ask,
+        answer: Answer::default(),
+        transcript: "unused-after-hook-release.jsonl".into(),
+    };
+    let error = provider.send(&session, input.clone()).unwrap()().unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Claude AskUserQuestion is no longer pending"
+    );
+    let without_hook = super::super::ClaudeProvider::new(config.path().to_owned());
+    let error = without_hook.send(&session, input).unwrap()().unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Claude AskUserQuestion is no longer pending"
+    );
+
     let mut stream = post(&server, &body);
-    let mut ask = await_pending(&server);
-    let AskKind::Questions { blocking, .. } = &mut ask.kind;
-    *blocking = false;
+    let ask = await_pending(&server);
     provider
         .send(
             &session,
