@@ -19,10 +19,10 @@ async function settle(tasks) {
 }
 
 /** Explicit chunks keep each stage and its group writes independently resumable. */
-export async function createChunkRun(root, settings) {
+export async function createChunkRun(root, settings, ignores) {
   const manifest = settings.chunks ? await loadChunks(settings.chunks, root)
     : { chunks: [], files: new Set(), fingerprint: null };
-  const ignores = await createChunkIgnore(root, settings.ignoreFile);
+  ignores ??= await createChunkIgnore(root, settings.ignoreFile);
   const ignored = new Set([...manifest.files].filter(ignores));
   const options = { manifest: manifest.fingerprint,
     ignored: [...ignored].sort(), chunkSiblings: !!settings.chunkSiblings,

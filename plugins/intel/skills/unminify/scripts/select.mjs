@@ -9,7 +9,9 @@ import { promisify } from 'node:util';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import generateModule from '@babel/generator';
-import ignore from 'ignore';
+import { createChunkIgnore } from './chunk-manifest.mjs';
+import { createSyntaxPool } from './syntax/pool.mjs';
+import { availableParallelism } from 'node:os';
 
 const traverse = traverseModule.default ?? traverseModule;
 const generate = generateModule.default ?? generateModule;
@@ -61,40 +63,52 @@ function analyze(source, options) {
 }
 
 /** Selects a file or a directory's files; paths are relative to the enclosing Git root, ignore rules to their own file. */
-export async function listFiles(target, { ignoreFile, onParse } = {}) {
-  target = await realpath(target);
-  const isDirectory = (await stat(target)).isDirectory();
-  const root = (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: isDirectory ? target : path.dirname(target) })).stdout.trim();
-  const rulesFile = ignoreFile ? await realpath(ignoreFile) : path.join(root, '.ignore');
-  let rules = '';
-  try { rules = await readFile(rulesFile, 'utf8'); }
-  catch (error) { if (error.code !== 'ENOENT' || ignoreFile) throw error; }
-  const matcher = ignore().add(rules);
-  const ignored = file => {
-    const relative = path.relative(path.dirname(rulesFile), file).split(path.sep).join('/');
-    return relative !== '' && !relative.startsWith('../') && matcher.ignores(relative);
-  };
-  const files = [];
-  async function select(file) {
-    if (!/\.m?js$/.test(file) || ignored(file)) return;
-    const source = await readFile(file, 'utf8');
-    const startedAt = Date.now(), started = performance.now();
-    try { parseSource(source); }
-    catch (error) { if (error instanceof SyntaxError) return; throw error; }
-    onParse?.(path.relative(root, file).split(path.sep).join('/'), startedAt, performance.now() - started);
-    files.push(path.relative(root,file).split(path.sep).join('/'));
+export async function listFiles(target, { ignoreFile, onParse, root, ignores, pool } = {}) {
+  const targets = await Promise.all((Array.isArray(target) ? target : [target]).map(file => realpath(file)));
+  if (!targets.length) return [];
+  if (!root) {
+    const first = targets[0];
+    const directory = (await stat(first)).isDirectory() ? first : path.dirname(first);
+    root = (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: directory })).stdout.trim();
+  }
+  ignores ??= await createChunkIgnore(root, ignoreFile);
+  const candidates = new Set();
+  function select(file) {
+    if (/\.m?js$/.test(file) && !ignores(file)) candidates.add(file);
   }
   async function walk(folder) {
     for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a,b)=>a.name.localeCompare(b.name))) {
       const file = path.join(folder, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== '.git' && !ignored(file + path.sep)) await walk(file);
-      } else if (entry.isFile()) await select(file);
+        if (entry.name !== '.git' && !ignores(file + path.sep)) await walk(file);
+      } else if (entry.isFile()) select(file);
     }
   }
-  if (isDirectory) await walk(target);
-  else await select(target);
-  return files.sort();
+  for (const file of targets) {
+    if ((await stat(file)).isDirectory()) await walk(file);
+    else select(file);
+  }
+  const ownPool = !pool;
+  pool ??= createSyntaxPool();
+  const files = [], pending = candidates.values();
+  async function checkFiles() {
+    for (const file of pending) {
+      const source = await readFile(file, 'utf8');
+      const startedAt = Date.now();
+      const { parseable, elapsed } = await pool.run({ kind: 'parse', source });
+      if (!parseable) continue;
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      onParse?.(relative, startedAt, elapsed);
+      files.push(relative);
+    }
+  }
+  try {
+    // Bound source buffers as well as ASTs; do not queue the entire corpus in memory.
+    const results = await Promise.allSettled(Array.from({ length: Math.min(candidates.size, availableParallelism()) }, checkFiles));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
+    return files.sort();
+  } finally { if (ownPool) await pool.close(); }
 }
 
 function ownerChain(binding) {

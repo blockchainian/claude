@@ -31,6 +31,9 @@ node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --min-symbol-length 4
 ```
 
 Each command selects parseable `.js`/`.mjs` files and applies the ignore rules first.
+Selection checks parseability in the syntax worker pool, returning only a boolean and
+parse time. Git root and ignore rules are loaded once per run; chunk siblings are
+selected together with the same rules.
 All commands accept `--ignore <file>` and `--chunks <file>`. Only `rename-bindings` accepts
 `--concurrency` and `--max-input-tokens`; `--min-symbol-length` belongs to
 `rename-bindings` and `sync-imports`. Other options fail with `invalid option`. A missing
@@ -224,6 +227,8 @@ were absent, report `没测到`. Inspect the Git diff and leave committing targe
 caller. The final summary is also appended to `performance.jsonl`: total and phase elapsed
 milliseconds, HTTP-attempt p50/p90/max, time-weighted average and peak in-flight requests,
 429 count, shared pause elapsed time and HTTP attempts per minute (including refreshes).
+`selection_plan` covers file selection and naming plans; ordinary-file duplicate import
+merging is recorded separately as `merge_imports`.
 Phase times merge overlapping intervals within each phase; different phases can overlap.
 Per-file `cpu_ms` counts local elapsed milliseconds for parsing, planning, rendering,
 resolving/applying names and rewrite checks, including child-process time. Nested steps are
