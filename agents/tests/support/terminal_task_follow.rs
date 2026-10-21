@@ -377,19 +377,15 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
         let center = left + (right - left) / 2;
         tmux.mouse(0, left, 2, true);
         tmux.run(&["send-keys", "-t", "probe", "p"]);
-        let capture = tmux.capture_when(|capture| {
-            capture
-                .lines()
-                .any(|row| row.trim_end().ends_with("Pinned"))
-        });
+        let capture =
+            tmux.capture_when(|capture| capture.lines().any(|row| row.trim_end().ends_with('·')));
         let rows: Vec<_> = capture.lines().collect();
-        let header = rows
+        let separator = rows
             .iter()
-            .position(|row| row.trim_end().ends_with("Pinned"))
+            .position(|row| row.trim_end().ends_with('·'))
             .unwrap();
-        let separator = header - 1;
-        let pin_row = (header + 1) as u16;
-        assert!(header > 3, "{capture}");
+        let pin_row = (separator + 1) as u16;
+        assert!(separator > 3, "{capture}");
         assert_eq!(
             rows[separator][..rows[separator].rfind('·').unwrap()].width(),
             center
@@ -448,7 +444,11 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
                 "detail must follow wheel selection: {plain}"
             );
         };
-        tmux.mouse(64, center, header, false);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "`"]);
+        assert_selected(2, "User");
+        tmux.mouse(64, center, pin_row as usize, false);
+        assert_selected(pin_row, "User");
+        tmux.run(&["send-keys", "-t", "probe", "-l", "`"]);
         assert_selected(pin_row, "User");
         tmux.mouse(65, center, pin_row as usize, false);
         assert_selected(pin_row, "User");
@@ -456,7 +456,7 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
         assert_selected(2, "User");
         tmux.mouse(65, center, 3, false);
         assert_selected(3, "Assistant");
-        tmux.mouse(64, center, header, false);
+        tmux.mouse(64, center, pin_row as usize, false);
         assert_selected(pin_row, "User");
         tmux.mouse(65, center, separator, false);
         assert_selected(pin_row, "User");
@@ -465,13 +465,9 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
         tmux.mouse(64, center, separator, false);
         assert_selected(2, "User");
         tmux.run(&["send-keys", "-t", "probe", "p"]);
-        tmux.wait_for(|capture| {
-            !capture
-                .lines()
-                .any(|row| row.trim_end().ends_with("Pinned"))
-        });
+        tmux.wait_for(|capture| !capture.lines().any(|row| row.trim_end().ends_with('·')));
         println!(
-            "{{\"verdict\":\"pass\",\"width\":{width},\"centered\":true,\"default_style\":true,\"click_ignored\":true,\"unpin_hides_section\":true,\"wheel_sections\":true,\"detail_follows\":true}}"
+            "{{\"verdict\":\"pass\",\"width\":{width},\"centered\":true,\"default_style\":true,\"click_ignored\":true,\"unpin_hides_section\":true,\"wheel_sections\":true,\"detail_follows\":true,\"backtick_ignored\":true}}"
         );
     }
 }

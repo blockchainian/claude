@@ -613,7 +613,30 @@ fn pinned_sections_dot_uses_list_width_and_ignores_mouse_clicks() {
 }
 
 #[test]
-fn pinned_sections_switch_key_restores_timeline_and_mouse_focus() {
+fn event_list_backtick_preserves_selected_row() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    for selected in [EventRow::Timeline(3), EventRow::Pinned(0)] {
+        let position = view.shown_row_position(selected).unwrap();
+        view.select_event(Some(position));
+        let source = view.visible_event().unwrap().source.clone();
+        assert!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE))
+                .is_none()
+        );
+        assert_eq!(view.selected_event_row(), Some(selected));
+        assert_eq!(view.visible_event().unwrap().source, source);
+    }
+}
+
+#[test]
+fn pinned_sections_wheel_restores_timeline_and_mouse_focus() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -624,14 +647,19 @@ fn pinned_sections_switch_key_restores_timeline_and_mouse_focus() {
     view.toggle_event_pin();
     view.select_event(view.shown_position(3));
     let timeline = view.selected_event_row();
-    let key = KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE);
-    view.handle_key(key);
-    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
-    view.handle_key(key);
-    assert_eq!(view.selected_event_row(), timeline);
     let area = Rect::new(0, 1, 100, 7);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 9));
     view.render_event(area, &mut buffer, Utc::now());
+    for (row, expected) in [(7, Some(EventRow::Pinned(0))), (1, timeline)] {
+        view.handle_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 3,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(view.selected_event_row(), expected);
+        view.render_event(area, &mut buffer, Utc::now());
+    }
     for (y, pinned) in [(7, true), (1, false)] {
         for kind in [
             MouseEventKind::Down(MouseButton::Left),

@@ -1786,14 +1786,6 @@ impl View {
             self.help = true;
             return None;
         }
-        if self.active_panel == Panel::EventList
-            && key.code == KeyCode::Char('`')
-            && plain
-            && !self.event_list.search.editing
-        {
-            self.switch_event_section();
-            return None;
-        }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.set_filter(1 - self.status_filter);
             return None;
