@@ -106,8 +106,9 @@ node "$SKILL_DIR/scripts/cli.mjs" <path>... --chunks <manifest.json> \
 By default, a name is eligible only when its declaration and all its references are in
 the selected files. Add `--chunk-siblings` to update references in unselected sibling
 files of the same chunk. Model naming still starts with selected declarations; import
-following may also update an outside import declaration used by a selected sibling,
-and restore external named imports used only within unselected chunk siblings.
+following also updates relative imports when the exporting binding has been renamed,
+even when their declaration and references are entirely in unselected chunk siblings.
+External named imports can also be restored entirely within unselected chunk siblings.
 Ignored files are never rewritten. A name is frozen if more than one chunk member
 declares it, any declaration or reference is ignored, or it is a known environment or
 JavaScript global. Direct `eval` or `with` freezes all binding names in the chunk, including
@@ -121,6 +122,8 @@ reference, and unbound globals throughout the chunk. Public properties and expor
 stay unchanged: `export { a }` becomes `export { readableName as a }`.
 Import locals follow the resolved exported binding's name without model requests, including
 references and export locals in sibling files; collision suffixes remain scope-safe.
+With `--chunk-siblings`, current and historical chunks use their recorded selection and
+the same import authorization, so running together or in batches produces identical bytes.
 An unchanged internal exporting binding leaves its chunk import alias unchanged.
 External named imports use the same length threshold and deterministic restoration as
 ordinary files. Short default and namespace import locals are model candidates, including
@@ -156,7 +159,7 @@ fingerprints, then processes additional selected files from the committed chunk.
 Completed selections are skipped; newly selected declarations still receive naming.
 Files already owned by ordinary rename journals cannot be silently moved into chunk
 journals. Historical completed chunks can follow imports even when the current command
-does not supply their manifest.
+does not supply their manifest, using their recorded selection and sibling authorization.
 
 ## Ignore and resume
 
