@@ -52,7 +52,7 @@ binding index (or the supplied input set outside Git) contains no program bindin
 `undefined`, and the current file passes binding and dynamic-scope checks. Direct
 API calls without index context retain numeric `void` in fragments.
 
-`rename-bindings` checks the entire expanded selection before creating a model client:
+`rename-bindings` checks every selected file and its entire chunk before creating a model client:
 if rerunning syntax restoration or import merging would change any file, it lists every
 such file and requires `restore-syntax`. It only names bindings, resolves collisions,
 checks rewrites and writes results; it never restores syntax or follows imports.
@@ -121,10 +121,12 @@ node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --chunks <manifest.json
   --min-symbol-length 4
 ```
 
-Selecting one chunk member expands the selection to every parseable, nonignored sibling
-for all three commands. Model naming covers those declarations; import
-following also updates relative imports when the exporting binding has been renamed,
-including declarations and references in expanded chunk siblings.
+Selecting one chunk member includes the entire chunk in syntax restoration and the
+pre-naming syntax check. Model naming targets only bindings declared in selected files,
+including program and function bindings; sibling declarations receive no model names.
+References to selected program bindings follow their renamed declarations throughout
+nonignored siblings. Import following also updates relative imports when the exporting
+binding has been renamed, including declarations and references in chunk siblings.
 External named imports are also restored throughout those siblings.
 Ignored files are never rewritten. A name is frozen if more than one chunk member
 declares it, any declaration or reference is ignored, or it is a known environment or
