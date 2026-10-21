@@ -223,6 +223,100 @@ fn event_pin_order_and_overlapping_records() {
 }
 
 #[test]
+fn event_pin_repin_moves_row_above_more_recent_pin() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    view.select_event(view.shown_position(1));
+    view.toggle_event_pin();
+    let first = view.event_list.pinned[0].pin.clone();
+    view.select_event(view.shown_position(2));
+    view.toggle_event_pin();
+    let second = view.event_list.pinned[0].pin.clone();
+    assert_eq!(view.event_list.pinned[1].pin, first);
+
+    view.select_event(view.shown_position(1));
+    view.toggle_event_pin();
+    assert_eq!(view.event_list.pinned.len(), 1);
+    assert_eq!(view.event_list.pinned[0].pin, second);
+    view.select_event(view.shown_position(1));
+    view.toggle_event_pin();
+    assert_eq!(view.event_list.pinned.len(), 2);
+    assert_eq!(view.event_list.pinned[0].pin, first);
+    assert_eq!(view.event_list.pinned[1].pin, second);
+}
+
+#[test]
+fn event_pin_running_tool_keeps_snapshot_until_repinned() {
+    use std::io::Write;
+
+    let (dir, mut view, _, first, _) = fixture();
+    let path = dir.path().join("running-tool.jsonl");
+    let mut records = include_str!("../../tests/fixtures/claude-tool-calls.jsonl").lines();
+    let request = records.next().unwrap();
+    let result = records.next().unwrap();
+    std::fs::write(&path, format!("{request}\n")).unwrap();
+    let running =
+        crate::providers::claude::event_reader::tail_session(&path, usize::MAX, true).unwrap();
+    assert_eq!(running.len(), 1);
+    assert_eq!(running[0].calls.len(), 1);
+    assert!(running[0].calls[0].output.is_none());
+    show(&mut view, &first, running);
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    view.select_event(view.shown_position(0));
+    view.toggle_event_pin();
+    assert_eq!(view.event_list.pinned.len(), 1);
+    let snapshot = view.event_list.pinned[0].event.clone();
+
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap(),
+        "{result}"
+    )
+    .unwrap();
+    let completed =
+        crate::providers::claude::event_reader::tail_session(&path, usize::MAX, true).unwrap();
+    assert_eq!(completed.len(), 1);
+    assert!(
+        completed[0].calls[0]
+            .output
+            .as_ref()
+            .is_some_and(|output| !output.is_empty())
+    );
+    assert_eq!(completed[0].source, snapshot.source);
+    view.apply_event_update(crate::event::Update {
+        events: completed.clone(),
+        reset: true,
+        ..Default::default()
+    });
+    assert_eq!(view.event_panel, completed);
+    assert_eq!(view.event_list.pinned[0].event, snapshot);
+
+    view.select_event(view.shown_position(0));
+    view.toggle_event_pin();
+    assert!(view.event_list.pinned.is_empty());
+    view.select_event(view.shown_position(0));
+    view.toggle_event_pin();
+    let mut expected = completed[0].clone();
+    expected.turn = None;
+    expected.previous_end = None;
+    assert_eq!(view.event_list.pinned[0].event, expected);
+    assert_eq!(
+        view.event_list.pinned[0].pin.records,
+        completed[0].source_records
+    );
+}
+
+#[test]
 fn event_pin_rejects_missing_identity_queued_and_inactive() {
     let (_dir, mut view, events, _, _) = fixture();
     for row in &mut view.rows {
