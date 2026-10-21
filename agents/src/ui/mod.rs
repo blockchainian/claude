@@ -284,6 +284,8 @@ pub struct View {
     interrupted_selection: Option<(SessionKey, usize)>,
     attention_selection: Option<SessionKey>,
     waiting_sessions: HashSet<SessionKey>,
+    /// When the user left each waiting task the queue had brought forward.
+    attention_skips: HashMap<SessionKey, DateTime<Utc>>,
     grouping: Grouping,
     use_colors: bool,
     pinned: Vec<SessionKey>,
@@ -422,6 +424,7 @@ impl View {
             interrupted_selection: None,
             attention_selection: None,
             waiting_sessions: HashSet::new(),
+            attention_skips: HashMap::new(),
             grouping,
             use_colors,
             pinned: Vec::new(),
@@ -696,7 +699,9 @@ impl View {
         let had_sessions = !self.rows.is_empty();
         let selected = self.selected_id().cloned();
         if self.attention_selection.is_some() && self.attention_selection != selected {
-            self.attention_selection = None;
+            if let Some(id) = self.attention_selection.take() {
+                self.attention_skips.insert(id, Utc::now());
+            }
             self.interrupted_selection = None;
         }
         let selected_parent = self.selected_row().and_then(|s| s.parent.clone());
@@ -761,6 +766,7 @@ impl View {
             .filter(|row| row.status == SessionStatus::NeedsInput)
             .map(|row| row.id.clone())
             .collect();
+        self.attention_skips.retain(|id, _| waiting.contains(id));
         if self
             .selected_draft()
             .is_some_and(|draft| draft.name.is_none())
@@ -781,8 +787,11 @@ impl View {
             .collect();
         queue.sort_by_key(|&index| {
             let row = &self.rows[index];
+            let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
             (
-                row.ask.as_ref().map_or(row.updated_at, |ask| ask.since),
+                self.attention_skips
+                    .get(&row.id)
+                    .map_or(since, |&skipped| since.max(skipped)),
                 row.id.clone(),
             )
         });

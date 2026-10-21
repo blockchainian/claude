@@ -1552,7 +1552,7 @@ fn needs_input_queue_continues_after_sending_and_returns_to_original_tab() {
 }
 
 #[test]
-fn needs_input_manual_selection_cancels_until_another_task_starts_waiting() {
+fn needs_input_task_left_waiting_queues_behind_tasks_that_start_waiting_later() {
     let mut view = test_view(Grouping::Project, false);
     let original = session("original", "Original", SessionStatus::Ready, 300);
     let mut first = session("first", "First", SessionStatus::Working, 120);
@@ -1577,6 +1577,13 @@ fn needs_input_manual_selection_cancels_until_another_task_starts_waiting() {
     view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
     assert_eq!(view.selected_id(), Some(&original.id));
     second.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&second.id));
+    view.input_sending(
+        &second.id,
+        &crate::providers::SessionInput::Prompt("continue".into()),
+    );
+    second.status = SessionStatus::Working;
     view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
     assert_eq!(view.selected_id(), Some(&first.id));
     view.select(
