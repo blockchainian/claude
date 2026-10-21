@@ -714,3 +714,76 @@ fn pinned_sections_absent_without_matching_pins() {
     ));
     assert_eq!(view.event_timeline_height(), 5);
 }
+
+#[test]
+fn pinned_sections_wheel_targets_hovered_section_and_restores_selection() {
+    for direction in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
+        let (_dir, mut view, events, _, _) = fixture();
+        for row in &mut view.rows {
+            row.status = SessionStatus::Ready;
+        }
+        view.status_filter = 0;
+        view.active_panel = Panel::EventList;
+        for index in [0, 1] {
+            view.select_event(view.shown_position(index));
+            view.toggle_event_pin();
+        }
+        view.select_event(view.shown_position(2));
+        let area = Rect::new(11, 3, 80, 8);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 14));
+        view.render_event(area, &mut buffer, Utc::now());
+        let mut wheel = |kind, row, expected| {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: area.x + 5,
+                row,
+                modifiers: KeyModifiers::NONE,
+            });
+            assert_eq!(view.selected_event_row(), Some(expected));
+            let event = match expected {
+                EventRow::Pinned(index) => &view.event_list.pinned[index].event,
+                EventRow::Timeline(index) => &events[index],
+            };
+            assert_eq!(view.visible_event().unwrap().source, event.source);
+            view.render_event(area, &mut buffer, Utc::now());
+        };
+        // The header belongs to the pinned section; switching consumes this wheel event.
+        wheel(direction, 3, EventRow::Pinned(0));
+        wheel(MouseEventKind::ScrollDown, 4, EventRow::Pinned(1));
+        wheel(direction, 7, EventRow::Timeline(2));
+        wheel(MouseEventKind::ScrollDown, 8, EventRow::Timeline(3));
+        wheel(direction, 5, EventRow::Pinned(1));
+        // The separator keeps routing wheel events to the selected section.
+        wheel(MouseEventKind::ScrollUp, 6, EventRow::Pinned(0));
+        wheel(direction, 7, EventRow::Timeline(3));
+        wheel(MouseEventKind::ScrollUp, 6, EventRow::Timeline(2));
+    }
+}
+
+#[test]
+fn pinned_sections_wheel_uses_rendered_separator_with_clipped_pins() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    for index in 0..4 {
+        view.select_event(view.shown_position(index));
+        view.toggle_event_pin();
+    }
+    view.select_event(view.shown_position(2));
+    let area = Rect::new(11, 3, 80, 4);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 10));
+    view.render_event(area, &mut buffer, Utc::now());
+    assert_eq!(view.viewport.borrow().event_separator, Some(1));
+    for (row, expected) in [(3, EventRow::Pinned(0)), (6, EventRow::Timeline(2))] {
+        view.handle_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: area.x + 5,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(view.selected_event_row(), Some(expected));
+        view.render_event(area, &mut buffer, Utc::now());
+    }
+}

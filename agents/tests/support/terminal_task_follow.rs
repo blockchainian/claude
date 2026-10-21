@@ -411,10 +411,51 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
             .collect::<Vec<_>>();
         assert_eq!(list[2].trim(), "·");
         println!("{}", list.join("\n"));
+        let assert_selected = |row: u16, detail: &str| {
+            let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+            let parsed = captured_screen(&colored, width as u16, 50);
+            for y in [3, 5, 6] {
+                assert_eq!(
+                    parsed.screen().cell(y, left as u16).unwrap().bgcolor(),
+                    if y == row {
+                        vt100::Color::Idx(233)
+                    } else {
+                        vt100::Color::Default
+                    },
+                    "wheel selected the wrong section: {colored}"
+                );
+            }
+            let plain = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let rows: Vec<_> = plain.lines().collect();
+            let rule = rows
+                .iter()
+                .position(|line| line.width() == width && line.chars().all(|c| c == '─'))
+                .unwrap();
+            assert!(
+                rows[rule + 1].trim_start().starts_with(detail),
+                "detail must follow wheel selection: {plain}"
+            );
+        };
+        tmux.mouse(64, center, 2, false);
+        assert_selected(3, "User");
+        tmux.mouse(65, center, 3, false);
+        assert_selected(3, "User");
+        tmux.mouse(65, center, 6, false);
+        assert_selected(5, "User");
+        tmux.mouse(65, center, 6, false);
+        assert_selected(6, "Assistant");
+        tmux.mouse(64, center, 2, false);
+        assert_selected(3, "User");
+        tmux.mouse(65, center, 4, false);
+        assert_selected(3, "User");
+        tmux.mouse(64, center, 5, false);
+        assert_selected(6, "Assistant");
+        tmux.mouse(64, center, 4, false);
+        assert_selected(5, "User");
         tmux.run(&["send-keys", "-t", "probe", "p"]);
         tmux.wait_for(|capture| !capture.lines().nth(2).unwrap().contains("Pinned"));
         println!(
-            "{{\"verdict\":\"pass\",\"width\":{width},\"centered\":true,\"default_style\":true,\"click_ignored\":true,\"unpin_hides_section\":true}}"
+            "{{\"verdict\":\"pass\",\"width\":{width},\"centered\":true,\"default_style\":true,\"click_ignored\":true,\"unpin_hides_section\":true,\"wheel_sections\":true,\"detail_follows\":true}}"
         );
     }
 }

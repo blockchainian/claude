@@ -1192,7 +1192,25 @@ impl View {
                 } else if over_list {
                     self.move_selection(forward);
                 } else if over_event && self.viewport.borrow().event_panel.contains(position) {
-                    self.move_event_selection(forward);
+                    let hovered_pins = {
+                        let viewport = self.viewport.borrow();
+                        let offset = usize::from(mouse.row - viewport.event_panel.y);
+                        viewport.event_separator.and_then(|separator| {
+                            let separator = separator + usize::from(viewport.event_header);
+                            (offset != separator).then_some(offset < separator)
+                        })
+                    };
+                    let in_pins = matches!(
+                        self.selected_event_row(),
+                        Some(task_ui::EventRow::Pinned(_))
+                    );
+                    if hovered_pins.is_some_and(|pinned| pinned != in_pins) {
+                        self.pending_click = None;
+                        self.event_list.background_return = None;
+                        self.switch_event_section();
+                    } else {
+                        self.move_event_selection(forward);
+                    }
                 } else if over_task_details && let Some(selector) = self.selector.as_mut() {
                     let code = if forward { KeyCode::Down } else { KeyCode::Up };
                     selector.selected =
