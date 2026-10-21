@@ -416,3 +416,54 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
         view.event_panel.len().max(4)
     );
 }
+
+#[test]
+fn c2_unpin_selects_nearest_pin_then_same_timeline_event() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    for index in [1, 2, 3] {
+        view.select_event(view.shown_position(index));
+        view.toggle_event_pin();
+    }
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(1)));
+    assert_eq!(
+        view.visible_event().unwrap().source.as_deref(),
+        Some("task-event-1")
+    );
+    view.toggle_event_pin();
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    view.toggle_event_pin();
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(3)));
+}
+
+#[test]
+fn event_pin_fixed_above_scrolled_timeline() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    view.select_event(None);
+    let area = Rect::new(0, 0, 100, 5);
+    let mut buffer = Buffer::empty(area);
+    view.render_event(area, &mut buffer, Utc::now());
+    assert_eq!(view.viewport.borrow().event_rows[0], EventRow::Pinned(0));
+    assert_eq!(buffer[(0, 1)].symbol(), "─");
+    assert_eq!(view.event_scroll(), view.shown_events().count() - 3);
+    let row_text = |y| {
+        (0..100)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+    };
+    assert!(!row_text(0).contains('│'));
+    assert_eq!(
+        view.viewport.borrow().event_rows.last(),
+        Some(&EventRow::Timeline(view.event_panel.len() - 1))
+    );
+}
