@@ -35,6 +35,8 @@ pub(crate) struct EventList {
     /// Window-relative caches, discarded when the task is parked.
     pub cursor: Option<usize>,
     pub scroll: std::cell::Cell<usize>,
+    pub pinned_scroll: std::cell::Cell<usize>,
+    pub(super) section_return: Option<EventRow>,
     pub restoring: bool,
     pub(super) tail: Option<EventId>,
 }

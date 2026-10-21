@@ -116,20 +116,23 @@ fn c2_pins_do_not_block_loading_older_timeline_events() {
     )));
     assert!(app.view.has_pinned_events(&app.sessions[0].id));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
 
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
     assert!(
         app.view.event_page_pending(),
-        "load history before entering pins"
+        "timeline navigation must request unloaded history"
     );
     assert_eq!(app.view.event_list.cursor, Some(1));
     app.refresh_event(2);
     super::event_search_tests::finish_search(&mut app);
     assert!(!app.transcript_has_older);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
     assert!(!app.view.event_page_pending());
+    assert_eq!(app.view.event_list.cursor, Some(1));
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('`'),
+        KeyModifiers::NONE,
+    )));
     assert_eq!(app.view.event_list.cursor, Some(0));
 }

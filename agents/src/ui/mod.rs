@@ -42,9 +42,9 @@ pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;
-mod task_ui;
 #[cfg(test)]
 mod task_event_list_tests;
+mod task_ui;
 pub use task_ui::PinnedRow;
 use task_ui::{EventRow, TaskUi};
 mod terminal_panel;
@@ -171,6 +171,7 @@ struct Viewport {
     /// Index into the task event list of each drawn event row, top down.
     event_rows: Vec<EventRow>,
     event_separator: Option<usize>,
+    event_header: bool,
     event_detail_max: usize,
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
@@ -518,10 +519,7 @@ impl View {
         if self.selector.is_some() && task_details_active {
             return;
         }
-        if !self.searching
-            && !self.task_search_editing()
-            && self.question_paste(text)
-        {
+        if !self.searching && !self.task_search_editing() && self.question_paste(text) {
             return;
         }
         if task_details_active && self.title_editor().is_some() {
@@ -1079,11 +1077,19 @@ impl View {
     }
 
     pub(crate) fn clamp_event_scroll(&mut self, max: usize) {
-        self.event_list.scroll.set(self.event_list.scroll.get().min(max));
+        self.event_list
+            .scroll
+            .set(self.event_list.scroll.get().min(max));
     }
 
     pub(crate) fn event_max_scroll(&self) -> usize {
-        self.shown_events().count().saturating_sub(self.event_timeline_height())
+        self.event_max_scroll_for(self.event_content_height())
+    }
+
+    pub(crate) fn event_max_scroll_for(&self, visible: usize) -> usize {
+        self.shown_events()
+            .count()
+            .saturating_sub(self.event_section_heights(visible).1)
     }
 
     pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
@@ -1155,7 +1161,9 @@ impl View {
             .as_ref()
             .and_then(|key| self.task_uis.get(key))
             .and_then(|ui| ui.focus);
-        let title = self.title_editing().then(|| std::mem::take(&mut self.rename));
+        let title = self
+            .title_editing()
+            .then(|| std::mem::take(&mut self.rename));
         self.rename_target = None;
         self.name_target = None;
         let mut selector = self.selector.take();
@@ -1370,9 +1378,13 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
     left
 }
 
-
 impl Viewport {
     fn event_row_at(&self, offset: usize) -> Option<EventRow> {
+        let offset = if self.event_header {
+            offset.checked_sub(1)?
+        } else {
+            offset
+        };
         let offset = match self.event_separator {
             Some(separator) if offset == separator => return None,
             Some(separator) if offset > separator => offset - 1,

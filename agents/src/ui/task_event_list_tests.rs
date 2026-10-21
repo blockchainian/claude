@@ -390,8 +390,13 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
     view.toggle_event_pin();
     view.select_event(Some(0));
     view.move_event_selection(true);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    view.switch_event_section();
+    view.navigate_event(KeyCode::Home);
     assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
     view.move_event_selection(false);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
+    view.switch_event_section();
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
     let area = Rect::new(0, 1, 100, 4);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 6));
@@ -401,13 +406,13 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
     view.handle_mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 3,
-        row: 1,
+        row: 2,
         modifiers: KeyModifiers::NONE,
     });
     view.handle_mouse(MouseEvent {
         kind: MouseEventKind::Up(MouseButton::Left),
         column: 3,
-        row: 1,
+        row: 2,
         modifiers: KeyModifiers::NONE,
     });
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
@@ -450,8 +455,9 @@ fn event_pin_fixed_above_scrolled_timeline() {
     let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 5));
     view.render_event(area, &mut buffer, Utc::now());
     assert_eq!(view.viewport.borrow().event_rows[0], EventRow::Pinned(0));
-    assert_eq!(buffer[(0, 1)].symbol(), "─");
-    assert_eq!(view.event_scroll(), view.shown_events().count() - 3);
+    assert_eq!(buffer[(47, 0)].symbol(), "P");
+    assert_eq!(buffer[(0, 2)].symbol(), " ");
+    assert_eq!(view.event_scroll(), view.shown_events().count() - 2);
     let row_text = |y| {
         (0..100)
             .map(|x| buffer[(x, y)].symbol())
@@ -468,7 +474,9 @@ fn event_pin_fixed_above_scrolled_timeline() {
 #[test]
 fn event_pin_clock_ends_at_same_display_column_as_timeline() {
     let (_dir, mut view, events, _, _) = fixture();
-    for row in &mut view.rows { row.status = SessionStatus::Ready; }
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
     view.status_filter = 0;
     view.select_event(Some(0));
     view.toggle_event_pin();
@@ -486,13 +494,177 @@ fn event_pin_clock_ends_at_same_display_column_as_timeline() {
         }
         text.trim_end().to_owned()
     };
-    let pinned = line(0);
-    let timeline = line(2);
+    let pinned = line(1);
+    let timeline = line(3);
     let clock = super::formatting::clock_text(events[0].started_at);
     assert!(pinned.ends_with(&clock), "{pinned}");
     assert!(timeline.ends_with(&clock), "{timeline}");
-    assert!(pinned.chars().count() < pinned.width(), "fixture must contain wide characters");
+    assert!(
+        pinned.chars().count() < pinned.width(),
+        "fixture must contain wide characters"
+    );
     assert_eq!(pinned.width(), timeline.width());
     assert!(!pinned.contains('│'));
     assert_eq!(buffer[(100, 0)].symbol(), " ");
+}
+
+#[test]
+fn pinned_sections_keep_navigation_within_focused_section() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    view.select_event(Some(1));
+    view.navigate_event(KeyCode::Up);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
+    view.select_event(Some(0));
+    for key in [KeyCode::Down, KeyCode::PageDown, KeyCode::End] {
+        view.navigate_event(key);
+        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    }
+}
+
+#[test]
+fn pinned_sections_render_centered_dim_header_and_blank_separator() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    view.select_event(None);
+    let area = Rect::new(0, 0, 100, 5);
+    let mut buffer = Buffer::empty(area);
+    view.render_event(area, &mut buffer, Utc::now());
+    let text = |y| {
+        (0..100)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+    };
+    assert_eq!(text(0).trim(), "Pinned");
+    assert_eq!(buffer[(47, 0)].symbol(), "P");
+    assert!(
+        buffer[(47, 0)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    assert!(text(2).trim().is_empty());
+    assert_eq!(view.viewport.borrow().event_row_at(0), None);
+    assert_eq!(
+        view.viewport.borrow().event_row_at(1),
+        Some(EventRow::Pinned(0))
+    );
+    assert_eq!(view.viewport.borrow().event_row_at(2), None);
+    assert!(matches!(
+        view.viewport.borrow().event_row_at(3),
+        Some(EventRow::Timeline(_))
+    ));
+    assert_eq!(view.event_timeline_height(), 2);
+}
+
+#[test]
+fn pinned_sections_switch_key_restores_timeline_and_mouse_focus() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    view.select_event(Some(3));
+    let timeline = view.selected_event_row();
+    let key = KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE);
+    view.handle_key(key);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    view.handle_key(key);
+    assert_eq!(view.selected_event_row(), timeline);
+    let area = Rect::new(0, 1, 100, 7);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 9));
+    view.render_event(area, &mut buffer, Utc::now());
+    for (y, pinned) in [(2, true), (4, false)] {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: 3,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        assert_eq!(
+            matches!(view.selected_event_row(), Some(EventRow::Pinned(_))),
+            pinned
+        );
+        for _ in 0..20 {
+            view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 3,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        assert_eq!(
+            matches!(view.selected_event_row(), Some(EventRow::Pinned(_))),
+            pinned
+        );
+    }
+}
+
+#[test]
+fn pinned_sections_scroll_many_pins_without_moving_timeline() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    for index in 0..4 {
+        view.select_event(view.shown_position(index));
+        view.toggle_event_pin();
+    }
+    let area = Rect::new(0, 0, 100, 5);
+    let mut buffer = Buffer::empty(area);
+    view.select_event(None);
+    view.render_event(area, &mut buffer, Utc::now());
+    let timeline_scroll = view.event_scroll();
+    view.switch_event_section();
+    view.navigate_event(KeyCode::End);
+    view.render_event(area, &mut buffer, Utc::now());
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(3)));
+    assert_eq!(view.event_scroll(), timeline_scroll);
+    assert!(
+        view.viewport
+            .borrow()
+            .event_rows
+            .contains(&EventRow::Pinned(3))
+    );
+    let pinned_scroll = view.event_list.pinned_scroll.get();
+    view.switch_event_section();
+    view.navigate_event(KeyCode::Home);
+    view.render_event(area, &mut buffer, Utc::now());
+    assert_eq!(view.event_list.pinned_scroll.get(), pinned_scroll);
+    assert_eq!(view.event_scroll(), 0);
+    assert_eq!(view.viewport.borrow().event_row_at(0), None);
+}
+
+#[test]
+fn pinned_sections_absent_without_matching_pins() {
+    let (_dir, view, _, _, _) = fixture();
+    let area = Rect::new(0, 0, 100, 5);
+    let mut buffer = Buffer::empty(area);
+    view.render_event(area, &mut buffer, Utc::now());
+    assert!(!view.viewport.borrow().event_header);
+    assert!(view.viewport.borrow().event_separator.is_none());
+    assert!(matches!(
+        view.viewport.borrow().event_row_at(0),
+        Some(EventRow::Timeline(_))
+    ));
+    assert_eq!(view.event_timeline_height(), 5);
 }

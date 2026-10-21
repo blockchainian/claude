@@ -908,7 +908,7 @@ impl App {
         self.view.finish_event_start();
         self.view.event_session = Some(stamp.session.clone());
         self.view
-            .clamp_event_scroll(self.view.matching_event_count().saturating_sub(visible));
+            .clamp_event_scroll(self.view.event_max_scroll_for(visible));
         if self.view.transcript_fully_loaded() {
             self.full_transcript_stamp = Some(stamp);
             self.transcript_stamp = None;

@@ -268,3 +268,41 @@ fn valid_pin_restore_keeps_order_without_rewriting_store() {
         modified
     );
 }
+
+#[test]
+fn event_refresh_preserves_pinned_timeline_scroll_after_leaving_newest() {
+    use ratatui::backend::TestBackend;
+
+    for pinned_count in [1, 3] {
+        let (_dir, mut app) = super::tests::fixture();
+        let path = app.sessions[0].transcript.as_ref().unwrap();
+        std::fs::write(
+            path,
+            include_bytes!("../tests/fixtures/claude-tool-calls.jsonl"),
+        )
+        .unwrap();
+        reload(&mut app);
+        let task = app.sessions[0].id.clone();
+        let pins = app
+            .view
+            .event_panel
+            .iter()
+            .rev()
+            .take(pinned_count)
+            .map(|event| crate::ui::PinnedRow {
+                pin: pin(event),
+                event: event.clone(),
+            })
+            .collect();
+        app.view.set_pinned_events(&task, pins);
+        app.view.event_list.cursor = app.view.matching_event_count().checked_sub(1);
+        let mut terminal = Terminal::new(TestBackend::new(200, 24)).unwrap();
+        app.draw(&mut terminal).unwrap();
+        let scroll = app.view.event_scroll();
+        assert!(scroll > 0, "fixture must overflow the timeline");
+        // Moving off the newest row stops render from revealing that row again.
+        app.view.event_list.cursor = app.view.event_list.cursor.map(|index| index - 1);
+        app.draw(&mut terminal).unwrap();
+        assert_eq!(app.view.event_scroll(), scroll, "pins: {pinned_count}");
+    }
+}

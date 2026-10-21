@@ -69,6 +69,8 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_panel = area;
             viewport.event_rows.clear();
+            viewport.event_header = false;
+            viewport.event_separator = None;
             viewport.event_jump = Rect::default();
             viewport.event_links.clear();
         }
@@ -110,28 +112,29 @@ impl View {
             area.height
                 .saturating_sub(u16::from(self.event_list.search.active())),
         );
-        let pinned_height = pinned_count.min(height.saturating_sub(2));
-        let separator = usize::from(pinned_height > 0);
-        let timeline_height = height.saturating_sub(pinned_height + separator);
+        let (pinned_height, timeline_height) = self.event_section_heights(height);
+        let header = usize::from(pinned_height > 0);
+        let separator = header;
         let start = pinned_count + scroll.min(matching.len().saturating_sub(pinned_count));
         let end = (start + timeline_height).min(matching.len());
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         let pinned_start = self
             .event_list
-            .cursor
-            .filter(|&cursor| cursor < pinned_count)
-            .map_or(0, |cursor| (cursor + 1).saturating_sub(pinned_height));
+            .pinned_scroll
+            .get()
+            .min(pinned_count.saturating_sub(pinned_height));
+        self.event_list.pinned_scroll.set(pinned_start);
         let visible = (pinned_start..pinned_start + pinned_height).chain(start..end);
         if separator > 0 {
-            Line::from("─".repeat(usize::from(area.width)))
-                .dim()
-                .render(super::render::row(area, pinned_height as u16, 1), buf);
+            let rect = super::rows::heading_rect("Pinned", super::render::row(area, 0, 1));
+            super::render::line("Pinned".dim(), rect, buf);
         }
+        self.viewport.borrow_mut().event_header = header > 0;
         self.viewport.borrow_mut().event_separator = (separator > 0).then_some(pinned_height);
         for (index, position) in visible.enumerate() {
             let (event_index, event) = matching[position];
-            let y = index + usize::from(index >= pinned_height) * separator;
+            let y = header + index + usize::from(index >= pinned_height) * separator;
             let pinned = matches!(event_index, super::task_ui::EventRow::Pinned(_));
             let last = match event_index {
                 super::task_ui::EventRow::Pinned(_) => false,
@@ -196,7 +199,7 @@ impl View {
             rows.push(event_index);
             drawn_links.extend(links);
         }
-        let mut text_area = super::render::row(area, 0, (rows.len() + separator) as u16);
+        let mut text_area = super::render::row(area, 0, (rows.len() + header + separator) as u16);
         text_area.width = text_area.width.saturating_sub(1);
         {
             let mut viewport = self.viewport.borrow_mut();
@@ -633,6 +636,14 @@ impl View {
             .map(|last| index.unwrap_or(last).min(last));
         if self.event_list.cursor != index || background {
             self.cancel_event_detail_selection();
+            let previous = self.selected_event_row();
+            let next =
+                index.and_then(|index| self.shown_event_rows().nth(index).map(|(row, _)| row));
+            if previous.is_some_and(|row| matches!(row, EventRow::Pinned(_)))
+                != next.is_some_and(|row| matches!(row, EventRow::Pinned(_)))
+            {
+                self.event_list.section_return = previous;
+            }
             self.event_list.cursor = index;
             self.event_detail.search.clear();
             let mut viewport = self.viewport.borrow_mut();
@@ -684,6 +695,15 @@ impl View {
         };
         let pinned = self.shown_pinned_count();
         let Some(offset) = selected.checked_sub(pinned) else {
+            let height = self.event_pinned_height();
+            if height > 0 {
+                let scroll = self.event_list.pinned_scroll.get();
+                self.event_list.pinned_scroll.set(if selected < scroll {
+                    selected
+                } else {
+                    scroll.max((selected + 1).saturating_sub(height))
+                });
+            }
             return;
         };
         let max = self.event_max_scroll();
@@ -705,20 +725,28 @@ impl View {
         match code {
             KeyCode::Up | KeyCode::Down => self.move_event_selection(code == KeyCode::Down),
             KeyCode::PageUp | KeyCode::PageDown => {
-                let steps = self
-                    .viewport
-                    .borrow()
-                    .event_panel
-                    .height
-                    .saturating_sub(u16::from(self.event_list.search.active()))
-                    .max(1);
+                let steps = if matches!(self.selected_event_row(), Some(EventRow::Pinned(_))) {
+                    self.event_pinned_height()
+                } else {
+                    self.event_timeline_height()
+                }
+                .max(1);
                 for _ in 0..steps {
                     self.move_event_selection(code == KeyCode::PageDown);
                 }
             }
             KeyCode::Home | KeyCode::End => {
                 self.event_list.pending_older = 0;
-                self.select_event(if code == KeyCode::Home { Some(0) } else { None });
+                let pinned = self.shown_pinned_count();
+                let in_pins = matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
+                let index = if code == KeyCode::Home {
+                    if in_pins { 0 } else { pinned }
+                } else if in_pins {
+                    pinned.saturating_sub(1)
+                } else {
+                    self.matching_event_count().saturating_sub(1)
+                };
+                self.select_event(Some(index));
                 self.reveal_event_selection();
             }
             _ => unreachable!("list navigation action"),
@@ -738,6 +766,11 @@ impl View {
             self.show_newest_event();
             return;
         };
+        let pinned = self.shown_pinned_count();
+        let in_pins = matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
+        if in_pins && forward && index + 1 >= pinned {
+            return;
+        }
         if !forward {
             let first_timeline = self
                 .shown_events()
@@ -750,7 +783,7 @@ impl View {
                 self.event_list.pending_older += 1;
                 return;
             }
-            if index == 0 {
+            if index == 0 || (!in_pins && index == pinned) {
                 return;
             }
         }
@@ -1105,16 +1138,52 @@ impl View {
             .count()
     }
 
-    pub(super) fn event_timeline_height(&self) -> usize {
-        let height = usize::from(
+    /// Heights within the list body, excluding the search input row.
+    pub(super) fn event_section_heights(&self, visible: usize) -> (usize, usize) {
+        let pinned = self.shown_pinned_count().min(visible.saturating_sub(3));
+        let timeline = visible.saturating_sub(pinned + 2 * usize::from(pinned > 0));
+        (pinned, timeline)
+    }
+
+    pub(super) fn event_content_height(&self) -> usize {
+        usize::from(
             self.viewport
                 .borrow()
                 .event_panel
                 .height
                 .saturating_sub(u16::from(self.event_list.search.active())),
-        );
-        let pinned = self.shown_pinned_count().min(height.saturating_sub(2));
-        height.saturating_sub(pinned + usize::from(pinned > 0))
+        )
+    }
+
+    fn event_pinned_height(&self) -> usize {
+        self.event_section_heights(self.event_content_height()).0
+    }
+
+    pub(super) fn switch_event_section(&mut self) {
+        let pinned = self.shown_pinned_count();
+        if pinned == 0 || self.shown_events().next().is_none() {
+            return;
+        }
+        let in_pins = matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
+        let target = self
+            .event_list
+            .section_return
+            .filter(|row| matches!(row, EventRow::Pinned(_)) != in_pins)
+            .and_then(|row| self.shown_row_position(row))
+            .unwrap_or_else(|| {
+                if in_pins {
+                    pinned + self.event_scroll()
+                } else {
+                    0
+                }
+            });
+        self.event_list.pending_older = 0;
+        self.select_event(Some(target));
+        self.reveal_event_selection();
+    }
+
+    pub(super) fn event_timeline_height(&self) -> usize {
+        self.event_section_heights(self.event_content_height()).1
     }
 
     pub(super) fn shown_event_rows(&self) -> impl Iterator<Item = (EventRow, &Event)> {

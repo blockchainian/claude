@@ -415,6 +415,7 @@ fn chronological_prepend_anchors_rows_and_selection() {
 fn chronological_keys_move_in_screen_direction_and_page_at_top() {
     let (_dir, mut view, events) = fixture();
     view.set_event(events[..10].to_vec());
+    view.event_list.has_older = true;
     draw(&view);
     view.navigate_event(KeyCode::Home);
     view.navigate_event(KeyCode::Down);
@@ -489,6 +490,7 @@ fn chronological_direct_render_uses_its_geometry_and_clamps_without_selection() 
 fn chronological_history_request_covers_queued_steps_beyond_a_page() {
     let (_dir, mut view, events) = fixture();
     view.set_event(events[..10].to_vec());
+    view.event_list.has_older = true;
     draw(&view);
     view.navigate_event(KeyCode::Home);
     for _ in 0..12 {
