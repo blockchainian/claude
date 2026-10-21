@@ -559,13 +559,7 @@ impl View {
                 ),
                 buf,
             );
-            let wide = area.width >= WIDE_LAYOUT_COLUMNS;
-            let filter_rule = if wide {
-                self.viewport.borrow().event_borders[0]
-            } else {
-                Rect::new(area.x, model_y, model_left.saturating_sub(area.x), 1)
-            };
-            self.render_event_filter(filter_rule, wide, buf);
+            self.render_event_filter(self.viewport.borrow().event_borders[1], buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
@@ -771,12 +765,7 @@ impl View {
             };
             truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width)
         };
-        let mut header = truncate_line_to_width(status, width);
-        header.spans.insert(0, " ".into());
-        header.spans.push(" ".into());
-        let label_width = header.width() as u16;
-        let x = rule.x + rule.width.saturating_sub(label_width) / 2;
-        let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
+        let (header, label) = centered_rule_label(truncate_line_to_width(status, width), rule);
         Clear.render(label, buf);
         line(header, label, buf);
     }
@@ -926,23 +915,17 @@ impl View {
         viewport.task_details_links.extend(links);
     }
 
-    fn render_event_filter(&self, rule: Rect, centered: bool, buf: &mut Buffer) {
+    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) {
         let title = match self.event_list.filter {
             crate::event::EventFilter::All => return,
             crate::event::EventFilter::Message => "Assistant",
             crate::event::EventFilter::Tool => "Tool",
         };
         let width = title.width() as u16;
-        // Leave room for the left joint, trailing space, and the midline gap.
-        if rule.is_empty() || rule.width < width + 3 {
+        if rule.is_empty() || rule.width < width + 4 {
             return;
         }
-        let x = if centered {
-            rule.x + (rule.width - width) / 2
-        } else {
-            rule.right() - 2 - width
-        };
-        let label = Rect::new(x - 1, rule.y, width + 2, 1);
+        let (header, label) = centered_rule_label(Line::from(title), rule);
         let viewport = self.viewport.borrow();
         if label.intersects(viewport.event_label)
             || viewport
@@ -952,9 +935,8 @@ impl View {
         {
             return;
         }
-        Line::from(format!("╴{title} "))
-            .style(style::time_style())
-            .render(label, buf);
+        Clear.render(label, buf);
+        line(header, label, buf);
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
@@ -1811,6 +1793,16 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
             }
         }
     }
+}
+
+fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
+    let mut header = title.bold();
+    header.spans.insert(0, " ".into());
+    header.spans.push(" ".into());
+    let width = header.width() as u16;
+    let x = rule.x + rule.width.saturating_sub(width) / 2;
+    let label = Rect::new(x, rule.y, width.min(rule.width), 1).intersection(rule);
+    (header, label)
 }
 
 /// Draws a dim rule across `area`'s first row.

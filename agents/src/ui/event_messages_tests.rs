@@ -397,40 +397,42 @@ fn filtered_event_border_labels_have_layout_coordinates() {
             view.event_list.filter = filter;
             let mut buf = Buffer::empty(area);
             view.render(area, &mut buf);
-            let layout = view.center_layout(area);
             let viewport = view.viewport.borrow();
-            let border = viewport.event_borders[0];
-            let y = if width >= render::WIDE_LAYOUT_COLUMNS {
-                border.y
-            } else {
-                layout.prompt.bottom()
-            };
+            let border = viewport.event_borders[1];
+            assert_eq!(border.y, viewport.event_panel.bottom());
+            let y = border.y;
             let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+            let top: String = (border.x..border.right())
+                .map(|x| buf[(x, viewport.event_borders[0].y)].symbol())
+                .collect();
+            assert!(!top.contains("Assistant") && !top.contains("Tool"), "{top}");
             if title.is_empty() {
-                assert!(!row.contains("Assistant"), "{row}");
-                assert!(!row.contains("Tool"), "{row}");
+                assert!(!row.contains("Assistant") && !row.contains("Tool"), "{row}");
             } else {
                 let length = title.len() as u16;
-                let x = if width >= render::WIDE_LAYOUT_COLUMNS {
-                    border.x + (border.width - length) / 2
+                let label = Rect::new(border.x + (border.width - length - 2) / 2, y, length + 2, 1);
+                let blocked = label.intersects(viewport.event_label)
+                    || viewport
+                        .field_targets
+                        .iter()
+                        .any(|(target, _)| label.intersects(*target));
+                if blocked {
+                    assert!(!row.contains(title), "width {width}: {row}");
                 } else {
-                    layout.gap.x + render::HORIZONTAL_PADDING - 2 - length
-                };
-                let actual: String = (x..x + length).map(|x| buf[(x, y)].symbol()).collect();
-                assert_eq!(actual, title, "width {width}: {row}");
-                assert_eq!(buf[(x - 1, y)].symbol(), "╴");
-                for column in x - 1..x + length {
-                    assert!(
-                        buf[(column, y)]
-                            .modifier
-                            .contains(ratatui::style::Modifier::DIM)
-                    );
-                    assert_eq!(buf[(column, y)].fg, ratatui::style::Color::Reset);
-                }
-                let label = Rect::new(x - 1, y, length + 2, 1);
-                assert!(!label.intersects(viewport.event_label));
-                for (target, _) in &viewport.field_targets {
-                    assert!(!label.intersects(*target));
+                    let actual: String = (label.x..label.right())
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect();
+                    assert_eq!(actual, format!(" {title} "), "width {width}: {row}");
+                    let status_y = view.center_layout(area).header.y + 1;
+                    let status_row: String =
+                        (0..width).map(|x| buf[(x, status_y)].symbol()).collect();
+                    let status = View::status(view.selected_row().unwrap()).0;
+                    let status_x = status_row[..status_row.find(status).unwrap()].width() as u16;
+                    for column in label.x + 1..label.right() - 1 {
+                        assert_eq!(buf[(column, y)].style(), buf[(status_x, status_y)].style());
+                    }
+                    assert_eq!(buf[(label.x - 1, y)].symbol(), "─");
+                    assert_eq!(buf[(label.right(), y)].symbol(), "─");
                 }
             }
             rows.push_str(&row);
@@ -444,6 +446,52 @@ fn filtered_event_border_labels_have_layout_coordinates() {
                 std::fs::write(&path, &rows).unwrap();
             }
             assert_eq!(rows, std::fs::read_to_string(path).unwrap());
+        }
+    }
+}
+
+#[test]
+fn filtered_event_labels_preserve_duration_and_model_labels() {
+    for width in [24, 44, 80, 100, 149, 150, 200] {
+        let (_dir, mut view) = fixture();
+        view.event_list.sort = EventSort::Duration;
+        view.event_list.restoring = false;
+        for filter in [EventFilter::Message, EventFilter::Tool] {
+            view.event_list.filter = EventFilter::All;
+            let area = Rect::new(0, 0, width, 40);
+            let mut before = Buffer::empty(area);
+            view.render(area, &mut before);
+            view.event_list.filter = filter;
+            let mut after = Buffer::empty(area);
+            view.render(area, &mut after);
+            let viewport = view.viewport.borrow();
+            for target in std::iter::once(viewport.event_label)
+                .chain(viewport.field_targets.iter().map(|(target, _)| *target))
+            {
+                for y in target.y..target.bottom() {
+                    for x in target.x..target.right() {
+                        assert_eq!(after[(x, y)], before[(x, y)], "width {width}: {target:?}");
+                    }
+                }
+            }
+            let border = viewport.event_borders[1];
+            let title = if filter == EventFilter::Message {
+                "Assistant"
+            } else {
+                "Tool"
+            };
+            let label = Rect::new(
+                border.x + border.width.saturating_sub(title.len() as u16 + 2) / 2,
+                border.y,
+                title.len() as u16 + 2,
+                1,
+            );
+            let row: String = (border.x..border.right())
+                .map(|x| after[(x, border.y)].symbol())
+                .collect();
+            if label.intersects(viewport.event_label) {
+                assert!(!row.contains(title), "{row}");
+            }
         }
     }
 }

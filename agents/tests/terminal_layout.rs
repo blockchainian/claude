@@ -3351,7 +3351,7 @@ mod terminal_transcript;
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_filtered_event_labels_and_typed_prompts() {
-    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/filter-label-probe");
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/bottom-filter-label-probe");
     std::fs::create_dir_all(&output).unwrap();
     std::fs::write(output.join("verdict.json"), r#"{"verdict":"incomplete"}"#).unwrap();
     let mut results = Vec::new();
@@ -3378,13 +3378,12 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
         let rows: Vec<_> = initial.lines().collect();
         let model_y = rows.iter().position(|row| row.contains("medium")).unwrap();
         let wide = width >= 150;
-        let midline = rows[2][..rows[2].find('│').unwrap()].width();
         let event_left = if wide {
             rows[2][..rows[2].rfind('│').unwrap()].width() + 2
         } else {
             1
         };
-        let border_y = if wide { 1 } else { model_y };
+        let top_border_y = if wide { 1 } else { model_y };
         let event_top = if wide { 2 } else { model_y + 1 };
         let event_bottom = if wide {
             model_y
@@ -3393,6 +3392,7 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
                 .find(|&y| rows[y].matches('─').count() > width / 2)
                 .unwrap()
         };
+        let border_y = event_bottom;
         tmux.mouse(0, event_left + 1, event_top, true);
         for (mode, label) in [
             ("all", None),
@@ -3407,8 +3407,8 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
                     return false;
                 };
                 match label {
-                    Some(label) => border.contains(&format!("╴{label} ")),
-                    None => !border.contains("╴Assistant ") && !border.contains("╴Tool "),
+                    Some(label) => border.contains(&format!(" {label} ")),
+                    None => !border.contains(" Assistant ") && !border.contains(" Tool "),
                 }
             });
             let rows: Vec<_> = capture.lines().collect();
@@ -3445,20 +3445,29 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
             }
             let label_column = label.map(|label| {
                 let column = border[..border.find(label).unwrap()].width();
-                let expected = if wide {
-                    event_left + (width - event_left - 1 - label.width()) / 2
-                } else {
-                    midline - 2 - label.width()
-                };
+                let expected = event_left + (width - event_left - 1 - label.width() - 2) / 2 + 1;
                 assert_eq!(column, expected, "{mode}, width {width}: {border}");
-                if !wide {
-                    let model = if border.contains("claude-opus-5-5") {
-                        "claude-opus-5-5"
-                    } else {
-                        "Opus 5.5"
-                    };
-                    let model_column = border[..border.find(model).unwrap()].width();
-                    assert_eq!(model_column, midline + 2, "{border}");
+                let top = rows[top_border_y];
+                assert!(
+                    !top.contains(" Assistant ") && !top.contains(" Tool "),
+                    "{top}"
+                );
+                let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+                let parser = captured_screen(&colored, width as u16, 50);
+                let status_y = rows
+                    .iter()
+                    .position(|row| row.contains(" Inactive ") && row.contains('─'))
+                    .unwrap();
+                let status_x = rows[status_y][..rows[status_y].find("Inactive").unwrap()].width();
+                let status = parser
+                    .screen()
+                    .cell(status_y as u16, status_x as u16)
+                    .unwrap();
+                for x in column..column + label.width() {
+                    let cell = parser.screen().cell(border_y as u16, x as u16).unwrap();
+                    assert_eq!(cell.bold(), status.bold());
+                    assert_eq!(cell.fgcolor(), status.fgcolor());
+                    assert_eq!(cell.bgcolor(), status.bgcolor());
                 }
                 column
             });
@@ -3474,12 +3483,30 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
                 "label_column": label_column, "border": border,
             }));
         }
+        tmux.run(&["send-keys", "-t", "probe", "t"]);
+        let duration = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .nth(border_y)
+                .is_some_and(|border| border.contains(" Tool ") && border.contains(" duration"))
+        });
+        let border = duration.lines().nth(border_y).unwrap();
+        assert!(
+            border.find("Tool").unwrap() + 4 < border.find("duration").unwrap(),
+            "{border}"
+        );
+        std::fs::write(
+            output.join(format!("{width}-duration-border.txt")),
+            format!("{border}\n"),
+        )
+        .unwrap();
+        results.push(serde_json::json!({"width": width, "mode": "duration", "border": border}));
         tmux.run(&["send-keys", "-t", "probe", "Space"]);
         tmux.wait_for(|capture| {
             capture
                 .lines()
                 .nth(border_y)
-                .is_some_and(|border| !border.contains("╴Assistant ") && !border.contains("╴Tool "))
+                .is_some_and(|border| !border.contains(" Assistant ") && !border.contains(" Tool "))
         });
     }
     let verdict = serde_json::json!({"verdict":"pass", "cases": results});
