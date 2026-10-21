@@ -46,7 +46,7 @@ async function fixture(t, files, groups) {
     read: file => readFile(join(root, file)),
     write: (file, source) => writeFile(join(root, file), source),
     run: (paths, extra = []) => run(parseArgs([...paths.map(file => join(root, file)), '--concurrency', '1',
-      ...(chunks ? ['--chunks', chunks, '--chunk-siblings'] : []), ...extra]), {
+      ...(chunks ? ['--chunks', chunks] : []), ...extra]), {
       ...select, ...rename, ...checks, ...syntax,
       createNamer: options => createNamer({ ...options, ...service, retryDelayMs: 1 }),
       output: line => lines.push(line),
@@ -238,7 +238,7 @@ test('a model failure in a later chunk selection exits with the selection still 
     complete(res, Object.fromEntries(body.text.format.schema.required.map(key => [key,
       /function calculatePending\(v\d+\)/.test(context) ? 'argumentValue' : 'calculateAnswer'])));
   });
-  const settings = { paths: [join(root, 'a.js')], chunks, chunkSiblings: true, concurrency: 1 };
+  const settings = { paths: [join(root, 'a.js')], chunks, concurrency: 1 };
   assert.equal((await run(settings, { ...select, ...rename, ...checks, ...syntax,
     createNamer: options => createNamer({ ...options, ...service, retryDelayMs: 1 }), output: () => {} })).exitCode, 1);
   phase = 'fail';

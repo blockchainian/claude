@@ -15,7 +15,7 @@ import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
 const defaults = { concurrency: 20, maxInputTokens: 100000, minSymbolLength: 4 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const help = 'unminify <path>... [--ignore <file>] [--chunks <file>] [--chunk-siblings] [--concurrency 20] [--max-input-tokens 100000] [--min-symbol-length 4]';
+const help = 'unminify <path>... [--ignore <file>] [--chunks <file>] [--concurrency 20] [--max-input-tokens 100000] [--min-symbol-length 4]';
 
 export function parseArgs(args) {
   const options = { ...defaults };
@@ -23,7 +23,6 @@ export function parseArgs(args) {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
-    if (arg === '--chunk-siblings') { options.chunkSiblings = true; continue; }
     if (arg.startsWith('-')) {
       const key = flags[arg], value = args[++index];
       if (!key || !value || value.startsWith('--')) throw new Error(`invalid option: ${arg}\n${help}`);
@@ -35,7 +34,6 @@ export function parseArgs(args) {
     } else (options.paths ??= []).push(resolve(arg));
   }
   if (!options.paths) throw new Error(help);
-  if (options.chunkSiblings && !options.chunks) throw new Error('--chunk-siblings requires --chunks');
   return options;
 }
 
@@ -48,7 +46,8 @@ async function modules() {
 
 // Callers may supply the documented module contracts to run without a model.
 export async function run(options, dependencies) {
-  const settings = { ...defaults, ...options };
+  // Chunk runs always rewrite references in unselected sibling fragments.
+  const settings = { ...defaults, ...options, chunkSiblings: !!options.chunks };
   for (const key of Object.keys(defaults)) {
     if (!Number.isSafeInteger(settings[key]) || settings[key] < 1) throw new Error(`${key} must be a positive integer`);
   }
@@ -85,7 +84,6 @@ export async function run(options, dependencies) {
   let api, namer;
   try {
     api = dependencies ?? await modules();
-    if (settings.chunkSiblings && !settings.chunks) throw new Error('--chunk-siblings requires --chunks');
     const chunkDriver = await (await import('./chunk-run.mjs')).createChunkRun(root, settings);
     const ignores = await createChunkIgnore(root, settings.ignoreFile);
     const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');

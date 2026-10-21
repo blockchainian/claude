@@ -44,11 +44,10 @@ async function fixture(t, files, groups = [{ id: 'one', files: Object.keys(files
 }
 const slices = { 'a.js': 'const a = 11;\n', 'b.js': 'console.log(a); export { a };\n' };
 
-test('chunk CLI arguments accept manifest and sibling expansion', () => {
-  const options = parseArgs(['src', '--chunks', 'chunks.json', '--chunk-siblings']);
+test('chunk CLI arguments accept a manifest and reject the removed sibling flag', () => {
+  const options = parseArgs(['src', '--chunks', 'chunks.json']);
   assert.equal(options.chunks, join(process.cwd(), 'chunks.json'));
-  assert.equal(options.chunkSiblings, true);
-  assert.throws(() => parseArgs(['src', '--chunk-siblings']), /chunks/);
+  assert.throws(() => parseArgs(['src', '--chunks', 'chunks.json', '--chunk-siblings']), /invalid option: --chunk-siblings/);
 });
 test('chunk naming asks once, renders sibling use, preserves export and replays completion', async t => {
   const f = await fixture(t, slices);
@@ -61,13 +60,13 @@ test('chunk naming asks once, renders sibling use, preserves export and replays 
   assert.equal((await f.run()).exitCode, 0);
   assert.equal(f.requests.length, 1);
 });
-for (const expanded of [false, true]) test(`chunk selection ${expanded ? 'expands to siblings' : 'freezes outside references'}`, async t => {
+test('chunk selection expands to siblings', async t => {
   const f = await fixture(t, slices);
-  const result = await f.run({ paths: [join(f.root, 'a.js')], chunkSiblings: expanded });
+  const result = await f.run({ paths: [join(f.root, 'a.js')] });
   assert.equal(result.exitCode, 0);
-  assert.equal(f.requests.length, expanded ? 1 : 0);
-  assert.equal(await f.read('a.js'), expanded ? 'const readableValue = 11;\n' : slices['a.js']);
-  assert.equal(await f.read('b.js'), expanded ? 'console.log(readableValue); export { readableValue as a };\n' : slices['b.js']);
+  assert.equal(f.requests.length, 1);
+  assert.equal(await f.read('a.js'), 'const readableValue = 11;\n');
+  assert.equal(await f.read('b.js'), 'console.log(readableValue); export { readableValue as a };\n');
 });
 test('chunk duplicate declarations freeze without merging unrelated same-name chunks', async t => {
   const files = { ...slices, 'c.js': 'const a = 12;\n', 'd.js': 'console.log(a);\n' };
@@ -85,7 +84,7 @@ test('ignored sibling references freeze even with expansion', async t => {
   const files = { 'a.js': slices['a.js'], 'vendor/b.js': slices['b.js'] };
   const f = await fixture(t, files);
   await writeFile(join(f.root, '.ignore'), 'vendor/\n');
-  assert.equal((await f.run({ chunkSiblings: true })).exitCode, 0);
+  assert.equal((await f.run()).exitCode, 0);
   assert.equal(f.requests.length, 0);
   for (const [file, source] of Object.entries(files)) assert.equal(await f.read(file), source);
 });
@@ -193,13 +192,13 @@ test('duplicate import aliases remain frozen when the exporter really changes', 
   for (const file of ['first.js', 'last.js']) assert.equal(await f.read(file), files[file]);
   assert.equal(f.requests.length, 1);
 });
-for (const expanded of [false, true]) test(`outside chunk import declarations ${expanded ? 'follow in expanded mode' : 'freeze in default mode'}`, async t => {
+test('outside chunk import declarations follow in sibling chunk members', async t => {
   const files = { 'remote.js': 'const a = 11; export { a };\n',
     'first.js': 'import { a as z } from "./remote.js";\n', 'last.js': 'console.log(z);\n' };
   const f = await fixture(t, files, [{ id: 'consumer', files: ['first.js', 'last.js'] }]);
-  assert.equal((await f.run({ paths: [join(f.root, 'remote.js'), join(f.root, 'last.js')], chunkSiblings: expanded })).exitCode, 0);
-  assert.equal(await f.read('first.js'), expanded ? 'import { a as readableValue } from "./remote.js";\n' : files['first.js']);
-  assert.equal(await f.read('last.js'), expanded ? 'console.log(readableValue);\n' : files['last.js']);
+  assert.equal((await f.run({ paths: [join(f.root, 'remote.js'), join(f.root, 'last.js')] })).exitCode, 0);
+  assert.equal(await f.read('first.js'), 'import { a as readableValue } from "./remote.js";\n');
+  assert.equal(await f.read('last.js'), 'console.log(readableValue);\n');
 });
 test('chunk exports declared in a sibling propagate through another chunk to a standalone importer', async t => {
   const files = { 'decl.js': 'const a = 11;\n', 'export.js': 'export { a };\n',

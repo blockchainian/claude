@@ -18,7 +18,7 @@ const tail = '// Recovered from consumer.js lines 2-3\n';
 const importer = 'import { q as w } from "./lib.js";\nw();\n';
 
 async function fixture(t, { ordinary = false, selectedReference = false, external = false,
-  ignored = false, conflict = false, unchanged = false, siblings = true } = {}) {
+  ignored = false, conflict = false, unchanged = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'unminify-sibling-follow-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
@@ -44,7 +44,7 @@ async function fixture(t, { ordinary = false, selectedReference = false, externa
     read: file => readFile(join(root, file)),
     async run(paths, { manifest = true } = {}) {
       const result = await run(parseArgs([...paths.map(file => join(root, file)), '--concurrency', '1',
-        ...(ordinary || !manifest ? [] : ['--chunks', join(root, 'chunks.json'), ...(siblings ? ['--chunk-siblings'] : [])])]), {
+        ...(ordinary || !manifest ? [] : ['--chunks', join(root, 'chunks.json')])]), {
         ...select, ...rename, ...checks, ...syntax,
         createNamer: options => createNamer({ ...options, ...service, retryDelayMs: 1 }), output() {},
       });
@@ -55,12 +55,11 @@ async function fixture(t, { ordinary = false, selectedReference = false, externa
   };
 }
 
-for (const siblings of [false, true]) test(`history without a manifest retains recorded sibling authorization: ${siblings}`, async t => {
-  const f = await fixture(t, { siblings });
+test('history without a manifest retains recorded sibling authorization', async t => {
+  const f = await fixture(t);
   await f.run(['frag-a.js']);
   await f.run(['lib.js'], { manifest: false });
-  assert.equal((await f.read('frag-b.js')).toString(), siblings
-    ? tail + importer.replaceAll('w', 'calculateAnswer') : f.files['frag-b.js']);
+  assert.equal((await f.read('frag-b.js')).toString(), tail + importer.replaceAll('w', 'calculateAnswer'));
 });
 
 test('probe scenarios 1 and 2: sibling-only relative imports follow identically together and in batches', async t => {
@@ -87,16 +86,16 @@ test('probe scenario 4: unselected ordinary consumers stay untouched', async t =
   assert.equal((await f.read('app.js')).toString(), importer);
 });
 
-for (const mode of ['selectedReference', 'external', 'ignored', 'conflict', 'unchanged', 'noSiblings']) {
+for (const mode of ['selectedReference', 'external', 'ignored', 'conflict', 'unchanged']) {
   test(`sibling import authorization: ${mode}, current and historical selections`, async t => {
-    const options = mode === 'noSiblings' ? { siblings: false } : { [mode]: true };
+    const options = { [mode]: true };
     const together = await fixture(t, options), batched = await fixture(t, options);
     await together.run(['lib.js', 'frag-a.js']);
     await batched.run(['frag-a.js']);
     await batched.run(['lib.js']);
     for (const file of ['lib.js', 'frag-a.js', 'frag-b.js']) assert.deepEqual(await together.read(file), await batched.read(file), file);
     const source = (await together.read('frag-b.js')).toString();
-    if (['ignored', 'unchanged', 'noSiblings'].includes(mode)) assert.equal(source, together.files['frag-b.js']);
+    if (['ignored', 'unchanged'].includes(mode)) assert.equal(source, together.files['frag-b.js']);
     else if (mode === 'conflict') {
       assert.match(source, /q as calculateAnswer2/);
       assert.match(source, /calculateAnswer2\(\)/);
