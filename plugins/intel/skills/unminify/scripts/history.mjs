@@ -57,8 +57,9 @@ export function loadHistory(root, { sources, journals, chunks, ignores, emit }) 
     if (file) {
       if (done && !ignores(file)) journals.set(file, openJournal(root, file, inputs.get(file), JSON.parse(header.options)));
     } else {
+      const options = JSON.parse(header.options);
       chunks.addHistory({ id: header.id, files: members }, inputs,
-        done ? openChunkJournal(root, header.id, inputs, JSON.parse(header.options)) : null, ignores);
+        done ? openChunkJournal(root, header.id, inputs, options) : null, ignores, options);
     }
   }
 }

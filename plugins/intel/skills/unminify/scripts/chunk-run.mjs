@@ -30,10 +30,11 @@ export async function createChunkRun(root, settings) {
         && state.chunk.files.some(file => selected.has(file) && !state.journal.selection?.includes(file)))
         .map(state => state.chunk);
     },
-    addHistory(chunk, inputs, journal, ignores) {
+    addHistory(chunk, inputs, journal, ignores, options) {
       if (completed.has(chunk.id)) return;
       completed.set(chunk.id, { chunk, journal, inputs, sources: inputs, pending: false,
-        selected: new Set(chunk.files), ignored: new Set(chunk.files.filter(ignores)), readOnly: !journal });
+        selected: new Set(journal?.selection ?? []), ignored: new Set(chunk.files.filter(ignores)),
+        chunkSiblings: options.chunkSiblings, readOnly: !journal });
     },
     select(files, fragments) {
       for (const file of files) selected.add(file);
@@ -56,7 +57,7 @@ export async function createChunkRun(root, settings) {
       if (journal.done) {
         summary.skipped += count;
         if (journal.done.status === 'rejected') summary.rejected += count;
-        else completed.set(chunk.id, { chunk, journal, inputs, sources: inputs, pending: false, selected: selection, ignored });
+        else completed.set(chunk.id, { chunk, journal, inputs, sources: inputs, pending: false, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
         emit({ chunk: chunk.id, status: 'skipped', previous: journal.done.status, reason: journal.done.reason });
         return;
       }
@@ -164,7 +165,7 @@ export async function createChunkRun(root, settings) {
           return;
         }
         for (const [file, source] of after) sources.set(file, source);
-        completed.set(chunk.id, { chunk, journal, inputs, sources: after, pending: true, count, batches: batches.length, selected: selection, ignored });
+        completed.set(chunk.id, { chunk, journal, inputs, sources: after, pending: true, count, batches: batches.length, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
       } finally { endWrite(); }
     },
     importOptions(journals) {
@@ -174,7 +175,7 @@ export async function createChunkRun(root, settings) {
       }
       const chunkBindings = new Map(), owners = new Map(), plans = new Map();
       for (const [id, state] of completed) {
-        const analysis = analyzeChunk(state.sources, { selected: state.selected, ignored: state.ignored, chunkSiblings: !!settings.chunkSiblings });
+        const analysis = analyzeChunk(state.sources, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings });
         for (const name of Object.values(state.journal?.batches.get('program-resolved') ?? {})) {
           const record = analysis.bindings.get(name);
           if (record) renamedExports.add(`${record.file}\0${name}`);
@@ -196,14 +197,14 @@ export async function createChunkRun(root, settings) {
             if (!byKey.has(key)) throw new Error(`unknown chunk import key: ${file}:${key}`);
             all.set(byKey.get(key), name);
           }
-          const resolved = resolveChunkNames(state.sources, all, { selected: state.selected, ignored: state.ignored, chunkSiblings: !!settings.chunkSiblings, allowImports: true, restoreExternalImports: true });
+          const resolved = resolveChunkNames(state.sources, all, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings, allowImports: true, restoreExternalImports: true });
           return new Map([...resolved].filter(([name]) => analysis.bindings.get(name).file === file).map(([name, value]) => [analysis.bindings.get(name).key, value]));
         },
         apply(sources, emit, summary) {
           for (const [id, state] of completed) {
             if (state.readOnly) continue;
             const proposals = plans.get(id) ?? new Map();
-            const names = resolveChunkNames(state.sources, proposals, { selected: state.selected, ignored: state.ignored, chunkSiblings: !!settings.chunkSiblings, allowImports: true, restoreExternalImports: true });
+            const names = resolveChunkNames(state.sources, proposals, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings, allowImports: true, restoreExternalImports: true });
             const after = applyChunkRenames(state.sources, names);
             const reason = checkChunkRewrite(state.sources, after);
             if (reason) {

@@ -143,10 +143,10 @@ export function analyzeChunk(sources, {
     bindings.set(name, record);
     let reason;
     if (dynamicScope) reason = 'dynamicScope';else if (declarationsForName.length > 1) reason = 'duplicate';else if ([...touched].some(file => ignored.has(file))) reason = 'ignored';else if (knownGlobals.has(name)) reason = 'knownGlobal';else if (!chunkSiblings && [...touched].some(file => !selected.has(file))) reason = 'outsideSelection';
-    // Import following also restores external named imports in authorized siblings.
+    // Import following also restores external named imports and confirmed internal imports in siblings.
     else if (!selected.has(declaration.file) && !(allowImports && chunkSiblings && record.kind === 'module'
       && ([...touched].some(file => selected.has(file)) || declaration.binding.path.isImportSpecifier()
-        && !/^\.{1,2}\//.test(declaration.binding.path.parent.source.value)))) reason = 'outsideSelection';
+        || /^\.{1,2}\//.test(declaration.binding.path.parent.source.value)))) reason = 'outsideSelection';
     if (reason) {
       frozen.set(name, reason);
       statistics[reason]++;
