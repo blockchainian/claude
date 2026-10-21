@@ -1172,9 +1172,7 @@ impl View {
         }
         self.park_event_list();
         let task_list_focused = self.active_panel == Panel::TaskList;
-        let restores_task = selected
-            .as_ref()
-            .is_some_and(|id| self.task_uis.get(id).is_some_and(|ui| ui.focus.is_some()));
+        let restores_task = self.has_parked_focus(selected.as_ref());
         let focus = self
             .panels_task
             .as_ref()

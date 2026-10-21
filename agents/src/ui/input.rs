@@ -357,8 +357,13 @@ impl View {
                 });
         }
         if let Some(panel) = panel {
-            if panel != Panel::TaskList || !self.browsing_task_list(mouse) {
+            if panel != Panel::TaskList || !self.scrolling_task_list(mouse) {
+                let leaves_task = panel == Panel::TaskList && self.active_panel != Panel::TaskList;
                 self.set_active_panel(panel);
+                // The task the user left keeps its parked focus one Enter away.
+                if leaves_task {
+                    self.task_entry_pending = self.has_parked_focus(self.panels_task.as_ref());
+                }
             }
         }
         if let Some(action) = self.overlay_mouse(mouse) {
@@ -394,7 +399,7 @@ impl View {
         }
     }
 
-    fn browsing_task_list(&self, mouse: MouseEvent) -> bool {
+    fn scrolling_task_list(&self, mouse: MouseEvent) -> bool {
         match mouse.kind {
             MouseEventKind::ScrollUp
             | MouseEventKind::ScrollDown
@@ -404,9 +409,6 @@ impl View {
                 .borrow()
                 .list
                 .contains((mouse.column, mouse.row).into()),
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
-                self.pressed_task.is_some()
-            }
             _ => false,
         }
     }
@@ -817,7 +819,7 @@ impl View {
         }
         if (self.active_panel == Panel::TaskDetails
             && self.rename_target.is_some()
-            && !self.browsing_task_list(mouse))
+            && !self.scrolling_task_list(mouse))
             || self.searching
         {
             self.mouse_press = None;

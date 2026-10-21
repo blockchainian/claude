@@ -93,6 +93,45 @@ fn rule_2_click_pending_row_keeps_list_bindings() {
     ));
 }
 #[test]
+fn rule_2_selected_row_click_from_task_panel_keeps_parked_focus_pending() {
+    let mut view = tasks();
+    view.set_active_panel(Panel::EventDetail);
+    click_selected(&mut view);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
+    assert_eq!(remembered(&view), Some(Focus::EventDetail));
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin { .. })
+    ));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert_eq!(view.active_panel, Panel::EventDetail);
+}
+#[test]
+fn rule_2_row_click_from_prompt_on_another_task_focuses_list() {
+    let mut view = tasks();
+    let first = view.selected;
+    let other = *view
+        .selectable_indices()
+        .iter()
+        .find(|&&i| i != first)
+        .unwrap();
+    view.prepare_prompt();
+    let rendered = screen(&view, 200, 45);
+    let title = view.rows[other].display_title().to_owned();
+    let (x, y) = rendered_cell(&rendered, &title);
+    click_mouse(
+        &mut view,
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert_eq!(view.selected, other);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin { .. })
+    ));
+}
+#[test]
 fn rule_3_open_keys_without_pending_enter_enabled_prompt() {
     for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
         let mut view = tasks();
