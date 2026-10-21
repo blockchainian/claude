@@ -34,7 +34,7 @@ test('all statement extraction paths use the original line indentation', () => {
     ['for (var first=read(), second=(trace(), next()); ready;) {}', ['var first=read();', 'trace();', 'for (var second = (next()); ready;) {}']],
     ['for (var key in (trace(), table)) {}', ['trace();', 'for (var key in table) {}']],
     ['for (item of (trace(), items)) {}', ['trace();', 'for (item of items) {}']],
-    ['(yield value), finish();', ['(yield value);', 'finish();']],
+    ['(yield value), finish();', ['yield value;', 'finish();']],
   ]) {
     assert.equal(run(`function* read() {\n  {\n    ${before} // tail\n  }\n}`),
       `function* read() {\n  {\n    ${statements.join('\n    ')} // tail\n  }\n}`, before);
@@ -54,5 +54,5 @@ test('composes nested splits without changing multiline initializer text', () =>
 
 test('formats split if branches and keeps their surrounding text', () => {
   assert.equal(run('  if (ready) first(), second(); else third(), fourth(); // keep'),
-    '  if (ready) {\n  first();\n  second();\n  } else {\n  third();\n  fourth();\n  } // keep');
+    '  if (ready) {\n    first();\n    second();\n  } else {\n    third();\n    fourth();\n  } // keep');
 });

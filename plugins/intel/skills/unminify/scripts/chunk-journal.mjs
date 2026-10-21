@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, openSync, closeSync, ftruncateSync, fsyncSync } from 'node:fs';
 import { join, isAbsolute, normalize, resolve, relative } from 'node:path';
-import { hash, appendRecord, atomicWrite } from './journal.mjs';
+import { hash, appendRecord, atomicWrite, validateResponse, responseValues } from './journal.mjs';
 
 const stable = value => JSON.stringify(sort(value));
 function sort(value) {
@@ -37,17 +37,18 @@ function stateAt(path) {
   if (!records.length) return null;
   const header = records[0];
   if (header.type !== 'chunk-source' || header.version !== 1 || typeof header.id !== 'string' || !header.hashes || typeof header.options !== 'string') throw new Error(`invalid chunk journal header: ${path}`);
-  const batches = new Map();
+  const batches = new Map(), replies = new Map();
   let done = null, intent = null;
   for (const record of records.slice(1)) {
-    if (record.type === 'chunk-prepare') { intent = record; done = null; }
+    if (record.type === 'response') { validateResponse(replies, record.request, record.names); replies.set(record.request, record.names); }
+    else if (record.type === 'chunk-prepare') { intent = record; done = null; }
     else if (record.type === 'chunk-done') { done = record; intent = null; }
     else if (record.type === 'chunk-batch' && typeof record.id === 'string' && record.names && typeof record.names === 'object') {
       if (batches.has(record.id) && stable(batches.get(record.id)) !== stable(record.names)) throw new Error(`conflicting batch: ${record.id}`);
       batches.set(record.id, record.names);
     } else throw new Error(`invalid chunk journal record: ${path}`);
   }
-  return { header, batches, done, intent };
+  return { header, batches, replies, done, intent };
 }
 function sameMembership(left, right, id) {
   if (stable(Object.keys(left).sort()) !== stable(Object.keys(right).sort())) throw new Error(`membership changed: ${id}`);
@@ -113,7 +114,7 @@ export function openChunkJournal(root, id, sources, options = {}) {
   if (!state) {
     const header = { type: 'chunk-source', version: 1, id, hashes, options: config };
     appendRecord(path, header);
-    state = { header, batches: new Map(), done: null, intent: null };
+    state = { header, batches: new Map(), replies: new Map(), done: null, intent: null };
   }
   if (state.header.id !== id) throw new Error(`chunk id changed: ${id}`);
   sameMembership(state.header.hashes, hashes, id);
@@ -128,7 +129,13 @@ export function openChunkJournal(root, id, sources, options = {}) {
   verifyHashes(fingerprints(current), expected, id);
   verifyHashes(diskHashes(root, expected, id), expected, id);
   const journal = {
-    path, batches: state.batches,
+    path, batches: state.batches, replies: state.replies,
+    response(request, names) {
+      const values = responseValues(names);
+      if (!validateResponse(state.replies, request, values)) return;
+      appendRecord(path, { type: 'response', request, names: values });
+      state.replies.set(request, values);
+    },
     get done() { return state.done; },
     batch(batchId, names) {
       const values = Object.fromEntries(names);

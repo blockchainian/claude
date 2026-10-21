@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import { isLexicalIdentifier } from './identifiers.mjs';
-import { toIdentifier, applyRenames } from './rename.mjs';
+import { toIdentifier, applyRenames, bindingContext } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
@@ -183,6 +183,7 @@ export function resolveChunkNames(sources, proposals, options = {}) {
     });
     let candidate = stem,
       suffix = 2;
+    if (collides(candidate)) options.onCollision?.({ key: name, proposed: stem, occupied: [...new Set([...occupied, ...free, ...(knownGlobals.has(stem) ? [stem] : []), ...binding.references.flatMap(({ path }) => Object.keys(path.scope.getAllBindings()))])].filter(collides), context: bindingContext(sources.get(binding.file), binding.declarations[0].binding) });
     while (collides(candidate)) candidate = `${stem}${suffix++}`;
     occupied.add(candidate);
     result.set(name, candidate);

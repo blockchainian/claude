@@ -48,6 +48,20 @@ function readRecords(path) {
   return data.subarray(0, end).toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
 }
 
+export function validateResponse(replies, request, names) {
+  if (typeof request !== 'string' || !request || !names || typeof names !== 'object' || Array.isArray(names)
+    || !Object.keys(names).length || Object.entries(names).some(([key, value]) => !key || typeof value !== 'string')) throw new Error('invalid response record');
+  if (!replies.has(request)) return true;
+  const previous = replies.get(request);
+  if (Object.keys(previous).length !== Object.keys(names).length || Object.entries(previous).some(([key, value]) => !Object.hasOwn(names, key) || names[key] !== value)) throw new Error(`conflicting response: ${request}`);
+  return false;
+}
+
+export function responseValues(names) {
+  if (!(names instanceof Map) || [...names.keys()].some(key => typeof key !== 'string' && !(Number.isSafeInteger(key) && key >= 0))) throw new Error('invalid response names');
+  return Object.fromEntries(names);
+}
+
 export function openJournal(root, file, source, options) {
   if (isAbsolute(file) || normalize(file).split(/[\\/]/).includes('..')) throw new Error('journal requires a relative repository path');
   const path = join(root, '.unminify', `${file}.jsonl`);
@@ -61,10 +75,11 @@ export function openJournal(root, file, source, options) {
   }
   const header = records[0];
   if (header.type !== 'source') throw new Error(`invalid journal header: ${file}`);
-  const batches = new Map();
+  const batches = new Map(), replies = new Map();
   let done = null, intent = null;
   for (const record of records.slice(1)) {
-    if (record.type === 'prepare') intent = record;
+    if (record.type === 'response') { validateResponse(replies, record.request, record.names); replies.set(record.request, record.names); }
+    else if (record.type === 'prepare') intent = record;
     else if (record.type === 'done') { done = record; intent = null; }
     else if (record.type === 'imports-rejected') { /* Retain the accepted source state. */ }
     else if (typeof record.id === 'string' && record.names && typeof record.names === 'object') {
@@ -84,7 +99,14 @@ export function openJournal(root, file, source, options) {
   if (fingerprint !== expected) throw new Error(`source changed: ${file}`);
   if (!done && header.options !== config) throw new Error(`options changed: ${file}`);
   return {
-    path, batches, get done() { return done; },
+    path, batches, replies,
+    response(request, names) {
+      const values = responseValues(names);
+      if (!validateResponse(replies, request, values)) return;
+      append({ type: 'response', request, names: values });
+      replies.set(request, values);
+    },
+    get done() { return done; },
     batch(id, names) {
       const values = Object.fromEntries(names);
       if (batches.has(id)) {

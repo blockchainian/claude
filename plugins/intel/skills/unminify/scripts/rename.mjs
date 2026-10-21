@@ -83,6 +83,21 @@ function analyze(source, options) {
   return { ast, bindings, globals, contains, program, jsxTags, ...fragmentFacts(program, options) };
 }
 
+/** Give short declarations in full and large owners as declaration/reference excerpts. */
+export function bindingContext(source, binding) {
+  const path = binding.kind === 'param' ? binding.path.findParent(path => path.isFunction()) : binding.path;
+  const node = path?.node ?? binding.path.node;
+  const text = source.slice(node.start, node.end);
+  if (text.length <= 2000) return `Binding ${binding.identifier.name}:\n${text}`;
+  const excerpts = [text.slice(0, 900)];
+  for (const reference of binding.referencePaths.slice(0, 3)) {
+    const statement = reference.getStatementParent()?.node ?? reference.node;
+    const start = Math.max(statement.start, reference.node.start - 150);
+    excerpts.push(source.slice(start, Math.min(statement.end, start + 350)));
+  }
+  return `Binding ${binding.identifier.name}:\n${excerpts.join('\n...\n')}`;
+}
+
 export function resolveNames(source, proposals, options) {
   const { bindings, globals, contains, jsxTags, fragment } = analyze(source, options);
   const byName = new Map();
@@ -112,6 +127,7 @@ export function resolveNames(source, proposals, options) {
     };
     let name = proposed;
     if (collides(name)) {
+      options?.onCollision?.({ key, proposed, occupied: [...new Set([...byName.keys(), ...globals.keys()])].filter(collides), context: bindingContext(source, record.binding) });
       const suffix = /^(.*?)(\d+)$/.exec(proposed);
       const stem = suffix ? suffix[1] : proposed;
       let number = suffix ? BigInt(suffix[2]) + 1n : 2n;
