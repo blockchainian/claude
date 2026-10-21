@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit, identifierBinding } from './identifiers.mjs';
-import { toIdentifier, applyRenames, bindingContext, importCollisionName, sameImportedBinding } from './rename.mjs';
+import { toIdentifier, applyRenames, bindingContext, importCollisionName, sameImportedBinding, orderImportRestores } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
@@ -171,7 +171,12 @@ export function resolveChunkNames(sources, proposals, options = {}) {
   for (const file of analysis.files.values()) for (const path of file.lexical) {
     if (!path.scope.getBinding(path.node.name) && !analysis.bindings.has(path.node.name)) free.add(path.node.name);
   }
-  for (const [name, raw] of proposals) {
+  const ordered = options.restoreExternalImports
+    ? orderImportRestores(proposals, new Map([...analysis.bindings]
+      .filter(([name]) => !analysis.frozen.has(name))
+      .map(([name, record]) => [name, { binding: record.declarations[0].binding, references: record.references.length }])))
+    : proposals;
+  for (const [name, raw] of ordered) {
     const binding = analysis.bindings.get(name);
     if (!binding) throw new Error(`Unknown chunk binding: ${name}`);
     if (analysis.frozen.has(name) || !isModelBinding(binding.declarations[0].binding) && !options.allowImports) continue;

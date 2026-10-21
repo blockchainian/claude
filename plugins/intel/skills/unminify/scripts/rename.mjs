@@ -45,6 +45,39 @@ export function importCollisionName(binding, proposed) {
   return name[0].toLowerCase() + name.slice(1);
 }
 
+/** Rank only competing external restores; leave unrelated proposals in place. */
+export function orderImportRestores(proposals, records) {
+  const groups = new Map();
+  const external = binding => binding.path.isImportSpecifier()
+    && !binding.path.parent.source.value.startsWith('.');
+  for (const [key, raw] of proposals) {
+    const record = records.get(key);
+    if (!record || !external(record.binding) || externalName(record.binding.path.node.imported) !== raw) continue;
+    if (!groups.has(raw)) groups.set(raw, []);
+    groups.get(raw).push(key);
+  }
+  const replacements = new Map(), displaced = [];
+  for (const [name, keys] of groups) {
+    const occupants = [...records].filter(([, record]) => record.binding.identifier.name === name);
+    if (occupants.some(([, record]) => !external(record.binding)
+      || externalName(record.binding.path.node.imported) !== name)) continue;
+    // An already restored import participates and wins ties in its current slot.
+    const contenders = [...occupants.map(([key]) => key).filter(key => !keys.includes(key)), ...keys];
+    if (new Set(contenders.map(key => records.get(key).binding.path.parent.source.value)).size < 2) continue;
+    const winner = contenders.reduce((best, key) => records.get(key).references > records.get(best).references ? key : best);
+    for (const [key, record] of occupants) {
+      if (key !== winner && !sameImportedBinding(record.binding, records.get(winner).binding)) {
+        displaced.push([key, importCollisionName(record.binding, name)]);
+      }
+    }
+    const ordered = [winner, ...contenders.filter(key => key !== winner)]
+      .filter(key => !displaced.some(([other]) => other === key));
+    // Keep other proposal groups and non-import proposals in their original slots.
+    keys.forEach((key, index) => replacements.set(key, index === 0 ? ordered.map(other => [other, name]) : []));
+  }
+  return [...displaced, ...[...proposals].flatMap(([key, raw]) => replacements.get(key) ?? [[key, raw]])];
+}
+
 function parseSource(source) {
   return timed('parse', () => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, plugins: ['jsx'] }));
 }
@@ -127,7 +160,11 @@ export function resolveNames(source, proposals, options) {
     byName.get(record.name).add(record);
   }
   const result = new Map();
-  for (const [key, raw] of proposals) {
+  const ordered = options?.restoreExternalImports
+    ? orderImportRestores(proposals, new Map([...bindings].map(([key, record]) => [key, {
+      binding: record.binding, references: record.binding.referencePaths.length,
+    }]))) : proposals;
+  for (const [key, raw] of ordered) {
     const record = bindings.get(key);
     if (!record) throw new Error(`Unknown binding key: ${key}`);
     if (fragment && record.binding.scope.path.isProgram()) continue;
