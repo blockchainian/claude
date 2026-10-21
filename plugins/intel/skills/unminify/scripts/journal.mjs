@@ -34,14 +34,14 @@ export function atomicWrite(path, source) {
   }
 }
 
-function readRecords(path) {
+export function readRecords(path, repair = true) {
   let data;
   try { data = readFileSync(path); } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;
   }
   const end = data.lastIndexOf(10) + 1;
-  if (end !== data.length) {
+  if (repair && end !== data.length) {
     const fd = openSync(path, 'r+');
     try { ftruncateSync(fd, end); fsyncSync(fd); } finally { closeSync(fd); }
   }
