@@ -1,5 +1,5 @@
 200 columns
-                                                                        Background command "等 tab 线程" completed (exit code 0)
+                                                                                         "等 tab 线程" completed
 
                                                                                                     ↓
                                                          已提交并推送 d8baebe62bffe87c775a43ebf7d1fe22bd53e23b，已安装。
@@ -25,7 +25,7 @@
 
                                                          左侧统一优先取 description，否则取 name；正文不重复显示，宽窄只改变块的位置。
 90 columns
-                 Background command "等 tab 线程" completed (exit code 0)
+                                  "等 tab 线程" completed
 
                                              ↓
 已提交并推送 d8baebe62bffe87c775a43ebf7d1fe22bd53e23b，已安装。

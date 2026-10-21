@@ -571,9 +571,10 @@ fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
     let mut left = call.event_detail_left.clone();
     if let Some(code) = call.exit_code.filter(|code| *code != 0) {
         if left.is_empty() {
-            left = call.name.clone();
+            left = code.to_string();
+        } else {
+            left.push_str(&format!(" · {code}"));
         }
-        left.push_str(&format!(" · {code}"));
     }
     (
         (!left.is_empty()).then_some(left),
@@ -1100,6 +1101,10 @@ mod tests {
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id · 1"));
         call.event_detail_left = "Read".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Read · 1"));
+        call.event_detail_left = "Bash".into();
+        assert_eq!(call_title(&call).0.as_deref(), Some("Bash · 1"));
+        call.event_detail_left.clear();
+        assert_eq!(call_title(&call).0.as_deref(), Some("1"));
     }
 
     #[test]

@@ -89,7 +89,7 @@ fn list_search_keeps_selected_full_index() {
     };
     assert!(view.event_list.search.editing);
     assert_eq!(view.event_list.cursor, Some(0));
-    view.event_list.search.query.set_text("Background command");
+    view.event_list.search.query.set_text("等 tab 线程");
     view.rematch_event();
     assert_eq!(view.event_list.cursor, Some(0));
 }

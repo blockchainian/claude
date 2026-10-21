@@ -1015,6 +1015,28 @@ impl EventReader {
                 .find(|line| !line.is_empty())
                 .unwrap_or("")
         });
+        // Split at the closing description quote, preserving embedded and escaped quotes.
+        let background = summary
+            .strip_prefix("Background command \"")
+            .and_then(|text| text.rsplit_once("\" "))
+            .zip(field("status"));
+        let exit_code = background.and_then(|((_, suffix), _)| {
+            let code = suffix.split_once("exit code ")?.1;
+            let end = code
+                .find(|ch: char| ch != '-' && !ch.is_ascii_digit())
+                .unwrap_or(code.len());
+            code[..end].parse::<i64>().ok()
+        });
+        let title = match background {
+            Some(((description, _), status)) => {
+                let mut title = format!("\"{description}\" {status}");
+                if let Some(code) = exit_code.filter(|code| *code != 0) {
+                    title.push_str(&format!(" · {code}"));
+                }
+                title
+            }
+            None => summary.to_owned(),
+        };
         let output = field("output-file").map(|path| {
             let text = match std::fs::read_to_string(path) {
                 Ok(text) => text,
@@ -1081,7 +1103,7 @@ impl EventReader {
                 text: message.unwrap_or_default(),
             }
         });
-        self.push(Kind::Tool, summary.to_owned(), at);
+        self.push(Kind::Tool, title.clone(), at);
         let event = &mut self.entries.last_mut().unwrap().event;
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
@@ -1093,14 +1115,14 @@ impl EventReader {
                 agent_thread_id: None,
                 agent_path: None,
                 event_detail_left: String::new(),
-                event_detail_title: summary.to_owned(),
+                event_detail_title: title.clone(),
                 show_event_detail: false,
                 id: field("task-id").unwrap_or("").to_owned(),
-                title: summary.to_owned(),
+                title,
                 name: "task-notification".to_owned(),
                 input: Vec::new(),
                 output: Some(output.into_iter().collect()),
-                exit_code: None,
+                exit_code,
                 is_error: false,
                 duration: None,
             });
@@ -1748,7 +1770,8 @@ pub(crate) mod tests {
         assert_eq!(actual, rows[1..]);
         assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap()).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap())
+                .unwrap(),
             rows[0]
         );
     }
@@ -3730,7 +3753,7 @@ pub(crate) mod tests {
         assert_eq!(events[5].started_at, at(42));
         assert_eq!(
             events[6].body,
-            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
+            "\"等 Codex 做日志面板\" completed"
         );
         assert_eq!(events[6].started_at, at(43));
         assert_eq!(events[6].ended_at, Some(at(43)));
@@ -3867,7 +3890,7 @@ pub(crate) mod tests {
         assert_eq!(measured.earliest, len - 64 * 1024);
         assert_eq!(
             event_panel.entries[0].event.body,
-            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
+            "\"等 Codex 做日志面板\" completed"
         );
     }
 

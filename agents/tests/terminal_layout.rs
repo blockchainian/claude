@@ -1593,16 +1593,16 @@ fn terminal_task_notification_shows_summary_without_id_and_missing_file() {
         "{record}"
     )
     .unwrap();
-    let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+    let summary = "\"等 tab 线程\" completed";
     tmux.wait_for(|capture| capture.contains(summary));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     println!("{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let rule = rows
         .iter()
-        .rposition(|line| line.matches('─').count() > 100)
-        .expect("log detail rule");
-    let detail = rows[rule + 1..rows.len() - 1].join("\n");
+        .rposition(|line| line.contains(summary))
+        .expect("log detail title");
+    let detail = rows[rule..rows.len() - 1].join("\n");
     assert_eq!(detail.matches(summary).count(), 1, "{capture}");
     assert!(!detail.contains("Task b9wi31ww0"), "{capture}");
     assert!(detail.contains("File no longer exists"), "{capture}");

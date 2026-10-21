@@ -1190,3 +1190,45 @@ fn codex_perspective_list_snapshot() {
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }
+
+#[test]
+fn background_notification_titles_show_only_exit_numbers_on_the_left() {
+    let fixture = include_str!("../../tests/fixtures/claude-background-notifications.jsonl");
+    let events = events(fixture);
+    for (event, code) in events
+        .iter()
+        .zip([None, Some(1), Some(-1), Some(144), None, None])
+    {
+        let detail =
+            super::super::tool_detail::event_detail_content(event, String::new(), Style::new());
+        assert_eq!(
+            detail.sections[0].title.left,
+            code.map(|code| code.to_string())
+        );
+        assert_eq!(detail.sections[0].title.exit_code, code);
+        assert_eq!(detail.sections[0].title.title, event.body);
+        let line = super::body_line(event, 300, Path::new("/workspace"));
+        assert_eq!(line.to_string(), event.body);
+        if let Some(code) = code {
+            let columns = super::super::event_detail::event_detail_columns(
+                Rect::new(0, 0, 300, 20),
+                Rect::new(0, 0, 300, 20),
+            );
+            let (header, _) = detail.sections[0].title.line(columns);
+            assert!(
+                header
+                    .spans
+                    .iter()
+                    .any(|span| span.content == code.to_string()
+                        && span.style
+                            == super::super::style::event_styles(&Kind::Error).1.not_dim())
+            );
+            assert!(
+                line.spans
+                    .iter()
+                    .any(|span| span.content == code.to_string()
+                        && span.style.fg == super::super::style::event_styles(&Kind::Error).0.fg)
+            );
+        }
+    }
+}

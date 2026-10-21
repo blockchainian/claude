@@ -2159,7 +2159,7 @@ pub(super) mod event_markdown {
         let events = notification_events(dir.path(), Some("all 3 tests passed"));
         assert_eq!(events.len(), 1);
         for event in events {
-            let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+            let summary = "\"等 tab 线程\" completed";
             assert_eq!(event.kind, Kind::Tool);
             assert_eq!(event.body, summary);
             assert_eq!(event.calls[0].title, summary);
