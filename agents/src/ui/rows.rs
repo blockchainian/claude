@@ -212,6 +212,9 @@ impl View {
             };
             fill_list_row(rect, buf, style);
             let (status, mut dot) = Self::status(task);
+            if self.collapsed[self.status_filter].contains(&task.id) {
+                dot.content = "✚".into();
+            }
             if header {
                 dot.style = style;
             }

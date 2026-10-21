@@ -309,6 +309,30 @@ fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
     let remembered_selection = tmux.capture_when(|capture| selected(capture, "Finished child"));
     tmux.run(&["send-keys", "-t", "probe", "Home"]);
     tmux.wait_for(|capture| selected(capture, "Live parent") && listed(capture, "Finished child"));
+    let click_indicator = |symbol: &str| {
+        let label = format!("{symbol} Live parent");
+        let capture = tmux.capture_when(|capture| capture.contains(&label));
+        let (y, x) = capture
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| line.find(&label).map(|x| (y, line[..x].width())))
+            .unwrap();
+        tmux.mouse(0, x, y, true);
+    };
+    click_indicator("●");
+    let folded = tmux.capture_when(|capture| {
+        capture.contains("✚ Live parent") && !listed(capture, "Finished child")
+    });
+    tmux.run(&["send-keys", "-t", "probe", "BTab"]);
+    tmux.wait_for(|capture| capture.contains("● Live parent") && listed(capture, "Working child"));
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    tmux.wait_for(|capture| {
+        capture.contains("✚ Live parent") && !listed(capture, "Finished child")
+    });
+    click_indicator("✚");
+    let unfolded = tmux.capture_when(|capture| {
+        capture.contains("● Live parent") && listed(capture, "Finished child")
+    });
     entry["status"] = "idle".into();
     write_entry(&path, &entry);
     let refreshed = tmux.capture_when(|capture| {
@@ -331,7 +355,7 @@ fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
         parent_row.split('│').next().unwrap().contains("2h ago"),
         "{refreshed}"
     );
-    let verdict = serde_json::json!({"passed": true, "active": active, "inactive": inactive, "default_selection": default_selection, "remembered_selection": remembered_selection, "refreshed": refreshed});
+    let verdict = serde_json::json!({"passed": true, "active": active, "inactive": inactive, "default_selection": default_selection, "remembered_selection": remembered_selection, "folded": folded, "unfolded": unfolded, "refreshed": refreshed});
     if let Some(path) = std::env::var_os("AGENTS_STATUS_TABS_VERDICT") {
         std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
     }
