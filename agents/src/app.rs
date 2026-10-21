@@ -231,6 +231,7 @@ impl App {
         view.set_pinned(&preferences.pinned);
         view.set_drafts(&preferences.drafts);
         view.restore_question_answers(&preferences);
+        view.restore_attention_skips(&preferences);
         if !preferences.draft_notices.is_empty() {
             view.set_notice(Some(preferences.draft_notices.join("; ")));
         }
@@ -1432,6 +1433,12 @@ impl App {
             }
             Action::PersistQuestion { id, ask } => {
                 let saved = self.preferences.save_task_ask(&self.config_dir, &id, ask);
+                self.report_save(saved);
+            }
+            Action::PersistSkip { id, skipped_at } => {
+                let saved =
+                    self.preferences
+                        .save_task_skipped_at(&self.config_dir, &id, skipped_at);
                 self.report_save(saved);
             }
             Action::AnswerQuestions { ask, answer } => {

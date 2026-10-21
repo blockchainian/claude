@@ -702,7 +702,12 @@ impl View {
         let selected = self.selected_id().cloned();
         if self.attention_selection.is_some() && self.attention_selection != selected {
             if let Some(id) = self.attention_selection.take() {
-                self.attention_skips.insert(id, Utc::now());
+                let skipped_at = Utc::now();
+                self.attention_skips.insert(id.clone(), skipped_at);
+                self.pending_actions.push(Action::PersistSkip {
+                    id,
+                    skipped_at: Some(skipped_at),
+                });
             }
             self.interrupted_selection = None;
         }
@@ -768,7 +773,19 @@ impl View {
             .filter(|row| row.status == SessionStatus::NeedsInput)
             .map(|row| row.id.clone())
             .collect();
-        self.attention_skips.retain(|id, _| waiting.contains(id));
+        let answered: Vec<_> = self
+            .attention_skips
+            .keys()
+            .filter(|id| !waiting.contains(*id) && self.rows.iter().any(|row| &row.id == *id))
+            .cloned()
+            .collect();
+        for id in answered {
+            self.attention_skips.remove(&id);
+            self.pending_actions.push(Action::PersistSkip {
+                id,
+                skipped_at: None,
+            });
+        }
         if self
             .selected_draft()
             .is_some_and(|draft| draft.name.is_none())
@@ -789,11 +806,11 @@ impl View {
             .collect();
         queue.sort_by_key(|&index| {
             let row = &self.rows[index];
-            let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
             (
-                self.attention_skips
-                    .get(&row.id)
-                    .map_or(since, |&skipped| since.max(skipped)),
+                self.after_skip(
+                    row,
+                    row.ask.as_ref().map_or(row.updated_at, |ask| ask.since),
+                ),
                 row.id.clone(),
             )
         });
@@ -1341,8 +1358,29 @@ impl View {
         selectable
             .into_iter()
             .filter(|&index| !prefer_active || self.rows[index].status != SessionStatus::Inactive)
-            .max_by_key(|&index| session_order(&self.rows[index]))
+            .max_by_key(|&index| {
+                let row = &self.rows[index];
+                (
+                    std::cmp::Reverse(self.after_skip(row, row.updated_at)),
+                    &row.id,
+                )
+            })
             .unwrap_or(usize::MAX)
+    }
+
+    /// Moves a task's waiting time to when the user last left it in the attention queue.
+    fn after_skip(&self, row: &Session, since: DateTime<Utc>) -> DateTime<Utc> {
+        self.attention_skips
+            .get(&row.id)
+            .map_or(since, |&skipped| since.max(skipped))
+    }
+
+    pub(crate) fn restore_attention_skips(&mut self, preferences: &crate::state::Preferences) {
+        self.attention_skips = preferences
+            .tasks
+            .keys()
+            .filter_map(|id| Some((id.clone(), preferences.task_skipped_at(id)?)))
+            .collect();
     }
     /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
     /// keeps its color while the list changes.

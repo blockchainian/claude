@@ -228,6 +228,10 @@ pub enum Action {
         id: SessionKey,
         ask: Option<crate::state::StoredAsk>,
     },
+    PersistSkip {
+        id: SessionKey,
+        skipped_at: Option<DateTime<Utc>>,
+    },
     PasteImage,
     PasteText,
     /// Puts text an input deleted on the clipboard, without a copy confirmation.

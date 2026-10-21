@@ -95,6 +95,9 @@ pub(crate) struct StoredTask {
     ask: Option<StoredAsk>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pinned_events: Vec<PinnedEvent>,
+    /// When the user last left this task while the attention queue had brought it forward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skipped_at: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -355,6 +358,26 @@ impl Preferences {
 
     pub fn task_ask(&self, key: &SessionKey) -> Option<&StoredAsk> {
         self.tasks.get(key).and_then(|task| task.ask.as_ref())
+    }
+
+    pub fn task_skipped_at(&self, key: &SessionKey) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.tasks
+            .get(key)
+            .and_then(|task| task.skipped_at.as_deref()?.parse().ok())
+    }
+
+    pub fn save_task_skipped_at(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        skipped_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> io::Result<()> {
+        self.save_task_field(
+            config_dir,
+            key,
+            "skipped_at",
+            skipped_at.map(|time| time.to_rfc3339()),
+        )
     }
 
     pub fn task_pinned_events(&self, key: &SessionKey) -> &[PinnedEvent] {

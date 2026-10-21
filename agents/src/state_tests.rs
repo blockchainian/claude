@@ -623,3 +623,37 @@ fn task_tool_filter_round_trip() {
     );
     assert_eq!(Preferences::load(dir.path()).task_filter(&key), filter);
 }
+
+#[test]
+fn task_skipped_at_round_trip_and_removal_preserves_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:skipped".parse().unwrap();
+    let ask = StoredAsk {
+        id: "ask".into(),
+        page: 0,
+        answers: BTreeMap::new(),
+    };
+    let skipped_at = "2026-10-21T13:40:12.345Z"
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_ask(dir.path(), &key, Some(ask.clone()))
+        .unwrap();
+    preferences
+        .save_task_skipped_at(dir.path(), &key, Some(skipped_at))
+        .unwrap();
+    assert_eq!(
+        document(dir.path())["state"]["tasks"]["claude:skipped"]["skipped_at"],
+        "2026-10-21T13:40:12.345+00:00"
+    );
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_skipped_at(&key), Some(skipped_at));
+
+    preferences
+        .save_task_skipped_at(dir.path(), &key, None)
+        .unwrap();
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_skipped_at(&key), None);
+    assert_eq!(loaded.task_ask(&key), Some(&ask));
+}

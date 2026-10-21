@@ -1552,6 +1552,42 @@ fn needs_input_queue_continues_after_sending_and_returns_to_original_tab() {
 }
 
 #[test]
+fn needs_input_task_left_waiting_stays_behind_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut view = test_view(Grouping::Project, false);
+    let original = session("original", "Original", SessionStatus::Ready, 10);
+    let mut first = session("first", "First", SessionStatus::Working, 120);
+    let mut second = session("second", "Second", SessionStatus::Working, 60);
+    let select = |view: &mut View, id: &SessionKey| {
+        view.select(view.rows.iter().position(|row| &row.id == id).unwrap());
+    };
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    select(&mut view, &original.id);
+    first.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&first.id));
+    select(&mut view, &original.id);
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+
+    let mut preferences = crate::state::Preferences::default();
+    let mut actions = vec![view.take_pending_action().unwrap()];
+    while let Some(action) = actions.pop() {
+        match action {
+            Action::Batch(batch) => actions.extend(batch),
+            Action::PersistSkip { id, skipped_at } => preferences
+                .save_task_skipped_at(dir.path(), &id, skipped_at)
+                .unwrap(),
+            _ => {}
+        }
+    }
+    let mut restarted = test_view(Grouping::Project, false);
+    restarted.restore_attention_skips(&crate::state::Preferences::load(dir.path()));
+    second.status = SessionStatus::NeedsInput;
+    restarted.set_sessions(vec![original, first, second.clone()], false);
+    assert_eq!(restarted.selected_id(), Some(&second.id));
+}
+
+#[test]
 fn needs_input_task_left_waiting_queues_behind_tasks_that_start_waiting_later() {
     let mut view = test_view(Grouping::Project, false);
     let original = session("original", "Original", SessionStatus::Ready, 300);
