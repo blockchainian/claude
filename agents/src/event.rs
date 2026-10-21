@@ -89,7 +89,7 @@ pub struct FileLink {
 }
 
 /// A transcript line retained by its file position, decoded only when requested.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceRecord {
     pub path: std::path::PathBuf,
     pub offset: u64,
@@ -184,6 +184,10 @@ pub(crate) struct Update {
 
 pub(crate) trait Reader: Send {
     fn refresh(&mut self, requested: usize) -> std::io::Result<Update>;
+
+    /// Decodes one event from each group, reading only the referenced lines.
+    /// Unreadable records or groups that do not decode to one event yield `None`.
+    fn read_events(&mut self, groups: &[Vec<SourceRecord>]) -> std::io::Result<Vec<Option<Event>>>;
 }
 
 /// One tool call of a Tool, Error or Denied row.

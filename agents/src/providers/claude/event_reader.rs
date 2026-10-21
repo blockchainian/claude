@@ -1,7 +1,7 @@
 use crate::event::{Event, Kind, Section, ToolCall};
 use chrono::{DateTime, Utc};
 use std::{
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, BufRead, Read, Seek, SeekFrom},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
@@ -563,6 +563,57 @@ impl Reader {
 impl crate::event::Reader for Reader {
     fn refresh(&mut self, requested: usize) -> io::Result<crate::event::Update> {
         Reader::refresh(self, requested)
+    }
+
+    fn read_events(
+        &mut self,
+        groups: &[Vec<crate::event::SourceRecord>],
+    ) -> io::Result<Vec<Option<Event>>> {
+        Ok(groups
+            .iter()
+            .map(|group| {
+                let decode = || -> io::Result<Option<Event>> {
+                    if group.is_empty() || group.iter().any(|record| record.path != self.path) {
+                        return Ok(None);
+                    }
+                    let mut file = io::BufReader::new(std::fs::File::open(&self.path)?);
+                    let mut records = Vec::with_capacity(group.len());
+                    for record in group {
+                        file.seek(SeekFrom::Start(record.offset))?;
+                        let mut line = Vec::new();
+                        file.read_until(b'\n', &mut line)?;
+                        records.push((
+                            record.offset,
+                            serde_json::from_slice::<serde_json::Value>(&line)?,
+                        ));
+                    }
+                    records.sort_by_key(|(offset, _)| *offset);
+                    records.dedup_by_key(|(offset, _)| *offset);
+                    let mut reader = EventReader {
+                        path: Some(self.path.clone()),
+                        ..EventReader::default()
+                    };
+                    for (offset, record) in records.into_iter().rev() {
+                        reader.offset = offset;
+                        reader.record_result(record, usize::MAX)?;
+                    }
+                    let events = reader
+                        .entries
+                        .into_iter()
+                        .rev()
+                        .map(|entry| entry.event)
+                        .collect();
+                    let mut events = crate::event::agent::merge(events);
+                    if events.len() != 1 {
+                        return Ok(None);
+                    }
+                    let mut event = events.remove(0);
+                    event.previous_end = None;
+                    Ok(Some(event))
+                };
+                decode().ok().flatten()
+            })
+            .collect())
     }
 }
 
@@ -1177,7 +1228,7 @@ impl EventReader {
             event.source_records.extend(records);
             let mut call = event_detail_call;
             call.id = block["id"].as_str().unwrap_or("").to_owned();
-            event.source = Some(call.id.clone());
+            event.source = block["id"].as_str().map(str::to_owned);
             call.started_at = Some(at);
             call.duration = ended_at.map(|end| end - at);
             event.ended_at = ended_at;
@@ -1268,7 +1319,7 @@ impl EventReader {
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
         // Records and content blocks arrive newest first; this call is the earliest so far.
-        entry.event.source = Some(detail.id.clone());
+        entry.event.source = block["id"].as_str().map(str::to_owned);
         entry.event.calls.insert(0, detail);
         entry.event.background |= input["run_in_background"] == true;
         entry.event.started_at = at;
@@ -1930,6 +1981,24 @@ pub(crate) mod tests {
                 assert_eq!(update.parsed_bytes, line.len() as u64);
             }
             assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn tool_without_id_has_no_source() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        for index in [0, 14] {
+            let mut record = records[index].clone();
+            record["message"]["content"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("id");
+            let events = events_from(vec![record]);
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].source, None);
         }
     }
 
@@ -3921,3 +3990,7 @@ mod refresh_work_tests {
         assert_eq!(unchanged.parsed_bytes, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "event_reader_pinned_tests.rs"]
+mod pinned_reader_tests;

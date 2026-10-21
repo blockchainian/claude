@@ -14,7 +14,7 @@ pub(super) enum ClickTarget {
         bottom: bool,
     },
     Event {
-        index: usize,
+        index: EventRow,
     },
     TaskDetails {
         session: SessionKey,
@@ -53,23 +53,25 @@ impl View {
         let full = self
             .event_list
             .cursor
-            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         let background_full = self
             .event_list
             .background_return
             .as_ref()
             .and_then(|saved| saved.event)
-            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         self.event_list.sort = sorting;
         self.prepare_event_search();
-        self.event_list.cursor = full.and_then(|full| self.shown_position(full));
-        let background_event = background_full.and_then(|full| self.shown_position(full));
+        self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        let background_event = background_full.and_then(|full| self.shown_row_position(full));
         if let Some(saved) = &mut self.event_list.background_return {
             saved.event = background_event;
         }
         self.event_list.pending_older = 0;
         self.event_list.unseen.set(0);
-        if self.event_list.background_return.is_none() {
+        if matches!(full, Some(EventRow::Pinned(_))) {
+            self.reveal_event_selection();
+        } else if self.event_list.background_return.is_none() {
             self.show_newest_event();
         } else if following {
             self.event_list.scroll.set(self.event_max_scroll());
@@ -647,9 +649,8 @@ impl View {
             }
         }
         if viewport.event_panel.contains(position)
-            && let Some(&index) = viewport
-                .event_rows
-                .get(usize::from(position.y - viewport.event_panel.y))
+            && let Some(index) =
+                viewport.event_row_at(usize::from(position.y - viewport.event_panel.y))
         {
             return Some(ClickTarget::Event { index });
         }
@@ -1003,8 +1004,8 @@ impl View {
                     .event_panel
                     .contains(position)
                     .then(|| usize::from(mouse.row - viewport.event_panel.y))
-                    .and_then(|row| viewport.event_rows.get(row))
-                    .and_then(|&full| self.shown_position(full))
+                    .and_then(|row| viewport.event_row_at(row))
+                    .and_then(|full| self.shown_row_position(full))
             };
             if let Some(event) = event {
                 self.event_list.background_return = None;
@@ -1084,7 +1085,7 @@ impl View {
                 .event_panel
                 .contains(position)
                 .then(|| usize::from(mouse.row - viewport.event_panel.y))
-                .and_then(|row| viewport.event_rows.get(row).copied());
+                .and_then(|row| viewport.event_row_at(row));
             // The selected event's body starts below the top rows, its header and a blank row.
             let copy_text = if viewport.task_details.contains(position) {
                 viewport
@@ -1191,7 +1192,25 @@ impl View {
                 } else if over_list {
                     self.move_selection(forward);
                 } else if over_event && self.viewport.borrow().event_panel.contains(position) {
-                    self.move_event_selection(forward);
+                    let hovered_pins = {
+                        let viewport = self.viewport.borrow();
+                        let offset = usize::from(mouse.row - viewport.event_panel.y);
+                        viewport.event_separator.and_then(|separator| {
+                            let separator = separator + usize::from(viewport.event_header);
+                            (offset != separator).then_some(offset < separator)
+                        })
+                    };
+                    let in_pins = matches!(
+                        self.selected_event_row(),
+                        Some(task_ui::EventRow::Pinned(_))
+                    );
+                    if hovered_pins.is_some_and(|pinned| pinned != in_pins) {
+                        self.pending_click = None;
+                        self.event_list.background_return = None;
+                        self.switch_event_section();
+                    } else {
+                        self.move_event_selection(forward);
+                    }
                 } else if over_task_details && let Some(selector) = self.selector.as_mut() {
                     let code = if forward { KeyCode::Down } else { KeyCode::Up };
                     selector.selected =
@@ -1694,7 +1713,7 @@ impl View {
             let selected_full = self
                 .event_list
                 .cursor
-                .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+                .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
             match key.code {
                 KeyCode::Esc => {
                     self.event_list.search.clear();
@@ -1755,6 +1774,14 @@ impl View {
             self.help = true;
             return None;
         }
+        if self.active_panel == Panel::EventList
+            && key.code == KeyCode::Char('`')
+            && plain
+            && !self.event_list.search.editing
+        {
+            self.switch_event_section();
+            return None;
+        }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.set_filter(1 - self.status_filter);
             return None;
@@ -1778,6 +1805,9 @@ impl View {
         if plain && key.code == KeyCode::Enter && self.active_panel == Panel::EventList {
             self.jump_event_agent();
             return None;
+        }
+        if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
+            return self.toggle_event_pin();
         }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);

@@ -432,3 +432,127 @@ fn task_write_failure_keeps_preferences_unchanged() {
     assert!(preferences.forget_task(&config_dir, &key).is_err());
     assert_eq!(preferences, before);
 }
+
+fn pinned_fixture_events() -> Vec<PinnedEvent> {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-web-search.jsonl");
+    let transcript = fs::read_to_string(&path).unwrap();
+    let mut offset = 0;
+    transcript
+        .split_inclusive('\n')
+        .map(|line| {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            let pin = PinnedEvent {
+                source: record["uuid"].as_str().unwrap().to_owned(),
+                records: vec![crate::event::SourceRecord {
+                    path: path.clone(),
+                    offset,
+                }],
+            };
+            offset += line.len() as u64;
+            pin
+        })
+        .collect()
+}
+
+#[test]
+fn task_pinned_events_round_trip_order_and_replace() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:pinned".parse().unwrap();
+    let mut preferences = Preferences::default();
+    assert!(preferences.task_pinned_events(&key).is_empty());
+    let mut pins = pinned_fixture_events();
+    assert!(pins.len() > 1);
+    pins.reverse();
+    preferences
+        .save_task_pinned_events(dir.path(), &key, pins.clone())
+        .unwrap();
+    assert_eq!(preferences.task_pinned_events(&key), pins);
+    assert_eq!(Preferences::load(dir.path()).task_pinned_events(&key), pins);
+    let stored: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
+    assert_eq!(
+        stored["state"]["tasks"][key.to_string()]["pinned_events"],
+        serde_json::to_value(&pins).unwrap()
+    );
+    pins.truncate(1);
+    preferences
+        .save_task_pinned_events(dir.path(), &key, pins.clone())
+        .unwrap();
+    assert_eq!(Preferences::load(dir.path()).task_pinned_events(&key), pins);
+}
+
+#[test]
+fn task_pinned_events_preserve_other_fields_and_remove_empty_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:pinned".parse().unwrap();
+    let other = "codex:other".parse().unwrap();
+    let mut preferences = Preferences::default();
+    let mut stale_writer = preferences.clone();
+    let pins = pinned_fixture_events();
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Duration)
+        .unwrap();
+    preferences
+        .save_task_sort(dir.path(), &other, EventSort::Duration)
+        .unwrap();
+    let ask = StoredAsk {
+        id: "question".into(),
+        page: 0,
+        answers: BTreeMap::new(),
+    };
+    preferences
+        .save_task_ask(dir.path(), &key, Some(ask.clone()))
+        .unwrap();
+    stale_writer
+        .save_task_pinned_events(dir.path(), &key, pins.clone())
+        .unwrap();
+    assert_eq!(stale_writer.task_sort(&key), EventSort::Duration);
+    assert_eq!(stale_writer.task_ask(&key), Some(&ask));
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Time)
+        .unwrap();
+    assert_eq!(preferences.task_pinned_events(&key), pins);
+    preferences
+        .save_task_pinned_events(dir.path(), &key, Vec::new())
+        .unwrap();
+    let stored: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
+    assert!(
+        stored["state"]["tasks"][key.to_string()]
+            .get("pinned_events")
+            .is_none()
+    );
+    let loaded = Preferences::load(dir.path());
+    assert!(loaded.task_pinned_events(&key).is_empty());
+    assert_eq!(loaded.task_ask(&key), Some(&ask));
+    assert_eq!(loaded.task_sort(&other), EventSort::Duration);
+    preferences.save_task_ask(dir.path(), &key, None).unwrap();
+    assert!(!preferences.tasks.contains_key(&key));
+    preferences
+        .save_task_pinned_events(dir.path(), &key, pins)
+        .unwrap();
+    preferences
+        .save_task_pinned_events(dir.path(), &key, Vec::new())
+        .unwrap();
+    assert!(!Preferences::load(dir.path()).tasks.contains_key(&key));
+}
+
+#[test]
+fn task_pinned_events_write_failure_keeps_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:pinned".parse().unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_pinned_events(dir.path(), &key, pinned_fixture_events())
+        .unwrap();
+    let before = preferences.clone();
+    let file = dir.path().join("not-a-directory");
+    fs::write(&file, "blocked").unwrap();
+    assert!(
+        preferences
+            .save_task_pinned_events(&file, &key, Vec::new())
+            .is_err()
+    );
+    assert_eq!(preferences, before);
+}

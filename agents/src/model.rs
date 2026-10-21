@@ -283,6 +283,10 @@ pub enum Action {
         id: SessionKey,
         pinned: bool,
     },
+    ToggleEventPin {
+        task: SessionKey,
+        pinned: Vec<crate::state::PinnedEvent>,
+    },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `t`: the event sorting changed; persist it.

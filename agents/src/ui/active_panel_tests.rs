@@ -308,7 +308,7 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
                 });
             }
             let selected = view.selected;
-            let event = view.event_list.cursor;
+            let event = view.selected_event_row();
             for code in [
                 KeyCode::Right,
                 KeyCode::Char('f'),
@@ -319,9 +319,22 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
                 KeyCode::Char('p'),
                 KeyCode::Backspace,
             ] {
-                assert_eq!(key(&mut view, code), None, "panel={panel:?} code={code:?}");
+                let action = key(&mut view, code);
+                if panel == Panel::EventList && code == KeyCode::Char('p') {
+                    let selected = view.visible_event().unwrap();
+                    assert!(matches!(
+                        action,
+                        Some(Action::ToggleEventPin { task, pinned })
+                            if Some(&task) == view.selected_id()
+                                && pinned.len() == 1
+                                && Some(&pinned[0].source) == selected.source.as_ref()
+                                && pinned[0].records == selected.source_records
+                    ));
+                } else {
+                    assert_eq!(action, None, "panel={panel:?} code={code:?}");
+                }
                 assert_eq!(view.selected, selected);
-                assert_eq!(view.event_list.cursor, event);
+                assert_eq!(view.selected_event_row(), event);
                 assert!(view.confirm_dialog.is_none());
                 assert!(view.rename_target.is_none());
             }

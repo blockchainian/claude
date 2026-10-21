@@ -9,6 +9,7 @@ pub(crate) struct EventSearch {
     pub editing: bool,
     matches: Vec<usize>,
     bodies: Vec<Utf32String>,
+    pinned_matches: Vec<usize>,
     matcher: RefCell<Matcher>,
 }
 
@@ -19,6 +20,7 @@ impl Default for EventSearch {
             editing: false,
             matches: Vec::new(),
             bodies: Vec::new(),
+            pinned_matches: Vec::new(),
             matcher: RefCell::new(Matcher::new(Config::DEFAULT)),
         }
     }
@@ -33,6 +35,7 @@ impl EventSearch {
         self.query.clear();
         self.editing = false;
         self.matches.clear();
+        self.pinned_matches.clear();
     }
 
     fn pattern(&self) -> Pattern {
@@ -99,20 +102,7 @@ impl View {
         self.event_list.search.bodies = self
             .event_panel
             .iter()
-            .map(|event| {
-                format!(
-                    "{} {} {}",
-                    super::event_list::kind_label(&event.kind),
-                    super::event_list::body_line(event, usize::MAX, &cwd),
-                    event
-                        .calls
-                        .iter()
-                        .map(|call| call.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-                .into()
-            })
+            .map(|event| search_body(event, &cwd))
             .collect();
         self.rematch_event();
     }
@@ -121,11 +111,11 @@ impl View {
         let full = self
             .event_list
             .cursor
-            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         self.rematch_event_at(full);
     }
 
-    pub(super) fn rematch_event_at(&mut self, selected_full: Option<usize>) {
+    pub(super) fn rematch_event_at(&mut self, selected_full: Option<super::task_ui::EventRow>) {
         self.cancel_event_detail_selection();
         let pattern = self.event_list.search.pattern();
         let mut matcher = self.event_list.search.matcher.borrow_mut();
@@ -137,12 +127,33 @@ impl View {
             .enumerate()
             .filter_map(|(index, body)| pattern.score(body.slice(..), &mut matcher).map(|_| index))
             .collect();
+        let cwd = self
+            .selected_row()
+            .map(|session| session.cwd.as_path())
+            .unwrap_or_else(|| Path::new(""));
+        self.event_list.search.pinned_matches = self
+            .event_list
+            .pinned
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| {
+                let body = search_body(&row.event, cwd);
+                pattern.score(body.slice(..), &mut matcher).map(|_| index)
+            })
+            .collect();
         drop(matcher);
         self.event_list.cursor = selected_full
             .and_then(|full| {
-                self.shown_position(full).or_else(|| {
+                self.shown_row_position(full).or_else(|| {
+                    let super::task_ui::EventRow::Timeline(full) = full else {
+                        return None;
+                    };
                     (self.event_list.sort == EventSort::Time)
-                        .then(|| self.shown_events().position(|(index, _)| index >= full))
+                        .then(|| {
+                            self.shown_event_rows().position(|(row, _)| {
+                                matches!(row, super::task_ui::EventRow::Timeline(index) if index >= full)
+                            })
+                        })
                         .flatten()
                 })
             })
@@ -150,7 +161,7 @@ impl View {
         let selected = self
             .event_list
             .cursor
-            .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         if selected != selected_full {
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
@@ -158,7 +169,17 @@ impl View {
     }
 
     pub(crate) fn matching_event_count(&self) -> usize {
-        self.shown_events().count()
+        self.shown_event_rows().count()
+    }
+
+    pub(super) fn pinned_event_matches(&self, index: usize) -> bool {
+        !self.event_list.search.active()
+            || self
+                .event_list
+                .search
+                .pinned_matches
+                .binary_search(&index)
+                .is_ok()
     }
 
     pub(super) fn event_matches(&self, index: usize) -> bool {
@@ -167,6 +188,29 @@ impl View {
     }
 }
 
+fn search_body(event: &crate::event::Event, cwd: &Path) -> Utf32String {
+    format!(
+        "{} {} {}",
+        super::event_list::kind_label(&event.kind),
+        super::event_list::body_line(event, usize::MAX, cwd),
+        event
+            .calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+    .into()
+}
+
 #[cfg(test)]
 #[path = "event_search_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "event_search_pinned_tests.rs"]
+mod pinned_tests;
+
+#[cfg(test)]
+#[path = "event_search_pinned_render_tests.rs"]
+mod pinned_render_tests;

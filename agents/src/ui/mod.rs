@@ -45,7 +45,8 @@ mod style;
 #[cfg(test)]
 mod task_event_list_tests;
 mod task_ui;
-use task_ui::TaskUi;
+pub use task_ui::PinnedRow;
+use task_ui::{EventRow, TaskUi};
 mod terminal_panel;
 pub(crate) mod text;
 mod text_selection;
@@ -168,7 +169,9 @@ struct Viewport {
     event_borders: [Rect; 2],
     output_borders: [Rect; 2],
     /// Index into the task event list of each drawn event row, top down.
-    event_rows: Vec<usize>,
+    event_rows: Vec<EventRow>,
+    event_separator: Option<usize>,
+    event_header: bool,
     event_detail_max: usize,
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
@@ -1080,20 +1083,22 @@ impl View {
     }
 
     pub(crate) fn event_max_scroll(&self) -> usize {
-        let height = usize::from(
-            self.viewport
-                .borrow()
-                .event_panel
-                .height
-                .saturating_sub(u16::from(self.event_list.search.active())),
-        );
-        self.matching_event_count().saturating_sub(height)
+        self.event_max_scroll_for(self.event_content_height())
+    }
+
+    pub(crate) fn event_max_scroll_for(&self, visible: usize) -> usize {
+        self.shown_events()
+            .count()
+            .saturating_sub(self.event_section_heights(visible).1)
     }
 
     pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
         let loaded = self.event_panel.len().max(visible);
         if has_older
-            && (self.event_page_pending() || (self.event_scroll() == 0 && !self.following_event()))
+            && (self.event_page_pending()
+                || (self.event_scroll() == 0
+                    && !self.following_event()
+                    && !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))))
         {
             loaded.saturating_add(visible.max(self.event_list.pending_older).max(1))
         } else {
@@ -1371,6 +1376,22 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
         *message = None;
     }
     left
+}
+
+impl Viewport {
+    fn event_row_at(&self, offset: usize) -> Option<EventRow> {
+        let offset = if self.event_header {
+            offset.checked_sub(1)?
+        } else {
+            offset
+        };
+        let offset = match self.event_separator {
+            Some(separator) if offset == separator => return None,
+            Some(separator) if offset > separator => offset - 1,
+            _ => offset,
+        };
+        self.event_rows.get(offset).copied()
+    }
 }
 
 #[cfg(test)]

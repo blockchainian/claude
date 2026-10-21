@@ -1878,6 +1878,64 @@ impl crate::event::Reader for Reader {
     fn refresh(&mut self, requested: usize) -> io::Result<crate::event::Update> {
         Reader::refresh(self, requested)
     }
+
+    fn read_events(
+        &mut self,
+        groups: &[Vec<crate::event::SourceRecord>],
+    ) -> io::Result<Vec<Option<Event>>> {
+        let mut file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(vec![None; groups.len()]);
+            }
+            Err(error) => return Err(error),
+        };
+        let metadata = read_metadata(&mut file)?;
+        Ok(groups
+            .iter()
+            .map(|group| {
+                let decode = || -> io::Result<Option<Event>> {
+                    if group.is_empty() || group.iter().any(|record| record.path != self.path) {
+                        return Ok(None);
+                    }
+                    let mut file = io::BufReader::new(std::fs::File::open(&self.path)?);
+                    let mut records = Vec::with_capacity(group.len());
+                    for record in group {
+                        file.seek(SeekFrom::Start(record.offset))?;
+                        let mut line = Vec::new();
+                        file.read_until(b'\n', &mut line)?;
+                        records.push((
+                            record.offset,
+                            serde_json::from_slice::<serde_json::Value>(&line)?,
+                        ));
+                    }
+                    records.sort_by_key(|(offset, _)| *offset);
+                    records.dedup_by_key(|(offset, _)| *offset);
+                    let selected = records.iter().map(|(offset, _)| *offset).collect();
+                    let events = events_with_context(
+                        &self.path,
+                        &records,
+                        usize::MAX,
+                        Some(&selected),
+                        metadata.as_ref(),
+                    )?
+                    .into_iter()
+                    .map(|(_, mut event)| {
+                        event.turn = None;
+                        event.previous_end = None;
+                        event
+                    })
+                    .collect();
+                    let mut events = crate::event::agent::merge(events);
+                    if events.len() != 1 {
+                        return Ok(None);
+                    }
+                    Ok(Some(events.remove(0)))
+                };
+                decode().ok().flatten()
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -4759,3 +4817,7 @@ mod selective_event_tests {
 #[cfg(test)]
 #[path = "rollout_source_tests.rs"]
 mod source_tests;
+
+#[cfg(test)]
+#[path = "rollout_pinned_reader_tests.rs"]
+mod pinned_reader_tests;

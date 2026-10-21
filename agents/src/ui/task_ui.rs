@@ -21,18 +21,22 @@ pub(super) struct TaskUi {
 #[derive(Default)]
 pub(crate) struct EventList {
     pub(super) position: EventPosition,
-    pub(super) selected: Option<EventId>,
+    pub(super) selected: Option<(bool, EventId)>,
+    pub pinned: Vec<PinnedRow>,
     pub search: EventSearch,
     pub sort: EventSort,
     pub sort_initialized: bool,
     pub unseen: std::cell::Cell<usize>,
     pub pending_older: usize,
+    pub has_older: bool,
     pub start_requested: bool,
     pub background: Option<Event>,
     pub(super) background_return: Option<super::BackgroundReturn>,
     /// Window-relative caches, discarded when the task is parked.
     pub cursor: Option<usize>,
     pub scroll: std::cell::Cell<usize>,
+    pub pinned_scroll: std::cell::Cell<usize>,
+    pub(super) section_return: Option<EventRow>,
     pub restoring: bool,
     pub(super) tail: Option<EventId>,
 }
@@ -83,6 +87,7 @@ pub(super) enum EventPosition {
     Live,
     At {
         anchor: EventId,
+        pinned: bool,
     },
 }
 
@@ -91,4 +96,16 @@ pub(super) enum EventDetailMode {
     #[default]
     Event,
     Terminal,
+}
+
+/// An immutable event snapshot and its persisted record positions.
+pub struct PinnedRow {
+    pub pin: crate::state::PinnedEvent,
+    pub event: Event,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EventRow {
+    Pinned(usize),
+    Timeline(usize),
 }
