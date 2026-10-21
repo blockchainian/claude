@@ -1390,7 +1390,7 @@ impl View {
         })
     }
 
-    /// The events the search lets through, with their index in the event list.
+    /// The timeline events the active filters let through, with their full index.
     pub(super) fn shown_events(&self) -> impl Iterator<Item = (usize, &Event)> {
         let order: Box<dyn Iterator<Item = usize> + '_> =
             if self.event_list.sort == EventSort::Duration {
@@ -1400,6 +1400,13 @@ impl View {
             };
         order
             .filter(|&index| self.event_matches(index))
+            .filter(|&index| {
+                !self.event_list.messages_only
+                    || matches!(
+                        self.event_panel[index].kind,
+                        Kind::User | Kind::QueuedUser | Kind::Assistant
+                    )
+            })
             .map(|index| (index, &self.event_panel[index]))
     }
 }

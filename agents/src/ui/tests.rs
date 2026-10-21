@@ -6443,7 +6443,11 @@ mod event_search {
                 .contains("enter keep")
         );
         for c in "time out".chars() {
-            key(&mut view, KeyCode::Char(c));
+            if c == ' ' {
+                view.handle_paste(" ");
+            } else {
+                key(&mut view, KeyCode::Char(c));
+            }
         }
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain timeout bold"));
@@ -6505,9 +6509,7 @@ mod event_search {
             ("user café", vec![3]),
         ] {
             open(&mut view);
-            for c in query.chars() {
-                key(&mut view, KeyCode::Char(c));
-            }
+            view.handle_paste(query);
             let matches: Vec<_> = (0..view.event_panel.len())
                 .filter(|&i| view.event_matches(i))
                 .collect();

@@ -48,7 +48,17 @@ enum PasteTarget {
 
 impl View {
     pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
-        self.event_list.sort_initialized = true;
+        self.change_event_list(false, |list| {
+            list.sort_initialized = true;
+            list.sort = sorting;
+        });
+    }
+
+    fn change_event_list(
+        &mut self,
+        keep_selection: bool,
+        change: impl FnOnce(&mut task_ui::EventList),
+    ) {
         let following = self.following_event();
         let full = self
             .event_list
@@ -61,9 +71,14 @@ impl View {
             .and_then(|saved| saved.event)
             .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         self.event_list.pinned_following = false;
-        self.event_list.sort = sorting;
+        change(&mut self.event_list);
         self.prepare_event_search();
-        self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        if keep_selection {
+            self.rematch_event_at(full);
+            self.cancel_list_selection(text_selection::Panel::EventList);
+        } else {
+            self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        }
         let background_event = background_full.and_then(|full| self.shown_row_position(full));
         if let Some(saved) = &mut self.event_list.background_return {
             saved.event = background_event;
@@ -72,7 +87,7 @@ impl View {
         self.event_list.unseen.set(0);
         if matches!(full, Some(EventRow::Pinned(_))) {
             self.reveal_event_selection();
-        } else if self.event_list.background_return.is_none() {
+        } else if self.event_list.background_return.is_none() && (!keep_selection || following) {
             self.show_newest_event();
         } else if following {
             self.event_list.scroll.set(self.event_max_scroll());
@@ -1139,9 +1154,6 @@ impl View {
                         last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
-                    if self.task_entry_pending {
-                        self.enter_task();
-                    }
                     if let Some(id) = fold_toggle.filter(|id| *id == self.rows[task].id) {
                         if !self.collapsed[self.status_filter].remove(&id) {
                             self.collapsed[self.status_filter].insert(id);
@@ -1703,7 +1715,10 @@ impl View {
             self.jump_event_detail_match();
             return None;
         }
-        if self.active_panel == Panel::EventList && self.event_list.search.editing {
+        if self.active_panel == Panel::EventList
+            && self.event_list.search.editing
+            && !(plain && key.code == KeyCode::Char(' '))
+        {
             let selected_full = self
                 .event_list
                 .cursor
@@ -1817,6 +1832,10 @@ impl View {
         }
         if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
             return self.toggle_event_pin();
+        }
+        if plain && key.code == KeyCode::Char(' ') && self.active_panel == Panel::EventList {
+            self.change_event_list(true, |list| list.messages_only = !list.messages_only);
+            return None;
         }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);

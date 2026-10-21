@@ -16,6 +16,8 @@ mod event_agent;
 mod event_detail;
 mod event_list;
 #[cfg(test)]
+mod event_messages_tests;
+#[cfg(test)]
 #[path = "event_scroll_tests.rs"]
 mod event_scroll_tests;
 mod event_search;

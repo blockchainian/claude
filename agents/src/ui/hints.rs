@@ -122,6 +122,7 @@ impl View {
                 &[
                     ("/", "Search"),
                     ("t", "Sort"),
+                    ("space", "Messages only"),
                     ("2× click top border", "Earliest"),
                     ("2× click bottom border", "Latest"),
                 ],
