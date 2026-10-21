@@ -56,7 +56,11 @@ declaration and grants no authorization to synthesize a reference;
 
 For fragments, pass `fragmentContext` from `indexFragmentContext(files)` or
 `loadFragmentContext(root, inputs)`. The latter indexes the whole Git root, falling
-back to the supplied input files outside Git. The context includes the union of all
+back to the supplied input files outside Git. Without a pool it returns synchronously;
+`await loadFragmentContext(root, inputs, pool)` reads and analyzes files in the shared
+syntax workers. At most `os.availableParallelism()` paths are queued per window; workers
+return cloneable summaries without source or ASTs. The main thread merges each window
+in file order, retaining serial insertion order. The context includes the union of all
 program binding names, including import aliases. An intrinsic is permitted only when
 absent from that union; local bindings and dynamic-scope checks still apply. Direct
 API calls without this context retain the conservative fragment policy. The CLI

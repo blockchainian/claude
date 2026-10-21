@@ -1,0 +1,263 @@
+{
+  "sourceCommit": "c94e33eb",
+  "phaseKeys": [
+    "check_write",
+    "followImports",
+    "merge_imports",
+    "model",
+    "selection_plan",
+    "syntax"
+  ],
+  "files": [
+    [
+      "alias.js",
+      "import { basename as sharedAlias } from \"node:path\";\n"
+    ],
+    [
+      "chunk-0/first.js",
+      "import { basename as firstPath0 } from \"node:path\";\nconst sharedFlag0 = true;\n"
+    ],
+    [
+      "chunk-0/last.js",
+      "console.log(sharedFlag0, readChunk0(\"sample\"), false); export { sharedFlag0 };\n"
+    ],
+    [
+      "chunk-0/middle.js",
+      "\nfunction readChunk0(input) { console.log(firstPath0(input), firstPath0(input));\nreturn void 0; }\n"
+    ],
+    [
+      "chunk-1/first.js",
+      "import { basename as firstPath1 } from \"node:path\";\nconst sharedFlag1 = true;\n"
+    ],
+    [
+      "chunk-1/last.js",
+      "console.log(sharedFlag1, readChunk1(\"sample\"), false); export { sharedFlag1 };\n"
+    ],
+    [
+      "chunk-1/middle.js",
+      "\nfunction readChunk1(input) { console.log(firstPath1(input), firstPath1(input));\nreturn void 0; }\n"
+    ],
+    [
+      "chunk-2/first.js",
+      "import { basename as firstPath2 } from \"node:path\";\nconst sharedFlag2 = true;\n"
+    ],
+    [
+      "chunk-2/last.js",
+      "console.log(sharedFlag2, readChunk2(\"sample\"), false); export { sharedFlag2 };\n"
+    ],
+    [
+      "chunk-2/middle.js",
+      "\nfunction readChunk2(input) { console.log(firstPath2(input), firstPath2(input));\nreturn void 0; }\n"
+    ],
+    [
+      "declaration.js",
+      "function sharedAlias(value) { return value + 1; }\n"
+    ],
+    [
+      "export.js",
+      "export { sharedAlias };\n"
+    ],
+    [
+      "intrinsic.js",
+      "const undefined = 7;\n"
+    ],
+    [
+      "invalid.js",
+      "const = ;\n"
+    ],
+    [
+      "ordinary.cjs",
+      "const fs = require(\"node:fs\"); module.exports = fs;\n"
+    ],
+    [
+      "standalone-0.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag0 = true;\nexport function read0(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-1.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag1 = true;\nexport function read1(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-10.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag10 = true;\nexport function read10(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-11.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag11 = true;\nexport function read11(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-2.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag2 = true;\nexport function read2(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-3.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag3 = true;\nexport function read3(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-4.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag4 = true;\nexport function read4(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-5.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag5 = true;\nexport function read5(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-6.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag6 = true;\nexport function read6(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-7.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag7 = true;\nexport function read7(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-8.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag8 = true;\nexport function read8(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ],
+    [
+      "standalone-9.js",
+      "import { basename as pathName } from \"node:path\";\n\nexport const flag9 = true;\nexport function read9(input) { console.log(pathName(input), pathName(input));\nreturn undefined; }\n"
+    ]
+  ],
+  "journals": [
+    [
+      "merge-imports/alias.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"after\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/declaration.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"after\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/export.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"after\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/intrinsic.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"after\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-0.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"273841ec0eb73974866d382c293b31518d9c695e8a235544d05cbf37e002e5ff\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"273841ec0eb73974866d382c293b31518d9c695e8a235544d05cbf37e002e5ff\",\"after\":\"88341ba11aa1670f428c4d5396040867ad4fa4790267fe272b9fb703cb09c83d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"88341ba11aa1670f428c4d5396040867ad4fa4790267fe272b9fb703cb09c83d\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-1.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"419fb484f00bb9f95494a51e18394a2a0268c0f0aae4653e385e65a2b5b5ea77\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"419fb484f00bb9f95494a51e18394a2a0268c0f0aae4653e385e65a2b5b5ea77\",\"after\":\"743e9d1dcb2c5f31b858a4e22f5e4761f7b51deb4c7fc935840f1af40fe2aa4b\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"743e9d1dcb2c5f31b858a4e22f5e4761f7b51deb4c7fc935840f1af40fe2aa4b\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-10.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"d2972153506b99c3034ee4d02ac2d654d1d7f3b2b1b59abaa55afb397840d717\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"d2972153506b99c3034ee4d02ac2d654d1d7f3b2b1b59abaa55afb397840d717\",\"after\":\"07f718598042b74b640ad55e63e6df2f7afe3341a84a4af9cf9a1ee9b43b003a\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"07f718598042b74b640ad55e63e6df2f7afe3341a84a4af9cf9a1ee9b43b003a\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-11.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"4f885bd2f2f80eeebb8b53b0e9a110ce5c8bbc687b52abbbdb04d81bfa8e2ecf\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"4f885bd2f2f80eeebb8b53b0e9a110ce5c8bbc687b52abbbdb04d81bfa8e2ecf\",\"after\":\"b74597650dd35611be7005e982d8e4856efd7427052002a6e6871cefe6890d73\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"b74597650dd35611be7005e982d8e4856efd7427052002a6e6871cefe6890d73\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-2.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"fa8743ddbb4797572f5a5289a65028bc50bdb7ef73d5bd6d699ab0cbcff78b30\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"fa8743ddbb4797572f5a5289a65028bc50bdb7ef73d5bd6d699ab0cbcff78b30\",\"after\":\"045be1300a585feaa7d75e8c86c4745d3e148c260adec54f493d6e96ee5a0247\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"045be1300a585feaa7d75e8c86c4745d3e148c260adec54f493d6e96ee5a0247\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-3.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"fe33bba0691e9604a0447dbb5e13d0926c02dbe7cf27d69be796ffe930cbe1ae\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"fe33bba0691e9604a0447dbb5e13d0926c02dbe7cf27d69be796ffe930cbe1ae\",\"after\":\"3c7644e33fc06df2718985e86fa8553d885fdfd63d50053ee688f68fffedbfc4\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"3c7644e33fc06df2718985e86fa8553d885fdfd63d50053ee688f68fffedbfc4\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-4.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"d295ace55e621386c6b536af3dbc48dcbf2f960cfdccc1d0afb7638ed80e2a42\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"d295ace55e621386c6b536af3dbc48dcbf2f960cfdccc1d0afb7638ed80e2a42\",\"after\":\"f0d1b87d41fc6d158d8391837f42ebcbd39a013801997e7c5ed6724eefb7e8f4\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"f0d1b87d41fc6d158d8391837f42ebcbd39a013801997e7c5ed6724eefb7e8f4\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-5.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"fdbd0b8c6e68650bd7dda7a65bf6e04d4ed5bcbedd4cd17103f301846066c969\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"fdbd0b8c6e68650bd7dda7a65bf6e04d4ed5bcbedd4cd17103f301846066c969\",\"after\":\"775f97b6c4ca6a95c1a70df46272ed365b88085175357c0509f1808680cc901d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"775f97b6c4ca6a95c1a70df46272ed365b88085175357c0509f1808680cc901d\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-6.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"4cc4d32114c6bcafe1f37f928af6e7f97cb60c4d8d091d6cb75d5e58dd9f308c\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"4cc4d32114c6bcafe1f37f928af6e7f97cb60c4d8d091d6cb75d5e58dd9f308c\",\"after\":\"ff19f8870ba007422dc2f4b240f6aef52e0dc534b089fbf3e97d02df23e39145\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"ff19f8870ba007422dc2f4b240f6aef52e0dc534b089fbf3e97d02df23e39145\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-7.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"0ab1c1a51edff16eb77345983b09bc4eb145b79ea78382ced432ea79359b1798\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"0ab1c1a51edff16eb77345983b09bc4eb145b79ea78382ced432ea79359b1798\",\"after\":\"0053dddd2162fb601da32194bc64f7fc5a2a9a1b3c6297f05f0fab50546376af\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"0053dddd2162fb601da32194bc64f7fc5a2a9a1b3c6297f05f0fab50546376af\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-8.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"886c8849528542affdb8af38a48f01fdb8b597814a6a4be41acc880ac89e83ed\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"886c8849528542affdb8af38a48f01fdb8b597814a6a4be41acc880ac89e83ed\",\"after\":\"d0bf315d8408069d645a75704fd46f966027783205f8ed57f6b1048d21e72069\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"d0bf315d8408069d645a75704fd46f966027783205f8ed57f6b1048d21e72069\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "merge-imports/standalone-9.js.jsonl",
+      "{\"type\":\"source\",\"hash\":\"3cde3a9769150e7cb2753971048093dc4d6571879bb93107023c2a55ac9dca3a\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"3cde3a9769150e7cb2753971048093dc4d6571879bb93107023c2a55ac9dca3a\",\"after\":\"482a3208e0eaa864dd851a59da01d830c8390a268fda72123039325ef515bc96\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"482a3208e0eaa864dd851a59da01d830c8390a268fda72123039325ef515bc96\",\"status\":\"merge-imports\"}\n"
+    ],
+    [
+      "syntax/alias.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":true,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"after\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"d3e9493fb60769286529135a2a77d1f690ed507d2a2b5b8ef7598eccc05e1399\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/chunks/2725aea2d2dea736fbe38e41ecb518f6098cb68ac77362c5e34faafb356567c5.jsonl",
+      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"chunk-1\",\"hashes\":{\"chunk-1/first.js\":\"86799c0cd3f06743a1a0c8d18cfb05b734423baaa54761ee0c25ba7477235e71\",\"chunk-1/last.js\":\"e451bb900072930e7654e906512420d07eb873dddde537914a3207a54c7a34b7\",\"chunk-1/middle.js\":\"ce0a259bdb2afa427500202f773c9589309d876a85ce5ed129d17678af0d0db2\"},\"options\":\"{\\\"ignored\\\":[],\\\"manifest\\\":\\\"46e57bb109823963673a1d4600e0f2811aa59993820deb61adf67f7eb867f981\\\",\\\"mergeImports\\\":1,\\\"syntax\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\"}\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"chunk-1/first.js\":\"86799c0cd3f06743a1a0c8d18cfb05b734423baaa54761ee0c25ba7477235e71\",\"chunk-1/last.js\":\"e451bb900072930e7654e906512420d07eb873dddde537914a3207a54c7a34b7\",\"chunk-1/middle.js\":\"ce0a259bdb2afa427500202f773c9589309d876a85ce5ed129d17678af0d0db2\"},\"after\":{\"chunk-1/first.js\":\"dbd9028c9fd433eed35e655304b0666a6545d84cd882e986f5a0aa52ec21b9a4\",\"chunk-1/last.js\":\"7457c7572c931ab4f11007e685317540ae923f9ad520a4b7ded5ad80221f0153\",\"chunk-1/middle.js\":\"463f58e42c206c9891301881c6ace73427d1fc6dba6bd7366cfb57b7bc8b7f09\"},\"sources\":{\"chunk-1/first.js\":\"import { basename as firstPath1 } from \\\"node:path\\\";\\nconst sharedFlag1 = true;\\n\",\"chunk-1/last.js\":\"console.log(sharedFlag1, readChunk1(\\\"sample\\\"), false); export { sharedFlag1 };\\n\",\"chunk-1/middle.js\":\"\\nfunction readChunk1(input) { console.log(firstPath1(input), firstPath1(input));\\nreturn void 0; }\\n\"},\"status\":\"syntax\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"chunk-1/first.js\":\"dbd9028c9fd433eed35e655304b0666a6545d84cd882e986f5a0aa52ec21b9a4\",\"chunk-1/last.js\":\"7457c7572c931ab4f11007e685317540ae923f9ad520a4b7ded5ad80221f0153\",\"chunk-1/middle.js\":\"463f58e42c206c9891301881c6ace73427d1fc6dba6bd7366cfb57b7bc8b7f09\"},\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/chunks/b18efa847f7a3fa48fe0aafd4a6250aa5129740e05126859377af20cedafdeee.jsonl",
+      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"chunk-0\",\"hashes\":{\"chunk-0/first.js\":\"091ba80099036023c0565ec1c33c9ff240d971b81df15b570eadc5cfa5afe384\",\"chunk-0/last.js\":\"3c4d7ec88e1168b72eefb9c58bc8706a1d5034fda4ddfb009d8e319e6f7b5eb4\",\"chunk-0/middle.js\":\"818aeeed5d91cbf4ded1423a365b06ebc12f132aacc5b75c1234a1dcc60433a8\"},\"options\":\"{\\\"ignored\\\":[],\\\"manifest\\\":\\\"46e57bb109823963673a1d4600e0f2811aa59993820deb61adf67f7eb867f981\\\",\\\"mergeImports\\\":1,\\\"syntax\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\"}\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"chunk-0/first.js\":\"091ba80099036023c0565ec1c33c9ff240d971b81df15b570eadc5cfa5afe384\",\"chunk-0/last.js\":\"3c4d7ec88e1168b72eefb9c58bc8706a1d5034fda4ddfb009d8e319e6f7b5eb4\",\"chunk-0/middle.js\":\"818aeeed5d91cbf4ded1423a365b06ebc12f132aacc5b75c1234a1dcc60433a8\"},\"after\":{\"chunk-0/first.js\":\"5a2b03eb6739882acbeacc257d24c8b8f0164543a39d4f317ccb49b83dc3fafc\",\"chunk-0/last.js\":\"3ec19d913a11cc93e1f307dc26ef2c9432d06f6aa99ae3b79402ac74da79aeae\",\"chunk-0/middle.js\":\"a254e70bff8d6fe9ec071b4e5583f67ded7d8acec84e09b1607a95d0d5f3e741\"},\"sources\":{\"chunk-0/first.js\":\"import { basename as firstPath0 } from \\\"node:path\\\";\\nconst sharedFlag0 = true;\\n\",\"chunk-0/last.js\":\"console.log(sharedFlag0, readChunk0(\\\"sample\\\"), false); export { sharedFlag0 };\\n\",\"chunk-0/middle.js\":\"\\nfunction readChunk0(input) { console.log(firstPath0(input), firstPath0(input));\\nreturn void 0; }\\n\"},\"status\":\"syntax\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"chunk-0/first.js\":\"5a2b03eb6739882acbeacc257d24c8b8f0164543a39d4f317ccb49b83dc3fafc\",\"chunk-0/last.js\":\"3ec19d913a11cc93e1f307dc26ef2c9432d06f6aa99ae3b79402ac74da79aeae\",\"chunk-0/middle.js\":\"a254e70bff8d6fe9ec071b4e5583f67ded7d8acec84e09b1607a95d0d5f3e741\"},\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/chunks/b6f3c15844fe12f966ad90db59da8332a9a6d9dfd198ac83949be2045ec6dc1e.jsonl",
+      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"chunk-2\",\"hashes\":{\"chunk-2/first.js\":\"b46f779a90f02d60321ccb61b9c562965a914279625f2748f60afe4162b58657\",\"chunk-2/last.js\":\"392636b764528371e8887664ead38b39d4f31a46d55a20b4c30b118d07957cda\",\"chunk-2/middle.js\":\"3eea9780fb7950f9ea33fc2472071f3ee9273ce92b83b17c04ae3edaa0c2f1b9\"},\"options\":\"{\\\"ignored\\\":[],\\\"manifest\\\":\\\"46e57bb109823963673a1d4600e0f2811aa59993820deb61adf67f7eb867f981\\\",\\\"mergeImports\\\":1,\\\"syntax\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\"}\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"chunk-2/first.js\":\"b46f779a90f02d60321ccb61b9c562965a914279625f2748f60afe4162b58657\",\"chunk-2/last.js\":\"392636b764528371e8887664ead38b39d4f31a46d55a20b4c30b118d07957cda\",\"chunk-2/middle.js\":\"3eea9780fb7950f9ea33fc2472071f3ee9273ce92b83b17c04ae3edaa0c2f1b9\"},\"after\":{\"chunk-2/first.js\":\"9c48ee665ed25c9ff1c8a50115dd3d7a535780e0b3f392903c2114e361fd8345\",\"chunk-2/last.js\":\"8b1f2372c6319ea089caff482bd2b35d9397689b36e04bc2d0336de43253a792\",\"chunk-2/middle.js\":\"eee8cc99efcfec81c11b5a095f5559ac8a0b271cc1aa84783fcefdf678bc2257\"},\"sources\":{\"chunk-2/first.js\":\"import { basename as firstPath2 } from \\\"node:path\\\";\\nconst sharedFlag2 = true;\\n\",\"chunk-2/last.js\":\"console.log(sharedFlag2, readChunk2(\\\"sample\\\"), false); export { sharedFlag2 };\\n\",\"chunk-2/middle.js\":\"\\nfunction readChunk2(input) { console.log(firstPath2(input), firstPath2(input));\\nreturn void 0; }\\n\"},\"status\":\"syntax\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"chunk-2/first.js\":\"9c48ee665ed25c9ff1c8a50115dd3d7a535780e0b3f392903c2114e361fd8345\",\"chunk-2/last.js\":\"8b1f2372c6319ea089caff482bd2b35d9397689b36e04bc2d0336de43253a792\",\"chunk-2/middle.js\":\"eee8cc99efcfec81c11b5a095f5559ac8a0b271cc1aa84783fcefdf678bc2257\"},\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/declaration.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":true,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"after\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"489221c3718ce5ea24bfee75ac764ba41179009e747b143126ff3e79579d2579\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/export.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":true,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"after\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"64f3c5ac4850288388b0bdc201a873c4f0371a65b72541018136ee390b03c92b\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/intrinsic.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"after\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"36a9868bb201e673e804447f52844d7b3302f5201735f1d81d468a31a3167ba3\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-0.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"5a73c72545bf87d6d978c5a2d88af799e35f0f572a056fbc7fe5e0be5f22d021\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"5a73c72545bf87d6d978c5a2d88af799e35f0f572a056fbc7fe5e0be5f22d021\",\"after\":\"273841ec0eb73974866d382c293b31518d9c695e8a235544d05cbf37e002e5ff\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"273841ec0eb73974866d382c293b31518d9c695e8a235544d05cbf37e002e5ff\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-1.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"ee3c368df38ff9adf0c3e8eeee75e27334ad558ad0d594330445e5174e24db9e\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"ee3c368df38ff9adf0c3e8eeee75e27334ad558ad0d594330445e5174e24db9e\",\"after\":\"419fb484f00bb9f95494a51e18394a2a0268c0f0aae4653e385e65a2b5b5ea77\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"419fb484f00bb9f95494a51e18394a2a0268c0f0aae4653e385e65a2b5b5ea77\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-10.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"4b5d034118b72e9c3762914f34b145ea346842be179c1a814281b0c24ac05462\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"4b5d034118b72e9c3762914f34b145ea346842be179c1a814281b0c24ac05462\",\"after\":\"d2972153506b99c3034ee4d02ac2d654d1d7f3b2b1b59abaa55afb397840d717\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"d2972153506b99c3034ee4d02ac2d654d1d7f3b2b1b59abaa55afb397840d717\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-11.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"993c2771c34a3866f82612a3b31c0dd40cb7d2983f67fbf5e0bf135b8fa22660\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"993c2771c34a3866f82612a3b31c0dd40cb7d2983f67fbf5e0bf135b8fa22660\",\"after\":\"4f885bd2f2f80eeebb8b53b0e9a110ce5c8bbc687b52abbbdb04d81bfa8e2ecf\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"4f885bd2f2f80eeebb8b53b0e9a110ce5c8bbc687b52abbbdb04d81bfa8e2ecf\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-2.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"6882bdb15c9ed23ad0096794c310dd0c73def3726e47c32795227beaccdf648b\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"6882bdb15c9ed23ad0096794c310dd0c73def3726e47c32795227beaccdf648b\",\"after\":\"fa8743ddbb4797572f5a5289a65028bc50bdb7ef73d5bd6d699ab0cbcff78b30\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"fa8743ddbb4797572f5a5289a65028bc50bdb7ef73d5bd6d699ab0cbcff78b30\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-3.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"3633a49874287221a7c8b6d859a449b83a40880d8f07ab21a984a9043a73a1de\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"3633a49874287221a7c8b6d859a449b83a40880d8f07ab21a984a9043a73a1de\",\"after\":\"fe33bba0691e9604a0447dbb5e13d0926c02dbe7cf27d69be796ffe930cbe1ae\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"fe33bba0691e9604a0447dbb5e13d0926c02dbe7cf27d69be796ffe930cbe1ae\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-4.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"77924be9e8e65713883e22199e085c876cf9efffc49658e94b0c493e9a77aa59\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"77924be9e8e65713883e22199e085c876cf9efffc49658e94b0c493e9a77aa59\",\"after\":\"d295ace55e621386c6b536af3dbc48dcbf2f960cfdccc1d0afb7638ed80e2a42\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"d295ace55e621386c6b536af3dbc48dcbf2f960cfdccc1d0afb7638ed80e2a42\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-5.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"382f1bf119d37f88acd9278322d655199fa887c72116c254bbeb42ac0d81aee5\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"382f1bf119d37f88acd9278322d655199fa887c72116c254bbeb42ac0d81aee5\",\"after\":\"fdbd0b8c6e68650bd7dda7a65bf6e04d4ed5bcbedd4cd17103f301846066c969\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"fdbd0b8c6e68650bd7dda7a65bf6e04d4ed5bcbedd4cd17103f301846066c969\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-6.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"411c71bf9ca378215d988ebc252e69b2c0879520591a84b05ea168bf1e2ac123\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"411c71bf9ca378215d988ebc252e69b2c0879520591a84b05ea168bf1e2ac123\",\"after\":\"4cc4d32114c6bcafe1f37f928af6e7f97cb60c4d8d091d6cb75d5e58dd9f308c\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"4cc4d32114c6bcafe1f37f928af6e7f97cb60c4d8d091d6cb75d5e58dd9f308c\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-7.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"b0f9b0b748d4784c73ea59db4cb86cb1510300661a5dd33d0ffb72f2dbfdb12e\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"b0f9b0b748d4784c73ea59db4cb86cb1510300661a5dd33d0ffb72f2dbfdb12e\",\"after\":\"0ab1c1a51edff16eb77345983b09bc4eb145b79ea78382ced432ea79359b1798\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"0ab1c1a51edff16eb77345983b09bc4eb145b79ea78382ced432ea79359b1798\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-8.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"13c8bd9a1ec5495113f1ab067fbc7b95ce8e20037837e84326b42a3f47406ae9\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"13c8bd9a1ec5495113f1ab067fbc7b95ce8e20037837e84326b42a3f47406ae9\",\"after\":\"886c8849528542affdb8af38a48f01fdb8b597814a6a4be41acc880ac89e83ed\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"886c8849528542affdb8af38a48f01fdb8b597814a6a4be41acc880ac89e83ed\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "syntax/standalone-9.js.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"f5d5be1c95e81633f1cbc296b9a67cde01cddbe1de754bfa5a65eeb64f40abab\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[\\\"undefined\\\"]}\"}\n{\"type\":\"prepare\",\"before\":\"f5d5be1c95e81633f1cbc296b9a67cde01cddbe1de754bfa5a65eeb64f40abab\",\"after\":\"3cde3a9769150e7cb2753971048093dc4d6571879bb93107023c2a55ac9dca3a\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"3cde3a9769150e7cb2753971048093dc4d6571879bb93107023c2a55ac9dca3a\",\"status\":\"syntax\"}\n"
+    ]
+  ]
+}
