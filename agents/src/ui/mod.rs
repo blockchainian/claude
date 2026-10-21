@@ -15,6 +15,10 @@ mod content;
 mod event_agent;
 mod event_detail;
 mod event_list;
+mod event_pin;
+#[cfg(test)]
+#[path = "event_pin_tests.rs"]
+mod event_pin_tests;
 #[cfg(test)]
 #[path = "event_scroll_tests.rs"]
 mod event_scroll_tests;
@@ -59,6 +63,7 @@ pub(crate) mod vscode;
 mod weekly_usage;
 mod window_navigation;
 pub use highlight::use_theme as use_highlight_theme;
+pub use task_ui::PinnedRow;
 pub use style::light_background;
 pub use style::set_light_background;
 pub(crate) use timeline::timeline_seconds;
@@ -169,6 +174,10 @@ struct Viewport {
     output_borders: [Rect; 2],
     /// Index into the task event list of each drawn event row, top down.
     event_rows: Vec<usize>,
+    /// Screen row of the first row in `event_rows`; the pinned area is drawn above it.
+    event_timeline_top: u16,
+    /// Index into the pinned events of each drawn pinned row, from the panel's top row down.
+    event_pinned_rows: Vec<usize>,
     event_detail_max: usize,
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
@@ -1081,14 +1090,8 @@ impl View {
     }
 
     pub(crate) fn event_max_scroll(&self) -> usize {
-        let height = usize::from(
-            self.viewport
-                .borrow()
-                .event_panel
-                .height
-                .saturating_sub(u16::from(self.event_list.search.active())),
-        );
-        self.matching_event_count().saturating_sub(height)
+        self.matching_event_count()
+            .saturating_sub(self.event_timeline_height())
     }
 
     pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
@@ -1354,6 +1357,8 @@ impl View {
 
 #[cfg(test)]
 mod rename_tests;
+#[cfg(test)]
+mod pinned_event_render_tests;
 #[cfg(test)]
 mod tests;
 

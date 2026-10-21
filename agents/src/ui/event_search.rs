@@ -54,6 +54,17 @@ impl EventSearch {
         pattern
     }
 
+    /// Whether `text` matches every word of the query; any text matches an empty query.
+    fn matches_text(&self, text: &str) -> bool {
+        let mut buffer = Vec::new();
+        self.pattern()
+            .score(
+                Utf32Str::new(text, &mut buffer),
+                &mut self.matcher.borrow_mut(),
+            )
+            .is_some()
+    }
+
     pub(super) fn indices(&self, text: &str) -> Vec<u32> {
         let mut indices = Vec::new();
         if !self.query.is_empty() {
@@ -68,6 +79,21 @@ impl EventSearch {
         }
         indices
     }
+}
+
+/// The text the search matches an event against.
+fn search_body(event: &crate::event::Event, cwd: &Path) -> String {
+    format!(
+        "{} {} {}",
+        super::event_list::kind_label(&event.kind),
+        super::event_list::body_line(event, usize::MAX, cwd),
+        event
+            .calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
 }
 
 impl View {
@@ -99,20 +125,7 @@ impl View {
         self.event_list.search.bodies = self
             .event_panel
             .iter()
-            .map(|event| {
-                format!(
-                    "{} {} {}",
-                    super::event_list::kind_label(&event.kind),
-                    super::event_list::body_line(event, usize::MAX, &cwd),
-                    event
-                        .calls
-                        .iter()
-                        .map(|call| call.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-                .into()
-            })
+            .map(|event| search_body(event, &cwd).into())
             .collect();
         self.rematch_event();
     }
@@ -136,6 +149,14 @@ impl View {
             .filter_map(|(index, body)| pattern.score(body.slice(..), &mut matcher).map(|_| index))
             .collect();
         drop(matcher);
+        if let Some(pinned) = self.event_list.pinned_cursor {
+            // The pinned cursor stays while the search still shows its row.
+            if self.shown_pinned().any(|(index, _)| index == pinned) {
+                self.event_list.cursor = None;
+                return;
+            }
+            self.event_list.pinned_cursor = None;
+        }
         self.event_list.cursor = selected_full
             .and_then(|full| {
                 self.shown_position(full).or_else(|| {
@@ -156,6 +177,23 @@ impl View {
 
     pub(crate) fn matching_event_count(&self) -> usize {
         self.shown_events().count()
+    }
+
+    /// The pinned events the search lets through, matched on their own, with their index in
+    /// `event_list.pinned`. The timeline's matches never include them.
+    pub(super) fn shown_pinned(&self) -> impl Iterator<Item = (usize, &PinnedRow)> {
+        let cwd = self
+            .selected_row()
+            .map(|session| session.cwd.clone())
+            .unwrap_or_default();
+        let search = &self.event_list.search;
+        self.event_list
+            .pinned
+            .iter()
+            .enumerate()
+            .filter(move |(_, row)| {
+                !search.active() || search.matches_text(&search_body(&row.event, &cwd))
+            })
     }
 
     pub(super) fn event_matches(&self, index: usize) -> bool {
