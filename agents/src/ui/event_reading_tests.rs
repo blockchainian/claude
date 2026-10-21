@@ -360,7 +360,15 @@ fn command_and_all_output_body_formats_keep_their_width() {
     for part in body_parts(&event) {
         for width in [200, 120] {
             let lines = part.lines(width, Style::default(), DateTime::UNIX_EPOCH);
-            if part.markdown() {
+            let json = super::super::structured_text::parse(&part.source)
+                .is_some_and(|document| document.syntax() == "json");
+            if json {
+                assert!(
+                    lines.len() > part.source.lines().count(),
+                    "long JSON values wrap at {width}"
+                );
+                assert!(lines.iter().all(|line| line.width() <= width));
+            } else if part.markdown() {
                 assert!(lines.iter().all(|line| line.width() <= width));
             } else if part.source.contains(&text) {
                 assert!(lines.iter().any(|line| line.width() > width));
@@ -495,7 +503,11 @@ fn assert_centered_event_detail(
                 .iter()
                 .flat_map(|part| {
                     part.lines_in(
-                        usize::from(drawn.columns.reading_width.min(drawn.columns.text.width)),
+                        usize::from(if part.reading_column() {
+                            drawn.columns.reading_width.min(drawn.columns.text.width)
+                        } else {
+                            drawn.columns.text.width
+                        }),
                         Style::default(),
                         DateTime::UNIX_EPOCH,
                         Path::new("/workspace"),

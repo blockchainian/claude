@@ -30,28 +30,8 @@ fn raw_record(record: &str) -> std::io::Result<String> {
 #[test]
 fn raw_text_preserves_record_key_order_and_scalar_spelling() {
     let record = r#"{"timestamp":"2026-10-12T02:12:55.062Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"printf \\\"hello\\\"\"}","call_id":"call_1","extra":[{"z":1e+3,"a":"\u0061"},true,null,[],{}]}}"#;
-    let expected = r#"{
-  "timestamp": "2026-10-12T02:12:55.062Z",
-  "type": "response_item",
-  "payload": {
-    "type": "function_call",
-    "name": "exec_command",
-    "arguments": "{\"cmd\":\"printf \\\"hello\\\"\"}",
-    "call_id": "call_1",
-    "extra": [
-      {
-        "z": 1e+3,
-        "a": "\u0061"
-      },
-      true,
-      null,
-      [],
-      {}
-    ]
-  }
-}"#;
     let actual = raw_record(record).unwrap();
-    assert_eq!(actual, expected);
+    assert_eq!(actual, record);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
         serde_json::from_str::<serde_json::Value>(record).unwrap()
@@ -72,25 +52,11 @@ fn raw_text_keeps_the_key_order_of_a_recorded_codex_call() {
         .lines()
         .nth(1)
         .unwrap();
-    assert_eq!(
-        raw_record(record).unwrap(),
-        r#"{
-  "type": "response_item",
-  "timestamp": "2026-06-03T16:23:35.991Z",
-  "payload": {
-    "type": "function_call",
-    "name": "write_stdin",
-    "arguments": "{\"session_id\":56890,\"chars\":\"\",\"yield_time_ms\":1000,\"max_output_tokens\":12000}",
-    "call_id": "call_2NkrgBUZYeHco4V2lFvzJsF5"
-  }
-}"#
-    );
+    assert_eq!(raw_record(record).unwrap(), record);
 }
 
 #[test]
 fn raw_text_preserves_string_whitespace_and_duplicate_keys() {
-    assert_eq!(
-        raw_record(" { \"z\" : [  ], \"a\" : { }, \"z\" : \" , {} \\n\\t\" } \n").unwrap(),
-        "{\n  \"z\": [],\n  \"a\": {},\n  \"z\": \" , {} \\n\\t\"\n}"
-    );
+    let record = " { \"z\" : [  ], \"a\" : { }, \"z\" : \" , {} \\n\\t\" } ";
+    assert_eq!(raw_record(&(record.to_owned() + "\n")).unwrap(), record);
 }

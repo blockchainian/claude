@@ -1791,17 +1791,19 @@ impl View {
         if plain
             && self.active_panel == Panel::EventDetail
             && !self.terminal_requested()
-            && matches!(key.code, KeyCode::Left | KeyCode::Right)
+            && key.code == KeyCode::Char(' ')
         {
-            let mode = if key.code == KeyCode::Left {
-                super::task_ui::EventDetailMode::Event
-            } else {
-                super::task_ui::EventDetailMode::Transcript
+            self.event_detail.mode = match self.event_detail.mode {
+                super::task_ui::EventDetailMode::Event => {
+                    super::task_ui::EventDetailMode::Transcript
+                }
+                super::task_ui::EventDetailMode::Transcript => {
+                    super::task_ui::EventDetailMode::Event
+                }
+                super::task_ui::EventDetailMode::Terminal => {
+                    unreachable!("terminal input handled above")
+                }
             };
-            if self.event_detail.mode == mode {
-                return None;
-            }
-            self.event_detail.mode = mode;
             self.cancel_event_detail_selection();
             self.event_detail.search.clear();
             self.event_detail.scroll.borrow_mut().offset = 0;

@@ -1,9 +1,9 @@
 {
+  "ts": 1792185169463,
   "kind": "completed",
+  "turnId": "01a14688-...",
+  "status": "completed",
   "lastMessage": "已提交推送 e388acaa，只包含本次修改。
 
-  三个区块单击定位、双击复制已实现。",
-  "status": "completed",
-  "ts": 1792185169463,
-  "turnId": "01a14688-..."
+  三个区块单击定位、双击复制已实现。"
 }

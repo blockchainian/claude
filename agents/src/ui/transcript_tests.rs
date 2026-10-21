@@ -3,42 +3,98 @@ use super::*;
 
 fn transcript(view: &mut View) {
     view.set_active_panel(Panel::EventDetail);
-    view.handle_key(KeyCode::Right.into());
+    view.handle_key(KeyCode::Char(' ').into());
 }
 
 #[test]
-fn transcript_left_and_right_switch_only_outside_search_and_terminal() {
+fn transcript_space_switches_only_in_details_outside_search_and_terminal() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 160, 45, now);
+    view.set_active_panel(Panel::EventList);
+    view.handle_key(KeyCode::Char(' ').into());
+    assert_eq!(view.event_detail.mode, EventDetailMode::Event);
     transcript(&mut view);
     assert_eq!(view.event_detail.mode, EventDetailMode::Transcript);
-    view.handle_key(KeyCode::Left.into());
+    for key in [KeyCode::Left, KeyCode::Right] {
+        view.handle_key(key.into());
+        assert_eq!(view.event_detail.mode, EventDetailMode::Transcript);
+    }
+    view.handle_key(KeyCode::Char(' ').into());
     assert_eq!(view.event_detail.mode, EventDetailMode::Event);
     transcript(&mut view);
     view.handle_key(KeyCode::Char('/').into());
-    view.handle_key(KeyCode::Left.into());
+    view.handle_key(KeyCode::Char(' ').into());
     assert_eq!(view.event_detail.mode, EventDetailMode::Transcript);
+    assert_eq!(view.event_detail.search.query.text(), " ");
     view.handle_key(KeyCode::Esc.into());
     let screen = std::sync::Arc::new(std::sync::Mutex::new(
         crate::session_terminal::TerminalScreen::new(10, 40),
     ));
     view.show_terminal(session_key("log"), screen);
-    for (key, bytes) in [(KeyCode::Left, b"\x1b[D"), (KeyCode::Right, b"\x1b[C")] {
+    for (key, bytes) in [
+        (KeyCode::Char(' '), b" ".as_slice()),
+        (KeyCode::Left, b"\x1b[D".as_slice()),
+        (KeyCode::Right, b"\x1b[C".as_slice()),
+    ] {
         assert_eq!(
             view.handle_key(key.into()),
             Some(Action::TerminalInput(bytes.to_vec()))
+        );
+    }
+
+    assert_eq!(view.event_detail.mode, EventDetailMode::Terminal);
+    assert_eq!(view.event_detail.return_mode, EventDetailMode::Transcript);
+}
+
+#[test]
+fn transcript_multiline_json_matches_event_document_lines() {
+    let raw = include_str!("../../tests/fixtures/claude-write/python.jsonl")
+        .lines()
+        .next()
+        .unwrap();
+    assert!(raw.contains(r"\n"));
+    let content = super::super::tool_detail::transcript_content(
+        &Ok(raw.into()),
+        crate::providers::ProviderId::Claude,
+    );
+    let (view, now) = event_fixture();
+    let mut event = view.event_panel[0].clone();
+    event.kind = crate::event::Kind::Assistant;
+    event.body = raw.into();
+    event.detail_body = None;
+    let expected =
+        super::super::tool_detail::event_detail_content(&event, String::new(), Style::default());
+    let draw = |content: &super::super::event_detail::EventDetailContent, width| {
+        content.sections[0].groups[0]
+            .parts
+            .iter()
+            .flat_map(|part| part.lines(width, Style::default(), now))
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        draw(&expected, 80)
+            .iter()
+            .any(|line| line.to_string().contains("import json, sys"))
+    );
+    for width in [20, 80, 120, 200] {
+        assert_eq!(
+            draw(&content, width),
+            draw(&expected, width),
+            "width {width}"
         );
     }
 }
 
 #[test]
 fn transcript_right_click_terminal_returns_to_previous_submode() {
-    for key in [KeyCode::Left, KeyCode::Right] {
+    for toggle in [false, true] {
         let (mut view, now) = event_fixture();
         event_screen(&view, 160, 45, now);
         view.set_active_panel(Panel::EventDetail);
-        view.handle_key(key.into());
-        let expected = if key == KeyCode::Left {
+        if toggle {
+            view.handle_key(KeyCode::Char(' ').into());
+        }
+        let expected = if !toggle {
             EventDetailMode::Event
         } else {
             EventDetailMode::Transcript
@@ -100,11 +156,10 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
     view.set_event(vec![event]);
     event_screen(&view, 240, 90, now);
     transcript(&mut view);
-    let rendered = event_screen(&view, 240, 90, now);
+    event_screen(&view, 240, 90, now);
     let mut buf = Buffer::empty(Rect::new(0, 0, 240, 90));
     view.render_at(buf.area, &mut buf, now);
-    let viewport = view.viewport.borrow();
-    let sources = &viewport.event_text.sources;
+    let sources = view.viewport.borrow().event_text.sources.clone();
     assert_eq!(sources.len(), 4);
     for (index, (source, title)) in [
         (claude, "assistant"),
@@ -119,6 +174,10 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
             .with_timezone(&Utc);
         let header = sources[index * 2].text.to_string();
         assert!(header.contains(title), "{header}");
+        if index > 0 {
+            view.handle_key(KeyCode::End.into());
+        }
+        let rendered = event_screen(&view, 240, 90, now);
         let drawn_header = rendered
             .lines()
             .find(|line| {
@@ -132,8 +191,8 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
         let pretty = &sources[index * 2 + 1].text;
         assert!(pretty.contains('\n'));
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(pretty).unwrap(),
-            value
+            pretty.trim_end(),
+            super::super::tool_detail::Part::text(source.into(), false).source
         );
     }
     assert!(
@@ -141,7 +200,6 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
             .iter()
             .any(|cell| cell.fg != ratatui::style::Color::Reset)
     );
-    drop(viewport);
     // Rendering and geometry changes must use the cached records, even if the file disappears.
     std::fs::remove_file(path).unwrap();
     assert!(event_screen(&view, 220, 80, now).contains("custom_tool_call"));
@@ -156,7 +214,7 @@ fn transcript_without_source_records_has_an_empty_message() {
 }
 
 #[test]
-fn transcript_json_keeps_absolute_paths_verbatim() {
+fn transcript_json_uses_shared_path_rendering() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("records.jsonl");
     let absolute = dir.path().join("source.rs").display().to_string();
@@ -173,7 +231,20 @@ fn transcript_json_keeps_absolute_paths_verbatim() {
     event_screen(&view, 240, 90, now);
     transcript(&mut view);
     let rendered = event_screen(&view, 240, 90, now);
-    assert!(rendered.contains(&absolute), "{rendered}");
+    let content = super::super::tool_detail::transcript_content(
+        &Ok(serde_json::json!({"type":"user", "path":absolute}).to_string()),
+        crate::providers::ProviderId::Claude,
+    );
+    let part = &content.sections[0].groups[0].parts[0];
+    let expected = super::super::tool_detail::Part::text(
+        serde_json::json!({"type":"user", "path":absolute}).to_string(),
+        false,
+    );
+    assert_eq!(
+        part.lines_in(100, Style::default(), now, dir.path()),
+        expected.lines_in(100, Style::default(), now, dir.path())
+    );
+    assert!(rendered.contains("source.rs"), "{rendered}");
 }
 
 #[test]
@@ -242,7 +313,7 @@ fn transcript_long_json_lines_wrap_without_losing_text_or_syntax_styles() {
     assert!(lines.iter().all(|line| line.width() <= 33));
     assert_eq!(
         lines.iter().map(ToString::to_string).collect::<String>(),
-        raw
+        part.source.replace('\n', "")
     );
     let styled_bytes = |lines: Vec<Line<'static>>| {
         lines
@@ -260,7 +331,13 @@ fn transcript_long_json_lines_wrap_without_losing_text_or_syntax_styles() {
     };
     assert_eq!(
         styled_bytes(lines),
-        styled_bytes(super::super::highlight::code_lines(raw, "json"))
+        styled_bytes(
+            super::super::tool_detail::Part::text(raw.into(), false).lines(
+                usize::MAX,
+                Style::default(),
+                Utc::now()
+            )
+        )
     );
 }
 
@@ -351,5 +428,9 @@ fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
     assert_eq!(
         sources[1].text.trim_end().to_owned() + "\n\n" + sources[3].text.trim_end(),
         expected
+            .lines()
+            .map(|line| super::super::tool_detail::Part::text(line.into(), false).source)
+            .collect::<Vec<_>>()
+            .join("\n\n")
     );
 }

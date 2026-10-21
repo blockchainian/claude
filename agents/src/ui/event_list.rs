@@ -1766,10 +1766,10 @@ fn event_detail_parts_layout(
                 .parts
                 .into_iter()
                 .map(|part| {
-                    let reading_width = if part.is_transcript() {
-                        columns.text.width
-                    } else {
+                    let reading_width = if part.reading_column() {
                         columns.reading_width.min(columns.text.width)
+                    } else {
+                        columns.text.width
                     };
                     let lines = part.lines_in(usize::from(reading_width), body_style, now, cwd);
                     (part, lines)
@@ -2771,6 +2771,32 @@ mod panel_detail_tests {
                 assert_eq!(layout.rows[row + 2].0, id + 1);
             }
         }
+    }
+
+    #[test]
+    fn json_detail_keeps_its_body_without_an_event_list() {
+        let columns = event_detail_columns(Rect::new(0, 0, 80, 12), Rect::default());
+        assert_eq!(columns.reading_width, 0);
+        assert!(columns.text.width > 0);
+        let raw = include_str!("../../tests/fixtures/codex-manager-await.jsonl");
+        let part = Part::text(raw.into(), false);
+        let expected = part.lines(
+            usize::from(columns.text.width),
+            Style::default(),
+            DateTime::UNIX_EPOCH,
+        );
+        let layout = layout_part(columns, part);
+        assert_eq!(layout.lines.len(), expected.len() + 2);
+        assert_eq!(
+            layout.lines[2..]
+                .iter()
+                .map(|line| line.to_string().trim_start().to_owned())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|line| line.to_string().trim_start().to_owned())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
