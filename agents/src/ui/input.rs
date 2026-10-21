@@ -125,8 +125,8 @@ impl View {
         }
     }
 
-    /// Double click on a task details body: select the event it came from, or copy a body no
-    /// event backs, such as a queued prompt or the task list.
+    /// Click on a task details body: select the event it came from, or, on a double click, copy
+    /// a body no event backs, such as a queued prompt or the task list.
     fn activate_task_details(&mut self, target: ClickTarget) -> Option<Action> {
         let ClickTarget::TaskDetails {
             session,
@@ -1153,6 +1153,10 @@ impl View {
                 } else if let Some(target @ ClickTarget::TaskDetails { .. }) =
                     self.click_target_at(position)
                 {
+                    if matches!(target, ClickTarget::TaskDetails { source: Some(_), .. }) {
+                        self.pending_click = None;
+                        return self.activate_task_details(target);
+                    }
                     if self.defer_click(target) {
                         return self
                             .task_details_target(position)
