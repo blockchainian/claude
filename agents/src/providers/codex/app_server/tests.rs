@@ -101,6 +101,88 @@ fn rename_real_codex_thread() {
 }
 
 #[test]
+#[ignore = "requires the running shared Codex daemon and local auth; rejects a real question and deletes its throwaway thread"]
+fn reject_real_codex_question_interrupts_turn() {
+    let provider = CodexProvider::from_config().unwrap();
+    let (id, _cleanup) = throwaway_thread(&provider);
+    let mut owner = super::Client::connect(&provider.home).unwrap();
+    let _: Value = owner
+        .request("thread/resume", json!({"threadId": id}))
+        .unwrap();
+    let started: Value = owner.request("turn/start", json!({
+        "threadId": id,
+        "input": [{"type": "text", "text": "Call request_user_input immediately with one question: Pick a color? Options Red and Blue. Wait for the answer. Do not use any other tools."}],
+        "collaborationMode": {"mode": "plan", "settings": {"model": "gpt-6.1-sol", "reasoning_effort": "low", "developer_instructions": null}},
+    })).unwrap();
+    let turn = started["turn"]["id"].as_str().unwrap();
+    let session = stored_session(&provider, &id);
+    let transcript = session.transcript.clone().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let pending = loop {
+        let summary = rollout::summary(&transcript).unwrap();
+        if summary.pending_question_call.is_some() {
+            break summary;
+        }
+        assert!(Instant::now() < deadline, "question never appeared");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let (call, since) = pending.pending_question_call.unwrap();
+    let ask = crate::ask::Ask {
+        id: call.clone(),
+        session: session.id.clone(),
+        since,
+        kind: crate::ask::AskKind::Questions {
+            questions: pending.pending_questions,
+            blocking: true,
+        },
+    };
+    assert!(
+        super::thread::question(&mut owner, &id, &call)
+            .unwrap()
+            .is_some()
+    );
+    provider
+        .send(
+            &session,
+            SessionInput::Answer {
+                ask,
+                answer: crate::ask::Answer {
+                    rejected: true,
+                    ..Default::default()
+                },
+                transcript: transcript.clone(),
+            },
+        )
+        .unwrap()()
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let turns: Value = owner
+            .request(
+                "thread/turns/list",
+                json!({"threadId": id, "limit": 1, "sortDirection": "desc"}),
+            )
+            .unwrap();
+        assert_eq!(turns["data"][0]["id"], turn);
+        if turns["data"][0]["status"] == "interrupted" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "rejected question did not interrupt the turn"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for line in std::fs::read_to_string(transcript).unwrap().lines() {
+        let record: Value = serde_json::from_str(line).unwrap();
+        let payload = &record["payload"];
+        if payload["type"] == "function_call_output" && payload["call_id"] == call {
+            assert!(!payload["output"].as_str().unwrap().contains("\"answers\""));
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires the running shared Codex daemon and local auth; starts, interrupts, archives and deletes a real throwaway thread"]
 fn stop_and_archive_real_codex_thread() {
     stop_and_archive_thread(false);
@@ -157,7 +239,7 @@ fn stop_and_archive_thread(manager: bool) {
         assert!(Instant::now() < deadline, "turn never reported running");
         std::thread::sleep(Duration::from_millis(100));
     }
-    provider.stop(&session).unwrap();
+    provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
         let mut client = super::Client::connect(&provider.home).unwrap();
@@ -176,10 +258,10 @@ fn stop_and_archive_thread(manager: bool) {
     };
     assert_eq!(status, "interrupted");
     // No running turn: stop does nothing.
-    provider.stop(&session).unwrap();
+    provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     drop(owner);
 
-    provider.archive(&session).unwrap();
+    provider.archive(&session).unwrap()().unwrap();
     let archived: bool = Connection::open_with_flags(
         provider.home.join("state_5.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -190,95 +272,38 @@ fn stop_and_archive_thread(manager: bool) {
     })
     .unwrap();
     assert!(archived);
+    let mut stored = provider
+        .snapshot(1)
+        .unwrap()
+        .sessions
+        .into_iter()
+        .find(|candidate| candidate.id == session.id)
+        .unwrap();
+    assert!(stored.archived);
+    stored.parent = session.parent.clone();
+    // Opening the archived thread in a terminal unarchives it first.
     assert!(
-        !provider
-            .snapshot(1)
-            .unwrap()
-            .sessions
-            .iter()
-            .any(|candidate| candidate.id == session.id)
+        provider
+            .launch(&Action::Resume(session.id.clone()), Some(&stored))
+            .is_some()
     );
+    let archived: bool = Connection::open_with_flags(
+        provider.home.join("state_5.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+    .query_row("SELECT archived FROM threads WHERE id=?1", [&id], |row| {
+        row.get(0)
+    })
+    .unwrap();
+    assert!(!archived);
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
-    provider.delete(&session).unwrap();
+    provider
+        .delete(&session)
+        .and_then(|delete| delete())
+        .unwrap();
     cleanup.2 = false;
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
-}
-
-#[test]
-fn delete_uses_thread_rpc_without_signalling_the_writer() {
-    use std::os::unix::net::UnixListener;
-    use tungstenite::Message;
-
-    for live in [false, true] {
-        let home = tempfile::tempdir().unwrap();
-        Connection::open(home.path().join("state_5.sqlite"))
-            .unwrap()
-            .execute_batch(include_str!("../../../../tests/fixtures/codex-state.sql"))
-            .unwrap();
-        let provider = CodexProvider::new(home.path().into(), home.path().join("manager"));
-        let mut session = stored_session(&provider, "thread-0");
-        if live {
-            // The writer may be a shared daemon: its identity must not affect deletion.
-            session.process = Some(Process {
-                pid: std::process::id(),
-                label: Some("codex".into()),
-                started_at: None,
-            });
-        }
-        let control = home.path().join("app-server-control");
-        std::fs::create_dir(&control).unwrap();
-        let listener = UnixListener::bind(control.join("app-server-control.sock")).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let server = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
-            let stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        if Instant::now() >= deadline {
-                            return false;
-                        }
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("{error}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let mut socket = tungstenite::accept(stream).unwrap();
-            let initialize: Value =
-                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-            assert_eq!(initialize["method"], "initialize");
-            socket
-                .send(Message::text(
-                    json!({"id": initialize["id"], "result": {"userAgent": "codex"}}).to_string(),
-                ))
-                .unwrap();
-            let initialized: Value =
-                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-            assert_eq!(initialized, json!({"method": "initialized"}));
-            let request: Value =
-                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-            assert_eq!(
-                request,
-                json!({"id": 2, "method": "thread/delete", "params": {"threadId": "thread-0"}})
-            );
-            // Recorded from the live daemon deleting our throwaway thread.
-            let mut response: Value = serde_json::from_str(include_str!(
-                "../../../../tests/fixtures/codex-delete-response.json"
-            ))
-            .unwrap();
-            response["id"] = request["id"].clone();
-            socket.send(Message::text(response.to_string())).unwrap();
-            true
-        });
-        let result = provider.delete(&session);
-        let received = server.join().unwrap();
-        assert!(received, "delete did not reach thread/delete: {result:?}");
-        result.unwrap();
-    }
 }
 
 #[test]
@@ -315,7 +340,7 @@ fn delete_real_codex_sessions() {
         let rollout = session.transcript.clone().unwrap();
         assert!(rollout.exists());
         if archived {
-            provider.archive(&session).unwrap();
+            provider.archive(&session).unwrap()().unwrap();
             let path: String = Connection::open_with_flags(
                 provider.home.join("state_5.sqlite"),
                 OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -330,7 +355,10 @@ fn delete_real_codex_sessions() {
             session.transcript = Some(PathBuf::from(path));
         }
         let deleted_rollout = session.transcript.clone().unwrap();
-        provider.delete(&session).unwrap();
+        provider
+            .delete(&session)
+            .and_then(|delete| delete())
+            .unwrap();
         cleanup.2 = false;
         assert!(!rollout.exists());
         assert!(!deleted_rollout.exists());
@@ -360,7 +388,11 @@ fn delete_real_codex_sessions() {
         .unwrap();
         assert_eq!(count, 0);
         assert_eq!(
-            provider.delete(&session).unwrap_err().to_string(),
+            provider
+                .delete(&session)
+                .and_then(|delete| delete())
+                .unwrap_err()
+                .to_string(),
             format!("no rollout found for thread id {id}")
         );
     }

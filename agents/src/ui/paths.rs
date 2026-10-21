@@ -5,17 +5,55 @@ use std::path::Path;
 /// The paths in `text`: absolute and home paths, and relative paths that exist under `cwd`.
 pub(super) fn text_paths(text: &str, cwd: &Path) -> Vec<Range<usize>> {
     let mut paths = Vec::new();
-    let mut start = 0;
-    for part in text.split_inclusive(char::is_whitespace) {
-        let word = part.trim_end_matches(char::is_whitespace);
+    for (start, word) in text_words(text) {
         if let Some(range) = word_path(word)
             && (is_rooted(&word[range.clone()]) || cwd.join(&word[range.clone()]).exists())
         {
             paths.push(start + range.start..start + range.end);
         }
-        start += part.len();
     }
     paths
+}
+
+/// A path inside `cwd`, relative to that directory. Component boundaries matter;
+/// parent components stay absolute so a lexical prefix cannot hide an escape.
+pub(super) fn relative_path(path: &str, cwd: &Path) -> Option<String> {
+    let expanded;
+    let absolute = if let Some(rest) = path.strip_prefix("~/") {
+        expanded = std::path::PathBuf::from(std::env::var_os("HOME")?).join(rest);
+        expanded.as_path()
+    } else {
+        Path::new(path)
+    };
+    if !absolute.is_absolute() || !cwd.is_absolute() {
+        return None;
+    }
+    let relative = absolute.strip_prefix(cwd).ok()?;
+    if relative
+        .components()
+        .any(|part| part == std::path::Component::ParentDir)
+    {
+        return None;
+    }
+    Some(if relative.as_os_str().is_empty() {
+        ".".into()
+    } else {
+        relative.to_str()?.to_owned()
+    })
+}
+
+/// CJK punctuation that ends a word without an intervening space.
+const CJK_BREAKS: [char; 7] = ['，', '。', '、', '；', '：', '！', '？'];
+
+/// The words that paths and commits are found in, with their byte offsets:
+/// text split at whitespace and at CJK punctuation.
+fn text_words(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    let breaks = |c: char| c.is_whitespace() || CJK_BREAKS.contains(&c);
+    text.split_inclusive(breaks).scan(0, move |offset, part| {
+        let start = *offset;
+        *offset += part.len();
+        Some((start, part.trim_end_matches(breaks)))
+    })
 }
 
 /// The bytes of the path-shaped part of one word, before any existence check:
@@ -40,7 +78,8 @@ pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
     let end = range.end;
     let path = &word[start..end];
     let shaped = if is_rooted(path) {
-        path[1..].contains('/')
+        // The first component after the root must be named, so `//` and `///` comments stay prose.
+        path[1..].contains('/') && !path.trim_start_matches('~')[1..].starts_with('/')
     } else {
         path.contains('/')
             && !path.contains("://")
@@ -55,9 +94,7 @@ pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
 /// Commit-shaped words, sharing the path finder's prose trimming. A range has two words.
 pub(super) fn text_commits(text: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
-    let mut offset = 0;
-    for part in text.split_inclusive(char::is_whitespace) {
-        let word = part.trim_end_matches(char::is_whitespace);
+    for (offset, word) in text_words(text) {
         if !word.contains(['/', '~']) && !word.contains("://") {
             let mut at = 0;
             for candidate in word.split("..") {
@@ -77,7 +114,6 @@ pub(super) fn text_commits(text: &str) -> Vec<Range<usize>> {
                 at += candidate.len() + 2;
             }
         }
-        offset += part.len();
     }
     ranges
 }
@@ -85,7 +121,7 @@ pub(super) fn text_commits(text: &str) -> Vec<Range<usize>> {
 fn word_bounds(word: &str, start: usize) -> Range<usize> {
     let mut end = start + trim_closing(&word[start..]).len();
     // CJK sentence punctuation ends a path without an intervening space.
-    if let Some(cut) = word[start..end].find(['，', '。', '；', '：', '！', '？']) {
+    if let Some(cut) = word[start..end].find(CJK_BREAKS) {
         end = start + trim_closing(&word[start..start + cut]).len();
     }
     for marker in ["**", "__", "~~", "*", "_"] {
@@ -142,6 +178,8 @@ mod tests {
     fn commit_candidates_follow_prose_boundaries() {
         for (text, expected) in [
             ("已提交 `cd410a5`，推送了", vec!["cd410a5"]),
+            ("**提交**：`0e61b5b1`，已推到", vec!["0e61b5b1"]),
+            ("`cd410a5`、`0e61b5b1`，见 ~/x", vec!["cd410a5", "0e61b5b1"]),
             ("commits 604ccc3..e8f6bc8", vec!["604ccc3", "e8f6bc8"]),
             (
                 "**deadbeef** (1234567), `abcdefabcdef`",
@@ -173,6 +211,10 @@ mod tests {
             ),
             ["src/ui/log.rs", "~/notes/a.md", "/tmp/a/b.md"]
         );
+        assert_eq!(
+            found("**改在**：`src/ui/log.rs`，", dir.path()),
+            ["src/ui/log.rs"]
+        );
     }
 
     #[test]
@@ -187,6 +229,10 @@ mod tests {
             ["~/.cargo/bin"]
         );
         assert_eq!(found("**/tmp/a/b.md**", cwd), ["/tmp/a/b.md"]);
+        assert_eq!(
+            found("`/tmp/a.md`、`~/b/c.md`", cwd),
+            ["/tmp/a.md", "~/b/c.md"]
+        );
         assert_eq!(found("(/tmp/a/b.md).", cwd), ["/tmp/a/b.md"]);
         assert_eq!(
             found("/tmp/a/b.rs:10-40 /tmp/a/c.rs:7 /tmp/a/d.rs:7-", cwd),
@@ -199,5 +245,12 @@ mod tests {
         let cwd = Path::new("/");
         assert!(found("a:b/c http://x/y/z", cwd).is_empty());
         assert_eq!(word_path("tmp/x/y.md"), Some(0..10));
+    }
+
+    #[test]
+    fn comment_slashes_are_not_rooted_paths() {
+        let cwd = Path::new("/");
+        assert!(found("src/model.rs:85:    /// Display parent // note", cwd).is_empty());
+        assert!(found("//! Module docs ~//x", cwd).is_empty());
     }
 }

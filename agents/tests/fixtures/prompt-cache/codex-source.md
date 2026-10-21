@@ -1,0 +1,1 @@
+Source: `~/.codex/sessions/2026/10/18/rollout-2026-10-18T23-54-18-01a152f0-882f-76f0-857d-065e6408bd0b.jsonl`, records 2, 14, 18, 19, 21, 24, 25. Selected protocol fields are unchanged; tool output and user content are omitted. The first request starts at task_started; the second follows custom_tool_call_output.

@@ -1,6 +1,6 @@
 [package]
 name = "agents"
-version = "0.1.0"
+version = "0.1.8"
 edition = "2024"
 license = "MIT"
 description = "Agent command center for Claude Code sessions"
@@ -11,29 +11,56 @@ name = "agents"
 path = "src/main.rs"
 
 [dependencies]
-arboard = { version = "3", default-features = false }
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+base64 = "0.23"
 chrono = "0.4"
 crossterm = "0.29"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 libc = "0.2"
 notify = "7"
 nucleo-matcher = "0.3"
 plist = "1"
 pulldown-cmark = { version = "0.10", default-features = false }
+roxmltree = "0.21.1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "unstable-widget-ref"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+shlex = "2"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+tempfile = "3"
 textwrap = "0.16"
 two-face = { version = "0.5", default-features = false, features = ["syntect-default-fancy"] }
 tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 unicode-segmentation = "1"
 unicode-width = "0.2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 vt100 = "0.16"
+vte = "0.15"
+sha2 = "0.10"
 
-[dev-dependencies]
-tempfile = "3"
+# macOS's default `unpacked` keeps one .o per codegen unit in target/debug/deps for
+# every incremental build, and Gatekeeper lists that directory on each exec of a test
+# binary; past ~100k entries syspolicyd pins several cores. Applies to `test` too.
+[profile.dev]
+split-debuginfo = "off"
+
+# Grammar regexes compile lazily on first use. Keep their engine optimized in
+# development and tests, as syntect does in its own development profile.
+[profile.dev.package.aho-corasick]
+opt-level = 2
+
+[profile.dev.package.fancy-regex]
+opt-level = 2
+
+[profile.dev.package.regex-automata]
+opt-level = 2
+
+[profile.dev.package.regex-syntax]
+opt-level = 2
 
 [patch.crates-io]
+nucleo-matcher = { path = "vendor/nucleo-matcher" }
 crossterm = { git = "https://github.com/blockchainian/crossterm", rev = "03622784292936a1950cfae866c02f584c21b848" }

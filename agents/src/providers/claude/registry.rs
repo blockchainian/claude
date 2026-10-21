@@ -7,9 +7,10 @@ use std::path::Path;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct Entry {
+pub(in crate::providers) struct Entry {
     pub pid: Option<u32>,
     pub session_id: Option<String>,
+    pub bridge_session_id: Option<String>,
     pub cwd: Option<String>,
     pub started_at: Option<i64>,
     pub proc_start: Option<String>,
@@ -17,19 +18,29 @@ pub(super) struct Entry {
     _version: Option<String>,
     pub kind: Option<String>,
     pub job_id: Option<String>,
+    pub messaging_socket_path: Option<std::path::PathBuf>,
     pub name: Option<String>,
     pub name_source: Option<String>,
     pub updated_at: Option<i64>,
     pub status: Option<String>,
 }
 
-pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::BackgroundJob> {
+#[derive(Clone)]
+pub(super) struct BackgroundSession {
+    pub job: crate::model::BackgroundJob,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+pub(super) fn background_jobs(config: &Path) -> HashMap<String, BackgroundSession> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct State {
         session_id: String,
         template: String,
         needs: Option<String>,
+        #[serde(default)]
+        respawn_flags: Vec<String>,
     }
     let mut jobs = HashMap::new();
     for entry in fs::read_dir(config.join("jobs"))
@@ -49,11 +60,25 @@ pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::Ba
         let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
+        let setting = |name| {
+            state
+                .respawn_flags
+                .windows(2)
+                .find(|args| args[0] == name)
+                .map(|args| args[1].clone())
+        };
+        let model = setting("--model");
+        let effort = setting("--effort");
         jobs.insert(
             state.session_id,
-            crate::model::BackgroundJob {
-                id,
-                needs: state.needs,
+            BackgroundSession {
+                job: crate::model::BackgroundJob {
+                    id,
+                    needs: state.needs,
+                    awaits_prompt: false,
+                },
+                model,
+                effort,
             },
         );
     }
@@ -149,6 +174,16 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn parses_remote_control_bridge_session_id() {
+        let entry: Entry =
+            serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
+        assert_eq!(
+            entry.bridge_session_id.as_deref(),
+            Some("session_01WnvuRYWGwQdQwyagwMG4N7")
+        );
+    }
+
+    #[test]
     fn stopped_background_job_matches_exact_state_session_id() {
         let directory = tempfile::tempdir().unwrap();
         let jobs = directory.path().join("jobs/job-distinct-from-session");
@@ -158,8 +193,8 @@ pub(super) mod tests {
         fs::write(jobs.join("state.json"), state).unwrap();
         let found = background_jobs(directory.path());
         let job = found.get("e772d00b-c424-4632-a8df-74bc9c7b1629").unwrap();
-        assert_eq!(job.id, "job-distinct-from-session");
-        assert_eq!(job.needs, None);
+        assert_eq!(job.job.id, "job-distinct-from-session");
+        assert_eq!(job.job.needs, None);
     }
 
     #[test]
@@ -173,6 +208,7 @@ pub(super) mod tests {
         let found = background_jobs(directory.path());
         assert_eq!(
             found["e772d00b-c424-4632-a8df-74bc9c7b1629"]
+                .job
                 .needs
                 .as_deref(),
             Some("send a prompt to start")

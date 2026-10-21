@@ -15,6 +15,11 @@ const MAX_BYTES: usize = 512 * 1024;
 const MAX_LINES: usize = 10_000;
 const MAX_LINE_BYTES: usize = 4 * 1024;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static JSON_HIGHLIGHTED_LINES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 /// The theme for the current terminal background; `None` until a background is applied.
 static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
@@ -80,17 +85,79 @@ fn with_theme<T>(f: impl FnOnce(&Theme) -> T) -> T {
     f(theme.theme.get_or_insert_with(|| bundled_theme(false)))
 }
 
+/// Token kinds emitted by the JSON pretty-printer, in the order returned by `json_styles`.
+#[derive(Clone, Copy)]
+pub(super) enum JsonToken {
+    Key,
+    String,
+    Number,
+    Literal,
+    Punctuation,
+    Escape,
+    StringQuote,
+}
+
+/// JSON token styles from the same theme and grammar scopes as syntax-highlighted code.
+pub(super) fn json_styles() -> [Style; 7] {
+    with_theme(json_styles_for)
+}
+
+fn json_styles_for(theme: &Theme) -> [Style; 7] {
+    let highlighter = Highlighter::new(theme);
+    let scopes: [&[&str]; 7] = [
+        &[
+            "source.json",
+            "meta.mapping.key.json",
+            "string.quoted.double.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "string.quoted.double.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "constant.numeric.integer.decimal.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "constant.language.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.json",
+            "punctuation.section.mapping.begin.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "string.quoted.double.json",
+            "constant.character.escape.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "string.quoted.double.json",
+            "punctuation.definition.string.begin.json",
+        ],
+    ];
+    scopes.map(|names| {
+        let stack: Vec<_> = names
+            .iter()
+            .map(|name| Scope::new(name).expect("JSON grammar scope is valid"))
+            .collect();
+        convert(highlighter.style_for_stack(&stack))
+    })
+}
+
 /// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.
+#[cfg(test)]
 pub(super) fn json_key_foreground() -> Color {
-    let scopes = [
-        "source.json",
-        "meta.mapping.key.json",
-        "string.quoted.double.json",
-    ]
-    .map(|scope| Scope::new(scope).expect("JSON key scope is valid"));
-    let foreground =
-        with_theme(|theme| Highlighter::new(theme).style_for_stack(&scopes).foreground);
-    terminal_color(foreground).unwrap_or(Color::Reset)
+    json_styles()[JsonToken::Key as usize]
+        .fg
+        .unwrap_or(Color::Reset)
 }
 
 /// A theme color as bat encodes it: alpha 0 holds an ANSI palette index in `r`, alpha 1 means the
@@ -112,7 +179,7 @@ const EXTENSION_ALIASES: [(&str, &str); 4] = [
 ];
 
 /// The syntax for a language token such as "bash" or a file extension such as "rs".
-fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
+pub(crate) fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
     let set = syntax_set();
     let lang = lang.trim();
     if lang.is_empty() {
@@ -141,7 +208,101 @@ fn exceeds_limits(text: &str) -> bool {
 /// `text` as one line per source line, highlighted as `lang` when the language is known
 /// and the text is within the size limits, plain otherwise.
 pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
-    highlighted(text, lang).unwrap_or_else(|| plain_lines(text))
+    if let Some(lang) = lang.strip_prefix("numbered:") {
+        if exceeds_limits(text) {
+            return plain_lines(text);
+        }
+        let gutters: Vec<_> = text
+            .lines()
+            .map(|line| {
+                line.split_once('\t')
+                    .filter(|(prefix, _)| {
+                        let number = prefix.trim_start_matches(char::is_whitespace);
+                        !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    .map_or("", |(prefix, _)| &line[..prefix.len() + 1])
+            })
+            .collect();
+        let code = text
+            .split_inclusive('\n')
+            .zip(&gutters)
+            .map(|(line, gutter)| &line[gutter.len()..])
+            .collect::<String>();
+        let mut lines = code_lines(&code, lang);
+        lines.resize_with(gutters.len(), Line::default);
+        for (line, gutter) in lines.iter_mut().zip(gutters) {
+            if !gutter.is_empty() {
+                line.spans.insert(
+                    0,
+                    Span::styled(gutter.to_owned(), Style::new().add_modifier(Modifier::DIM)),
+                );
+            }
+        }
+        return lines;
+    }
+    let Some(mut lines) = highlighted(text, lang) else {
+        return plain_lines(text);
+    };
+    if find_syntax(lang).map(|syntax| syntax.scope)
+        == find_syntax("bash").map(|syntax| syntax.scope)
+    {
+        for script in super::shell_commands::scripts(text) {
+            let syntax = match script.syntax {
+                super::shell_commands::SyntaxSource::Interpreter(interpreter) => {
+                    let shebang = format!("#!/usr/bin/env {interpreter}");
+                    syntax_set().find_syntax_by_first_line(&shebang)
+                }
+                super::shell_commands::SyntaxSource::Extension(extension) => find_syntax(extension),
+            };
+            if let Some(syntax) = syntax
+                && let Some(embedded) = highlighted(&text[script.range.clone()], &syntax.name)
+            {
+                overlay(&mut lines, text, script.range, embedded);
+            }
+        }
+    }
+    lines
+}
+
+/// Replaces styles only inside a script range; the shell parser still sees the entire command.
+fn overlay(
+    lines: &mut [Line<'static>],
+    text: &str,
+    range: std::ops::Range<usize>,
+    embedded: Vec<Line<'static>>,
+) {
+    let first_row = text[..range.start]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count();
+    let first_column = range.start - text[..range.start].rfind('\n').map_or(0, |n| n + 1);
+    for (row, script) in embedded.into_iter().enumerate() {
+        let column = if row == 0 { first_column } else { 0 };
+        let length: usize = script.spans.iter().map(|span| span.content.len()).sum();
+        let line = &mut lines[first_row + row];
+        let mut spans = Vec::new();
+        let mut suffix = Vec::new();
+        let mut offset = 0;
+        for span in &line.spans {
+            let end = offset + span.content.len();
+            if offset < column {
+                spans.push(Span::styled(
+                    span.content[..(column - offset).min(span.content.len())].to_owned(),
+                    span.style,
+                ));
+            }
+            if end > column + length {
+                suffix.push(Span::styled(
+                    span.content[(column + length).saturating_sub(offset)..].to_owned(),
+                    span.style,
+                ));
+            }
+            offset = end;
+        }
+        spans.extend(script.spans);
+        spans.extend(suffix);
+        line.spans = spans;
+    }
 }
 
 fn highlighted(text: &str, lang: &str) -> Option<Vec<Line<'static>>> {
@@ -153,18 +314,26 @@ fn highlighted(text: &str, lang: &str) -> Option<Vec<Line<'static>>> {
         let mut highlighter = HighlightLines::new(syntax, theme);
         let mut lines = Vec::new();
         for line in LinesWithEndings::from(text) {
+            #[cfg(test)]
+            if lang == "json" {
+                JSON_HIGHLIGHTED_LINES.with(|count| count.set(count.get() + 1));
+            }
             let ranges = highlighter.highlight_line(line, syntax_set()).ok()?;
-            let spans: Vec<_> = ranges
-                .into_iter()
-                .filter_map(|(style, part)| {
-                    let part = part.trim_end_matches(['\n', '\r']);
-                    (!part.is_empty()).then(|| Span::styled(part.to_owned(), convert(style)))
-                })
-                .collect();
-            lines.push(Line::from(spans));
+            lines.push(styled_line(ranges));
         }
         Some(lines)
     })
+}
+
+fn styled_line(ranges: Vec<(syntect::highlighting::Style, &str)>) -> Line<'static> {
+    let spans: Vec<_> = ranges
+        .into_iter()
+        .filter_map(|(style, part)| {
+            let part = part.trim_end_matches(['\n', '\r']);
+            (!part.is_empty()).then(|| Span::styled(part.to_owned(), convert(style)))
+        })
+        .collect();
+    Line::from(spans)
 }
 
 fn convert(style: syntect::highlighting::Style) -> Style {
@@ -218,12 +387,232 @@ mod tests {
     }
 
     #[test]
+    fn json_token_styles_match_both_bundled_themes() {
+        let source = r#"{"key": "value\t", "number": 42, "truth": true, "nothing": null, "array": [-12.5e2, false]}"#;
+        for light in [false, true] {
+            let theme = bundled_theme(light);
+            let styles = json_styles_for(&theme);
+            let mut highlighted = HighlightLines::new(find_syntax("json").unwrap(), &theme);
+            let ranges = highlighted.highlight_line(source, syntax_set()).unwrap();
+            for (needle, token) in [
+                ("key", JsonToken::Key),
+                ("\"key\"", JsonToken::Key),
+                ("\"value", JsonToken::StringQuote),
+                ("\", \"number", JsonToken::StringQuote),
+                ("value", JsonToken::String),
+                ("42", JsonToken::Number),
+                ("-12.5e2", JsonToken::Number),
+                ("true", JsonToken::Literal),
+                ("false", JsonToken::Literal),
+                ("null", JsonToken::Literal),
+                ("{", JsonToken::Punctuation),
+                ("[", JsonToken::Punctuation),
+                ("]", JsonToken::Punctuation),
+                (":", JsonToken::Punctuation),
+                (",", JsonToken::Punctuation),
+                ("}", JsonToken::Punctuation),
+                ("\\t", JsonToken::Escape),
+            ] {
+                let offset = source.find(needle).unwrap();
+                let mut cursor = 0;
+                let (style, _) = ranges
+                    .iter()
+                    .find(|(_, part)| {
+                        let contains = cursor <= offset && offset < cursor + part.len();
+                        cursor += part.len();
+                        contains
+                    })
+                    .unwrap();
+                assert_eq!(styles[token as usize], convert(*style), "{light}: {needle}");
+            }
+        }
+    }
+
+    #[test]
+    fn numbered_code_keeps_gutters_dim_and_code_highlighted() {
+        let source = "     1\tlet answer = \"ready\";\n     2\t// next\nplain text";
+        let lines = code_lines(source, "numbered:rs");
+        assert_eq!(text(&lines), source.lines().collect::<Vec<_>>());
+        assert_eq!(lines[0].spans[0].content, "     1\t");
+        assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(lines[0].spans[0].style.fg, None);
+        assert!(lines[0].spans.len() > 2);
+        assert_eq!(lines[1].spans[0].content, "     2\t");
+        assert!(!lines[2].spans[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(text(&code_lines("     1\t", "numbered:rs")), ["     1\t"]);
+    }
+
+    #[test]
     fn known_language_highlights_and_keeps_the_text() {
         let lines = code_lines("let x = 1;\n", "rs");
         assert_eq!(text(&lines), ["let x = 1;"]);
         assert!(lines[0].spans.len() > 1);
         assert!(lines[0].spans.iter().all(|span| span.style.fg.is_some()));
         assert_eq!(text(&code_lines("echo hi", "bash")), ["echo hi"]);
+    }
+
+    fn byte_styles(lines: &[Line<'_>]) -> Vec<Vec<Style>> {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .flat_map(|span| std::iter::repeat_n(span.style, span.content.len()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn assert_script_styles(source: &str, script: &str, lang: &str) {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let lines = code_lines(source, "bash");
+        assert_eq!(text(&lines), source.lines().collect::<Vec<_>>());
+        let actual = byte_styles(&lines);
+        let shell = byte_styles(&highlighted(source, "bash").unwrap());
+        let embedded = byte_styles(&highlighted(script, lang).unwrap());
+        let start = source.find(script).unwrap();
+        let end = start + script.len();
+        let mut offset = 0;
+        let mut embedded_offset = 0;
+        let embedded: Vec<_> = embedded.into_iter().flatten().collect();
+        for (row, line) in source.split_inclusive('\n').enumerate() {
+            for column in 0..line.trim_end_matches(['\r', '\n']).len() {
+                let expected = if (start..end).contains(&(offset + column)) {
+                    let style = embedded[embedded_offset];
+                    embedded_offset += 1;
+                    style
+                } else {
+                    shell[row][column]
+                };
+                assert_eq!(
+                    actual[row][column], expected,
+                    "{source}: row {row}, byte {column}"
+                );
+            }
+            offset += line.len();
+        }
+    }
+
+    #[test]
+    fn shell_script_python_argument() {
+        let (source, script, lang) = (
+            "python3 -c \"\nimport json;d=json.load(open('/tmp/x.json'))\nfor t in d['threads']:\n  if t['id'].startswith('01a147c6'): print(t)\n\"",
+            "\nimport json;d=json.load(open('/tmp/x.json'))\nfor t in d['threads']:\n  if t['id'].startswith('01a147c6'): print(t)\n",
+            "python",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_script_python_heredoc() {
+        let (source, script, lang) = (
+            "cd /some/dir && python3 - <<'EOF'\nimport json\nrows=[json.loads(l) for l in open('a.jsonl')]\nEOF",
+            "import json\nrows=[json.loads(l) for l in open('a.jsonl')]\n",
+            "python",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_script_python_heredoc_after_script_arguments() {
+        for source in [
+            "python3 - agents <<'EOF'\nimport json\nEOF",
+            "python3 - agents src tests <<'EOF'\nimport json\nEOF",
+            "python3 - -c 'print(42)' <<'EOF'\nimport json\nEOF",
+        ] {
+            assert_script_styles(source, "import json\n", "python");
+        }
+    }
+
+    #[test]
+    fn shell_script_node_argument() {
+        let (source, script, lang) = (
+            "node -e 'const x = 42; console.log(x)' && echo done",
+            "const x = 42; console.log(x)",
+            "js",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_script_node_heredoc() {
+        let (source, script, lang) = (
+            "node <<EOF\nconst x = 42; console.log(x)\nEOF\necho done",
+            "const x = 42; console.log(x)\n",
+            "js",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_scripts_follow_bundled_shebang_syntaxes() {
+        for (source, script, lang) in [
+            (
+                "python -c 'import json; print(42)'",
+                "import json; print(42)",
+                "python",
+            ),
+            ("/usr/bin/python3 -c 'print(42)'", "print(42)", "python"),
+            ("ruby -e 'puts 42'", "puts 42", "ruby"),
+            (
+                "python3 <<-EOF\n\timport json\n\tprint(42)\n\tEOF",
+                "\timport json\n\tprint(42)\n",
+                "python",
+            ),
+            (
+                "python3 -c 'print(\"中文\")' && echo done",
+                "print(\"中文\")",
+                "python",
+            ),
+        ] {
+            assert_script_styles(source, script, lang);
+        }
+    }
+
+    #[test]
+    fn shell_script_cat_heredoc_by_extension() {
+        for (source, script, lang) in [
+            (
+                "cat > foo.py <<'EOF'\nimport json\nEOF",
+                "import json\n",
+                "py",
+            ),
+            ("cat <<EOF > a.rs\nlet x = 42;\nEOF", "let x = 42;\n", "rs"),
+            (
+                "cat > 'some file.py' <<EOF\nimport json\nEOF",
+                "import json\n",
+                "py",
+            ),
+        ] {
+            assert_script_styles(source, script, lang);
+        }
+    }
+
+    #[test]
+    fn shell_scripts_leave_non_interpreter_arguments_alone() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        for source in [
+            "echo python3 -c 'import json'",
+            "python3 script.py -c 'import json'",
+            "python3 script.py <<EOF\nimport json\nEOF",
+            "cat <<EOF\nimport json\nEOF",
+            "cat >> foo.py <<EOF\nimport json\nEOF",
+            "cat > foo.unknownext <<EOF\nimport json\nEOF",
+            "tee foo.py <<EOF\nimport json\nEOF",
+            "cat > $file.py <<EOF\nimport json\nEOF",
+            "cat > \"$file.py\" <<EOF\nimport json\nEOF",
+            "cat > foo.py > bar.rs <<EOF\nimport json\nEOF",
+            "cat > foo.py <<EOF <<END\nimport json\nEOF\nlet x = 42;\nEND",
+            "echo \"python3 -c 'import json'\"",
+            "python3 -c 'import json'\"suffix\"",
+            "python3 -c \"unterminated",
+        ] {
+            assert_eq!(
+                code_lines(source, "bash"),
+                highlighted(source, "bash").unwrap(),
+                "{source}"
+            );
+        }
     }
 
     #[test]

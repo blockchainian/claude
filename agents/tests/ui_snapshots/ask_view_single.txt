@@ -1,0 +1,14 @@
+ Single
+
+Probe single choice?
+
+› 1. Red
+     Red choice
+  2. Green
+     Green choice
+  3. Blue
+     Blue choice
+  4. Type something.
+
+
+↑/↓ move · Enter to confirm · Esc to cancel

@@ -34,13 +34,10 @@ impl Metadata {
         self.name.clone()
     }
 
-    pub(super) fn status(
-        &self,
-        summary: &Summary,
-        config: &Path,
-        alive: bool,
-    ) -> Option<SessionStatus> {
-        let last = summary.subagent_records.last()?;
+    pub(super) fn status(&self, summary: &Summary, config: &Path, alive: bool) -> SessionStatus {
+        let Some(last) = summary.subagent_records.last() else {
+            return SessionStatus::Inactive;
+        };
         let blocks = last["message"]["content"].as_array();
         if last["type"] == "user"
             && blocks.is_some_and(|blocks| {
@@ -62,7 +59,7 @@ impl Metadata {
                 })
             })
         {
-            return None;
+            return SessionStatus::Inactive;
         }
         let text = super::transcript::content_text(last, false);
         if last["type"] == "user"
@@ -70,7 +67,7 @@ impl Metadata {
                 .as_deref()
                 .is_some_and(|text| text.trim().starts_with("[Request interrupted by user"))
         {
-            return None;
+            return SessionStatus::Inactive;
         }
         if last["type"] == "assistant" {
             if last["message"]["stop_reason"] == "stop_sequence"
@@ -78,19 +75,27 @@ impl Metadata {
                     .as_deref()
                     .is_some_and(|text| text.starts_with("API Error:"))
             {
-                return None;
+                return SessionStatus::Inactive;
             }
             if last["message"]["stop_reason"] == "end_turn"
                 && blocks.is_some_and(|blocks| {
                     !blocks.is_empty() && blocks.iter().all(|block| block["type"] == "text")
                 })
             {
-                return (self.task_kind.as_deref() == Some("in_process_teammate")
-                    && self.is_member(config))
-                .then_some(SessionStatus::Ready);
+                return if self.task_kind.as_deref() == Some("in_process_teammate")
+                    && self.is_member(config)
+                {
+                    SessionStatus::Ready
+                } else {
+                    SessionStatus::Inactive
+                };
             }
         }
-        alive.then_some(SessionStatus::Working)
+        if alive {
+            SessionStatus::Working
+        } else {
+            SessionStatus::Inactive
+        }
     }
 
     fn is_member(&self, config: &Path) -> bool {
@@ -157,12 +162,7 @@ mod tests {
         rows
     }
 
-    fn status(
-        rows: Vec<Value>,
-        teammate: bool,
-        listed: bool,
-        alive: bool,
-    ) -> Option<crate::model::SessionStatus> {
+    fn status(rows: Vec<Value>, teammate: bool, listed: bool, alive: bool) -> SessionStatus {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("agent-x.jsonl");
         fs::write(
@@ -191,21 +191,67 @@ mod tests {
     }
 
     #[test]
+    fn finished_subagents_remain_in_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = registry::tests::fixture(dir.path());
+        let id = entry["sessionId"].as_str().unwrap();
+        let parent = transcript(dir.path(), id, 0);
+        fs::write(dir.path().join("sessions/live.json"), entry.to_string()).unwrap();
+        let agents = parent.with_extension("").join("subagents");
+        fs::create_dir_all(&agents).unwrap();
+        fs::write(agents.join("agent-done.jsonl"), FIXTURE).unwrap();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-done")
+            .unwrap();
+        assert_eq!(child.parent.as_ref().map(|key| key.id.as_str()), Some(id));
+        assert_eq!(child.status, SessionStatus::Inactive);
+    }
+
+    #[test]
+    fn pending_subagents_with_dead_parent_remain_in_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let parent = transcript(dir.path(), id, 0);
+        let agents = parent.with_extension("").join("subagents");
+        fs::create_dir_all(&agents).unwrap();
+        fs::write(agents.join("agent-pending.jsonl"), pending()[0].to_string()).unwrap();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let snapshot = store.refresh(1);
+        let parent = snapshot.sessions.iter().find(|s| s.id.id == id).unwrap();
+        assert_eq!(parent.status, SessionStatus::Inactive);
+        assert!(parent.process.is_none());
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-pending")
+            .unwrap();
+        assert_eq!(child.parent.as_ref(), Some(&parent.id));
+        assert_eq!(child.status, SessionStatus::Inactive);
+    }
+
+    #[test]
     fn handback_result_finishes() {
-        assert_eq!(status(records(), false, false, true), None);
+        assert_eq!(
+            status(records(), false, false, true),
+            SessionStatus::Inactive
+        );
     }
     #[test]
     fn handback_pair_does_not_need_result_metadata() {
         let mut rows = records();
         rows[1].as_object_mut().unwrap().remove("toolUseResult");
-        assert_eq!(status(rows, false, false, true), None);
+        assert_eq!(status(rows, false, false, true), SessionStatus::Inactive);
     }
 
     #[test]
     fn handback_result_without_tool_use_finishes() {
         let mut rows = records();
         rows.remove(0);
-        assert_eq!(status(rows, false, false, true), None);
+        assert_eq!(status(rows, false, false, true), SessionStatus::Inactive);
     }
 
     #[test]
@@ -213,10 +259,7 @@ mod tests {
         let mut rows = records();
         rows[0]["message"]["content"][0]["name"] = "Bash".into();
         rows[1].as_object_mut().unwrap().remove("toolUseResult");
-        assert_eq!(
-            status(rows, false, false, true),
-            Some(SessionStatus::Working)
-        );
+        assert_eq!(status(rows, false, false, true), SessionStatus::Working);
     }
 
     #[test]
@@ -226,10 +269,7 @@ mod tests {
         user["message"]["content"] = json!("Continue checking");
         user.as_object_mut().unwrap().remove("toolUseResult");
         rows.push(user);
-        assert_eq!(
-            status(rows, false, false, true),
-            Some(SessionStatus::Working)
-        );
+        assert_eq!(status(rows, false, false, true), SessionStatus::Working);
     }
 
     #[test]
@@ -239,43 +279,43 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(pending()[0]["message"]["content"][0].clone());
-        assert_eq!(
-            status(rows, false, false, true),
-            Some(SessionStatus::Working)
-        );
+        assert_eq!(status(rows, false, false, true), SessionStatus::Working);
     }
 
     #[test]
     fn background_end_turn_finishes() {
         assert_eq!(
             status(text_end(json!("end_turn"), "Done"), false, false, true),
-            None
+            SessionStatus::Inactive
         );
     }
     #[test]
     fn listed_teammate_is_ready() {
         assert_eq!(
             status(text_end(json!("end_turn"), "Done"), true, true, true),
-            Some(crate::model::SessionStatus::Ready)
+            SessionStatus::Ready
         );
     }
     #[test]
     fn unlisted_teammate_finishes() {
         assert_eq!(
             status(text_end(json!("end_turn"), "Done"), true, false, true),
-            None
+            SessionStatus::Inactive
         );
     }
     #[test]
     fn pending_tool_with_live_parent_works() {
         assert_eq!(
             status(pending(), false, false, true),
-            Some(crate::model::SessionStatus::Working)
+            SessionStatus::Working
         );
     }
     #[test]
     fn pending_tool_with_dead_parent_finishes() {
-        assert_eq!(status(pending(), false, false, false), None);
+        assert_eq!(
+            status(pending(), false, false, false),
+            SessionStatus::Inactive
+        );
     }
     #[test]
     fn api_error_finishes() {
@@ -289,7 +329,7 @@ mod tests {
                 false,
                 true
             ),
-            None
+            SessionStatus::Inactive
         );
     }
     #[test]
@@ -297,7 +337,7 @@ mod tests {
         let mut rows = records();
         rows[1]["message"]["content"] = json!("[Request interrupted by user]");
         rows[1].as_object_mut().unwrap().remove("toolUseResult");
-        assert_eq!(status(rows, false, false, true), None);
+        assert_eq!(status(rows, false, false, true), SessionStatus::Inactive);
     }
 
     #[test]
@@ -306,11 +346,11 @@ mod tests {
         rows[1]["message"]["content"] =
             json!([{"type":"text","text":"[Request interrupted by user for tool use]"}]);
         rows[1].as_object_mut().unwrap().remove("toolUseResult");
-        assert_eq!(status(rows, false, false, true), None);
+        assert_eq!(status(rows, false, false, true), SessionStatus::Inactive);
     }
 
     #[test]
-    fn discovers_fields_and_retains_cache_only_for_live_parent() {
+    fn discovers_fields_and_retains_cache_after_parent_exits() {
         let dir = tempfile::tempdir().unwrap();
         let entry = registry::tests::fixture(dir.path());
         let id = entry["sessionId"].as_str().unwrap();
@@ -347,9 +387,9 @@ mod tests {
         let child = snapshot
             .sessions
             .iter()
-            .find(|s| s.parent.is_some())
+            .find(|s| s.id.id == "agent-x")
             .unwrap();
-        assert_eq!(snapshot.sessions.len(), 2);
+        assert_eq!(snapshot.sessions.len(), 3);
         assert_eq!(child.parent.as_ref().map(|key| key.id.as_str()), Some(id));
         assert_eq!(child.id.id, "agent-x");
         assert_eq!(child.transcript.as_ref(), Some(&path));
@@ -396,7 +436,7 @@ mod tests {
             changed
                 .sessions
                 .iter()
-                .find(|s| s.parent.is_some())
+                .find(|s| s.id.id == "agent-x")
                 .unwrap()
                 .last_message
                 .as_deref(),
@@ -407,13 +447,20 @@ mod tests {
         let child = changed
             .sessions
             .iter()
-            .find(|s| s.parent.is_some())
+            .find(|s| s.id.id == "agent-x")
             .unwrap();
         assert_eq!(child.title, "renamed");
         assert_eq!(child.prompt, "renamed");
         fs::remove_file(dir.path().join("sessions/live.json")).unwrap();
-        assert!(store.refresh(1).sessions.iter().all(|s| s.parent.is_none()));
-        assert!(!store.summaries.contains_key(&path));
+        let snapshot = store.refresh(1);
+        assert_eq!(snapshot.sessions.len(), 3);
+        assert!(
+            snapshot
+                .sessions
+                .iter()
+                .all(|s| s.status == SessionStatus::Inactive)
+        );
+        assert!(store.summaries.contains_key(&path));
     }
 
     #[test]
@@ -442,7 +489,7 @@ mod tests {
             let child = snapshot
                 .sessions
                 .iter()
-                .find(|s| s.parent.is_some())
+                .find(|s| s.id.id == "agent-x")
                 .unwrap();
             assert_eq!(
                 child.started_at,
@@ -473,7 +520,7 @@ mod tests {
         let child = snapshot
             .sessions
             .iter()
-            .find(|s| s.parent.is_some())
+            .find(|s| s.id.id == "agent-x")
             .unwrap();
         assert_eq!(child.status, SessionStatus::Ready);
         assert_eq!(child.title, "Review files");
@@ -484,7 +531,21 @@ mod tests {
         assert_eq!(child.last_message.as_deref(), Some("Review complete"));
         assert!(child.latest_activity().is_none());
         fs::write(&path, FIXTURE).unwrap();
-        assert!(store.refresh(1).sessions.iter().all(|s| s.parent.is_none()));
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-x")
+            .unwrap();
+        assert_eq!(
+            child.parent.as_ref(),
+            snapshot
+                .sessions
+                .iter()
+                .find(|s| s.parent.is_none())
+                .map(|s| &s.id)
+        );
+        assert_eq!(child.status, SessionStatus::Inactive);
     }
 
     #[test]

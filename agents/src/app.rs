@@ -1,7 +1,11 @@
 //! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
+#[path = "app_transcript.rs"]
+mod transcript_cache;
+use transcript_cache::{ActivityCache, FileStamp};
+
 use crate::model::Action;
-use crate::model::{DraftId, Session};
+use crate::model::{DraftKey, Session, SessionStatus};
 use crate::providers::Snapshot;
 use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
@@ -31,24 +35,57 @@ use std::time::Instant;
 const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 
 enum Input {
-    WeeklyUsage {
+    AccountUsage {
         provider: ProviderId,
-        result: io::Result<Option<crate::providers::WeeklyUsage>>,
+        result: io::Result<crate::providers::AccountUsage>,
+    },
+    ResetCreditRedeemed {
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+        result: io::Result<crate::providers::ResetCreditRedemption>,
     },
     Terminal(io::Result<Event>),
-    Filesystem(notify::Result<()>),
+    Filesystem(notify::Result<notify::Event>),
+    Sessions {
+        refresh: Box<crate::sessions::Refresh>,
+        generation: u64,
+        result: io::Result<Snapshot>,
+    },
+    EventsLoaded {
+        token: u64,
+        reader: Box<dyn crate::event::Reader>,
+        result: io::Result<LoadedEvents>,
+    },
     Created {
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         result: io::Result<std::process::Output>,
     },
+    /// A new task's worktree, with the task request to create in it.
     WorktreeCreated {
-        draft_id: DraftId,
+        draft_key: DraftKey,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
         result: io::Result<(PathBuf, String)>,
     },
     Sent {
         id: SessionKey,
         input: SessionInput,
+        result: io::Result<()>,
+    },
+    Deleted {
+        id: SessionKey,
+        result: io::Result<()>,
+    },
+    Archived {
+        id: SessionKey,
+        result: io::Result<()>,
+    },
+    /// The session terminal's screen changed or its program closed the terminal.
+    TerminalOutput,
+    /// A terminal client has detached or been killed and reaped.
+    TerminalClosed {
+        id: SessionKey,
         result: io::Result<()>,
     },
 }
@@ -101,6 +138,7 @@ pub struct App {
     pending_inputs: std::collections::HashSet<SessionKey>,
     config_dir: PathBuf,
     hub: Hub,
+    session_refresh: SessionRefresh,
     preferences: Preferences,
     view: View,
     clipboard: crate::clipboard::Clipboard,
@@ -108,50 +146,137 @@ pub struct App {
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
-    last_session: Option<SessionKey>,
-    log_stamp: Option<LogStamp>,
-    full_log_stamp: Option<LogStamp>,
+    /// The session program running in the event detail panel.
+    terminal: Option<crate::session_terminal::SessionTerminal>,
+    /// The task whose terminal opens once that task's previous client has closed.
+    terminal_task: Option<SessionKey>,
+    /// The waiting task whose terminal opened on its own, so closing it keeps it closed.
+    waiting_terminal: Option<SessionKey>,
+    /// Clients being reaped before the same session can open another terminal.
+    closing_terminals: std::collections::HashMap<SessionKey, session_terminal::TerminalClose>,
+    transcript_stamp: Option<TranscriptStamp>,
+    full_transcript_stamp: Option<TranscriptStamp>,
+    transcript: Option<(SessionKey, PathBuf, Box<dyn crate::event::Reader>)>,
+    pending_transcript: Option<PendingTranscript>,
+    transcript_request: u64,
+    transcript_has_older: bool,
+    transcript_parsed_bytes: u64,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
     /// When each recently active transcript's turns ran.
-    activity: std::collections::HashMap<PathBuf, crate::activity::Turns>,
+    activity: ActivityCache,
+    usage_stamps: std::collections::HashMap<PathBuf, FileStamp>,
+    #[cfg(test)]
+    usage_reads: usize,
 }
 
 #[derive(PartialEq, Eq)]
-struct LogStamp {
+struct TranscriptStamp {
     session: SessionKey,
     path: PathBuf,
-    modified: std::time::SystemTime,
-    length: u64,
+    file: FileStamp,
     count: usize,
 }
 
+struct LoadedEvents {
+    transcript: (TranscriptStamp, crate::event::Update),
+    pinned: Option<Vec<(crate::state::PinnedEvent, Option<crate::event::Event>)>>,
+}
+
+struct PendingTranscript {
+    token: u64,
+    session: SessionKey,
+    path: PathBuf,
+    visible: usize,
+}
+
+/// A new task's directory and branch: the repository's current branch, or none outside git.
+pub(crate) fn draft_location(cwd: PathBuf) -> io::Result<(PathBuf, String)> {
+    let cwd = std::fs::canonicalize(cwd)?;
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .output()?;
+    if !output.status.success() {
+        if cwd.ancestors().any(|path| path.join(".git").exists()) {
+            return Err(io::Error::other(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            ));
+        }
+        return Ok((cwd, String::new()));
+    }
+    let output = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(&cwd)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
+    }
+    let branch = String::from_utf8(output.stdout)
+        .map_err(io::Error::other)?
+        .trim()
+        .to_owned();
+    Ok((cwd, branch))
+}
+
 impl App {
-    pub fn new(hub: Hub, config_dir: PathBuf) -> Self {
+    pub fn new(mut hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
+        hub.set_weekly_usage(preferences.usage.clone());
+        view.weekly_usage = preferences.usage.clone();
+        view.usage_view = preferences.usage_view;
         view.set_pinned(&preferences.pinned);
+        view.set_drafts(&preferences.drafts);
+        view.restore_question_answers(&preferences);
+        if !preferences.draft_notices.is_empty() {
+            view.set_notice(Some(preferences.draft_notices.join("; ")));
+        }
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
         view.set_input_choices(hub.input_choices());
+        for draft in &preferences.drafts {
+            if let Some((_, defaults)) = hub.task_defaults(&draft.cwd) {
+                match defaults {
+                    Ok(defaults) => view.set_draft_defaults(&draft.cwd, defaults),
+                    Err(error) => view.set_notice(Some(format!("Cannot create draft: {error}"))),
+                }
+            }
+        }
+        view.provider_names = hub.display_names();
         let (sender, receiver) = mpsc::channel();
+        let session_refresh = SessionRefresh::new(hub.session_source());
         Self {
             sender,
             receiver,
             pending_inputs: std::collections::HashSet::new(),
             hub,
+            session_refresh,
             config_dir,
             preferences,
             view,
             clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
             launch: None,
-            last_session: None,
-            log_stamp: None,
-            full_log_stamp: None,
+            terminal: None,
+            terminal_task: None,
+            waiting_terminal: None,
+            closing_terminals: std::collections::HashMap::new(),
+            transcript_stamp: None,
+            full_transcript_stamp: None,
+            transcript: None,
+            pending_transcript: None,
+            transcript_request: 0,
+            transcript_has_older: false,
+            transcript_parsed_bytes: 0,
             usage: std::collections::HashMap::new(),
-            activity: std::collections::HashMap::new(),
+            activity: ActivityCache::default(),
+            usage_stamps: std::collections::HashMap::new(),
+            #[cfg(test)]
+            usage_reads: 0,
         }
     }
 
@@ -162,11 +287,9 @@ impl App {
             let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
                 .ok()
                 .flatten();
-            self.apply_background(
-                background,
-                background.is_some_and(terminal_background::is_light),
-            );
+            self.apply_background(background.is_some_and(terminal_background::is_light));
             let result = self.event_loop(&mut terminal);
+            self.close_terminal();
             leave_terminal(terminal)?;
             result?;
             let Some(mut command) = self.launch.take() else {
@@ -179,10 +302,7 @@ impl App {
                     "{} exited with {status}",
                     command.get_program().to_string_lossy()
                 )),
-                Err(error) => Some(format!(
-                    "Failed to start {:?}: {error}",
-                    command.get_program()
-                )),
+                Err(error) => Some(format!("Cannot start {:?}: {error}", command.get_program())),
             };
             self.view.set_notice(notice);
         }
@@ -199,7 +319,7 @@ impl App {
             .map_err(notify::Error::io)
             .and_then(|roots| {
                 crate::sessions::watch(&roots, move |event| {
-                    let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
+                    let _ = filesystem.send(Input::Filesystem(event));
                 })
             });
         let mut watcher = match watch {
@@ -224,77 +344,130 @@ impl App {
             crossterm::event::EnableThemeChangeReports,
             MouseReports::Enable
         )?;
-        self.refresh();
+        self.request_refresh();
         let mut selection_tick = Instant::now();
         loop {
+            let persist = self.view.take_question_action();
+            self.handle_action(persist);
+            let persist = self.view.take_drafts_action();
+            self.handle_action(persist);
             if selection_tick.elapsed() >= Duration::from_millis(50) {
                 self.view.tick_text_selection();
                 selection_tick = Instant::now();
             }
-            let action = self.view.flush_pending_click(Instant::now());
+            self.view.expire_messages(Instant::now());
+            self.refresh_weekly_usage();
+            self.view.present_reset_credit();
+            if let Some(request) = schedule.take_due(Instant::now()) {
+                self.request_sessions(request);
+            }
+            self.view.set_cell_aspect(cell_aspect());
+            self.sync_terminal();
+            let action = self.view.take_pending_action();
             if self.handle_action(action) {
                 return Ok(());
             }
-            self.view.expire_messages(Instant::now());
-            self.refresh_weekly_usage();
-            if schedule.due(Instant::now()) {
-                self.refresh();
-                schedule.refreshed(Instant::now());
+            self.draw(terminal)?;
+            if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
+                return Ok(());
             }
-            self.view.set_cell_aspect(cell_aspect());
-            terminal.draw(|frame| {
-                let area = frame.area();
-                self.refresh_log(self.view.log_event_count(area));
-                self.refresh_usage();
-                self.refresh_activity(area.width);
-                self.view.render(area, frame.buffer_mut());
-                self.view.underline_links(frame.buffer_mut());
-                if let Some((x, y)) = self.view.cursor_pos(area) {
-                    frame.set_cursor_position((x, y));
-                }
-            })?;
+        }
+    }
+
+    fn draw<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<(), B::Error> {
+        self.draw_at(terminal, chrono::Utc::now())
+    }
+
+    fn draw_at<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), B::Error> {
+        // Keep the drawing cursor hidden until the frame's input cursor is in place.
+        terminal.hide_cursor()?;
+        let mut cursor = None;
+        terminal.draw(|frame| {
+            let area = frame.area();
+            self.refresh_event(self.view.event_count(area));
+            self.refresh_usage();
+            self.refresh_activity(area.width, now);
+            self.view.render_at(area, frame.buffer_mut(), now);
+            cursor = self.view.cursor_pos(area);
+        })?;
+        self.terminal_drawn();
+        if let Some(position) = cursor {
+            terminal.set_cursor_position(position)?;
+            terminal.show_cursor()?;
+        } else if let Some(position) = self.view.marker_pos() {
             // The hidden cursor otherwise rests wherever the last repainted cell was, and a
             // terminal's cursor-line guide follows it there; park it on the selected row's marker.
-            if self.view.cursor_pos(terminal.get_frame().area()).is_none()
-                && let Some((x, y)) = self.view.marker_pos()
-            {
-                terminal.set_cursor_position((x, y))?;
-            }
-            let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
-            let timeout = self
-                .view
-                .log_redraw_in(chrono::Utc::now())
-                .map_or(timeout, |log| timeout.min(log));
-            let timeout = self
-                .view
-                .expire_messages(Instant::now())
-                .map_or(timeout, |message| timeout.min(message));
-            let timeout = self
-                .view
-                .pending_click_in(Instant::now())
-                .map_or(timeout, |click| timeout.min(click));
-            let timeout = self
-                .view
-                .timeline_redraw_in(chrono::Utc::now())
-                .map_or(timeout, |usage| timeout.min(usage));
-            let timeout =
-                crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
-            let timeout = if self.view.text_selection_dragging() {
-                timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
-            } else {
-                timeout
-            };
-            match self.receiver.recv_timeout(timeout) {
-                Ok(input) => {
-                    if self.handle_inputs(input, &mut watcher, &mut schedule)? {
-                        return Ok(());
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(io::Error::other("event readers disconnected"));
+            terminal.set_cursor_position(position)?;
+        }
+        Ok(())
+    }
+
+    fn wait_for_input(
+        &mut self,
+        watcher: &mut Option<notify::RecommendedWatcher>,
+        schedule: &mut RefreshSchedule,
+        selection_tick: Instant,
+    ) -> io::Result<bool> {
+        let timeout =
+            self.input_timeout(schedule, selection_tick, Instant::now(), chrono::Utc::now());
+        match self.receiver.recv_timeout(timeout) {
+            Ok(input) => {
+                if self.handle_inputs(input, watcher, schedule)? {
+                    return Ok(true);
                 }
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(io::Error::other("event readers disconnected"));
+            }
+        }
+        let action = self.view.flush_pending_click(Instant::now());
+        Ok(self.handle_action(action))
+    }
+
+    fn input_timeout(
+        &mut self,
+        schedule: &RefreshSchedule,
+        selection_tick: Instant,
+        now: Instant,
+        wall_now: chrono::DateTime<chrono::Utc>,
+    ) -> Duration {
+        let timeout = schedule.redraw_timeout(now, self.view.has_background());
+        let timeout = self
+            .view
+            .event_redraw_in(wall_now)
+            .map_or(timeout, |event_panel| timeout.min(event_panel));
+        let timeout = self
+            .view
+            .tool_redraw_in(wall_now)
+            .map_or(timeout, |tool| timeout.min(tool));
+        let timeout = self
+            .view
+            .expire_messages(now)
+            .map_or(timeout, |message| timeout.min(message));
+        let timeout = self
+            .view
+            .pending_click_in(now)
+            .map_or(timeout, |click| timeout.min(click));
+        let timeout = self
+            .view
+            .timeline_redraw_in(wall_now)
+            .map_or(timeout, |usage| timeout.min(usage));
+        let timeout = crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
+        if self.view.text_selection_dragging() {
+            timeout.min(
+                Duration::from_millis(50)
+                    .saturating_sub(now.saturating_duration_since(selection_tick)),
+            )
+        } else {
+            timeout
         }
     }
 
@@ -309,17 +482,35 @@ impl App {
         let mut next = Some(first);
         while let Some(input) = next.take().or_else(|| self.receiver.try_recv().ok()) {
             match input {
-                Input::WeeklyUsage { provider, result } => {
-                    self.hub.weekly_usage_complete(provider, result);
-                    self.view.weekly_usage = self.hub.weekly_usage().clone();
+                Input::AccountUsage { provider, result } => {
+                    self.complete_account_usage(provider, result);
+                }
+                Input::ResetCreditRedeemed {
+                    provider,
+                    request,
+                    result,
+                } => {
+                    self.complete_reset_credit(provider, request, result);
                 }
                 Input::Terminal(event) => {
                     if self.handle_event(event?) {
                         return Ok(true);
                     }
                 }
-                Input::Filesystem(Ok(())) if watcher.is_some() => {
-                    schedule.changed(Instant::now());
+                Input::Sessions {
+                    refresh,
+                    generation,
+                    result,
+                } => {
+                    self.finish_sessions(*refresh, generation, result)?;
+                }
+                Input::Filesystem(Ok(event)) if watcher.is_some() => {
+                    let request = if event.need_rescan() {
+                        crate::sessions::RefreshRequest::Full
+                    } else {
+                        crate::sessions::RefreshRequest::paths(event.paths)
+                    };
+                    schedule.paths_changed(Instant::now(), request);
                 }
                 Input::Filesystem(Err(error)) if watcher.is_some() => {
                     self.view
@@ -328,32 +519,62 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::EventsLoaded {
+                    token,
+                    reader,
+                    result,
+                } => {
+                    self.finish_event_load(token, reader, result);
+                }
                 Input::Created {
-                    draft_id,
+                    draft_key,
                     provider,
                     result,
                 } => {
                     let result =
                         result.and_then(|output| self.hub.provider(provider).created_job(&output));
-                    self.view.draft_created(draft_id, result);
+                    self.view.draft_created(draft_key, result);
                     schedule.changed(Instant::now());
                 }
-                Input::WorktreeCreated { draft_id, result } => {
-                    self.view.draft_worktree_complete(draft_id, result);
-                }
+                Input::WorktreeCreated {
+                    draft_key,
+                    provider,
+                    mut request,
+                    result,
+                } => match result {
+                    Ok((cwd, branch)) => {
+                        request.cwd = cwd.clone();
+                        self.view
+                            .draft_worktree_created(draft_key, Ok((cwd, branch)));
+                        self.create_task(draft_key, provider, request);
+                    }
+                    Err(error) => self.view.draft_worktree_created(draft_key, Err(error)),
+                },
                 Input::Sent { id, input, result } => {
-                    self.pending_inputs.remove(&id);
-                    self.view.input_complete(&id, &input, result);
+                    if matches!(input, SessionInput::Interrupt) {
+                        let generation = self.request_refresh();
+                        self.session_refresh
+                            .stops
+                            .push((generation, id, result.is_ok()));
+                        if let Err(error) = result {
+                            self.input_error(&input, error.to_string());
+                        }
+                    } else {
+                        self.pending_inputs.remove(&id);
+                        self.view.input_complete(&id, &input, result);
+                    }
                 }
+                Input::Deleted { id, result } => self.deleted(&id, result),
+                Input::Archived { id, result } => self.archived(&id, result),
+                Input::TerminalOutput => {}
+                Input::TerminalClosed { id, result } => self.terminal_closed(&id, result),
             }
         }
         Ok(false)
     }
 
-    /// `background` is the terminal's reported color, when known.
-    fn apply_background(&mut self, background: Option<(u8, u8, u8)>, light: bool) {
+    fn apply_background(&mut self, light: bool) {
         crate::ui::set_light_background(light);
-        crate::theme::set_background(background, light);
         crate::theme::use_default_accents(light);
         if let Some(path) = &self.preferences.theme
             && let Err(error) = crate::theme::use_theme_file(path, light)
@@ -377,159 +598,331 @@ impl App {
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
+        let task = self.view.selected_id().cloned();
+        let selected_event = self.view.event_list.cursor;
         let action = match event {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
-            Event::Paste(text) => {
-                self.view.handle_paste(&text);
-                return false;
-            }
+            Event::Paste(text) => return self.paste(&text),
             Event::ThemeChanged(theme) => {
-                self.apply_background(None, theme == Theme::Light);
+                self.apply_background(theme == Theme::Light);
                 return false;
             }
             _ => return false,
         };
+        // Explicit input changing the selected log returns the output to event details.
+        if self.view.terminal_requested()
+            && self.view.selected_id() == task.as_ref()
+            && self.view.event_list.cursor != selected_event
+        {
+            self.handle_action(Some(Action::CloseTerminal));
+        }
         self.handle_action(action)
     }
 
-    fn refresh_log(&mut self, visible: usize) {
-        let count = visible.saturating_add(self.view.log_scroll());
+    fn paste(&mut self, text: &str) -> bool {
+        if let Some(action) = self.view.terminal_paste(text) {
+            return self.handle_action(Some(action));
+        }
+        if self.view.pasting_prompt() {
+            match crate::images::ImageAttachment::from_paste(text) {
+                Ok(Some(image)) => self.view.attach_image(image),
+                Ok(None) => self.view.handle_paste(text),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            }
+        } else {
+            self.view.handle_paste(text);
+        }
+        false
+    }
+
+    fn refresh_event(&mut self, visible: usize) {
+        if let Some(id) = self.view.selected_id() {
+            let sorting = self.preferences.task_sort(id);
+            self.view.initialize_event_sort(sorting);
+        }
+        let count = if self.view.event_list.start_requested
+            || self.view.transcript_fully_loaded()
+            || self.view.restoring_event_position()
+        {
+            usize::MAX
+        } else {
+            self.view
+                .event_read_count(visible, self.transcript_has_older)
+        };
         let selected = self
             .view
             .selected_id()
             .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
-            .and_then(|session| {
-                Some((
-                    session.id.clone(),
-                    session.transcript.clone()?,
-                    session.clone(),
-                ))
-            });
-        let Some((session, path, selected_session)) = selected else {
-            self.log_stamp = None;
-            self.full_log_stamp = None;
-            self.view.log.clear();
-            self.view.log_session = None;
+            .cloned();
+        let Some(selected) = selected.filter(|session| session.transcript.is_some()) else {
+            self.transcript_stamp = None;
+            self.full_transcript_stamp = None;
+            self.transcript = None;
+            self.pending_transcript = None;
+            self.transcript_has_older = false;
+            self.view.event_panel.clear();
+            self.view.prepare_event_search();
+            self.view.event_session = None;
             return;
         };
-        if self.view.log_search.active() {
-            let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
-                let metadata = std::fs::metadata(&path)?;
-                let stamp = LogStamp {
-                    session: session.clone(),
-                    path: path.clone(),
-                    modified: metadata.modified()?,
-                    length: metadata.len(),
-                    count: usize::MAX,
-                };
-                if self.full_log_stamp.as_ref() == Some(&stamp) {
-                    return Ok(None);
-                }
-                let events = self.hub.provider(session.provider).log(
-                    &selected_session,
-                    usize::MAX,
-                    selected_session.parent.is_some(),
-                )?;
-                Ok(Some((stamp, events)))
-            };
-            match load() {
-                Ok(loaded) => {
-                    if let Some((stamp, events)) = loaded {
-                        self.full_log_stamp = Some(stamp);
-                        self.view.set_log(events);
+        let path = selected.transcript.as_ref().expect("transcript checked");
+        if let Some(pending) = &self.pending_transcript {
+            if pending.session == selected.id && &pending.path == path {
+                return;
+            }
+            self.pending_transcript = None;
+        }
+        let first_load = self
+            .transcript
+            .as_ref()
+            .is_none_or(|(id, cached_path, _)| id != &selected.id || cached_path != path);
+        let previous_reader = if first_load {
+            self.transcript.take()
+        } else {
+            None
+        };
+        if first_load {
+            match crate::providers::event_reader(&selected) {
+                Ok(reader) => {
+                    self.transcript = Some((selected.id.clone(), path.clone(), reader));
+                    self.transcript_has_older = true;
+                    if self.view.event_session.as_ref() != Some(&selected.id) {
+                        self.view.event_panel.clear();
+                        self.view.prepare_event_search();
+                        self.view.event_session = Some(selected.id.clone());
                     }
-                    self.log_stamp = None;
-                    self.view.log_session = Some(session);
-                    self.view
-                        .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
                 }
                 Err(error) => {
-                    self.full_log_stamp = None;
-                    self.log_stamp = None;
-                    self.view.log.clear();
-                    self.view.prepare_log_search();
-                    self.view.log_session = None;
-                    self.view
-                        .set_notice(Some(format!("Failed to read task log: {error}")));
+                    self.apply_event_result(Err(error), visible);
+                    return;
                 }
             }
-            return;
         }
-        self.full_log_stamp = None;
-        let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
-            let metadata = std::fs::metadata(&path)?;
-            let stamp = LogStamp {
+        if first_load
+            || ((self.view.transcript_fully_loaded() || self.view.restoring_event_position())
+                && self.transcript_has_older)
+        {
+            let (session, path, mut reader) = self.transcript.take().expect("reader checked");
+            self.transcript_request += 1;
+            let token = self.transcript_request;
+            self.pending_transcript = Some(PendingTranscript {
+                token,
                 session: session.clone(),
                 path: path.clone(),
-                modified: metadata.modified()?,
-                length: metadata.len(),
+                visible,
+            });
+            let pinned = if first_load && !self.view.has_pinned_events(&session) {
+                let pinned = self.preferences.task_pinned_events(&session);
+                (!pinned.is_empty()).then(|| pinned.to_vec())
+            } else {
+                None
+            };
+            let sender = self.sender.clone();
+            thread::spawn(move || {
+                drop(previous_reader);
+                let result = (|| {
+                    // Capture inputs before reading, so writes during the read are checked again.
+                    let file = FileStamp::read(&path)?;
+                    let update = reader.refresh(count)?;
+                    let pinned = pinned
+                        .map(|pinned| {
+                            let groups = pinned
+                                .iter()
+                                .map(|pin| pin.records.clone())
+                                .collect::<Vec<_>>();
+                            let events = reader.read_events(&groups)?;
+                            if events.len() != pinned.len() {
+                                return Err(io::Error::other(
+                                    "Pinned event reader returned an unexpected count",
+                                ));
+                            }
+                            Ok(pinned.into_iter().zip(events).collect())
+                        })
+                        .transpose()?;
+                    Ok(LoadedEvents {
+                        transcript: (
+                            TranscriptStamp {
+                                session,
+                                path,
+                                file,
+                                count,
+                            },
+                            update,
+                        ),
+                        pinned,
+                    })
+                })();
+                let _ = sender.send(Input::EventsLoaded {
+                    token,
+                    reader,
+                    result,
+                });
+            });
+            return;
+        }
+        let result = (|| -> io::Result<Option<(TranscriptStamp, crate::event::Update)>> {
+            let file = FileStamp::read(path)?;
+            let stamp = TranscriptStamp {
+                session: selected.id.clone(),
+                path: path.clone(),
+                file,
                 count,
             };
-            if self.log_stamp.as_ref() == Some(&stamp) {
+            let previous = self
+                .transcript_stamp
+                .as_ref()
+                .or(self.full_transcript_stamp.as_ref());
+            if previous.is_some_and(|previous| {
+                previous.session == stamp.session
+                    && previous.path == stamp.path
+                    && previous.file == stamp.file
+                    && (previous.count >= count || !self.transcript_has_older)
+            }) {
+                self.finish_event_refresh(stamp, visible);
                 return Ok(None);
             }
-            let events = self.hub.provider(session.provider).log(
-                &selected_session,
-                count,
-                selected_session.parent.is_some(),
-            )?;
-            Ok(Some((stamp, events)))
-        };
-        match load() {
-            Ok(Some((mut stamp, events))) => {
-                if events.len() < count {
-                    self.view
-                        .clamp_log_scroll(events.len().saturating_sub(visible));
-                    stamp.count = visible.saturating_add(self.view.log_scroll());
-                }
-                self.log_stamp = Some(stamp);
-                let scroll = self.view.log_scroll();
-                self.view.set_log(events);
-                self.view.log_session = Some(session);
-                // Keeping the rows still scrolled further back than the loaded window reaches.
-                if self.view.log_scroll() > scroll {
-                    self.refresh_log(visible);
-                }
-            }
+            let update = self
+                .transcript
+                .as_mut()
+                .expect("reader opened")
+                .2
+                .refresh(count)?;
+            Ok(Some((stamp, update)))
+        })();
+        match result {
             Ok(None) => {}
+            Ok(Some(result)) => self.apply_event_result(Ok(result), visible),
+            Err(error) => self.apply_event_result(Err(error), visible),
+        }
+    }
+
+    fn finish_event_load(
+        &mut self,
+        token: u64,
+        reader: Box<dyn crate::event::Reader>,
+        result: io::Result<LoadedEvents>,
+    ) {
+        let Some(pending) = self
+            .pending_transcript
+            .as_ref()
+            .filter(|pending| pending.token == token)
+        else {
+            return;
+        };
+        let current = self.view.selected_id() == Some(&pending.session)
+            && self.sessions.iter().any(|session| {
+                session.id == pending.session && session.transcript.as_ref() == Some(&pending.path)
+            });
+        let pending = self.pending_transcript.take().expect("request checked");
+        if current {
+            self.transcript = Some((pending.session.clone(), pending.path, reader));
+            let result = result.map(|loaded| {
+                if let Some(pinned) = loaded.pinned {
+                    self.restore_pinned_events(&pending.session, pinned);
+                }
+                loaded.transcript
+            });
+            self.apply_event_result(result, pending.visible);
+        }
+    }
+
+    fn restore_pinned_events(
+        &mut self,
+        task: &SessionKey,
+        pinned: Vec<(crate::state::PinnedEvent, Option<crate::event::Event>)>,
+    ) {
+        // Ignore a read whose stored pins changed while the transcript was loading.
+        if !self
+            .preferences
+            .task_pinned_events(task)
+            .iter()
+            .eq(pinned.iter().map(|(pin, _)| pin))
+        {
+            return;
+        }
+        let count = pinned.len();
+        let rows = pinned
+            .into_iter()
+            .filter_map(|(pin, event)| {
+                let event = event?;
+                if event.source.as_deref() != Some(pin.source.as_str()) {
+                    return None;
+                }
+                Some(crate::ui::PinnedRow { pin, event })
+            })
+            .collect::<Vec<_>>();
+        if rows.len() != count {
+            let saved = self.preferences.save_task_pinned_events(
+                &self.config_dir,
+                task,
+                rows.iter().map(|row| row.pin.clone()).collect(),
+            );
+            self.report_save(saved);
+        }
+        self.view.set_pinned_events(task, rows);
+    }
+
+    fn apply_event_result(
+        &mut self,
+        result: io::Result<(TranscriptStamp, crate::event::Update)>,
+        visible: usize,
+    ) {
+        match result {
+            Ok((stamp, update)) => {
+                self.transcript_parsed_bytes += update.parsed_bytes;
+                self.transcript_has_older = update.has_older;
+                debug_assert!(update.oldest_offset <= update.read_offset);
+                let changed = update.reset
+                    || update.prepended > 0
+                    || update.appended > 0
+                    || update.replaced > 0;
+                if changed {
+                    self.view.apply_event_update(update);
+                }
+                self.finish_event_refresh(stamp, visible);
+            }
             Err(error) => {
-                self.log_stamp = None;
-                self.view.log.clear();
-                self.view.log_session = None;
+                self.transcript = None;
+                self.transcript_has_older = false;
+                self.transcript_stamp = None;
+                self.full_transcript_stamp = None;
+                if self.view.event_list.sort != crate::ui::EventSort::Duration {
+                    self.view.event_panel.clear();
+                    self.view.prepare_event_search();
+                    self.view.event_session = None;
+                }
                 self.view
-                    .set_notice(Some(format!("Failed to read task log: {error}")));
+                    .set_notice(Some(format!("Cannot read task events: {error}")));
             }
         }
     }
 
-    /// Reads when each task worked within a timeline `width` cells wide and hands the view the
-    /// bins any of them worked in; a task idle since before the timeline is not read.
-    fn refresh_activity(&mut self, width: u16) {
-        let now = chrono::Utc::now();
-        let since = now - chrono::Duration::seconds(crate::ui::timeline_seconds(width));
-        let mut bins = std::collections::BTreeSet::new();
-        for session in &self.sessions {
-            let Some(path) = &session.transcript else {
-                continue;
-            };
-            let works = session.status == crate::model::SessionStatus::Working;
-            let recent = std::fs::metadata(path)
-                .and_then(|metadata| metadata.modified())
-                .is_ok_and(|at| chrono::DateTime::<chrono::Utc>::from(at) >= since);
-            if !works && !recent {
-                self.activity.remove(path);
-                continue;
-            }
-            let turns = self.activity.entry(path.clone()).or_default();
-            if turns.update(path, session.id.provider, since).is_err() {
-                continue;
-            }
-            for (start, end) in turns.spans(now, works) {
-                bins.extend(crate::usage::bin_of(start.max(since))..=crate::usage::bin_of(end));
-            }
+    fn finish_event_refresh(&mut self, stamp: TranscriptStamp, visible: usize) {
+        self.view.event_list.has_older = self.transcript_has_older;
+        if self.view.event_list.restoring {
+            self.view.prepare_event_search();
+            self.view.restore_event_list();
         }
-        self.view.set_activity(bins);
+        self.view.event_list.pending_older = 0;
+        self.view.finish_event_start();
+        self.view.event_session = Some(stamp.session.clone());
+        self.view
+            .clamp_event_scroll(self.view.event_max_scroll_for(visible));
+        if self.view.transcript_fully_loaded() {
+            self.full_transcript_stamp = Some(stamp);
+            self.transcript_stamp = None;
+        } else {
+            self.full_transcript_stamp = None;
+            self.transcript_stamp = Some(stamp);
+        }
+    }
+
+    /// Updates file inputs on session changes and polling ticks, and bins when time moves.
+    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
+        if let Some(bins) = self.activity.update(&self.sessions, width, now) {
+            self.view.set_activity(bins);
+        }
     }
 
     /// Reads what the selected task's transcript gained and hands its usage to the view.
@@ -544,20 +937,57 @@ impl App {
         let Some(path) = &session.transcript else {
             return;
         };
-        let series = self.usage.entry(path.clone()).or_default();
-        let Ok(changed) = series.update(path, session.id.provider) else {
+        let Ok(stamp) = FileStamp::read(path) else {
             return;
         };
+        let previous = self.usage_stamps.get(path);
+        if previous == Some(&stamp) && self.view.usage_session() == Some(&session.id) {
+            return;
+        }
+        let series = self.usage.entry(path.clone()).or_default();
+        let changed = if previous == Some(&stamp) {
+            false
+        } else {
+            if previous.is_some_and(|previous| !stamp.appended_to(previous)) {
+                *series = Default::default();
+            }
+            #[cfg(test)]
+            {
+                self.usage_reads += 1;
+            }
+            let Ok(changed) = series.update(path, session.id.provider) else {
+                return;
+            };
+            self.usage_stamps.insert(path.clone(), stamp);
+            changed
+        };
+        self.view
+            .set_context_usage(&session.id, series.context_percent());
         if changed || self.view.usage_session() != Some(&session.id) {
             self.view.set_usage(&session.id, series.bins.clone());
         }
     }
 
+    fn complete_weekly_usage(
+        &mut self,
+        provider: ProviderId,
+        result: io::Result<Option<crate::providers::WeeklyUsage>>,
+    ) {
+        if let Ok(Some(usage)) = &result {
+            let saved = self
+                .preferences
+                .save_usage(&self.config_dir, provider, usage);
+            self.report_save(saved);
+        }
+        self.hub.weekly_usage_complete(provider, result);
+        self.view.weekly_usage = self.hub.weekly_usage().clone();
+    }
+
     fn refresh_weekly_usage(&mut self) {
-        for (provider, job) in self.hub.weekly_usage_jobs(Instant::now()) {
+        for (provider, job) in self.hub.account_usage_jobs(Instant::now()) {
             let sender = self.sender.clone();
             thread::spawn(move || {
-                let _ = sender.send(Input::WeeklyUsage {
+                let _ = sender.send(Input::AccountUsage {
                     provider,
                     result: job(),
                 });
@@ -565,36 +995,160 @@ impl App {
         }
     }
 
-    fn refresh(&mut self) {
-        let Snapshot { sessions, has_more } = self.hub.refresh();
+    fn complete_account_usage(
+        &mut self,
+        provider: ProviderId,
+        result: io::Result<crate::providers::AccountUsage>,
+    ) {
+        match result {
+            Ok(usage) => {
+                self.view.offer_reset_credit(provider, usage.reset_offers);
+                self.complete_weekly_usage(provider, Ok(usage.weekly));
+            }
+            Err(error) => self.complete_weekly_usage(provider, Err(error)),
+        }
+    }
+
+    fn redeem_reset_credit(
+        &mut self,
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+    ) {
+        let Some(job) = self
+            .hub
+            .provider(provider)
+            .redeem_reset_credit(request.clone())
+        else {
+            self.view.reset_credit_completed(provider);
+            self.view
+                .set_notice(Some(io::ErrorKind::Unsupported.to_string()));
+            return;
+        };
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| Err(io::Error::other("Reset credit job panicked")));
+            let _ = sender.send(Input::ResetCreditRedeemed {
+                provider,
+                request,
+                result,
+            });
+        });
+    }
+
+    fn complete_reset_credit(
+        &mut self,
+        provider: ProviderId,
+        request: crate::providers::ResetCreditRequest,
+        result: io::Result<crate::providers::ResetCreditRedemption>,
+    ) {
+        use crate::providers::ResetCreditOutcome;
+        match result {
+            Ok(redemption) => {
+                self.view.reset_credit_completed(provider);
+                self.complete_account_usage(provider, Ok(redemption.usage));
+                let failure = match redemption.outcome {
+                    ResetCreditOutcome::Reset
+                    | ResetCreditOutcome::AlreadyRedeemed
+                    | ResetCreditOutcome::NothingToReset => None,
+                    ResetCreditOutcome::NoCredit => Some("noCredit"),
+                    ResetCreditOutcome::Cooldown => Some("cooldown"),
+                    ResetCreditOutcome::Ineligible => Some("ineligible"),
+                    ResetCreditOutcome::Unavailable => Some("unavailable"),
+                };
+                if let Some(failure) = failure {
+                    self.view
+                        .set_notice(Some(redemption.reason.unwrap_or_else(|| failure.into())));
+                }
+            }
+            Err(error) => {
+                self.view.reset_credit_failed(provider, &request);
+                self.view.set_notice(Some(error.to_string()));
+            }
+        }
+    }
+
+    fn apply_sessions(&mut self, Snapshot { sessions, has_more }: Snapshot) {
+        self.forget_inactive_state(&sessions);
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
     }
 
+    /// Finished tasks leave the Pinned group and discard their saved interface state.
+    fn forget_inactive_state(&mut self, sessions: &[Session]) {
+        for session in sessions
+            .iter()
+            .filter(|session| session.status == SessionStatus::Inactive)
+        {
+            if self.preferences.tasks.contains_key(&session.id) {
+                let saved = self.preferences.forget_task(&self.config_dir, &session.id);
+                self.report_save(saved);
+            }
+            self.view.clear_pinned_events(&session.id);
+        }
+        let pinned = self.preferences.pinned.len();
+        self.preferences.pinned.retain(|id| {
+            !sessions
+                .iter()
+                .any(|session| &session.id == id && session.status == SessionStatus::Inactive)
+        });
+        if self.preferences.pinned.len() != pinned {
+            let saved = self.preferences.save_pinned(&self.config_dir);
+            self.report_save(saved);
+            self.view.set_pinned(&self.preferences.pinned);
+        }
+    }
+
     /// Returns true when the dashboard should close.
     fn send_input(&mut self, id: SessionKey, input: SessionInput) {
+        if self.send_to_terminal(&id, &input) {
+            return;
+        }
         let Some(session) = self.session(&id) else {
-            self.view.input_failed("Task is no longer available".into());
+            self.input_error(&input, "Task is no longer available".into());
             return;
         };
         let Some(job) = self.hub.provider(id.provider).send(&session, input.clone()) else {
-            self.view
-                .input_failed("This task cannot receive that input".into());
+            self.input_error(&input, "This task cannot receive that input".into());
             return;
+        };
+        // A closing terminal client still owns the session's input until it leaves.
+        let closing = self
+            .closing_terminals
+            .get_mut(&id)
+            .and_then(session_terminal::TerminalClose::take);
+        let job: Job = match closing {
+            Some(close) => Box::new(move || {
+                close
+                    .join()
+                    .map_err(|_| io::Error::other("Terminal close panicked"))?;
+                job()
+            }),
+            None => job,
         };
         self.start_input_job(id, input, job);
     }
 
+    fn input_error(&mut self, input: &SessionInput, error: String) {
+        if matches!(input, SessionInput::Interrupt) {
+            self.view.set_notice(Some(format!("Cannot stop: {error}")));
+        } else {
+            self.view.input_failed(error);
+        }
+    }
+
     fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
         if !self.pending_inputs.insert(id.clone()) {
-            self.view
-                .set_notice(Some("Input is still being sent".into()));
             return false;
         }
-        self.view.input_sending(&id);
+        let interrupt = matches!(input, SessionInput::Interrupt);
+        if !interrupt {
+            self.view.input_sending(&id, &input);
+        }
         let sender = self.sender.clone();
         let target = id.clone();
+        let sent_input = input.clone();
         match thread::Builder::new()
             .name("agents-send".into())
             .spawn(move || {
@@ -602,14 +1156,18 @@ impl App {
                     .unwrap_or_else(|_| Err(io::Error::other("Input job panicked")));
                 let _ = sender.send(Input::Sent {
                     id: target,
-                    input,
+                    input: sent_input,
                     result,
                 });
             }) {
             Ok(_) => true,
             Err(error) => {
                 self.pending_inputs.remove(&id);
-                self.view.input_failed(error.to_string());
+                if interrupt {
+                    self.view.set_notice(Some(format!("Cannot stop: {error}")));
+                } else {
+                    self.view.input_complete(&id, &input, Err(error));
+                }
                 false
             }
         }
@@ -617,19 +1175,18 @@ impl App {
 
     fn new_draft(&mut self, cwd: PathBuf) {
         let result: io::Result<crate::ui::DraftSetup> = (|| {
+            let (cwd, branch) = draft_location(cwd)?;
             let (provider, defaults) = self
                 .hub
-                .task_defaults()
+                .task_defaults(&cwd)
                 .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
             let defaults = defaults?;
-            let repository = crate::tasks::repository(&cwd)?;
             Ok(crate::ui::DraftSetup {
                 provider,
-                cwd: repository.directory,
+                cwd,
                 model: defaults.model,
                 effort: defaults.effort,
-                branch: repository.branch,
-                trunk: repository.trunk,
+                branch,
             })
         })();
         match result {
@@ -644,19 +1201,19 @@ impl App {
 
     fn create_task(
         &mut self,
-        draft_id: DraftId,
+        draft_key: DraftKey,
         provider: ProviderId,
         request: crate::tasks::NewTask,
     ) {
-        let command = self
+        let job = self
             .hub
             .provider(provider)
             .create(&request)
             .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
-        let mut command = match command {
-            Ok(command) => command,
+        let job = match job {
+            Ok(job) => job,
             Err(error) => {
-                self.view.draft_created(draft_id, Err(error));
+                self.view.draft_created(draft_key, Err(error));
                 return;
             }
         };
@@ -664,44 +1221,146 @@ impl App {
         if let Err(error) = thread::Builder::new()
             .name("agents-create".into())
             .spawn(move || {
-                let result =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| command.output()))
-                        .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
                 let _ = sender.send(Input::Created {
-                    draft_id,
+                    draft_key,
                     provider,
                     result,
                 });
             })
         {
-            self.view.draft_created(draft_id, Err(error));
+            self.view.draft_created(draft_key, Err(error));
         }
     }
 
-    fn create_worktree(&mut self, draft_id: DraftId, cwd: PathBuf, branch: String) {
+    fn persist_drafts(&mut self) {
+        self.preferences.drafts = self.view.stored_drafts();
+        let saved = self.preferences.save_drafts(&self.config_dir);
+        self.report_save(saved);
+    }
+
+    fn change_draft_directory(&mut self, draft_key: DraftKey, cwd: PathBuf) {
+        match draft_location(cwd) {
+            Ok((cwd, branch)) => self.view.draft_directory_changed(draft_key, cwd, branch),
+            Err(error) => self.view.draft_directory_failed(draft_key, error),
+        }
+    }
+
+    /// Creates the task's worktree on `branch`, then the task in it.
+    fn create_task_in_worktree(
+        &mut self,
+        draft_key: DraftKey,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
+        branch: crate::tasks::BranchChoice,
+    ) {
         let Some(root) = self.preferences.worktree_root.clone() else {
-            self.view.draft_worktree_complete(
-                draft_id,
-                Err(io::Error::other(
-                    "Set worktree_root, WORKTREES, or WORKSPACE",
-                )),
+            self.view.draft_worktree_created(
+                draft_key,
+                Err(io::Error::other("Set worktree_root in agents.json")),
             );
             return;
         };
         let config = crate::providers::claude::trust_config_path();
+        let cwd = request.cwd.clone();
         let sender = self.sender.clone();
         if let Err(error) = thread::Builder::new()
             .name("agents-worktree".into())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     crate::tasks::create_worktree(&cwd, &root, &branch, &config)
-                        .map(|cwd| (cwd, branch))
+                        .map(|cwd| (cwd, branch.name().to_owned()))
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
-                let _ = sender.send(Input::WorktreeCreated { draft_id, result });
+                let _ = sender.send(Input::WorktreeCreated {
+                    draft_key,
+                    provider,
+                    request,
+                    result,
+                });
             })
         {
-            self.view.draft_worktree_complete(draft_id, Err(error));
+            self.view.draft_worktree_created(draft_key, Err(error));
+        }
+    }
+
+    /// Hides the session at once and deletes it on a worker thread.
+    fn delete(&mut self, session: Session) {
+        let id = session.id.clone();
+        self.view.hide(&id);
+        let job = match self.hub.provider(id.provider).delete(&session) {
+            Ok(job) => job,
+            Err(error) => return self.deleted(&id, Err(error)),
+        };
+        if let Err(error) = self.run_session_job(
+            id.clone(),
+            job,
+            "agents-delete",
+            "Delete job panicked",
+            |id, result| Input::Deleted { id, result },
+        ) {
+            self.deleted(&id, Err(error));
+        }
+    }
+
+    fn archive(&mut self, session: Session) {
+        let id = session.id.clone();
+        self.view.hide(&id);
+        let job = match self.hub.provider(id.provider).archive(&session) {
+            Ok(job) => job,
+            Err(error) => return self.archived(&id, Err(error)),
+        };
+        if let Err(error) = self.run_session_job(
+            id.clone(),
+            job,
+            "agents-archive",
+            "Archive job panicked",
+            |id, result| Input::Archived { id, result },
+        ) {
+            self.archived(&id, Err(error));
+        }
+    }
+
+    fn run_session_job(
+        &self,
+        id: SessionKey,
+        job: Job,
+        name: &str,
+        panic_message: &'static str,
+        complete: fn(SessionKey, io::Result<()>) -> Input,
+    ) -> io::Result<()> {
+        let sender = self.sender.clone();
+        thread::Builder::new().name(name.into()).spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| Err(io::Error::other(panic_message)));
+            let _ = sender.send(complete(id, result));
+        })?;
+        Ok(())
+    }
+
+    fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
+        self.view.unhide(id);
+        self.request_refresh();
+        if let Err(error) = result {
+            self.view
+                .set_notice(Some(format!("Cannot archive: {error}")));
+        }
+    }
+
+    fn deleted(&mut self, id: &SessionKey, result: io::Result<()>) {
+        match result {
+            Ok(()) => {
+                let saved = self.preferences.forget_task(&self.config_dir, id);
+                self.report_save(saved);
+                self.request_refresh();
+            }
+            Err(error) => {
+                self.view.unhide(id);
+                self.request_refresh();
+                self.view
+                    .set_notice(Some(format!("Cannot delete: {error}")));
+            }
         }
     }
 
@@ -710,8 +1369,8 @@ impl App {
             return false;
         };
         let target = match &action {
-            Action::Open(id)
-            | Action::Resume(id)
+            Action::Resume(id)
+            | Action::OpenTerminal(id)
             | Action::Fork(id)
             | Action::Rename { id, .. }
             | Action::Delete(id)
@@ -723,24 +1382,46 @@ impl App {
         if let Some(session) = target.and_then(|id| self.session(id))
             && !session.can_resume()
         {
-            if matches!(action, Action::Open(_) | Action::Resume(_)) {
+            if matches!(action, Action::Resume(_)) {
                 return self.handle_action(Some(Action::Unsupported("Resume")));
+            }
+            if matches!(action, Action::OpenTerminal(_)) {
+                return self.handle_action(Some(Action::Unsupported("Terminal")));
             }
             return false;
         }
         match action {
-            Action::Quit => return true,
+            Action::RedeemResetCredit { provider, request } => {
+                self.redeem_reset_credit(provider, request)
+            }
+            Action::Batch(actions) => {
+                for action in actions {
+                    if self.handle_action(Some(action)) {
+                        return true;
+                    }
+                }
+            }
+            Action::Quit => {
+                self.persist_drafts();
+                return true;
+            }
+            Action::PersistDrafts => self.persist_drafts(),
             Action::NewDraft { cwd } => self.new_draft(cwd),
             Action::CreateTask {
-                draft_id,
+                draft_key,
                 provider,
                 request,
-            } => self.create_task(draft_id, provider, request),
-            Action::CreateWorktree {
-                draft_id,
-                cwd,
-                branch,
-            } => self.create_worktree(draft_id, cwd, branch),
+                branch: None,
+            } => self.create_task(draft_key, provider, request),
+            Action::CreateTask {
+                draft_key,
+                provider,
+                request,
+                branch: Some(branch),
+            } => self.create_task_in_worktree(draft_key, provider, request, branch),
+            Action::ChangeDraftDirectory { draft_key, cwd } => {
+                self.change_draft_directory(draft_key, cwd)
+            }
             Action::SetModel { id, model } => self.send_input(id, SessionInput::SetModel(model)),
             Action::SetEffort { id, effort } => {
                 self.send_input(id, SessionInput::SetEffort(effort))
@@ -748,20 +1429,46 @@ impl App {
             Action::SendPrompt { id, text } => {
                 self.send_input(id, SessionInput::Prompt(text));
             }
-            Action::Back => {
-                let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
-                else {
-                    return self.launch_new();
-                };
-                let id = session.id.clone();
-                return self.launch_session(Action::Resume(id), session);
+            Action::PersistQuestion { id, ask } => {
+                let saved = self.preferences.save_task_ask(&self.config_dir, &id, ask);
+                self.report_save(saved);
             }
+            Action::AnswerQuestions { ask, answer } => {
+                let id = ask.session.clone();
+                if let Some(transcript) = self
+                    .session(&id)
+                    .and_then(|session| session.transcript.clone())
+                {
+                    self.send_input(
+                        id,
+                        SessionInput::Answer {
+                            ask,
+                            answer,
+                            transcript,
+                        },
+                    );
+                } else {
+                    self.view
+                        .set_notice(Some("Session has no transcript".into()));
+                }
+            }
+            Action::SendImages { id, text, images } => {
+                self.send_input(id, SessionInput::PromptWithImages { text, images })
+            }
+            Action::PasteImage => match self.clipboard.image() {
+                Ok(image) => self.view.attach_image(image),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            },
+            Action::PasteText => match self.clipboard.text() {
+                Ok(text) => return self.paste(&text),
+                Err(error) => self.view.set_notice(Some(error.to_string())),
+            },
             Action::ShowMore => {
                 self.hub.show_more();
                 self.view.set_loading(true);
-                self.refresh();
+                self.request_refresh();
             }
-            Action::Open(id) | Action::Resume(id) => {
+            Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
                     return self.launch_session(Action::Resume(id), session);
                 }
@@ -771,17 +1478,26 @@ impl App {
                     return self.launch_session(Action::Fork(id), session);
                 }
             }
+            Action::OpenTerminal(id) => self.open_terminal(id),
+            Action::CloseTerminal => self.close_terminal(),
+            Action::TerminalInput(bytes) => self.write_terminal(&bytes),
+            Action::TerminalPaste(text) => self.paste_terminal(&text),
             Action::New => {
                 return self.launch_new();
+            }
+            Action::Rename { id, name } if id.provider == ProviderId::Claude => {
+                self.send_input(id, SessionInput::Rename(name));
             }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
                     if session.transcript.is_some() {
                         match self.hub.provider(id.provider).rename(&session, &name) {
-                            Ok(()) => self.refresh(),
+                            Ok(()) => {
+                                self.request_refresh();
+                            }
                             Err(error) => self
                                 .view
-                                .set_notice(Some(format!("Failed to rename: {error}"))),
+                                .set_notice(Some(format!("Cannot rename: {error}"))),
                         }
                     } else {
                         self.view
@@ -790,41 +1506,12 @@ impl App {
                 }
             }
             Action::Delete(id) => {
-                self.refresh();
-                if let Some(session) = self.session(&id) {
-                    if !session.can_resume() {
-                        return false;
-                    }
-                    if session.transcript.is_none() {
-                        self.view.set_notice(Some("Nothing to delete".into()));
-                    } else {
-                        match self.hub.provider(id.provider).delete(&session) {
-                            Ok(()) => {
-                                self.view.hide(&id);
-                                self.refresh();
-                            }
-                            Err(error) => {
-                                self.refresh();
-                                self.view
-                                    .set_notice(Some(format!("Failed to delete: {error}")));
-                            }
-                        }
-                    }
-                } else {
-                    self.view.set_notice(Some("Nothing to delete".into()));
-                }
+                let generation = self.request_refresh();
+                self.session_refresh.deletes.push((generation, id));
             }
             Action::Archive(id) => {
                 if let Some(session) = self.session(&id) {
-                    match self.hub.provider(id.provider).archive(&session) {
-                        Ok(()) => {
-                            self.view.hide(&id);
-                            self.refresh();
-                        }
-                        Err(error) => self
-                            .view
-                            .set_notice(Some(format!("Failed to archive: {error}"))),
-                    }
+                    self.archive(session);
                 }
             }
             Action::Stop(id) => {
@@ -834,20 +1521,42 @@ impl App {
             Action::TogglePin { id, pinned } => {
                 self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
                 if pinned {
-                    self.preferences.pinned.push(id);
+                    self.preferences.pinned.insert(0, id);
                 }
-                self.save_preferences();
+                let saved = self.preferences.save_pinned(&self.config_dir);
+                self.report_save(saved);
                 self.view.set_pinned(&self.preferences.pinned);
+            }
+            Action::ToggleEventPin { task, pinned } => {
+                let saved =
+                    self.preferences
+                        .save_task_pinned_events(&self.config_dir, &task, pinned);
+                self.report_save(saved);
+            }
+            Action::PersistUsageView(view) => {
+                self.preferences.usage_view = view;
+                let saved = self.preferences.save_usage_view(&self.config_dir);
+                self.report_save(saved);
+            }
+            Action::PersistSorting { id, sorting } => {
+                let saved = self
+                    .preferences
+                    .save_task_sort(&self.config_dir, &id, sorting);
+                self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {
                 self.preferences.grouping = grouping;
-                self.save_preferences();
+                let saved = self.preferences.save_grouping(&self.config_dir);
+                self.report_save(saved);
+            }
+            Action::Cut(text) => {
+                if let Err(error) = self.clipboard.copy(&text) {
+                    self.view.set_notice(Some(format!("Cannot copy: {error}")));
+                }
             }
             Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
-                Err(error) => self
-                    .view
-                    .set_notice(Some(format!("Failed to copy: {error}"))),
+                Err(error) => self.view.set_notice(Some(format!("Cannot copy: {error}"))),
             },
             Action::Unsupported(what) => {
                 self.view
@@ -866,10 +1575,9 @@ impl App {
                     Ok(mut child) => {
                         thread::spawn(move || child.wait());
                     }
-                    Err(error) => self.view.set_notice(Some(format!(
-                        "Failed to open {}: {error}",
-                        target.display()
-                    ))),
+                    Err(error) => self
+                        .view
+                        .set_notice(Some(format!("Cannot open {}: {error}", target.display()))),
                 }
             }
         }
@@ -891,18 +1599,16 @@ impl App {
             .cloned()
     }
 
-    fn save_preferences(&mut self) {
-        if let Err(error) = self.preferences.save(&self.config_dir) {
+    fn report_save(&mut self, result: io::Result<()>) {
+        if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Failed to save preferences: {error}")));
+                .set_notice(Some(format!("Cannot save preferences: {error}")));
         }
     }
 
     /// Hands the terminal to the selected session's provider process.
     fn launch_session(&mut self, action: Action, session: Session) -> bool {
         if self.pending_inputs.contains(&session.id) {
-            self.view
-                .set_notice(Some("Input is still being sent".into()));
             return false;
         }
 
@@ -921,7 +1627,6 @@ impl App {
             .provider(session.id.provider)
             .launch(&action, Some(&session));
         if self.launch.is_some() {
-            self.last_session = Some(session.id);
             return true;
         }
         false
@@ -950,20 +1655,36 @@ impl crossterm::Command for MouseReports {
     }
 }
 
+#[path = "app_refresh.rs"]
+mod session_refresh;
+use session_refresh::SessionRefresh;
+
+#[path = "app_keyboard.rs"]
+mod keyboard;
+
+#[path = "app_terminal.rs"]
+mod session_terminal;
+
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(
         stdout,
         terminal::EnterAlternateScreen,
-        crossterm::event::EnableBracketedPaste
+        crossterm::event::EnableBracketedPaste,
+        crossterm::event::PushKeyboardEnhancementFlags(
+            crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        )
     )?;
+    keyboard::enable_tmux_keys(&mut stdout)?;
     Terminal::new(CrosstermBackend::new(stdout))
 }
 
 fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     let reports = crossterm::execute!(
         terminal.backend_mut(),
+        crossterm::event::PopKeyboardEnhancementFlags,
+        keyboard::ModifyOtherKeys(false),
         crossterm::event::DisableThemeChangeReports,
         crossterm::event::DisableBracketedPaste,
         MouseReports::Disable
@@ -977,6 +1698,10 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 #[cfg(test)]
 #[path = "providers/claude/app_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_overlay_tests.rs"]
+mod overlay_tests;
 
 /// How many times taller than wide one terminal cell is, when the terminal reports its pixels.
 fn cell_aspect() -> Option<f64> {
@@ -992,3 +1717,47 @@ fn cell_aspect() -> Option<f64> {
 #[cfg(test)]
 #[path = "app_input_tests.rs"]
 mod input_tests;
+
+#[cfg(test)]
+#[path = "app_ui_tests.rs"]
+mod ui_tests;
+
+#[cfg(test)]
+#[path = "app_live_tests.rs"]
+pub(crate) mod live_tests;
+
+#[cfg(test)]
+#[path = "app_loop_tests.rs"]
+mod loop_tests;
+
+#[cfg(test)]
+#[path = "app_project_tests.rs"]
+mod project_tests;
+
+#[cfg(test)]
+#[path = "app_event_search_tests.rs"]
+mod event_search_tests;
+
+#[cfg(test)]
+#[path = "app_weekly_usage_tests.rs"]
+mod weekly_usage_tests;
+
+#[cfg(test)]
+#[path = "app_reset_credit_tests.rs"]
+mod reset_credit_tests;
+
+#[cfg(test)]
+#[path = "app_transcript_tests.rs"]
+mod transcript_tests;
+
+#[cfg(test)]
+#[path = "app_refresh_tests.rs"]
+mod refresh_tests;
+
+#[cfg(test)]
+#[path = "app_codex_paging_tests.rs"]
+mod codex_paging_tests;
+
+#[cfg(test)]
+#[path = "app_event_pin_tests.rs"]
+mod event_pin_tests;

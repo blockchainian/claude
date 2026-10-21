@@ -1,9 +1,100 @@
 use super::*;
 
+/// Maps the dashboard list bindings to their navigation action.
+pub(super) fn list_navigation(key: KeyEvent) -> Option<KeyCode> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return match key.code {
+            KeyCode::Char('p' | 'k') => Some(KeyCode::Up),
+            KeyCode::Char('n' | 'j') => Some(KeyCode::Down),
+            KeyCode::Char('b') => Some(KeyCode::PageUp),
+            KeyCode::Char('f') => Some(KeyCode::PageDown),
+            _ => None,
+        };
+    }
+    if key
+        .modifiers
+        .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('k') => Some(KeyCode::Up),
+        KeyCode::Char('j') => Some(KeyCode::Down),
+        code @ (KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::PageUp
+        | KeyCode::PageDown
+        | KeyCode::Home
+        | KeyCode::End) => Some(code),
+        _ => None,
+    }
+}
+
+/// The choice a list navigation key moves to among `len` choices: up and down wrap around.
+pub(super) fn step(selected: usize, len: usize, page: usize, code: KeyCode) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    match code {
+        KeyCode::Up => (selected + len - 1) % len,
+        KeyCode::Down => (selected + 1) % len,
+        KeyCode::PageUp => selected.saturating_sub(page.max(1)),
+        KeyCode::PageDown => (selected + page.max(1)).min(len - 1),
+        KeyCode::Home => 0,
+        KeyCode::End => len - 1,
+        _ => selected,
+    }
+}
+
+/// One row of a choice list: plain text or a choice.
+pub(super) enum ListRow {
+    Text(Line<'static>),
+    Choice(usize, Line<'static>),
+}
+
+/// Draws `rows` from `scroll`, moved so the selected choice stays visible, highlighting it like
+/// the task list's cursor row; returns each drawn choice's row.
+pub(super) fn render_list(
+    rows: &[ListRow],
+    selected: usize,
+    scroll: &std::cell::Cell<usize>,
+    area: Rect,
+    buf: &mut Buffer,
+) -> Vec<(Rect, usize)> {
+    let height = usize::from(area.height);
+    let position = rows
+        .iter()
+        .position(|row| matches!(row, ListRow::Choice(index, _) if *index == selected));
+    let mut start = scroll.get().min(rows.len().saturating_sub(height));
+    if let Some(position) = position {
+        if position < start {
+            start = position;
+        } else if position >= start + height {
+            start = position + 1 - height;
+        }
+    }
+    scroll.set(start);
+    let mut drawn = Vec::new();
+    for (offset, row) in rows.iter().skip(start).take(height).enumerate() {
+        let rect = render::row(area, offset as u16, 1);
+        match row {
+            ListRow::Text(text) => render::line(text.clone(), rect, buf),
+            ListRow::Choice(index, text) => {
+                let mut text = text.clone();
+                if *index == selected {
+                    render::fill_list_row(rect, buf, style::cursor_style());
+                    text = text.patch_style(style::cursor_style());
+                }
+                render::line(text, rect, buf);
+                drawn.push((rect, *index));
+            }
+        }
+    }
+    drawn
+}
+
 pub(super) enum CenterRow {
     Group(usize),
-    DraftGroup(crate::model::DraftId),
-    Draft(crate::model::DraftId),
     Task(usize),
     Parent(usize),
     Gap,
@@ -38,95 +129,10 @@ impl View {
             entries.push(CenterRow::Task(index));
             previous = Some(index);
         }
-        if self.status_filter == 0 {
-            for draft in &self.drafts {
-                let group = entries.iter().position(|entry| match entry {
-                    CenterRow::Group(index) => {
-                        self.project_groups[*index].heading == draft.heading()
-                    }
-                    CenterRow::DraftGroup(id) => self
-                        .drafts
-                        .iter()
-                        .any(|other| other.id == *id && other.heading() == draft.heading()),
-                    _ => false,
-                });
-                if let Some(group) = group {
-                    let next = entries
-                        .iter()
-                        .enumerate()
-                        .skip(group + 1)
-                        .find(|(_, entry)| {
-                            matches!(
-                                entry,
-                                CenterRow::Group(_) | CenterRow::DraftGroup(_) | CenterRow::Gap
-                            )
-                        })
-                        .map_or(entries.len(), |(index, _)| index);
-                    entries.insert(next, CenterRow::Draft(draft.id));
-                } else {
-                    if !entries.is_empty() {
-                        entries.push(CenterRow::Gap);
-                    }
-                    entries.push(CenterRow::DraftGroup(draft.id));
-                    entries.push(CenterRow::Draft(draft.id));
-                }
-            }
-        }
         entries
     }
 
     pub(super) fn page_selection(&mut self, forward: bool) {
-        if self.status_filter == 0 && !self.drafts.is_empty() {
-            let entries = self.center_rows(&self.selectable_indices(), self.grouping);
-            let targets: Vec<_> = entries
-                .iter()
-                .enumerate()
-                .filter_map(|(position, row)| match row {
-                    CenterRow::Task(index) => Some((position, Some(*index), None)),
-                    CenterRow::Draft(id) => Some((position, None, Some(*id))),
-                    CenterRow::ShowMore => Some((position, Some(usize::MAX), None)),
-                    _ => None,
-                })
-                .collect();
-            if targets.is_empty() {
-                return;
-            }
-            let current = targets
-                .iter()
-                .find(|(_, index, draft)| {
-                    if let Some(id) = draft {
-                        self.selected_draft == Some(*id)
-                    } else {
-                        self.selected_draft.is_none() && *index == Some(self.selected)
-                    }
-                })
-                .map_or(0, |(position, _, _)| *position);
-            let height = self.viewport.borrow().page_height.max(1);
-            let desired = if forward {
-                current.saturating_add(height)
-            } else {
-                current.saturating_sub(height)
-            };
-            let target = if forward {
-                targets
-                    .iter()
-                    .find(|(position, _, _)| *position >= desired)
-                    .unwrap_or_else(|| targets.last().unwrap())
-            } else {
-                targets
-                    .iter()
-                    .rev()
-                    .find(|(position, _, _)| *position <= desired)
-                    .unwrap_or(&targets[0])
-            };
-            self.viewport.borrow_mut().scroll = target.0.min(entries.len().saturating_sub(height));
-            if let Some(id) = target.2 {
-                self.select_draft(id);
-            } else if let Some(index) = target.1 {
-                self.select(index);
-            }
-            return;
-        }
         let indices = self.selectable_indices();
         let mut state = self.viewport.borrow_mut();
         if indices.is_empty() {
@@ -151,7 +157,7 @@ impl View {
             .find(|(_, index)| *index == self.selected)
             .map(|(position, _)| *position)
             .unwrap_or(tasks[0].0);
-        let height = state.page_height.max(/*other*/ 1);
+        let height = state.page_height.max(1);
         let target = if forward {
             current.saturating_add(height)
         } else {

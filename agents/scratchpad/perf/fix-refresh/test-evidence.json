@@ -1,0 +1,97 @@
+{
+  "source": {
+    "base": "175c81c786768445a8421a00f29c24823abf0855",
+    "method": "git archive HEAD plus owned patch; excludes uncommitted peer changes",
+    "patch_sha256": "20b027a71bfb69741e7f996f0a078fac6c867e1a92b66ae614aa43f78e245108",
+    "patch": "delivery-code.patch",
+    "cargo_target_dir": "/private/tmp/agents-fix-refresh-target",
+    "files": [
+      "agents/src/app.rs",
+      "agents/src/providers/mod.rs",
+      "agents/src/providers/claude/mod.rs",
+      "agents/src/providers/codex/mod.rs",
+      "agents/src/refresh.rs",
+      "agents/src/sessions/mod.rs",
+      "agents/src/app_input_tests.rs",
+      "agents/src/app_live_tests.rs",
+      "agents/src/providers/claude/app_tests.rs",
+      "agents/src/app_ui_tests.rs",
+      "agents/src/app_refresh.rs",
+      "agents/src/app_refresh_tests.rs",
+      "agents/src/sessions/refresh.rs"
+    ]
+  },
+  "tests": [
+    {
+      "test": "refresh_allows_first_frame_input_and_exit_while_sqlite_is_locked",
+      "fixture": "real Codex SQLite database with exclusive lock; real terminal buffer and Ctrl+C",
+      "red": "895.717 ms, failed 300 ms bound",
+      "green": "candidate-final-host: passed"
+    },
+    {
+      "test": "filesystem_refresh_updates_only_the_affected_session",
+      "fixture": "real upstream Claude JSONL files, both edited, only one notified",
+      "red": "unrelated session changed",
+      "green": "candidate-final-host: passed"
+    },
+    {
+      "test": "refresh_burst_runs_once_then_runs_one_merged_request",
+      "fixture": "real empty Hub; 50 path requests and one full refresh",
+      "green": "two completions: generations 1 and 52"
+    },
+    {
+      "test": "targeted_refreshes_keep_the_full_liveness_deadline",
+      "red": "partial writes postponed full liveness refresh",
+      "green": "candidate-final-host: passed"
+    },
+    {
+      "test": "targeted_refresh_keeps_the_history_page_budget_with_subagents",
+      "red": "partial snapshot included extra history rows",
+      "green": "candidate-final-host: passed"
+    },
+    {
+      "test": "targeted_refresh_backfills_a_removed_history_row",
+      "red": "partial snapshot missed replacement history row",
+      "green": "candidate-final-host: passed"
+    },
+    {
+      "test": "codex_stop_refreshes_after_failure_and_reports_in_footer",
+      "fixture": "real SQLite exclusive lock",
+      "red": "pending stop cleared before refresh result",
+      "green": "candidate-final-host: passed"
+    },
+    {
+      "test": "subagent_file_change_does_not_refresh_its_parent_row",
+      "fixture": "real upstream Claude parent and subagent JSONL",
+      "red": "child path refreshed unrelated parent row",
+      "green": "candidate-final-host: passed"
+    }
+  ],
+  "other_coverage": [
+    "Codex targeted refresh leaves unrelated row unchanged",
+    "Unknown path discovers a new session",
+    "Filesystem Input preserves paths through fixed-window debounce",
+    "Existing selection, deletion, archive, stop and pagination tests wait for real completion"
+  ],
+  "environment": "A sandbox-only FSEvents test timed out; identical focused suite passed with host permissions. Final gates use host permissions.",
+  "red_logs": {
+    "red.log": "3d9fba049041ddc416f1e3bc6e9a5cb5ae3b1ff73c5a9c3913ba701dd6d8902b",
+    "red-path-corrected.log": "fef81ddaee3455cefcad78c25de25d0c1143bda5ac3908d3084c7e42d3c68e1e",
+    "red-pages.log": "09dc0e438c4b078ebc2457a992c0b51d71f1106d610101b559a7c9e797593348",
+    "red-liveness.log": "c857f03a8fdac47cf0fc4da6bcbe2c1ff9359ddec1017d86aef57be9bf2d3ee1",
+    "red-stop.log": "4ba353b252311dbce8b5d20113aa9835089d21ffc863d8b8b6f35b5041ebd1ab",
+    "red-subagent-path.log": "c6925a6fe5f1bd643bf8d68fa128894241055c1f0dfe4fc18f79c4a7a5bece19"
+  },
+  "final_integration_tests": {
+    "command": [
+      "cargo",
+      "nextest",
+      "run"
+    ],
+    "status": "completion",
+    "passed": 1832,
+    "skipped": 144,
+    "summary": "1832 tests run: 1832 passed (1 slow), 144 skipped",
+    "test_execution_s": 73.809
+  }
+}

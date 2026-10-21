@@ -1,0 +1,25 @@
+{
+  "rateLimits": {
+    "limitId": "codex",
+    "primary": {
+      "usedPercent": 16,
+      "windowDurationMins": 10080,
+      "resetsAt": 1792979570
+    },
+    "secondary": null
+  },
+  "rateLimitResetCredits": {
+    "availableCount": 2,
+    "credits": [
+      {
+        "resetType": "codexRateLimits",
+        "status": "available",
+        "grantedAt": 1790709812,
+        "expiresAt": 1793301812,
+        "title": "Full reset",
+        "description": "Thanks for using Codex! You've been granted one free rate limit reset.",
+        "id": "fixture-credit"
+      }
+    ]
+  }
+}

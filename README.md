@@ -19,6 +19,14 @@ Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from 
 
 ## Install
 
+### Agent Command Center
+
+```sh
+cargo install --locked --git https://github.com/blockchainian/claude agents
+```
+
+`agents` is the terminal dashboard for Claude Code and Codex sessions; run it from the directory whose sessions you want to see.
+
 ### Claude Code
 
 ```
@@ -61,48 +69,6 @@ Intel exposes fourteen skills in Codex; its case-study Workflow remains Claude-o
 Each plugin's README covers its requirements and platform-specific behavior.
 Skills resolve script paths from the loaded `SKILL.md` directory in each shell call.
 For Mobile phone automation, review and trust `phone-session-gate` in `/hooks` first.
-
-## Layout
-
-```
-.claude-plugin/marketplace.json   the catalog, listing every plugin
-.agents/plugins/marketplace.json the Codex catalog, listing eight portable plugins
-plugins/codex/                    the codex-manager plugin
-plugins/feature/                  the ship / handoff / retro plugin
-plugins/mobile/                   the iOS plugin
-plugins/render/                   the Render plugin, trimmed to nine skills
-plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
-plugins/proxy/                    the mitmproxy traffic-capture plugin
-plugins/intel/                    the research plugin: transcribe, digest, translate, case study and more
-plugins/secrets/                  the account and session plugin
-plugins/web/                      the web browser-CLI, leak-finder and design-check plugin
-plugins/computer-use/             the single-window capture plugin
-plugins/creator/                  the creator-account plugin: TikTok upload and stats
-tests/                            the marketplace node suite
-```
-
-Every plugin pins a `version` in `.claude-plugin/plugin.json`; Render and Intel also have
-a `.codex-plugin/plugin.json` for host-specific settings. Render scopes OAuth and hooks; Intel lists fourteen
-portable skills and excludes Claude-only case-study. Keep each plugin's manifest
-versions equal. Bump the version in the same commit as
-the change you want to ship — a plugin whose version is unchanged stays cached
-on every machine that already has it, however much its code moved.
-
-## Tests
-
-```
-npm test              # every suite
-npm run test:codex    # codex-manager against a fake app-server daemon
-npm run test:feature  # the feature plugin's plan checkers, workstream.sh, watch-ci and retro
-npm run test:proxy    # the proxy plugin's capture logic and WireGuard key derivation
-npm run test:intel    # the intel plugin's skills; the render suites need Chrome and uv
-npm run test:web      # the heap-snapshot diff and the design check; needs uv
-npm run test:mobile   # the phone-session hook, the simulator claim, frame diff, stitch and design check; needs uv
-npm run test:secrets  # the local secrets engine and adapter contract
-npm run test:creator  # the creator plugin's account pick, args, stats and sound rows
-npm run test:marketplace  # the marketplace manifest and shared-engine checks
-npm run validate      # the marketplace and plugin manifests
-```
 
 ## License
 

@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering;
 /// Whether the terminal background is light, as last reported by the terminal.
 static LIGHT_BACKGROUND: AtomicBool = AtomicBool::new(false);
 
-#[cfg(test)]
 pub fn light_background() -> bool {
     LIGHT_BACKGROUND.load(Ordering::Relaxed)
 }
@@ -81,17 +80,25 @@ pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> 
     if light {
         Style::default()
             .bold()
-            .fg(Color::Indexed(18))
+            .fg(crate::theme::text_accent_for(true))
             .bg(Color::Indexed(111))
     } else {
         Style::default()
             .bold()
-            .fg(Color::Indexed(24))
+            .fg(crate::theme::text_accent_for(false))
             .bg(Color::Indexed(233))
     }
 }
 pub(super) fn active_tab_style() -> Style {
     selection_style()
+}
+
+/// Highlights a cursor row without replacing its cells' foreground colors.
+pub(super) fn cursor_style() -> Style {
+    Style {
+        fg: None,
+        ..selection_style()
+    }
 }
 pub(super) fn inactive_tab_style() -> Style {
     Style {
@@ -106,27 +113,68 @@ pub(super) fn thread_color(slot: usize) -> Color {
     crate::theme::accent(slot)
 }
 
-/// Label and body styles for transcript events, using terminal palette colors.
-pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
-    use crate::log::Kind;
+/// Label and body styles for transcript events, with the theme accent on tools.
+pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
+    use crate::event::Kind;
     let body = match kind {
-        Kind::User | Kind::QueuedUser => Style::default(),
+        Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
         Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
-        Kind::Tool | Kind::QueuedSystem => Style::default().fg(Color::Blue),
-        Kind::Error | Kind::Denied => Style::default().fg(Color::Red),
+        Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
+        Kind::Error | Kind::Denied => error_style(),
     };
     (body.bold(), body)
 }
 
-pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
-    if last {
-        log_styles(kind).1.bold()
+/// Numeric command status has its own error span; the summary keeps its tool color.
+pub(super) fn event_body_style(kind: &crate::event::Kind, exit_code: Option<i64>) -> Style {
+    let kind = if *kind == crate::event::Kind::Error && exit_code.is_some_and(|code| code != 0) {
+        &crate::event::Kind::Tool
+    } else {
+        kind
+    };
+    event_styles(kind).1
+}
+
+pub(super) fn error_style() -> Style {
+    Style::default().fg(Color::Red)
+}
+
+pub(super) fn time_style() -> Style {
+    Style::default().dim()
+}
+
+/// The braille dots in the usage chart and activity strip.
+pub(super) fn timeline_style(use_colors: bool) -> Style {
+    if use_colors {
+        Style::default().fg(crate::theme::inline_code_color())
     } else {
         Style::default()
     }
 }
 
-/// The border labels used to jump through the log and separate input from output.
-pub(super) fn log_jump_style() -> Style {
+pub(super) fn event_time_style(kind: &crate::event::Kind, last: bool) -> Style {
+    if last {
+        event_styles(kind).1.bold()
+    } else {
+        time_style()
+    }
+}
+
+/// The arrows that separate a tool call's input from its output.
+pub(super) fn event_jump_style() -> Style {
     Style::default().bold().not_dim()
+}
+
+/// Keep a command label's style while coloring only its non-zero exit status.
+pub(super) fn exit_code_line(text: String, code: Option<i64>, style: Style) -> Line<'static> {
+    if let Some(code) = code.filter(|code| *code != 0) {
+        let digits = code.to_string();
+        if let Some(prefix) = text.strip_suffix(&format!(" · {digits}")) {
+            return Line::from(vec![
+                Span::styled(format!("{prefix} · "), style),
+                Span::styled(digits, event_styles(&crate::event::Kind::Error).1.not_dim()),
+            ]);
+        }
+    }
+    Line::from(Span::styled(text, style))
 }

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-06-07T03:05:59.199Z",
+  "ordinal": 456,
+  "type": "response_item",
+  "payload": {
+    "type": "function_call",
+    "name": "list_pages",
+    "namespace": "mcp__chrome_devtools",
+    "arguments": "{}",
+    "call_id": "[scrubbed]"
+  }
+}

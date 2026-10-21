@@ -1,7 +1,4 @@
-use super::formatting::{
-    format_duration, format_relative_time, format_session_duration, tail_lines,
-};
-use super::hints::hint_line;
+use super::formatting::{format_duration, format_relative_time, tail_lines};
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
 use ratatui::widgets::{Block, Borders};
@@ -39,161 +36,297 @@ pub(super) fn render_input_row(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let style = super::style::active_tab_style();
-    buf.set_style(area, style);
     let (text, _) = input_row(prompt, edit, area);
     line(text, area, buf);
-    // Wide graphemes reset their continuation cells while rendering. Apply the row fill
-    // afterward as well, preserving the prompt's foreground color.
-    buf.set_style(area, Style { fg: None, ..style });
 }
+
+pub(super) const HORIZONTAL_PADDING: u16 = 1;
+const PANEL_GAP: u16 = 2 * HORIZONTAL_PADDING + 1;
+
+/// Fills a list row through both padding cells, stopping before column separators.
+pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
+    if area.is_empty() {
+        return;
+    }
+    let left = area.x.saturating_sub(HORIZONTAL_PADDING);
+    let right = area.right().saturating_add(HORIZONTAL_PADDING);
+    let padded = Rect::new(left, area.y, right - left, area.height).intersection(buf.area);
+    buf.set_style(padded, style);
+}
+
+pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
 
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
+    /// The panels above the prompt, where global dialogs center.
+    pub(super) top: Rect,
     pub(super) list: Rect,
     pub(super) gap: Rect,
-    pub(super) details: Rect,
+    pub(super) task_details: Rect,
     pub(super) search: Rect,
+    pub(super) usage_chart: Rect,
     pub(super) footer: Rect,
-    pub(super) log: Rect,
+    pub(super) event_panel: Rect,
     pub(super) prompt: Rect,
+    pub(super) event_detail: Rect,
 }
+
 impl View {
-    fn input(&self) -> (&str, &line_edit::LineEdit) {
-        if self.rename_target.is_some() {
-            ("Rename › ", &self.rename)
-        } else {
-            ("Search › ", &self.search)
-        }
+    fn input(&self) -> (String, &line_edit::LineEdit) {
+        (format!("Search {PROMPT_MARKER} "), &self.search)
     }
 
     pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
-        let header_height = if area.height >= 6 { 3 } else { 0 };
+        let header_height = if area.height >= 6 { 2 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
-        let log_height = bottom_height.saturating_sub(footer_height).max(10);
-        let log_height = if area.height.saturating_sub(footer_height + log_height)
-            >= header_height + 6
-            && self
-                .selected_row()
-                .is_some_and(|session| session.transcript.is_some())
-        {
-            log_height
+        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        // The prompt or question grows with its content up to a share of the rows between
+        // the header and the footer: half in narrow mode, where the event list stacks below
+        // it, and two thirds in wide mode, where the event list sits beside the panels.
+        let content_rows = area
+            .height
+            .saturating_sub(header_height + footer_height + 2)
+            .max(2);
+        let prompt_cap = if wide {
+            content_rows * 2 / 3
         } else {
-            0
+            content_rows / 2
         };
-        let log = row(area, area.height - footer_height - log_height, log_height);
         let prompt_height = self
-            .input_box
-            .height(area.width.saturating_sub(4), &self.input_label())
-            .min(log.y.saturating_sub(header.bottom()));
+            .active_question()
+            .map_or_else(
+                || {
+                    self.input_box.height(
+                        area.width.saturating_sub(2 * HORIZONTAL_PADDING),
+                        &self.input_label(),
+                    )
+                },
+                |question| question.height(area.width.saturating_sub(2 * HORIZONTAL_PADDING)),
+            )
+            .min(prompt_cap);
+        let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
+        let event_height = bottom_height.saturating_sub(footer_height).max(10);
+        let show_event =
+            area.height.saturating_sub(footer_height + event_height) >= header_height + 6;
+        // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
+        // The output keeps its top rule inside this share and leaves one row for its bottom rule.
+        let content_height = area
+            .height
+            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
+        let (top_height, list_height, event_detail_height) = if !show_event {
+            (
+                area.height
+                    .saturating_sub(header_height + footer_height + prompt_height),
+                0,
+                0,
+            )
+        } else if wide {
+            // Round the upper share down and give the remaining content rows below.
+            let top = (u32::from(content_height) * 618 / 1000) as u16;
+            (top, 0, content_height - top)
+        } else {
+            (
+                content_height.div_ceil(3),
+                (content_height + 1) / 3,
+                content_height / 3,
+            )
+        };
+        let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
+        let top = body;
         let prompt = row(
             area,
-            log.y.saturating_sub(area.y + prompt_height),
+            header_height + top_height + u16::from(show_event),
             prompt_height,
         );
-        let body = row(
-            area,
-            header_height,
-            prompt.y.saturating_sub(header.bottom()),
-        )
-        .inner(Margin::new(2, 0));
-        let [list, gap, details] = if body.width >= 7 {
+        let event_panel = if show_event && !wide {
+            row(area, prompt.bottom() - area.y + 1, list_height)
+                .inner(Margin::new(HORIZONTAL_PADDING, 0))
+        } else {
+            Rect::default()
+        };
+        let event_detail = if show_event {
+            row(
+                area,
+                header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
+                event_detail_height,
+            )
+        } else {
+            Rect::default()
+        };
+        let (body, event_list) = if wide && show_event {
+            let column_width = (body.width - 2 * PANEL_GAP) / 4;
+            let event_width = body.width - 2 * PANEL_GAP - 2 * column_width;
+            (
+                Rect {
+                    width: body.width - event_width - PANEL_GAP,
+                    ..body
+                },
+                Rect::new(body.right() - event_width, body.y, event_width, body.height),
+            )
+        } else {
+            (body, Rect::default())
+        };
+        let [list, gap, task_details] = if body.width >= 2 * PANEL_GAP + 1 {
             let content = Rect {
-                width: body.width - 3,
+                width: body.width - PANEL_GAP,
                 ..body
             };
-            let ratio = if area.width >= 90 { 618 } else { 500 };
-            let [list, mut details] = Layout::horizontal([
-                Constraint::Ratio(ratio, 1000),
-                Constraint::Ratio(1000 - ratio, 1000),
-            ])
-            .areas(content);
-            let gap = Rect::new(list.right(), body.y, 3, body.height);
-            details.x += gap.width;
-            [list, gap, details]
+            let [list, mut task_details] =
+                Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                    .areas(content);
+            let gap = Rect::new(list.right(), body.y, PANEL_GAP, body.height);
+            task_details.x += gap.width;
+            [list, gap, task_details]
         } else {
             [body, Rect::default(), Rect::default()]
         };
-        let search = row(
-            list,
-            0,
-            u16::from(self.searching || self.rename_target.is_some()),
-        );
-        let list = row(
-            list,
-            search.height,
-            list.height.saturating_sub(search.height),
-        );
+        // Keep the chart's original canvas and scale when the input row takes list space.
+        let usage_chart = list;
+        let (list, search) = if self.searching {
+            let input = event_list::search_input_rect(list);
+            (
+                row(list, 0, list.height.saturating_sub(input.height)),
+                input,
+            )
+        } else {
+            (list, Rect::default())
+        };
         CenterLayout {
             header,
+            top,
             list,
             gap,
-            details,
+            task_details,
             search,
+            usage_chart,
             footer,
-            log,
+            event_panel: if wide && show_event {
+                event_list
+            } else {
+                event_panel
+            },
             prompt,
+            event_detail,
         }
     }
-    pub(crate) fn log_event_count(&self, area: Rect) -> usize {
+    pub(crate) fn event_count(&self, area: Rect) -> usize {
         usize::from(
             self.center_layout(area)
-                .log
+                .event_panel
                 .height
-                .saturating_sub(super::log::LOG_TOP + 1),
+                .saturating_sub(u16::from(self.event_list.search.active())),
         )
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let layout = self.center_layout(area);
-        if let Some(editor) = &self.branch_editor
-            && let Some((rect, _)) = self
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .find(|(_, field)| *field == Field::Branch)
-        {
-            let (_, caret) = input_row("Branch › ", &editor.editor, *rect);
-            return Some((rect.x + caret, rect.y));
-        }
-        if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
-            return self
-                .input_box
-                .cursor(layout.prompt.inner(Margin::new(2, 0)), &self.input_label());
-        }
-        if (self.log_search.editing || self.log_detail_search.editing)
-            && !self.help
+        if !self.help
             && self.confirm_dialog.is_none()
-            && !layout.log.is_empty()
+            && let Some(cursor) = self.terminal_cursor()
         {
-            let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
-            let search = if self.log_open.is_some() {
-                &self.log_detail_search
-            } else {
-                &self.log_search
-            };
-            let (_, caret) = input_row("Search › ", &search.query, input);
+            return Some(cursor);
+        }
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && self.active_panel == Panel::TaskDetails
+            && let Some(editor) = self.title_editor()
+        {
+            let input = self.viewport.borrow().title_input;
+            if input.is_empty() {
+                return None;
+            }
+            let (_, caret) = editor.window(usize::from(input.width));
             return Some((input.x + caret, input.y));
         }
-        if !(self.searching || self.rename_target.is_some())
-            || self.confirm_dialog.is_some()
-            || self.help
-            || layout.search.is_empty()
+        let layout = self.center_layout(area);
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && self.active_panel == Panel::TaskDetails
+            && let Some(selector) = &self.selector
+            && let Some(editor) = selector.branch_editor()
+        {
+            let input = self.viewport.borrow().task_details_input;
+            if !input.is_empty() {
+                let (_, caret) = input_row(&format!("New branch {PROMPT_MARKER} "), editor, input);
+                return Some((input.x + caret, input.y));
+            }
+        }
+        if !self.help
+            && self.confirm_dialog.is_none()
+            && self.active_panel == Panel::Prompt
+            && let Some(question) = self.active_question()
+        {
+            return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));
+        }
+        if self.prompt_focused()
+            && self.input_disabled().is_none()
+            && !self.help
+            && self.active_question().is_none()
+        {
+            return self.input_box.cursor(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                &self.input_label(),
+            );
+        }
+        if self.task_search_editing()
+            && !self.help
+            && self.confirm_dialog.is_none()
+            && !layout.event_panel.is_empty()
+        {
+            let search_area =
+                if self.active_panel == Panel::EventDetail && !layout.event_detail.is_empty() {
+                    layout
+                        .event_detail
+                        .inner(Margin::new(HORIZONTAL_PADDING, 0))
+                } else {
+                    layout.event_panel
+                };
+            let input = event_list::search_input_rect(search_area);
+            let search = if self.active_panel == Panel::EventDetail {
+                &self.event_detail.search
+            } else {
+                &self.event_list.search
+            };
+            let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
+            return Some((input.x + caret, input.y));
+        }
+        if !self.searching || self.confirm_dialog.is_some() || self.help || layout.search.is_empty()
         {
             return None;
         }
         let (prompt, edit) = self.input();
-        let (_, caret) = input_row(prompt, edit, layout.search);
+        let (_, caret) = input_row(&prompt, edit, layout.search);
         Some((layout.search.x + caret, layout.search.y))
     }
 
+    #[cfg(test)]
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }
+    pub(super) fn clear_overlay(&self, area: Rect, modal: bool, buf: &mut Buffer) {
+        use ratatui::buffer::CellWidth;
+
+        self.viewport
+            .borrow_mut()
+            .overlays
+            .push(Overlay { area, modal });
+        let area = area.intersection(buf.area);
+        if area.is_empty() {
+            return;
+        }
+        // Clear the outside half of any wide character split by an overlay edge.
+        for y in area.y..area.bottom() {
+            if area.x > buf.area.x && buf[(area.x - 1, y)].cell_width() > 1 {
+                buf[(area.x - 1, y)].reset();
+            }
+            if area.right() < buf.area.right() && buf[(area.right() - 1, y)].cell_width() > 1 {
+                buf[(area.right(), y)].reset();
+            }
+        }
+        Clear.render(area, buf);
+    }
+
     pub(crate) fn render_at(
         &self,
         area: Rect,
@@ -204,62 +337,49 @@ impl View {
         {
             // A panel this frame leaves out keeps no links from the last one.
             let mut viewport = self.viewport.borrow_mut();
+            viewport.overlays.clear();
+            viewport.picker_rows.clear();
+            viewport.confirm_options.clear();
+            viewport.list_links.clear();
             viewport.marker = None;
             viewport.field_targets.clear();
-            viewport.details = Rect::default();
-            viewport.log = Rect::default();
-            viewport.details_links.clear();
-            viewport.log_links.clear();
+            viewport.task_details = Rect::default();
+            viewport.task_details_title = Rect::default();
+            viewport.title_input = Rect::default();
+            viewport.task_details_input = Rect::default();
+            viewport.event_panel = Rect::default();
+            viewport.event_borders = [Rect::default(); 2];
+            viewport.output_borders = [Rect::default(); 2];
+            viewport.event_detail = Rect::default();
+            viewport.terminal = Rect::default();
+            viewport.task_details_links.clear();
+            viewport.event_links.clear();
         }
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
-        self.input_box.render(
-            layout.prompt.inner(Margin::new(2, 0)),
-            buf,
-            &self.input_label(),
-            self.input_disabled(),
-        );
-        let inset = |area: Rect| area.inner(Margin::new(2, 0));
-        line(
-            vec![
-                "Agent command center".bold(),
-                format!("  Group: {}  g", self.grouping().label()).dim(),
-            ],
-            inset(layout.header),
-            buf,
-        );
+        if let Some(question) = self.active_question() {
+            question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
+        } else {
+            self.input_box.render(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                buf,
+                &self.input_label(),
+                self.selected_id()
+                    .map_or_else(Style::default, |id| self.title_style(id)),
+                self.input_disabled(),
+                self.prompt_focused(),
+            );
+        }
+        let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
         let labels = TASK_FILTERS
             .iter()
-            .map(|(label, group)| {
-                let count = self
-                    .rows
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, s)| {
-                        !self.hidden.contains(&s.id)
-                            && self.group_index(*index).is_some_and(|parent| {
-                                !self.hidden.contains(&self.rows[parent].id)
-                                    && group.contains(&s.status)
-                            })
-                    })
-                    .count();
+            .enumerate()
+            .map(|(tab, (label, _))| {
+                let count = self.visible_indices_for_filter(tab).len();
                 format!("{label} {count}")
             })
             .collect::<Vec<_>>();
-        let mut tabs = inset(row(layout.header, 1, 1));
-        let filter_hint = if self.searching || self.rename_target.is_some() {
-            Line::default()
-        } else {
-            hint_line(&[("tab/⇧tab", "filter")])
-        };
-        if tabs.width >= 80 && filter_hint.width() > 0 {
-            let width = filter_hint.width() as u16;
-            filter_hint.render(
-                Rect::new(tabs.right() - width, tabs.y, width, tabs.height),
-                buf,
-            );
-            tabs.width = tabs.width.saturating_sub(width + 2);
-        }
+        let tabs = inset(row(layout.header, 0, 1));
         self.viewport.borrow_mut().tab_bar = tabs;
         self.viewport.borrow_mut().tabs = super::selection_tabs::render_filled_tab_bar(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -267,15 +387,24 @@ impl View {
             tabs,
             buf,
         );
-        line(
-            "─".repeat(usize::from(area.width.saturating_sub(4))).dim(),
-            inset(row(layout.header, 2, 1)),
+        let weekly_target = super::weekly_usage::render(
+            row(layout.header, 0, 1),
+            &self.viewport.borrow().tabs,
+            [
+                self.weekly_usage.get(&ProviderId::Claude),
+                self.weekly_usage.get(&ProviderId::Codex),
+            ],
+            self.usage_view,
+            self.use_colors,
             buf,
         );
-        if self.searching || self.rename_target.is_some() {
-            let (prompt, edit) = self.input();
-            render_input_row(prompt, edit, layout.search, buf);
+        if let Some(target) = weekly_target {
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .push((target, Field::WeeklyUsage));
         }
+        rule(row(layout.header, 1, 1), buf);
 
         line(self.center_footer_hints(), inset(layout.footer), buf);
         if let Some((label, _)) = &self.copied {
@@ -289,7 +418,7 @@ impl View {
                 layout.header.height,
                 layout.footer.y.saturating_sub(layout.header.bottom()),
             ));
-            Clear.render(body, buf);
+            self.clear_overlay(body, true, buf);
             let mut lines = self.center_help_lines(body.width);
             if lines.len() > usize::from(body.height) {
                 lines.truncate(usize::from(body.height.saturating_sub(1)));
@@ -300,88 +429,212 @@ impl View {
         }
         for y in layout.gap.y..layout.gap.bottom() {
             if layout.gap.width > 1 {
-                buf[(layout.gap.x + 1, y)]
+                buf[(layout.gap.x + HORIZONTAL_PADDING, y)]
+                    .set_symbol("│")
+                    .set_style(Style::default().dim());
+            }
+        }
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+            for y in layout.event_panel.y..layout.event_panel.bottom() {
+                buf[(
+                    layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
+                    y,
+                )]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
         }
         self.render_center_rows(layout.list, buf, now);
-        self.render_usage_chart(layout.list, buf, now);
+        self.render_usage_chart(layout.usage_chart, buf, now);
+        if self.searching {
+            let (prompt, edit) = self.input();
+            Clear.render(layout.search, buf);
+            render_input_row(&prompt, edit, layout.search, buf);
+        }
         if let Some((notice, _)) = &self.notice
             && !layout.list.is_empty()
         {
             let bottom = row(layout.list, layout.list.height - 1, 1);
-            Clear.render(bottom, buf);
+            self.clear_overlay(bottom, false, buf);
             line(notice.clone().dim(), bottom, buf);
         }
-        // The details title sits on the task log's top rule, or on a rule of its own
-        // when the log is hidden.
-        let mut details = layout.details;
-        let details_rule = if details.is_empty() {
-            None
-        } else if layout.log.is_empty() {
-            details.height = details.height.saturating_sub(1);
-            Some(row(layout.details, details.height, 1))
-        } else {
-            Some(Rect::new(details.x, layout.log.y, details.width, 1))
-        };
-        if !details.is_empty() {
-            self.render_details(details, buf, now);
+        // Activity and task status share the rule immediately above the prompt.
+        let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
+        if !layout.event_detail.is_empty() {
+            rule(middle, buf);
         }
-        self.viewport.borrow_mut().log = layout.log;
-        self.render_log(inset(layout.log), buf, now);
-        if !layout.log.is_empty() {
-            let rule = Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
-                .intersection(inset(layout.log));
+        let mut task_details = layout.task_details;
+        let task_details_rule = if task_details.is_empty() {
+            None
+        } else if !layout.event_detail.is_empty() {
+            Some(Rect::new(task_details.x, middle.y, task_details.width, 1))
+        } else {
+            task_details.height = task_details.height.saturating_sub(1);
+            Some(row(layout.task_details, task_details.height, 1))
+        };
+        if !task_details.is_empty() {
+            self.render_task_details(task_details, buf, now);
+        }
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.event_panel = layout.event_panel;
+            viewport.search = layout.search;
+            viewport.event_detail = inset(layout.event_detail);
+        }
+        self.render_event(layout.event_panel, buf, now);
+        if !layout.event_detail.is_empty() {
+            rule(row(layout.event_detail, 0, 1), buf);
+            let bottom = row(area, layout.event_detail.bottom() - area.y, 1);
+            rule(bottom, buf);
+            self.viewport.borrow_mut().output_borders = [row(layout.event_detail, 0, 1), bottom];
+            self.render_event_detail(inset(layout.event_detail), buf, now);
+        }
+        let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
+        if let Some((title, columns)) = footer_title
+            && self.copied.is_none()
+            && self.footer_shows_task_hints()
+        {
+            super::event_list::render_footer_title(
+                title,
+                columns,
+                inset(layout.footer),
+                self.center_footer_hints().width() as u16,
+                area.width >= WIDE_LAYOUT_COLUMNS,
+                buf,
+            );
+        }
+        if !layout.event_panel.is_empty() {
+            self.viewport.borrow_mut().event_borders = [
+                Rect::new(
+                    layout.event_panel.x,
+                    layout.event_panel.y.saturating_sub(1),
+                    layout.event_panel.width,
+                    1,
+                ),
+                Rect::new(
+                    layout.event_panel.x,
+                    layout.event_panel.bottom(),
+                    layout.event_panel.width,
+                    1,
+                ),
+            ];
+            let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
+                layout.event_panel.bottom()
+            } else {
+                let border = row(area, layout.prompt.bottom() - area.y, 1);
+                rule(border, buf);
+                border.y
+            };
+            // The model and effort sit between the separator's joint, or the screen's left
+            // edge in the narrow layout, and the screen's right edge.
+            let left = if area.width >= WIDE_LAYOUT_COLUMNS {
+                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1)
+            } else {
+                area.x
+            };
+            // The duration label sits on the border between the event list and its detail in both
+            // layouts; the New button, shown only in time order, shares the model's border.
+            let jump_y = if self.event_list.sort == EventSort::Duration {
+                layout.event_panel.bottom()
+            } else {
+                model_y
+            };
+            self.render_event_jump(
+                Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
+                buf,
+            );
+            // The narrow layout starts them at the midline, under the task's folder on the title
+            // rule.
+            let model_left = if area.width < WIDE_LAYOUT_COLUMNS && !layout.gap.is_empty() {
+                layout.gap.x + HORIZONTAL_PADDING
+            } else {
+                left
+            };
+            self.render_event_model(
+                Rect::new(
+                    model_left,
+                    model_y,
+                    area.right().saturating_sub(model_left),
+                    1,
+                ),
+                buf,
+            );
+            let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
-        if let Some(rule) = details_rule {
-            self.render_details_title(rule, buf, now);
+        if let Some(task_details_rule) = task_details_rule {
+            // The title and status rules run from the separator's joint on the left to the event list's
+            // joint or the screen's right edge.
+            let left = layout.gap.x + HORIZONTAL_PADDING;
+            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+                layout.event_panel.x - HORIZONTAL_PADDING
+            } else {
+                area.right()
+            };
+            if layout.header.height >= 2 {
+                self.render_status_rule(
+                    Rect::new(left, layout.header.y + 1, right - left, 1),
+                    buf,
+                    now,
+                );
+            }
+            self.render_title_rule(Rect::new(left, task_details_rule.y, right - left, 1), buf);
         }
-        if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
-            let label = " ↑ Top ";
-            let width = (label.width() as u16).min(layout.list.width);
-            let jump = Rect::new(
-                layout.list.x + layout.list.width.saturating_sub(width) / 2,
-                layout.log.y,
-                width,
-                1,
-            )
-            .intersection(inset(layout.log));
-            Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
-            self.viewport.borrow_mut().log_jump = jump;
+        let mut separators = vec![];
+        if layout.gap.width > 1 {
+            separators.push((
+                layout.gap.x + HORIZONTAL_PADDING,
+                layout.gap.y,
+                layout.gap.bottom(),
+            ));
         }
-        self.render_controls(details, buf);
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+            separators.push((
+                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
+                layout.event_panel.y,
+                layout.event_panel.bottom(),
+            ));
+        }
+        join_separators(&separators, area, buf);
+        self.render_controls(task_details, buf);
         if let Some(dialog) = &self.confirm_dialog {
-            self.render_confirm_dialog(dialog, layout.list, buf);
+            self.render_confirm_dialog(dialog, layout.top, buf);
             self.viewport.borrow_mut().marker = None;
         }
     }
-    fn render_confirm_dialog(&self, dialog: &ConfirmDialog, area: Rect, buf: &mut Buffer) {
+    pub(super) fn render_confirm_dialog(
+        &self,
+        dialog: &ConfirmDialog,
+        area: Rect,
+        buf: &mut Buffer,
+    ) {
         use ratatui::widgets::{Block, Borders};
         let width = area.width.min(80);
         let content_width = usize::from(width.saturating_sub(4).max(1));
-        let (title, description, label) = match dialog.removal {
-            Removal::Archive => (
-                format!("Archive “{}”?", dialog.title),
-                "This stops any running work in this task and its child agents, then archives them. Their history can be restored from the resume picker.",
-                "Archive task and child agents",
-            ),
-            Removal::Delete => (
-                format!("Permanently delete “{}”?", dialog.title),
-                "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.",
-                "Permanently delete task and child agents",
-            ),
-        };
-        let description = if matches!(dialog.removal, Removal::Delete)
-            && self
-                .rows
-                .iter()
-                .any(|session| session.id == dialog.id && session.background_job.is_some())
-        {
-            format!("{description} Worktrees and branches created by agents remain.")
-        } else {
-            description.to_owned()
+        let (title, description, confirm_label) = match &dialog.action {
+            ConfirmAction::Delete(id) => {
+                let title = format!("Permanently delete “{}”?", dialog.title);
+                let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
+                let description = if self
+                    .rows
+                    .iter()
+                    .any(|session| session.id == *id && session.background_job.is_some())
+                {
+                    format!("{description} Worktrees and branches created by agents remain.")
+                } else {
+                    description.to_owned()
+                };
+                (
+                    title,
+                    description,
+                    "Permanently delete task and child agents",
+                )
+            }
+            ConfirmAction::Reset { provider, request } => {
+                let (title, description) =
+                    reset_credit::reset_text(*provider, &request.offer, Utc::now());
+                (title, description, "Redeem reset credit")
+            }
         };
         let mut lines = Vec::new();
         for text in textwrap::wrap(&title, content_width) {
@@ -391,12 +644,14 @@ impl View {
             lines.push(Line::from(text.into_owned().dim()));
         }
         lines.push(Line::default());
-        for (confirm, label) in [(false, "Cancel"), (true, label)] {
+        let options_start = lines.len() as u16;
+        for (index, label) in ["Cancel", confirm_label].into_iter().enumerate() {
+            let confirm = index == 1;
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
-                if selected { "›" } else { " " },
-                if confirm { 2 } else { 1 }
+                if selected { PROMPT_MARKER } else { " " },
+                index + 1
             );
             lines.push(Line::from(Span::styled(
                 text,
@@ -414,61 +669,335 @@ impl View {
             width,
             height,
         );
-        Clear.render(dialog, buf);
+        self.clear_overlay(dialog, true, buf);
+        let viewport = &mut *self.viewport.borrow_mut();
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
+        viewport.confirm_options = [false, true]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, confirm)| {
+                let y = inner.y + options_start + index as u16;
+                (y < inner.bottom()).then_some((Rect::new(inner.x, y, inner.width, 1), confirm))
+            })
+            .collect();
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// Centers the selected task's status, title and elapsed time on the rule row
-    /// `rule`, a space apart from the rule on each side.
-    fn render_details_title(
-        &self,
-        rule: Rect,
-        buf: &mut Buffer,
-        now: chrono::DateTime<chrono::Utc>,
-    ) {
-        let Some(session) = self.selected_row() else {
-            return;
+    /// Centers the bold status on the rule row `rule`, whose end cells are its corners, a space
+    /// apart from the rule on each side, with the elapsed time at its right end.
+    fn render_status_rule(&self, rule: Rect, buf: &mut Buffer, now: chrono::DateTime<chrono::Utc>) {
+        let session = self
+            .selected_row()
+            .filter(|_| self.selected_draft().is_none());
+        let status = match (session, self.selected_draft()) {
+            (Some(session), _) => Self::status(session).0,
+            (None, Some(_)) => SessionStatus::New.label(),
+            (None, None) => return,
         };
-        // One rule cell and a space on each side.
-        let width = usize::from(rule.width).saturating_sub(4);
-        let (status, _) = Self::status(session);
-        let mut header = Line::from(vec![status.into(), " · ".dim()]);
+        self::rule(rule, buf);
+        // The status stays centered on the whole rule, keeping both end labels clear.
+        let fits = |text: &String| usize::from(rule.width) >= 2 * (text.width() + 2) + 7;
         let elapsed = session
-            .started_at
-            .map(|at| format!(" · {}", format_session_duration((now - at).num_seconds())));
-        let elapsed_width = elapsed
-            .as_deref()
-            .map_or(0, unicode_width::UnicodeWidthStr::width);
-        let title_width = width.saturating_sub(header.width() + elapsed_width);
-        let title_style = self.title_style(&session.id).bold();
-        let title = if title_width <= 1 {
-            Line::from(Span::styled("…", title_style))
+            .and_then(|session| {
+                let start = session.started_at?;
+                let end = if session.status == SessionStatus::Inactive {
+                    session.last_record_at.unwrap_or(session.updated_at)
+                } else {
+                    now
+                };
+                Some(format_duration((end - start).num_seconds()))
+            })
+            .filter(fits);
+        let cache_remaining = session
+            .and_then(|session| session.cache_expires_at)
+            .map(|expires| expires - now);
+        let elapsed = elapsed.map(|elapsed| {
+            let mut spans = Vec::new();
+            if let Some(seconds) = cache_remaining
+                .filter(|remaining| {
+                    *remaining >= chrono::Duration::seconds(1)
+                        && *remaining <= chrono::Duration::minutes(15)
+                })
+                .map(|remaining| remaining.num_seconds())
+            {
+                let countdown = format_duration(seconds);
+                if fits(&format!("{countdown} · {elapsed}")) {
+                    spans.push(Span::styled(countdown, style::error_style()));
+                    spans.push(" · ".dim());
+                }
+            }
+            spans.push(elapsed.dim());
+            Line::from(spans)
+        });
+        // A Claude task past a quarter of its context shows the percentage in the error color.
+        let context = session.and_then(|session| {
+            let percent = self.selected_context_percent()?;
+            let text = format!("{percent}%");
+            fits(&text).then(|| {
+                if session.id.provider == ProviderId::Claude && percent > 25 {
+                    Span::styled(text, style::error_style())
+                } else {
+                    text.dim()
+                }
+            })
+        });
+        let (left, right) = render_rule_ends(rule, 0, context.map(Line::from), elapsed, buf);
+        let reserved = [left, right]
+            .into_iter()
+            .flatten()
+            .map(|area| 2 * usize::from(area.width + 2))
+            .max()
+            .unwrap_or(0);
+        // The corner, one rule cell and a space on each side.
+        let width = usize::from(rule.width).saturating_sub(6 + reserved);
+        let status = if width <= 1 {
+            Line::from("…".bold())
         } else {
-            truncate_line_with_ellipsis_if_overflow(
-                Line::from(Span::styled(
-                    session.display_title().to_owned(),
-                    title_style,
-                )),
-                title_width,
-            )
+            // An expired prompt cache follows the status as ⏸︎.
+            let status = if cache_remaining
+                .is_some_and(|remaining| remaining < chrono::Duration::seconds(1))
+            {
+                format!("{status} ⏸\u{fe0e}")
+            } else {
+                status.to_string()
+            };
+            truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width)
         };
-        header.spans.extend(title.spans);
-        if let Some(elapsed) = elapsed {
-            header.spans.push(elapsed.dim());
-        }
-        let mut header = truncate_line_to_width(header, width);
+        let mut header = truncate_line_to_width(status, width);
         header.spans.insert(0, " ".into());
         header.spans.push(" ".into());
         let label_width = header.width() as u16;
-        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
         let x = rule.x + rule.width.saturating_sub(label_width) / 2;
         let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
         Clear.render(label, buf);
         line(header, label, buf);
     }
-    pub(super) fn render_details(
+    /// Centers the selected task's name, or a new task's label, on the rule under the details
+    /// panel, a space apart on each side; a double click edits a task's name. The project
+    /// folder on the left and the pull request or branch on the right flank it.
+    fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
+        let session = self
+            .selected_row()
+            .filter(|_| self.selected_draft().is_none());
+        let draft = self.selected_draft();
+        // A linked worktree is named by its repository, though its link opens the worktree.
+        let (title, key, cwd, heading) = match (session, draft) {
+            (Some(session), _) => (
+                session.display_title().to_owned(),
+                session.id.clone(),
+                &session.cwd,
+                self.project_groups[self.selected].heading.clone(),
+            ),
+            (None, Some(draft)) => (
+                draft.name.clone().unwrap_or_else(|| "New task".to_owned()),
+                draft.key(),
+                &draft.setup.cwd,
+                draft.heading(),
+            ),
+            (None, None) => return,
+        };
+        // The name, shown or edited, keeps the color it has in the task list.
+        let name_style = self.title_style(&key);
+        let title_style = name_style.bold();
+        // The left corner is a joint, or the separator that keeps going down beside the prompt.
+        self::rule(
+            Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(1), 1),
+            buf,
+        );
+        if buf[(rule.x, rule.y)].symbol() == "│" {
+            buf[(rule.x, rule.y)].set_symbol("├");
+        }
+        let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
+        let folder_width = folder_width.min(usize::from(rule.width / 3));
+        let folder = super::formatting::format_directory_display(&heading, Some(folder_width));
+        let right = match (session, draft) {
+            (Some(session), _) => session
+                .pr
+                .as_ref()
+                .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)))
+                .or_else(|| {
+                    session
+                        .git_branch
+                        .as_ref()
+                        .map(|branch| Span::styled(branch.clone(), style::time_style()))
+                }),
+            (None, Some(draft)) => (!draft.branch_name().is_empty())
+                .then(|| draft.branch_name().to_owned())
+                .map(|branch| Span::styled(branch, style::time_style())),
+            _ => None,
+        };
+        // Keep short branch labels intact; longer labels share the folder's width budget.
+        let right = right.map(|span| {
+            truncate_line_with_ellipsis_if_overflow(Line::from(span), folder_width.max(20))
+        });
+        // The title stays centered on the whole rule, so the wider side label's width is kept
+        // clear on both sides, plus the corner, one rule cell and a space on each side.
+        let side = right
+            .as_ref()
+            .map_or(0, |line| line.width())
+            .max(folder.width());
+        let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
+        let editor = self.title_editor();
+        let title = if let Some(editor) = editor {
+            let placeholder = self.name_target.is_some() && editor.is_empty();
+            let display_width = if placeholder {
+                "New task".width()
+            } else {
+                editor.text().width() + 1
+            };
+            let input_width = display_width.min(width);
+            let (text, _) = editor.window(input_width);
+            let (text, style) = if placeholder {
+                ("New task", Style::default().dim())
+            } else {
+                (text, name_style)
+            };
+            let mut title = truncate_line_to_width(
+                Line::from(Span::styled(text.to_owned(), style)),
+                input_width,
+            );
+            title
+                .spans
+                .push(" ".repeat(input_width.saturating_sub(title.width())).into());
+            title
+        } else if width <= 1 {
+            truncate_line_to_width(Line::from(Span::styled("…", title_style)), width.max(1))
+        } else {
+            truncate_line_with_ellipsis_if_overflow(
+                Line::from(Span::styled(title, title_style)),
+                width,
+            )
+        };
+        let mut label = title;
+        label.spans.insert(0, " ".into());
+        label.spans.push(" ".into());
+        let label_width = (label.width() as u16).min(rule.width);
+        let label_area = Rect::new(
+            rule.x + rule.width.saturating_sub(label_width) / 2,
+            rule.y,
+            label_width,
+            1,
+        );
+        Clear.render(label_area, buf);
+        line(label, label_area, buf);
+        let input = label_area.inner(Margin::new(1, 0));
+        if editor.is_some() {
+            self.viewport.borrow_mut().title_input = input;
+        }
+        if session.is_some() || draft.is_some_and(|draft| draft.name.is_some()) {
+            self.viewport.borrow_mut().task_details_title = input;
+        }
+        let (folder_area, right_area) = render_rule_ends(
+            rule,
+            label_width,
+            Some(Line::from(Span::styled(folder, style::time_style()))),
+            right,
+            buf,
+        );
+        let mut viewport = self.viewport.borrow_mut();
+        let Some(session) = session else {
+            // A new task's folder is still a choice, so it opens the repository browser, not the folder.
+            for (area, field) in [(folder_area, Field::Directory), (right_area, Field::Branch)] {
+                if let Some(area) = area {
+                    viewport.field_targets.push((area, field));
+                }
+            }
+            return;
+        };
+        let mut links = Vec::new();
+        if let Some(area) = folder_area {
+            links.push((area, cwd.clone()));
+        }
+        if let (Some(area), Some(pr)) = (right_area, &session.pr) {
+            let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                .unwrap_or_else(|| pr.url.clone());
+            super::hyperlink::hyperlink(buf, area, &url);
+            links.push((area, PathBuf::from(url)));
+        }
+        super::links::underline(buf, &links);
+        viewport.task_details_links.extend(links);
+    }
+
+    /// Groups the model and effort on the left; each value opens its own picker.
+    fn render_event_model(&self, rule: Rect, buf: &mut Buffer) {
+        let draft = self.selected_draft();
+        let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
+            // A session shows only the settings it has reported; nothing stands in for the rest.
+            (Some(session), _) => (
+                session
+                    .model
+                    .as_deref()
+                    .filter(|model| !model.is_empty())
+                    .map(|model| self.model_text(session.id.provider, model)),
+                session.effort.clone(),
+            ),
+            // A new task shows its defaults too, so both stay clickable.
+            (None, Some(draft)) => (
+                self.draft_model(draft)
+                    .map(|model| self.model_text(draft.setup.provider, model)),
+                self.draft_effort(draft).map(str::to_owned),
+            ),
+            (None, None) => return,
+        };
+        let separator = super::title_rule::SEPARATOR;
+        let label = self.viewport.borrow().event_label;
+        let right = if label.intersects(rule) {
+            label.x.saturating_sub(1)
+        } else {
+            rule.right().saturating_sub(2)
+        };
+        let mut x = rule.x + 2;
+        let values: Vec<_> = [(model, Field::Model), (effort, Field::Effort)]
+            .into_iter()
+            .filter_map(|(value, field)| {
+                value
+                    .filter(|value| !value.is_empty())
+                    .map(|value| (value, field))
+            })
+            .collect();
+        for (index, (value, field)) in values.iter().enumerate() {
+            let gap = if index == 0 {
+                0
+            } else {
+                separator.width() as u16
+            };
+            let mut available = right.saturating_sub(x).saturating_sub(gap);
+            if index == 0 && values.len() == 2 {
+                let reserve = (values[1].0.width() as u16).min(available / 2);
+                available = available.saturating_sub(reserve + separator.width() as u16);
+            }
+            if available == 0 {
+                break;
+            }
+            if gap > 0 {
+                Line::from(separator)
+                    .style(style::time_style())
+                    .render(Rect::new(x, rule.y, gap, 1), buf);
+                x += gap;
+            } else {
+                buf[(x - 1, rule.y)]
+                    .set_symbol("╴")
+                    .set_style(style::time_style());
+            }
+            let text = truncate_line_with_ellipsis_if_overflow(
+                Line::from(value.clone()),
+                usize::from(available),
+            );
+            let width = text.width() as u16;
+            let area = Rect::new(x, rule.y, width, 1);
+            text.style(style::time_style()).render(area, buf);
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .push((area, *field));
+            x += width;
+            buf[(x, rule.y)]
+                .set_symbol(" ")
+                .set_style(style::time_style());
+        }
+    }
+    pub(super) fn render_task_details(
         &self,
         area: Rect,
         buf: &mut Buffer,
@@ -476,52 +1005,31 @@ impl View {
     ) {
         {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.details = Rect::default();
-            viewport.details_copy.clear();
-            viewport.details_background.clear();
-            viewport.details_links.clear();
-            viewport.details_text = text_selection::TextRegion::default();
+            viewport.task_details = Rect::default();
+            viewport.task_details_title = Rect::default();
+            viewport.title_input = Rect::default();
+            viewport.task_details_input = Rect::default();
+            viewport.task_details_copy.clear();
+            viewport.task_details_background.clear();
+            viewport.task_details_links.clear();
+            viewport.task_details_text = text_selection::TextRegion::default();
         }
         if let Some(draft) = self.selected_draft() {
-            self.viewport.borrow_mut().details = area;
-            let lines = [
-                "New task".to_owned(),
-                draft.setup.cwd.display().to_string(),
-                format!(
-                    "Model: {}",
-                    draft.setup.model.as_deref().unwrap_or("Default")
-                ),
-                format!(
-                    "Effort: {}",
-                    draft.setup.effort.as_deref().unwrap_or("Default")
-                ),
-                format!("Branch: {}", draft.setup.branch),
-            ];
-            for (index, text) in lines.into_iter().enumerate() {
-                line(text, row(area, index as u16, 1), buf);
-            }
-            for (index, field) in [(2, Field::Model), (3, Field::Effort), (4, Field::Branch)] {
-                let rect = row(area, index, 1);
-                if !rect.is_empty() {
-                    self.viewport.borrow_mut().field_targets.push((rect, field));
-                }
-            }
-            if draft.working || draft.job.is_some() {
-                line("Creating…", row(area, 5, 1), buf);
-            }
+            self.viewport.borrow_mut().task_details = area;
             if let Some(error) = &draft.error {
-                line(error.clone().red(), row(area, 6, 1), buf);
+                Paragraph::new(error.as_str())
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .render(area, buf);
             }
             return;
         }
         let Some(session) = self.selected_row() else {
             return;
         };
-        self.viewport.borrow_mut().details = area;
+        self.viewport.borrow_mut().task_details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, needs attention, the newer of latest
-        // activity and last message, prompt, project, branch, model. The title sits
-        // on the rule below the panel.
+        // Sections top to bottom: background, activity, update, prompt and queued
+        // messages, needs input, tasks. The title sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
@@ -537,10 +1045,17 @@ impl View {
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
-            .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
+        let boxes = self
+            .background_for(session)
+            .map(|task| {
+                (
+                    task,
+                    task.output
+                        .as_deref()
+                        .map(|path| tail_lines(path, 1))
+                        .unwrap_or_default(),
+                )
+            })
             .filter(|(_, lines)| {
                 !lines
                     .last()
@@ -551,7 +1066,11 @@ impl View {
         let subagents = self.subagents_for(session).collect::<Vec<_>>();
         if !boxes.is_empty() || !subagents.is_empty() {
             separate_section(&mut items);
-            items.push("Background".dim().into());
+            items.push(Item::Decoration(centered_header(
+                "Background".dim().into(),
+                Line::default(),
+                width,
+            )));
             let start = items.len();
             items.extend(
                 boxes
@@ -559,94 +1078,101 @@ impl View {
                     .map(|(task, output)| Item::Background { task, output }),
             );
             items.extend(subagents.into_iter().map(Item::Subagent));
-            // Tasks showing output come first; each group keeps its order.
-            items[start..].sort_by_key(|item| item.height() == 1);
+            // Mix tasks and descendants: two-line entries first, then oldest starts,
+            // unknown starts last, with identity/path breaking ties regardless of depth or kind.
+            items[start..].sort_by_key(|item| {
+                let (started_at, identity, provider) = match item {
+                    Item::Background { task, .. } => (
+                        Some(task.started_at),
+                        task.output
+                            .as_deref()
+                            .map(std::path::Path::as_os_str)
+                            .unwrap_or_else(|| std::ffi::OsStr::new(&task.description)),
+                        None,
+                    ),
+                    Item::Subagent(child) => (
+                        child.started_at,
+                        std::ffi::OsStr::new(&child.id.id),
+                        Some(child.id.provider),
+                    ),
+                    Item::Text(_) | Item::Decoration(_) => {
+                        unreachable!("Background contains only tasks and descendants")
+                    }
+                };
+                (
+                    item.height() == 1,
+                    started_at.is_none(),
+                    started_at,
+                    identity,
+                    provider,
+                )
+            });
             background = start..items.len();
         }
 
-        let needs = session
-            .background_job
-            .as_ref()
-            .and_then(|job| job.needs.as_deref());
-        if session.status == SessionStatus::NeedsInput || needs.is_some() {
-            separate_section(&mut items);
-            let start = items.len();
-            items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
-            if let Some(needs) = needs {
-                items.extend(
-                    textwrap::wrap(needs, width.max(1))
-                        .into_iter()
-                        .map(|text| Line::from(text.into_owned()).into()),
-                );
-            } else if session.pending_questions.is_empty() {
-                items.extend([
-                    "Open task to review.".dim().into(),
-                    "Waiting for your response.".into(),
-                ]);
-            } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            question.clone(),
-                            style::log_styles(&crate::log::Kind::Assistant).1,
-                        )),
-                        width,
-                    )
-                    .into()
-                }));
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key(
-                "Needs attention",
-                &(needs, &session.pending_questions),
-            ));
-            copies.push(None);
-            body_links.push(Vec::new());
-        }
         item_links.resize(items.len(), Vec::new());
 
-        // Latest activity and Last message share one slot and follow the
-        // clock: whichever of the latest tool call and the last reply is newer.
-        let activity = session.latest_activity();
+        let activity = session.activity.as_ref();
         if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
-            let mut label = wrapped
-                .first()
-                .map_or(String::new(), |line| line.to_string());
-            if wrapped.len() > 1 {
-                label.push('…');
-            }
+            let label = super::event_list::summary_line(
+                &activity.label,
+                &activity.kind,
+                activity.exit_code,
+                &activity.paths,
+                width,
+                &session.cwd,
+            )
+            .line;
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
-                Line::from(vec![
-                    "Latest activity".dim(),
-                    " · ".dim(),
-                    format_relative_time(now, Some(activity.at)).dim(),
-                ])
-                .into(),
-                truncate_line_with_ellipsis_if_overflow(
-                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
+                Item::Decoration(centered_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
                     width,
-                )
-                .into(),
+                )),
+                truncate_line_with_ellipsis_if_overflow(label, width).into(),
             ]);
             bodies.push(start..items.len());
-            keys.push(body_key("Latest activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied last activity")));
+            body_links.push(if super::text::is_prose(&activity.kind) {
+                super::links::text_links(&activity.label, &session.cwd, &[])
+            } else {
+                super::links::path_links(
+                    &activity.label,
+                    &super::event_list::summary_paths(
+                        &activity.label,
+                        &activity.paths,
+                        &session.cwd,
+                    ),
+                    &session.cwd,
+                )
+            });
         }
-        if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
-            let mut header = vec!["Last message".dim()];
+
+        item_links.resize(items.len(), Vec::new());
+
+        if let Some(message) = session.last_message.as_ref() {
+            let mut header = Line::default();
             if let Some(at) = session.last_message_at {
-                header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
+                header =
+                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(Line::from(header).into());
+            items.push(Item::Decoration(centered_header(
+                "Update".dim().into(),
+                header,
+                width,
+            )));
             let start = items.len();
-            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
+            let body_style = style::event_styles(&crate::event::Kind::Assistant).1;
             items.extend(
-                wrap_details(message, &session.cwd, width, true)
+                super::text::lines(message, &session.cwd, width, true)
                     .into_iter()
                     .map(|mut line| {
                         for span in &mut line.spans {
@@ -657,148 +1183,164 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
-            keys.push(body_key("Last message", message));
-            copies.push(Some((message.as_str(), "Copied last message")));
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
-        let mut header = vec!["Prompt".dim()];
-        if let Some(start) = session.prompt_at {
-            let end = if session.status == SessionStatus::Working {
-                now
+        if !session.prompt.trim().is_empty()
+            || session
+                .parent
+                .as_ref()
+                .is_none_or(|parent| parent.provider != ProviderId::Codex)
+        {
+            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
             } else {
-                session.last_record_at.unwrap_or(start)
+                centered_header("Prompt".dim().into(), Line::default(), width)
             };
-            let messages = session.turn_messages;
-            let label = if messages == 1 { "message" } else { "messages" };
-            header.extend([
-                " · ".dim(),
-                format!("{messages} {label}").dim(),
-                " · ".dim(),
-                format_duration((end - start).num_seconds().max(0)).dim(),
-            ]);
-        }
-        separate_section(&mut items);
-        items.push(Line::from(header).into());
-        let prompt_text = match session.prompt.trim() {
-            "" => "No prompt available.",
-            prompt => prompt,
-        };
-        let prompt_start = items.len();
-        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
-        items.extend(prompt_body.into_iter().map(Item::from));
-        bodies.push(prompt_start..items.len());
-        keys.push(body_key("Prompt", &session.prompt));
-        copies.push(
-            Some((session.prompt.as_str(), "Copied prompt"))
-                .filter(|(prompt, _)| !prompt.trim().is_empty()),
-        );
-        body_links.push(super::links::text_links(
-            &session.prompt,
-            &session.cwd,
-            &session.prompt_images,
-        ));
-        item_links.resize(items.len(), Vec::new());
-        for queued in &session.queued {
-            let first = wrap_details(queued, &session.cwd, width, true)
-                .into_iter()
-                .next()
-                .unwrap_or_default();
-            let visible = if first.width() > width {
-                width - 1
-            } else {
-                width
-            } as u16;
-            let mut cells =
-                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
-                    .pop()
-                    .unwrap_or_default();
-            cells.retain(|(columns, _)| columns.end <= visible);
-            item_links.push(super::links::row_links(
-                &cells,
-                &super::links::text_links(queued, &session.cwd, &[]),
+            separate_section(&mut items);
+            items.push(Item::Decoration(prompt_header));
+            let prompt_text = match session.prompt.trim() {
+                "" => "No prompt available.",
+                prompt => prompt,
+            };
+            let prompt_start = items.len();
+            let prompt_body = super::text::lines(prompt_text, &session.cwd, width, true);
+            items.extend(prompt_body.into_iter().map(Item::from));
+            bodies.push(prompt_start..items.len());
+            keys.push(body_key("Prompt", &session.prompt));
+            copies.push(
+                Some((session.prompt.as_str(), "Copied prompt"))
+                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
+            );
+            body_links.push(super::links::text_links(
+                &session.prompt,
+                &session.cwd,
+                &session.prompt_images,
             ));
-            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+            item_links.resize(items.len(), Vec::new());
+        }
+        for queued in &session.queued {
+            separate_section(&mut items);
+            let start = items.len();
+            items.extend(
+                super::text::lines(queued, &session.cwd, width, true)
+                    .into_iter()
+                    .map(Item::from),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Prompt", queued));
+            copies.push(Some((queued.as_str(), "Copied prompt")));
+            body_links.push(super::links::text_links(queued, &session.cwd, &[]));
         }
 
         item_links.resize(items.len(), Vec::new());
 
-        let mut project = vec!["Project".dim()];
-        if let Some(branch) = &session.git_branch {
-            project.extend([
-                " · ".dim(),
-                Span::styled(branch.clone(), self.title_style(&session.id)),
-            ]);
-        }
-        let link = session.pr.as_ref().and_then(|pr| {
-            let label = format!("#{}", pr.number);
-            project.push(" · ".dim());
-            let prefix_width = Line::from(project.clone()).width();
-            let link = line_width_fits(prefix_width + label.len(), width).then(|| {
-                let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                    .unwrap_or_else(|| pr.url.clone());
-                (prefix_width as u16, label.len() as u16, url)
-            });
-            project.push(Span::styled(label, self.title_style(&session.id)));
-            link
-        });
-        let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
-        item_links.extend([
-            Vec::new(),
-            link.iter()
-                .map(|(x, width, url)| (*x..x + width, PathBuf::from(url)))
-                .collect(),
-            vec![(0..cwd.width().min(width) as u16, session.cwd.clone())],
-        ]);
-        items.extend([
-            Line::default().into(),
-            Item::Link {
-                line: Line::from(project),
-                link,
-            },
-            cwd.into(),
-        ]);
-
-        let effort = match session.effort.as_deref() {
-            Some(effort) => Some(effort),
-            None if session.is_live_background()
-                && session.input_disabled_reason().is_none()
-                && self
-                    .input_choices
-                    .get(&session.id.provider)
-                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
-            {
-                Some("Unknown")
-            }
-            None => None,
-        };
-        let mut model = vec![session.model_name().to_owned().into()];
-        if let Some(effort) = effort {
-            model.extend([" · ".dim(), effort.to_owned().into()]);
-        }
-        if let Some(usage) = self.weekly_usage.get(&session.id.provider) {
-            model.push(format!(" · weekly {}% left", usage.left_percent).dim());
-            if usage.left_percent < 20
-                && let Some(resets_at) = usage.resets_at
-            {
-                model.push(
-                    format!(
-                        " · resets {}",
-                        resets_at.with_timezone(&chrono::Local).format("%a %H:%M")
+        let needs = session
+            .background_job
+            .as_ref()
+            .and_then(|job| job.needs.as_deref());
+        if session.status == SessionStatus::NeedsInput || needs.is_some() {
+            separate_section(&mut items);
+            let start = items.len();
+            items.push(Item::Decoration(centered_header(
+                Span::styled("Needs input", style::attention_title_style()).into(),
+                Line::default(),
+                width,
+            )));
+            if let Some(needs) = needs {
+                items.extend(
+                    super::text::lines(needs, &session.cwd, width, false)
+                        .into_iter()
+                        .map(Item::from),
+                );
+            } else if session.pending_questions.is_empty() {
+                items.extend([
+                    "Open task to review.".dim().into(),
+                    "Waiting for your response.".into(),
+                ]);
+            } else {
+                items.extend(session.pending_questions.iter().map(|question| {
+                    truncate_line_with_ellipsis_if_overflow(
+                        super::text::summary(
+                            question,
+                            &session.cwd,
+                            width,
+                            &crate::event::Kind::Assistant,
+                            None,
+                        ),
+                        width,
                     )
-                    .dim(),
+                    .into()
+                }));
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key(
+                "Needs input",
+                &(needs, &session.pending_questions),
+            ));
+            copies.push(None);
+            body_links.push(Vec::new());
+        }
+        item_links.resize(items.len(), Vec::new());
+
+        let tasks = [
+            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
+            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
+        ]
+        .into_iter()
+        .flat_map(|(status, indicator)| {
+            session
+                .tasks
+                .iter()
+                .filter(move |task| task.status == status)
+                .map(move |task| (task, indicator))
+        })
+        .collect::<Vec<_>>();
+        let tasks_text = tasks
+            .iter()
+            .map(|(task, status)| {
+                format!(
+                    "{} {}",
+                    Self::status_indicator(*status).content,
+                    task.subject
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(Item::Decoration(centered_header(
+                "Tasks".dim().into(),
+                format!("{in_progress}/{}", tasks.len()).dim().into(),
+                width,
+            )));
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
                 );
             }
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
         }
-        let mut model_item = items.len() + 1;
-        // A blank row keeps the model off the bottom rule.
-        items.extend([
-            Line::default().into(),
-            Line::from(model).into(),
-            Line::default().into(),
-        ]);
-        item_links.resize(items.len(), Vec::new());
 
+        let mut item_ids = (0..items.len()).collect::<Vec<_>>();
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();
         for (id, (body, copy)) in bodies.iter().zip(&copies).enumerate() {
@@ -812,134 +1354,91 @@ impl View {
                     _ => unreachable!("copyable bodies contain text rows"),
                 })
                 .collect::<Vec<_>>();
-            let markdown = *label != "Copied latest activity";
+            let markdown = match *label {
+                "Copied last activity" => {
+                    activity.is_some_and(|activity| super::text::is_prose(&activity.kind))
+                }
+                "Copied tasks" => false,
+                _ => true,
+            };
             let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
             for (index, cells) in body.clone().zip(maps) {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
                 text_rows[index] = Some(text_selection::DrawnRow {
-                    segment: id,
+                    segment: body.start,
                     x: area.x,
                     y: 0,
                     cells,
                 });
             }
             sources.push(text_selection::Source {
-                id,
+                id: body.start,
                 text: (*source).into(),
                 label: (*label).to_owned(),
             });
         }
-        self.viewport.borrow_mut().details_text = text_selection::TextRegion {
+        self.viewport.borrow_mut().task_details_text = text_selection::TextRegion {
             area,
             sources,
             rows: Vec::new(),
         };
         let available = usize::from(area.height);
-        let budget = budget_details(&items, &bodies, background, available);
-        let (scroll, body_rows) = {
+        let budget = budget_task_details(&items, &bodies, background, available);
+        let (scroll, body_rows, total) = {
             let mut viewport = self.viewport.borrow_mut();
-            let state = &mut viewport.details_scroll;
+            let state = &mut viewport.task_details_scroll;
             state.content_top = content_top;
-            // Back on a task, a body whose text changed while the user was away opens folded,
-            // and the plain offset starts over.
-            if let Some(left) = state.left_keys.take()
-                && left != keys
-            {
-                state.reveal = keys
-                    .iter()
-                    .map(|key| {
-                        left.iter()
-                            .position(|old| old == key)
-                            .and_then(|index| state.reveal.get(index).copied())
-                            .unwrap_or(0)
-                    })
-                    .collect();
-                state.offset = 0;
-            }
-            state.keys = keys;
-            if state.reveal.len() != bodies.len() {
-                state.reveal = vec![0; bodies.len()];
-            }
-            if let Some(budget) = &budget {
-                state.fallback_max = None;
-                state.offset = 0;
-                state.hidden = budget.bodies.iter().map(|&(_, hidden)| hidden).collect();
-                for (reveal, hidden) in state.reveal.iter_mut().zip(&state.hidden) {
-                    *reveal = (*reveal).min(*hidden);
-                }
-                let mut keep = vec![true; items.len()];
-                if let Some(cut) = &budget.background_cut {
+            state.prepare(keys);
+            let excluded = budget
+                .as_ref()
+                .and_then(|budget| budget.background_cut.as_ref())
+                .map_or(0..0, |cut| {
                     items[cut.start] = "…".dim().into();
-                    keep[cut.start + 1..cut.end].fill(false);
-                }
-                for (i, body) in bodies.iter().enumerate() {
-                    let rows = budget.bodies[i].0 + state.reveal[i];
-                    keep[body.start + rows..body.end].fill(false);
-                    if rows > 0 && state.reveal[i] < state.hidden[i] {
-                        let Item::Text(last) = &mut items[body.start + rows - 1] else {
-                            unreachable!("details bodies contain text rows");
-                        };
-                        *last =
-                            truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
-                        last.spans.push("…".dim());
-                        if let Some(mapped) = &mut text_rows[body.start + rows - 1] {
-                            mapped
-                                .cells
-                                .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
-                        }
-                        item_links[body.start + rows - 1]
-                            .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
-                    }
-                }
-                state.bodies = bodies
+                    cut.start + 1..cut.end
+                });
+            let heights = items.iter().map(Item::height).collect::<Vec<_>>();
+            let allocations = budget.as_ref().map(|budget| {
+                budget
+                    .bodies
                     .iter()
-                    .enumerate()
-                    .map(|(i, body)| {
-                        let start = items[..body.start]
-                            .iter()
-                            .zip(&keep)
-                            .filter(|(_, keep)| **keep)
-                            .map(|(item, _)| item.height())
-                            .sum::<usize>();
-                        start..start + budget.bodies[i].0 + state.reveal[i]
-                    })
-                    .collect();
-                model_item = keep[..model_item].iter().filter(|keep| **keep).count();
-                let mut index = 0;
-                items.retain(|_| {
-                    let retain = keep[index];
-                    index += 1;
-                    retain
-                });
-                let mut index = 0;
-                text_rows.retain(|_| {
-                    let retain = keep[index];
-                    index += 1;
-                    retain
-                });
-                let mut index = 0;
-                item_links.retain(|_| {
-                    let retain = keep[index];
-                    index += 1;
-                    retain
-                });
-                (state.reveal.iter().sum::<usize>(), state.bodies.clone())
-            } else {
-                state.hidden.clear();
-                state.bodies.clear();
-                let total = items.iter().map(Item::height).sum::<usize>();
-                let max = total.saturating_sub(available);
-                state.fallback_max = Some(max);
-                state.offset = state.offset.min(max);
-                let row_of = |index: usize| items[..index].iter().map(Item::height).sum::<usize>();
-                let rows = bodies
-                    .iter()
-                    .map(|body| row_of(body.start)..row_of(body.end))
-                    .collect();
-                (state.offset, rows)
+                    .map(|&(rows, _)| rows)
+                    .collect::<Vec<_>>()
+            });
+            let layout = state.layout(
+                &heights,
+                &bodies,
+                allocations.as_deref(),
+                excluded,
+                available,
+            );
+            for &cut in &layout.cuts {
+                let (Item::Text(last) | Item::Decoration(last)) = &mut items[cut] else {
+                    unreachable!("details bodies contain text rows");
+                };
+                *last = truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
+                last.spans.push("…".dim());
+                if let Some(mapped) = &mut text_rows[cut] {
+                    mapped
+                        .cells
+                        .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
+                }
+                item_links[cut].retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
             }
+            let mut keep = vec![false; items.len()];
+            for &index in &layout.kept {
+                keep[index] = true;
+            }
+            let mut rows = keep.iter();
+            item_ids.retain(|_| *rows.next().unwrap());
+            let mut rows = keep.iter();
+            items.retain(|_| *rows.next().unwrap());
+            let mut rows = keep.iter();
+            text_rows.retain(|_| *rows.next().unwrap());
+            let mut rows = keep.iter();
+            item_links.retain(|_| *rows.next().unwrap());
+            (layout.scroll, state.bodies.clone(), layout.total)
         };
-        self.viewport.borrow_mut().details_copy = body_rows
+        self.viewport.borrow_mut().task_details_copy = body_rows
             .into_iter()
             .zip(copies)
             .filter_map(|(rows, text)| {
@@ -950,38 +1449,26 @@ impl View {
                 Some((screen_row(start)..screen_row(end), text.to_owned(), label))
             })
             .collect();
-        let total = items.iter().map(Item::height).sum::<usize>();
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for (item_index, ((item, mapped), links)) in
-            items.into_iter().zip(text_rows).zip(item_links).enumerate()
+        for (((item, mapped), links), id) in items
+            .into_iter()
+            .zip(text_rows)
+            .zip(item_links)
+            .zip(item_ids)
         {
+            let fallback = mapped.is_none() && !matches!(item, Item::Decoration(_));
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
-                if item_index == model_item {
-                    let model_width =
-                        session.model_name().width().min(usize::from(area.width)) as u16;
-                    self.viewport
-                        .borrow_mut()
-                        .field_targets
-                        .push((Rect::new(area.x, y, model_width, 1), Field::Model));
-                    if let Some(effort) = effort {
-                        let offset = session.model_name().width() + " · ".width();
-                        let rect = Rect::new(area.x + offset as u16, y, effort.width() as u16, 1)
-                            .intersection(area);
-                        if !rect.is_empty() {
-                            self.viewport
-                                .borrow_mut()
-                                .field_targets
-                                .push((rect, Field::Effort));
-                        }
-                    }
-                }
                 if let Some(mut mapped) = mapped {
                     mapped.y = y;
-                    self.viewport.borrow_mut().details_text.rows.push(mapped);
+                    self.viewport
+                        .borrow_mut()
+                        .task_details_text
+                        .rows
+                        .push(mapped);
                 }
                 drawn_links.extend(links.into_iter().map(|(columns, target)| {
                     (
@@ -992,48 +1479,127 @@ impl View {
             }
             let height = item.height();
             let item_area = row(content_area, offset as u16, height as u16);
-            match item {
-                Item::Text(text) => line(text, item_area, &mut content),
-                Item::Link { line: text, link } => {
+            let title_columns = match item {
+                Item::Text(text) | Item::Decoration(text) => {
                     line(text, item_area, &mut content);
-                    if let Some((x, width, url)) = link {
-                        super::hyperlink::hyperlink(
-                            &mut content,
-                            Rect::new(item_area.x + x, item_area.y, width, 1),
-                            &url,
-                        );
-                    }
+                    None
                 }
                 Item::Background { task, output } => {
                     let start = offset.max(scroll);
                     let end = (offset + height).min(scroll + available);
-                    if start < end {
-                        self.viewport.borrow_mut().details_background.push((
+                    if start < end && task.output.is_some() {
+                        self.viewport.borrow_mut().task_details_background.push((
                             content_top + (start - scroll) as u16
                                 ..content_top + (end - scroll) as u16,
                             task.clone(),
                         ));
                     }
-                    render_background(task, output, now, item_area, &mut content);
+                    Some(render_background(
+                        task,
+                        output,
+                        &session.cwd,
+                        now,
+                        item_area,
+                        &mut content,
+                    ))
                 }
                 Item::Subagent(child) => {
-                    let (text, kind) = subagent_line(child);
+                    let (text, kind, exit_code, paths) = subagent_line(child);
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
-                            Line::from(Span::styled(text.to_owned(), style::log_styles(&kind).1)),
-                            usize::from(item_area.width.saturating_sub(2)),
+                            super::event_list::summary_line(
+                                text,
+                                &kind,
+                                exit_code,
+                                paths,
+                                usize::from(item_area.width),
+                                &child.cwd,
+                            )
+                            .line,
+                            usize::from(item_area.width),
                         )
                     });
-                    let elapsed = child
-                        .started_at
-                        .map(|at| format_duration((now - at).num_seconds().max(0)));
-                    render_background_box(
-                        &child.title,
+                    // A known turn uses the same clock as its Prompt. Without a
+                    // turn timestamp, show the child's own age.
+                    let elapsed = turn_elapsed(child, now).or_else(|| {
+                        child
+                            .started_at
+                            .map(|at| format_duration((now - at).num_seconds().max(0)))
+                    });
+                    Some(render_background_box(
+                        child.display_title(),
                         elapsed.as_deref(),
                         body.into_iter().collect(),
                         item_area,
                         &mut content,
-                    );
+                    ))
+                }
+            };
+            if fallback {
+                let mut source = String::new();
+                let mut rows = Vec::new();
+                for dy in 0..height {
+                    let y = offset + dy;
+                    let mut cells = Vec::new();
+                    let mut x = 0;
+                    let mut pending_space = Vec::new();
+                    while x < area.width {
+                        let symbol = content[(x, y as u16)].symbol();
+                        let width = symbol.width().max(1) as u16;
+                        if dy == 0
+                            && title_columns.as_ref().is_some_and(|ranges| {
+                                !ranges.iter().any(|range| range.contains(&x))
+                            })
+                        {
+                            x += width;
+                            continue;
+                        }
+                        if symbol.trim().is_empty() {
+                            pending_space.push((x..x + width, symbol.to_owned()));
+                        } else {
+                            if !cells.is_empty() {
+                                for (columns, symbol) in &pending_space {
+                                    let start = source.len();
+                                    source.push_str(symbol);
+                                    cells.push((columns.clone(), start..source.len()));
+                                }
+                            }
+                            pending_space.clear();
+                            let start = source.len();
+                            source.push_str(symbol);
+                            cells.push((x..x + width, start..source.len()));
+                        }
+                        x += width;
+                    }
+                    if !cells.is_empty() {
+                        rows.push((y, cells));
+                        source.push('\n');
+                    }
+                }
+                if !source.is_empty() {
+                    source.pop();
+                    let mut viewport = self.viewport.borrow_mut();
+                    viewport
+                        .task_details_text
+                        .sources
+                        .push(text_selection::Source {
+                            id,
+                            text: source.into(),
+                            label: "Copied selection".into(),
+                        });
+                    for (y, cells) in rows {
+                        if y >= scroll && y < scroll + available {
+                            viewport
+                                .task_details_text
+                                .rows
+                                .push(text_selection::DrawnRow {
+                                    segment: id,
+                                    x: area.x,
+                                    y: area.y + (y - scroll) as u16,
+                                    cells,
+                                });
+                        }
+                    }
                 }
             }
             offset += height;
@@ -1049,20 +1615,40 @@ impl View {
             line("…".dim(), last, buf);
             self.viewport
                 .borrow_mut()
-                .details_text
+                .task_details_text
                 .rows
                 .retain(|row| row.y != last.y);
             drawn_links.retain(|(rect, _)| rect.y != last.y);
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .retain(|(rect, _)| !rect.intersects(last));
         }
-        self.viewport.borrow_mut().details_links = drawn_links;
-        self.highlight_text_selection(text_selection::Panel::Details, buf);
+        self.viewport
+            .borrow_mut()
+            .task_details_text
+            .sources
+            .sort_by_key(|source| source.id);
+        self.viewport.borrow_mut().task_details_links = drawn_links;
+        self.highlight_text_selection(text_selection::Panel::TaskDetails, buf);
+        super::links::underline(buf, &self.viewport.borrow().task_details_links);
     }
+}
+
+fn turn_elapsed(session: &Session, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let start = session.prompt_at?;
+    let end = if session.status == SessionStatus::Working {
+        now
+    } else {
+        session.last_record_at.unwrap_or(start)
+    };
+    Some(format_duration((end - start).num_seconds().max(0)))
 }
 
 /// Puts a blank row between a section and the one above it.
 fn separate_section(items: &mut Vec<Item<'_>>) {
     if !items.is_empty() {
-        items.push(Line::default().into());
+        items.push(Item::Decoration(Line::default()));
     }
 }
 
@@ -1091,7 +1677,7 @@ pub(super) fn allocate(wants: &[usize], budget: usize) -> Vec<usize> {
     rows
 }
 
-struct DetailsBudget {
+struct TaskDetailsBudget {
     bodies: Vec<(usize, usize)>,
     background_cut: Option<std::ops::Range<usize>>,
 }
@@ -1104,12 +1690,12 @@ fn body_key(section: &str, text: &impl std::hash::Hash) -> u64 {
     hasher.finish()
 }
 
-fn budget_details(
+fn budget_task_details(
     items: &[Item<'_>],
     bodies: &[std::ops::Range<usize>],
     background: std::ops::Range<usize>,
     available: usize,
-) -> Option<DetailsBudget> {
+) -> Option<TaskDetailsBudget> {
     let wants = bodies.iter().map(|body| body.len()).collect::<Vec<_>>();
     let floors = wants.iter().filter(|&&want| want > 0).count();
     let background_rows = items[background.clone()]
@@ -1145,24 +1731,98 @@ fn budget_details(
         .zip(wants)
         .map(|(alloc, want)| (alloc, want - alloc))
         .collect();
-    Some(DetailsBudget {
+    Some(TaskDetailsBudget {
         bodies,
         background_cut,
     })
 }
 
-fn line_width_fits(line_width: usize, width: usize) -> bool {
-    line_width <= width
+/// Centers a section label, fitting its right value into the space after it.
+fn centered_header(label: Line<'static>, value: Line<'static>, width: usize) -> Line<'static> {
+    let label = truncate_line_with_ellipsis_if_overflow(label, width);
+    let start = (width - label.width()) / 2;
+    let available = width.saturating_sub(start + label.width() + 1);
+    let value = truncate_line_with_ellipsis_if_overflow(value, available);
+    let mut header = Line::from(" ".repeat(start).dim());
+    header.spans.extend(label.spans);
+    if value.width() > 0 {
+        header
+            .spans
+            .push(" ".repeat(width - header.width() - value.width()).dim());
+        header.spans.extend(value.spans);
+    }
+    header
 }
 
-/// One row-aligned piece of the details panel.
+/// Joins each vertical separator, given as its column and rows, to the rules above and below it.
+fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer) {
+    for &(x, top, bottom) in separators {
+        for (y, joint) in [(top.checked_sub(1), "┬"), (Some(bottom), "┴")] {
+            let Some(y) = y.filter(|&y| y >= area.y && y < area.bottom()) else {
+                continue;
+            };
+            let cell = &mut buf[(x, y)];
+            match (cell.symbol(), joint) {
+                ("─", _) => {
+                    cell.set_symbol(joint);
+                }
+                ("┬", "┴") | ("┴", "┬") => {
+                    cell.set_symbol("┼");
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Draws a dim rule across `area`'s first row.
+fn rule(area: Rect, buf: &mut Buffer) {
+    line("─".repeat(usize::from(area.width)).dim(), area, buf);
+}
+
+/// Draws end labels with a half line toward their corner and a space toward the center,
+/// keeping clear the `center` columns in the rule's middle. Returns where each text landed.
+fn render_rule_ends(
+    rule: Rect,
+    center: u16,
+    left: Option<Line<'static>>,
+    right: Option<Line<'static>>,
+    buf: &mut Buffer,
+) -> (Option<Rect>, Option<Rect>) {
+    // Each side keeps its corner cell, a space on both sides of its text and a rule cell before
+    // the center.
+    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(4);
+    let mut place = |text: Option<Line<'static>>, from_left: bool| {
+        let text = truncate_line_with_ellipsis_if_overflow(text?, side);
+        let width = text.width() as u16;
+        if width == 0 {
+            return None;
+        }
+        let x = if from_left {
+            rule.x + 2
+        } else {
+            rule.right() - 2 - width
+        };
+        let area = Rect::new(x, rule.y, width, 1);
+        Clear.render(Rect::new(x - 1, rule.y, width + 2, 1), buf);
+        let (padding, symbol) = if from_left {
+            (x - 1, "╴")
+        } else {
+            (x + width, "╶")
+        };
+        buf[(padding, rule.y)]
+            .set_symbol(symbol)
+            .set_style(Style::default().dim());
+        text.render(area, buf);
+        Some(area)
+    };
+    (place(left, true), place(right, false))
+}
+
+/// One row-aligned piece of the task details panel.
 enum Item<'a> {
     Text(Line<'static>),
-    Link {
-        line: Line<'static>,
-        /// Column offset, width and target of the pull request link.
-        link: Option<(u16, u16, String)>,
-    },
+    Decoration(Line<'static>),
     Subagent(&'a Session),
     Background {
         task: &'a crate::model::BackgroundTask,
@@ -1173,7 +1833,7 @@ enum Item<'a> {
 impl Item<'_> {
     fn height(&self) -> usize {
         match self {
-            Self::Text(_) | Self::Link { .. } => 1,
+            Self::Text(_) | Self::Decoration(_) => 1,
             Self::Background { output, .. } => box_height(output.len()),
             Self::Subagent(child) => box_height(usize::from(!subagent_line(child).0.is_empty())),
         }
@@ -1186,21 +1846,34 @@ impl<T: Into<Line<'static>>> From<T> for Item<'_> {
     }
 }
 
-/// The first line of a working subagent's current tool call, or of its last
-/// message when it is between calls, with the log kind that styles it.
-fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
+/// A working subagent's current tool call, or its last message between calls,
+/// with the event list kind that styles it.
+fn subagent_line(
+    child: &Session,
+) -> (
+    &str,
+    crate::event::Kind,
+    Option<i64>,
+    &[std::ops::Range<usize>],
+) {
     let activity = child
         .latest_activity()
         .filter(|_| child.status == SessionStatus::Working);
-    let (text, kind) = if let Some(activity) = activity {
-        (Some(activity.label.as_str()), activity.kind.clone())
+    if let Some(activity) = activity {
+        (
+            &activity.label,
+            activity.kind.clone(),
+            activity.exit_code,
+            &activity.paths,
+        )
     } else {
-        (child.last_message.as_deref(), crate::log::Kind::Assistant)
-    };
-    (
-        text.unwrap_or_default().lines().next().unwrap_or_default(),
-        kind,
-    )
+        (
+            child.last_message.as_deref().unwrap_or_default(),
+            crate::event::Kind::Assistant,
+            None,
+            &[],
+        )
+    }
 }
 
 /// A running background command: its description and elapsed time on the top
@@ -1208,18 +1881,28 @@ fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
 fn render_background(
     task: &crate::model::BackgroundTask,
     output: Vec<String>,
+    cwd: &std::path::Path,
     now: chrono::DateTime<chrono::Utc>,
     box_area: Rect,
     buf: &mut Buffer,
-) {
+) -> Vec<std::ops::Range<u16>> {
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
     render_background_box(
         &task.description,
         Some(&elapsed),
-        output.into_iter().map(Line::from).collect(),
+        output
+            .into_iter()
+            .flat_map(|text| {
+                super::tool_detail::Part::text_parts(text, false)
+                    .into_iter()
+                    .flat_map(|part| {
+                        part.lines_in(usize::from(box_area.width), Style::default(), now, cwd)
+                    })
+            })
+            .collect(),
         box_area,
         buf,
-    );
+    )
 }
 
 fn render_background_box(
@@ -1228,53 +1911,35 @@ fn render_background_box(
     output: Vec<Line<'static>>,
     box_area: Rect,
     buf: &mut Buffer,
-) {
-    // A rule cell leads the title and a half-width glyph ends the row; a
-    // space keeps the title off both.
-    let title = super::title_rule::title_rule(description, usize::from(box_area.width), elapsed);
+) -> Vec<std::ops::Range<u16>> {
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().dim())
-        .title_style(Style::default().not_dim())
-        .title(title);
+        .border_style(Style::default().dim());
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    if box_area.width > 0 {
-        buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+    let title =
+        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed);
+    // The first and last spans draw rules; the middle spans contain the title.
+    let mut columns = Vec::new();
+    if title.spans.len() >= 4 {
+        let start = title.spans[0].width() as u16;
+        let end = (title.width() - title.spans.last().unwrap().width()).saturating_sub(1) as u16;
+        columns.push(start..end);
+        if let Some(elapsed) = elapsed {
+            let last = title.spans.last().unwrap();
+            if last.content.ends_with(elapsed) {
+                columns.push(box_area.width - elapsed.width() as u16..box_area.width);
+            }
+        }
     }
-    // Output lines up with the title text under the rule.
-    let inner = Rect {
-        x: inner.x + 2,
-        width: inner.width.saturating_sub(2),
-        ..inner
-    };
+    line(title, row(box_area, 0, 1), buf);
     Paragraph::new(output).render(inner, buf);
+    columns
 }
 
 /// Rows a background task takes: its titled rule and the output lines below.
 fn box_height(lines: usize) -> usize {
     1 + lines
-}
-
-fn wrap_details(
-    text: &str,
-    cwd: &std::path::Path,
-    width: usize,
-    markdown: bool,
-) -> Vec<Line<'static>> {
-    let paths = super::paths::text_paths(text, cwd);
-    let text = super::line_truncation::abbreviate_paths_for_wrap(text, &paths, width);
-    if markdown {
-        super::markdown::render_with_options(
-            &text,
-            super::line_truncation::prose_wrap_options(width),
-        )
-    } else {
-        textwrap::wrap(&text, super::line_truncation::prose_wrap_options(width))
-            .into_iter()
-            .map(|line| Line::from(line.into_owned()))
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -1284,11 +1949,22 @@ mod wrapped_path_tests {
     const MESSAGE: &str = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
 
     #[test]
-    fn wrapped_details_keep_fitting_paths_and_markdown_styles() {
+    fn task_details_and_event_share_structured_message_layout() {
+        let source = include_str!("../../tests/fixtures/structured_text/real-theme.plist");
+        let cwd = std::path::Path::new("/project");
+        let expected: Vec<_> = super::super::tool_detail::Part::prose_parts(source.into(), true)
+            .into_iter()
+            .flat_map(|part| part.lines_in(80, Style::default(), chrono::DateTime::UNIX_EPOCH, cwd))
+            .collect();
+        assert_eq!(super::text::lines(source, cwd, 80, true), expected);
+    }
+
+    #[test]
+    fn wrapped_task_details_keep_fitting_paths_and_markdown_styles() {
         for markdown in [false, true] {
-            let lines = wrap_details(
+            let lines = super::text::lines(
                 "some prose before /tmp/fits.md and after",
-                std::path::Path::new("/"),
+                std::path::Path::new("/project"),
                 20,
                 markdown,
             );
@@ -1298,13 +1974,13 @@ mod wrapped_path_tests {
                     .any(|line| line.to_string().contains("/tmp/fits.md"))
             );
         }
-        let lines = wrap_details(
+        let lines = super::text::lines(
             "**/private/workspace/reports/report.md**",
-            std::path::Path::new("/"),
+            std::path::Path::new("/project"),
             20,
             true,
         );
-        assert_eq!(lines[0].to_string(), "/p…/w…/r…/report.md");
+        assert_eq!(lines[0].to_string(), "/…/reports/report.md");
         assert!(lines[0].spans.iter().all(|span| {
             span.style
                 .add_modifier
@@ -1313,7 +1989,7 @@ mod wrapped_path_tests {
     }
 
     #[test]
-    fn details_last_message_and_prompt_show_abbreviated_screenshot_path() {
+    fn task_details_last_message_and_prompt_show_abbreviated_screenshot_path() {
         let now = chrono::Utc::now();
         let session = Session {
             id: crate::providers::SessionKey {
@@ -1325,11 +2001,13 @@ mod wrapped_path_tests {
             name: None,
             title: "Path probe".into(),
             prompt: MESSAGE.into(),
+            task_details_sources: Default::default(),
             prompt_images: Vec::new(),
             queued: Vec::new(),
             prompt_at: None,
             turn_messages: 0,
             last_record_at: None,
+            cache_expires_at: None,
             model: None,
             effort: None,
             git_branch: None,
@@ -1341,17 +2019,20 @@ mod wrapped_path_tests {
             last_message: Some(MESSAGE.into()),
             last_message_at: None,
             activity: None,
+            ask: None,
             pending_questions: Vec::new(),
             background_job: None,
             background: Vec::new(),
+            tasks: Vec::new(),
             last_prompt: None,
             transcript: None,
+            archived: false,
         };
         let mut view = View::new(Grouping::Project, false);
         view.set_sessions(vec![session], false);
         let area = Rect::new(0, 0, 40, 30);
         let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, now);
+        view.render_task_details(area, &mut buf, now);
         let rows: Vec<String> = buf
             .content
             .chunks(40)
@@ -1359,26 +2040,235 @@ mod wrapped_path_tests {
             .collect();
         assert_eq!(
             rows.iter()
-                .filter(|row| row.contains("/p…/t…/c…/-…/0…/s…/b…/report.md"))
+                .filter(|row| row.contains("/…/background-research/report.md"))
                 .count(),
             2
         );
-        assert!(rows.iter().any(|row| row.contains("Last message")));
+        assert!(rows.iter().any(|row| row.contains("Update")));
         assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 
     #[test]
-    fn wrapped_details_abbreviate_screenshot_path_at_narrow_width() {
-        let lines = wrap_details(MESSAGE, std::path::Path::new("/"), 40, true);
+    fn wrapped_task_details_abbreviate_screenshot_path_at_narrow_width() {
+        let lines = super::text::lines(MESSAGE, std::path::Path::new("/project"), 40, true);
         let plain: Vec<_> = lines.iter().map(ToString::to_string).collect();
         assert_eq!(
             plain,
             [
                 "报告已写到",
-                "/p…/t…/c…/-…/0…/s…/b…/report.md，并已发",
+                "/…/background-research/report.md，并已发",
                 "给 team-lead。",
             ]
         );
         assert!(lines.iter().all(|line| line.width() <= 40));
+    }
+}
+
+#[cfg(test)]
+mod background_title_tests {
+    use super::*;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn duration_label_occupies_jump_position_without_click_target_or_overlap() {
+        let mut view = View::default();
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd: std::env::temp_dir(),
+            model: Some("a-model-name-that-needs-truncation".into()),
+            effort: Some("high".into()),
+            branch: "main".into(),
+        });
+        for width in [44, 80, 100, 149, 150, 200] {
+            let area = Rect::new(0, 0, width, 40);
+            let mut buf = Buffer::empty(area);
+            view.event_list.sort = EventSort::Duration;
+            view.event_list.restoring = false;
+            view.render(area, &mut buf);
+            let viewport = view.viewport.borrow();
+            let top = viewport.event_borders[0];
+            let y = viewport.event_borders[1].y;
+            let label = Rect::new(viewport.event_panel.right() + 1 - 10, y, 10, 1);
+            let text: String = (label.x..label.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect();
+            assert_eq!(text, " duration ", "width {width}");
+            let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "tests/ui_snapshots/event_duration_label_{width}.txt"
+            ));
+            let snapshot = format!("{row}\n");
+            if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+                std::fs::write(&path, &snapshot).unwrap();
+            }
+            assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+            assert!(viewport.event_jump.is_empty());
+            for x in label.x..label.right() {
+                assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+            }
+            for (target, _) in &viewport.field_targets {
+                assert!(!target.intersects(label), "width {width}: {target:?}");
+            }
+            let text: String = (0..width).map(|x| buf[(x, top.y)].symbol()).collect();
+            assert!(!text.contains("duration"), "width {width}: {text}");
+        }
+    }
+
+    #[test]
+    fn background_titles_are_centered_with_optional_time_and_cjk() {
+        for (title, left, right) in [("Check files", 13, 14), ("中文答题卡住", 13, 13)] {
+            for time in [None, Some("35s")] {
+                let area = Rect::new(0, 0, 40, 2);
+                let mut buf = Buffer::empty(area);
+                render_background_box(title, time, vec![Line::from("output")], area, &mut buf);
+                let text: String = buf.content[..40]
+                    .iter()
+                    .enumerate()
+                    .filter(|(x, _)| *x == 0 || buf.content[x - 1].symbol().width() < 2)
+                    .map(|(_, c)| c.symbol())
+                    .collect();
+                let suffix = time.map(|t| format!(" {t}")).unwrap_or_default();
+                assert_eq!(
+                    text,
+                    format!(
+                        "{} {title} {}{suffix}",
+                        "─".repeat(left),
+                        "─".repeat(right - suffix.width())
+                    ),
+                    "{title} {time:?}"
+                );
+                assert_eq!(buf[(0, 1)].symbol(), "o");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod branch_input_tests {
+    use super::*;
+    use crate::ui::draft_controls::{Selector, SelectorKind};
+
+    #[test]
+    fn branch_input_matches_search_row_with_panel_padding_and_cursor() {
+        for width in [100, 160, 200] {
+            for text in ["", "feature/你好", "feature/".repeat(30).as_str()] {
+                let area = Rect::new(4, 2, width, 40);
+                let mut view = View::default();
+                view.set_active_panel(Panel::TaskDetails);
+                let mut editor = line_edit::LineEdit::default();
+                editor.insert(text);
+                view.selector = Some(Selector::new(
+                    SelectorKind::Branch {
+                        draft: crate::model::DraftKey {
+                            millis: 0,
+                            counter: 1,
+                        },
+                        branches: vec!["main".into()],
+                        editor,
+                        editing: true,
+                    },
+                    1,
+                ));
+                let mut buffer = Buffer::empty(area);
+                view.render(area, &mut buffer);
+                let rect = view.viewport.borrow().task_details_input;
+                assert_eq!(rect.x, view.center_layout(area).task_details.x);
+                let editor = view.selector.as_ref().unwrap().branch_editor().unwrap();
+                let mut expected = Buffer::empty(rect);
+                render_input_row("New branch ❯ ", editor, rect, &mut expected);
+                assert_eq!(
+                    view.cursor_pos(area),
+                    Some((rect.x + input_row("New branch ❯ ", editor, rect).1, rect.y))
+                );
+                for x in rect.x..rect.right() {
+                    assert_eq!(buffer[(x, rect.y)], expected[(x, rect.y)]);
+                    assert_eq!(buffer[(x, rect.y)].bg, Color::Reset);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod title_input_tests {
+    use super::*;
+
+    #[test]
+    fn new_task_name_keeps_its_task_list_color_while_shown_and_edited() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let mut view = View::new(Grouping::Project, true);
+        view.set_active_panel(Panel::TaskDetails);
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd: directory.path().to_owned(),
+            model: None,
+            effort: None,
+            branch: String::new(),
+        });
+        let key = view.selected_draft().unwrap().key();
+        let color = Some(view.title_color(&key));
+        let rule = Rect::new(0, 0, 60, 1);
+        let name_cell = |view: &View, text: &str| {
+            let mut buf = Buffer::empty(rule);
+            view.render_title_rule(rule, &mut buf);
+            let x = (0..rule.width)
+                .find(|&x| buf[(x, 0)].symbol() == &text[..1])
+                .unwrap();
+            buf[(x, 0)].clone()
+        };
+        view.rename.set_text("Draft name");
+        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+        assert!(view.accept_draft_name());
+        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+    }
+
+    #[test]
+    fn title_editor_keeps_wide_caret_inside_the_rule_and_clears_side_labels() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("项目");
+        std::fs::create_dir(&cwd).unwrap();
+        let mut view = View::default();
+        view.set_active_panel(Panel::TaskDetails);
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd,
+            model: None,
+            effort: None,
+            branch: "main".into(),
+        });
+        for width in [12, 20, 40, 80] {
+            for text in ["", "你好", "改 Claude Code 的颜色", &"你好".repeat(80)] {
+                view.rename.set_text(text);
+                for code in [KeyCode::Home, KeyCode::Right, KeyCode::End, KeyCode::Left] {
+                    view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+                    let rule = Rect::new(7, 3, width, 1);
+                    let mut buf = Buffer::empty(Rect::new(5, 2, width + 4, 3));
+                    view.viewport.borrow_mut().field_targets.clear();
+                    view.render_title_rule(rule, &mut buf);
+                    let input = view.viewport.borrow().title_input;
+                    assert!(input.x >= rule.x && input.right() <= rule.right());
+                    if !input.is_empty() {
+                        let (visible, caret) = view.rename.window(usize::from(input.width));
+                        assert!(caret < input.width);
+                        if !text.is_empty() {
+                            let mut expected = Buffer::empty(input);
+                            let style = view.title_style(&view.selected_draft().unwrap().key());
+                            line(
+                                Span::styled(visible.to_owned(), style),
+                                input,
+                                &mut expected,
+                            );
+                            for x in input.x..input.right() {
+                                assert_eq!(buf[(x, input.y)], expected[(x, input.y)]);
+                            }
+                        }
+                    }
+                    for (label, _) in &view.viewport.borrow().field_targets {
+                        assert!(label.right() < input.x || label.x > input.right());
+                    }
+                }
+            }
+        }
     }
 }

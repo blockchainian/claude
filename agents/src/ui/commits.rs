@@ -24,12 +24,13 @@ struct Cache {
     entries: Entries,
     requests: mpsc::Sender<Key>,
     visible: AtomicBool,
+    retry_after: Duration,
 }
 
 static CACHE: OnceLock<Cache> = OnceLock::new();
 
-fn cache() -> &'static Cache {
-    CACHE.get_or_init(|| {
+impl Cache {
+    fn new(retry_after: Duration) -> Self {
         let entries: Entries = Arc::default();
         let results = Arc::clone(&entries);
         let (requests, receiver) = mpsc::channel::<Key>();
@@ -48,41 +49,49 @@ fn cache() -> &'static Cache {
                 }
             })
             .expect("start commit link worker");
-        Cache {
+        Self {
             entries,
             requests,
             visible: AtomicBool::new(false),
+            retry_after,
         }
-    })
+    }
+
+    fn target(&self, cwd: &Path, sha: &str) -> Option<PathBuf> {
+        let key = (cwd.to_path_buf(), sha.to_owned());
+        let mut entries = self.entries.lock().expect("commit cache poisoned");
+        if let Some(entry) = entries.get(&key) {
+            if entry.target.is_some() {
+                return entry.target.clone();
+            }
+            self.visible.store(true, Ordering::Relaxed);
+            if entry
+                .checked
+                .is_none_or(|at| at.elapsed() < self.retry_after)
+            {
+                return None;
+            }
+        }
+        self.visible.store(true, Ordering::Relaxed);
+        entries.insert(
+            key.clone(),
+            Entry {
+                target: None,
+                checked: None,
+            },
+        );
+        self.requests.send(key).expect("commit link worker stopped");
+        None
+    }
+}
+
+fn cache() -> &'static Cache {
+    CACHE.get_or_init(|| Cache::new(RETRY_AFTER))
 }
 
 /// Positive results live for the process; misses retry after five seconds.
 pub(super) fn target(cwd: &Path, sha: &str) -> Option<PathBuf> {
-    let cache = cache();
-    let key = (cwd.to_path_buf(), sha.to_owned());
-    let mut entries = cache.entries.lock().expect("commit cache poisoned");
-    if let Some(entry) = entries.get(&key) {
-        if entry.target.is_some() {
-            return entry.target.clone();
-        }
-        cache.visible.store(true, Ordering::Relaxed);
-        if entry.checked.is_none_or(|at| at.elapsed() < RETRY_AFTER) {
-            return None;
-        }
-    }
-    cache.visible.store(true, Ordering::Relaxed);
-    entries.insert(
-        key.clone(),
-        Entry {
-            target: None,
-            checked: None,
-        },
-    );
-    cache
-        .requests
-        .send(key)
-        .expect("commit link worker stopped");
-    None
+    cache().target(cwd, sha)
 }
 
 /// Wake periodically once candidates are visible, including while a miss can become a commit.
@@ -136,6 +145,7 @@ mod tests {
 
     #[test]
     fn commit_cache_rechecks_misses_and_rejects_non_commits() {
+        let cache = Cache::new(Duration::from_millis(50));
         let dir = tempfile::tempdir().unwrap();
         let git = |args: &[&str], input: &[u8]| {
             let mut child = Command::new("git")
@@ -174,11 +184,11 @@ mod tests {
             .unwrap()
             .trim()
             .to_owned();
-        assert_eq!(target(dir.path(), &sha), None);
+        assert_eq!(cache.target(dir.path(), &sha), None);
         let deadline = Instant::now() + Duration::from_secs(10);
         let checked = loop {
             if let Some(at) =
-                cache().entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked
+                cache.entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked
             {
                 break at;
             }
@@ -187,29 +197,33 @@ mod tests {
         };
         git(&["hash-object", "-w", "-t", "commit", "--stdin"], &payload);
         assert_eq!(
-            target(dir.path(), &sha),
+            cache.target(dir.path(), &sha),
             None,
             "negative cache must suppress immediate retry"
         );
         assert_eq!(
-            cache().entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked,
+            cache.entries.lock().unwrap()[&(dir.path().into(), sha.clone())].checked,
             Some(checked)
         );
         let url = loop {
-            if let Some(url) = target(dir.path(), &sha) {
+            if let Some(url) = cache.target(dir.path(), &sha) {
                 break url;
             }
             assert!(Instant::now() < deadline, "new commit stayed unlinked");
             std::thread::sleep(Duration::from_millis(20));
         };
         assert!(url.to_str().unwrap().ends_with(&format!("&sha={sha}")));
-        assert_eq!(target(dir.path(), &sha), Some(url));
+        assert_eq!(cache.target(dir.path(), &sha), Some(url));
         assert_eq!(resolve(dir.path(), "deadbeef"), None);
         let blob = String::from_utf8(git(&["hash-object", "-w", "--stdin"], b"blob")).unwrap();
         assert_eq!(resolve(dir.path(), blob.trim()), None);
         let other = tempfile::tempdir().unwrap();
         assert_eq!(resolve(other.path(), &sha), None);
-        assert_eq!(target(other.path(), &sha), None, "cwd is part of the key");
+        assert_eq!(
+            cache.target(other.path(), &sha),
+            None,
+            "cwd is part of the key"
+        );
         std::fs::create_dir(dir.path().join("nested")).unwrap();
         assert_eq!(
             resolve(&dir.path().join("nested"), &sha),

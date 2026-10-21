@@ -1,12 +1,12 @@
-  Agent command center  Group: Projec…
-  ‹  Needs you 1   Inactive 1
-  ────────────────────────────────────
-      Tasks         │ Prompt
-  /t…/pro…  1 of 3  │ Unloaded task
-  › ○ Unloaded ta…  │
-                    │ Project
-                    │ /tmp/project
-                    │ …
-                    │ ─ Inactive · … ─
-  Unloaded tas ›
-  ? help  esc back  ↑/↓ move  enter o…
+  Active 2                  Inactive 1
+────────────────────┬──── Inactive ─────
+    /tmp/project    │      Prompt
+ ○ Unloaded task    │ Unloaded task
+                    │
+                    │
+                    │
+                    │
+                    │
+                    ├─── Unloaded … ────
+ Unloaded tas ❯
+ ? help  esc previous  ↑/↓ move  enter…

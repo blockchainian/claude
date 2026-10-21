@@ -1,0 +1,28 @@
+{
+  "source_head": "9af4e1ee35473c94e6441de5e792f32ddab09c74",
+  "archive_sha256": "25eabe21c0e569e77e84196a61c42f0f391de258ddd768a064289232a67a7fde",
+  "archive": "/Users/satoshi/Code/.worktrees/agents-panel/agents/scratchpad/perf/fix-refresh/baseline-source.tar",
+  "copy": "/Users/satoshi/Code/.worktrees/agents-panel/agents/scratchpad/perf/fix-refresh/baseline",
+  "target": "/private/tmp/agents-refresh-baseline-target",
+  "patches": [],
+  "binary": "/private/tmp/agents-refresh-baseline-target/release/agents",
+  "binary_sha256": "eb62ecdf04265520d6513c6f76a197bc09daab040df00b49e06ce065c1b4ec09",
+  "build_status": {
+    "status": "completion",
+    "returncode": 0,
+    "elapsed_s": 149.05975616700016
+  },
+  "build_command": [
+    "cargo",
+    "build",
+    "--release",
+    "--manifest-path",
+    "/Users/satoshi/Code/.worktrees/agents-panel/agents/scratchpad/perf/fix-refresh/baseline/agents/Cargo.toml"
+  ],
+  "probe_sha256": "ba3e04ae934f8fb80b0e0a4f7885f37ff220c581836a0cbef7e1dfcce49c8f77",
+  "probe_sha256_by_mode": {
+    "startup": "ba3e04ae934f8fb80b0e0a4f7885f37ff220c581836a0cbef7e1dfcce49c8f77",
+    "exit": "ba3e04ae934f8fb80b0e0a4f7885f37ff220c581836a0cbef7e1dfcce49c8f77",
+    "interaction": "7f9f453d8ebf38755a0bb2960dc0cc1cac222a8d3830031584a9b10a4b3388ed"
+  }
+}

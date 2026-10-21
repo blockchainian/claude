@@ -1,0 +1,30 @@
+{
+  "method": "item/tool/requestUserInput",
+  "id": 2,
+  "params": {
+    "threadId": "01a15740-4bf4-7023-8165-78567b297f81",
+    "turnId": "01a15740-4eb3-70d3-a023-5e3f2cdc5298",
+    "itemId": "call_3d3e7995122343ac8f2f117588d23898",
+    "questions": [
+      {
+        "id": "color",
+        "header": "Color",
+        "question": "Pick a color?",
+        "isOther": true,
+        "isSecret": false,
+        "options": [
+          {
+            "label": "Red",
+            "description": "Choose red."
+          },
+          {
+            "label": "Blue",
+            "description": "Choose blue."
+          }
+        ]
+      }
+    ],
+    "isBlocking": false,
+    "autoResolutionMs": null
+  }
+}

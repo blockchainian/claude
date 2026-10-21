@@ -15,7 +15,7 @@ pub(super) struct Link {
 pub(super) type DrawnLink = (Rect, PathBuf);
 
 /// The existing paths in `text`, and the label of each of `images`.
-pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -> Vec<Link> {
+pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image]) -> Vec<Link> {
     let mut links = markdown_links(text, cwd);
     for link in path_links(text, &super::paths::text_paths(text, cwd), cwd) {
         if !links
@@ -167,7 +167,7 @@ pub(super) fn row_links(
 }
 
 /// Underlines the cells of each drawn link with dots. Ratatui has no dotted underline, so
-/// each cell carries its own escape codes; call it last, after the frame's text is read.
+/// each cell carries its own escape codes; call it last, after the panel's text is read.
 pub(super) fn underline(buf: &mut Buffer, links: &[DrawnLink]) {
     use ratatui::buffer::CellDiffOption;
     use std::num::NonZeroU16;
@@ -303,7 +303,7 @@ mod tests {
             "see `src/ui/log.rs`, and/or ~/., {} and https://x.io/a/b [Image #1]",
             absolute.display()
         );
-        let images = [crate::log::Image {
+        let images = [crate::event::Image {
             label: "[Image #1]".into(),
             path: "/tmp/1.png".into(),
         }];

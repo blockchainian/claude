@@ -1,0 +1,12 @@
+ Bash                                           Bash                                           35s
+
+                                         ┌ cat /workspace/a
+                                         │ printf longer
+                                         └ echo done
+                                           pwd
+                                         {
+                                           "timeout": 1000
+                                         }
+                                                  ↓
+                                           running 3 tests
+                                           ...

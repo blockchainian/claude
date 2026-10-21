@@ -1,0 +1,6 @@
+├─ Codex task
+│  ├─ Provider adapters
+│  │  └─ Deep worker
+│  └─ Grand sibling
+└─ Sibling task
+   └─ Cousin task

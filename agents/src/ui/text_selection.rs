@@ -4,15 +4,15 @@ use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Panel {
-    Details,
-    Log,
+    TaskDetails,
+    Event,
     Tasks,
-    LogList,
+    EventList,
 }
 
 impl Panel {
     fn is_list(self) -> bool {
-        matches!(self, Self::Tasks | Self::LogList)
+        matches!(self, Self::Tasks | Self::EventList)
     }
 }
 
@@ -168,19 +168,19 @@ impl Selection {
 impl View {
     fn text_region(viewport: &Viewport, panel: Panel) -> &TextRegion {
         match panel {
-            Panel::Details => &viewport.details_text,
-            Panel::Log => &viewport.log_text,
+            Panel::TaskDetails => &viewport.task_details_text,
+            Panel::Event => &viewport.event_text,
             Panel::Tasks => &viewport.task_text,
-            Panel::LogList => &viewport.log_list_text,
+            Panel::EventList => &viewport.event_list_text,
         }
     }
 
-    pub(super) fn cancel_open_selection(&self) {
+    pub(super) fn cancel_event_detail_selection(&self) {
         if self
             .text_selection
             .borrow()
             .as_ref()
-            .is_some_and(|selection| selection.panel == Panel::Log)
+            .is_some_and(|selection| selection.panel == Panel::Event)
         {
             self.text_selection.borrow_mut().take();
         }
@@ -188,20 +188,25 @@ impl View {
 
     pub(super) fn begin_text_selection(&mut self, x: u16, y: u16) {
         let viewport = self.viewport.borrow();
-        let selection = [Panel::Details, Panel::Log, Panel::Tasks, Panel::LogList]
-            .into_iter()
-            .find_map(|panel| {
-                let region = Self::text_region(&viewport, panel);
-                let anchor = region.hit(x, y, true, panel.is_list())?;
-                Some(Selection {
-                    panel,
-                    start: anchor,
-                    end: anchor,
-                    pointer: (x, y),
-                    dragged: false,
-                    sources: region.sources.clone(),
-                })
-            });
+        let selection = [
+            Panel::TaskDetails,
+            Panel::Event,
+            Panel::Tasks,
+            Panel::EventList,
+        ]
+        .into_iter()
+        .find_map(|panel| {
+            let region = Self::text_region(&viewport, panel);
+            let anchor = region.hit(x, y, true, panel.is_list())?;
+            Some(Selection {
+                panel,
+                start: anchor,
+                end: anchor,
+                pointer: (x, y),
+                dragged: false,
+                sources: region.sources.clone(),
+            })
+        });
         *self.text_selection.borrow_mut() = selection;
     }
 
@@ -224,9 +229,6 @@ impl View {
                 }
                 selection.panel
             };
-        if panel == Panel::LogList {
-            self.set_log_open(None);
-        }
         self.last_copy_click = None;
         if panel.is_list() {
             self.last_click = None;
@@ -254,6 +256,7 @@ impl View {
 
     /// Move the held gesture's panel by one row; render remaps its endpoint afterward.
     pub(crate) fn tick_text_selection(&mut self) -> bool {
+        let mut detail = self.event_detail.scroll.borrow_mut();
         let selection = self.text_selection.borrow();
         let Some(selection) = selection.as_ref().filter(|selection| selection.dragged) else {
             return false;
@@ -280,26 +283,26 @@ impl View {
                 };
                 previous != viewport.scroll
             }
-            Panel::LogList => {
-                let previous = viewport.log_scroll;
-                viewport.log_scroll = if forward {
+            Panel::EventList => {
+                let previous = self.event_list.scroll.get();
+                self.event_list.scroll.set(if forward {
                     previous.saturating_add(1)
                 } else {
                     previous.saturating_sub(1)
-                };
-                previous != viewport.log_scroll
+                });
+                previous != self.event_list.scroll.get()
             }
-            Panel::Log => {
-                let previous = viewport.log_open_scroll;
-                viewport.log_open_scroll = if forward {
-                    previous.saturating_add(1).min(viewport.log_open_max)
+            Panel::Event => {
+                let previous = detail.offset;
+                detail.offset = if forward {
+                    previous.saturating_add(1).min(viewport.event_detail_max)
                 } else {
                     previous.saturating_sub(1)
                 };
-                previous != viewport.log_open_scroll
+                previous != detail.offset
             }
-            Panel::Details => {
-                let state = &mut viewport.details_scroll;
+            Panel::TaskDetails => {
+                let state = &mut viewport.task_details_scroll;
                 if let Some(max) = state.fallback_max {
                     let previous = state.offset;
                     state.offset = if forward {
@@ -322,8 +325,13 @@ impl View {
                             }
                         })
                 };
-                let target = if can_scroll(selection.end.segment) {
-                    selection.end.segment
+                let body = state.bodies.iter().position(|rows| {
+                    rows.contains(
+                        &(usize::from(selection.pointer.1.saturating_sub(area.y)) + state.offset),
+                    )
+                });
+                let target = if let Some(body) = body.filter(|&body| can_scroll(body)) {
+                    body
                 } else if let Some(target) =
                     (0..state.reveal.len()).find(|&index| can_scroll(index))
                 {
@@ -357,7 +365,7 @@ impl View {
         else {
             return;
         };
-        if panel.is_list() {
+        if panel.is_list() || panel == Panel::TaskDetails {
             for source in &region.sources {
                 if let Some(cached) = selection
                     .sources
@@ -424,6 +432,12 @@ fn column_byte(text: &str, column: usize, end: bool) -> usize {
 }
 
 impl View {
+    pub(super) fn cancel_list_selection(&self, panel: Panel) {
+        if self.selecting_list(panel) {
+            self.text_selection.borrow_mut().take();
+        }
+    }
+
     /// Keeps a list selection on its rows after their ids grew by `rows`.
     pub(super) fn shift_list_selection(&self, panel: Panel, rows: usize) {
         let mut selection = self.text_selection.borrow_mut();
@@ -489,7 +503,7 @@ impl View {
         }
         match panel {
             Panel::Tasks => self.viewport.borrow_mut().task_text = region,
-            Panel::LogList => self.viewport.borrow_mut().log_list_text = region,
+            Panel::EventList => self.viewport.borrow_mut().event_list_text = region,
             _ => unreachable!("screen cells belong to a list"),
         }
         self.highlight_text_selection(panel, buf);

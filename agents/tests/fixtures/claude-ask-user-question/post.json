@@ -1,0 +1,33 @@
+{
+  "session_id": "8a9983a7-ffed-4baa-8b5a-4f1c9d56bb05",
+  "transcript_path": "/tmp/agents-hook-fixture/config/projects/-tmp-agents-hook-fixture-cwd/8a9983a7-ffed-4baa-8b5a-4f1c9d56bb05.jsonl",
+  "cwd": "/tmp/agents-hook-fixture/cwd",
+  "scratchpad_dir": "/tmp/claude-fixture/-tmp-agents-hook-fixture-cwd/8a9983a7-ffed-4baa-8b5a-4f1c9d56bb05/scratchpad",
+  "prompt_id": "09319d64-5fb7-404d-88de-81af89db2c0f",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "Hook color?",
+        "header": "Color",
+        "options": [
+          {
+            "label": "Red",
+            "description": "Red choice"
+          },
+          {
+            "label": "Blue",
+            "description": "Blue choice"
+          }
+        ],
+        "multiSelect": false
+      }
+    ]
+  },
+  "tool_use_id": "toolu_01VqpitZ82Zr7Q25su8idyn4"
+}

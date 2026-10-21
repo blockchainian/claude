@@ -1,12 +1,17 @@
 //! Merged session snapshots and filesystem notifications.
 
+mod refresh;
 mod watcher;
+pub use refresh::{Refresh, RefreshRequest};
 mod weekly_usage;
 
 use crate::model::SessionStatus;
-use crate::providers::{Capabilities, Provider, ProviderId, Snapshot};
+use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
 use std::collections::{HashMap, HashSet};
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 pub use watcher::watch;
 
@@ -33,6 +38,16 @@ impl Hub {
             .as_ref()
     }
 
+    pub fn display_names(&self) -> Vec<(ProviderId, &'static str)> {
+        let mut names = self
+            .providers
+            .iter()
+            .map(|provider| (provider.id(), provider.display_name()))
+            .collect::<Vec<_>>();
+        names.sort_by_key(|(id, _)| *id);
+        names
+    }
+
     pub fn capabilities(&self) -> HashMap<ProviderId, Capabilities> {
         self.providers
             .iter()
@@ -47,6 +62,11 @@ impl Hub {
             .collect()
     }
 
+    pub fn set_weekly_usage(&mut self, values: HashMap<ProviderId, crate::providers::WeeklyUsage>) {
+        self.weekly_usage.values = values;
+    }
+
+    #[cfg(test)]
     pub fn weekly_usage_jobs(
         &mut self,
         now: std::time::Instant,
@@ -55,6 +75,21 @@ impl Hub {
             .iter()
             .filter_map(|provider| {
                 let job = provider.weekly_usage()?;
+                self.weekly_usage
+                    .start(provider.id(), now)
+                    .then_some((provider.id(), job))
+            })
+            .collect()
+    }
+
+    pub fn account_usage_jobs(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Vec<(ProviderId, crate::providers::AccountUsageJob)> {
+        self.providers
+            .iter()
+            .filter_map(|provider| {
+                let job = provider.account_usage()?;
                 self.weekly_usage
                     .start(provider.id(), now)
                     .then_some((provider.id(), job))
@@ -74,10 +109,13 @@ impl Hub {
         &self.weekly_usage.values
     }
 
-    pub fn task_defaults(&self) -> Option<(ProviderId, io::Result<crate::tasks::TaskDefaults>)> {
+    pub fn task_defaults(
+        &self,
+        cwd: &Path,
+    ) -> Option<(ProviderId, io::Result<crate::tasks::TaskDefaults>)> {
         self.providers.iter().find_map(|provider| {
             provider
-                .task_defaults()
+                .task_defaults(cwd)
                 .map(|defaults| (provider.id(), defaults))
         })
     }
@@ -94,11 +132,108 @@ impl Hub {
         self.pages = self.pages.saturating_add(1);
     }
 
+    pub fn session_source(&self) -> Refresh {
+        Refresh::new(Self::new(
+            self.providers.iter().map(|p| p.session_source()).collect(),
+        ))
+    }
+
+    pub fn pages(&self) -> usize {
+        self.pages
+    }
+
+    pub fn refresh_paths(&mut self, paths: &[PathBuf], previous: Snapshot) -> Snapshot {
+        let Some(affected) = refresh::affected_sessions(paths, &previous.sessions) else {
+            return self.refresh();
+        };
+        self.refresh_selected(Some((&affected, &previous)))
+    }
+
     pub fn refresh(&mut self) -> Snapshot {
+        self.refresh_selected(None)
+    }
+
+    fn refresh_selected(&mut self, changed: Option<(&HashSet<SessionKey>, &Snapshot)>) -> Snapshot {
+        let mut snapshots: Vec<_> = self
+            .providers
+            .iter_mut()
+            .map(|provider| match changed {
+                None => provider.discover(self.pages),
+                Some((affected, previous)) => {
+                    let ids = affected
+                        .iter()
+                        .filter(|id| id.provider == provider.id())
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    provider.refresh_sessions(self.pages, &ids, &previous.sessions)
+                }
+            })
+            .collect();
+        let mut frontier: Vec<_> = snapshots
+            .iter()
+            .flat_map(|s| &s.sessions)
+            .filter(|s| s.process.is_some())
+            .map(|s| s.id.clone())
+            .collect();
+        let mut selected: HashSet<_> = snapshots
+            .iter()
+            .flat_map(|s| &s.sessions)
+            .map(|s| s.id.clone())
+            .collect();
+        let mut visited = HashSet::new();
+        while !frontier.is_empty() {
+            frontier.retain(|id| visited.insert(id.clone()));
+            if frontier.is_empty() {
+                break;
+            }
+            let mut next = Vec::new();
+            for (provider, snapshot) in self.providers.iter_mut().zip(&mut snapshots) {
+                for child in provider.children(&frontier).sessions {
+                    next.push(child.id.clone());
+                    if selected.insert(child.id.clone()) {
+                        snapshot.sessions.push(child);
+                    }
+                }
+                // Claude discovers its own subagents together with their transcript.
+                next.extend(
+                    snapshot
+                        .sessions
+                        .iter()
+                        .filter(|s| s.parent.as_ref().is_some_and(|p| frontier.contains(p)))
+                        .map(|s| s.id.clone()),
+                );
+            }
+            frontier = next;
+        }
         merge(
             self.providers
                 .iter_mut()
-                .map(|provider| provider.refresh(self.pages)),
+                .zip(snapshots)
+                .map(|(provider, snapshot)| {
+                    let Some((affected, previous)) = changed else {
+                        return provider.enrich(snapshot);
+                    };
+                    let mut cached = Vec::new();
+                    let mut details = Vec::new();
+                    for session in snapshot.sessions {
+                        if !affected.contains(&session.id)
+                            && let Some(before) = previous
+                                .sessions
+                                .iter()
+                                .find(|before| before.id == session.id)
+                        {
+                            cached.push(before.clone());
+                        } else {
+                            details.push(session);
+                        }
+                    }
+                    let mut updated = provider.enrich(Snapshot {
+                        sessions: details,
+                        has_more: snapshot.has_more,
+                    });
+                    updated.sessions.extend(cached);
+                    updated
+                }),
         )
     }
 }
@@ -110,18 +245,10 @@ fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
         sessions.extend(snapshot.sessions);
         has_more |= snapshot.has_more;
     }
-    // Remove orphaned descendants too, so every retained parent remains in the snapshot.
-    loop {
-        let ids: HashSet<_> = sessions.iter().map(|session| session.id.clone()).collect();
-        let count = sessions.len();
-        sessions.retain(|session| {
-            session
-                .parent
-                .as_ref()
-                .is_none_or(|parent| ids.contains(parent))
-        });
-        if sessions.len() == count {
-            break;
+    let ids: HashSet<_> = sessions.iter().map(|s| s.id.clone()).collect();
+    for session in &mut sessions {
+        if session.parent.as_ref().is_some_and(|p| !ids.contains(p)) {
+            session.parent = None;
         }
     }
     let (mut parents, mut children): (Vec<_>, Vec<_>) = sessions

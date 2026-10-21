@@ -1,0 +1,55 @@
+
+
+
+
+
+
+
+
+
+
+
+---
+
+
+
+
+
+
+
+feature/a
+main
+
+Create new branch
+---
+
+
+
+
+
+
+
+feature/a
+main
+
+New branch ❯ feature/probe
+---
+ ○ named task                                            New                now │
+                                                                                ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
+ named task ❯ unfinished task
+---
+Creation was interrupted
+
+
+
+
+
+
+
+
+
+
+---
+ ○ named task                                            New                now │
+                                                                                ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
+ named task ❯

@@ -1,11 +1,13 @@
 //! Opt-in checks against an actual background Claude session.
-use super::attach;
+use super::{ClaudeProvider, ask_user_question::AskUserQuestion, attach};
+use crate::app::live_tests as dashboard;
 use crate::providers::SessionInput;
 use serde_json::{Value, json};
 use std::{
     fs, io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -83,6 +85,63 @@ impl Live {
     }
 
     fn prepare(&mut self) -> io::Result<String> {
+        self.trust_repo()?;
+        let mut app = dashboard::app(
+            Box::new(ClaudeProvider::new(self.home.clone())),
+            self.repo.path().to_owned(),
+        );
+        let job = dashboard::create(
+            &mut app,
+            crate::tasks::NewTask {
+                cwd: self.repo.path().to_owned(),
+                name: None,
+                model: Some("haiku".into()),
+                effort: None,
+                images: Vec::new(),
+                prompt: "Reply exactly READY and stop. Do not use tools or edit files.".into(),
+            },
+        );
+        self.jobs.push(job.clone());
+        Ok(job)
+    }
+
+    /// Starts a background job whose AskUserQuestion goes to the hook at `port`, without the
+    /// user's own settings and hooks.
+    fn prepare_question(&mut self, port: u16) -> io::Result<String> {
+        self.trust_repo()?;
+        let settings = json!({"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":format!("http://127.0.0.1:{port}/ask-user-question"),"timeout":3600}]}]}}).to_string();
+        let text = command(
+            self.repo.path(),
+            "claude",
+            &[
+                "--bg",
+                "--model",
+                "haiku",
+                "--effort",
+                "low",
+                "--tools",
+                "AskUserQuestion",
+                "--strict-mcp-config",
+                "--mcp-config",
+                "{\"mcpServers\":{}}",
+                "--setting-sources",
+                "",
+                "--settings",
+                &settings,
+                "Use AskUserQuestion exactly once. Ask question \"Hook color?\", header \"Color\", multiSelect false, options Red with description Red choice and Blue with description Blue choice. After my answer, reply DONE. This is an explicit interactive question test.",
+            ],
+        )?;
+        let job = text
+            .lines()
+            .find_map(|line| line.split("backgrounded · ").nth(1))
+            .ok_or_else(|| io::Error::other(format!("no background job id: {text}")))?
+            .trim()
+            .to_owned();
+        self.jobs.push(job.clone());
+        Ok(job)
+    }
+
+    fn trust_repo(&mut self) -> io::Result<()> {
         let cwd = self.repo.path();
         command(cwd, "git", &["init"])?;
         command(
@@ -107,26 +166,7 @@ impl Live {
         };
         config["projects"][fs::canonicalize(cwd)?.to_str().unwrap()]["hasTrustDialogAccepted"] =
             json!(true);
-        atomic_write(path, &serde_json::to_vec_pretty(&config)?)?;
-        let output = command(
-            cwd,
-            "claude",
-            &[
-                "--bg",
-                "--model",
-                "haiku",
-                "Reply exactly READY and stop. Do not use tools or edit files.",
-            ],
-        )?;
-        let job = output
-            .lines()
-            .find_map(|line| {
-                line.split_once("backgrounded · ")
-                    .map(|(_, job)| job.trim().to_owned())
-            })
-            .ok_or_else(|| io::Error::other("Claude did not print a background job id"))?;
-        self.jobs.push(job.clone());
-        Ok(job)
+        atomic_write(path, &serde_json::to_vec_pretty(&config)?)
     }
 
     fn registry(&self, job: &str) -> io::Result<Option<Value>> {
@@ -217,6 +257,7 @@ impl Live {
                 }
             }
             if Instant::now() >= deadline {
+                fs::create_dir_all(std::env::temp_dir().join("agents-stage3-live"))?;
                 fs::write(
                     std::env::temp_dir().join("agents-stage3-live/queued-transcript-timeout.json"),
                     serde_json::to_vec_pretty(&latest)?,
@@ -232,6 +273,7 @@ impl Live {
     fn cleanup(&mut self) -> io::Result<()> {
         let mut errors = Vec::new();
         for job in self.jobs.drain(..) {
+            let _ = command(self.repo.path(), "claude", &["stop", &job]);
             if let Err(error) = command(self.repo.path(), "claude", &["rm", &job]) {
                 errors.push(error.to_string());
             }
@@ -272,12 +314,27 @@ fn real_attach_prompt_paste_busy_steer_interrupt_model() {
             .as_str()
             .ok_or_else(|| io::Error::other("registry lacks sessionId"))?
             .to_owned();
-        let idle_screen = attach::inspect(&job, live.repo.path())?;
-        fs::create_dir_all(std::env::temp_dir().join("agents-stage3-live"))?;
-        fs::write(
-            std::env::temp_dir().join("agents-stage3-live/driver-idle.screen.txt"),
-            idle_screen,
+        live.wait_prompt(
+            &id,
+            "Reply exactly READY and stop. Do not use tools or edit files.",
         )?;
+        live.status(&job, "idle")?;
+        let mut app = dashboard::app(
+            Box::new(ClaudeProvider::new(live.home.clone())),
+            live.repo.path().to_owned(),
+        );
+        let session = dashboard::session(&app, &id);
+        assert_eq!(
+            session.background_job.as_ref().map(|job| job.id.as_str()),
+            Some(job.as_str())
+        );
+        assert_eq!(
+            session
+                .process
+                .as_ref()
+                .and_then(|process| process.label.as_deref()),
+            Some("bg")
+        );
         let settings = live.home.join("settings.json");
         fs::create_dir_all(live.repo.path().join(".claude"))?;
         fs::write(
@@ -285,40 +342,20 @@ fn real_attach_prompt_paste_busy_steer_interrupt_model() {
             serde_json::to_vec(&json!({"permissions": {"allow": ["Bash(sleep 10)"]}}))?,
         )?;
         let pasted = "Use the Bash tool to run exactly `sleep 10` three times, in separate foreground tool calls, one after another.\nAfter all three calls, reply agents-paste-✓. Do not edit files or use any other tools.";
-        attach::send(
-            &job,
-            live.repo.path(),
-            &settings,
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
             SessionInput::Prompt(pasted.to_owned()),
-        )?;
+        );
         live.wait_prompt(&id, pasted)?;
         let busy = live.status(&job, "busy")?;
         assert_eq!(busy["sessionId"], id);
-        let screen = attach::inspect(&job, live.repo.path())?;
-        let lines: Vec<_> = screen.lines().collect();
-        let row = lines
-            .iter()
-            .rposition(|line| line.trim() == "❯")
-            .ok_or_else(|| io::Error::other("busy screen lacks empty input"))?;
-        assert!(
-            lines[..row]
-                .iter()
-                .any(|line| line.trim_start().starts_with('●')),
-            "busy screen lacks its status line"
-        );
-        fs::create_dir_all(std::env::temp_dir().join("agents-stage3-live"))?;
-        fs::write(
-            std::env::temp_dir().join("agents-stage3-live/driver-busy.screen.txt"),
-            &screen,
-        )?;
-        assert_eq!(live.status(&job, "busy")?["sessionId"], id);
         let steer = "After the current tool finishes, include agents-steer-✓ in your next reply and continue the remaining sleep calls. Do not start another task.";
-        attach::send(
-            &job,
-            live.repo.path(),
-            &settings,
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
             SessionInput::Prompt(steer.to_owned()),
-        )?;
+        );
         eprintln!("busy Enter accepted the queued prompt");
         let events = live.wait_queued_command(&id, steer)?;
         assert!(
@@ -328,20 +365,16 @@ fn real_attach_prompt_paste_busy_steer_interrupt_model() {
         );
         eprintln!("queued_command reached the real transcript boundary");
         assert_eq!(live.registry(&job)?.unwrap()["sessionId"], id);
-        fs::write(
-            std::env::temp_dir().join("agents-stage3-live/driver-transcript.json"),
-            serde_json::to_vec_pretty(&events)?,
-        )?;
-        attach::send(&job, live.repo.path(), &settings, SessionInput::Interrupt)?;
+
+        dashboard::send(&mut app, session.id.clone(), SessionInput::Interrupt);
         live.status(&job, "idle")?;
         eprintln!("interrupt returned the registry to idle");
         let defaults: Value = serde_json::from_slice(&fs::read(&settings)?)?;
-        attach::send(
-            &job,
-            live.repo.path(),
-            &settings,
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
             SessionInput::SetModel("sonnet".to_owned()),
-        )?;
+        );
         let restored: Value = serde_json::from_slice(&fs::read(&settings)?)?;
         for key in ["model", "effortLevel"] {
             assert_eq!(
@@ -357,6 +390,129 @@ fn real_attach_prompt_paste_busy_steer_interrupt_model() {
         );
         assert_eq!(live.registry(&job)?.unwrap()["sessionId"], id);
         eprintln!("same-session model change preserved global defaults");
+        dashboard::delete(&mut app, session.id.clone());
+        dashboard::refresh(&mut app);
+        assert!(
+            !live.home.join("jobs").join(&job).exists(),
+            "App delete must remove the real background job"
+        );
+        assert!(
+            live.registry(&job)?.is_none(),
+            "App delete must remove registry"
+        );
+        live.jobs.retain(|created| created != &job);
+        Ok(())
+    }));
+    let cleanup = live.cleanup();
+    assert!(cleanup.is_ok(), "cleanup failed: {cleanup:?}");
+    match result {
+        Ok(result) => result.unwrap(),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+#[test]
+#[ignore = "starts a real billable Claude background session and restores global configuration"]
+fn real_terminal_panel_clears_left_input() {
+    let mut live = Live::new().unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {
+        let job = live.prepare()?;
+        let id = live.status(&job, "idle")?["sessionId"]
+            .as_str()
+            .ok_or_else(|| io::Error::other("registry lacks sessionId"))?
+            .to_owned();
+        live.wait_prompt(
+            &id,
+            "Reply exactly READY and stop. Do not use tools or edit files.",
+        )?;
+        let mut app = dashboard::app(
+            Box::new(ClaudeProvider::new(live.home.clone())),
+            live.repo.path().to_owned(),
+        );
+        let session = dashboard::session(&app, &id);
+        dashboard::open_terminal(&mut app, session.id.clone(), |screen| {
+            screen.lines().any(|line| line.trim() == "❯")
+        });
+        dashboard::paste_terminal(&mut app, "agents-panel stale text\nsecond line");
+        dashboard::wait_terminal(&mut app, |screen| screen.contains("second line"));
+        let prompt = "Reply exactly agents-panel-✓ and stop. Do not use tools.";
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
+            SessionInput::Prompt(prompt.to_owned()),
+        );
+        live.wait_prompt(&id, prompt)?;
+        dashboard::close_terminal(&mut app);
+        Ok(())
+    }));
+    let cleanup = live.cleanup();
+    assert!(cleanup.is_ok(), "cleanup failed: {cleanup:?}");
+    match result {
+        Ok(result) => result.unwrap(),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+#[test]
+#[ignore = "starts a real billable Claude background session and restores global configuration"]
+fn real_attach_clears_left_input_and_keeps_a_pending_question() {
+    let mut live = Live::new().unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {
+        let server = Arc::new(AskUserQuestion::bind(0, live.home.clone())?);
+        let job = live.prepare_question(server.port)?;
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let ask = loop {
+            if let Some(ask) = server.pending().into_iter().next() {
+                break ask;
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "real AskUserQuestion request never arrived",
+                ));
+            }
+            thread::sleep(Duration::from_millis(100));
+        };
+        let left = "agents-left-input stale text\nsecond line";
+        attach::type_input(&job, live.repo.path(), left)?;
+        let mut provider = ClaudeProvider::new(live.home.clone());
+        provider.ask_user_question = Some(Arc::clone(&server));
+        let mut app = dashboard::app(Box::new(provider), live.repo.path().to_owned());
+        let session = dashboard::session(&app, &ask.session.id);
+        let prompt = "After the question, reply agents-left-input-✓ too.";
+        dashboard::send(
+            &mut app,
+            session.id.clone(),
+            SessionInput::Prompt(prompt.to_owned()),
+        );
+        assert_eq!(
+            server.pending(),
+            vec![ask.clone()],
+            "clearing the input must keep the pending question"
+        );
+        let session = dashboard::session(&app, &ask.session.id);
+        dashboard::answer_questions(&mut app, session, vec![vec!["Blue".into()]]);
+        let deadline = Instant::now() + Duration::from_secs(90);
+        loop {
+            let events = live.transcript(&ask.session.id).unwrap_or_default();
+            let text = serde_json::to_string(&events)?;
+            assert!(
+                !text.contains("agents-left-input stale"),
+                "left input was submitted"
+            );
+            if events
+                .iter()
+                .any(|event| event["toolUseResult"]["answers"] == json!({"Hook color?":"Blue"}))
+                && text.contains(prompt)
+            {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "transcript never recorded both the answer and the prompt",
+                ));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
         Ok(())
     }));
     let cleanup = live.cleanup();

@@ -1,0 +1,526 @@
+use crate::providers::WeeklyUsage;
+use crate::state::UsageView;
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Widget,
+};
+
+pub(super) fn provider_text(name: &str, usage: &WeeklyUsage, view: UsageView) -> String {
+    if view == UsageView::Compact {
+        return format!("{}%", 100 - usage.left_percent());
+    }
+    detailed_provider_text(name, usage, false)
+}
+
+fn detailed_provider_text(name: &str, usage: &WeeklyUsage, left: bool) -> String {
+    let usage_text = provider_usage_text(usage, left);
+    if usage_text.is_empty() {
+        name.to_owned()
+    } else if left {
+        format!("{usage_text} {name}")
+    } else {
+        format!("{name} {usage_text}")
+    }
+}
+
+fn provider_usage_text(usage: &WeeklyUsage, left: bool) -> String {
+    let reset = usage.resets_at.map(|reset| {
+        let reset = reset + chrono::Duration::seconds(30);
+        format!(
+            "resets {}",
+            reset.with_timezone(&chrono::Local).format("%a %H:%M")
+        )
+    });
+    let credits = usage
+        .reset_credits
+        .filter(|count| *count > 0)
+        .map(|count| format!("{count} credit{}", if count == 1 { "" } else { "s" }));
+    let parts = if left {
+        [credits, reset]
+    } else {
+        [reset, credits]
+    };
+    parts.into_iter().flatten().collect::<Vec<_>>().join(", ")
+}
+
+/// The style of a provider's text: the error color once more than 95% is used.
+fn text_style(usage: &WeeklyUsage) -> Style {
+    if 100 - usage.left_percent() > 95 {
+        super::style::error_style()
+    } else {
+        Style::default()
+    }
+}
+
+fn half_width(width: u16, available: [u16; 2]) -> u16 {
+    let budget = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        width / 2
+    } else {
+        (usize::from(width) * 3 / 4) as u16
+    };
+    ((budget.saturating_sub(1)) / 2)
+        .min(available[0].saturating_sub(1))
+        .min(available[1].saturating_sub(1))
+}
+
+fn compact_provider(
+    name: &str,
+    usage: &WeeklyUsage,
+    bar_width: u16,
+    bar_limit: u16,
+    available: u16,
+    left: bool,
+    use_colors: bool,
+) -> Line<'static> {
+    let used = 100 - usage.left_percent();
+    let number_width = format!("{used}%").len() as u16;
+    let limit = available - name.len() as u16 - number_width - 3;
+    let dots = ((f64::from(bar_width * 2) * f64::from(used) / 100.0).round() as usize)
+        .min(usize::from(bar_limit * 2));
+    // Fill all four dot rows, mirrored at half-cell precision.
+    let full = "⣿".repeat(dots / 2);
+    let partial = if dots.is_multiple_of(2) {
+        ""
+    } else if left {
+        "⡇"
+    } else {
+        "⢸"
+    };
+    let bar = if left {
+        format!("{full}{partial}")
+    } else {
+        format!("{partial}{full}")
+    };
+    let empty = Span::raw(" ".repeat(usize::from(limit) - dots.div_ceil(2)));
+    let style = text_style(usage);
+    let bar_style = if used > 95 {
+        style
+    } else {
+        super::style::timeline_style(use_colors)
+    };
+    let number = Span::styled(format!("{used}%"), style);
+    let bar = Span::styled(bar, bar_style);
+    let label = Span::styled(name.to_owned(), style);
+    let gap = Span::raw(if dots == 0 { "" } else { " " });
+    let empty = if dots == 0 {
+        Span::raw(" ".repeat(usize::from(limit) + 1))
+    } else {
+        empty
+    };
+    if left {
+        Line::from(vec![
+            bar,
+            gap,
+            number,
+            empty,
+            Span::raw(" "),
+            label,
+            Span::raw(" "),
+        ])
+    } else {
+        Line::from(vec![
+            Span::raw(" "),
+            label,
+            Span::raw(" "),
+            empty,
+            number,
+            gap,
+            bar,
+        ])
+    }
+}
+
+/// Place each provider against the screen midline without covering either tab.
+pub(super) fn render(
+    area: Rect,
+    tabs: &[(usize, Rect)],
+    usage: [Option<&WeeklyUsage>; 2],
+    view: UsageView,
+    use_colors: bool,
+    buf: &mut Buffer,
+) -> Option<Rect> {
+    if area.is_empty() || usage.iter().all(Option::is_none) {
+        return None;
+    }
+    let center = area.x + area.width / 2;
+    let mut available = [center - area.x, area.right().saturating_sub(center + 1)];
+    for (_, tab) in tabs {
+        if tab.x <= center {
+            available[0] = available[0].min(center.saturating_sub(tab.right()));
+        }
+        if tab.right() > center {
+            available[1] = available[1].min(tab.x.saturating_sub(center + 1));
+        }
+    }
+    let names = ["Claude", "Codex"];
+    let half = half_width(area.width, available);
+    if view == UsageView::Compact {
+        let text_widths = std::array::from_fn::<_, 2, _>(|i| {
+            usage[i].map_or(0, |usage| {
+                names[i].len() as u16 + provider_text(names[i], usage, view).len() as u16 + 3
+            })
+        });
+        if text_widths.iter().any(|width| *width > half) {
+            return None;
+        }
+        // Both providers use the same full-scale length, up to the outer edge.
+        let bar_width = half.saturating_sub(
+            names
+                .iter()
+                .map(|name| name.len() as u16 + 2)
+                .max()
+                .unwrap(),
+        );
+        let bar_limit = half.saturating_sub(*text_widths.iter().max().unwrap());
+        for i in 0..2 {
+            if let Some(usage) = usage[i] {
+                let width = half;
+                let side = Rect::new(
+                    if i == 0 { center - width } else { center + 1 },
+                    area.y,
+                    width,
+                    1,
+                );
+                compact_provider(
+                    names[i],
+                    usage,
+                    bar_width,
+                    bar_limit,
+                    half,
+                    i == 0,
+                    use_colors,
+                )
+                .render(side, buf);
+            }
+        }
+        if usage.iter().all(Option::is_some) {
+            buf[(center, area.y)].set_symbol("·");
+        }
+        return Some(Rect::new(center - half, area.y, half * 2 + 1, 1));
+    }
+    let texts = std::array::from_fn::<_, 2, _>(|i| {
+        usage[i].map(|usage| provider_usage_text(usage, i == 0))
+    });
+    let widths = texts.each_ref().map(|text| {
+        text.as_ref()
+            .map_or(0, |text| Line::from(text.as_str()).width() as u16)
+    });
+    if (0..2).any(|i| usage[i].is_some() && widths[i] + names[i].len() as u16 + 3 > half) {
+        return None;
+    }
+    let mut target = None::<Rect>;
+    for i in 0..2 {
+        if usage[i].is_none() {
+            continue;
+        }
+        let side = Rect::new(
+            if i == 0 { center - half } else { center + 1 },
+            area.y,
+            half,
+            1,
+        );
+        target = Some(target.map_or(side, |target| target.union(side)));
+        let usage_text = texts[i].as_ref().unwrap();
+        let gap = " ".repeat(usize::from(half - widths[i] - names[i].len() as u16 - 2));
+        let text = if i == 0 {
+            format!(" {usage_text}{gap}{} ", names[i])
+        } else {
+            format!(" {}{gap}{usage_text} ", names[i])
+        };
+        Line::styled(text, text_style(usage[i].unwrap())).render(side, buf);
+    }
+    if usage.iter().all(Option::is_some) {
+        Line::from("·").render(Rect::new(center, area.y, 1, 1), buf);
+    }
+    target
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detailed_usage_puts_details_at_outer_edges() {
+        let usage = WeeklyUsage {
+            used_percent: 21.0,
+            resets_at: Some("2026-10-23T16:00:00Z".parse().unwrap()),
+            reset_credits: Some(1),
+        };
+        let reset = usage
+            .resets_at
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%a %H:%M")
+            .to_string();
+        for (width, half) in [(200, 49), (149, 55)] {
+            for present in [[true, true], [true, false], [false, true]] {
+                let area = Rect::new(3, 2, width, 1);
+                let center = area.x + width / 2;
+                let mut buf = Buffer::empty(area);
+                let target = render(
+                    area,
+                    &[],
+                    present.map(|p| p.then_some(&usage)),
+                    UsageView::Detailed,
+                    false,
+                    &mut buf,
+                )
+                .unwrap();
+                let left = format!("1 credit, resets {reset}");
+                let right = format!("resets {reset}, 1 credit");
+                let expected_left = format!(" {left:<pad$}Claude ", pad = usize::from(half) - 8);
+                let expected_right = format!(" Codex{right:>pad$} ", pad = usize::from(half) - 7);
+                let row = (area.x..area.right())
+                    .map(|x| buf[(x, area.y)].symbol())
+                    .collect::<String>();
+                let cells = row.chars().collect::<Vec<_>>();
+                let middle = usize::from(width / 2);
+                assert_eq!(
+                    cells[middle],
+                    if present == [true, true] { '·' } else { ' ' }
+                );
+                for (i, expected) in [expected_left, expected_right].iter().enumerate() {
+                    let start = if i == 0 {
+                        middle - usize::from(half)
+                    } else {
+                        middle + 1
+                    };
+                    let actual = cells[start..start + usize::from(half)]
+                        .iter()
+                        .collect::<String>();
+                    assert_eq!(
+                        actual,
+                        if present[i] {
+                            expected.clone()
+                        } else {
+                            " ".repeat(usize::from(half))
+                        },
+                        "{width}, {present:?}"
+                    );
+                }
+                let expected = match present {
+                    [true, true] => Rect::new(center - half, area.y, half * 2 + 1, 1),
+                    [true, false] => Rect::new(center - half, area.y, half, 1),
+                    [false, true] => Rect::new(center + 1, area.y, half, 1),
+                    _ => unreachable!(),
+                };
+                assert_eq!(target, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn compact_bar_uses_error_color_above_95_percent() {
+        for (used, red) in [(95.0, false), (96.0, true)] {
+            let usage = WeeklyUsage::from_used_percent(used, None).unwrap();
+            let area = Rect::new(0, 0, 200, 1);
+            let mut buf = Buffer::empty(area);
+            render(
+                area,
+                &[],
+                [Some(&usage); 2],
+                UsageView::Compact,
+                true,
+                &mut buf,
+            )
+            .unwrap();
+            let bar = buf
+                .content
+                .iter()
+                .filter(|cell| cell.symbol() == "⣿")
+                .collect::<Vec<_>>();
+            assert!(!bar.is_empty());
+            for cell in bar {
+                assert_eq!(cell.fg == ratatui::style::Color::Red, red, "{used}");
+            }
+        }
+    }
+
+    #[test]
+    fn provider_text_uses_error_color_above_95_percent() {
+        for view in [UsageView::Compact, UsageView::Detailed] {
+            for (used, red) in [(95.0, false), (96.0, true)] {
+                let mut usage = WeeklyUsage::from_used_percent(
+                    used,
+                    Some("2026-10-23T16:00:00Z".parse().unwrap()),
+                )
+                .unwrap();
+                usage.reset_credits = Some(2);
+                let area = Rect::new(0, 0, 200, 1);
+                let mut buf = Buffer::empty(area);
+                render(area, &[], [Some(&usage); 2], view, true, &mut buf).unwrap();
+                let row = buf
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>();
+                let texts = match view {
+                    UsageView::Compact => vec!["Claude", "Codex"],
+                    UsageView::Detailed => vec!["Claude", "Codex", "resets", "2 credits"],
+                };
+                for name in texts {
+                    let start = row.find(name).unwrap();
+                    let start = row[..start].chars().count();
+                    for cell in &buf.content[start..start + name.len()] {
+                        assert_eq!(
+                            cell.fg == ratatui::style::Color::Red,
+                            red,
+                            "{view:?}, {used}, {name}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn detailed_usage_requires_space_between_details_and_name() {
+        let usage = WeeklyUsage {
+            used_percent: 21.0,
+            resets_at: Some("2026-10-23T16:00:00Z".parse().unwrap()),
+            reset_credits: Some(12345),
+        };
+        // At 150 columns the budget shrinks; tabs can also reduce either half.
+        for (width, tabs) in [
+            (80, vec![]),
+            (150, vec![]),
+            (200, vec![(0, Rect::new(0, 0, 65, 1))]),
+            (200, vec![(0, Rect::new(136, 0, 64, 1))]),
+        ] {
+            let area = Rect::new(0, 0, width, 1);
+            let mut buf = Buffer::empty(area);
+            assert_eq!(
+                render(
+                    area,
+                    &tabs,
+                    [Some(&usage); 2],
+                    UsageView::Detailed,
+                    false,
+                    &mut buf
+                ),
+                None
+            );
+            assert!(buf.content.iter().all(|cell| cell.symbol() == " "));
+        }
+    }
+
+    #[test]
+    fn detailed_labels_stay_next_to_center() {
+        let reset: chrono::DateTime<chrono::Utc> = "2026-10-23T16:00:00Z".parse().unwrap();
+        let time = reset
+            .with_timezone(&chrono::Local)
+            .format("%a %H:%M")
+            .to_string();
+        for resets_at in [None, Some(reset)] {
+            for reset_credits in [None, Some(0), Some(1), Some(2)] {
+                let usage = WeeklyUsage {
+                    used_percent: 21.0,
+                    resets_at,
+                    reset_credits,
+                };
+                let mut parts = Vec::new();
+                if let Some(count) = reset_credits.filter(|n| *n > 0) {
+                    parts.push(format!(
+                        "{count} credit{}",
+                        if count == 1 { "" } else { "s" }
+                    ));
+                }
+                if resets_at.is_some() {
+                    parts.push(format!("resets {time}"));
+                }
+                let extras = parts.join(", ");
+                let expected = if extras.is_empty() {
+                    "Claude".to_owned()
+                } else {
+                    format!("{extras} Claude")
+                };
+                assert_eq!(detailed_provider_text("Claude", &usage, true), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn weekly_usage_rounds_reset_to_nearest_minute() {
+        for (actual, rounded) in [
+            ("2026-10-23T15:59:59.837Z", "2026-10-23T16:00:00Z"),
+            ("2026-10-23T15:59:29.999Z", "2026-10-23T15:59:00Z"),
+            ("2026-10-23T15:59:30Z", "2026-10-23T16:00:00Z"),
+            ("2026-10-23T23:59:59.837Z", "2026-10-24T00:00:00Z"),
+        ] {
+            let reset = actual.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+            let expected = rounded
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .unwrap()
+                .with_timezone(&chrono::Local)
+                .format("%a %H:%M")
+                .to_string();
+            let usage = WeeklyUsage::from_used_percent(97.0, Some(reset)).unwrap();
+            for name in ["Claude", "Codex"] {
+                for view in [UsageView::Compact, UsageView::Detailed] {
+                    assert_eq!(
+                        provider_text(name, &usage, view),
+                        match view {
+                            UsageView::Compact => "97%".to_owned(),
+                            UsageView::Detailed => format!("{name} resets {expected}"),
+                        },
+                        "{actual}, {view:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn weekly_usage_text_modes_thresholds_credits_and_reset_times() {
+        let reset = "2026-10-23T15:59:59Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap();
+        let local = "2026-10-23T16:00:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%a %H:%M")
+            .to_string();
+        for left in [0, 3, 4, 5, 79, 100] {
+            for reset_at in [None, Some(reset)] {
+                for credits in [None, Some(0), Some(1), Some(2)] {
+                    for view in [UsageView::Compact, UsageView::Detailed] {
+                        let usage = WeeklyUsage {
+                            used_percent: 100.0 - f64::from(left),
+                            resets_at: reset_at,
+                            reset_credits: credits,
+                        };
+                        let mut expected = match view {
+                            UsageView::Compact => format!("{}%", 100 - left),
+                            UsageView::Detailed => "Claude".to_owned(),
+                        };
+                        let has_credits = matches!(credits, Some(1 | 2));
+                        if reset_at.is_some() && view == UsageView::Detailed {
+                            expected.push_str(&match view {
+                                UsageView::Compact => format!(" until {local}"),
+                                UsageView::Detailed => format!(" resets {local}"),
+                            });
+                        }
+                        if has_credits && view == UsageView::Detailed {
+                            expected.push_str(if reset_at.is_some() { ", " } else { " " });
+                            expected.push_str(if credits == Some(1) {
+                                "1 credit"
+                            } else {
+                                "2 credits"
+                            });
+                        }
+                        for name in ["Claude", "Codex"] {
+                            assert_eq!(
+                                provider_text(name, &usage, view),
+                                expected.replace("Claude", name)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

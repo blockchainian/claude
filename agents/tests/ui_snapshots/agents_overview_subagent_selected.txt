@@ -1,30 +1,30 @@
-  Agent command center  Group: Project  g
-   All 3   Ready 2   Working 1   Needs you 0   Inactive 0                                              tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                      Status         Updated  │ Prompt
-  /tmp/project  3                                                        │ Check files
-    ○ Parent task                                Ready           2m ago  │
-    └ ○ Review results                           Ready              now  │ Project
-  › └ ● Check files                              Working         1m ago  │ /tmp/child-project
-                                                                         │
-                                                                         │ child-model
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │ ────────── Working · Check files ──────────
-  Check files · Subagent cannot take input
-  ? help  esc back  ↑/↓ move  n new
+  Active 3                                                                                                  Inactive 0
+────────────────────────────────────────────────────────────┬──────────────────────── Working ──────────────────────────
+                        /tmp/project                        │                          Prompt
+ ○ Parent task                       Ready           2m ago │ Check files
+ ├─ ○ Review results                 Ready              now │
+ └─ ● Check files                    Working         1m ago │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+────────────────────────────────────────────────────────────┴╴child-project ─────── Check files ────────────────────────
+ Check files ❮
+─────────────────────────────────────────────────────────────╴child-model ──────────────────────────────────────────────
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ? help  esc previous  ↑/↓ move  n new

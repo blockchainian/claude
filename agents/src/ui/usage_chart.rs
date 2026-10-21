@@ -22,6 +22,16 @@ const TOP_PERCENTILE: usize = 95;
 const DOT_BITS: [[u8; 4]; 2] = [[0x40, 0x04, 0x02, 0x01], [0x80, 0x20, 0x10, 0x08]];
 
 impl View {
+    pub(crate) fn set_context_usage(&mut self, id: &SessionKey, percent: Option<u64>) {
+        self.context_usage = percent.map(|percent| (id.clone(), percent));
+    }
+
+    pub(super) fn selected_context_percent(&self) -> Option<u64> {
+        let session = self.selected_row()?;
+        let (id, percent) = self.context_usage.as_ref()?;
+        (*id == session.id).then_some(*percent)
+    }
+
     pub(crate) fn set_usage(&mut self, id: &SessionKey, bins: BTreeMap<i64, Bin>) {
         self.usage = Some((id.clone(), bins));
     }
@@ -70,7 +80,9 @@ impl View {
                     .fold(0, |bits, column| bits | column);
                 if bits != 0 {
                     let symbol = char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ');
-                    buf[(x, y)].set_char(symbol);
+                    buf[(x, y)]
+                        .set_char(symbol)
+                        .set_style(super::style::timeline_style(self.use_colors));
                 }
             }
         }

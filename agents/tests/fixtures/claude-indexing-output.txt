@@ -1,0 +1,29 @@
+        .unwrap();
+    }
+
+    fn user(file: &mut impl Write, content: &str) {
+        let mut record: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+        record["message"]["content"] = content.into();
+        writeln!(file, "{record}").unwrap();
+    }
+
+    fn idle_prompt(file: &mut impl Write) {
+        queue(file, "enqueue", "Current prompt");
+        queue(file, "dequeue", "");
+        user(file, "Current prompt");
+        writeln!(file, "{}", FIXTURE.lines().nth(1).unwrap()).unwrap();
+        write_tool_traffic(file, 1);
+    }
+
+    fn summary(file: &tempfile::NamedTempFile) -> Summary {
+        let len = file.as_file().metadata().unwrap().len();
+        let mut summary = read(file.path(), len).unwrap();
+        let bytes = std::fs::read(file.path()).unwrap();
+        let requested = records(&bytes)
+            .filter_map(|record| {
+                let id = record["toolUseResult"]["backgroundTaskId"]
+                    .as_str()?
+                    .to_owned();
+                Some((id.clone(), PathBuf::from(format!("/tmp/x/{id}.output"))))
+            })
+            .collect();

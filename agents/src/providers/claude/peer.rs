@@ -1,4 +1,4 @@
-use crate::log::Kind;
+use crate::event::Kind;
 use serde_json::Value;
 
 type Message<'a> = (Option<&'a str>, &'a str);
@@ -17,15 +17,17 @@ fn report_body(body: &str) -> &str {
     body
 }
 
+/// The sender and body of a peer message's origin, on a user record or on the attachment of a
+/// message absorbed mid-turn; a subagent's hand-back gives its report without the frame.
 pub(super) fn origin_message(record: &Value) -> Option<Message<'_>> {
-    let origin = &record["origin"];
-    if origin["kind"] != "peer" {
-        return None;
-    }
-    Some((
-        origin["name"].as_str(),
-        report_body(origin["body"].as_str()?),
-    ))
+    let origin = [&record["origin"], &record["attachment"]["origin"]]
+        .into_iter()
+        .find(|origin| origin["kind"] == "peer")?;
+    let body = match origin["handbackReportText"].as_str() {
+        Some(report) => report,
+        None => report_body(origin["body"].as_str()?),
+    };
+    Some((origin["name"].as_str(), body))
 }
 
 /// Extracts peer text without changing the body's internal whitespace.
