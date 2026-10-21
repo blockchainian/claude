@@ -96,6 +96,18 @@ pub struct SourceRecord {
 }
 
 impl Event {
+    /// Matches either the row source or any member call of a merged row.
+    pub fn has_source(&self, id: &str) -> bool {
+        self.source.as_deref() == Some(id) || self.calls.iter().any(|call| call.id == id)
+    }
+
+    pub fn shares_source(&self, other: &Self) -> bool {
+        self.source
+            .as_deref()
+            .is_some_and(|id| other.has_source(id))
+            || self.calls.iter().any(|call| other.has_source(&call.id))
+    }
+
     /// The shared row summary, before Markdown rendering and width-dependent fitting.
     pub fn summary(&self) -> String {
         if let Some(summary) = agent::summary(self) {

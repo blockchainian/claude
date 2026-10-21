@@ -789,7 +789,7 @@ impl View {
 
     pub(super) fn event_position(&self, id: &task_ui::EventId) -> Option<usize> {
         self.shown_events()
-            .position(|(_, event)| event.source.as_ref() == Some(&id.0))
+            .position(|(_, event)| event.has_source(&id.0))
     }
 
     pub(crate) fn restore_event_list(&mut self) {
@@ -814,7 +814,7 @@ impl View {
                 && let Some(index) = self
                     .event_panel
                     .iter()
-                    .position(|event| event.source.as_ref() == Some(&tail.0))
+                    .position(|event| event.has_source(&tail.0))
             {
                 self.event_list
                     .unseen
@@ -854,20 +854,15 @@ impl View {
             selected_index.and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
         let reset_selected = selected_full.filter(|_| update.reset).and_then(|full| {
             let selected = &self.event_panel[full];
-            update
-                .events
-                .iter()
-                .position(|event| match (&selected.source, &event.source) {
-                    (Some(left), Some(right)) => left == right,
-                    (None, None) => match (selected.calls.first(), event.calls.first()) {
-                        (Some(left), Some(right)) => left.id == right.id,
-                        (None, None) => {
-                            selected.kind == event.kind && selected.started_at == event.started_at
-                        }
-                        _ => false,
-                    },
-                    _ => false,
-                })
+            update.events.iter().position(|event| {
+                event.shares_source(selected)
+                    || (selected.source.is_none()
+                        && event.source.is_none()
+                        && selected.calls.is_empty()
+                        && event.calls.is_empty()
+                        && selected.kind == event.kind
+                        && selected.started_at == event.started_at)
+            })
         });
         let selected_order = (self.event_list.sort == EventSort::Duration
             && self.selecting_list(text_selection::Panel::EventList))
@@ -2742,3 +2737,7 @@ mod path_tests;
 #[cfg(test)]
 #[path = "turn_group_tests.rs"]
 mod turn_group_tests;
+
+#[cfg(test)]
+#[path = "event_identity_tests.rs"]
+mod event_identity_tests;
