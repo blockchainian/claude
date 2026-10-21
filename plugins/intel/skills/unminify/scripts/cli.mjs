@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { loadHistory, loadImportContext } from './history.mjs';
+import { createChunkIgnore } from './chunk-manifest.mjs';
 import { runMergeFile } from './merge-imports.mjs';
 import { loadFragmentContext } from './fragments.mjs';
 import { randomUUID } from 'node:crypto';
@@ -84,8 +86,8 @@ export async function run(options, dependencies) {
   try {
     api = dependencies ?? await modules();
     if (settings.chunkSiblings && !settings.chunks) throw new Error('--chunk-siblings requires --chunks');
-    const chunkDriver = settings.chunks
-      ? await (await import('./chunk-run.mjs')).createChunkRun(root, settings) : null;
+    const chunkDriver = await (await import('./chunk-run.mjs')).createChunkRun(root, settings);
+    const ignores = await createChunkIgnore(root, settings.ignoreFile);
     const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');
     // Overlapping paths list a file once.
     const listed = new Set();
@@ -274,67 +276,73 @@ export async function run(options, dependencies) {
     }
     try {
       // Keep a second window ready while request slots drain or files write back.
-      const tasks = chunkDriver ? [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))] : files;
-      const fileConcurrency = Math.min(tasks.length, settings.concurrency * 2);
-      let nextFile = 0;
-      async function worker() {
-        while (nextFile < tasks.length) {
-          const task = tasks[nextFile++], file = typeof task === 'string' ? task : task.id;
-          try {
-            if (typeof task === 'string') await processFile(task);
-            else await chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext });
-          }
-          catch (error) {
-            summary.exitCode = 1;
-            emit({ file, status: 'interrupted', reason: error.message });
+      let tasks = [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))];
+      do {
+        const fileConcurrency = Math.min(tasks.length, settings.concurrency * 2);
+        let nextFile = 0;
+        async function worker() {
+          while (nextFile < tasks.length) {
+            const task = tasks[nextFile++], file = typeof task === 'string' ? task : task.id;
+            try {
+              if (typeof task === 'string') await processFile(task);
+              else await chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext });
+            }
+            catch (error) {
+              summary.exitCode = 1;
+              emit({ file, status: 'interrupted', reason: error.message });
+            }
           }
         }
-      }
-      await Promise.all(Array.from({ length: fileConcurrency }, worker));
-      const endImports = phase('followImports');
-      let changes;
-      const chunkImports = chunkDriver?.importOptions(journals);
-      try {
-        changes = await api.followImports(sources, (file, task) => {
-          const end = phase('followImports', file);
-          try { return fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task(); }
-          finally { end(); }
-        }, fragments, chunkImports, settings);
-      }
-      finally {
-        endImports();
-        for (const metrics of fileMetrics.values()) {
-          if (!changes?.has(metrics.file) || !journals.get(metrics.file)?.done) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
-        }
-      }
-      chunkImports?.apply(sources, emit, summary);
-      for (const [file, after] of changes) {
-        if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
-        // Unfinished journals retain batch positions and the original source fingerprint.
-        if (!journals.get(file)?.done) continue;
-        const metrics = fileMetrics.get(file);
-        let writtenAt = null;
-        const endWriting = phase('check_write', file);
+        await Promise.all(Array.from({ length: fileConcurrency }, worker));
+        loadHistory(root, { sources, journals, chunks: chunkDriver, ignores, emit });
+        loadImportContext(root, sources);
+        const endImports = phase('followImports');
+        let changes;
+        const chunkImports = chunkDriver.importOptions(journals);
+        chunkImports.readOnly = new Set([...sources.keys()].filter(file => !journals.get(file)?.done && !chunkImports.chunkBindings.has(file)));
         try {
-          const before = sources.get(file), journal = journals.get(file);
-          const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after, { fragment: fragments.has(file) })));
-          if (reason !== null) {
-            journal.rejectImports(reason);
-            summary.rejected++;
-            emit({ file, status: 'imports-rejected', reason });
-            continue;
-          }
-          journal.prepare(before, after, 'imports');
-          atomicWrite(join(root, file), after);
-          journal.complete(after, 'imports');
-          sources.set(file, after);
-          writtenAt = Date.now();
-          emit({ file, status: 'imports' });
-        } finally {
-          endWriting();
-          event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: writtenAt, at: Date.now() });
+          changes = await api.followImports(sources, (file, task) => {
+            const end = phase('followImports', file);
+            try { return fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task(); }
+            finally { end(); }
+          }, fragments, chunkImports, settings);
         }
-      }
+        finally {
+          endImports();
+          for (const metrics of fileMetrics.values()) {
+            if (!changes?.has(metrics.file) || !journals.get(metrics.file)?.done) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
+          }
+        }
+        chunkImports?.apply(sources, emit, summary);
+        for (const [file, after] of changes) {
+          if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
+          // Unfinished journals retain batch positions and the original source fingerprint.
+          if (!journals.get(file)?.done) continue;
+          const metrics = fileMetricsFor(file);
+          let writtenAt = null;
+          const endWriting = phase('check_write', file);
+          try {
+            const before = sources.get(file), journal = journals.get(file);
+            const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after, { fragment: fragments.has(file) })));
+            if (reason !== null) {
+              journal.rejectImports(reason);
+              summary.rejected++;
+              emit({ file, status: 'imports-rejected', reason });
+              continue;
+            }
+            journal.prepare(before, after, 'imports');
+            atomicWrite(join(root, file), after);
+            journal.complete(after, 'imports');
+            sources.set(file, after);
+            writtenAt = Date.now();
+            emit({ file, status: 'imports' });
+          } finally {
+            endWriting();
+            event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: writtenAt, at: Date.now() });
+          }
+        }
+        tasks = stop ? [] : chunkDriver.more();
+      } while (tasks.length);
     } finally { await namer.close(); namer = undefined; }
     if (stop) {
       output(`${stop.code}: ${stop.code === 'AUTH' ? 'Run codex login, then resume.' : 'Wait for quota to reset, then resume.'} Resume with the same unminify command; completed replies are saved.`);

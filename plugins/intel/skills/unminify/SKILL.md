@@ -57,9 +57,15 @@ Planning and packing count the actual instructions, prompt and rendered context 
 batch that still cannot fit fails before sending. Placeholders are unique across
 the request; original batch IDs stay stable across resume. Collision replies use
 stable binding-specific journal IDs.
-At the end of every run, including interrupted runs, imports in journal-completed files
-follow export names without another model request. Unfinished files supply their current
-export names but remain untouched so their journals can resume. External named import aliases
+At the end of every run, including interrupted runs, the command discovers all completed
+ordinary and chunk journals in the target Git root, including files outside this batch.
+It verifies their current contents against the recorded results before following imports;
+changed or missing files are skipped and reported. Historical files receive only import
+following, never model naming. Ordinary files pass rewrite checks and journaled atomic
+writes; chunks pass whole-chunk checks and transactional writes. Ignored files are never
+written. Running selections in batches produces the same final file bytes as running
+them together. Unfinished files supply their current export names but remain untouched
+so their journals can resume. External named import aliases
 restore the imported name deterministically when it is at least `--min-symbol-length`
 characters long; shorter imported names stay unchanged and never go to the model.
 When the imported name is occupied by a same-scope binding or would change a reference's
@@ -142,10 +148,15 @@ Unselected siblings receive only the authorized shared-name edits.
 Chunk journals live in `.unminify/chunks/`. They store accepted replies and durable
 whole-chunk write intents, including rewritten source, to finish a partially written
 transaction without model requests. Recovery validates every member before writing any
-remaining member and runs before selection or syntax. Manifest membership, selected paths,
-ignore membership, batch options and syntax pipeline must match when resuming; source
-changes fail explicitly. Files already owned by ordinary rename journals cannot be
-silently moved into chunk journals. Use the same command to resume.
+remaining member and runs before selection or syntax. Manifest membership, ignore
+membership, batch options and syntax pipeline must match when resuming; source changes
+fail explicitly. Selected paths are tracked separately from output options. A changed
+selection first finishes any pending selection using its saved replies and source
+fingerprints, then processes additional selected files from the committed chunk.
+Completed selections are skipped; newly selected declarations still receive naming.
+Files already owned by ordinary rename journals cannot be silently moved into chunk
+journals. Historical completed chunks can follow imports even when the current command
+does not supply their manifest.
 
 ## Ignore and resume
 
@@ -167,9 +178,9 @@ times, retry cause, in-flight and queued counts, file/batch IDs/name count/phase
 session ID (changes on reconnect), plus status, usage, `estimated_input_tokens` and safe rate headers. Credentials,
 auth-file contents and source text are never logged in these telemetry files.
 
-Rerun the same command and batch
-options after interruption. Completed files are skipped; unfinished files reuse recorded
-replies against the unchanged original source. Do not delete journals during a resumable run.
+Keep the same output and batch options after interruption; the selected paths may change.
+Completed files are skipped; unfinished files reuse recorded replies against the unchanged
+original source. Do not delete journals during a resumable run.
 If source or batch options changed, stop and report the mismatch rather than discard records.
 The user decides whether `.unminify/` should be ignored or committed.
 

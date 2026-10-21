@@ -38,9 +38,15 @@ function stateAt(path) {
   const header = records[0];
   if (header.type !== 'chunk-source' || header.version !== 1 || typeof header.id !== 'string' || !header.hashes || typeof header.options !== 'string') throw new Error(`invalid chunk journal header: ${path}`);
   const batches = new Map(), replies = new Map();
-  let done = null, intent = null;
+  let done = null, intent = null, selection = null;
   for (const record of records.slice(1)) {
-    if (record.type === 'response') { validateResponse(replies, record.request, record.names); replies.set(record.request, record.names); }
+    if (record.type === 'chunk-selection') {
+      sameMembership(header.hashes, record.hashes, header.id);
+      header.hashes = record.hashes;
+      selection = record.files;
+      batches.clear(); replies.clear(); done = null; intent = null;
+    }
+    else if (record.type === 'response') { validateResponse(replies, record.request, record.names); replies.set(record.request, record.names); }
     else if (record.type === 'chunk-prepare') { intent = record; done = null; }
     else if (record.type === 'chunk-done') { done = record; intent = null; }
     else if (record.type === 'chunk-batch' && typeof record.id === 'string' && record.names && typeof record.names === 'object') {
@@ -48,7 +54,7 @@ function stateAt(path) {
       batches.set(record.id, record.names);
     } else throw new Error(`invalid chunk journal record: ${path}`);
   }
-  return { header, batches, replies, done, intent };
+  return { header, batches, replies, done, intent, selection };
 }
 function sameMembership(left, right, id) {
   if (stable(Object.keys(left).sort()) !== stable(Object.keys(right).sort())) throw new Error(`membership changed: ${id}`);
@@ -130,6 +136,15 @@ export function openChunkJournal(root, id, sources, options = {}) {
   verifyHashes(diskHashes(root, expected, id), expected, id);
   const journal = {
     path, batches: state.batches, replies: state.replies,
+    get selection() { return state.selection; },
+    begin(files) {
+      const selection = [...new Set([...(state.selection ?? []), ...files])].sort();
+      if (state.selection && (!state.done || selection.length === state.selection.length)) return;
+      const record = { type: 'chunk-selection', files: selection, hashes: fingerprints(current) };
+      appendRecord(path, record);
+      state.selection = selection;
+      state.batches.clear(); state.replies.clear(); state.done = null;
+    },
     response(request, names) {
       const values = responseValues(names);
       if (!validateResponse(state.replies, request, values)) return;

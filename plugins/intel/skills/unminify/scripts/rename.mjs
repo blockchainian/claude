@@ -363,7 +363,7 @@ export function followImports(files, withFile = (file, task) => task(), fragment
     const branch = new Set(visiting).add(file);
     const module = modules.get(file);
     const proposals = new Map();
-    if (module.fragment && !chunks?.chunkBindings.has(file)) {
+    if (chunks?.readOnly?.has(file) || module.fragment && !chunks?.chunkBindings.has(file)) {
       resolved.set(file, proposals);
       return proposals;
     }
