@@ -1883,7 +1883,14 @@ impl crate::event::Reader for Reader {
         &mut self,
         groups: &[Vec<crate::event::SourceRecord>],
     ) -> io::Result<Vec<Option<Event>>> {
-        let metadata = read_metadata(&mut File::open(&self.path)?)?;
+        let mut file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(vec![None; groups.len()]);
+            }
+            Err(error) => return Err(error),
+        };
+        let metadata = read_metadata(&mut file)?;
         Ok(groups
             .iter()
             .map(|group| {
@@ -4818,6 +4825,25 @@ mod source_tests;
 mod pinned_reader_tests {
     use super::*;
     use crate::event::{Reader as _, SourceRecord};
+
+    #[test]
+    fn pinned_missing_transcript_discards_each_group() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-rollout.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::copy(fixture, &path).unwrap();
+        let groups: Vec<_> = tail(&path, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.source_records)
+            .collect();
+        assert!(!groups.is_empty());
+        let mut reader = Reader::new(path.clone(), false);
+        std::fs::remove_file(path).unwrap();
+        let events = reader.read_events(&groups).unwrap();
+        assert_eq!(events.len(), groups.len());
+        assert!(events.iter().all(Option::is_none));
+    }
 
     #[test]
     fn pinned_records_restore_real_events_before_refresh() {
