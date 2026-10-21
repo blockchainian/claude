@@ -1819,7 +1819,7 @@ impl View {
         }
         if plain && key.code == KeyCode::Char(' ') && self.active_panel == Panel::EventList {
             self.change_event_list(true, |list| {
-                list.messages_only = !list.messages_only;
+                list.filter = list.filter.next();
                 list.settings_initialized = true;
             });
             return self
@@ -1827,10 +1827,7 @@ impl View {
                 .cloned()
                 .map(|id| Action::PersistFiltering {
                     id,
-                    filter: self
-                        .event_list
-                        .messages_only
-                        .then_some(crate::state::TaskFilter::Message),
+                    filter: self.event_list.filter,
                 });
         }
         if let Some(code) = super::navigation::list_navigation(key) {

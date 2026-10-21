@@ -563,22 +563,22 @@ fn task_filter_round_trip_and_removal_preserves_sort() {
     let key = "claude:filtered".parse().unwrap();
     let other = "codex:other".parse().unwrap();
     let mut preferences = Preferences::default();
-    assert_eq!(preferences.task_filter(&key), None);
+    assert_eq!(preferences.task_filter(&key), EventFilter::All);
     preferences
-        .save_task_filter(dir.path(), &key, Some(TaskFilter::Message))
+        .save_task_filter(dir.path(), &key, EventFilter::Message)
         .unwrap();
     assert_eq!(
         document(dir.path())["state"]["tasks"]["claude:filtered"]["filter"],
         "message"
     );
     let mut loaded = Preferences::load(dir.path());
-    assert_eq!(loaded.task_filter(&key), Some(TaskFilter::Message));
-    assert_eq!(loaded.task_filter(&other), None);
+    assert_eq!(loaded.task_filter(&key), EventFilter::Message);
+    assert_eq!(loaded.task_filter(&other), EventFilter::All);
     loaded
         .save_task_sort(dir.path(), &key, EventSort::Duration)
         .unwrap();
     preferences
-        .save_task_filter(dir.path(), &key, None)
+        .save_task_filter(dir.path(), &key, EventFilter::All)
         .unwrap();
     assert!(
         document(dir.path())["state"]["tasks"]["claude:filtered"]
@@ -586,24 +586,40 @@ fn task_filter_round_trip_and_removal_preserves_sort() {
             .is_none()
     );
     let loaded = Preferences::load(dir.path());
-    assert_eq!(loaded.task_filter(&key), None);
+    assert_eq!(loaded.task_filter(&key), EventFilter::All);
     assert_eq!(loaded.task_sort(&key), EventSort::Duration);
     preferences
-        .save_task_filter(dir.path(), &key, Some(TaskFilter::Message))
+        .save_task_filter(dir.path(), &key, EventFilter::Message)
         .unwrap();
     preferences
         .save_task_sort(dir.path(), &key, EventSort::Time)
         .unwrap();
     assert_eq!(
         Preferences::load(dir.path()).task_filter(&key),
-        Some(TaskFilter::Message)
+        EventFilter::Message
     );
     preferences
-        .save_task_filter(dir.path(), &key, None)
+        .save_task_filter(dir.path(), &key, EventFilter::All)
         .unwrap();
     assert!(
         document(dir.path())["state"]["tasks"]
             .get("claude:filtered")
             .is_none()
     );
+}
+
+#[test]
+fn task_tool_filter_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:tools".parse().unwrap();
+    let filter: EventFilter = serde_json::from_str("\"tool\"").unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_filter(dir.path(), &key, filter)
+        .unwrap();
+    assert_eq!(
+        document(dir.path())["state"]["tasks"]["claude:tools"]["filter"],
+        "tool"
+    );
+    assert_eq!(Preferences::load(dir.path()).task_filter(&key), filter);
 }

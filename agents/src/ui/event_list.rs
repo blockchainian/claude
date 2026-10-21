@@ -943,11 +943,11 @@ impl View {
     pub(crate) fn initialize_event_list(
         &mut self,
         sorting: EventSort,
-        filter: Option<crate::state::TaskFilter>,
+        filter: crate::event::EventFilter,
     ) {
         if !self.event_list.settings_initialized {
             self.event_list.sort = sorting;
-            self.event_list.messages_only = filter == Some(crate::state::TaskFilter::Message);
+            self.event_list.filter = filter;
             self.event_list.settings_initialized = true;
         }
     }
@@ -1406,11 +1406,9 @@ impl View {
         order
             .filter(|&index| self.event_matches(index))
             .filter(|&index| {
-                !self.event_list.messages_only
-                    || matches!(
-                        self.event_panel[index].kind,
-                        Kind::User | Kind::QueuedUser | Kind::Assistant
-                    )
+                self.event_list
+                    .filter
+                    .includes(&self.event_panel[index].kind)
             })
             .map(|index| (index, &self.event_panel[index]))
     }

@@ -297,7 +297,7 @@ pub enum Action {
     /// Space: the event filter changed; persist it.
     PersistFiltering {
         id: SessionKey,
-        filter: Option<crate::state::TaskFilter>,
+        filter: crate::event::EventFilter,
     },
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,

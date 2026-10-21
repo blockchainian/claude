@@ -24,7 +24,7 @@ pub(crate) struct EventList {
     pub(super) selected: Option<(bool, EventId)>,
     pub pinned: Vec<PinnedRow>,
     pub search: EventSearch,
-    pub messages_only: bool,
+    pub filter: crate::event::EventFilter,
     pub sort: EventSort,
     pub settings_initialized: bool,
     pub unseen: std::cell::Cell<usize>,

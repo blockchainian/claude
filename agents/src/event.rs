@@ -31,6 +31,43 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventFilter {
+    #[default]
+    All,
+    Message,
+    Tool,
+}
+
+impl EventFilter {
+    pub fn is_all(&self) -> bool {
+        *self == Self::All
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Message,
+            Self::Message => Self::Tool,
+            Self::Tool => Self::All,
+        }
+    }
+
+    pub fn includes(self, kind: &Kind) -> bool {
+        let category = match kind {
+            Kind::User
+            | Kind::QueuedUser
+            | Kind::Assistant
+            | Kind::Compaction
+            | Kind::QueuedSystem
+            | Kind::Agent
+            | Kind::Session => Self::Message,
+            Kind::Tool | Kind::Error | Kind::Denied => Self::Tool,
+        };
+        self == Self::All || self == category
+    }
+}
+
 /// Transcript turn containing a row, including whether its boundaries are known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Turn {

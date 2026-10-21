@@ -1,3 +1,4 @@
+use crate::event::EventFilter;
 use crate::model::{EventSort, Grouping};
 use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
@@ -84,18 +85,12 @@ enum TaskSort {
     Duration,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TaskFilter {
-    Message,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sort: Option<TaskSort>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    filter: Option<TaskFilter>,
+    #[serde(default, skip_serializing_if = "EventFilter::is_all")]
+    filter: EventFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ask: Option<StoredAsk>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -351,8 +346,11 @@ impl Preferences {
         }
     }
 
-    pub fn task_filter(&self, key: &SessionKey) -> Option<TaskFilter> {
-        self.tasks.get(key).and_then(|task| task.filter)
+    pub fn task_filter(&self, key: &SessionKey) -> EventFilter {
+        self.tasks
+            .get(key)
+            .map(|task| task.filter)
+            .unwrap_or_default()
     }
 
     pub fn task_ask(&self, key: &SessionKey) -> Option<&StoredAsk> {
@@ -398,9 +396,14 @@ impl Preferences {
         &mut self,
         config_dir: &Path,
         key: &SessionKey,
-        filter: Option<TaskFilter>,
+        filter: EventFilter,
     ) -> io::Result<()> {
-        self.save_task_field(config_dir, key, "filter", filter)
+        self.save_task_field(
+            config_dir,
+            key,
+            "filter",
+            (!filter.is_all()).then_some(filter),
+        )
     }
 
     fn save_task_field<T: Serialize>(

@@ -16,7 +16,7 @@
  View                                    Events
  tab/⇧tab  Filter                        /                       Search
  /         Search                        t                       Sort
- g         Group                         space                   Messages only
+ g         Group                         space                   Messages/tools
                                          2× click top border     Earliest
                                          2× click bottom border  Latest
 
