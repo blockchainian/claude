@@ -49,10 +49,13 @@ fn terminal_notification_transcripts_show_only_the_report() {
             "{record}"
         )
         .unwrap();
+        let title = "\"等 tab 线程\" ✓";
         let capture = tmux.capture_when(|capture| {
-            capture.contains("Task b9wi31ww0") && capture.contains(expected)
+            capture
+                .rsplit_once(title)
+                .is_some_and(|(_, detail)| detail.contains(expected))
         });
-        let detail = capture.split("Task b9wi31ww0").nth(1).unwrap();
+        let detail = capture.rsplit_once(title).unwrap().1;
         for hidden in [
             "Now ",
             "\"parentUuid\"",
