@@ -1209,6 +1209,14 @@ fn model_catalog_labels_refresh_only_when_modified() {
 }
 
 #[test]
+fn sessions_load_while_codex_rewrites_the_model_cache() {
+    let (dir, mut provider) = fixture();
+    // Codex truncates models_cache.json before rewriting it in place.
+    std::fs::write(dir.path().join("models_cache.json"), "").unwrap();
+    assert!(!provider.refresh(1).sessions.is_empty());
+}
+
+#[test]
 fn input_choices_list_cached_models_by_priority_with_their_efforts() {
     let (dir, provider) = fixture();
     assert_eq!(
