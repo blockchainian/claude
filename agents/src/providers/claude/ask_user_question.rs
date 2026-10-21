@@ -96,7 +96,7 @@ impl AskUserQuestion {
             .ok_or_else(|| io::Error::other("Claude AskUserQuestion is no longer pending"))?;
         let body = if answer.rejected {
             let AskKind::Questions { questions, .. } = &ask.kind;
-            let mut reason = "The user wants to clarify these questions.\n    This means they may have additional information, context or questions for you.\n    Take their response into account and then reformulate the questions if appropriate.\n    Start by asking them what they would like to clarify.\n\n    Questions asked:".to_owned();
+            let mut reason = "The user wants to clarify these questions. Start by asking them what they would like to clarify.\n\n    Questions asked:".to_owned();
             for question in questions {
                 reason.push_str(&format!("\n- \"{}\"\n  ", question.text));
                 if let Some(answer) = answers.get(&question.text) {
