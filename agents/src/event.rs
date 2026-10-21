@@ -184,6 +184,25 @@ pub(crate) struct Update {
 
 pub(crate) trait Reader: Send {
     fn refresh(&mut self, requested: usize) -> std::io::Result<Update>;
+
+    /// Decodes one event from each group of records, reading only those lines.
+    /// An entry is `None` when its lines cannot be read or decode to no single event.
+    fn read_events(&mut self, groups: &[Vec<SourceRecord>]) -> std::io::Result<Vec<Option<Event>>>;
+}
+
+impl SourceRecord {
+    /// The JSON record on the transcript line starting at this offset.
+    /// `None` when the file, the line or its JSON is unavailable.
+    pub(crate) fn read(&self) -> Option<serde_json::Value> {
+        use std::io::{BufRead, Seek};
+        let mut file = std::fs::File::open(&self.path).ok()?;
+        file.seek(std::io::SeekFrom::Start(self.offset)).ok()?;
+        let mut line = Vec::new();
+        std::io::BufReader::new(file)
+            .read_until(b'\n', &mut line)
+            .ok()?;
+        serde_json::from_slice(&line).ok()
+    }
 }
 
 /// One tool call of a Tool, Error or Denied row.

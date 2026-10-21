@@ -564,6 +564,56 @@ impl crate::event::Reader for Reader {
     fn refresh(&mut self, requested: usize) -> io::Result<crate::event::Update> {
         Reader::refresh(self, requested)
     }
+
+    fn read_events(
+        &mut self,
+        groups: &[Vec<crate::event::SourceRecord>],
+    ) -> io::Result<Vec<Option<Event>>> {
+        Ok(groups
+            .iter()
+            .map(|group| event_from_records(&self.path, group))
+            .collect())
+    }
+}
+
+/// Decodes the one event whose transcript lines are exactly `group`, without
+/// the surrounding transcript: its turn and previous event are unknown.
+fn event_from_records(path: &Path, group: &[crate::event::SourceRecord]) -> Option<Event> {
+    if group.iter().any(|record| record.path != path) {
+        return None;
+    }
+    let records = group
+        .iter()
+        .map(|record| (record.offset, record))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_iter()
+        .map(|(offset, record)| Some((offset, record.read()?)))
+        .collect::<Option<Vec<_>>>()?;
+    let mut event_panel = EventReader {
+        path: Some(path.to_path_buf()),
+        ..EventReader::default()
+    };
+    // Newest first, as the sequential reader walks, so results precede their calls.
+    for (offset, record) in records.into_iter().rev() {
+        event_panel.offset = offset;
+        if !event_panel.record(record, usize::MAX) {
+            break;
+        }
+    }
+    if event_panel.error.is_some() {
+        return None;
+    }
+    let mut events = crate::event::agent::merge(
+        event_panel
+            .entries
+            .into_iter()
+            .rev()
+            .map(|entry| entry.event)
+            .collect(),
+    );
+    let mut event = events.pop().filter(|_| events.is_empty())?;
+    event.previous_end = None;
+    Some(event)
 }
 
 #[derive(Default)]
@@ -1157,7 +1207,7 @@ impl EventReader {
             event.source_records.extend(records);
             let mut call = event_detail_call;
             call.id = block["id"].as_str().unwrap_or("").to_owned();
-            event.source = Some(call.id.clone());
+            event.source = block["id"].as_str().map(str::to_owned);
             call.started_at = Some(at);
             call.duration = ended_at.map(|end| end - at);
             event.ended_at = ended_at;
@@ -1248,7 +1298,7 @@ impl EventReader {
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
         // Records and content blocks arrive newest first; this call is the earliest so far.
-        entry.event.source = Some(detail.id.clone());
+        entry.event.source = block["id"].as_str().map(str::to_owned);
         entry.event.calls.insert(0, detail);
         entry.event.background |= input["run_in_background"] == true;
         entry.event.started_at = at;
@@ -3879,3 +3929,7 @@ mod refresh_work_tests {
         assert_eq!(unchanged.parsed_bytes, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "event_reader_read_events_tests.rs"]
+mod read_events_tests;

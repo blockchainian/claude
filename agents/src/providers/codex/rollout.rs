@@ -1878,6 +1878,60 @@ impl crate::event::Reader for Reader {
     fn refresh(&mut self, requested: usize) -> io::Result<crate::event::Update> {
         Reader::refresh(self, requested)
     }
+
+    fn read_events(
+        &mut self,
+        groups: &[Vec<crate::event::SourceRecord>],
+    ) -> io::Result<Vec<Option<Event>>> {
+        let metadata = match File::open(&self.path) {
+            Ok(mut file) => read_metadata(&mut file)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(vec![None; groups.len()]);
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(groups
+            .iter()
+            .map(|group| event_from_records(&self.path, group, metadata.as_ref()))
+            .collect())
+    }
+}
+
+/// Decodes the one event whose transcript lines are exactly `group`, without
+/// the surrounding transcript: its turn and previous event are unknown.
+fn event_from_records(
+    path: &Path,
+    group: &[crate::event::SourceRecord],
+    metadata: Option<&Value>,
+) -> Option<Event> {
+    if group.iter().any(|record| record.path != path) {
+        return None;
+    }
+    let records = group
+        .iter()
+        .map(|record| (record.offset, record))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_iter()
+        .map(|(offset, record)| Some((offset, record.read()?)))
+        .collect::<Option<Vec<_>>>()?;
+    let selected: HashSet<u64> = records.iter().map(|(offset, _)| *offset).collect();
+    let entries =
+        events_with_context(path, &records, usize::MAX, Some(&selected), metadata).ok()?;
+    // Merging needs equal turns, and turns computed from a few lines disagree.
+    let mut events = crate::event::agent::merge(
+        entries
+            .into_iter()
+            .map(|(_, mut event)| {
+                event.turn = None;
+                event
+            })
+            .collect(),
+    );
+    let mut event = events.pop().filter(|_| events.is_empty())?;
+    event.previous_end = None;
+    event.source_records.sort_by_key(|record| record.offset);
+    event.source_records.dedup();
+    Some(event)
 }
 
 #[cfg(test)]
@@ -4759,3 +4813,7 @@ mod selective_event_tests {
 #[cfg(test)]
 #[path = "rollout_source_tests.rs"]
 mod source_tests;
+
+#[cfg(test)]
+#[path = "rollout_read_events_tests.rs"]
+mod read_events_tests;
