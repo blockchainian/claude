@@ -2636,8 +2636,8 @@ pub(crate) mod tests {
     #[test]
     fn real_absorbed_handback_shows_sender_and_report() {
         let fixture = include_str!("../../../tests/fixtures/claude-peer-handback-absorbed.jsonl");
-        let origin = &serde_json::from_str::<Value>(fixture.lines().last().unwrap()).unwrap()
-            ["attachment"]["origin"];
+        let origin = &serde_json::from_str::<Value>(fixture.lines().last().unwrap()).unwrap()["attachment"]
+            ["origin"];
         let report = origin["handbackReportText"].as_str().unwrap();
         let mut file = tempfile::NamedTempFile::new().unwrap();
         write!(file, "{fixture}").unwrap();

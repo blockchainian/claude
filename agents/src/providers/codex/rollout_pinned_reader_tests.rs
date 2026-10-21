@@ -57,8 +57,7 @@ fn pinned_records_restore_real_events_before_refresh() {
 #[test]
 fn pinned_malformed_completion_only_discards_its_group() {
     use std::io::Write;
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-tool-calls.jsonl");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-tool-calls.jsonl");
     let text = std::fs::read_to_string(&path).unwrap();
     let mut record: Value = text
         .lines()

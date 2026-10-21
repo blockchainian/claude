@@ -36,8 +36,7 @@ fn pinned_records_restore_real_events_before_refresh() {
 
 #[test]
 fn pinned_invalid_records_do_not_discard_other_groups() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
     let event = tail(&path, usize::MAX).unwrap().remove(0);
     let mut reader = Reader::new(path.clone(), false);
     let groups = vec![

@@ -742,13 +742,7 @@ impl View {
                 }
             })
         });
-        let (left, right) = render_rule_ends(
-            rule,
-            0,
-            context.map(Line::from),
-            elapsed,
-            buf,
-        );
+        let (left, right) = render_rule_ends(rule, 0, context.map(Line::from), elapsed, buf);
         let reserved = [left, right]
             .into_iter()
             .flatten()

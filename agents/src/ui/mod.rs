@@ -286,6 +286,8 @@ pub struct View {
     use_colors: bool,
     pinned: Vec<SessionKey>,
     hidden: HashSet<SessionKey>,
+    /// Parent tasks whose subtree a double click folded away in the task list.
+    collapsed: HashSet<SessionKey>,
     status_filter: usize,
     /// The task each tab shows selected when it is entered, by tab index.
     tab_selections: Vec<Option<SessionKey>>,
@@ -422,6 +424,7 @@ impl View {
             use_colors,
             pinned: Vec::new(),
             hidden: HashSet::new(),
+            collapsed: HashSet::new(),
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
             search: line_edit::LineEdit::default(),
@@ -1059,6 +1062,9 @@ impl View {
                 continue;
             }
             rows.push(index);
+            if self.collapsed.contains(&self.rows[index].id) {
+                continue;
+            }
             if let Some(siblings) = children.get(&self.rows[index].id) {
                 pending.extend(siblings.iter().rev().copied());
             }

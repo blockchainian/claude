@@ -5190,7 +5190,10 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
                 let index = viewport.event_rows[usize::from(y - viewport.event_panel.y)];
                 assert_eq!(viewport.event_list_text.area.x, left);
                 assert_eq!(viewport.event_list_text.area.right(), width - 2);
-                match index { EventRow::Timeline(index) => view.event_panel[index].clone(), EventRow::Pinned(_) => panic!("expected timeline row") }
+                match index {
+                    EventRow::Timeline(index) => view.event_panel[index].clone(),
+                    EventRow::Pinned(_) => panic!("expected timeline row"),
+                }
             };
             let x = if edge { width - 2 } else { left };
             click_mouse(
@@ -9765,7 +9768,12 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(view.visible_event(), Some(&expected), "{label}\n{rendered}");
     event_screen(&view, 160, 45, now);
-    assert!(view.viewport.borrow().event_rows.contains(&EventRow::Timeline(index)));
+    assert!(
+        view.viewport
+            .borrow()
+            .event_rows
+            .contains(&EventRow::Timeline(index))
+    );
     assert_eq!(view.visible_event() == view.event_panel.last(), index == 7);
     view.set_event(Vec::new());
     event_screen(&view, 160, 45, now);
@@ -10169,7 +10177,12 @@ fn event_border_double_clicks_respect_shared_output_border() {
         assert_eq!(click(&mut view, event_panel.y - 1), None);
         assert_eq!(view.visible_event(), Some(&oldest), "width {width}");
         event_screen(&view, width, 20, now);
-        assert!(view.viewport.borrow().event_rows.contains(&EventRow::Timeline(0)));
+        assert!(
+            view.viewport
+                .borrow()
+                .event_rows
+                .contains(&EventRow::Timeline(0))
+        );
         assert_eq!(view.event_scroll(), 0);
         assert!(view.viewport.borrow().event_jump.is_empty());
         click(&mut view, event_panel.bottom());
@@ -11263,7 +11276,11 @@ fn claude_context_usage_over_a_quarter_uses_error_color() {
         let task_details = view.center_layout(area).task_details;
         let cell = &buf[(task_details.x, task_details.y - 1)];
         assert_eq!(cell_text(cell.symbol()), &percent.to_string()[..1]);
-        assert_eq!(cell.fg == style::error_style().fg.unwrap(), red, "{provider:?} {percent}");
+        assert_eq!(
+            cell.fg == style::error_style().fg.unwrap(),
+            red,
+            "{provider:?} {percent}"
+        );
     }
 }
 
@@ -11278,3 +11295,6 @@ mod window_navigation_tests;
 
 #[path = "active_panel_tests.rs"]
 mod active_panel_tests;
+
+#[path = "task_tree_collapse_tests.rs"]
+mod task_tree_collapse_tests;

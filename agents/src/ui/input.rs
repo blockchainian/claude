@@ -1137,6 +1137,12 @@ impl View {
                         self.enter_task();
                     }
                     if double {
+                        let id = self.rows[task].id.clone();
+                        if !self.collapsed.remove(&id)
+                            && self.rows.iter().any(|row| row.parent.as_ref() == Some(&id))
+                        {
+                            self.collapsed.insert(id);
+                        }
                         return None;
                     }
                     self.last_click = Some((task, now));
