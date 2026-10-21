@@ -59,17 +59,22 @@ fn click_selected(view: &mut View) {
     );
 }
 #[test]
-fn rule_1_list_wheel_keeps_prompt_focus_and_cursor() {
+fn rule_1_list_wheel_focuses_list_and_keeps_parked_focus() {
     let mut view = tasks();
     view.prepare_prompt();
-    screen(&view, 200, 45);
-    assert!(view.cursor_pos(Rect::new(0, 0, 200, 45)).is_some());
-    let before = view.selected_id().cloned();
+    let before = view.selected_task_key();
     panel_mouse(&mut view, Panel::TaskList, MouseEventKind::ScrollDown);
-    assert_ne!(view.selected_id(), before.as_ref());
-    assert_eq!(view.active_panel, Panel::Prompt);
+    assert_ne!(view.selected_task_key(), before);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(!view.task_entry_pending);
+    assert_eq!(remembered(&view), None);
     screen(&view, 200, 45);
-    assert!(view.cursor_pos(Rect::new(0, 0, 200, 45)).is_some());
+    assert!(view.cursor_pos(Rect::new(0, 0, 200, 45)).is_none());
+    panel_mouse(&mut view, Panel::TaskList, MouseEventKind::ScrollUp);
+    assert_eq!(view.selected_task_key(), before);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
+    assert_eq!(remembered(&view), Some(Focus::Prompt));
 }
 #[test]
 fn rule_2_open_keys_restore_pending_without_terminal() {

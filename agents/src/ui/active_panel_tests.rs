@@ -485,26 +485,9 @@ fn mouse_activation_every_event_routes_subsequent_paging() {
                 } else {
                     Panel::TaskList
                 });
-                let selected = view.selected_id().cloned();
                 view.handle_mouse(mouse(kind, area.x, area.y + (area.height - 1).min(1)));
-                let expected = if panel == Panel::TaskList
-                    && matches!(
-                        kind,
-                        MouseEventKind::ScrollUp
-                            | MouseEventKind::ScrollDown
-                            | MouseEventKind::ScrollLeft
-                            | MouseEventKind::ScrollRight
-                    ) {
-                    if view.selected_id() == selected.as_ref() {
-                        Panel::EventDetail
-                    } else {
-                        Panel::Prompt
-                    }
-                } else {
-                    panel
-                };
-                assert_eq!(view.active_panel, expected, "width={width} kind={kind:?}");
-                assert_mouse_panel_paging(&mut view, expected);
+                assert_eq!(view.active_panel, panel, "width={width} kind={kind:?}");
+                assert_mouse_panel_paging(&mut view, panel);
             }
         }
     }

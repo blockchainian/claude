@@ -357,13 +357,11 @@ impl View {
                 });
         }
         if let Some(panel) = panel {
-            if panel != Panel::TaskList || !self.scrolling_task_list(mouse) {
-                let leaves_task = panel == Panel::TaskList && self.active_panel != Panel::TaskList;
-                self.set_active_panel(panel);
-                // The task the user left keeps its parked focus one Enter away.
-                if leaves_task {
-                    self.task_entry_pending = self.has_parked_focus(self.panels_task.as_ref());
-                }
+            let leaves_task = panel == Panel::TaskList && self.active_panel != Panel::TaskList;
+            self.set_active_panel(panel);
+            // The task the user left keeps its parked focus one Enter away.
+            if leaves_task {
+                self.task_entry_pending = self.has_parked_focus(self.panels_task.as_ref());
             }
         }
         if let Some(action) = self.overlay_mouse(mouse) {
@@ -396,20 +394,6 @@ impl View {
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
-        }
-    }
-
-    fn scrolling_task_list(&self, mouse: MouseEvent) -> bool {
-        match mouse.kind {
-            MouseEventKind::ScrollUp
-            | MouseEventKind::ScrollDown
-            | MouseEventKind::ScrollLeft
-            | MouseEventKind::ScrollRight => self
-                .viewport
-                .borrow()
-                .list
-                .contains((mouse.column, mouse.row).into()),
-            _ => false,
         }
     }
 
@@ -817,9 +801,7 @@ impl View {
             }
             return None;
         }
-        if (self.active_panel == Panel::TaskDetails
-            && self.rename_target.is_some()
-            && !self.scrolling_task_list(mouse))
+        if (self.active_panel == Panel::TaskDetails && self.rename_target.is_some())
             || self.searching
         {
             self.mouse_press = None;
