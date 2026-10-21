@@ -82,6 +82,10 @@ batch that still cannot fit fails before sending. Placeholders are unique across
 the request; original batch IDs stay stable across resume. Collision replies use
 stable binding-specific journal IDs.
 `sync-imports` follows imports without requesting model names or restoring syntax.
+Its import summaries, edits and file checks use the same syntax worker pool with bounded
+in-flight files. Workers release each file's Babel objects after extracting compact binding,
+reference and edit records. The main thread resolves proposals once per chunk, reuses
+unchanged file records during validation and releases completed chunk records before continuing.
 Run it after naming, including an interrupted naming run. It covers the current selection
 and discovers all completed ordinary and chunk journals in the target Git root, including files outside this batch.
 It verifies their current contents against the recorded results before following imports;

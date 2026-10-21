@@ -3,6 +3,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 const timings = new AsyncLocalStorage();
 export const withTimings = (totals, task) => timings.run(totals, task);
 
+/** Record worker measurements in the file context that submitted its task. */
+export function captureTimings() {
+  const totals = timings.getStore();
+  return values => {
+    if (totals) for (const [step, elapsed] of Object.entries(values)) totals[step] = (totals[step] ?? 0) + elapsed;
+  };
+}
+
 // Local elapsed time, including child processes; nested steps are inclusive.
 export function timed(step, task) {
   const started = performance.now();
