@@ -100,12 +100,11 @@ ordinary file workflow.
 
 ```bash
 node "$SKILL_DIR/scripts/cli.mjs" <path>... --chunks <manifest.json> \
-  --chunk-siblings --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
+  --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
 ```
 
-By default, a name is eligible only when its declaration and all its references are in
-the selected files. Add `--chunk-siblings` to update references in unselected sibling
-files of the same chunk. Model naming still starts with selected declarations; import
+References in unselected sibling files of the same chunk are always updated.
+Model naming starts with selected declarations; import
 following also updates relative imports when the exporting binding has been renamed,
 even when their declaration and references are entirely in unselected chunk siblings.
 External named imports can also be restored entirely within unselected chunk siblings.
@@ -122,7 +121,7 @@ reference, and unbound globals throughout the chunk. Public properties and expor
 stay unchanged: `export { a }` becomes `export { readableName as a }`.
 Import locals follow the resolved exported binding's name without model requests, including
 references and export locals in sibling files; collision suffixes remain scope-safe.
-With `--chunk-siblings`, current and historical chunks use their recorded selection and
+Current and historical chunks use their recorded selection and
 the same import authorization, so running together or in batches produces identical bytes.
 An unchanged internal exporting binding leaves its chunk import alias unchanged.
 External named imports use the same length threshold and deterministic restoration as
