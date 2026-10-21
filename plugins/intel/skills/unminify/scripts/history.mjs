@@ -12,7 +12,7 @@ export function journalHistory(root) {
     for (const entry of readdirSync(folder, { withFileTypes: true })) {
       const path = join(folder, entry.name);
       if (entry.isDirectory()) {
-        if (folder !== directory || !['syntax', 'merge-imports'].includes(entry.name)) walk(path);
+        if (folder !== directory || !['syntax', 'merge-imports', 'imports'].includes(entry.name)) walk(path);
       }
       else if (entry.isFile() && (/\.m?js\.jsonl$/.test(entry.name)
         || dirname(path) === join(directory, 'chunks') && entry.name.endsWith('.jsonl'))) {

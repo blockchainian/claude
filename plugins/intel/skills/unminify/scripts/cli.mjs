@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { loadHistory, loadImportContext } from './history.mjs';
 import { createChunkIgnore } from './chunk-manifest.mjs';
-import { runMergeFile } from './merge-imports.mjs';
+import { runMergeFile, mergeExternalImports } from './merge-imports.mjs';
 import { loadFragmentContext } from './fragments.mjs';
+import { transformSyntax } from './syntax/runner.mjs';
 import { randomUUID } from 'node:crypto';
 import { reconsiderNames } from './collision.mjs';
 import { packBatches } from './pack.mjs';
@@ -15,17 +16,28 @@ import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
 const defaults = { concurrency: 20, maxInputTokens: 100000, minSymbolLength: 4 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const help = 'unminify <path>... [--ignore <file>] [--chunks <file>] [--concurrency 20] [--max-input-tokens 100000] [--min-symbol-length 4]';
+const commands = ['restore-syntax', 'rename-bindings', 'sync-imports'];
+const help = [
+  'unminify restore-syntax <path>... [--ignore <file>] [--chunks <file>]',
+  'unminify rename-bindings <path>... [--ignore <file>] [--chunks <file>] [--min-symbol-length 4] [--concurrency 20] [--max-input-tokens 100000]',
+  'unminify sync-imports <path>... [--ignore <file>] [--chunks <file>] [--min-symbol-length 4]',
+].join('\n');
 
 export function parseArgs(args) {
-  const options = { ...defaults };
+  if (args.length === 1 && ['--help', '-h'].includes(args[0])) return { help: true };
+  const [command, ...rest] = args;
+  if (!commands.includes(command)) throw new Error(help);
+  args = rest;
+  const options = { command, ...defaults };
   const flags = { '--chunks': 'chunks', '--ignore': 'ignoreFile', '--concurrency': 'concurrency', '--max-input-tokens': 'maxInputTokens', '--min-symbol-length': 'minSymbolLength' };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg.startsWith('-')) {
       const key = flags[arg], value = args[++index];
-      if (!key || !value || value.startsWith('--')) throw new Error(`invalid option: ${arg}\n${help}`);
+      if (!key || command === 'restore-syntax' && !['chunks', 'ignoreFile'].includes(key)
+        || command === 'sync-imports' && ['concurrency', 'maxInputTokens'].includes(key)
+        || !value || value.startsWith('--')) throw new Error(`invalid option: ${arg}\n${help}`);
       if (key === 'ignoreFile' || key === 'chunks') options[key] = resolve(value);
       else {
         if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) throw new Error(`${arg} must be a positive integer`);
@@ -47,7 +59,11 @@ async function modules() {
 // Callers may supply the documented module contracts to run without a model.
 export async function run(options, dependencies) {
   // Chunk runs always rewrite references in unselected sibling fragments.
-  const settings = { ...defaults, ...options, chunkSiblings: !!options.chunks };
+  const settings = { ...defaults, ...options, command: options.command ?? 'all', chunkSiblings: !!options.chunks };
+  if (settings.command !== 'all' && !commands.includes(settings.command)) throw new Error(help);
+  const restoring = settings.command === 'restore-syntax' || settings.command === 'all';
+  const naming = settings.command === 'rename-bindings' || settings.command === 'all';
+  const syncing = settings.command === 'sync-imports' || settings.command === 'all';
   for (const key of Object.keys(defaults)) {
     if (!Number.isSafeInteger(settings[key]) || settings[key] < 1) throw new Error(`${key} must be a positive integer`);
   }
@@ -95,12 +111,17 @@ export async function run(options, dependencies) {
         onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
       })) listed.add(file);
     }
-    const files = [...listed];
+    const selectedCount = listed.size;
+    chunkDriver.select([...listed], new Set());
+    for (const chunk of chunkDriver.jobs) for (const member of chunk.files) {
+      for (const file of await api.listFiles(join(root, member), { ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined })) listed.add(file);
+    }
+    const files = [...listed].sort();
     const fragmentContext = loadFragmentContext(root, files);
     const { fragments } = fragmentContext;
     chunkDriver?.select(files, fragments);
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
-    summary.files = files.length;
+    summary.files = selectedCount;
     selectionEnd(); selectionEnd = null;
     let stop = null, active = 0;
     const waiters = [];
@@ -122,7 +143,7 @@ export async function run(options, dependencies) {
       }
     };
     // Finish every syntax write before creating any rename plan or request.
-    if (api.runSyntaxFile) {
+    if (restoring && api.runSyntaxFile) {
       for (const file of files) {
         if (chunkDriver?.files.has(file)) continue;
         // Merge checkpoints own the text after syntax, including the write/complete window.
@@ -135,12 +156,30 @@ export async function run(options, dependencies) {
         finally { endSyntax(); }
       }
     }
-    for (const file of files) {
+    if (restoring) for (const file of files) {
       if (chunkDriver?.files.has(file)) continue;
       const endMerge = phase('selection_plan');
       try { emit(runMergeFile(root, file)); } finally { endMerge(); }
     }
-    namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
+    if (restoring) {
+      const rejected = await chunkDriver.restore({ api, emit, summary, sources, phase, fragmentContext });
+      if (rejected || !naming) {
+        summary.exitCode = summary.rejected ? 1 : 0;
+        return summary;
+      }
+    }
+    if (settings.command === 'rename-bindings') {
+      const pending = chunkDriver.syntaxPending({ fragmentContext });
+      for (const file of files) {
+        if (chunkDriver.files.has(file)) continue;
+        const source = readFileSync(join(root, file), 'utf8');
+        const restored = transformSyntax(source, { fragment: fragments.has(file), fragmentContext }).source;
+        const merged = mergeExternalImports(new Map([[file, restored]])).get(file);
+        if (source !== merged) pending.push(file);
+      }
+      if (pending.length) throw new Error(`Run restore-syntax before rename-bindings:\n${[...new Set(pending)].sort().join('\n')}`);
+    }
+    if (naming) namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
       event(record) {
         event(record);
         if (record.type === 'pause_end') pauses.push([record.started_at, record.ended_at]);
@@ -274,7 +313,7 @@ export async function run(options, dependencies) {
     }
     try {
       // Keep a second window ready while request slots drain or files write back.
-      let tasks = [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))];
+      let tasks = naming ? [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))] : [];
       do {
         const fileConcurrency = Math.min(tasks.length, settings.concurrency * 2);
         let nextFile = 0;
@@ -292,7 +331,19 @@ export async function run(options, dependencies) {
           }
         }
         await Promise.all(Array.from({ length: fileConcurrency }, worker));
+        if (!syncing) break;
+        if (!naming) await chunkDriver.prepareImports(sources);
         loadHistory(root, { sources, journals, chunks: chunkDriver, ignores, emit });
+        if (!naming) for (const file of files) {
+          if (chunkDriver.files.has(file) || journals.has(file)) continue;
+          const source = readFileSync(join(root, file), 'utf8');
+          sources.set(file, source);
+          // Pending naming journals keep ownership of their offsets and source text.
+          if (existsSync(join(root, '.unminify', `${file}.jsonl`))) continue;
+          const journal = openJournal(root, join('imports', file), source, { minSymbolLength: settings.minSymbolLength });
+          if (!journal.done) journal.complete(source, 'imports');
+          journals.set(file, journal);
+        }
         loadImportContext(root, sources);
         const endImports = phase('followImports');
         let changes;
@@ -339,9 +390,9 @@ export async function run(options, dependencies) {
             event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: writtenAt, at: Date.now() });
           }
         }
-        tasks = stop ? [] : chunkDriver.more();
+        tasks = naming && !stop ? chunkDriver.more() : [];
       } while (tasks.length);
-    } finally { await namer.close(); namer = undefined; }
+    } finally { await namer?.close(); namer = undefined; }
     if (stop) {
       output(`${stop.code}: ${stop.code === 'AUTH' ? 'Run codex login, then resume.' : 'Wait for quota to reset, then resume.'} Resume with the same unminify command; completed replies are saved.`);
       summary.exitCode = 1;

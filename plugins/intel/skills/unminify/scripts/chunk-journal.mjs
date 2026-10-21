@@ -94,8 +94,8 @@ function recover(root, path, state, actual, write = atomicWrite) {
 }
 
 // Validate every pending transaction before completing any interrupted group write.
-export function recoverChunkJournals(root, settings) {
-  const directory = join(root, '.unminify', 'chunks');
+export function recoverChunkJournals(root, settings, journalDirectory = 'chunks') {
+  const directory = join(root, '.unminify', journalDirectory);
   let files;
   try { files = readdirSync(directory).filter(file => file.endsWith('.jsonl')).sort(); }
   catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
@@ -111,11 +111,11 @@ export function recoverChunkJournals(root, settings) {
   return pending.length;
 }
 
-export function openChunkJournal(root, id, sources, options = {}) {
+export function openChunkJournal(root, id, sources, options = {}, journalDirectory = 'chunks') {
   if (typeof id !== 'string' || !id) throw new Error('chunk journal requires an id');
   let current = new Map(sourceEntries(root, sources));
   const hashes = fingerprints(current), config = stable(options);
-  const path = join(root, '.unminify', 'chunks', `${hash(id)}.jsonl`);
+  const path = join(root, '.unminify', journalDirectory, `${hash(id)}.jsonl`);
   let state = stateAt(path);
   if (!state) {
     const header = { type: 'chunk-source', version: 1, id, hashes, options: config };

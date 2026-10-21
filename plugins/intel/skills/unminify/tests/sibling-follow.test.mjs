@@ -4,7 +4,8 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { run, parseArgs } from '../scripts/cli.mjs';
+import { run } from '../scripts/cli.mjs';
+import { parseRunArgs } from './helpers/run-stages.mjs';
 import * as select from '../scripts/select.mjs';
 import * as rename from '../scripts/rename.mjs';
 import * as checks from '../scripts/checks.mjs';
@@ -43,7 +44,7 @@ async function fixture(t, { ordinary = false, selectedReference = false, externa
   return { files, requests,
     read: file => readFile(join(root, file)),
     async run(paths, { manifest = true } = {}) {
-      const result = await run(parseArgs([...paths.map(file => join(root, file)), '--concurrency', '1',
+      const result = await run(parseRunArgs([...paths.map(file => join(root, file)), '--concurrency', '1',
         ...(ordinary || !manifest ? [] : ['--chunks', join(root, 'chunks.json')])]), {
         ...select, ...rename, ...checks, ...syntax,
         createNamer: options => createNamer({ ...options, ...service, retryDelayMs: 1 }), output() {},

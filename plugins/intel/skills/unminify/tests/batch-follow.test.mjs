@@ -4,7 +4,8 @@ import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { run, parseArgs } from '../scripts/cli.mjs';
+import { run } from '../scripts/cli.mjs';
+import { parseRunArgs } from './helpers/run-stages.mjs';
 import * as select from '../scripts/select.mjs';
 import * as rename from '../scripts/rename.mjs';
 import * as checks from '../scripts/checks.mjs';
@@ -45,7 +46,7 @@ async function fixture(t, files, groups) {
   return { root, controls, requests, lines,
     read: file => readFile(join(root, file)),
     write: (file, source) => writeFile(join(root, file), source),
-    run: (paths, extra = []) => run(parseArgs([...paths.map(file => join(root, file)), '--concurrency', '1',
+    run: (paths, extra = []) => run(parseRunArgs([...paths.map(file => join(root, file)), '--concurrency', '1',
       ...(chunks ? ['--chunks', chunks] : []), ...extra]), {
       ...select, ...rename, ...checks, ...syntax,
       createNamer: options => createNamer({ ...options, ...service, retryDelayMs: 1 }),
@@ -149,7 +150,7 @@ async function runWithoutChunks(t, target, paths) {
     const body = JSON.parse(raw);
     complete(res, Object.fromEntries(body.text.format.schema.required.map(key => [key, 'calculateAnswer'])));
   });
-  return run(parseArgs([...paths.map(file => join(target.root, file)), '--concurrency', '1']), {
+  return run(parseRunArgs([...paths.map(file => join(target.root, file)), '--concurrency', '1']), {
     ...select, ...rename, ...checks, ...syntax,
     createNamer: options => createNamer({ ...options, ...service, retryDelayMs: 1 }),
     output: line => target.lines.push(line),

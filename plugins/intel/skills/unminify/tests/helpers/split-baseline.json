@@ -1,0 +1,23 @@
+{
+  "files": {
+    "src/a/exporter.js": "import { readFileSync as a } from \"node:fs\";\nimport { readFileSync as b } from \"node:fs\";\nconst ready = !0; console.log(a, b, ready); export { a as read };\n",
+    "src/b/consumer.js": "import { read as c } from \"../a/exporter.js\";\nconst missing = void 0; console.log(c, missing); export { c as consume };\n",
+    "src/a/first.js": "import { basename as d } from \"node:path\";\nconst flag = !1;\n",
+    "src/b/last.js": "console.log(d, flag); export { d as filename };\n"
+  },
+  "groups": [
+    {
+      "id": "shared",
+      "files": [
+        "src/a/first.js",
+        "src/b/last.js"
+      ]
+    }
+  ],
+  "expected": {
+    "src/a/exporter.js": "import { readFileSync } from \"node:fs\";\n\nconst ready = true; console.log(readFileSync, readFileSync, ready); export { readFileSync as read };\n",
+    "src/b/consumer.js": "import { read as readFileSync } from \"../a/exporter.js\";\nconst missing = undefined; console.log(readFileSync, missing); export { readFileSync as consume };\n",
+    "src/a/first.js": "import { basename } from \"node:path\";\nconst flag = false;\n",
+    "src/b/last.js": "console.log(basename, flag); export { basename as filename };\n"
+  }
+}

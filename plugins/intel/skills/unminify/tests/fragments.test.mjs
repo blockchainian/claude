@@ -149,7 +149,7 @@ test('CLI replay protects a sibling name outside its input and still renames a l
   const batch = planFile(source, { ...options, fragment: true }).stages.flat()[0];
   const journal = openJournal(root, 'selected.js', source, options);
   journal.batch(batch.id, new Map([[source.indexOf('Zp'), 'unsafeTop'], [batch.keys[0], 'value']]));
-  const output = execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/cli.mjs', import.meta.url)),
+  const output = execFileSync(process.execPath, [fileURLToPath(new URL('./helpers/run-stages.mjs', import.meta.url)),
     join(root, 'selected.js')], { encoding: 'utf8', timeout: 10000 });
   const summary = output.trim().split('\n').map(line => JSON.parse(line)).find(record => record.type === 'summary');
   assert.equal(summary.exitCode, 0);

@@ -23,19 +23,23 @@ async function main(args) {
   await writeFile(join(repo, 'package.json'), '{"type":"module"}\n');
   console.log(`Temporary repository: ${repo}`);
   console.log('Calling the real model using the current Codex login.');
-  const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.mjs', import.meta.url)), repo], { stdio: ['ignore', 'pipe', 'inherit'] });
-  let transcript = '';
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', chunk => { transcript += chunk; process.stdout.write(chunk); });
-  const result = await new Promise((resolveResult, reject) => {
-    child.once('error', reject);
-    child.once('close', (code, signal) => resolveResult({ code, signal }));
-  });
+  let transcript = '', result;
+  for (const command of ['restore-syntax', 'rename-bindings', 'sync-imports']) {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./cli.mjs', import.meta.url)), command, repo], { stdio: ['ignore', 'pipe', 'inherit'] });
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => { transcript += chunk; process.stdout.write(chunk); });
+    result = await new Promise((resolveResult, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => resolveResult({ code, signal }));
+    });
+    if (result.code !== 0) break;
+  }
   for (const name of names) {
     console.log(`\n--- ${name}: before ---\n${originals.get(name)}`);
     console.log(`--- ${name}: after ---\n${await readFile(join(repo, name), 'utf8')}`);
   }
-  const summary = transcript.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).find(record => record.type === 'summary');
+  const summaries = transcript.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).filter(record => record.type === 'summary');
+  const summary = summaries.length > 1 ? summaries[1] : summaries[0];
   if (summary) console.log(JSON.stringify({ requests: summary.requests, tokens: summary.tokens, quota: summary.quota }));
   else throw new Error(`CLI did not produce a summary (${result.signal ?? result.code})`);
   process.exitCode = result.code ?? 1;

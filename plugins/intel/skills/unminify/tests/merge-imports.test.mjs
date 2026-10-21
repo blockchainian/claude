@@ -87,7 +87,7 @@ test('real CLI merges before naming, checkpoints and resumes chunks and standalo
       } : { 'one.js': 'import {join as a} from "node:path"; import {join as b} from "node:path"; export const result = {b};' };
       for (const [file, code] of Object.entries(files)) writeFileSync(join(root, file), code);
       writeFileSync(join(root, 'chunks.json'), JSON.stringify({ version: 1, chunks: [{ id: 'sample', files: ['a.js', 'use.js', 'z.js'] }] }));
-      const cli = new URL('../scripts/cli.mjs', import.meta.url);
+      const cli = new URL('./helpers/run-stages.mjs', import.meta.url);
       const args = [cli.pathname, root, '--min-symbol-length', '1', ...(chunked ? ['--chunks', join(root, 'chunks.json')] : [])];
       const env = { ...process.env, CODEX_HOME: join(root, 'no-login') };
       const first = execFileSync(process.execPath, args, { env, encoding: 'utf8' });
@@ -141,7 +141,7 @@ test('CLI resumes between the syntax, merge and rename checkpoints without a mod
     writeFileSync(join(root, 'one.js'), 'import {join as a} from "node:path"; import {join as b} from "node:path"; console.log(b);');
     runSyntaxFile(root, 'one.js');
     runMergeFile(root, 'one.js');
-    const output = execFileSync(process.execPath, [new URL('../scripts/cli.mjs', import.meta.url).pathname, root, '--min-symbol-length', '1'], {
+    const output = execFileSync(process.execPath, [new URL('./helpers/run-stages.mjs', import.meta.url).pathname, root, '--min-symbol-length', '1'], {
       env: { ...process.env, CODEX_HOME: join(root, 'no-login') }, encoding: 'utf8',
     });
     assert.equal(JSON.parse(output.trim().split('\n').at(-1)).exitCode, 0);

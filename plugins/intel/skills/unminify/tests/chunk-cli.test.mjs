@@ -45,9 +45,9 @@ async function fixture(t, files, groups = [{ id: 'one', files: Object.keys(files
 const slices = { 'a.js': 'const a = 11;\n', 'b.js': 'console.log(a); export { a };\n' };
 
 test('chunk CLI arguments accept a manifest and reject the removed sibling flag', () => {
-  const options = parseArgs(['src', '--chunks', 'chunks.json']);
+  const options = parseArgs(['rename-bindings', 'src', '--chunks', 'chunks.json']);
   assert.equal(options.chunks, join(process.cwd(), 'chunks.json'));
-  assert.throws(() => parseArgs(['src', '--chunks', 'chunks.json', '--chunk-siblings']), /invalid option: --chunk-siblings/);
+  assert.throws(() => parseArgs(['rename-bindings', 'src', '--chunks', 'chunks.json', '--chunk-siblings']), /invalid option: --chunk-siblings/);
 });
 test('chunk naming asks once, renders sibling use, preserves export and replays completion', async t => {
   const f = await fixture(t, slices);
@@ -168,7 +168,7 @@ test('dynamic chunk bindings and locals remain unchanged without model requests'
   assert.equal(f.requests.length, 0);
 });
 
-test('chunk syntax remains uncommitted until import following can be validated', async t => {
+test('chunk syntax is committed before naming while import following waits for validation', async t => {
   const files = { 'remote.js': 'const a = 11; export { a };\n',
     'first.js': 'import { a as z } from "./remote.js"; const stableValue = !0;\n', 'last.js': 'console.log(z);\n' };
   let observed;
@@ -177,7 +177,7 @@ test('chunk syntax remains uncommitted until import following can be validated',
     return false;
   } });
   assert.equal((await f.run({ concurrency: 1 })).exitCode, 0);
-  assert.equal(observed, files['first.js']);
+  assert.equal(observed, files['first.js'].replace('!0', 'true'));
   assert.match(await f.read('first.js'), /readableValue/);
   assert.match(await f.read('first.js'), /stableValue = true/);
 });
