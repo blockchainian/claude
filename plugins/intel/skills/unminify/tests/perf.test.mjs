@@ -106,7 +106,7 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   const durationTotal = report.windows.reduce((sum, window) => sum + (window.average_duration_ms ?? 0) * window.completed, 0);
   assert(Math.abs(durationTotal - requests.reduce((sum, request) => sum + request.duration_ms, 0)) < 0.001);
   assert(summary.total_ms > 0);
-  assert.deepEqual(Object.keys(summary.phase_ms).sort(), ['check_write', 'followImports', 'model', 'selection_plan']);
+  assert.deepEqual(Object.keys(summary.phase_ms).sort(), ['check_write', 'followImports', 'merge_imports', 'model', 'selection_plan']);
   const durations = requests.map(request => request.duration_ms).sort((a, b) => a - b);
   assert.equal(summary.request_ms.p50, durations[0]);
   assert.equal(summary.request_ms.p90, durations[1]);

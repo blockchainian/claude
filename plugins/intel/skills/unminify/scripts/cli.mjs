@@ -101,22 +101,21 @@ export async function run(options, dependencies) {
   let api, namer, syntaxPool;
   try {
     api = dependencies ?? await modules();
-    const chunkDriver = await (await import('./chunk-run.mjs')).createChunkRun(root, settings);
+    syntaxPool = createSyntaxPool(dependencies?.syntaxPool);
     const ignores = await createChunkIgnore(root, settings.ignoreFile);
-    const ignoreFile = settings.ignoreFile ? resolve(settings.ignoreFile) : join(root, '.ignore');
+    const chunkDriver = await (await import('./chunk-run.mjs')).createChunkRun(root, settings, ignores);
     // Overlapping paths list a file once.
     const listed = new Set();
     for (const target of paths) {
       for (const file of await api.listFiles(target, {
-        ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined,
+        root, ignores, pool: syntaxPool,
         onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
       })) listed.add(file);
     }
     const selectedFiles = [...listed];
     chunkDriver.select(selectedFiles, new Set());
-    for (const chunk of chunkDriver.jobs) for (const member of chunk.files) {
-      for (const file of await api.listFiles(join(root, member), { ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined })) listed.add(file);
-    }
+    const siblings = chunkDriver.jobs.flatMap(chunk => chunk.files).filter(file => !listed.has(file));
+    for (const file of await api.listFiles(siblings.map(file => join(root, file)), { root, ignores, pool: syntaxPool })) listed.add(file);
     const files = [...listed].sort();
     const fragmentContext = loadFragmentContext(root, files);
     const { fragments } = fragmentContext;
@@ -144,7 +143,6 @@ export async function run(options, dependencies) {
       }
     };
     // Finish every syntax write before creating any rename plan or request.
-    syntaxPool = createSyntaxPool(dependencies?.syntaxPool);
     async function syntaxFiles(task) {
       const results = await Promise.allSettled(files.filter(file => !chunkDriver.files.has(file)).map(task));
       const failure = results.find(result => result.status === 'rejected');
@@ -165,7 +163,7 @@ export async function run(options, dependencies) {
     }
     if (restoring) {
       const records = await syntaxFiles(async file => {
-        const endMerge = phase('selection_plan');
+        const endMerge = phase('merge_imports');
         try { return await runMergeFile(root, file, syntaxPool); } finally { endMerge(); }
       });
       records.forEach(emit);
@@ -421,7 +419,7 @@ export async function run(options, dependencies) {
       summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
       if (!Object.keys(summary.quota).length) summary.quota = "没测到";
       summary.total_ms = endedAt - startedAt;
-      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), 'model', 'followImports', 'check_write']
+      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
         .map(key => [key, intervalMs(phases[key] ?? [])]));
       Object.assign(summary, requestStats(requests, pauses, summary.total_ms));
       event({ type: 'run_end', at: endedAt, total_ms: summary.total_ms });
