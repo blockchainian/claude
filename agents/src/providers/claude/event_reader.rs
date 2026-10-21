@@ -1157,6 +1157,7 @@ impl EventReader {
             event.source_records.extend(records);
             let mut call = event_detail_call;
             call.id = block["id"].as_str().unwrap_or("").to_owned();
+            event.source = Some(call.id.clone());
             call.started_at = Some(at);
             call.duration = ended_at.map(|end| end - at);
             event.ended_at = ended_at;
@@ -1246,6 +1247,8 @@ impl EventReader {
         let mut detail = event_detail_call;
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
+        // Records and content blocks arrive newest first; this call is the earliest so far.
+        entry.event.source = Some(detail.id.clone());
         entry.event.calls.insert(0, detail);
         entry.event.background |= input["run_in_background"] == true;
         entry.event.started_at = at;
@@ -1907,6 +1910,60 @@ pub(crate) mod tests {
                 assert_eq!(update.parsed_bytes, line.len() as u64);
             }
             assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn single_tool_source_is_its_real_tool_use_id() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        // Include ordinary tools and the separately rendered Agent call.
+        for pair in records[..16].chunks_exact(2) {
+            let id = pair[0]["message"]["content"][0]["id"].as_str().unwrap();
+            for prefix in 1..=pair.len() {
+                let events = events_from(pair[..prefix].to_vec());
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].calls[0].id, id);
+                assert_eq!(events[0].source.as_deref(), Some(id));
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_tool_source_stays_on_first_real_call_as_transcript_grows() {
+        let lines: Vec<_> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .split_inclusive('\n')
+            .collect();
+        let records: Vec<Value> = lines[16..19]
+            .iter()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(records[0]["message"]["id"], records[1]["message"]["id"]);
+        let ids: Vec<_> = records[..2]
+            .iter()
+            .map(|record| record["message"]["content"][0]["id"].as_str().unwrap())
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = Reader::new(file.path().into(), false);
+        for (index, line) in lines[16..19].iter().enumerate() {
+            file.write_all(line.as_bytes()).unwrap();
+            let incremental = reader.refresh(usize::MAX).unwrap().events;
+            let full = tail(file.path(), usize::MAX).unwrap();
+            assert_eq!(incremental, full);
+            assert_eq!(full.len(), 1);
+            let event = &full[0];
+            assert_eq!(
+                event
+                    .calls
+                    .iter()
+                    .map(|call| call.id.as_str())
+                    .collect::<Vec<_>>(),
+                ids[..(index + 1).min(2)]
+            );
+            assert_eq!(event.source.as_deref(), Some(ids[0]));
+            assert_eq!(event.calls[0].output.is_some(), index == 2);
         }
     }
 
