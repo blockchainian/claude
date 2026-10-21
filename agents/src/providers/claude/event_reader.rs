@@ -883,16 +883,7 @@ impl EventReader {
                         .any(|prefix| text.trim_start().starts_with(prefix))
                 {
                     if let Some((kind, sender, body)) = wrapped {
-                        let (sender, body) = super::peer::origin_message(&record)
-                            .map(|(name, body)| (name.map(str::to_owned), body.to_owned()))
-                            .unwrap_or((sender, body));
-                        self.push(kind, body, at);
-                        self.entries.last_mut().unwrap().event.source =
-                            record["uuid"].as_str().map(str::to_owned);
-                        self.entries.last_mut().unwrap().event.sender = sender;
-                        if is_peer {
-                            self.peer_message();
-                        }
+                        self.push_wrapped(&record, kind, sender, body, at);
                     } else if is_prompt_text(&record, &text) {
                         let images = self.images.take(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
@@ -950,12 +941,18 @@ impl EventReader {
             Some("attachment") if super::images::queued_prompt(&record).is_some() => {
                 let prompt = super::images::queued_prompt(&record).unwrap();
                 if let Some(text) = prompt_text(prompt) {
-                    let body = prompt_body(&text);
-                    let images = self.images.take(&record, &body)?;
-                    self.push(Kind::User, body, at);
-                    let event = &mut self.entries.last_mut().unwrap().event;
-                    event.source = record["uuid"].as_str().map(str::to_owned);
-                    event.images = images;
+                    if let Some((kind, sender, body)) = wrapped_message(&text)
+                        .filter(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session))
+                    {
+                        self.push_wrapped(&record, kind, sender, body, at);
+                    } else {
+                        let body = prompt_body(&text);
+                        let images = self.images.take(&record, &body)?;
+                        self.push(Kind::User, body, at);
+                        let event = &mut self.entries.last_mut().unwrap().event;
+                        event.source = record["uuid"].as_str().map(str::to_owned);
+                        event.images = images;
+                    }
                 }
             }
             Some("queue-operation") if record["operation"] == "enqueue" => {
@@ -1109,6 +1106,29 @@ impl EventReader {
             });
         }
         true
+    }
+
+    /// Pushes a wrapped message, taking the sender and body from the record's origin when it
+    /// carries one.
+    fn push_wrapped(
+        &mut self,
+        record: &serde_json::Value,
+        kind: Kind,
+        sender: Option<String>,
+        body: String,
+        at: DateTime<Utc>,
+    ) {
+        let (sender, body) = super::peer::origin_message(record)
+            .map(|(name, body)| (name.map(str::to_owned), body.to_owned()))
+            .unwrap_or((sender, body));
+        let is_peer = matches!(kind, Kind::Agent | Kind::Session);
+        self.push(kind, body, at);
+        let event = &mut self.entries.last_mut().unwrap().event;
+        event.source = record["uuid"].as_str().map(str::to_owned);
+        event.sender = sender;
+        if is_peer {
+            self.peer_message();
+        }
     }
 
     fn peer_message(&mut self) {
@@ -2611,6 +2631,28 @@ pub(crate) mod tests {
             assert_eq!(activity.kind, event.kind);
             assert_eq!(activity.at, event.started_at);
         }
+    }
+
+    #[test]
+    fn real_absorbed_handback_shows_sender_and_report() {
+        let fixture = include_str!("../../../tests/fixtures/claude-peer-handback-absorbed.jsonl");
+        let origin = &serde_json::from_str::<Value>(fixture.lines().last().unwrap()).unwrap()
+            ["attachment"]["origin"];
+        let report = origin["handbackReportText"].as_str().unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "{fixture}").unwrap();
+        let events = tail_session(file.path(), usize::MAX, true).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::Agent);
+        assert_eq!(events[0].sender.as_deref(), Some("general-purpose"));
+        assert_eq!(events[0].body, report);
+        let summary =
+            super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap();
+        assert_eq!(
+            summary.prompt,
+            crate::event::participant_text(Some("general-purpose"), report)
+        );
     }
 
     #[test]

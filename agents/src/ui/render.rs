@@ -730,14 +730,22 @@ impl View {
             spans.push(elapsed.dim());
             Line::from(spans)
         });
-        let context = session
-            .and_then(|_| self.selected_context_percent())
-            .map(|percent| format!("{percent}%"))
-            .filter(fits);
+        // A Claude task past a quarter of its context shows the percentage in the error color.
+        let context = session.and_then(|session| {
+            let percent = self.selected_context_percent()?;
+            let text = format!("{percent}%");
+            fits(&text).then(|| {
+                if session.id.provider == ProviderId::Claude && percent > 25 {
+                    Span::styled(text, style::error_style())
+                } else {
+                    text.dim()
+                }
+            })
+        });
         let (left, right) = render_rule_ends(
             rule,
             0,
-            context.map(|text| Line::from(text.dim())),
+            context.map(Line::from),
             elapsed,
             buf,
         );

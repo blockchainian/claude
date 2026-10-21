@@ -559,6 +559,35 @@ fn terminal_prompt_newline_entry() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_prompt_kill_copies_and_ctrl_y_pastes() {
+    let (directory, tmux, _transcript) = start_probe("prompt-kill-yank");
+    begin_named_draft(&tmux, "Prompt probe");
+    let clipboard = directory.path().join("clipboard/text");
+    tmux.run(&["send-keys", "-t", "probe", "-l", "keep line"]);
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "probe",
+        "Left",
+        "Left",
+        "Left",
+        "Left",
+        "C-k",
+    ]);
+    tmux.wait_for(|capture| {
+        capture
+            .lines()
+            .any(|line| line.trim_end() == " Prompt probe ❯ keep")
+            && clipboard.exists()
+    });
+    assert_eq!(std::fs::read_to_string(&clipboard).unwrap(), "line");
+    tmux.run(&["send-keys", "-t", "probe", "C-a", "C-y"]);
+    tmux.wait_for(|capture| capture.contains("Prompt probe ❯ linekeep"));
+    println!("{{\"prompt_kill_yank\":\"pass\"}}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_marker_caret_and_mouse_alignment() {
     let (_directory, tmux, _transcript) = start_probe("prompt-marker");
     for width in [120, 200] {

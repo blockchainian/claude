@@ -95,16 +95,7 @@ impl AskUserQuestion {
             .filter(|entry| entry.ask == *ask)
             .ok_or_else(|| io::Error::other("Claude AskUserQuestion is no longer pending"))?;
         let body = if answer.rejected {
-            let AskKind::Questions { questions, .. } = &ask.kind;
-            let mut reason = "The user wants to clarify these questions.\n    This means they may have additional information, context or questions for you.\n    Take their response into account and then reformulate the questions if appropriate.\n    Start by asking them what they would like to clarify.\n\n    Questions asked:".to_owned();
-            for question in questions {
-                reason.push_str(&format!("\n- \"{}\"\n  ", question.text));
-                if let Some(answer) = answers.get(&question.text) {
-                    reason.push_str(&format!("Answer: {answer}"));
-                } else {
-                    reason.push_str("(No answer provided)");
-                }
-            }
+            let reason = "The user dismissed these questions because the message you sent with them was not shown.\nResend that message verbatim, then end your turn. Ask nothing, in text or through AskUserQuestion, until the user replies.";
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":reason}})
         } else {
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"questions":entry.questions,"answers":answers}}})

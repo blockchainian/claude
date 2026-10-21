@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -16,6 +18,17 @@ pub(super) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
 
 #[path = "line_images.rs"]
 mod images;
+
+thread_local! {
+    /// The clipboard action the last key asked of any editor: copying the text a kill
+    /// removed, or pasting it back with Ctrl+Y.
+    static CLIPBOARD_ACTION: RefCell<Option<crate::model::Action>> = const { RefCell::new(None) };
+}
+
+/// Takes the clipboard action the handled key asked of an editor, if any.
+pub(super) fn take_clipboard_action() -> Option<crate::model::Action> {
+    CLIPBOARD_ACTION.take()
+}
 
 #[derive(Clone, Default)]
 pub(super) struct LineEdit {
@@ -359,6 +372,23 @@ impl LineEdit {
         }
         (&self.text[start..end], caret as u16)
     }
+    /// Runs a kill and asks for the text it removed to go on the clipboard, joined in
+    /// text order with what earlier kills of the same key removed.
+    fn kill(&mut self, delete: fn(&mut Self)) {
+        let (before, cursor) = (self.text.clone(), self.cursor);
+        delete(self);
+        // Every kill leaves the caret where its removed text started.
+        let removed = &before[self.cursor..self.cursor + before.len() - self.text.len()];
+        if removed.is_empty() {
+            return;
+        }
+        let text = match CLIPBOARD_ACTION.take() {
+            Some(crate::model::Action::Cut(earlier)) if self.cursor == cursor => earlier + removed,
+            Some(crate::model::Action::Cut(earlier)) => removed.to_owned() + &earlier,
+            _ => removed.to_owned(),
+        };
+        CLIPBOARD_ACTION.set(Some(crate::model::Action::Cut(text)));
+    }
     pub(super) fn handle(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
             return false;
@@ -382,10 +412,13 @@ impl LineEdit {
             (KeyCode::End, KeyModifiers::NONE) => self.end(),
             (KeyCode::Char('b'), KeyModifiers::ALT) => self.word_left(),
             (KeyCode::Char('f'), KeyModifiers::ALT) => self.word_right(),
-            (KeyCode::Char('k'), KeyModifiers::CONTROL) => self.kill_to_end(),
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.kill_to_start(),
-            (KeyCode::Char('w'), KeyModifiers::CONTROL) => self.kill_word_back(),
-            (KeyCode::Char('d'), KeyModifiers::ALT) => self.kill_word_forward(),
+            (KeyCode::Char('k'), KeyModifiers::CONTROL) => self.kill(Self::kill_to_end),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.kill(Self::kill_to_start),
+            (KeyCode::Char('w'), KeyModifiers::CONTROL) => self.kill(Self::kill_word_back),
+            (KeyCode::Char('d'), KeyModifiers::ALT) => self.kill(Self::kill_word_forward),
+            (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                CLIPBOARD_ACTION.set(Some(crate::model::Action::PasteText));
+            }
             (KeyCode::Char(c), KeyModifiers::NONE) if !c.is_control() => self.insert(c),
             _ => return false,
         }
@@ -574,6 +607,32 @@ mod tests {
             e.kill_to_start();
             assert_eq!((e.text(), e.cursor), (text, cursor));
         }
+    }
+
+    #[test]
+    fn kills_copy_the_removed_text_and_ctrl_y_pastes() {
+        use crate::model::Action;
+        let press = |e: &mut LineEdit, c, modifiers| {
+            assert!(e.handle(KeyEvent::new(KeyCode::Char(c), modifiers)));
+            take_clipboard_action()
+        };
+        let mut e = edit("one two\nthree");
+        e.set_cursor("one ".len());
+        let cut = |text: &str| Some(Action::Cut(text.into()));
+        assert_eq!(press(&mut e, 'k', KeyModifiers::CONTROL), cut("two"));
+        assert_eq!(press(&mut e, 'k', KeyModifiers::CONTROL), cut("\nthree"));
+        assert_eq!(press(&mut e, 'u', KeyModifiers::CONTROL), cut("one "));
+        assert_eq!(press(&mut e, 'u', KeyModifiers::CONTROL), None);
+        e.set_text("one two");
+        e.set_cursor(0);
+        assert_eq!(press(&mut e, 'd', KeyModifiers::ALT), cut("one"));
+        e.set_text("one two");
+        assert_eq!(press(&mut e, 'w', KeyModifiers::CONTROL), cut("two"));
+        assert_eq!(
+            press(&mut e, 'y', KeyModifiers::CONTROL),
+            Some(Action::PasteText)
+        );
+        assert_eq!(e.text(), "one ");
     }
 
     #[test]

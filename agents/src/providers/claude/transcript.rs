@@ -471,6 +471,9 @@ fn prompt_text(record: &Value) -> Option<String> {
         }
         "attachment" => {
             let prompt = super::images::queued_prompt(record)?;
+            if let Some((name, body)) = super::peer::origin_message(record) {
+                return Some(crate::event::participant_text(name, body));
+            }
             prompt
                 .as_str()
                 .map(str::to_owned)

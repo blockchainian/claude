@@ -1458,7 +1458,13 @@ impl View {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
         let focus = self.task_focus();
-        let action = self.handle_key_event(key);
+        let action = match (
+            self.handle_key_event(key),
+            line_edit::take_clipboard_action(),
+        ) {
+            (Some(action), Some(clipboard)) => Some(Action::Batch(vec![action, clipboard])),
+            (action, None) | (None, action) => action,
+        };
         if self.task_focus() != focus {
             self.set_active_panel(self.active_panel);
         }

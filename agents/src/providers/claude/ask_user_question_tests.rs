@@ -410,7 +410,7 @@ fn http_reader_rejects_wrong_routes_and_invalid_json() {
 }
 
 #[test]
-fn hook_rejected_questions_return_native_clarification_feedback() {
+fn hook_rejected_questions_resend_message_without_answers() {
     let config = tempfile::tempdir().unwrap();
     let job = config.path().join("jobs/recorded");
     std::fs::create_dir_all(&job).unwrap();
@@ -442,11 +442,7 @@ fn hook_rejected_questions_return_native_clarification_feedback() {
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     let decoded: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
-    let reason = recorded[1]["message"]["content"][0]["content"]
-        .as_str()
-        .unwrap()
-        .strip_prefix("PreToolUse:AskUserQuestion hook error: ")
-        .unwrap();
+    let reason = "The user dismissed these questions because the message you sent with them was not shown.\nResend that message verbatim, then end your turn. Ask nothing, in text or through AskUserQuestion, until the user replies.";
     assert_eq!(
         decoded,
         json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
@@ -483,7 +479,20 @@ fn hook_rejected_questions_return_native_clarification_feedback() {
     let decoded: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
     assert_eq!(
         decoded["hookSpecificOutput"]["permissionDecisionReason"],
-        reason.replace("(No answer provided)", "Answer: Red, Blue, my words")
-            + "\n- \"Second?\"\n  (No answer provided)"
+        reason
     );
+    let reason = decoded["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap();
+    for result in [
+        format!("PreToolUse:AskUserQuestion hook error: {reason}"),
+        format!("Error: PreToolUse:AskUserQuestion hook error: {reason}"),
+        format!("The user doesn't want to proceed with this tool use. the user said:\n{reason}"),
+    ] {
+        assert_eq!(
+            crate::providers::tool::rejected_answers(&body["tool_input"]["questions"], &result)
+                .as_deref(),
+            Some("Chat about this\n\nYou have not answered all questions")
+        );
+    }
 }

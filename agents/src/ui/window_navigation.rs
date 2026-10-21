@@ -165,6 +165,12 @@ impl View {
         else {
             return;
         };
+        // The full-width prompt sits under several panels; moving up always lands on the task list.
+        if source == Panel::Prompt && direction == 'k' && !v.list.is_empty() {
+            drop(v);
+            self.set_active_panel(Panel::TaskList);
+            return;
+        }
         let horizontal = matches!(direction, 'h' | 'l');
         let axes = |r: ratatui::layout::Rect| {
             if horizontal {
