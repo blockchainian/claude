@@ -6,6 +6,7 @@ import { analyzeChunk, planChunk, renderChunkBatch, resolveChunkNames, applyChun
 import { reconsiderNames } from './collision.mjs';
 import { packBatches } from './pack.mjs';
 import { transformSyntax } from './syntax/runner.mjs';
+import { mergeExternalImports, importMergeVersion } from './merge-imports.mjs';
 import { syntaxFingerprint } from './syntax/stage.mjs';
 
 /** Explicit chunks own their syntax, naming and writes as one transaction. */
@@ -15,7 +16,7 @@ export async function createChunkRun(root, settings) {
   const ignored = new Set([...manifest.files].filter(ignores));
   const options = { manifest: manifest.fingerprint, paths: settings.paths.map(path => relative(root, path)).sort(),
     ignored: [...ignored].sort(), chunkSiblings: !!settings.chunkSiblings,
-    minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens, syntax: syntaxFingerprint };
+    minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens, syntax: syntaxFingerprint, mergeImports: importMergeVersion };
   recoverChunkJournals(root, id => {
     if (!manifest.chunks.some(chunk => chunk.id === id)) throw new Error(`chunk missing from manifest: ${id}`);
     return options;
@@ -45,13 +46,19 @@ export async function createChunkRun(root, settings) {
         return;
       }
       const chunkOptions = { ...settings, selected, ignored };
-      const baseline = new Map(inputs);
+      let baseline = new Map(inputs);
       const endSyntax = phase('syntax', chunk.id);
       try {
         for (const [file, source] of baseline) if (selected.has(file) && !ignored.has(file)) {
           baseline.set(file, transformSyntax(source, { fragment: true, fragmentContext }).source);
         }
       } finally { endSyntax(); }
+      const endMerge = phase('selection_plan', chunk.id);
+      try {
+        const merged = mergeExternalImports(baseline, chunkOptions);
+        emit({ chunk: chunk.id, status: 'merge-imports', files: [...merged].filter(([file, source]) => source !== baseline.get(file)).length });
+        baseline = merged;
+      } finally { endMerge(); }
       const analysis = analyzeChunk(baseline, chunkOptions);
       emit({ chunk: chunk.id, status: 'planned', names: analysis.candidates.length, frozen: analysis.statistics });
       const batches = planChunk(baseline, chunkOptions);
