@@ -111,17 +111,17 @@ export async function run(options, dependencies) {
         onParse(file, at, elapsed) { fileMetricsFor(file, at).cpu_ms.parse += elapsed; },
       })) listed.add(file);
     }
-    const selectedCount = listed.size;
-    chunkDriver.select([...listed], new Set());
+    const selectedFiles = [...listed];
+    chunkDriver.select(selectedFiles, new Set());
     for (const chunk of chunkDriver.jobs) for (const member of chunk.files) {
       for (const file of await api.listFiles(join(root, member), { ignoreFile: settings.ignoreFile || existsSync(ignoreFile) ? ignoreFile : undefined })) listed.add(file);
     }
     const files = [...listed].sort();
     const fragmentContext = loadFragmentContext(root, files);
     const { fragments } = fragmentContext;
-    chunkDriver?.select(files, fragments);
+    chunkDriver.select(selectedFiles, fragments);
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
-    summary.files = selectedCount;
+    summary.files = selectedFiles.length;
     selectionEnd(); selectionEnd = null;
     let stop = null, active = 0;
     const waiters = [];
