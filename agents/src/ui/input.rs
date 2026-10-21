@@ -1145,8 +1145,8 @@ impl View {
                         self.enter_task();
                     }
                     if let Some(id) = fold_toggle.filter(|id| *id == self.rows[task].id) {
-                        if !self.collapsed.remove(&id) {
-                            self.collapsed.insert(id);
+                        if !self.collapsed[self.status_filter].remove(&id) {
+                            self.collapsed[self.status_filter].insert(id);
                         }
                         return None;
                     }
