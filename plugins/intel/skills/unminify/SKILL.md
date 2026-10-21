@@ -43,6 +43,11 @@ Never print credentials.
 
 `restore-syntax` runs all 13 first-batch syntax steps in registry order, then merges
 duplicate external imports, in every selected file and all selected chunk members.
+File syntax passes run in a worker pool sized by `os.availableParallelism()`. Chunk
+fragments run independently; import merging analyzes each whole chunk, with separate
+chunks running in parallel. The pre-naming syntax check uses the same pool. Workers
+return source and edit counts; the main thread retains the existing checkpoints and
+atomic writes, preserving serial output bytes and interruption recovery.
 Only converted source ranges are replaced; surrounding
 text stays byte-identical. Inserted statement blocks use the surrounding indentation
 step; extracted expression statements drop parentheses only when statement grammar

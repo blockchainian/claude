@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { loadHistory, loadImportContext } from './history.mjs';
 import { createChunkIgnore } from './chunk-manifest.mjs';
-import { runMergeFile, mergeExternalImports } from './merge-imports.mjs';
+import { runMergeFile } from './merge-imports.mjs';
 import { loadFragmentContext } from './fragments.mjs';
-import { transformSyntax } from './syntax/runner.mjs';
+import { createSyntaxPool } from './syntax/pool.mjs';
+import { runSyntaxFileParallel } from './syntax/parallel-stage.mjs';
 import { randomUUID } from 'node:crypto';
 import { reconsiderNames } from './collision.mjs';
 import { packBatches } from './pack.mjs';
@@ -97,7 +98,7 @@ export async function run(options, dependencies) {
     }
     return fileMetrics.get(file);
   }
-  let api, namer;
+  let api, namer, syntaxPool;
   try {
     api = dependencies ?? await modules();
     const chunkDriver = await (await import('./chunk-run.mjs')).createChunkRun(root, settings);
@@ -143,42 +144,52 @@ export async function run(options, dependencies) {
       }
     };
     // Finish every syntax write before creating any rename plan or request.
+    syntaxPool = createSyntaxPool(dependencies?.syntaxPool);
+    async function syntaxFiles(task) {
+      const results = await Promise.allSettled(files.filter(file => !chunkDriver.files.has(file)).map(task));
+      const failure = results.find(result => result.status === 'rejected');
+      if (failure) throw failure.reason;
+      return results.map(result => result.value);
+    }
     if (restoring && api.runSyntaxFile) {
-      for (const file of files) {
-        if (chunkDriver?.files.has(file)) continue;
+      const records = await syntaxFiles(async file => {
         // Merge checkpoints own the text after syntax, including the write/complete window.
         if (existsSync(join(root, '.unminify', 'merge-imports', `${file}.jsonl`))) {
-          emit({ file, status: 'syntax-skipped' });
-          continue;
+          return { file, status: 'syntax-skipped' };
         }
         const endSyntax = phase('syntax', file);
-        try { emit(api.runSyntaxFile(root, file, { fragment: fragments.has(file), fragmentContext })); }
+        try { return await runSyntaxFileParallel(root, file, { fragment: fragments.has(file), fragmentContext }, syntaxPool); }
         finally { endSyntax(); }
-      }
-    }
-    if (restoring) for (const file of files) {
-      if (chunkDriver?.files.has(file)) continue;
-      const endMerge = phase('selection_plan');
-      try { emit(runMergeFile(root, file)); } finally { endMerge(); }
+      });
+      records.forEach(emit);
     }
     if (restoring) {
-      const rejected = await chunkDriver.restore({ api, emit, summary, sources, phase, fragmentContext });
+      const records = await syntaxFiles(async file => {
+        const endMerge = phase('selection_plan');
+        try { return await runMergeFile(root, file, syntaxPool); } finally { endMerge(); }
+      });
+      records.forEach(emit);
+      const rejected = await chunkDriver.restore({ api, emit, summary, sources, phase, fragmentContext, pool: syntaxPool });
       if (rejected || !naming) {
         summary.exitCode = summary.rejected ? 1 : 0;
         return summary;
       }
     }
     if (settings.command === 'rename-bindings') {
-      const pending = chunkDriver.syntaxPending({ fragmentContext });
-      for (const file of files) {
-        if (chunkDriver.files.has(file)) continue;
-        const source = readFileSync(join(root, file), 'utf8');
-        const restored = transformSyntax(source, { fragment: fragments.has(file), fragmentContext }).source;
-        const merged = mergeExternalImports(new Map([[file, restored]])).get(file);
-        if (source !== merged) pending.push(file);
-      }
+      const [chunkPending, ordinaryPending] = await Promise.all([
+        chunkDriver.syntaxPending({ fragmentContext, pool: syntaxPool }),
+        syntaxFiles(async file => {
+          const source = readFileSync(join(root, file), 'utf8');
+          const restored = await syntaxPool.run({ kind: 'transform', source,
+            options: { fragment: fragments.has(file), fragmentContext } });
+          const merged = await syntaxPool.run({ kind: 'merge', sources: new Map([[file, restored.source]]) });
+          return source !== merged.get(file) ? file : null;
+        }),
+      ]);
+      const pending = [...chunkPending, ...ordinaryPending.filter(Boolean)];
       if (pending.length) throw new Error(`Run restore-syntax before rename-bindings:\n${[...new Set(pending)].sort().join('\n')}`);
     }
+    await syntaxPool.close(); syntaxPool = undefined;
     if (naming) namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
       event(record) {
         event(record);
@@ -403,7 +414,7 @@ export async function run(options, dependencies) {
     summary.exitCode = 1;
     throw error;
   } finally {
-    try { await namer?.close(); }
+    try { await syntaxPool?.close(); await namer?.close(); }
     finally {
       selectionEnd?.();
       const endedAt = Date.now();

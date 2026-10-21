@@ -132,14 +132,19 @@ export function mergeExternalImports(sources, options = {}) {
   if (reason) throw new Error(reason);
   return after;
 }
-export function runMergeFile(root, file) {
+export function runMergeFile(root, file, pool) {
   if (existsSync(join(root, '.unminify', `${file}.jsonl`))) return { file, status: 'merge-imports-skipped' };
   const path = join(root, file), source = readFileSync(path, 'utf8');
   const journal = openJournal(root, join('merge-imports', file), source, { version: importMergeVersion });
   if (journal.done) return { file, status: 'merge-imports-skipped' };
-  const after = mergeExternalImports(new Map([[file, source]])).get(file);
-  journal.prepare(source, after, 'merge-imports');
-  if (source !== after) atomicWrite(path, after);
-  journal.complete(after, 'merge-imports');
-  return { file, status: 'merge-imports', changed: source !== after };
+  const inputs = new Map([[file, source]]);
+  function commit(output) {
+    const after = output.get(file);
+    journal.prepare(source, after, 'merge-imports');
+    if (source !== after) atomicWrite(path, after);
+    journal.complete(after, 'merge-imports');
+    return { file, status: 'merge-imports', changed: source !== after };
+  }
+  return pool ? pool.run({ kind: 'merge', sources: inputs }).then(commit)
+    : commit(mergeExternalImports(inputs));
 }
