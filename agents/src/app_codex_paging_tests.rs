@@ -132,20 +132,10 @@ fn c2_pins_do_not_block_loading_older_timeline_events() {
     assert_eq!(app.view.event_list.cursor, Some(0));
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 23)).unwrap();
     app.draw(&mut terminal).unwrap();
-    let buffer = terminal.backend().buffer();
-    let separator = (0..23)
-        .find(|&row| {
-            (0..120)
-                .map(|column| buffer[(column, row)].symbol())
-                .collect::<String>()
-                .trim()
-                == "·"
-        })
-        .expect("rendered pinned section separator");
     app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollDown,
         column: 2,
-        row: separator + 1,
+        row: 13,
         modifiers: KeyModifiers::NONE,
     }));
     assert_eq!(app.view.event_list.cursor, Some(1));

@@ -396,7 +396,7 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
     view.move_event_selection(false);
     assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
     view.navigate_event(KeyCode::End);
-    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    assert_eq!(view.event_list.cursor, view.newest_event_position());
     let area = Rect::new(0, 1, 100, 4);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 6));
     view.render_event(area, &mut buffer, Utc::now());
@@ -460,7 +460,7 @@ fn event_pin_fixed_below_scrolled_timeline() {
         view.viewport.borrow().event_rows.last().copied().unwrap(),
         EventRow::Pinned(0)
     );
-    assert_eq!(buffer[(50, 3)].symbol(), "·");
+    assert_eq!(buffer[(50, 3)].symbol(), " ");
     assert_eq!(buffer[(0, 3)].symbol(), " ");
     assert_eq!(view.event_scroll(), view.shown_events().count() - 3);
     let row_text = |y| {
@@ -527,14 +527,17 @@ fn pinned_sections_navigation_clamps_at_list_ends() {
     view.navigate_event(KeyCode::Up);
     assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
     view.select_event(view.shown_row_position(EventRow::Pinned(0)));
-    for key in [KeyCode::Down, KeyCode::PageDown, KeyCode::End] {
+    view.navigate_event(KeyCode::Down);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    for key in [KeyCode::PageDown, KeyCode::End] {
+        view.select_event(view.shown_row_position(EventRow::Pinned(0)));
         view.navigate_event(key);
-        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+        assert_eq!(view.event_list.cursor, view.newest_event_position());
     }
 }
 
 #[test]
-fn pinned_sections_render_dot_separator_without_header() {
+fn pinned_sections_render_blank_separator_without_header() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -552,12 +555,7 @@ fn pinned_sections_render_dot_separator_without_header() {
             .collect::<String>()
     };
     assert!((0..5).all(|y| !text(y).contains("Pinned")));
-    assert_eq!(text(3).trim(), "·");
-    assert_eq!(buffer[(50, 3)].symbol(), "·");
-    assert_eq!(
-        buffer[(50, 3)].style(),
-        ratatui::buffer::Cell::default().style()
-    );
+    assert_eq!(text(3).trim(), "");
     assert_eq!(view.viewport.borrow().event_row_at(3), None);
     assert_eq!(
         view.viewport.borrow().event_row_at(4),
@@ -571,7 +569,7 @@ fn pinned_sections_render_dot_separator_without_header() {
 }
 
 #[test]
-fn pinned_sections_dot_uses_list_width_and_ignores_mouse_clicks() {
+fn pinned_sections_separator_ignores_mouse_clicks() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -586,7 +584,7 @@ fn pinned_sections_dot_uses_list_width_and_ignores_mouse_clicks() {
         view.render_event(area, &mut buffer, Utc::now());
         let center = area.x + area.width / 2;
         let y = area.y + 3;
-        assert_eq!(buffer[(center, y)].symbol(), "·");
+        assert_eq!(buffer[(center, y)].symbol(), " ");
         assert_eq!(
             buffer[(center, y)].style(),
             ratatui::buffer::Cell::default().style()
@@ -650,7 +648,9 @@ fn pinned_sections_scroll_many_pins_without_moving_timeline() {
     view.select_event(None);
     view.render_event(area, &mut buffer, Utc::now());
     let timeline_scroll = view.event_scroll();
-    view.navigate_event(KeyCode::End);
+    for _ in 0..4 {
+        view.navigate_event(KeyCode::Down);
+    }
     view.render_event(area, &mut buffer, Utc::now());
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(3)));
     assert_eq!(view.event_scroll(), timeline_scroll);
@@ -765,8 +765,10 @@ fn pinned_sections_timeline_restore_and_live_follow_ignore_pin_indices() {
     view.navigate_event(KeyCode::Up);
     assert_eq!(view.event_list.cursor, view.newest_event_position());
     assert!(view.following_event());
+    view.navigate_event(KeyCode::Down);
     view.navigate_event(KeyCode::End);
-    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    assert_eq!(view.event_list.cursor, view.newest_event_position());
+    assert!(view.following_event());
     view.navigate_event(KeyCode::Home);
     assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
 }
@@ -796,7 +798,7 @@ fn pinned_sections_short_timeline_keeps_blank_rows_out_of_hit_testing() {
 }
 
 #[test]
-fn pinned_navigation_crosses_sections_in_both_sorts_and_pages() {
+fn pinned_navigation_crosses_sections_by_line_and_pages_within_timeline() {
     for sort in [EventSort::Time, EventSort::Duration] {
         let (_dir, mut view, _, _, _) = fixture();
         for row in &mut view.rows {
@@ -817,14 +819,20 @@ fn pinned_navigation_crosses_sections_in_both_sorts_and_pages() {
         view.navigate_event(KeyCode::Up);
         assert_eq!(view.event_list.cursor, Some(last));
         view.navigate_event(KeyCode::PageDown);
+        assert_eq!(view.event_list.cursor, Some(last));
+        view.navigate_event(KeyCode::Down);
+        view.navigate_event(KeyCode::Down);
+        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(1)));
+        view.navigate_event(KeyCode::PageUp);
         assert_eq!(
             view.event_list.cursor,
-            Some((last + view.event_timeline_height().max(1)).min(last + 3))
+            Some(last.saturating_sub(view.event_timeline_height().max(1)))
         );
-        view.navigate_event(KeyCode::End);
-        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(2)));
-        view.navigate_event(KeyCode::PageUp);
-        assert_eq!(view.event_list.cursor, Some((last + 3).saturating_sub(3)));
+        for key in [KeyCode::PageDown, KeyCode::End] {
+            view.select_event(view.shown_row_position(EventRow::Pinned(2)));
+            view.navigate_event(key);
+            assert_eq!(view.event_list.cursor, Some(last));
+        }
         view.navigate_event(KeyCode::Home);
         assert_eq!(view.event_list.cursor, Some(0));
     }

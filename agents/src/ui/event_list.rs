@@ -127,12 +127,6 @@ impl View {
         self.event_list.pinned_scroll.set(pinned_start);
         let visible = (start..end)
             .chain(timeline_count + pinned_start..timeline_count + pinned_start + pinned_height);
-        if separator > 0 {
-            let mut dot = super::render::row(area, timeline_height as u16, 1);
-            dot.x += dot.width / 2;
-            dot.width = 1;
-            super::render::line("·", dot, buf);
-        }
         self.viewport.borrow_mut().event_separator = (separator > 0).then_some(timeline_height);
         for (index, position) in visible.enumerate() {
             let (event_index, event) = matching[position];
@@ -746,25 +740,39 @@ impl View {
     pub(super) fn navigate_event(&mut self, code: KeyCode) {
         match code {
             KeyCode::Up | KeyCode::Down => self.move_event_selection(code == KeyCode::Down),
+            // Paging and Home/End stay in the timeline; from a pin they start at its newest event.
             KeyCode::PageUp | KeyCode::PageDown => {
-                let steps = if matches!(self.selected_event_row(), Some(EventRow::Pinned(_))) {
-                    self.event_pinned_height()
-                } else {
-                    self.event_timeline_height()
+                let forward = code == KeyCode::PageDown;
+                if matches!(self.selected_event_row(), Some(EventRow::Pinned(_))) {
+                    let Some(newest) = self.newest_event_position() else {
+                        return;
+                    };
+                    self.navigate_to_event(newest);
+                    if forward {
+                        return;
+                    }
                 }
-                .max(1);
-                for _ in 0..steps {
-                    self.move_event_selection(code == KeyCode::PageDown);
+                for _ in 0..self.event_timeline_height().max(1) {
+                    if forward
+                        && self.event_list.pending_older == 0
+                        && self.event_list.cursor.is_some()
+                        && self.event_list.cursor >= self.newest_event_position()
+                    {
+                        break;
+                    }
+                    self.move_event_selection(forward);
                 }
             }
             KeyCode::Home | KeyCode::End => {
                 self.event_list.pending_older = 0;
                 let index = if code == KeyCode::Home {
-                    0
+                    Some(0)
                 } else {
-                    self.matching_event_count().saturating_sub(1)
+                    self.newest_event_position()
                 };
-                self.navigate_to_event(index);
+                if let Some(index) = index {
+                    self.navigate_to_event(index);
+                }
             }
             _ => unreachable!("list navigation action"),
         }
