@@ -1,5 +1,5 @@
 import { timed } from './timing.mjs';
-import { isLexicalIdentifier } from './identifiers.mjs';
+import { isLexicalIdentifier, identifierBinding } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 // Rejects rewrites that change module contracts, scope resolution or source text.
 import { execFileSync } from 'node:child_process';
@@ -95,6 +95,7 @@ function header(source) {
 function analyze(source, ast, options) {
   let facts;
   const bindings = new Set();
+  const declarations = new Map();
   const variables = new Map();
   const globals = new Set();
   let constReassigned = 0;
@@ -102,11 +103,14 @@ function analyze(source, ast, options) {
   traverse(ast, {
     Program(path) { facts = fragmentFacts(path, options); },
     Scope(path) {
-      for (const binding of Object.values(path.scope.bindings)) bindings.add(binding);
+      for (const binding of Object.values(path.scope.bindings)) {
+        bindings.add(binding);
+        declarations.set(binding.identifier, binding);
+      }
     },
     Identifier(path) {
       if (!isLexicalIdentifier(path)) return;
-      const binding = path.scope.getBinding(path.node.name);
+      const binding = identifierBinding(path, declarations);
       variables.set(path.node, binding ?? null);
       if (!binding) globals.add(path.node.name);
     },
