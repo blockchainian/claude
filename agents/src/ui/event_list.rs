@@ -18,6 +18,34 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 }
 
 impl View {
+    pub(super) fn refresh_transcript(&mut self) {
+        let mode = if self.terminal_requested() {
+            self.event_detail.return_mode
+        } else {
+            self.event_detail.mode
+        };
+        if mode != task_ui::EventDetailMode::Transcript {
+            return;
+        }
+        let Some(event) = self.visible_event() else {
+            self.event_detail.transcript = None;
+            return;
+        };
+        if self
+            .event_detail
+            .transcript
+            .as_ref()
+            .is_some_and(|cached| cached.records == event.source_records)
+        {
+            return;
+        }
+        self.event_detail.transcript = Some(task_ui::Transcript {
+            records: event.source_records.clone(),
+            text: event.raw_text().map_err(|error| error.to_string()),
+        });
+        self.viewport.borrow_mut().event_detail_layout = None;
+    }
+
     /// Resolve recorded agent settings with the same catalog as session borders and pickers.
     pub(super) fn display_event<'a>(&self, event: &'a Event) -> std::borrow::Cow<'a, Event> {
         if !event.calls.iter().any(|call| call.model_settings.is_some()) {
@@ -43,6 +71,16 @@ impl View {
     }
 
     pub(super) fn event_detail_text(&self, event: &Event) -> String {
+        if self.event_detail.mode == task_ui::EventDetailMode::Transcript {
+            return self
+                .event_detail
+                .transcript
+                .as_ref()
+                .expect("transcript loaded")
+                .text
+                .clone()
+                .unwrap_or_else(|error| format!("Cannot read transcript records: {error}"));
+        }
         open_text(&self.display_event(event))
     }
 
@@ -53,6 +91,21 @@ impl View {
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> EventDetailLayout {
+        if self.event_detail.mode == task_ui::EventDetailMode::Transcript {
+            let transcript = self
+                .event_detail
+                .transcript
+                .as_ref()
+                .expect("transcript loaded");
+            let sections = super::tool_detail::transcript_content(
+                &transcript.text,
+                self.selected_id()
+                    .expect("detail belongs to a session")
+                    .provider,
+            )
+            .sections;
+            return event_detail_parts_layout(event, columns, cwd, now, sections);
+        }
         let display = self.display_event(event);
         let sections =
             super::tool_detail::event_detail_content(&display, String::new(), Style::new().dim())
@@ -344,10 +397,11 @@ impl View {
                 layout
             }
         };
-        if (!shows_calls(event)
-            || (event.calls.len() == 1
-                && (self.event_list.sort == EventSort::Duration
-                    || event.calls[0].started_at.is_none())))
+        if self.event_detail.mode != task_ui::EventDetailMode::Transcript
+            && (!shows_calls(event)
+                || (event.calls.len() == 1
+                    && (self.event_list.sort == EventSort::Duration
+                        || event.calls[0].started_at.is_none())))
             && let Some((_, span)) = layout.times.first_mut()
         {
             span.content = time.to_owned().into();
@@ -485,6 +539,7 @@ impl View {
             .map(|record| (&record.path, record.offset));
         let key = event_detail_key(&(
             self.selected_id(),
+            self.event_detail.mode,
             matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
             &event.source,
             record,
@@ -661,6 +716,7 @@ impl View {
         if self.following_event() {
             self.event_list.unseen.set(0);
         }
+        self.refresh_transcript();
     }
 
     #[cfg(test)]
@@ -908,6 +964,7 @@ impl View {
             }
             self.event_list.scroll.set(self.event_max_scroll());
             self.event_list.unseen.set(0);
+            self.refresh_transcript();
             return;
         }
         self.event_list.pinned_following = false;
@@ -950,10 +1007,12 @@ impl View {
             self.event_list.background_return = None;
             self.event_list.background = None;
         }
+        self.refresh_transcript();
     }
 
     /// Applies structural changes without comparing row contents.
     pub(crate) fn apply_event_update(&mut self, update: crate::event::Update) {
+        self.event_detail.transcript = None;
         if self.event_list.restoring {
             self.last_update = Utc::now();
             self.event_panel = update.events;
@@ -1091,6 +1150,7 @@ impl View {
         {
             self.select_event(Some(index.saturating_sub(pending)));
         }
+        self.refresh_transcript();
     }
 
     #[cfg(test)]

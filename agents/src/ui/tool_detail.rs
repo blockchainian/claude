@@ -27,6 +27,8 @@ enum Body {
     Running,
     /// Code highlighted as the given language.
     Code(String),
+    /// Literal transcript JSON, without display path substitutions.
+    Transcript,
     /// Shell command ranges retain original bytes while separators are display-only.
     Shell(Vec<super::shell_commands::Command>),
     /// Parsed structured content with its format-owned rendering.
@@ -48,6 +50,7 @@ impl Body {
             | Self::Arrow
             | Self::Running
             | Self::Code(_)
+            | Self::Transcript
             | Self::Shell(_)
             | Self::Structured(_)
             | Self::Diff
@@ -185,7 +188,7 @@ impl Part {
             &self.source,
             lines,
             self.markdown(),
-            (!matches!(self.body, Body::Structured(_))).then_some(cwd),
+            (!matches!(self.body, Body::Structured(_) | Body::Transcript)).then_some(cwd),
         )
     }
 
@@ -233,6 +236,9 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
         cwd: &std::path::Path,
     ) -> Vec<Line<'static>> {
+        if matches!(self.body, Body::Transcript) {
+            return highlight::code_lines(&self.source, "json");
+        }
         let text = crate::providers::text::printable(&self.source);
         let paths = super::paths::text_paths(&text, cwd);
         let display =
@@ -317,6 +323,7 @@ impl Part {
             }
             Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Structured(document) => document.highlighted(),
+            Body::Transcript => highlight::code_lines(source, "json"),
             Body::Diff => highlight::diff_lines(source),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
             Body::Note => source
@@ -436,6 +443,68 @@ fn shell_maps(
         }
     }
     maps
+}
+
+/// Raw records retain their pretty JSON source as one highlighted part per section.
+pub(super) fn transcript_content(
+    raw: &Result<String, String>,
+    provider: crate::providers::ProviderId,
+) -> EventDetailContent {
+    let message = |text: String| EventDetailContent {
+        sections: vec![EventDetailSection {
+            title: TitleRow {
+                left: None,
+                exit_code: None,
+                title: String::new(),
+                title_style: Style::default(),
+                time: None,
+                meta_style: Style::new().dim(),
+            },
+            groups: vec![Group {
+                parts: vec![Part::new(text, Body::Text)],
+            }],
+        }],
+    };
+    let raw = match raw {
+        Ok(raw) if raw.is_empty() => return message("No transcript records".into()),
+        Ok(raw) => raw,
+        Err(error) => return message(format!("Cannot read transcript records: {error}")),
+    };
+    // raw_text separates pretty-printed JSON records with one empty line.
+    let sections = raw
+        .split("\n\n")
+        .map(|text| {
+            let record: serde_json::Value =
+                serde_json::from_str(text).expect("raw_text validates JSON");
+            let mut title = record["type"].as_str().unwrap_or_default().to_owned();
+            if provider == crate::providers::ProviderId::Codex
+                && let Some(kind) = record["payload"]["type"].as_str()
+            {
+                if !title.is_empty() {
+                    title.push_str(" / ");
+                }
+                title.push_str(kind);
+            }
+            let time = record["timestamp"]
+                .as_str()
+                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                .map(|time| super::formatting::clock_text(time.with_timezone(&chrono::Utc)));
+            EventDetailSection {
+                title: TitleRow {
+                    left: time,
+                    exit_code: None,
+                    title,
+                    title_style: Style::default(),
+                    time: None,
+                    meta_style: Style::new().dim(),
+                },
+                groups: vec![Group {
+                    parts: vec![Part::new(text, Body::Transcript)],
+                }],
+            }
+        })
+        .collect();
+    EventDetailContent { sections }
 }
 
 /// Build one titled section per message or tool call.

@@ -271,6 +271,7 @@ impl View {
 
         self.viewport.borrow_mut().event_detail_layout = None;
         self.event_detail.scroll.borrow_mut().offset = 0;
+        self.refresh_transcript();
     }
 
     fn set_filter(&mut self, idx: usize) {
@@ -1785,6 +1786,27 @@ impl View {
                 }
                 _ => {}
             }
+            return None;
+        }
+        if plain
+            && self.active_panel == Panel::EventDetail
+            && !self.terminal_requested()
+            && matches!(key.code, KeyCode::Left | KeyCode::Right)
+        {
+            let mode = if key.code == KeyCode::Left {
+                super::task_ui::EventDetailMode::Event
+            } else {
+                super::task_ui::EventDetailMode::Transcript
+            };
+            if self.event_detail.mode == mode {
+                return None;
+            }
+            self.event_detail.mode = mode;
+            self.cancel_event_detail_selection();
+            self.event_detail.search.clear();
+            self.event_detail.scroll.borrow_mut().offset = 0;
+            self.viewport.borrow_mut().event_detail_layout = None;
+            self.refresh_transcript();
             return None;
         }
         if plain && key.code == KeyCode::Enter && self.active_panel == Panel::EventList {

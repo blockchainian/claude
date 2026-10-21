@@ -11305,3 +11305,6 @@ mod active_panel_tests;
 
 #[path = "task_tree_collapse_tests.rs"]
 mod task_tree_collapse_tests;
+
+#[path = "transcript_tests.rs"]
+mod transcript_tests;

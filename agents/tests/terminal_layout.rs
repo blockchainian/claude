@@ -3344,3 +3344,6 @@ fn terminal_inactive_elapsed_stays_at_last_record() {
 
 #[path = "support/terminal_window_navigation.rs"]
 mod terminal_window_navigation;
+
+#[path = "support/terminal_transcript.rs"]
+mod terminal_transcript;

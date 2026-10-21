@@ -45,8 +45,15 @@ pub(crate) struct EventList {
 #[derive(Default)]
 pub(super) struct EventDetail {
     pub mode: EventDetailMode,
+    pub return_mode: EventDetailMode,
+    pub transcript: Option<Transcript>,
     pub scroll: std::cell::RefCell<super::event_detail::EventDetailScroll>,
     pub search: EventSearch,
+}
+
+pub(super) struct Transcript {
+    pub records: Vec<crate::event::SourceRecord>,
+    pub text: Result<String, String>,
 }
 
 #[derive(Default)]
@@ -92,10 +99,11 @@ pub(super) enum EventPosition {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(super) enum EventDetailMode {
     #[default]
     Event,
+    Transcript,
     Terminal,
 }
 

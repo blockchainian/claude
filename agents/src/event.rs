@@ -143,7 +143,6 @@ impl Event {
         }
     }
 
-    #[cfg(test)]
     pub fn raw_text(&self) -> std::io::Result<String> {
         use std::io::{BufRead, Seek};
         let mut records = self.source_records.iter().collect::<Vec<_>>();

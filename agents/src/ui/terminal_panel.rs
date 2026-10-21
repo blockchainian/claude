@@ -27,14 +27,17 @@ impl View {
                 .and_then(super::draft_controls::TaskKey::session)
                 == Some(id)
         }) {
-            self.event_detail.mode = super::task_ui::EventDetailMode::Event;
+            self.event_detail.mode = self.event_detail.return_mode;
         }
         self.terminal = None;
         self.viewport.borrow_mut().terminal = Rect::default();
     }
 
     pub(crate) fn request_terminal(&mut self) {
-        self.event_detail.mode = super::task_ui::EventDetailMode::Terminal;
+        if !self.terminal_requested() {
+            self.event_detail.return_mode = self.event_detail.mode;
+            self.event_detail.mode = super::task_ui::EventDetailMode::Terminal;
+        }
     }
 
     pub(crate) fn terminal_requested(&self) -> bool {
