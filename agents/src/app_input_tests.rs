@@ -34,6 +34,11 @@ fn registry_app(kind: &str) -> (tempfile::TempDir, App, PathBuf, serde_json::Val
     let mut state: serde_json::Value = serde_json::from_str(r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#).unwrap();
     state["sessionId"] = id.into();
     fs::write(job.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+    let app = open_app(root);
+    (directory, app, path, registry)
+}
+
+fn open_app(root: &std::path::Path) -> App {
     let mut app = App::new(
         Hub::new(vec![Box::new(
             crate::providers::claude::ClaudeProvider::new(root.to_owned()),
@@ -44,7 +49,102 @@ fn registry_app(kind: &str) -> (tempfile::TempDir, App, PathBuf, serde_json::Val
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
     app.refresh_event(8);
     super::event_search_tests::finish_search(&mut app);
-    (directory, app, path, registry)
+    app
+}
+
+fn pin_first_source_event(app: &mut App, id: &SessionKey) -> PinnedEvent {
+    let event = app
+        .view
+        .event_panel
+        .iter()
+        .find(|event| event.source.is_some() && !event.source_records.is_empty())
+        .expect("a pinnable event")
+        .clone();
+    let pin = PinnedEvent {
+        source: event.source.clone().unwrap(),
+        records: event.source_records.clone(),
+    };
+    app.handle_action(Some(Action::ToggleEventPin {
+        task: id.clone(),
+        pinned: vec![pin.clone()],
+    }));
+    pin
+}
+
+#[test]
+fn toggling_an_event_pin_saves_the_task_pins() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    let pin = pin_first_source_event(&mut app, &id);
+    assert_eq!(
+        Preferences::load(directory.path()).task_pinned_events(&id),
+        [pin]
+    );
+    app.handle_action(Some(Action::ToggleEventPin {
+        task: id.clone(),
+        pinned: Vec::new(),
+    }));
+    assert!(
+        Preferences::load(directory.path())
+            .task_pinned_events(&id)
+            .is_empty()
+    );
+}
+
+#[test]
+fn stored_pins_are_read_back_when_the_task_opens() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    let pin = pin_first_source_event(&mut app, &id);
+    drop(app);
+    let app = open_app(directory.path());
+    assert!(app.view.has_pinned_events(&id));
+    assert_eq!(
+        Preferences::load(directory.path()).task_pinned_events(&id),
+        [pin]
+    );
+}
+
+#[test]
+fn stored_pins_that_no_longer_match_their_records_are_forgotten() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    let mut pin = pin_first_source_event(&mut app, &id);
+    pin.source = "not-the-recorded-source".into();
+    app.handle_action(Some(Action::ToggleEventPin {
+        task: id.clone(),
+        pinned: vec![pin],
+    }));
+    drop(app);
+    let app = open_app(directory.path());
+    assert!(!app.view.has_pinned_events(&id));
+    assert!(
+        Preferences::load(directory.path())
+            .task_pinned_events(&id)
+            .is_empty()
+    );
+}
+
+#[test]
+fn inactive_sessions_lose_their_stored_state() {
+    let (directory, mut app, registry, _) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    pin_first_source_event(&mut app, &id);
+    let saved =
+        app.preferences
+            .save_task_sort(directory.path(), &id, crate::model::EventSort::Duration);
+    saved.unwrap();
+    fs::remove_file(registry).unwrap();
+    fs::remove_file(directory.path().join("jobs/e772d00b/state.json")).unwrap();
+    app.refresh();
+    assert_eq!(
+        app.session(&id).unwrap().status,
+        crate::model::SessionStatus::Inactive
+    );
+    let stored = Preferences::load(directory.path());
+    assert!(stored.task_pinned_events(&id).is_empty());
+    assert!(stored.tasks.is_empty());
+    assert!(!app.view.has_pinned_events(&id));
 }
 
 fn screen(app: &mut App) -> String {
@@ -66,9 +166,10 @@ fn complete_input(app: &mut App, expected: &str) {
             token,
             reader,
             result,
+            pinned,
         } = input
         {
-            app.finish_event_load(token, reader, result);
+            app.finish_event_load(token, reader, result, pinned);
         } else {
             break input;
         }

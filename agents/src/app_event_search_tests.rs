@@ -139,11 +139,12 @@ fn completed_history_does_not_replace_another_task_or_request() {
         token,
         reader,
         result,
+        pinned,
     } = stale
     else {
         panic!("expected a transcript completion");
     };
-    app.finish_event_load(token, reader, result);
+    app.finish_event_load(token, reader, result, pinned);
     assert_eq!(app.view.event_panel, second_event);
     assert_eq!(app.view.event_session.as_ref(), Some(&second.id));
     app.sessions = vec![first.clone()];
