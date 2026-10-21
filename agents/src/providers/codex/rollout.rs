@@ -318,12 +318,20 @@ fn walk(path: &Path, mut visit: impl FnMut(Value, u64) -> io::Result<bool>) -> i
     Ok(())
 }
 
-fn source(record: &Value, offset: u64) -> String {
+fn record_ids(record: &Value) -> impl Iterator<Item = &str> {
     let payload = &record["payload"];
-    payload["item"]["id"]
-        .as_str()
-        .or_else(|| payload["id"].as_str())
-        .or_else(|| payload["call_id"].as_str())
+    [
+        payload["item"]["id"].as_str(),
+        payload["id"].as_str(),
+        payload["call_id"].as_str(),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+fn source(record: &Value, offset: u64) -> String {
+    record_ids(record)
+        .next()
         .map(str::to_owned)
         .unwrap_or_else(|| format!("offset:{offset}"))
 }
@@ -1688,27 +1696,16 @@ impl Reader {
             older.reverse();
             let added = older.len();
             let mut selected: HashSet<_> = older.iter().map(|(offset, _)| *offset).collect();
-            let completed: HashSet<_> = older
+            let ids: HashSet<_> = older
                 .iter()
-                .filter_map(|(_, record)| {
-                    let item = &record["payload"]["item"];
-                    (record["type"] == "event_msg" && record["payload"]["type"] == "item_completed")
-                        .then(|| item["id"].as_str())
-                        .flatten()
-                        .map(str::to_owned)
-                })
+                .flat_map(|(_, record)| record_ids(record).map(str::to_owned))
                 .collect();
             older.append(&mut self.records);
             self.records = older;
-            // A completion can precede the raw record that it supplies. Repair
-            // those existing rows and all members of their merged message group.
+            // Rebuild retained rows when either half of a paired event arrives,
+            // including every member of a merged message group.
             for (offset, record) in &self.records[added..] {
-                let payload = &record["payload"];
-                if [payload["id"].as_str(), payload["call_id"].as_str()]
-                    .into_iter()
-                    .flatten()
-                    .any(|id| completed.contains(id))
-                {
+                if record_ids(record).any(|id| ids.contains(id)) {
                     selected.insert(*offset);
                 }
             }
@@ -2017,7 +2014,11 @@ fn events_with_context<'a>(
     let mut completed_prompt = None;
     let mut completed_messages = HashMap::new();
     let mut collaboration = HashMap::new();
+    let mut sources: HashMap<&str, Vec<u64>> = HashMap::new();
     for (offset, record) in records {
+        for id in record_ids(record) {
+            sources.entry(id).or_default().push(*offset);
+        }
         let item = &record["payload"]["item"];
         if matches!(
             item["type"].as_str(),
@@ -2056,6 +2057,12 @@ fn events_with_context<'a>(
                 *completed
             })
             .unwrap_or(record);
+        source_records.extend(
+            record_ids(record)
+                .filter_map(|id| sources.get(id))
+                .flatten()
+                .map(|offset| reference(*offset)),
+        );
         let payload = &record["payload"];
         if selected.is_some_and(|selected| !selected.contains(&offset)) {
             match (record["type"].as_str(), payload["type"].as_str()) {
@@ -3273,7 +3280,11 @@ mod tests {
             .collect();
         let outputs: Vec<_> = records
             .iter()
-            .map(|record| completed_tool(record).unwrap().unwrap().calls[0].output.clone())
+            .map(|record| {
+                completed_tool(record).unwrap().unwrap().calls[0]
+                    .output
+                    .clone()
+            })
             .collect();
         assert_eq!(outputs, [
             Some(vec![Section::Diff {
@@ -4620,9 +4631,15 @@ mod paging_tests {
         for requested in [1, 20, 40, 80, usize::MAX] {
             let update = reader.refresh(requested).unwrap();
             let converted = EVENT_CONVERSIONS.with(|count| count.get());
+            // A retained row is decoded again when an earlier source arrives.
+            let paired_sources: usize = reader
+                .entries
+                .iter()
+                .map(|(_, event)| event.source_records.len().saturating_sub(1))
+                .sum();
             assert!(
-                converted <= reader.records.len(),
-                "converted {converted} records for {} retained records",
+                converted <= reader.records.len() + paired_sources,
+                "converted {converted} records for {} retained records and {paired_sources} paired sources",
                 reader.records.len()
             );
             let before = converted;
@@ -4738,3 +4755,7 @@ mod selective_event_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "rollout_source_tests.rs"]
+mod source_tests;
