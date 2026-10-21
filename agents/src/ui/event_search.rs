@@ -119,7 +119,8 @@ impl View {
 
     pub(crate) fn rematch_event(&mut self) {
         let full = self
-            .event_list.cursor
+            .event_list
+            .cursor
             .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
         self.rematch_event_at(full);
     }
@@ -129,7 +130,8 @@ impl View {
         let pattern = self.event_list.search.pattern();
         let mut matcher = self.event_list.search.matcher.borrow_mut();
         self.event_list.search.matches = self
-            .event_list.search
+            .event_list
+            .search
             .bodies
             .iter()
             .enumerate()
@@ -146,7 +148,8 @@ impl View {
             })
             .or_else(|| self.matching_event_count().checked_sub(1));
         let selected = self
-            .event_list.cursor
+            .event_list
+            .cursor
             .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
         if selected != selected_full {
             let mut viewport = self.viewport.borrow_mut();
@@ -159,7 +162,8 @@ impl View {
     }
 
     pub(super) fn event_matches(&self, index: usize) -> bool {
-        !self.event_list.search.active() || self.event_list.search.matches.binary_search(&index).is_ok()
+        !self.event_list.search.active()
+            || self.event_list.search.matches.binary_search(&index).is_ok()
     }
 }
 

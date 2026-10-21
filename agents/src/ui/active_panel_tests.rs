@@ -61,11 +61,7 @@ fn task_details_position(view: &View, panel: Panel) -> usize {
 fn assert_lists_unchanged(view: &View, selected: usize, event: Option<usize>, scroll: usize) {
     assert_eq!(view.selected, selected, "task selection changed");
     assert_eq!(view.event_list.cursor, event, "log selection changed");
-    assert_eq!(
-        view.event_list.scroll.get(),
-        scroll,
-        "log list moved"
-    );
+    assert_eq!(view.event_list.scroll.get(), scroll, "log list moved");
 }
 
 #[test]
@@ -172,7 +168,10 @@ fn active_panel_lists_keep_their_navigation_bindings() {
                     let selected = view.selected;
                     let event = view.event_list.cursor;
                     view.handle_key(forward);
-                    assert_ne!(view.event_list.cursor, event, "width={width}, key={forward:?}");
+                    assert_ne!(
+                        view.event_list.cursor, event,
+                        "width={width}, key={forward:?}"
+                    );
                     let after = view.event_list.cursor;
                     view.handle_key(backward);
                     assert_ne!(

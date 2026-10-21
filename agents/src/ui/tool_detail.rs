@@ -385,13 +385,8 @@ fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec
                 } else {
                     SHELL_BRACKET[1]
                 };
-                line.spans.insert(
-                    0,
-                    Span::styled(
-                        format!("{bracket} "),
-                        bracket_style(),
-                    ),
-                );
+                line.spans
+                    .insert(0, Span::styled(format!("{bracket} "), bracket_style()));
             }
         }
         lines.extend(rows);

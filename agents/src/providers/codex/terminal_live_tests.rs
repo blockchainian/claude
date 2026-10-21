@@ -88,10 +88,15 @@ fn idle_terminal_archives_real_codex_thread_without_hiding_it() {
     let provider = CodexProvider::from_config().unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let mut client = app_server::Client::connect(&provider.home).unwrap();
-    let started: Value = client.request("thread/start", json!({
-        "cwd":workspace.path(), "approvalPolicy":"on-request", "sandbox":"read-only",
-        "ephemeral":false, "serviceName":"agents-terminal-idle-probe"
-    })).unwrap();
+    let started: Value = client
+        .request(
+            "thread/start",
+            json!({
+                "cwd":workspace.path(), "approvalPolicy":"on-request", "sandbox":"read-only",
+                "ephemeral":false, "serviceName":"agents-terminal-idle-probe"
+            }),
+        )
+        .unwrap();
     let id = started["thread"]["id"].as_str().unwrap().to_owned();
     let cleanup = DeleteThread {
         home: provider.home.clone(),

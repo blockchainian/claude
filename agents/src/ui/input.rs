@@ -51,9 +51,13 @@ impl View {
         self.event_list.sort_initialized = true;
         let following = self.following_event();
         let full = self
-            .event_list.cursor
+            .event_list
+            .cursor
             .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
-        let background_full = self.event_list.background_return.as_ref()
+        let background_full = self
+            .event_list
+            .background_return
+            .as_ref()
             .and_then(|saved| saved.event)
             .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
         self.event_list.sort = sorting;
@@ -509,12 +513,14 @@ impl View {
             }
             PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
             PasteTarget::EventSearch(area) => {
-                self.event_list.search
+                self.event_list
+                    .search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
             PasteTarget::EventDetailSearch(area) => {
-                self.event_detail.search
+                self.event_detail
+                    .search
                     .query
                     .click_row_after(area, &search, mouse.column)
             }
@@ -1686,7 +1692,8 @@ impl View {
         }
         if self.active_panel == Panel::EventList && self.event_list.search.editing {
             let selected_full = self
-                .event_list.cursor
+                .event_list
+                .cursor
                 .and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
             match key.code {
                 KeyCode::Esc => {
@@ -1781,10 +1788,13 @@ impl View {
                 EventSort::Time => EventSort::Duration,
                 EventSort::Duration => EventSort::Time,
             });
-            return self.selected_id().cloned().map(|id| Action::PersistSorting {
-                id,
-                sorting: self.event_list.sort,
-            });
+            return self
+                .selected_id()
+                .cloned()
+                .map(|id| Action::PersistSorting {
+                    id,
+                    sorting: self.event_list.sort,
+                });
         }
         if plain
             && key.code == KeyCode::Esc

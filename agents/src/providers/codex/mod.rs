@@ -17,13 +17,13 @@ mod send_tests;
 mod settings_tests;
 #[cfg(test)]
 mod subagents_tests;
-#[cfg(test)]
-mod tests;
 mod terminal;
 #[cfg(test)]
 mod terminal_live_tests;
 #[cfg(test)]
 mod terminal_tests;
+#[cfg(test)]
+mod tests;
 
 use super::{
     AccountUsageJob, Capabilities, Job, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
@@ -283,11 +283,10 @@ impl CodexProvider {
             };
             if let Some(summary) = summary {
                 if let Some(path) = session.transcript.as_deref() {
-                    (session.prompt_images, session.task_details_sources[2]) =
-                        tasks
-                            .get_mut(path)
-                            .expect("summary cache entry")
-                            .first_prompt(&session.prompt)?;
+                    (session.prompt_images, session.task_details_sources[2]) = tasks
+                        .get_mut(path)
+                        .expect("summary cache entry")
+                        .first_prompt(&session.prompt)?;
                 }
                 if let Some((call, since)) = &summary.pending_question_call {
                     pending.push((

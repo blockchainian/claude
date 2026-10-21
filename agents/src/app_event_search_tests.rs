@@ -333,7 +333,9 @@ fn parked_event_position_loads_history_before_restoring_selection() {
     let (dir, mut app) = super::tests::fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let records: Vec<serde_json::Value> = include_str!("../tests/fixtures/transcript.jsonl")
-        .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
     let mut transcript = String::new();
     for copy in 0..12 {
         for record in &records {
@@ -352,7 +354,11 @@ fn parked_event_position_loads_history_before_restoring_selection() {
     other.id.id = "other-history".into();
     other.updated_at -= chrono::Duration::seconds(1);
     other.transcript = Some(dir.path().join("other-history.jsonl"));
-    std::fs::write(other.transcript.as_ref().unwrap(), include_bytes!("../tests/fixtures/transcript.jsonl")).unwrap();
+    std::fs::write(
+        other.transcript.as_ref().unwrap(),
+        include_bytes!("../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
     let second = other.id.clone();
     app.sessions.push(other);
     app.view.set_sessions(app.sessions.clone(), false);
@@ -360,12 +366,20 @@ fn parked_event_position_loads_history_before_restoring_selection() {
     for code in [KeyCode::Home, KeyCode::Down] {
         app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     }
-    let selected = app.view.event_panel[app.view.event_list.cursor.unwrap()].source.clone();
+    let selected = app.view.event_panel[app.view.event_list.cursor.unwrap()]
+        .source
+        .clone();
     let anchor = app.view.event_panel[app.view.event_scroll()].source.clone();
     app.view.event_list.unseen.set(3);
     for _ in 0..2 {
-        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)));
-        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE)));
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+        )));
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('k'),
+            KeyModifiers::NONE,
+        )));
     }
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
     assert_eq!(app.view.selected_id(), Some(&second));
@@ -381,7 +395,10 @@ fn parked_event_position_loads_history_before_restoring_selection() {
     app.draw(&mut terminal).unwrap();
     assert_eq!(app.view.event_list.unseen.get(), 3);
     finish_search(&mut app);
-    assert_eq!(app.view.event_panel[app.view.event_list.cursor.unwrap()].source, selected);
+    assert_eq!(
+        app.view.event_panel[app.view.event_list.cursor.unwrap()].source,
+        selected
+    );
     assert_eq!(app.view.event_panel[app.view.event_scroll()].source, anchor);
     assert_eq!(app.view.event_list.unseen.get(), 3);
 }

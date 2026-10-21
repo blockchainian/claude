@@ -413,7 +413,11 @@ fn event_scroll_wheel_pauses_at_title_before_changing_event() {
     for _ in 0..2 {
         wheel(&mut view, false);
         panel(&view, now);
-        assert_eq!(view.event_list.cursor, Some(1), "the title holds two wheels");
+        assert_eq!(
+            view.event_list.cursor,
+            Some(1),
+            "the title holds two wheels"
+        );
     }
     wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(0));
@@ -524,7 +528,11 @@ fn event_scroll_wheel_entering_from_below_starts_at_bottom() {
     for _ in 0..2 {
         wheel(&mut view, false);
         panel(&view, now);
-        assert_eq!(view.event_list.cursor, Some(1), "the title holds two wheels");
+        assert_eq!(
+            view.event_list.cursor,
+            Some(1),
+            "the title holds two wheels"
+        );
     }
     wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(0));
@@ -939,8 +947,16 @@ fn event_detail_task_switch_preserves_scroll_and_search() {
     view.event_session = Some(id);
     assert_eq!(view.event_detail.search.query.text(), "detail");
     assert!(view.event_detail.search.editing);
-    assert_eq!(view.visible_event().and_then(|event| event.source.as_deref()), Some("scroll-1"));
-    assert_eq!(view.event_detail.scroll.borrow().offset, scroll, "offset before render");
+    assert_eq!(
+        view.visible_event()
+            .and_then(|event| event.source.as_deref()),
+        Some("scroll-1")
+    );
+    assert_eq!(
+        view.event_detail.scroll.borrow().offset,
+        scroll,
+        "offset before render"
+    );
     panel(&view, now);
     assert_eq!(view.event_detail.scroll.borrow().offset, scroll);
 }

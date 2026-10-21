@@ -42,9 +42,9 @@ pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;
-mod task_ui;
 #[cfg(test)]
 mod task_event_list_tests;
+mod task_ui;
 use task_ui::TaskUi;
 mod terminal_panel;
 pub(crate) mod text;
@@ -516,10 +516,7 @@ impl View {
         if self.selector.is_some() && task_details_active {
             return;
         }
-        if !self.searching
-            && !self.task_search_editing()
-            && self.question_paste(text)
-        {
+        if !self.searching && !self.task_search_editing() && self.question_paste(text) {
             return;
         }
         if task_details_active && self.title_editor().is_some() {
@@ -1077,7 +1074,9 @@ impl View {
     }
 
     pub(crate) fn clamp_event_scroll(&mut self, max: usize) {
-        self.event_list.scroll.set(self.event_list.scroll.get().min(max));
+        self.event_list
+            .scroll
+            .set(self.event_list.scroll.get().min(max));
     }
 
     pub(crate) fn event_max_scroll(&self) -> usize {
@@ -1157,7 +1156,9 @@ impl View {
             .as_ref()
             .and_then(|key| self.task_uis.get(key))
             .and_then(|ui| ui.focus);
-        let title = self.title_editing().then(|| std::mem::take(&mut self.rename));
+        let title = self
+            .title_editing()
+            .then(|| std::mem::take(&mut self.rename));
         self.rename_target = None;
         self.name_target = None;
         let mut selector = self.selector.take();

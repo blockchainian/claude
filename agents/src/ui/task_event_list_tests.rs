@@ -1,12 +1,22 @@
 use super::*;
 use crate::providers::Provider;
 
-fn fixture() -> (tempfile::TempDir, View, Vec<crate::event::Event>, SessionKey, SessionKey) {
+fn fixture() -> (
+    tempfile::TempDir,
+    View,
+    Vec<crate::event::Event>,
+    SessionKey,
+    SessionKey,
+) {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
     let path = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
-    std::fs::write(&path, include_str!("../../tests/fixtures/claude-tool-calls.jsonl")).unwrap();
+    std::fs::write(
+        &path,
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
+    )
+    .unwrap();
     let mut provider = crate::providers::claude::ClaudeProvider::new(dir.path().to_owned());
     let mut sessions = provider.refresh(1).sessions;
     let first = sessions[0].id.clone();
@@ -16,7 +26,8 @@ fn fixture() -> (tempfile::TempDir, View, Vec<crate::event::Event>, SessionKey, 
     sessions.push(other);
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(sessions, false);
-    let mut events = crate::providers::claude::event_reader::tail_session(&path, usize::MAX, true).unwrap();
+    let mut events =
+        crate::providers::claude::event_reader::tail_session(&path, usize::MAX, true).unwrap();
     // The captured payload omits UUIDs; give its events distinct record identities.
     for (index, event) in events.iter_mut().enumerate() {
         event.source = Some(format!("task-event-{index}"));
@@ -33,7 +44,11 @@ fn show(view: &mut View, id: &SessionKey, events: Vec<crate::event::Event>) {
     view.select(row);
     assert_eq!(view.selected_id(), Some(id));
     view.event_session = Some(id.clone());
-    view.apply_event_update(crate::event::Update { events, reset: true, ..Default::default() });
+    view.apply_event_update(crate::event::Update {
+        events,
+        reset: true,
+        ..Default::default()
+    });
 }
 
 #[test]
@@ -61,7 +76,14 @@ fn task_event_list_restores_identity_after_history_changes() {
     show(&mut view, &second, events.clone());
     show(&mut view, &first, events[1..].to_vec());
     assert_eq!(view.visible_event().unwrap().source, selected);
-    assert_eq!(view.shown_events().nth(view.event_scroll()).unwrap().1.source, anchor);
+    assert_eq!(
+        view.shown_events()
+            .nth(view.event_scroll())
+            .unwrap()
+            .1
+            .source,
+        anchor
+    );
     assert_eq!(view.event_list.unseen.get(), 2);
 }
 
@@ -111,7 +133,10 @@ fn task_event_list_live_follows_events_added_while_away() {
     event.source = Some("appended-event".into());
     appended.push(event);
     show(&mut view, &first, appended);
-    assert_eq!(view.visible_event().unwrap().source.as_deref(), Some("appended-event"));
+    assert_eq!(
+        view.visible_event().unwrap().source.as_deref(),
+        Some("appended-event")
+    );
     assert!(view.following_event());
     assert_eq!(view.event_scroll(), view.event_max_scroll());
 }

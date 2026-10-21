@@ -717,7 +717,11 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_event() {
     assert_eq!(app.view.selected_id(), Some(&child.id));
     assert_eq!(app.view.event_session.as_ref(), Some(&child.id));
     assert_eq!(app.transcript_stamp.as_ref().unwrap().session, child.id);
-    assert!(app.view.event_panel[0].body.starts_with("SyntaxWarning 修好了"));
+    assert!(
+        app.view.event_panel[0]
+            .body
+            .starts_with("SyntaxWarning 修好了")
+    );
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
     app.refresh_event(8);
@@ -725,7 +729,11 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_event() {
         app.full_transcript_stamp.as_ref().unwrap().session,
         child.id
     );
-    assert!(app.view.event_panel[0].body.starts_with("SyntaxWarning 修好了"));
+    assert!(
+        app.view.event_panel[0]
+            .body
+            .starts_with("SyntaxWarning 修好了")
+    );
     key(&mut app, KeyCode::Esc);
     // A remembered task row enters its parked focus; use panel navigation for the list.
     for direction in ['k', 'k', 'k', 'k', 'h'] {
