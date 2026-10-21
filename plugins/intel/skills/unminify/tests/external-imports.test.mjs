@@ -96,3 +96,31 @@ test('chunk collision suffixes reach a fixed point when restoring external alias
   assert.equal((await run(options)).exitCode, 0);
   assert.equal(await readFile(join(root, 'imports.js'), 'utf8'), expected);
 });
+
+for (const chunkSiblings of [false, true]) test(`CLI restores sibling-only external imports with chunkSiblings=${chunkSiblings}`, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'unminify-sibling-import-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
+  const inputs = new Map([
+    ['selected.js', 'const selectedValue = 7; console.log(selectedValue);\n'],
+    ['imports.js', '// Recovered from chunk-fixture.js lines 10-20.\nimport { basename as bQr, join as jQr } from "path";\nimport { execFile as eQr } from "child_process";\nfunction readFixture() { return [bQr("fixture.txt"), jQr("a", "b"), eQr]; }\n'],
+    ['use.js', 'console.log(jQr("c", "d"));\n'],
+  ]);
+  for (const [file, source] of inputs) await writeFile(join(root, file), source);
+  const chunks = join(root, 'chunks.json');
+  await writeFile(chunks, JSON.stringify({ version: 1, chunks: [{ id: 'fixture', files: [...inputs.keys()] }] }));
+  const options = { paths: [join(root, 'selected.js')], chunks, chunkSiblings };
+  for (let pass = 0; pass < 2; pass++) {
+    const result = await run(options);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.requests, 0);
+    const after = new Map();
+    for (const file of inputs.keys()) after.set(file, await readFile(join(root, file), 'utf8'));
+    assert.equal(after.get('selected.js'), inputs.get('selected.js'));
+    assert.equal(after.get('imports.js'), chunkSiblings
+      ? inputs.get('imports.js').replace('basename as bQr', 'basename').replace('join as jQr', 'join').replace('execFile as eQr', 'execFile').replace('bQr("', 'basename("').replace('jQr("', 'join("').replace(', eQr]', ', execFile]')
+      : inputs.get('imports.js'));
+    assert.equal(after.get('use.js'), chunkSiblings ? 'console.log(join("c", "d"));\n' : inputs.get('use.js'));
+    assert.equal(checkChunkRewrite(inputs, after), null);
+  }
+});

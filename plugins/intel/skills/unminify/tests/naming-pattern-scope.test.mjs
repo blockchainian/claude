@@ -22,7 +22,7 @@ test('collision context includes globals in default parameter scopes', () => {
   });
   assert.deepEqual(names, new Map([[first, 'count'], [second, 'count2']]));
   assert.equal(collisions.length, 1);
-  assert.deepEqual(collisions[0].occupied, ['configure', 'count', 'external']);
+  assert.deepEqual(collisions[0].occupied, ['count', 'external']);
   assert.match(collisions[0].context, /function configure\(a = external, b\)/);
   assert.equal(checkRewrite(source, applyRenames(source, names)), null);
 });

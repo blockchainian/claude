@@ -1,5 +1,5 @@
 import { timed } from './timing.mjs';
-import { isLexicalIdentifier, restoredImportEdit } from './identifiers.mjs';
+import { isLexicalIdentifier, isLexicalReference, restoredImportEdit } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
@@ -38,6 +38,7 @@ function analyze(source, options) {
   const scopes = new Set();
   const globals = new Map();
   const jsxTags = new Set();
+  const references = [];
   let program;
   traverse(ast, {
     Program(path) { program = path; },
@@ -46,13 +47,14 @@ function analyze(source, options) {
       for (let scope = path.scope; scope; scope = scope.parent) scopes.add(scope);
       for (const binding of Object.values(path.scope.bindings)) {
         const key = binding.identifier.start;
-        if (!bindings.has(key)) bindings.set(key, { binding, scopes: new Set(), name: binding.identifier.name });
+        if (!bindings.has(key)) bindings.set(key, { binding, scopes: new Set(), references: new Set(), name: binding.identifier.name });
         bindings.get(key).scopes.add(binding.scope);
       }
     },
     'Identifier|JSXIdentifier'(path) {
       if (!isLexicalIdentifier(path)) return;
       const binding = path.scope.getBinding(path.node.name);
+      if (binding && isLexicalReference(path)) references.push([binding.identifier.start, path.scope]);
       if (binding) {
         if (path.isJSXIdentifier() && (path.parentPath.isJSXOpeningElement() || path.parentPath.isJSXClosingElement())) jsxTags.add(binding.identifier.start);
         return;
@@ -61,6 +63,7 @@ function analyze(source, options) {
       globals.get(path.node.name).add(path.scope);
     },
   });
+  for (const [key, scope] of references) bindings.get(key).references.add(scope);
   // Scope intervals make same/ancestor/descendant checks independent of depth.
   const children = new Map([...scopes].map(scope => [scope, []]));
   for (const scope of scopes) if (scope.parent) children.get(scope.parent).push(scope);
@@ -118,7 +121,9 @@ export function resolveNames(source, proposals, options) {
       for (const other of byName.get(candidate) ?? []) {
         if (other === record) continue;
         for (const scope of record.scopes) for (const otherScope of other.scopes) {
-          if (contains(scope, otherScope) || contains(otherScope, scope)) return true;
+          if (scope === otherScope
+            || contains(scope, otherScope) && [...record.references].some(reference => contains(otherScope, reference))
+            || contains(otherScope, scope) && [...other.references].some(reference => contains(scope, reference))) return true;
         }
       }
       for (const scope of record.scopes) for (const globalScope of globals.get(candidate) ?? []) {

@@ -62,7 +62,8 @@ follow export names without another model request. Unfinished files supply their
 export names but remain untouched so their journals can resume. External named import aliases
 restore the imported name deterministically when it is at least `--min-symbol-length`
 characters long; shorter imported names stay unchanged and never go to the model.
-Existing conflict resolution supplies numeric suffixes when needed. Canonically spaced
+Same-scope bindings and names that would change a reference's binding require numeric
+suffixes; unused names in enclosing or nested scopes do not. Canonically spaced
 aliases collapse to shorthand when the restored local equals the imported name; other
 spacing and comments are preserved. Public export names stay unchanged.
 
@@ -92,7 +93,8 @@ node "$SKILL_DIR/scripts/cli.mjs" <path>... --chunks <manifest.json> \
 By default, a name is eligible only when its declaration and all its references are in
 the selected files. Add `--chunk-siblings` to update references in unselected sibling
 files of the same chunk. Model naming still starts with selected declarations; import
-following may also update an outside import declaration used by a selected sibling.
+following may also update an outside import declaration used by a selected sibling,
+and restore external named imports used only within unselected chunk siblings.
 Ignored files are never rewritten. A name is frozen if more than one chunk member
 declares it, any declaration or reference is ignored, or it is a known environment or
 JavaScript global. Direct `eval` or `with` freezes all binding names in the chunk, including
