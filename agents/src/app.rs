@@ -54,7 +54,7 @@ enum Input {
     EventsLoaded {
         token: u64,
         reader: Box<dyn crate::event::Reader>,
-        result: io::Result<(TranscriptStamp, crate::event::Update)>,
+        result: io::Result<LoadedEvents>,
     },
     Created {
         draft_key: DraftKey,
@@ -176,6 +176,11 @@ struct TranscriptStamp {
     path: PathBuf,
     file: FileStamp,
     count: usize,
+}
+
+struct LoadedEvents {
+    transcript: (TranscriptStamp, crate::event::Update),
+    pinned: Option<Vec<(crate::state::PinnedEvent, Option<crate::event::Event>)>>,
 }
 
 struct PendingTranscript {
@@ -707,6 +712,12 @@ impl App {
                 path: path.clone(),
                 visible,
             });
+            let pinned = if first_load && !self.view.has_pinned_events(&session) {
+                let pinned = self.preferences.task_pinned_events(&session);
+                (!pinned.is_empty()).then(|| pinned.to_vec())
+            } else {
+                None
+            };
             let sender = self.sender.clone();
             thread::spawn(move || {
                 drop(previous_reader);
@@ -714,15 +725,33 @@ impl App {
                     // Capture inputs before reading, so writes during the read are checked again.
                     let file = FileStamp::read(&path)?;
                     let update = reader.refresh(count)?;
-                    Ok((
-                        TranscriptStamp {
-                            session,
-                            path,
-                            file,
-                            count,
-                        },
-                        update,
-                    ))
+                    let pinned = pinned
+                        .map(|pinned| {
+                            let groups = pinned
+                                .iter()
+                                .map(|pin| pin.records.clone())
+                                .collect::<Vec<_>>();
+                            let events = reader.read_events(&groups)?;
+                            if events.len() != pinned.len() {
+                                return Err(io::Error::other(
+                                    "Pinned event reader returned an unexpected count",
+                                ));
+                            }
+                            Ok(pinned.into_iter().zip(events).collect())
+                        })
+                        .transpose()?;
+                    Ok(LoadedEvents {
+                        transcript: (
+                            TranscriptStamp {
+                                session,
+                                path,
+                                file,
+                                count,
+                            },
+                            update,
+                        ),
+                        pinned,
+                    })
                 })();
                 let _ = sender.send(Input::EventsLoaded {
                     token,
@@ -772,7 +801,7 @@ impl App {
         &mut self,
         token: u64,
         reader: Box<dyn crate::event::Reader>,
-        result: io::Result<(TranscriptStamp, crate::event::Update)>,
+        result: io::Result<LoadedEvents>,
     ) {
         let Some(pending) = self
             .pending_transcript
@@ -787,9 +816,53 @@ impl App {
             });
         let pending = self.pending_transcript.take().expect("request checked");
         if current {
-            self.transcript = Some((pending.session, pending.path, reader));
+            self.transcript = Some((pending.session.clone(), pending.path, reader));
+            let result = result.map(|loaded| {
+                if let Some(pinned) = loaded.pinned {
+                    self.restore_pinned_events(&pending.session, pinned);
+                }
+                loaded.transcript
+            });
             self.apply_event_result(result, pending.visible);
         }
+    }
+
+    fn restore_pinned_events(
+        &mut self,
+        task: &SessionKey,
+        pinned: Vec<(crate::state::PinnedEvent, Option<crate::event::Event>)>,
+    ) {
+        // Ignore a read whose stored pins changed while the transcript was loading.
+        if !self
+            .preferences
+            .task_pinned_events(task)
+            .iter()
+            .eq(pinned.iter().map(|(pin, _)| pin))
+        {
+            return;
+        }
+        let count = pinned.len();
+        let rows = pinned
+            .into_iter()
+            .filter_map(|(pin, event)| {
+                let mut event = event?;
+                if event.source.as_deref() != Some(pin.source.as_str()) {
+                    return None;
+                }
+                event.turn = None;
+                event.previous_end = None;
+                Some(crate::ui::PinnedRow { pin, event })
+            })
+            .collect::<Vec<_>>();
+        if rows.len() != count {
+            let saved = self.preferences.save_task_pinned_events(
+                &self.config_dir,
+                task,
+                rows.iter().map(|row| row.pin.clone()).collect(),
+            );
+            self.report_save(saved);
+        }
+        self.view.set_pinned_events(task, rows);
     }
 
     fn apply_event_result(
@@ -997,26 +1070,24 @@ impl App {
     }
 
     fn apply_sessions(&mut self, Snapshot { sessions, has_more }: Snapshot) {
-        self.unpin_inactive(&sessions);
-        for session in &sessions {
-            if session.status == SessionStatus::Inactive
-                && self.preferences.task_sort(&session.id) != crate::model::EventSort::Time
-            {
-                let saved = self.preferences.save_task_sort(
-                    &self.config_dir,
-                    &session.id,
-                    crate::model::EventSort::Time,
-                );
-                self.report_save(saved);
-            }
-        }
+        self.forget_inactive_state(&sessions);
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
     }
 
-    /// Finished tasks leave the Pinned group: a pin only orders active work.
-    fn unpin_inactive(&mut self, sessions: &[Session]) {
+    /// Finished tasks leave the Pinned group and discard their saved interface state.
+    fn forget_inactive_state(&mut self, sessions: &[Session]) {
+        for session in sessions
+            .iter()
+            .filter(|session| session.status == SessionStatus::Inactive)
+        {
+            if self.preferences.tasks.contains_key(&session.id) {
+                let saved = self.preferences.forget_task(&self.config_dir, &session.id);
+                self.report_save(saved);
+            }
+            self.view.clear_pinned_events(&session.id);
+        }
         let pinned = self.preferences.pinned.len();
         self.preferences.pinned.retain(|id| {
             !sessions
@@ -1457,6 +1528,12 @@ impl App {
                 self.report_save(saved);
                 self.view.set_pinned(&self.preferences.pinned);
             }
+            Action::ToggleEventPin { task, pinned } => {
+                let saved =
+                    self.preferences
+                        .save_task_pinned_events(&self.config_dir, &task, pinned);
+                self.report_save(saved);
+            }
             Action::PersistUsageView(view) => {
                 self.preferences.usage_view = view;
                 let saved = self.preferences.save_usage_view(&self.config_dir);
@@ -1676,3 +1753,7 @@ mod refresh_tests;
 #[cfg(test)]
 #[path = "app_codex_paging_tests.rs"]
 mod codex_paging_tests;
+
+#[cfg(test)]
+#[path = "app_event_pin_tests.rs"]
+mod event_pin_tests;
