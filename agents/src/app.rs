@@ -1473,6 +1473,11 @@ impl App {
                 let saved = self.preferences.save_grouping(&self.config_dir);
                 self.report_save(saved);
             }
+            Action::Cut(text) => {
+                if let Err(error) = self.clipboard.copy(&text) {
+                    self.view.set_notice(Some(format!("Cannot copy: {error}")));
+                }
+            }
             Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
                 Err(error) => self.view.set_notice(Some(format!("Cannot copy: {error}"))),

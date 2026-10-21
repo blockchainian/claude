@@ -230,6 +230,8 @@ pub enum Action {
     },
     PasteImage,
     PasteText,
+    /// Puts text an input deleted on the clipboard, without a copy confirmation.
+    Cut(String),
     SendImages {
         id: SessionKey,
         text: String,
