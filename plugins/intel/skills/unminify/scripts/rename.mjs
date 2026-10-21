@@ -41,7 +41,8 @@ function analyze(source, options) {
   let program;
   traverse(ast, {
     Program(path) { program = path; },
-    Scopable(path) {
+    // Babel also gives parameter patterns scopes outside the Scopable alias.
+    Scope(path) {
       for (let scope = path.scope; scope; scope = scope.parent) scopes.add(scope);
       for (const binding of Object.values(path.scope.bindings)) {
         const key = binding.identifier.start;
