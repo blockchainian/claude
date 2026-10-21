@@ -155,14 +155,75 @@ impl Event {
                 file.seek(std::io::SeekFrom::Start(record.offset))?;
                 let mut line = Vec::new();
                 std::io::BufReader::new(file).read_until(b'\n', &mut line)?;
-                let value: serde_json::Value = serde_json::from_slice(&line)
+                let line = std::str::from_utf8(&line)
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-                serde_json::to_string_pretty(&value)
+                pretty_record(line)
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
             })
             .collect::<std::io::Result<Vec<_>>>()
             .map(|records| records.join("\n\n"))
     }
+}
+
+/// Changes only JSON whitespace, retaining key order and literal scalar spelling.
+fn pretty_record(line: &str) -> Result<String, serde_json::Error> {
+    serde_json::from_str::<serde_json::Value>(line)?;
+    let mut output = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut depth = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut previous = None;
+    let newline = |output: &mut String, depth: usize| {
+        output.push('\n');
+        for _ in 0..depth {
+            output.push_str("  ");
+        }
+    };
+    while let Some(ch) = chars.next() {
+        if quoted {
+            output.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+        } else {
+            match ch {
+                ' ' | '\t' | '\r' | '\n' => continue,
+                '"' => {
+                    quoted = true;
+                    output.push(ch);
+                }
+                '{' | '[' => {
+                    output.push(ch);
+                    depth += 1;
+                    let closing = if ch == '{' { '}' } else { ']' };
+                    if chars.clone().find(|ch| !ch.is_ascii_whitespace()) != Some(closing) {
+                        newline(&mut output, depth);
+                    }
+                }
+                '}' | ']' => {
+                    depth -= 1;
+                    let opening = if ch == '}' { '{' } else { '[' };
+                    if previous != Some(opening) {
+                        newline(&mut output, depth);
+                    }
+                    output.push(ch);
+                }
+                ',' => {
+                    output.push(ch);
+                    newline(&mut output, depth);
+                }
+                ':' => output.push_str(": "),
+                _ => output.push(ch),
+            }
+        }
+        previous = Some(ch);
+    }
+    Ok(output)
 }
 
 /// Structural changes produced by one persistent transcript-reader refresh.
@@ -266,3 +327,7 @@ pub struct Image {
 #[cfg(test)]
 #[path = "event/agent_tests.rs"]
 mod agent_tests;
+
+#[cfg(test)]
+#[path = "event/raw_tests.rs"]
+mod raw_tests;

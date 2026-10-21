@@ -571,7 +571,8 @@ impl View {
             .map(|body| body.len())
             .collect::<Vec<_>>();
         let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
-        let allocations = if height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
+        let allocations = if self.event_detail.mode != task_ui::EventDetailMode::Transcript
+            && height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
             && !self.event_detail.search.active()
             && !external_scroll
             && state.offset == 0
@@ -1765,12 +1766,12 @@ fn event_detail_parts_layout(
                 .parts
                 .into_iter()
                 .map(|part| {
-                    let lines = part.lines_in(
-                        usize::from(columns.reading_width.min(columns.text.width)),
-                        body_style,
-                        now,
-                        cwd,
-                    );
+                    let reading_width = if part.is_transcript() {
+                        columns.text.width
+                    } else {
+                        columns.reading_width.min(columns.text.width)
+                    };
+                    let lines = part.lines_in(usize::from(reading_width), body_style, now, cwd);
                     (part, lines)
                 })
                 .collect();

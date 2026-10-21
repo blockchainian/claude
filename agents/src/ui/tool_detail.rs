@@ -158,6 +158,10 @@ impl Part {
         self
     }
 
+    pub fn is_transcript(&self) -> bool {
+        matches!(self.body, Body::Transcript)
+    }
+
     /// Whether the selection maps the drawn lines back to the source as Markdown.
     pub fn markdown(&self) -> bool {
         matches!(self.body, Body::Markdown | Body::Prose(true))
@@ -236,8 +240,8 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
         cwd: &std::path::Path,
     ) -> Vec<Line<'static>> {
-        if matches!(self.body, Body::Transcript) {
-            return highlight::code_lines(&self.source, "json");
+        if self.is_transcript() {
+            return transcript_lines(&self.source, width);
         }
         let text = crate::providers::text::printable(&self.source);
         let paths = super::paths::text_paths(&text, cwd);
@@ -443,6 +447,40 @@ fn shell_maps(
         }
     }
     maps
+}
+
+/// Wrap literal JSON at grapheme boundaries, retaining every byte and syntax style.
+fn transcript_lines(source: &str, width: usize) -> Vec<Line<'static>> {
+    use unicode_width::UnicodeWidthStr;
+
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    for line in highlight::code_lines(source, "json") {
+        let mut row = Line::default();
+        let mut used = 0;
+        for grapheme in line.styled_graphemes(Style::default()) {
+            let cells = grapheme.symbol.width();
+            if used > 0 && used + cells > width {
+                lines.push(std::mem::take(&mut row));
+                used = 0;
+            }
+            if let Some(span) = row
+                .spans
+                .last_mut()
+                .filter(|span| span.style == grapheme.style)
+            {
+                span.content.to_mut().push_str(grapheme.symbol);
+            } else {
+                row.spans
+                    .push(Span::styled(grapheme.symbol.to_owned(), grapheme.style));
+            }
+            used += cells;
+        }
+        lines.push(row);
+    }
+    lines
 }
 
 /// Raw records retain their pretty JSON source as one highlighted part per section.

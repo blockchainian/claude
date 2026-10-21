@@ -129,9 +129,11 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
             })
             .unwrap_or_else(|| panic!("missing record clock: {rendered}"));
         assert!(drawn_header.contains(title));
+        let pretty = &sources[index * 2 + 1].text;
+        assert!(pretty.contains('\n'));
         assert_eq!(
-            sources[index * 2 + 1].text.trim_end(),
-            serde_json::to_string_pretty(&value).unwrap()
+            serde_json::from_str::<serde_json::Value>(pretty).unwrap(),
+            value
         );
     }
     assert!(
@@ -222,4 +224,132 @@ fn transcript_titles_use_provider_fields_and_leave_missing_metadata_empty() {
         assert_eq!(content.sections[0].title.title, title);
         assert_eq!(content.sections[0].title.left, None);
     }
+}
+
+#[test]
+fn transcript_long_json_lines_wrap_without_losing_text_or_syntax_styles() {
+    let raw = include_str!("../../tests/fixtures/codex-raw-detail.jsonl")
+        .lines()
+        .nth(2)
+        .unwrap();
+    let content = super::super::tool_detail::transcript_content(
+        &Ok(raw.to_owned()),
+        crate::providers::ProviderId::Codex,
+    );
+    let part = &content.sections[0].groups[0].parts[0];
+    let lines = part.lines(33, Style::default(), Utc::now());
+    assert!(lines.len() > 10);
+    assert!(lines.iter().all(|line| line.width() <= 33));
+    assert_eq!(
+        lines.iter().map(ToString::to_string).collect::<String>(),
+        raw
+    );
+    let styled_bytes = |lines: Vec<Line<'static>>| {
+        lines
+            .into_iter()
+            .flat_map(|line| line.spans)
+            .flat_map(|span| {
+                span.content
+                    .as_bytes()
+                    .iter()
+                    .copied()
+                    .map(|byte| (byte, span.style))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        styled_bytes(lines),
+        styled_bytes(super::super::highlight::code_lines(raw, "json"))
+    );
+}
+
+#[test]
+fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("records.jsonl");
+    let records = include_str!("../../tests/fixtures/codex-raw-detail.jsonl");
+    std::fs::write(&path, records).unwrap();
+    let offsets = records
+        .split_inclusive('\n')
+        .scan(0u64, |offset, line| {
+            let at = *offset;
+            *offset += line.len() as u64;
+            Some(at)
+        })
+        .skip(1);
+    let (mut view, now) = event_fixture();
+    view.rows[0].id.provider = crate::providers::ProviderId::Codex;
+    view.event_session = Some(view.rows[0].id.clone());
+    let mut event = view.event_panel[0].clone();
+    event.source_records = offsets
+        .map(|offset| crate::event::SourceRecord {
+            path: path.clone(),
+            offset,
+        })
+        .collect();
+    view.set_event(vec![event]);
+    event_screen(&view, 200, 50, now);
+    transcript(&mut view);
+    let first = event_screen(&view, 200, 50, now);
+    let detail = view.viewport.borrow().event_text.area;
+    let body = |screen: &str| {
+        screen
+            .lines()
+            .skip(usize::from(detail.y))
+            .take(usize::from(detail.height))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(!body(&first).contains('…'), "{first}");
+    assert!(view.event_detail.scroll.borrow().state.hidden.is_empty());
+    let expected = view
+        .event_detail
+        .transcript
+        .as_ref()
+        .unwrap()
+        .text
+        .as_ref()
+        .unwrap()
+        .clone();
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        let rendered = event_screen(&view, 200, 50, now);
+        assert!(!body(&rendered).contains('…'), "{rendered}");
+        let viewport = view.viewport.borrow();
+        for row in &viewport.event_text.rows {
+            for (_, bytes) in &row.cells {
+                seen.extend((bytes.start..bytes.end).map(|byte| (row.segment, byte)));
+            }
+        }
+        drop(viewport);
+        let before = view.event_detail.scroll.borrow().offset;
+        view.handle_key(KeyCode::Down.into());
+        event_screen(&view, 200, 50, now);
+        if view.event_detail.scroll.borrow().offset == before {
+            break;
+        }
+    }
+    let viewport = view.viewport.borrow();
+    let sources = &viewport.event_text.sources;
+    let json = sources
+        .iter()
+        .filter(|source| source.text.trim_start().starts_with('{'))
+        .collect::<Vec<_>>();
+    assert_eq!(json.len(), 2);
+    for source in json {
+        for (byte, value) in source.text.bytes().enumerate() {
+            if value != b'\n' {
+                assert!(
+                    seen.contains(&(source.id, byte)),
+                    "unreachable byte {byte} in {}",
+                    source.text
+                );
+            }
+        }
+    }
+    assert_eq!(
+        sources[1].text.trim_end().to_owned() + "\n\n" + sources[3].text.trim_end(),
+        expected
+    );
 }

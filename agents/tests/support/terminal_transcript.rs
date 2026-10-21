@@ -158,14 +158,29 @@ fn terminal_transcript_modes() {
         detail_body(&source, top).contains("\"payload\": {"),
         "{source}"
     );
+    let body = detail_body(&source, top);
+    assert!(!body.contains('…'), "{source}");
+    let keys = [
+        "\"type\": \"function_call\"",
+        "\"name\":",
+        "\"arguments\":",
+        "\"call_id\":",
+    ];
+    let positions = keys.map(|key| body.find(key).expect("original call key is visible"));
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{source}"
+    );
     codex.run(&["send-keys", "-t", "probe", "End"]);
-    let tail = codex.capture_when(|capture| capture.contains("function_call_output"));
+    let tail = codex.capture_when(|capture| detail_body(capture, top).contains("819.416125"));
+    assert!(!detail_body(&tail, top).contains('…'), "{tail}");
     std::fs::write(report.join("codex-start.txt"), source).unwrap();
     std::fs::write(report.join("codex-end.txt"), tail).unwrap();
     let verdict = serde_json::json!({
         "verdict":"pass", "claude":true, "codex":true,
         "pretty_json":true, "json_syntax_color":true, "left_right":true,
         "home_end":true, "scroll":true, "search":true,
+        "original_key_order":true, "complete_records_without_ellipsis":true,
         "search_caret_keeps_mode":true, "text_selection":true,
         "captures":report,
     });
