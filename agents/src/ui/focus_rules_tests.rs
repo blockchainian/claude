@@ -82,11 +82,15 @@ fn rule_2_open_keys_restore_pending_without_terminal() {
     }
 }
 #[test]
-fn rule_2_click_pending_row_restores_focus() {
+fn rule_2_click_pending_row_keeps_list_bindings() {
     let mut view = pending();
     click_selected(&mut view);
-    assert_eq!(view.active_panel, Panel::EventDetail);
-    assert!(!view.task_entry_pending);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin { .. })
+    ));
 }
 #[test]
 fn rule_3_open_keys_without_pending_enter_enabled_prompt() {
