@@ -11246,6 +11246,27 @@ fn context_usage_on_task_details_border_keeps_status_and_elapsed() {
     }
 }
 
+#[test]
+fn claude_context_usage_over_a_quarter_uses_error_color() {
+    for (provider, percent, red) in [
+        (ProviderId::Claude, 25, false),
+        (ProviderId::Claude, 26, true),
+        (ProviderId::Codex, 80, false),
+    ] {
+        let (mut view, now) = event_fixture();
+        view.rows[view.selected].id.provider = provider;
+        let id = view.selected_id().unwrap().clone();
+        view.set_context_usage(&id, Some(percent));
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let task_details = view.center_layout(area).task_details;
+        let cell = &buf[(task_details.x, task_details.y - 1)];
+        assert_eq!(cell_text(cell.symbol()), &percent.to_string()[..1]);
+        assert_eq!(cell.fg == style::error_style().fg.unwrap(), red, "{provider:?} {percent}");
+    }
+}
+
 #[path = "summary_consistency_tests.rs"]
 mod summary_consistency_tests;
 
