@@ -432,3 +432,104 @@ fn task_write_failure_keeps_preferences_unchanged() {
     assert!(preferences.forget_task(&config_dir, &key).is_err());
     assert_eq!(preferences, before);
 }
+
+fn pinned_event(source: &str, offsets: &[u64]) -> PinnedEvent {
+    PinnedEvent {
+        source: source.into(),
+        records: offsets
+            .iter()
+            .map(|&offset| crate::event::SourceRecord {
+                path: "tests/fixtures/claude-agent-display.jsonl".into(),
+                offset,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn pinned_events_keep_order_and_empty_list_removes_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("agents.json"),
+        r#"{"config":{"usage_view":"detailed"},"state":{"tasks":{"claude:one":{"custom":true}}}}"#,
+    )
+    .unwrap();
+    let key = "claude:one".parse().unwrap();
+    let other = "codex:two".parse().unwrap();
+    let pinned = vec![
+        pinned_event("toolu_b", &[900, 1200]),
+        pinned_event("toolu_a", &[40]),
+    ];
+    let mut preferences = Preferences::load(dir.path());
+    assert!(preferences.task_pinned_events(&key).is_empty());
+    preferences
+        .save_task_pinned_events(dir.path(), &key, pinned.clone())
+        .unwrap();
+    assert_eq!(preferences.task_pinned_events(&key), pinned);
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_pinned_events(&key), pinned);
+    assert!(loaded.task_pinned_events(&other).is_empty());
+    let stored = document(dir.path());
+    assert_eq!(stored["state"]["tasks"]["claude:one"]["custom"], true);
+    assert_eq!(
+        stored["state"]["tasks"]["claude:one"]["pinned_events"][0]["records"][1]["offset"],
+        1200
+    );
+    preferences
+        .save_task_pinned_events(dir.path(), &key, Vec::new())
+        .unwrap();
+    let stored = document(dir.path());
+    assert!(
+        stored["state"]["tasks"]["claude:one"]
+            .get("pinned_events")
+            .is_none()
+    );
+    assert!(preferences.task_pinned_events(&key).is_empty());
+    preferences
+        .save_task_pinned_events(dir.path(), &other, Vec::new())
+        .unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]
+            .get("codex:two")
+            .is_none()
+    );
+}
+
+#[test]
+fn pinned_events_share_a_task_with_sort_and_ask_and_forget_clears_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "codex:task".parse().unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Duration)
+        .unwrap();
+    preferences
+        .save_task_pinned_events(dir.path(), &key, vec![pinned_event("call_1", &[7])])
+        .unwrap();
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_sort(&key), EventSort::Duration);
+    assert_eq!(loaded.task_pinned_events(&key).len(), 1);
+    preferences.forget_task(dir.path(), &key).unwrap();
+    assert!(preferences.task_pinned_events(&key).is_empty());
+    assert!(
+        Preferences::load(dir.path())
+            .task_pinned_events(&key)
+            .is_empty()
+    );
+}
+
+#[test]
+fn pinned_events_write_failure_keeps_preferences_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path().join("not-a-directory");
+    fs::write(&config_dir, "occupied").unwrap();
+    let key = "codex:task".parse().unwrap();
+    let mut preferences = Preferences::default();
+    let before = preferences.clone();
+    assert!(
+        preferences
+            .save_task_pinned_events(&config_dir, &key, vec![pinned_event("call_1", &[7])])
+            .is_err()
+    );
+    assert_eq!(preferences, before);
+}

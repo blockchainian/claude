@@ -70,6 +70,14 @@ pub struct StoredAsk {
     pub answers: BTreeMap<String, crate::ask::QuestionAnswer>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PinnedEvent {
+    /// `Event.source`, compared with the decoded event before it is shown.
+    pub source: String,
+    /// `Event.source_records`, read back by offset after a restart.
+    pub records: Vec<crate::event::SourceRecord>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum TaskSort {
@@ -82,6 +90,8 @@ pub(crate) struct StoredTask {
     sort: Option<TaskSort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ask: Option<StoredAsk>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pinned_events: Vec<PinnedEvent>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -337,6 +347,12 @@ impl Preferences {
         self.tasks.get(key).and_then(|task| task.ask.as_ref())
     }
 
+    pub fn task_pinned_events(&self, key: &SessionKey) -> &[PinnedEvent] {
+        self.tasks
+            .get(key)
+            .map_or(&[], |task| task.pinned_events.as_slice())
+    }
+
     pub fn save_task_sort(
         &mut self,
         config_dir: &Path,
@@ -374,6 +390,22 @@ impl Preferences {
                 None => {
                     task.remove("ask");
                 }
+            }
+            Ok(())
+        })
+    }
+
+    pub fn save_task_pinned_events(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        pinned: Vec<PinnedEvent>,
+    ) -> io::Result<()> {
+        self.update_task(config_dir, key, |task| {
+            if pinned.is_empty() {
+                task.remove("pinned_events");
+            } else {
+                task.insert("pinned_events".into(), serde_json::to_value(pinned)?);
             }
             Ok(())
         })

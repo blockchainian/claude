@@ -89,7 +89,7 @@ pub struct FileLink {
 }
 
 /// A transcript line retained by its file position, decoded only when requested.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceRecord {
     pub path: std::path::PathBuf,
     pub offset: u64,
