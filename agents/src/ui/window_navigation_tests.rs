@@ -19,7 +19,7 @@ fn window_navigation_all_directions_in_both_layouts() {
                     (TaskList, [TaskList, Prompt, TaskList, TaskDetails]),
                     (TaskDetails, [TaskList, Prompt, TaskDetails, EventList]),
                     (EventList, [TaskDetails, Prompt, EventList, EventList]),
-                    (Prompt, [Prompt, bottom, TaskDetails, Prompt]),
+                    (Prompt, [Prompt, bottom, TaskList, Prompt]),
                     (bottom, [bottom, bottom, Prompt, bottom]),
                 ]
             } else {
