@@ -2,7 +2,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadChunks, createChunkIgnore } from './chunk-manifest.mjs';
 import { openChunkJournal, recoverChunkJournals } from './chunk-journal.mjs';
-import { analyzeChunk, planChunk, renderChunkBatch, resolveChunkNames, applyChunkRenames, checkChunkRewrite } from './chunks.mjs';
+import { analyzeChunk, planChunk, renderChunkBatch, resolveChunkNames, applyChunkRenames, checkChunkRewrite, releaseChunkAnalysis } from './chunks.mjs';
+import { analyzeImportChunk, resolveImportChunkNames, applyImportChunkRenames, checkImportChunkRewrite, releaseImportChunk } from './import-chunks.mjs';
 import { reconsiderNames } from './collision.mjs';
 import { packBatches } from './pack.mjs';
 import { transformSyntax } from './syntax/runner.mjs';
@@ -257,14 +258,19 @@ export async function createChunkRun(root, settings, ignores) {
         completed.set(chunk.id, { chunk, journal, inputs: after, sources: after, pending: false, count, batches: batches.length, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
       } finally { endWrite(); }
     },
-    importOptions(journals) {
+    async importOptions(journals, pool) {
       const renamedExports = new Set();
       for (const [file, journal] of journals) for (const names of journal.batches.values()) {
         for (const name of Object.values(names)) renamedExports.add(`${file}\0${name}`);
       }
-      const chunkBindings = new Map(), owners = new Map(), plans = new Map();
+      const chunkBindings = new Map(), owners = new Map(), plans = new Map(), analyses = new Map(), keys = new Map();
       for (const [id, state] of completed) {
-        const analysis = analyzeChunk(state.sources, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings });
+        releaseChunkAnalysis(state.inputs);
+        releaseChunkAnalysis(state.sources);
+        const analysis = await analyzeImportChunk(state.sources, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings, allowImports: true }, pool);
+        analyses.set(id, analysis);
+        for (const file of state.chunk.files) keys.set(file, new Map());
+        for (const [name, record] of analysis.bindings) for (const entry of record.declarations) keys.get(entry.file).set(entry.binding.key, name);
         for (const name of Object.values(state.journal?.batches.get('program-resolved') ?? {})) {
           const record = analysis.bindings.get(name);
           if (record) renamedExports.add(`${record.file}\0${name}`);
@@ -274,28 +280,42 @@ export async function createChunkRun(root, settings, ignores) {
         for (const file of state.chunk.files) { chunkBindings.set(file, bindings); owners.set(file, id); }
       }
       return { chunkBindings, renamedExports,
-        resolve(file, proposals) {
-          const id = owners.get(file), state = completed.get(id);
-          if (state.readOnly) return new Map();
-          const analysis = analyzeChunk(state.sources);
-          const byKey = new Map([...analysis.bindings].flatMap(([name, record]) => record.declarations
-            .filter(declaration => declaration.file === file).map(declaration => [declaration.binding.identifier.start, name])));
-          if (!plans.has(id)) plans.set(id, new Map());
-          const all = plans.get(id);
-          for (const [key, name] of proposals) {
+        release() {
+          for (const analysis of analyses.values()) releaseImportChunk(analysis);
+          analyses.clear(); keys.clear(); plans.clear();
+        },
+        groupFiles(file) {
+          const id = owners.get(file);
+          return id === undefined ? null : completed.get(id).chunk.files;
+        },
+        resolveGroup(grouped) {
+          const first = grouped.keys().next().value, id = owners.get(first), state = completed.get(id);
+          if (state.readOnly) return new Map([...grouped.keys()].map(file => [file, new Map()]));
+          const analysis = analyses.get(id), all = new Map();
+          for (const [file, proposals] of grouped) for (const [key, name] of proposals) {
+            const byKey = keys.get(file);
             if (!byKey.has(key)) throw new Error(`unknown chunk import key: ${file}:${key}`);
             all.set(byKey.get(key), name);
           }
-          const resolved = resolveChunkNames(state.sources, all, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings, allowImports: true, restoreExternalImports: true });
-          return new Map([...resolved].filter(([name]) => analysis.bindings.get(name).file === file).map(([name, value]) => [analysis.bindings.get(name).key, value]));
+          const names = resolveImportChunkNames(analysis, all, { selected: state.selected, ignored: state.ignored,
+            chunkSiblings: state.chunkSiblings, allowImports: true, restoreExternalImports: true });
+          plans.set(id, names);
+          const result = new Map([...grouped.keys()].map(file => [file, new Map()]));
+          for (const [name, value] of names) {
+            const binding = analysis.bindings.get(name);
+            result.get(binding.file).set(binding.key, value);
+          }
+          return result;
         },
-        apply(sources, emit, summary) {
+        async apply(sources, emit, summary) {
           for (const [id, state] of completed) {
             if (state.readOnly) continue;
-            const proposals = plans.get(id) ?? new Map();
-            const names = resolveChunkNames(state.sources, proposals, { selected: state.selected, ignored: state.ignored, chunkSiblings: state.chunkSiblings, allowImports: true, restoreExternalImports: true });
-            const after = applyChunkRenames(state.sources, names);
-            const reason = checkChunkRewrite(state.sources, after);
+            const names = plans.get(id) ?? new Map();
+            const analysis = analyses.get(id);
+            const after = await applyImportChunkRenames(state.sources, names, analysis, pool);
+            const reason = await checkImportChunkRewrite(state.sources, after, analysis, pool);
+            releaseImportChunk(analysis);
+            analyses.delete(id);
             if (reason) {
               summary.rejected += state.chunk.files.filter(file => reporting.has(file)).length;
               if (state.pending) state.journal.complete(state.inputs, 'rejected', reason);
@@ -310,6 +330,7 @@ export async function createChunkRun(root, settings, ignores) {
               emit({ chunk: id, status: state.pending ? 'renamed' : 'imports', files: state.count, batches: state.batches });
             }
             state.pending = false;
+            state.inputs = after;
             state.sources = after;
             for (const [file, source] of after) sources.set(file, source);
           }

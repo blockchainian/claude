@@ -187,7 +187,7 @@ export async function run(options, dependencies) {
       const pending = [...chunkPending, ...ordinaryPending.filter(Boolean)];
       if (pending.length) throw new Error(`Run restore-syntax before rename-bindings:\n${[...new Set(pending)].sort().join('\n')}`);
     }
-    await syntaxPool.close(); syntaxPool = undefined;
+    if (!syncing) { await syntaxPool.close(); syntaxPool = undefined; }
     if (naming) namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
       event(record) {
         event(record);
@@ -356,22 +356,28 @@ export async function run(options, dependencies) {
         loadImportContext(root, sources);
         const endImports = phase('followImports');
         let changes;
-        const chunkImports = chunkDriver.importOptions(journals);
+        const chunkImports = await chunkDriver.importOptions(journals, syntaxPool);
         chunkImports.readOnly = new Set([...sources.keys()].filter(file => !journals.get(file)?.done && !chunkImports.chunkBindings.has(file)));
         try {
-          changes = await api.followImports(sources, (file, task) => {
+          changes = await api.followImports(sources, async (file, task) => {
             const end = phase('followImports', file);
-            try { return fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task(); }
+            try { return await (fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task()); }
             finally { end(); }
-          }, fragments, chunkImports, settings);
-        }
+          }, fragments, chunkImports, { ...settings, pool: syntaxPool });
+        } catch (error) { chunkImports.release(); throw error; }
         finally {
           endImports();
           for (const metrics of fileMetrics.values()) {
             if (!changes?.has(metrics.file) || !journals.get(metrics.file)?.done) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
           }
         }
-        chunkImports?.apply(sources, emit, summary);
+        try { await chunkImports.apply(sources, emit, summary); }
+        finally { chunkImports.release(); }
+        const importChecks = new Map(await syntaxPool.map([...changes].filter(([file]) => journals.get(file)?.done), async ([file, after]) => {
+          const before = sources.get(file);
+          const reason = await withTimings(fileMetricsFor(file).cpu_ms, () => syntaxPool.run({ kind: 'import-check', before, after, options: { fragment: fragments.has(file) } }));
+          return [file, reason];
+        }));
         for (const [file, after] of changes) {
           if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
           // Unfinished journals retain batch positions and the original source fingerprint.
@@ -381,7 +387,7 @@ export async function run(options, dependencies) {
           const endWriting = phase('check_write', file);
           try {
             const before = sources.get(file), journal = journals.get(file);
-            const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after, { fragment: fragments.has(file) })));
+            const reason = importChecks.get(file);
             if (reason !== null) {
               journal.rejectImports(reason);
               summary.rejected++;

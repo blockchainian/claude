@@ -8,7 +8,7 @@ import { estimateInputTokens } from './prompt.mjs';
 
 const traverse = traverseModule.default ?? traverseModule;
 const require = createRequire(import.meta.url);
-const knownGlobals = new Set([
+export const knownGlobals = new Set([
   ...require('@babel/helper-globals/data/builtin-lower.json'),
   ...require('@babel/helper-globals/data/builtin-upper.json'),
   ...require('@babel/helper-globals/data/browser-upper.json'),
@@ -23,6 +23,9 @@ const knownGlobals = new Set([
 ]);
 
 const inspections = new WeakMap();
+export function releaseChunkAnalysis(sources) {
+  inspections.delete(sources);
+}
 function inspect(sources) {
   const cached = inspections.get(sources);
   if (cached && cached.sources.length === sources.size && cached.sources.every(([file, source]) => sources.get(file) === source)) return cached.analysis;
