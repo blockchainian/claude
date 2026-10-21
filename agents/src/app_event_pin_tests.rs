@@ -128,7 +128,7 @@ fn first_load_recovers_pins_and_removes_invalid_records_and_sources() {
     reload(&mut app);
     assert_eq!(
         Preferences::load(dir.path()).task_pinned_events(&task),
-        [valid.clone()]
+        std::slice::from_ref(&valid)
     );
     assert_eq!(app.view.event_list.pinned.len(), 1);
     let row = &app.view.event_list.pinned[0];
