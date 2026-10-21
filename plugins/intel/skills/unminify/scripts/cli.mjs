@@ -288,7 +288,7 @@ export async function run(options, dependencies) {
           const end = phase('followImports', file);
           try { return fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task(); }
           finally { end(); }
-        }, fragments, chunkImports);
+        }, fragments, chunkImports, settings);
       }
       finally {
         endImports();

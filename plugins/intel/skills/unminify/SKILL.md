@@ -42,8 +42,9 @@ binding index (or the supplied input set outside Git) contains no program bindin
 `undefined`, and the current file passes binding and dynamic-scope checks. Direct
 API calls without index context retain numeric `void` in fragments.
 
-The command selects parseable `.js`/`.mjs` files, asks for names of non-import bindings shorter than `--min-symbol-length`,
-resolves naming conflicts, checks each completed file and writes it atomically. Naming
+The command selects parseable `.js`/`.mjs` files and asks for names of bindings shorter
+than `--min-symbol-length`, including default and namespace import locals but excluding
+named imports. It resolves naming conflicts, checks each completed file and writes it atomically. Naming
 instructions prohibit duplicate names in the same scope and reserve `is`/`has`/`should`/`can`
 prefixes for boolean variables and functions returning booleans. A conflicting suggestion
 gets one more model request with the occupied names and binding context before numeric
@@ -58,7 +59,12 @@ the request; original batch IDs stay stable across resume. Collision replies use
 stable binding-specific journal IDs.
 At the end of every run, including interrupted runs, imports in journal-completed files
 follow export names without another model request. Unfinished files supply their current
-export names but remain untouched so their journals can resume. Public export names stay unchanged.
+export names but remain untouched so their journals can resume. External named import aliases
+restore the imported name deterministically when it is at least `--min-symbol-length`
+characters long; shorter imported names stay unchanged and never go to the model.
+Existing conflict resolution supplies numeric suffixes when needed. Canonically spaced
+aliases collapse to shorthand when the restored local equals the imported name; other
+spacing and comments are preserved. Public export names stay unchanged.
 
 ## Explicit chunks
 
@@ -100,7 +106,10 @@ reference, and unbound globals throughout the chunk. Public properties and expor
 stay unchanged: `export { a }` becomes `export { readableName as a }`.
 Import locals follow the resolved exported binding's name without model requests, including
 references and export locals in sibling files; collision suffixes remain scope-safe.
-An unchanged exporting binding leaves its chunk import alias unchanged.
+An unchanged internal exporting binding leaves its chunk import alias unchanged.
+External named imports use the same length threshold and deterministic restoration as
+ordinary files. Short default and namespace import locals are model candidates, including
+their references in authorized sibling files.
 
 A chunk prepares selected-file syntax changes in memory, names its program bindings,
 then names selected-file function bindings and follows import names. Individual-file checks and chunk binding,

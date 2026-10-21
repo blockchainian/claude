@@ -1,5 +1,5 @@
 import { timed } from './timing.mjs';
-import { isLexicalIdentifier } from './identifiers.mjs';
+import { isLexicalIdentifier, restoredImportEdit } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
@@ -172,6 +172,11 @@ export function applyRenames(source, renames) {
       const binding = path.scope.getBinding(path.node.name);
       const name = binding && renames.get(binding.identifier.start);
       if (!name || name === path.node.name) return;
+      const restored = restoredImportEdit(path, source, name);
+      if (restored) {
+        add(restored.start, restored.end, restored.text);
+        return;
+      }
       const { start, end } = path.node;
       const raw = source.slice(start, end);
       let replacement = name;
@@ -211,7 +216,7 @@ function externalName(node) {
   return node.name ?? node.value;
 }
 
-export function followImports(files, withFile = (file, task) => task(), fragments = new Set(), chunks) {
+export function followImports(files, withFile = (file, task) => task(), fragments = new Set(), chunks, { minSymbolLength = 4 } = {}) {
   const modules = new Map();
   const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
   const targetFile = (file, specifier) => {
@@ -235,9 +240,11 @@ export function followImports(files, withFile = (file, task) => task(), fragment
       for (const node of analysis.ast.program.body) {
         if (node.type === 'ImportDeclaration') {
           const target = targetFile(file, node.source.value);
-          if (target === null) continue;
           for (const specifier of node.specifiers) {
             if (specifier.type === 'ImportNamespaceSpecifier') continue;
+            if (target === null && (specifier.type !== 'ImportSpecifier'
+              || externalName(specifier.imported).length < minSymbolLength
+              || specifier.local.name === externalName(specifier.imported))) continue;
             imports.push({ key: specifier.local.start, target, name: specifier.type === 'ImportDefaultSpecifier' ? 'default' : externalName(specifier.imported) });
           }
         } else if (node.type === 'ExportNamedDeclaration') {
@@ -300,6 +307,10 @@ export function followImports(files, withFile = (file, task) => task(), fragment
       return proposals;
     }
     for (const imported of module.imports) {
+      if (imported.target === null) {
+        proposals.set(imported.key, imported.name);
+        continue;
+      }
       const exported = findExport(imported.target, imported.name);
       if (!exported) continue;
       const names = plan(exported.file, branch);
