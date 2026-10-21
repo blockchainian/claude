@@ -763,15 +763,11 @@ impl View {
                     self.move_event_selection(forward);
                 }
             }
-            KeyCode::Home | KeyCode::End => {
+            KeyCode::Home => self.show_first_event(),
+            KeyCode::End => {
                 self.event_list.pending_older = 0;
-                let index = if code == KeyCode::Home {
-                    Some(0)
-                } else {
-                    self.newest_event_position()
-                };
-                if let Some(index) = index {
-                    self.navigate_to_event(index);
+                if let Some(newest) = self.newest_event_position() {
+                    self.navigate_to_event(newest);
                 }
             }
             _ => unreachable!("list navigation action"),
@@ -781,6 +777,8 @@ impl View {
     /// Moves one displayed event; App loads older rows at the oldest loaded boundary.
     pub(super) fn move_event_selection(&mut self, forward: bool) {
         self.pending_click = None;
+        // Moving on cancels a pending jump to the transcript's first event.
+        self.event_list.start_requested = false;
         self.event_list.background_return = None;
         self.event_list.background = None;
         if forward && self.event_list.pending_older > 0 {
@@ -826,6 +824,14 @@ impl View {
             && self.event_list.sort == EventSort::Time
             && matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
         self.reveal_event_selection();
+    }
+
+    /// Selects the first loaded event and asks App to load the whole transcript.
+    pub(super) fn show_first_event(&mut self) {
+        self.event_list.background_return = None;
+        self.event_list.pending_older = 0;
+        self.event_list.start_requested = true;
+        self.navigate_to_event(0);
     }
 
     pub(crate) fn finish_event_start(&mut self) {

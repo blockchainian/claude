@@ -393,6 +393,22 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
 }
 
 #[test]
+fn home_loads_first_event_of_whole_event() {
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    replace_transcript(&path, transcript_copies(&payload, 200, 0));
+    app.refresh_event(8);
+    assert_eq!(app.view.event_panel.len(), 8);
+    click_event(&mut app);
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+    let area = ratatui::layout::Rect::new(0, 0, 120, 23);
+    app.refresh_event(app.view.event_count(area));
+    let detail = event_detail_at(&app, area);
+    assert!(detail.contains("Transcript copy 0"), "{detail}");
+}
+
+#[test]
 fn top_border_loads_first_event_of_whole_event() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();

@@ -990,10 +990,7 @@ impl View {
                 } else if bottom {
                     self.show_newest_event();
                 } else {
-                    self.event_list.background_return = None;
-                    self.event_list.pending_older = 0;
-                    self.event_list.start_requested = true;
-                    self.select_event(Some(0));
+                    self.show_first_event();
                 }
             }
             return None;
