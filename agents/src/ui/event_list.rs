@@ -1205,10 +1205,24 @@ impl View {
         self.rematch_event_at(selected);
         self.cancel_list_selection(text_selection::Panel::EventList);
         self.viewport.get_mut().event_detail_layout = None;
-        self.event_list.cursor = selected.and_then(|row| match row {
+        let target = selected.and_then(|row| match row {
             EventRow::Timeline(_) => self.shown_row_position(row),
-            EventRow::Pinned(_) => None,
-        }).or_else(|| self.matching_event_count().checked_sub(1));
+            EventRow::Pinned(_) => {
+                let pins = self
+                    .shown_event_rows()
+                    .take_while(|(row, _)| matches!(row, EventRow::Pinned(_)))
+                    .count();
+                if pins > 0 {
+                    selected_position.map(|index| index.min(pins - 1))
+                } else {
+                    event.source.as_ref().and_then(|source| {
+                        self.row_identity_position(false, &task_ui::EventId(source.clone()))
+                    })
+                }
+            }
+        });
+        self.select_event(target);
+        self.reveal_event_selection();
         Some(Action::ToggleEventPin {
             task,
             pinned: self
