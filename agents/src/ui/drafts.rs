@@ -37,7 +37,7 @@ impl Draft {
         }
     }
 
-    fn key(&self) -> SessionKey {
+    pub(super) fn key(&self) -> SessionKey {
         SessionKey {
             provider: self.setup.provider,
             id: self.id.to_string(),

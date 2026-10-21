@@ -274,14 +274,14 @@ impl View {
             && self.confirm_dialog.is_none()
             && !layout.event_panel.is_empty()
         {
-            let search_area = if self.active_panel == Panel::EventDetail && !layout.event_detail.is_empty()
-            {
-                layout
-                    .event_detail
-                    .inner(Margin::new(HORIZONTAL_PADDING, 0))
-            } else {
-                layout.event_panel
-            };
+            let search_area =
+                if self.active_panel == Panel::EventDetail && !layout.event_detail.is_empty() {
+                    layout
+                        .event_detail
+                        .inner(Margin::new(HORIZONTAL_PADDING, 0))
+                } else {
+                    layout.event_panel
+                };
             let input = event_list::search_input_rect(search_area);
             let search = if self.active_panel == Panel::EventDetail {
                 &self.event_detail.search
@@ -778,21 +778,24 @@ impl View {
             .filter(|_| self.selected_draft().is_none());
         let draft = self.selected_draft();
         // A linked worktree is named by its repository, though its link opens the worktree.
-        let (title, title_style, cwd, heading) = match (session, draft) {
+        let (title, key, cwd, heading) = match (session, draft) {
             (Some(session), _) => (
                 session.display_title().to_owned(),
-                self.title_style(&session.id).bold(),
+                session.id.clone(),
                 &session.cwd,
                 self.project_groups[self.selected].heading.clone(),
             ),
             (None, Some(draft)) => (
                 draft.name.clone().unwrap_or_else(|| "New task".to_owned()),
-                Style::default().bold(),
+                draft.key(),
                 &draft.setup.cwd,
                 draft.heading(),
             ),
             (None, None) => return,
         };
+        // The name, shown or edited, keeps the color it has in the task list.
+        let name_style = self.title_style(&key);
+        let title_style = name_style.bold();
         // The left corner is a joint, or the separator that keeps going down beside the prompt.
         self::rule(
             Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(1), 1),
@@ -844,7 +847,7 @@ impl View {
             let (text, style) = if placeholder {
                 ("New task", Style::default().dim())
             } else {
-                (text, Style::default())
+                (text, name_style)
             };
             let mut title = truncate_line_to_width(
                 Line::from(Span::styled(text.to_owned(), style)),
@@ -2187,6 +2190,36 @@ mod title_input_tests {
     use super::*;
 
     #[test]
+    fn new_task_name_keeps_its_task_list_color_while_shown_and_edited() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let mut view = View::new(Grouping::Project, true);
+        view.set_active_panel(Panel::TaskDetails);
+        view.add_draft(DraftSetup {
+            provider: ProviderId::Claude,
+            cwd: directory.path().to_owned(),
+            model: None,
+            effort: None,
+            branch: String::new(),
+        });
+        let key = view.selected_draft().unwrap().key();
+        let color = Some(view.title_color(&key));
+        let rule = Rect::new(0, 0, 60, 1);
+        let name_cell = |view: &View, text: &str| {
+            let mut buf = Buffer::empty(rule);
+            view.render_title_rule(rule, &mut buf);
+            let x = (0..rule.width)
+                .find(|&x| buf[(x, 0)].symbol() == &text[..1])
+                .unwrap();
+            buf[(x, 0)].clone()
+        };
+        view.rename.set_text("Draft name");
+        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+        assert!(view.accept_draft_name());
+        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+    }
+
+    #[test]
     fn title_editor_keeps_wide_caret_inside_the_rule_and_clears_side_labels() {
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().join("项目");
@@ -2216,7 +2249,8 @@ mod title_input_tests {
                         assert!(caret < input.width);
                         if !text.is_empty() {
                             let mut expected = Buffer::empty(input);
-                            line(visible.to_owned(), input, &mut expected);
+                            let style = view.title_style(&view.selected_draft().unwrap().key());
+                            line(Span::styled(visible.to_owned(), style), input, &mut expected);
                             for x in input.x..input.right() {
                                 assert_eq!(buf[(x, input.y)], expected[(x, input.y)]);
                             }
