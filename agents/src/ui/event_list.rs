@@ -70,7 +70,6 @@ impl View {
             viewport.event_panel = area;
             viewport.event_rows.clear();
             viewport.event_timeline_rows = 0;
-            viewport.event_header = false;
             viewport.event_separator = None;
             viewport.event_jump = Rect::default();
             viewport.event_links.clear();
@@ -114,8 +113,7 @@ impl View {
                 .saturating_sub(u16::from(self.event_list.search.active())),
         );
         let (pinned_height, timeline_height) = self.event_section_heights(height);
-        let header = usize::from(pinned_height > 0);
-        let separator = header;
+        let separator = usize::from(pinned_height > 0);
         let timeline_count = matching.len() - pinned_count;
         let start = scroll.min(timeline_count);
         let end = (start + timeline_height).min(timeline_count);
@@ -130,24 +128,18 @@ impl View {
         let visible = (start..end)
             .chain(timeline_count + pinned_start..timeline_count + pinned_start + pinned_height);
         if separator > 0 {
-            let rect = super::rows::heading_rect(
-                "Pinned",
-                super::render::row(area, (timeline_height + separator) as u16, 1),
-            );
-            super::render::line("Pinned".dim(), rect, buf);
             let mut dot = super::render::row(area, timeline_height as u16, 1);
             dot.x += dot.width / 2;
             dot.width = 1;
             super::render::line("·", dot, buf);
         }
-        self.viewport.borrow_mut().event_header = header > 0;
         self.viewport.borrow_mut().event_separator = (separator > 0).then_some(timeline_height);
         for (index, position) in visible.enumerate() {
             let (event_index, event) = matching[position];
             let y = if position < timeline_count {
                 index
             } else {
-                timeline_height + separator + header + index - (end - start)
+                timeline_height + separator + index - (end - start)
             };
             let pinned = matches!(event_index, super::task_ui::EventRow::Pinned(_));
             let last = match event_index {
@@ -217,8 +209,8 @@ impl View {
         let mut text_area = super::render::row(
             area,
             0,
-            if header > 0 {
-                (timeline_height + pinned_height + header + separator) as u16
+            if separator > 0 {
+                (timeline_height + pinned_height + separator) as u16
             } else {
                 rows.len() as u16
             },
@@ -1171,8 +1163,8 @@ impl View {
 
     /// Heights within the list body, excluding the search input row.
     pub(super) fn event_section_heights(&self, visible: usize) -> (usize, usize) {
-        let pinned = self.shown_pinned_count().min(visible.saturating_sub(3));
-        let timeline = visible.saturating_sub(pinned + 2 * usize::from(pinned > 0));
+        let pinned = self.shown_pinned_count().min(visible.saturating_sub(2));
+        let timeline = visible.saturating_sub(pinned + usize::from(pinned > 0));
         (pinned, timeline)
     }
 

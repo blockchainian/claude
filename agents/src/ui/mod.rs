@@ -172,7 +172,6 @@ struct Viewport {
     event_rows: Vec<EventRow>,
     event_timeline_rows: usize,
     event_separator: Option<usize>,
-    event_header: bool,
     event_detail_max: usize,
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
@@ -1388,9 +1387,9 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
 impl Viewport {
     fn event_row_at(&self, offset: usize) -> Option<EventRow> {
         let offset = match self.event_separator {
-            Some(separator) if offset == separator || offset == separator + 1 => return None,
+            Some(separator) if offset == separator => return None,
             Some(separator) if offset > separator => {
-                offset - separator - 2 + self.event_timeline_rows
+                offset - separator - 1 + self.event_timeline_rows
             }
             Some(_) if offset >= self.event_timeline_rows => return None,
             _ => offset,

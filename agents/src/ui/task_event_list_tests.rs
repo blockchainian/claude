@@ -461,9 +461,9 @@ fn event_pin_fixed_below_scrolled_timeline() {
         view.viewport.borrow().event_rows.last().copied().unwrap(),
         EventRow::Pinned(0)
     );
-    assert_eq!(buffer[(47, 3)].symbol(), "P");
-    assert_eq!(buffer[(0, 2)].symbol(), " ");
-    assert_eq!(view.event_scroll(), view.shown_events().count() - 2);
+    assert_eq!(buffer[(50, 3)].symbol(), "·");
+    assert_eq!(buffer[(0, 3)].symbol(), " ");
+    assert_eq!(view.event_scroll(), view.shown_events().count() - 3);
     let row_text = |y| {
         (0..100)
             .map(|x| buffer[(x, y)].symbol())
@@ -472,7 +472,7 @@ fn event_pin_fixed_below_scrolled_timeline() {
     assert!(!row_text(4).contains('│'));
     assert_eq!(buffer[(100, 4)].symbol(), " ");
     assert_eq!(
-        view.viewport.borrow().event_rows.get(1),
+        view.viewport.borrow().event_rows.get(2),
         Some(&EventRow::Timeline(view.event_panel.len() - 1))
     );
 }
@@ -535,7 +535,7 @@ fn pinned_sections_keep_navigation_within_focused_section() {
 }
 
 #[test]
-fn pinned_sections_render_centered_dim_header_and_dot_separator() {
+fn pinned_sections_render_dot_separator_without_header() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -552,17 +552,11 @@ fn pinned_sections_render_centered_dim_header_and_dot_separator() {
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>()
     };
-    assert_eq!(text(3).trim(), "Pinned");
-    assert_eq!(buffer[(47, 3)].symbol(), "P");
-    assert!(
-        buffer[(47, 3)]
-            .modifier
-            .contains(ratatui::style::Modifier::DIM)
-    );
-    assert_eq!(text(2).trim(), "·");
-    assert_eq!(buffer[(50, 2)].symbol(), "·");
+    assert!((0..5).all(|y| !text(y).contains("Pinned")));
+    assert_eq!(text(3).trim(), "·");
+    assert_eq!(buffer[(50, 3)].symbol(), "·");
     assert_eq!(
-        buffer[(50, 2)].style(),
+        buffer[(50, 3)].style(),
         ratatui::buffer::Cell::default().style()
     );
     assert_eq!(view.viewport.borrow().event_row_at(3), None);
@@ -570,12 +564,11 @@ fn pinned_sections_render_centered_dim_header_and_dot_separator() {
         view.viewport.borrow().event_row_at(4),
         Some(EventRow::Pinned(0))
     );
-    assert_eq!(view.viewport.borrow().event_row_at(2), None);
     assert!(matches!(
-        view.viewport.borrow().event_row_at(0),
+        view.viewport.borrow().event_row_at(2),
         Some(EventRow::Timeline(_))
     ));
-    assert_eq!(view.event_timeline_height(), 2);
+    assert_eq!(view.event_timeline_height(), 3);
 }
 
 #[test]
@@ -593,7 +586,7 @@ fn pinned_sections_dot_uses_list_width_and_ignores_mouse_clicks() {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 12));
         view.render_event(area, &mut buffer, Utc::now());
         let center = area.x + area.width / 2;
-        let y = area.y + 2;
+        let y = area.y + 3;
         assert_eq!(buffer[(center, y)].symbol(), "·");
         assert_eq!(
             buffer[(center, y)].style(),
@@ -615,7 +608,7 @@ fn pinned_sections_dot_uses_list_width_and_ignores_mouse_clicks() {
             }
             assert_eq!(view.selected_event_row(), before);
         }
-        assert_eq!(view.event_timeline_height(), 2);
+        assert_eq!(view.event_timeline_height(), 3);
     }
 }
 
@@ -703,7 +696,7 @@ fn pinned_sections_scroll_many_pins_without_moving_timeline() {
     view.render_event(area, &mut buffer, Utc::now());
     assert_eq!(view.event_list.pinned_scroll.get(), pinned_scroll);
     assert_eq!(view.event_scroll(), 0);
-    assert_eq!(view.viewport.borrow().event_row_at(2), None);
+    assert_eq!(view.viewport.borrow().event_row_at(1), None);
 }
 
 #[test]
@@ -712,7 +705,6 @@ fn pinned_sections_absent_without_matching_pins() {
     let area = Rect::new(0, 0, 100, 5);
     let mut buffer = Buffer::empty(area);
     view.render_event(area, &mut buffer, Utc::now());
-    assert!(!view.viewport.borrow().event_header);
     assert!(view.viewport.borrow().event_separator.is_none());
     assert!(matches!(
         view.viewport.borrow().event_row_at(0),
@@ -753,16 +745,16 @@ fn pinned_sections_wheel_targets_hovered_section_and_restores_selection() {
             assert_eq!(view.visible_event().unwrap().source, event.source);
             view.render_event(area, &mut buffer, Utc::now());
         };
-        // The header belongs to the pinned section; switching consumes this wheel event.
+        // Switching sections consumes this wheel event.
         wheel(direction, 9, EventRow::Pinned(0));
         wheel(MouseEventKind::ScrollDown, 10, EventRow::Pinned(1));
         wheel(direction, 3, EventRow::Timeline(2));
         wheel(MouseEventKind::ScrollDown, 4, EventRow::Timeline(3));
         wheel(direction, 10, EventRow::Pinned(1));
         // The separator keeps routing wheel events to the selected section.
-        wheel(MouseEventKind::ScrollUp, 7, EventRow::Pinned(0));
+        wheel(MouseEventKind::ScrollUp, 8, EventRow::Pinned(0));
         wheel(direction, 3, EventRow::Timeline(3));
-        wheel(MouseEventKind::ScrollUp, 7, EventRow::Timeline(2));
+        wheel(MouseEventKind::ScrollUp, 8, EventRow::Timeline(2));
     }
 }
 
