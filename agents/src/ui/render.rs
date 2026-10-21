@@ -364,6 +364,8 @@ impl View {
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
                 buf,
                 &self.input_label(),
+                self.selected_id()
+                    .map_or_else(Style::default, |id| self.title_style(id)),
                 self.input_disabled(),
                 self.prompt_focused(),
             );
@@ -2250,7 +2252,11 @@ mod title_input_tests {
                         if !text.is_empty() {
                             let mut expected = Buffer::empty(input);
                             let style = view.title_style(&view.selected_draft().unwrap().key());
-                            line(Span::styled(visible.to_owned(), style), input, &mut expected);
+                            line(
+                                Span::styled(visible.to_owned(), style),
+                                input,
+                                &mut expected,
+                            );
                             for x in input.x..input.right() {
                                 assert_eq!(buf[(x, input.y)], expected[(x, input.y)]);
                             }

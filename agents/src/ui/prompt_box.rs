@@ -47,6 +47,9 @@ pub(super) struct PromptBox {
 /// starts after the prefix and every later row starts at the box's left edge.
 struct PromptLayout {
     prefix: String,
+    /// The byte length of the task name that starts the prefix; zero while the label shows
+    /// something else.
+    task_label_len: usize,
     inset: u16,
     lines: Vec<String>,
     /// The caret's column within the box and its row.
@@ -59,6 +62,18 @@ fn prompt_heading(label: &str, marker: &str) -> String {
     } else {
         format!("{label} {marker}")
     }
+}
+
+/// Draws the task name in its task list color, then the marker and the rest in the box's style.
+fn render_heading(
+    area: Rect,
+    buf: &mut Buffer,
+    (name, rest): (&str, &str),
+    name_style: Style,
+    rest_style: Style,
+) {
+    let (x, _) = buf.set_stringn(area.x, area.y, name, usize::from(area.width), name_style);
+    buf.set_stringn(x, area.y, rest, usize::from(area.right() - x), rest_style);
 }
 
 impl PromptBox {
@@ -98,9 +113,15 @@ impl PromptBox {
         } else {
             usize::from(width / 3).min(prefix_budget.saturating_sub(3))
         };
+        let shows_task = self.search.is_none() && failed_label.is_none();
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
         let heading = format!("{} ", prompt_heading(&label, PROMPT_MARKER));
         let prefix = clip(&heading, prefix_budget);
+        let task_label_len = if shows_task {
+            label.len().min(prefix.len())
+        } else {
+            0
+        };
         let inset = prefix.width() as u16;
         self.text_width
             .set((usize::from(width), usize::from(inset)));
@@ -123,6 +144,7 @@ impl PromptBox {
         }
         PromptLayout {
             prefix,
+            task_label_len,
             inset,
             lines,
             caret,
@@ -142,6 +164,7 @@ impl PromptBox {
         area: Rect,
         buf: &mut Buffer,
         label: &str,
+        label_style: Style,
         disabled: Option<&str>,
         focused: bool,
     ) {
@@ -155,11 +178,11 @@ impl PromptBox {
                 heading.push(' ');
                 heading.push_str(reason);
             }
-            buf.set_stringn(
-                area.x,
-                area.y,
-                heading,
-                usize::from(area.width),
+            render_heading(
+                area,
+                buf,
+                heading.split_at(label.len()),
+                label_style,
                 Style::default().dim(),
             );
             return;
@@ -175,11 +198,11 @@ impl PromptBox {
             Style::default().dim()
         };
         if start == 0 {
-            buf.set_stringn(
-                area.x,
-                area.y,
-                &layout.prefix,
-                usize::from(area.width),
+            render_heading(
+                area,
+                buf,
+                layout.prefix.split_at(layout.task_label_len),
+                label_style,
                 style,
             );
         }
@@ -306,7 +329,7 @@ mod tests {
     fn rendered(editor: &PromptBox, width: u16, disabled: Option<&str>) -> String {
         let area = Rect::new(0, 0, width, editor.height(width, "Task"));
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "Task", disabled, true);
+        editor.render(area, &mut buffer, "Task", Style::default(), disabled, true);
         buffer
             .content
             .chunks(usize::from(width))
@@ -320,11 +343,11 @@ mod tests {
         let mut editor = focused();
         let area = Rect::new(8, 4, 35, 1);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "", None, true);
+        editor.render(area, &mut buffer, "", Style::default(), None, true);
         assert_eq!(buffer[(8, 4)].symbol(), "❯");
         assert_eq!(editor.cursor(area, ""), Some((10, 4)));
         editor.paste("abc");
-        editor.render(area, &mut buffer, "", None, true);
+        editor.render(area, &mut buffer, "", Style::default(), None, true);
         assert_eq!(buffer[(10, 4)].symbol(), "a");
         assert_eq!(editor.cursor(area, ""), Some((13, 4)));
         editor.select_mouse(
@@ -347,7 +370,7 @@ mod tests {
         let area = Rect::new(8, 4, 35, 1);
         for (reason, expected) in [("", "❮"), ("/bg", "❮ /bg")] {
             let mut buffer = Buffer::empty(area);
-            editor.render(area, &mut buffer, "", Some(reason), true);
+            editor.render(area, &mut buffer, "", Style::default(), Some(reason), true);
             let screen: String = (area.x..area.right())
                 .map(|column| buffer[(column, area.y)].symbol())
                 .collect();
@@ -369,11 +392,11 @@ mod tests {
         let mut editor = focused();
         let area = Rect::new(8, 4, 35, 5);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "Task", None, true);
+        editor.render(area, &mut buffer, "Task", Style::default(), None, true);
         assert_eq!(buffer[(13, 4)].symbol(), "❯");
         assert_eq!(editor.cursor(area, "Task"), Some((15, 4)));
         editor.paste("你好");
-        editor.render(area, &mut buffer, "Task", None, true);
+        editor.render(area, &mut buffer, "Task", Style::default(), None, true);
         assert_eq!(buffer[(15, 4)].symbol(), "你");
         assert_eq!(buffer[(17, 4)].symbol(), "好");
         assert_eq!(editor.cursor(area, "Task"), Some((19, 4)));
@@ -485,7 +508,7 @@ mod tests {
         editor.state = SendState::Failed("Claude attach timed out\nscreen".into());
         let area = Rect::new(0, 0, 80, 1);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "Task", None, true);
+        editor.render(area, &mut buffer, "Task", Style::default(), None, true);
         let heading = "Task Claude attach timed out ❯ retry me";
         let screen: String = (0..heading.chars().count() as u16)
             .map(|column| buffer[(column, 0)].symbol().to_owned())
@@ -516,13 +539,24 @@ mod tests {
         for (reason, expected) in [("/bg", "升级命令中心 ❮ /bg"), ("", "升级命令中心 ❮")]
         {
             let mut buffer = Buffer::empty(area);
-            editor.render(area, &mut buffer, "升级命令中心", Some(reason), true);
+            editor.render(
+                area,
+                &mut buffer,
+                "升级命令中心",
+                Style::default(),
+                Some(reason),
+                true,
+            );
             use unicode_segmentation::UnicodeSegmentation;
             let mut column = 0;
             for grapheme in expected.graphemes(true) {
                 let cell = &buffer[(column as u16, 0)];
                 assert_eq!(cell.symbol(), grapheme);
-                assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+                // The task name keeps its own style; the marker and reason are dimmed.
+                assert_eq!(
+                    cell.modifier.contains(ratatui::style::Modifier::DIM),
+                    column >= "升级命令中心".width()
+                );
                 column += grapheme.width();
             }
             assert_eq!(column, expected.width());
@@ -557,7 +591,7 @@ mod tests {
         assert_eq!(editor.height(60, label), 1);
         let area = Rect::new(0, 0, 60, 1);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, label, None, true);
+        editor.render(area, &mut buffer, label, Style::default(), None, true);
         let text = buffer
             .content
             .iter()
@@ -587,7 +621,14 @@ mod tests {
         use unicode_width::UnicodeWidthStr;
         let area = Rect::new(0, 0, width, height);
         let mut buffer = Buffer::empty(area);
-        editor.render(area, &mut buffer, "New prompt", None, true);
+        editor.render(
+            area,
+            &mut buffer,
+            "New prompt",
+            Style::default(),
+            None,
+            true,
+        );
         buffer
             .content
             .chunks(usize::from(width))

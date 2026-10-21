@@ -112,8 +112,14 @@ fn successful_input_keeps_prompt_while_another_task_is_selected() {
     let prompt = |view: &View| {
         let area = Rect::new(0, 0, 80, 1);
         let mut buffer = Buffer::empty(area);
-        view.input_box
-            .render(area, &mut buffer, "Task", None, view.prompt_focused());
+        view.input_box.render(
+            area,
+            &mut buffer,
+            "Task",
+            Style::default(),
+            None,
+            view.prompt_focused(),
+        );
         buffer
     };
     let mut view = fixture();
@@ -245,12 +251,24 @@ fn model_and_effort_submission_keep_prompt_and_block_duplicate_enter() {
         view.handle_paste(include_str!("../../tests/fixtures/claude-peer-message.txt"));
         let area = Rect::new(0, 0, 120, 5);
         let mut before = Buffer::empty(area);
-        view.input_box
-            .render(area, &mut before, "Task", None, view.prompt_focused());
+        view.input_box.render(
+            area,
+            &mut before,
+            "Task",
+            Style::default(),
+            None,
+            view.prompt_focused(),
+        );
         view.input_sending(&id, &input);
         let mut during = Buffer::empty(area);
-        view.input_box
-            .render(area, &mut during, "Task", None, view.prompt_focused());
+        view.input_box.render(
+            area,
+            &mut during,
+            "Task",
+            Style::default(),
+            None,
+            view.prompt_focused(),
+        );
         assert_eq!(during, before);
         assert_eq!(key(&mut view, KeyCode::Enter), None);
         view.input_complete(&id, &input, Ok(()));

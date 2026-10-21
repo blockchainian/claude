@@ -3768,6 +3768,35 @@ mod task_details_header {
     }
 
     #[test]
+    fn prompt_label_keeps_the_task_list_color() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(
+            vec![session("task", "Header task", SessionStatus::Ready, 0)],
+            false,
+        );
+        let color = view.title_color(&session_key("task"));
+        for focused in [false, true] {
+            if focused {
+                view.set_active_panel(Panel::Prompt);
+            }
+            assert_eq!(view.prompt_focused(), focused);
+            let (buf, _) = rule(&view, Utc::now());
+            let prompt = view.center_layout(buf.area).prompt;
+            let y = prompt.y;
+            let x = (prompt.x..prompt.right())
+                .find(|&x| buf[(x, y)].symbol() == "H")
+                .unwrap();
+            assert_eq!(buf[(x, y)].fg, color);
+            assert!(!buf[(x, y)].modifier.contains(Modifier::DIM));
+            let marker = (x..prompt.right())
+                .find(|&x| buf[(x, y)].symbol() == PROMPT_MARKER)
+                .unwrap();
+            assert_ne!(buf[(marker, y)].fg, color);
+        }
+    }
+
+    #[test]
     fn truncated_title_keeps_full_width() {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut row = session(
