@@ -22,7 +22,7 @@ fn panel_fixture(width: u16) -> (View, DateTime<Utc>) {
         .find(|event| event.kind == crate::event::Kind::User)
         .unwrap()
         .body
-        .repeat(8);
+        .repeat(2);
     let event = events
         .iter()
         .find(|event| event.kind == crate::event::Kind::Assistant)
@@ -31,15 +31,20 @@ fn panel_fixture(width: u16) -> (View, DateTime<Utc>) {
     let mut view = fixture();
     let row = &mut view.rows[view.selected];
     row.prompt = prompt;
-    row.last_message = Some(event.body.repeat(8));
+    row.last_message = Some(event.body.repeat(2));
     row.transcript = Some(path);
     view.event_session = view.selected_id().cloned();
+    // Only the selected event and the neighbours a wheel at the detail's edge
+    // steps to need a detail that overflows its panel; the rest stay the
+    // fixture's real size.
     view.set_event(
         (0..60)
             .map(|index| {
                 let mut event = event.clone();
                 event.source = Some(format!("active-panel-{index}"));
-                event.body = event.body.repeat(8);
+                if (19..=21).contains(&index) {
+                    event.body = event.body.repeat(8);
+                }
                 event
             })
             .collect(),
