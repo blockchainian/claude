@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
-import { isLexicalIdentifier } from './identifiers.mjs';
+import { isLexicalIdentifier, isModelBinding, restoredImportEdit } from './identifiers.mjs';
 import { toIdentifier, applyRenames, bindingContext } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
 import { estimateInputTokens } from './prompt.mjs';
@@ -148,7 +148,10 @@ export function analyzeChunk(sources, {
     if (reason) {
       frozen.set(name, reason);
       statistics[reason]++;
-    } else if (record.kind === 'module') statistics.imports++;else if (name.length < minSymbolLength) candidates.push(record);
+    } else {
+      if (record.kind === 'module') statistics.imports++;
+      if (isModelBinding(declaration.binding) && name.length < minSymbolLength) candidates.push(record);
+    }
   }
   return {
     files,
@@ -169,13 +172,13 @@ export function resolveChunkNames(sources, proposals, options = {}) {
   for (const [name, raw] of proposals) {
     const binding = analysis.bindings.get(name);
     if (!binding) throw new Error(`Unknown chunk binding: ${name}`);
-    if (analysis.frozen.has(name) || binding.kind === 'module' && !options.allowImports) continue;
+    if (analysis.frozen.has(name) || !isModelBinding(binding.declarations[0].binding) && !options.allowImports) continue;
     let stem = toIdentifier(raw);
     if (binding.references.some(({
       path
     }) => path.isJSXIdentifier()) && /^[a-z]/.test(stem)) stem = stem[0].toUpperCase() + stem.slice(1);
     if (stem === name) continue;
-    const collides = candidate => occupied.has(candidate) || free.has(candidate) || knownGlobals.has(candidate) || binding.references.some(({
+    const collides = candidate => candidate !== name && occupied.has(candidate) || free.has(candidate) || knownGlobals.has(candidate) || binding.references.some(({
       path
     }) => {
       const other = path.scope.getBinding(candidate);
@@ -186,7 +189,7 @@ export function resolveChunkNames(sources, proposals, options = {}) {
     if (collides(candidate)) options.onCollision?.({ key: name, proposed: stem, occupied: [...new Set([...occupied, ...free, ...(knownGlobals.has(stem) ? [stem] : []), ...binding.references.flatMap(({ path }) => Object.keys(path.scope.getAllBindings()))])].filter(collides), context: bindingContext(sources.get(binding.file), binding.declarations[0].binding) });
     while (collides(candidate)) candidate = `${stem}${suffix++}`;
     occupied.add(candidate);
-    result.set(name, candidate);
+    if (candidate !== name) result.set(name, candidate);
   }
   return result;
 }
@@ -220,6 +223,11 @@ export function applyChunkRenames(sources, names) {
       if (toIdentifier(name) !== name) throw new Error(`Invalid identifier: ${name}`);
       const binding = path.scope.getBinding(path.node.name);
       if (binding && binding.scope !== program.scope) continue;
+      const restored = restoredImportEdit(path, source, name);
+      if (restored) {
+        add(restored.start, restored.end, restored.text);
+        continue;
+      }
       const {
           start,
           end

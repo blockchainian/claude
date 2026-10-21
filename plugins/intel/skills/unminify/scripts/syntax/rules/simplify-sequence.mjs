@@ -68,26 +68,18 @@ export default {
       const lineStart = context.source.lastIndexOf('\n', node.start - 1) + 1;
       return context.source.slice(lineStart, node.start).match(/^[\t ]*/)[0];
     }
-    function indentUnit(path) {
-      fileIndent ??= (context.source.match(/^[\t ]+(?=\S)/gm) ?? []).sort((a, b) => a.length - b.length)[0] || '';
-      let indent = lineIndent(path.node);
-      for (let parent = path.parentPath; parent; parent = parent.parentPath) {
-        const outer = lineIndent(parent.node);
-        if (indent.startsWith(outer) && indent.length > outer.length) {
-          const unit = indent.slice(outer.length);
-          // Inline ancestors can span several levels of the file's indentation.
-          return fileIndent && unit.startsWith(fileIndent) ? fileIndent : unit;
-        }
-        indent = outer;
-      }
+    function indentUnit() {
       return fileIndent || '  ';
     }
     function blockIndent(path) {
       let indent = lineIndent(path.node);
-      // Enclosing extracted branches also add a level to their nested replacements.
+      // Account only for the indentation missing from a branch being expanded.
       for (let parent = path; parent; parent = parent.parentPath) {
         if (parent.parentPath?.isIfStatement() && eligible(parent) && (split(parent)?.length ?? 0) > 1) {
-          indent += indentUnit(parent);
+          const original = lineIndent(parent.node);
+          if (indent.startsWith(original)) {
+            indent = lineIndent(parent.parentPath.node) + indentUnit() + indent.slice(original.length);
+          }
         }
       }
       return indent;
@@ -192,7 +184,22 @@ export default {
     }
     return {
       Program: {
-        enter(path) { path.traverse({ WithStatement() { withPresent = true; } }); },
+        enter(path) {
+          const units = [];
+          const inspectBody = body => {
+            const outer = body.isProgram() ? '' : lineIndent(body.node);
+            for (const statement of body.get('body')) {
+              const inner = lineIndent(statement.node);
+              if (inner.startsWith(outer) && inner.length > outer.length) units.push(inner.slice(outer.length));
+            }
+          };
+          inspectBody(path);
+          path.traverse({
+            WithStatement() { withPresent = true; },
+            BlockStatement: inspectBody,
+          });
+          fileIndent = units.sort((a, b) => a.length - b.length)[0];
+        },
         exit() {
           if (!edits.length) return;
           if (!context.fragment) {
@@ -220,7 +227,7 @@ export default {
           const newline = context.source.includes('\r\n') ? '\r\n' : '\n';
           if (path.parentPath.isIfStatement() && result.length > 1) {
             const outer = blockIndent(path.parentPath);
-            const inner = outer + indentUnit(path);
+            const inner = outer + indentUnit();
             replace(path.node, `{${newline}${inner}${result.join(newline + inner)}${newline}${outer}}`);
           } else replace(path.node, result.join(newline + indent));
         },

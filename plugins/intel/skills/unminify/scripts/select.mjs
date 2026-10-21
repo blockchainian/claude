@@ -1,6 +1,6 @@
 import { countTokens, estimateInputTokens } from './prompt.mjs';
 import { timed } from './timing.mjs';
-import { isLexicalIdentifier } from './identifiers.mjs';
+import { isLexicalIdentifier, isModelBinding } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 import { readFile, readdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -120,7 +120,7 @@ export function planFile(source, { minSymbolLength = 4, maxInputTokens = 100000,
     }
     return { stages: stages.map(stage => stage.flatMap(fit)) };
   };
-  const candidates = [...bindings.values()].filter(b=>b.kind !== 'module' && b.identifier.name.length < minSymbolLength
+  const candidates = [...bindings.values()].filter(b=>isModelBinding(b) && b.identifier.name.length < minSymbolLength
     && !(analysis.fragment && b.scope.path.isProgram()))
     .sort((a,b)=>a.identifier.start-b.identifier.start);
   if (!candidates.length) return { stages: [[]] };
