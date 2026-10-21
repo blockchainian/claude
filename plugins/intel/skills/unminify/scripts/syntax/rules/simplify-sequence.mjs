@@ -29,6 +29,7 @@ export default {
   visitor(context) {
     const edits = [];
     let withPresent = false;
+    let fileIndent;
     // Compose child replacements before replacing a containing statement.
     function render(node, replacements = edits) {
       let result = '', offset = node.start;
@@ -46,13 +47,51 @@ export default {
       edits.push({ start: node.start, end: node.end, text });
     }
     const expression = node => {
-      const text = render(node);
-      const head = statementHead(node);
+      const inner = unwrap(node);
+      const head = statementHead(inner);
+      const hazard = ['ObjectExpression', 'ObjectPattern', 'FunctionExpression', 'ClassExpression'].includes(head.type)
+        || (head.type === 'Identifier' && head.name === 'let'
+          && /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*\[/.test(context.source.slice(head.end, inner.end)));
+      // Keep parenthesized strings from becoming directives after extraction.
+      if (node.type === 'ParenthesizedExpression' && (hazard || inner.type === 'StringLiteral')) return `${render(node)};`;
+      function withoutParens(current) {
+        if (current.type !== 'ParenthesizedExpression') return render(current);
+        const child = current.expression;
+        return context.source.slice(current.start + 1, child.start)
+          + withoutParens(child) + context.source.slice(child.end, current.end - 1);
+      }
+      const text = withoutParens(node);
       // Expression statements must not become declarations or blocks.
-      return ['ObjectExpression', 'ObjectPattern', 'FunctionExpression', 'ClassExpression'].includes(head.type)
-        || (head.type === 'Identifier' && head.name === 'let')
-        ? `(${text});` : `${text};`;
+      return hazard ? `(${text});` : `${text};`;
     };
+    function lineIndent(node) {
+      const lineStart = context.source.lastIndexOf('\n', node.start - 1) + 1;
+      return context.source.slice(lineStart, node.start).match(/^[\t ]*/)[0];
+    }
+    function indentUnit(path) {
+      fileIndent ??= (context.source.match(/^[\t ]+(?=\S)/gm) ?? []).sort((a, b) => a.length - b.length)[0] || '';
+      let indent = lineIndent(path.node);
+      for (let parent = path.parentPath; parent; parent = parent.parentPath) {
+        const outer = lineIndent(parent.node);
+        if (indent.startsWith(outer) && indent.length > outer.length) {
+          const unit = indent.slice(outer.length);
+          // Inline ancestors can span several levels of the file's indentation.
+          return fileIndent && unit.startsWith(fileIndent) ? fileIndent : unit;
+        }
+        indent = outer;
+      }
+      return fileIndent || '  ';
+    }
+    function blockIndent(path) {
+      let indent = lineIndent(path.node);
+      // Enclosing extracted branches also add a level to their nested replacements.
+      for (let parent = path; parent; parent = parent.parentPath) {
+        if (parent.parentPath?.isIfStatement() && eligible(parent) && (split(parent)?.length ?? 0) > 1) {
+          indent += indentUnit(parent);
+        }
+      }
+      return indent;
+    }
     function withField(node, field, value) {
       const own = edits.filter(e => !(e.start >= field.start && e.end <= field.end));
       return render(node, [...own, { start: field.start, end: field.end, text: value }]);
@@ -177,12 +216,13 @@ export default {
           if (!eligible(path)) return;
           const result = split(path);
           if (!result) return;
-          const lineStart = context.source.lastIndexOf('\n', path.node.start - 1) + 1;
-          const indent = context.source.slice(lineStart, path.node.start).match(/^[\t ]*/)[0];
+          const indent = lineIndent(path.node);
           const newline = context.source.includes('\r\n') ? '\r\n' : '\n';
-          const text = result.join(newline + indent);
-          replace(path.node, path.parentPath.isIfStatement() && result.length > 1
-            ? `{${newline}${indent}${text}${newline}${indent}}` : text);
+          if (path.parentPath.isIfStatement() && result.length > 1) {
+            const outer = blockIndent(path.parentPath);
+            const inner = outer + indentUnit(path);
+            replace(path.node, `{${newline}${inner}${result.join(newline + inner)}${newline}${outer}}`);
+          } else replace(path.node, result.join(newline + indent));
         },
       },
     };

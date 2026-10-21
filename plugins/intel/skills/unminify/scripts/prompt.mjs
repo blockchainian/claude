@@ -7,7 +7,7 @@ export const countTokens = text => encoder.encode(text, [], []).length;
 const instructionTokens = countTokens(instructions);
 
 export function promptText({ context, placeholders }) {
-  return `Give descriptive names to these JavaScript placeholders: ${Object.keys(placeholders).join(', ')}. Use camelCase for variables and functions, and PascalCase for classes. Return a JSON object mapping every placeholder to its name.\n\n${context}`;
+  return `Name placeholders: ${Object.keys(placeholders).join(', ')}. Use camelCase; PascalCase classes. No same scope duplicates. is/has/should/can prefixes only for boolean variables or functions returning boolean values.\n\n${context}`;
 }
 
 export const estimateInputTokens = payload => instructionTokens + countTokens(promptText(payload));

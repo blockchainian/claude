@@ -34,20 +34,28 @@ Never print credentials.
 
 Without `--chunks`, before planning any names the command runs all 13 first-batch syntax steps in registry
 order in every selected file. Only converted source ranges are replaced; surrounding
-text stays byte-identical. Fragment files retain program binding names, declaration kinds
+text stays byte-identical. Inserted statement blocks use the surrounding indentation
+step; extracted expression statements drop parentheses only when statement grammar
+and evaluation semantics allow it. Fragment files retain program binding names, declaration kinds
 and evaluation order. Their numeric `void` expressions are restored only when the Git-root
 binding index (or the supplied input set outside Git) contains no program binding named
 `undefined`, and the current file passes binding and dynamic-scope checks. Direct
 API calls without index context retain numeric `void` in fragments.
 
 The command selects parseable `.js`/`.mjs` files, asks for names of non-import bindings shorter than `--min-symbol-length`,
-resolves naming conflicts, checks each completed file and writes it atomically. Top-level
+resolves naming conflicts, checks each completed file and writes it atomically. Naming
+instructions prohibit duplicate names in the same scope and reserve `is`/`has`/`should`/`can`
+prefixes for boolean variables and functions returning booleans. A conflicting suggestion
+gets one more model request with the occupied names and binding context before numeric
+suffixes are used. These requests obey the input token budget and are journaled for resume.
+Top-level
 batches finish before function batches. Within each file and stage, pending batches are greedily
 packed in order within `--max-input-tokens` (default 100000), with no name-count cap.
 Planning and packing count the actual instructions, prompt and rendered context using
 `js-tiktoken` 1.0.21 with `o200k_base`. Oversized contexts are shortened; an irreducible
 batch that still cannot fit fails before sending. Placeholders are unique across
-the request; replies and resume records stay keyed by the original batch IDs.
+the request; original batch IDs stay stable across resume. Collision replies use
+stable binding-specific journal IDs.
 At the end of every run, including interrupted runs, imports in journal-completed files
 follow export names without another model request. Unfinished files supply their current
 export names but remain untouched so their journals can resume. Public export names stay unchanged.
@@ -84,7 +92,8 @@ declares it, any declaration or reference is ignored, or it is a known environme
 JavaScript global. Direct `eval` or `with` freezes all binding names in the chunk, including
 function locals and import aliases, because their dynamic references cannot be indexed. The `planned` JSON event reports frozen-name counts by reason.
 
-Each eligible program name is proposed once. Context includes declaration excerpts and
+Initial naming proposes each eligible program name once; collisions may trigger a retry.
+Context includes declaration excerpts and
 sibling reference excerpts, using the same actual token budget and greedy batch packing.
 Collision resolution considers all chunk program bindings, visible bindings at every
 reference, and unbound globals throughout the chunk. Public properties and export names

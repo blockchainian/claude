@@ -3,6 +3,7 @@ import { join, relative } from 'node:path';
 import { loadChunks, createChunkIgnore } from './chunk-manifest.mjs';
 import { openChunkJournal, recoverChunkJournals } from './chunk-journal.mjs';
 import { analyzeChunk, planChunk, renderChunkBatch, resolveChunkNames, applyChunkRenames, checkChunkRewrite } from './chunks.mjs';
+import { reconsiderNames } from './collision.mjs';
 import { packBatches } from './pack.mjs';
 import { transformSyntax } from './syntax/runner.mjs';
 import { syntaxFingerprint } from './syntax/stage.mjs';
@@ -93,7 +94,9 @@ export async function createChunkRun(root, settings) {
         // Response arrival order never decides collision suffixes or resume output.
         proposals.clear();
         for (const batch of batches) for (const [key, name] of Object.entries(journal.batches.get(batch.id))) proposals.set(key, name);
-        const names = resolveChunkNames(baseline, proposals, chunkOptions);
+        const names = await reconsiderNames({ proposals, journal, id: 'program', namer: { name: (...args) => withSlot(() => namer.name(...args)) },
+          maxInputTokens: settings.maxInputTokens, telemetry: { file: chunk.id, chunk: chunk.id },
+          resolve: (values, onCollision) => resolveChunkNames(baseline, values, { ...chunkOptions, onCollision }) });
         journal.batch('program-resolved', names);
         after = applyChunkRenames(baseline, names);
         for (const file of chunk.files.filter(file => !analysis.statistics.dynamicScope && selected.has(file) && !ignored.has(file))) {
@@ -114,7 +117,9 @@ export async function createChunkRun(root, settings) {
               if (batchFailed) return;
               for (const batch of stage) for (const [key, name] of Object.entries(journal.batches.get(prefix + batch.id))) local.set(Number(key), name);
             }
-            const resolved = api.resolveNames(source, local, { fragment: true });
+            const resolved = await reconsiderNames({ proposals: local, journal, id: prefix, namer: { name: (...args) => withSlot(() => namer.name(...args)) },
+              maxInputTokens: settings.maxInputTokens, telemetry: { file, chunk: chunk.id },
+              resolve: (values, onCollision) => api.resolveNames(source, values, { fragment: true, onCollision }) });
             const rewritten = api.applyRenames(source, resolved);
             const reason = api.checkRewrite(source, rewritten, { fragment: true });
             if (reason) {
