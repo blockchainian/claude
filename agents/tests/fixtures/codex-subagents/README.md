@@ -1,0 +1,2 @@
+Records excerpted from archived rollout 01a14be9-91f3-7282-8dd7-76e192a6519c (2026-10-17). Session metadata retains only identity, spawn source and history boundary. Personal workspace paths are scrubbed; message encryption and ordinals are retained.
+parent.jsonl contains session metadata and an assistant reply from its parent rollout 01a14be8-e18f-7522-9ae2-5bce46249fb0, with the same metadata reduction.

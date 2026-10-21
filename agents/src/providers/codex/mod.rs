@@ -1,20 +1,37 @@
 mod app_server;
 #[cfg(test)]
+mod ask_live_tests;
+mod background;
+#[cfg(test)]
 mod inner_tests;
+#[cfg(test)]
+mod lazy_tests;
 mod manager;
-mod rollout;
+#[cfg(test)]
+mod memory_tests;
+mod questions;
+pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;
+#[cfg(test)]
+mod settings_tests;
+#[cfg(test)]
+mod subagents_tests;
+mod terminal;
+#[cfg(test)]
+mod terminal_live_tests;
+#[cfg(test)]
+mod terminal_tests;
 #[cfg(test)]
 mod tests;
 
 use super::{
-    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, WeeklyUsageJob,
+    AccountUsageJob, Capabilities, Job, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
+    SessionInput, SessionKey, Snapshot, TerminalCommand, WeeklyUsageJob,
 };
-use crate::{
-    log,
-    model::{Action, Process, Session, SessionStatus},
-};
+#[cfg(test)]
+use crate::event;
+use crate::model::{Action, Process, Session, SessionStatus};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, Row};
 use std::{
@@ -23,18 +40,37 @@ use std::{
     io::{self, BufRead},
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
+    time::SystemTime,
 };
 
 const PAGE_SIZE: usize = 10;
 
+fn failed_snapshot(error: io::Error) -> Snapshot {
+    eprintln!("agents: Codex: {error}");
+    Snapshot {
+        sessions: vec![],
+        has_more: false,
+    }
+}
+
 pub struct CodexProvider {
     home: PathBuf,
     manager_home: PathBuf,
+    tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
+    models: Mutex<ModelCatalog>,
+    background: Mutex<background::Background>,
 }
 
 impl CodexProvider {
     pub fn new(home: PathBuf, manager_home: PathBuf) -> Self {
-        Self { manager_home, home }
+        Self {
+            manager_home,
+            home,
+            tasks: Mutex::new(HashMap::new()),
+            models: Mutex::new(ModelCatalog::default()),
+            background: Mutex::new(background::Background::default()),
+        }
     }
 
     pub fn from_config() -> io::Result<Self> {
@@ -65,6 +101,10 @@ impl CodexProvider {
     }
 
     fn snapshot(&self, pages: usize) -> io::Result<Snapshot> {
+        self.enrich_sessions(self.discover_sessions(pages)?)
+    }
+
+    fn discover_sessions(&self, pages: usize) -> io::Result<Snapshot> {
         let path = self.home.join("state_5.sqlite");
         if !path.exists() {
             return Ok(Snapshot {
@@ -74,16 +114,78 @@ impl CodexProvider {
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
-        let manager = manager::links(&self.manager_home)?;
-        let names = indexed_names(&self.home)?;
-        let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
-        let starts = process_starts(&live.values().copied().collect::<Vec<_>>())?;
-        let mut statement = db
-            .prepare("SELECT * FROM threads")
+        let live_ids = serde_json::to_string(&live.keys().collect::<Vec<_>>())?;
+        let shown = pages.saturating_mul(PAGE_SIZE);
+        let schema: HashSet<String> = db
+            .prepare("PRAGMA table_info(threads)")
+            .map_err(io::Error::other)?
+            .query_map([], |row| row.get(1))
+            .map_err(io::Error::other)?
+            .collect::<rusqlite::Result<_>>()
             .map_err(io::Error::other)?;
+        let updated = if schema.contains("updated_at_ms") {
+            "COALESCE(updated_at_ms, updated_at * 1000)"
+        } else {
+            "updated_at * 1000"
+        };
+        // Filter internal review threads before applying the history budget.
+        let review = if schema.contains("source") {
+            "AND CASE WHEN json_valid(source) THEN COALESCE(json_extract(source, '$.subagent') != 'review', 1) AND COALESCE(json_extract(source, '$.subagent.other') != 'guardian', 1) ELSE 1 END"
+        } else {
+            ""
+        };
+        let thread_source = if schema.contains("thread_source") {
+            "AND COALESCE(thread_source, '') != 'guardian_review'"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT id FROM threads WHERE id NOT IN (SELECT value FROM json_each(?1)) {review} {thread_source} ORDER BY {updated} DESC, id LIMIT ?2"
+        );
+        let mut statement = db.prepare(&sql).map_err(io::Error::other)?;
+        let mut recent = statement
+            .query_map(
+                rusqlite::params![live_ids, shown.saturating_add(1) as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(io::Error::other)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(io::Error::other)?;
+        let has_more = recent.len() > shown;
+        recent.truncate(shown);
+        recent.extend(live.keys().cloned());
+        let sessions = self.read_sessions(&db, &recent, &live)?;
+        Ok(Snapshot { sessions, has_more })
+    }
+
+    fn read_sessions(
+        &self,
+        db: &Connection,
+        ids: &[String],
+        live: &HashMap<String, u32>,
+    ) -> io::Result<Vec<Session>> {
+        let names = indexed_names(&self.home)?;
+        let links = manager::thread_links(&self.manager_home, ids.iter().cloned())?;
+        let starts = process_starts(&live.values().copied().collect::<Vec<_>>())?;
+        let edges = has_edges(db).map_err(io::Error::other)?;
+        let parent = if edges {
+            "(SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id=t.id)"
+        } else {
+            "NULL"
+        };
+        let sql = format!(
+            "SELECT t.*, {parent} AS parent_id FROM threads t WHERE t.id IN (SELECT value FROM json_each(?1))"
+        );
+        let mut statement = db.prepare(&sql).map_err(io::Error::other)?;
+        let ids = serde_json::to_string(ids)?;
         let rows = statement
-            .query_map([], |row| {
+            .query_map([ids], |row| {
+                let id: String = row.get("id")?;
+                let parents = column::<String>(row, "parent_id")?
+                    .map(|p| (id, p))
+                    .into_iter()
+                    .collect();
                 let mut session = session(row, &parents)?;
                 if column::<String>(row, "history_mode")?.as_deref() != Some("paginated")
                     && let Some(session) = session.as_mut()
@@ -96,71 +198,83 @@ impl CodexProvider {
             .map_err(io::Error::other)?;
         let mut sessions = Vec::new();
         for row in rows {
-            if let Some(mut session) = row.map_err(io::Error::other)? {
-                if let Some(pid) = live.get(&session.id.id) {
-                    session.process = Some(Process {
-                        pid: *pid,
-                        label: Some("codex".into()),
-                        started_at: starts.get(pid).copied(),
-                    });
-                }
-                if let Some(link) = manager.get(&session.id.id) {
-                    session.parent = Some(link.parent.clone());
-                    if session.name.is_none() {
-                        session.name = link.name.clone();
-                    }
-                    if let Some(name) = &session.name {
-                        session.title = name.clone();
-                    }
-                }
-                sessions.push(session);
+            let Some(mut session) = row.map_err(io::Error::other)? else {
+                continue;
+            };
+            if let Some(pid) = live.get(&session.id.id) {
+                session.process = Some(Process {
+                    pid: *pid,
+                    label: Some("codex".into()),
+                    started_at: starts.get(pid).copied(),
+                });
             }
+            if let Some(link) = links.get(&session.id.id) {
+                let native_agent = session.parent.is_some();
+                session.parent = Some(link.parent.clone());
+                if session.name.is_none() {
+                    session.name = link.name.clone();
+                }
+                if !native_agent && let Some(name) = &session.name {
+                    session.title = name.clone();
+                }
+                if link.needs_input {
+                    session.status = SessionStatus::NeedsInput;
+                }
+            }
+            sessions.push(session);
         }
+        self.models
+            .lock()
+            .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?
+            .refresh(&self.home.join("models_cache.json"))?;
         sessions.sort_by(|a, b| {
             b.updated_at
                 .cmp(&a.updated_at)
                 .then_with(|| a.id.cmp(&b.id))
         });
-        let inactive: Vec<_> = sessions
-            .iter()
-            .filter(|s| s.parent.is_none() && s.process.is_none())
-            .map(|s| s.id.clone())
-            .collect();
-        let shown = pages.saturating_mul(PAGE_SIZE);
-        let has_more = inactive.len() > shown;
-        let mut selected: HashSet<_> = sessions
-            .iter()
-            .filter(|s| {
-                (s.parent.is_none() && s.process.is_some())
-                    || s.parent
-                        .as_ref()
-                        .is_some_and(|parent| parent.provider == ProviderId::Claude)
-            })
-            .map(|s| s.id.clone())
-            .chain(inactive.into_iter().take(shown))
-            .collect();
-        // Descendants follow their visible parent without consuming another page slot.
-        loop {
-            let before = selected.len();
-            for session in &sessions {
-                if session
-                    .parent
-                    .as_ref()
-                    .is_some_and(|p| selected.contains(p))
-                {
-                    selected.insert(session.id.clone());
-                }
-            }
-            if selected.len() == before {
-                break;
-            }
+        Ok(sessions)
+    }
+
+    fn child_sessions(&self, parents: &[SessionKey]) -> io::Result<Vec<Session>> {
+        let path = self.home.join("state_5.sqlite");
+        if !path.exists() {
+            return Ok(vec![]);
         }
-        sessions.retain(|s| selected.contains(&s.id));
-        for session in &mut sessions {
+        let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(io::Error::other)?;
+        let native: Vec<_> = parents
+            .iter()
+            .filter(|p| p.provider == ProviderId::Codex)
+            .map(|p| &p.id)
+            .collect();
+        let mut ids = Vec::new();
+        if !native.is_empty() && has_edges(&db).map_err(io::Error::other)? {
+            ids = db.prepare("SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id IN (SELECT value FROM json_each(?1))").map_err(io::Error::other)?
+                .query_map([serde_json::to_string(&native)?], |r| r.get(0)).map_err(io::Error::other)?
+                .collect::<rusqlite::Result<_>>().map_err(io::Error::other)?;
+        }
+        for parent in parents.iter().filter(|p| p.provider == ProviderId::Claude) {
+            ids.extend(manager::parent_links(&self.manager_home, parent)?.into_keys());
+        }
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        self.read_sessions(&db, &ids, &HashMap::new())
+    }
+
+    fn enrich_sessions(&self, mut snapshot: Snapshot) -> io::Result<Snapshot> {
+        let sessions = &mut snapshot.sessions;
+        let mut tasks = self
+            .tasks
+            .lock()
+            .map_err(|_| io::Error::other("Codex task cache lock poisoned"))?;
+        let mut pending = Vec::new();
+        for (index, session) in sessions.iter_mut().enumerate() {
+            let needs_input = session.status == SessionStatus::NeedsInput;
             let summary = match session
                 .transcript
                 .as_deref()
-                .map(rollout::summary)
+                .map(|path| tasks.entry(path.to_owned()).or_default().summary(path))
                 .transpose()
             {
                 Ok(summary) => summary,
@@ -169,24 +283,188 @@ impl CodexProvider {
             };
             if let Some(summary) = summary {
                 if let Some(path) = session.transcript.as_deref() {
-                    session.prompt_images = rollout::first_prompt_images(path, &session.prompt)?;
+                    (session.prompt_images, session.task_details_sources[2]) = tasks
+                        .get_mut(path)
+                        .expect("summary cache entry")
+                        .first_prompt(&session.prompt)?;
+                }
+                if let Some((call, since)) = &summary.pending_question_call {
+                    pending.push((
+                        index,
+                        call.clone(),
+                        *since,
+                        summary.pending_questions.clone(),
+                    ));
                 }
                 apply_rollout(session, summary);
             } else {
                 session.status = status(session.process.is_some(), false);
             }
-            if manager
-                .get(&session.id.id)
-                .is_some_and(|link| link.needs_input)
-            {
+            if needs_input {
                 session.status = SessionStatus::NeedsInput;
             }
         }
-        Ok(Snapshot { sessions, has_more })
+        self.background(sessions)?;
+        questions::apply(sessions, pending);
+        Ok(snapshot)
+    }
+
+    fn background(&self, sessions: &mut [Session]) -> io::Result<()> {
+        if !sessions
+            .iter()
+            .any(|session| session.status != SessionStatus::Inactive)
+        {
+            return Ok(());
+        }
+        // Check before connecting: offline homes may exceed the Unix socket path limit.
+        if !self
+            .home
+            .join("app-server-control/app-server-control.sock")
+            .try_exists()?
+        {
+            return Ok(());
+        }
+        // Offline session browsing remains available without a running daemon.
+        let mut client = match app_server::Client::connect(&self.home) {
+            Ok(client) => client,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        let mut background = self
+            .background
+            .lock()
+            .map_err(|_| io::Error::other("Codex background cache lock poisoned"))?;
+        for session in sessions
+            .iter_mut()
+            .filter(|session| session.status != SessionStatus::Inactive)
+        {
+            let terminals =
+                match app_server::thread::background_terminals(&mut client, &session.id.id) {
+                    Ok(terminals) => terminals,
+                    // The daemon has no live terminals for an unloaded thread.
+                    Err(error)
+                        if error.to_string() == format!("thread not found: {}", session.id.id) =>
+                    {
+                        vec![]
+                    }
+                    Err(error) => return Err(error),
+                };
+            session.background = background.tasks(
+                &session.id.id,
+                session.transcript.as_deref(),
+                terminals,
+                Utc::now(),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct ModelCatalog {
+    modified: Option<SystemTime>,
+    /// The models Codex lists in its picker, by priority.
+    choices: crate::providers::InputChoices,
+}
+
+impl ModelCatalog {
+    fn refresh(&mut self, path: &Path) -> io::Result<()> {
+        let modified = match std::fs::metadata(path) {
+            Ok(metadata) => metadata.modified()?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.modified = None;
+                self.choices = crate::providers::InputChoices::default();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        if self.modified == Some(modified) {
+            return Ok(());
+        }
+        #[derive(serde::Deserialize)]
+        struct Catalog {
+            models: Vec<Model>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Model {
+            slug: String,
+            display_name: String,
+            visibility: Option<String>,
+            #[serde(default)]
+            priority: i64,
+            #[serde(default)]
+            supported_reasoning_levels: Vec<Level>,
+            default_reasoning_level: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Level {
+            effort: String,
+        }
+        let catalog: Catalog = serde_json::from_reader(io::BufReader::new(File::open(path)?))?;
+        let mut listed: Vec<_> = catalog
+            .models
+            .iter()
+            .filter(|model| model.visibility.as_deref() == Some("list"))
+            .collect();
+        listed.sort_by_key(|model| model.priority);
+        self.choices = crate::providers::InputChoices {
+            defaults: crate::tasks::TaskDefaults::default(),
+            models: listed
+                .into_iter()
+                .map(|model| crate::providers::ModelChoice {
+                    id: model.slug.clone(),
+                    label: model.display_name.clone(),
+                    family: model_family(&model.slug, &model.display_name),
+                    efforts: model
+                        .supported_reasoning_levels
+                        .iter()
+                        .map(|level| level.effort.clone())
+                        .collect(),
+                    default_effort: model.default_reasoning_level.clone(),
+                })
+                .collect(),
+            aliases: HashMap::new(),
+            display_names: catalog
+                .models
+                .into_iter()
+                .map(|model| (model.slug, model.display_name))
+                .collect(),
+        };
+        self.modified = Some(modified);
+        Ok(())
+    }
+}
+
+fn model_family(slug: &str, display_name: &str) -> String {
+    let tier = slug.strip_prefix("gpt-").and_then(|suffix| {
+        let (version, tier) = suffix.split_once('-')?;
+        let numeric_version = version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+        (numeric_version && !tier.is_empty() && tier.bytes().all(|byte| byte.is_ascii_alphabetic()))
+            .then_some(tier)
+    });
+    if let Some(tier) = tier
+        && let Some(name) = display_name.split('-').nth(2)
+        && name.eq_ignore_ascii_case(tier)
+    {
+        name.to_owned()
+    } else {
+        display_name.to_owned()
     }
 }
 
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
+    session.prompt_at = summary.prompt_at;
+    session.cache_expires_at = summary.cache_expires_at;
+    session.task_details_sources[..2].clone_from_slice(&summary.task_details_sources[..2]);
     session.last_message = summary.last_message;
     session.last_message_at = summary.last_message_at;
     session.last_record_at = summary.updated_at;
@@ -195,7 +473,12 @@ fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
         session.updated_at = session.updated_at.max(at);
     }
     session.status = status(session.process.is_some(), summary.turn_ended);
-    session.pending_questions = summary.pending_questions;
+    session.tasks = summary.tasks;
+    session.pending_questions = summary
+        .pending_questions
+        .into_iter()
+        .map(|question| question.text)
+        .collect();
     if session.process.is_some() && !session.pending_questions.is_empty() {
         session.status = SessionStatus::NeedsInput;
     }
@@ -235,21 +518,26 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
     {
         return Ok(None);
     }
-    // Codex's agents overview lists only unarchived threads.
-    if column::<bool>(row, "archived")? == Some(true) {
-        return Ok(None);
-    }
     let id: String = row.get("id")?;
     let prompt = column::<String>(row, "first_user_message")?.unwrap_or_default();
-    let title = column::<String>(row, "title")?
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| prompt.clone());
+    let agent_path = subagent
+        .and_then(|value| value.get("thread_spawn"))
+        .and_then(|spawn| spawn.get("agent_path"))
+        .and_then(|path| path.as_str());
+    let title = if let Some(path) = agent_path {
+        crate::event::agent::name(path).to_owned()
+    } else {
+        column::<String>(row, "title")?
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| prompt.clone())
+    };
     let updated_at = time(row, "updated_at")?.unwrap_or(DateTime::UNIX_EPOCH);
     Ok(Some(Session {
         parent: parents.get(&id).cloned().map(key),
         id: key(id),
         cwd: PathBuf::from(column::<String>(row, "cwd")?.unwrap_or_default()),
         name: match column::<String>(row, "history_mode")?.as_deref() {
+            _ if agent_path.is_some() => None,
             Some("paginated") => column::<String>(row, "name")?
                 .map(|name| name.trim().to_owned())
                 .filter(|name| !name.is_empty()),
@@ -259,10 +547,16 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
             }
         },
         title,
-        prompt: prompt.chars().take(512).collect(),
+        prompt: if agent_path.is_some() {
+            String::new()
+        } else {
+            prompt.chars().take(512).collect()
+        },
+        task_details_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: vec![],
         prompt_at: None,
+        cache_expires_at: None,
         turn_messages: 0,
         last_record_at: None,
         model: column(row, "model")?,
@@ -277,12 +571,15 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         last_message: None,
         last_message_at: None,
         activity: None,
+        ask: None,
         pending_questions: vec![],
+        tasks: vec![],
         background: vec![],
         last_prompt: None,
         transcript: column::<String>(row, "rollout_path")?
             .filter(|p| !p.is_empty())
             .map(PathBuf::from),
+        archived: column::<bool>(row, "archived")?.unwrap_or(false),
     }))
 }
 
@@ -312,25 +609,8 @@ fn indexed_names(home: &Path) -> io::Result<HashMap<String, String>> {
     Ok(names)
 }
 
-fn parents(db: &Connection) -> rusqlite::Result<HashMap<String, String>> {
-    let present: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread_spawn_edges')", [], |row| row.get(0))?;
-    if !present {
-        return Ok(HashMap::new());
-    }
-    let mut statement = db.prepare("SELECT * FROM thread_spawn_edges")?;
-    let mut parents = HashMap::new();
-    let rows = statement.query_map([], |row| {
-        Ok((
-            column::<String>(row, "child_thread_id")?,
-            column::<String>(row, "parent_thread_id")?,
-        ))
-    })?;
-    for row in rows {
-        if let (Some(child), Some(parent)) = row? {
-            parents.insert(child, parent);
-        }
-    }
-    Ok(parents)
+fn has_edges(db: &Connection) -> rusqlite::Result<bool> {
+    db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread_spawn_edges')", [], |row| row.get(0))
 }
 
 fn status(live: bool, turn_ended: bool) -> SessionStatus {
@@ -389,9 +669,45 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 }
 
 impl Provider for CodexProvider {
+    fn session_source(&self) -> Box<dyn Provider> {
+        Box::new(Self::new(self.home.clone(), self.manager_home.clone()))
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Codex"
+    }
+
+    fn terminal_command(&self, session: &Session) -> Result<TerminalCommand, &'static str> {
+        let command = self
+            .launch(&Action::Resume(session.id.clone()), Some(session))
+            .ok_or("Terminal is not supported")?;
+        // The app-server owns turns, so closing the client leaves them running.
+        Ok(TerminalCommand {
+            command,
+            detach: None,
+        })
+    }
+
+    fn terminal_screen_is_loading(&self, screen: &str) -> bool {
+        screen.contains("Resuming session")
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::Codex
     }
+    fn input_choices(&self) -> crate::providers::InputChoices {
+        let Ok(mut models) = self.models.lock() else {
+            return crate::providers::InputChoices::default();
+        };
+        if models
+            .refresh(&self.home.join("models_cache.json"))
+            .is_err()
+        {
+            return crate::providers::InputChoices::default();
+        }
+        models.choices.clone()
+    }
+
     fn weekly_usage(&self) -> Option<WeeklyUsageJob> {
         let home = self.home.clone();
         Some(Box::new(move || {
@@ -399,6 +715,22 @@ impl Provider for CodexProvider {
             app_server::account::weekly_usage(&mut client)
         }))
     }
+    fn account_usage(&self) -> Option<AccountUsageJob> {
+        let home = self.home.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::account::account_usage(&mut client)
+        }))
+    }
+
+    fn redeem_reset_credit(&self, request: ResetCreditRequest) -> Option<ResetCreditJob> {
+        let home = self.home.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::account::redeem_reset_credit(&mut client, request)
+        }))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume: true,
@@ -418,15 +750,31 @@ impl Provider for CodexProvider {
             .collect())
     }
     fn refresh(&mut self, pages: usize) -> Snapshot {
-        self.snapshot(pages).unwrap_or_else(|error| {
-            eprintln!("agents: Codex: {error}");
-            Snapshot {
-                sessions: vec![],
-                has_more: false,
-            }
-        })
+        self.snapshot(pages).unwrap_or_else(failed_snapshot)
     }
-    fn log(&self, session: &Session, count: usize, _: bool) -> io::Result<Vec<log::Event>> {
+    fn discover(&mut self, pages: usize) -> Snapshot {
+        self.discover_sessions(pages)
+            .unwrap_or_else(failed_snapshot)
+    }
+    fn children(&mut self, parents: &[SessionKey]) -> Snapshot {
+        self.child_sessions(parents)
+            .map(|sessions| Snapshot {
+                sessions,
+                has_more: false,
+            })
+            .unwrap_or_else(failed_snapshot)
+    }
+    fn enrich(&mut self, snapshot: Snapshot) -> Snapshot {
+        self.enrich_sessions(snapshot)
+            .unwrap_or_else(failed_snapshot)
+    }
+    #[cfg(test)]
+    fn event_panel(
+        &self,
+        session: &Session,
+        count: usize,
+        _: bool,
+    ) -> io::Result<Vec<event::Event>> {
         session
             .transcript
             .as_deref()
@@ -439,7 +787,7 @@ impl Provider for CodexProvider {
         }
         let mut command = Command::new("codex");
         match action {
-            Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
+            Action::Resume(_) | Action::Fork(_) => {
                 let session = session?;
                 if !session.cwd.is_dir() {
                     return None;
@@ -449,6 +797,13 @@ impl Provider for CodexProvider {
                 } else {
                     "resume"
                 };
+                // `codex resume` asks before unarchiving; unarchive here so it opens directly.
+                // On failure it still asks, so the error needs no handling.
+                if session.archived && subcommand == "resume" {
+                    let _ = app_server::Client::connect(&self.home).and_then(|mut client| {
+                        app_server::thread::unarchive(&mut client, &session.id.id)
+                    });
+                }
                 command
                     .args([subcommand, &session.id.id])
                     .current_dir(&session.cwd);
@@ -457,30 +812,63 @@ impl Provider for CodexProvider {
         }
         Some(command)
     }
+    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<Job>> {
+        terminal::cleanup(&self.home, session)
+    }
+
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
-        if !session.can_resume()
-            || matches!(
-                input,
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_)
-            )
-        {
+        if !session.can_resume() {
             return None;
         }
         let home = self.home.clone();
         let id = session.id.id.clone();
+        let archived = session.archived;
         Some(Box::new(move || {
             let mut client = app_server::Client::connect(&home)?;
+            // Input brings an archived thread back before resuming it.
+            if archived
+                && matches!(
+                    input,
+                    SessionInput::Prompt(_)
+                        | SessionInput::PromptWithImages { .. }
+                        | SessionInput::SetModel(_)
+                        | SessionInput::SetEffort(_)
+                )
+            {
+                app_server::thread::unarchive(&mut client, &id)?;
+            }
+            if let SessionInput::Answer { ask, .. } = &input
+                && ask.session != key(id.clone())
+            {
+                return Err(io::Error::other("Codex question session changed"));
+            }
             match input {
-                SessionInput::Prompt(text) => app_server::thread::prompt(&mut client, &id, &text),
-                SessionInput::Interrupt => {
-                    match app_server::thread::running_turn(&mut client, &id)? {
-                        Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),
-                        None => Ok(()),
-                    }
+                SessionInput::Prompt(text) => {
+                    app_server::thread::prompt(&mut client, &id, &text, &[])
                 }
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_) => {
-                    Err(io::ErrorKind::Unsupported.into())
+                SessionInput::PromptWithImages { text, images } => {
+                    app_server::thread::prompt(&mut client, &id, &text, &images)
                 }
+                SessionInput::Rename(_) => Err(io::ErrorKind::Unsupported.into()),
+                SessionInput::Interrupt
+                | SessionInput::Answer {
+                    answer: crate::ask::Answer { rejected: true, .. },
+                    ..
+                } => match app_server::thread::running_turn(&mut client, &id)? {
+                    Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),
+                    None => Ok(()),
+                },
+                SessionInput::SetModel(model) => {
+                    app_server::thread::set_settings(&mut client, &id, Some(&model), None)
+                }
+                SessionInput::SetEffort(effort) => {
+                    app_server::thread::set_settings(&mut client, &id, None, Some(&effort))
+                }
+                SessionInput::Answer {
+                    ask,
+                    answer,
+                    transcript,
+                } => app_server::thread::answer(&mut client, &id, &ask, &answer, &transcript),
             }
         }))
     }
@@ -491,28 +879,51 @@ impl Provider for CodexProvider {
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::set_name(&mut client, &session.id.id, name)
     }
-    fn archive(&self, session: &Session) -> io::Result<()> {
+    fn archive(&self, session: &Session) -> io::Result<Job> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        let mut client = app_server::Client::connect(&self.home)?;
-        app_server::thread::archive(&mut client, &session.id.id)
+        let home = self.home.clone();
+        let manager_home = self.manager_home.clone();
+        let config = super::claude::config_dir();
+        let id = session.id.id.clone();
+        let archived = session.archived;
+        Ok(Box::new(move || {
+            if manager::thread_links(&manager_home, [id.clone()])?
+                .get(&id)
+                .is_some_and(|link| !link.detached)
+            {
+                let mut client = app_server::Client::connect(&home)?;
+                app_server::thread::stop(&mut client, &id)?;
+                let output =
+                    manager::detach_command(&config, &manager_home, &home, &id)?.output()?;
+                if !output.status.success() {
+                    return Err(io::Error::other(format!(
+                        "codex-manager detach failed ({}): {}",
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+                let _: serde_json::Value = serde_json::from_slice(&output.stdout)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                return Ok(());
+            }
+            if archived {
+                return Ok(());
+            }
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::thread::archive(&mut client, &id)
+        }))
     }
-    fn stop(&self, session: &Session) -> io::Result<()> {
+    fn delete(&self, session: &Session) -> io::Result<Job> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        let mut client = app_server::Client::connect(&self.home)?;
-        match app_server::thread::running_turn(&mut client, &session.id.id)? {
-            Some(turn) => app_server::thread::interrupt(&mut client, &session.id.id, &turn),
-            None => Ok(()),
-        }
-    }
-    fn delete(&self, session: &Session) -> io::Result<()> {
-        if !session.can_resume() {
-            return Err(io::ErrorKind::Unsupported.into());
-        }
-        let mut client = app_server::Client::connect(&self.home)?;
-        app_server::thread::delete(&mut client, &session.id.id)
+        let home = self.home.clone();
+        let id = session.id.id.clone();
+        Ok(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::thread::delete(&mut client, &id)
+        }))
     }
 }

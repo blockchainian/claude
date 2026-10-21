@@ -59,6 +59,8 @@ fn manager_child_rename_opens_dialog_and_emits_action() {
         None
     );
     assert_eq!(view.rename_target.as_ref(), Some(&id));
+    assert_eq!(view.active_panel, Panel::TaskDetails);
+    view.set_active_panel(Panel::TaskDetails);
     view.rename.set_text("  Manager child renamed  ");
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -75,8 +77,9 @@ fn manager_child_session_keys_operate() {
     let id = view.selected_id().unwrap().clone();
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
-        Some(Action::Open(id.clone()))
+        None
     );
+    assert_eq!(view.active_panel, Panel::TaskList);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE)),
         Some(Action::Fork(id.clone()))
@@ -90,14 +93,14 @@ fn manager_child_session_keys_operate() {
 #[test]
 fn codex_spawn_child_session_keys_emit_unsupported() {
     for (code, modifiers, label) in [
-        (KeyCode::Char('l'), KeyModifiers::CONTROL, "Resume"),
-        (KeyCode::Char('f'), KeyModifiers::NONE, "Fork"),
-        (KeyCode::Char('r'), KeyModifiers::NONE, "Rename"),
-        (KeyCode::Char('x'), KeyModifiers::NONE, "Stop"),
-        (KeyCode::Char('a'), KeyModifiers::NONE, "Archive"),
-        (KeyCode::Backspace, KeyModifiers::NONE, "Delete"),
-        (KeyCode::Char('h'), KeyModifiers::NONE, "Hide"),
-        (KeyCode::Char('p'), KeyModifiers::NONE, "Pin"),
+        (KeyCode::Char('l'), KeyModifiers::CONTROL, None),
+        (KeyCode::Char('f'), KeyModifiers::NONE, Some("Fork")),
+        (KeyCode::Char('r'), KeyModifiers::NONE, Some("Rename")),
+        (KeyCode::Char('x'), KeyModifiers::NONE, Some("Stop")),
+        (KeyCode::Char('a'), KeyModifiers::NONE, Some("Archive")),
+        (KeyCode::Backspace, KeyModifiers::NONE, Some("Delete")),
+        (KeyCode::Char('h'), KeyModifiers::NONE, Some("Hide")),
+        (KeyCode::Char('p'), KeyModifiers::NONE, Some("Pin")),
     ] {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
@@ -106,7 +109,7 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
             view.set_notice(notice.clone());
             assert_eq!(
                 view.handle_key(KeyEvent::new(code, modifiers)),
-                Some(Action::Unsupported(label)),
+                label.map(Action::Unsupported),
                 "{code:?}"
             );
             assert_eq!(view.selected_id(), Some(&id));
@@ -129,45 +132,40 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         (KeyCode::Char('f'), KeyModifiers::NONE),
         (KeyCode::Char('n'), KeyModifiers::NONE),
         (KeyCode::Char('x'), KeyModifiers::NONE),
-        (KeyCode::Char('w'), KeyModifiers::NONE),
     ] {
         let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
         let session = view.selected_row().unwrap().clone();
         let expected = match code {
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => Action::Open(session.id),
-            KeyCode::Char('o') => Action::Resume(session.id),
-            KeyCode::Char('f') => Action::Fork(session.id),
-            KeyCode::Char('n') => Action::NewDraft { cwd: session.cwd },
-            KeyCode::Char('x') => Action::Stop(session.id),
-            KeyCode::Char('w') => Action::Unsupported("New worktree"),
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l' | 'o') => None,
+            KeyCode::Char('f') => Some(Action::Fork(session.id)),
+            KeyCode::Char('n') => Some(Action::NewDraft { cwd: session.cwd }),
+            KeyCode::Char('x') => Some(Action::Stop(session.id)),
             _ => unreachable!(),
         };
-        assert_eq!(
-            view.handle_key(KeyEvent::new(code, modifiers)),
-            Some(expected)
-        );
+        assert_eq!(view.handle_key(KeyEvent::new(code, modifiers)), expected);
+        if matches!(code, KeyCode::Enter | KeyCode::Right | KeyCode::Char('o')) {
+            assert_eq!(view.active_panel, Panel::Prompt);
+        } else if code == KeyCode::Char('l') {
+            assert_eq!(view.active_panel, Panel::TaskList);
+        }
     }
-    for (code, removal) in [
-        (KeyCode::Char('a'), Removal::Archive),
-        (KeyCode::Backspace, Removal::Delete),
-    ] {
-        let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
-        let id = view.selected_id().unwrap().clone();
-        assert_eq!(
-            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            None
-        );
-        assert!(view.confirm_dialog.is_some());
-        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        let expected = match removal {
-            Removal::Archive => Action::Archive(id),
-            Removal::Delete => Action::Delete(id),
-        };
-        assert_eq!(
-            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            Some(expected)
-        );
-    }
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    let id = view.selected_id().unwrap().clone();
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+        Some(Action::Archive(id.clone()))
+    );
+    assert!(view.confirm_dialog.is_none());
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+        None
+    );
+    assert!(view.confirm_dialog.is_some());
+    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(Action::Delete(id))
+    );
 }
 
 #[test]
@@ -202,3 +200,122 @@ fn manager_thread_hides_itself_and_pins_its_parent_group() {
     assert!(view.hidden.contains(&child.id));
     assert!(!view.hidden.contains(&parent));
 }
+
+#[test]
+fn title_requires_double_click_to_rename() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    let area = Rect::new(0, 0, 160, 40);
+    view.render(area, &mut Buffer::empty(area));
+    let title = view.viewport.borrow().task_details_title;
+    assert!(title.width > 0);
+    let click = |view: &mut View| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: title.x,
+                row: title.y,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+    };
+    click(&mut view);
+    assert!(view.rename_target.is_none());
+    click(&mut view);
+    assert_eq!(view.rename_target.as_ref(), view.selected_id());
+    let original = view.selected_row().unwrap().display_title().to_owned();
+    assert_eq!(view.rename.text(), original);
+    view.handle_paste(" changed");
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(view.rename_target.is_none());
+    assert_eq!(view.selected_row().unwrap().display_title(), original);
+}
+
+#[test]
+fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut view = View::default();
+    let id = view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    view.set_active_panel(Panel::TaskDetails);
+    assert_eq!(view.name_target, Some(id));
+    assert!(view.selector.is_none());
+    assert!(view.rename.is_empty());
+    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(view.name_target, Some(id));
+    view.handle_paste("甲乙");
+    for code in [
+        KeyCode::Home,
+        KeyCode::Right,
+        KeyCode::Delete,
+        KeyCode::Char('丙'),
+        KeyCode::End,
+    ] {
+        view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+    assert_eq!(view.rename.text(), "甲丙");
+    view.set_active_panel(Panel::TaskDetails);
+    view.open_field(draft_controls::Field::Directory);
+    assert!(view.title_editor().is_none());
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(view.title_editor().unwrap().text(), "甲丙");
+    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(view.drafts[0].name.as_deref(), Some("甲丙"));
+    assert!(view.name_target.is_none());
+    assert!(view.selector.is_some());
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!view.prompt_focused());
+    view.set_active_panel(Panel::Prompt);
+    view.handle_paste("prompt body");
+    assert_eq!(view.input_box.editor.text(), "prompt body");
+    view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    view.set_active_panel(Panel::TaskDetails);
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(view.name_target.is_none());
+    assert_eq!(view.drafts.len(), 1);
+    assert_eq!(view.drafts[0].input.editor.text(), "prompt body");
+}
+
+#[test]
+fn failed_draft_keeps_its_title_editor() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut view = View::default();
+    let id = view.add_draft(DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().into(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    view.draft_created(id, Err(std::io::Error::other("failed")));
+    assert!(view.title_editor().is_some());
+    assert_eq!(view.drafts[0].error.as_deref(), Some("failed"));
+}
+
+#[test]
+fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
+    let (_directory, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    assert!(view.active_panel == Panel::TaskList);
+    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    view.set_active_panel(Panel::TaskDetails);
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    view.set_active_panel(Panel::TaskList);
+    view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+    assert!(view.searching);
+}
+
+#[path = "title_save_tests.rs"]
+mod title_save_tests;

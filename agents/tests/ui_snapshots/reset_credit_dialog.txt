@@ -1,0 +1,16 @@
+
+
+
+
+
+
+
+
+          ┌──────────────────────────────────────────────────────────────────────────────┐
+          │ Redeem a Claude reset credit?                                                │
+          │ Claude reached its weekly usage limit. The limit resets in 3 days. This      │
+          │ reset credit expires in 2 days.                                              │
+          │                                                                              │
+          │ ❯ 1. Cancel                                                                  │
+          │   2. Redeem reset credit                                                     │
+          └──────────────────────────────────────────────────────────────────────────────┘

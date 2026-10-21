@@ -48,8 +48,7 @@ pub fn all_pids() -> Vec<u32> {
     }
 }
 
-/// The process's start time at whole-second resolution, or `None` if unavailable.
-pub fn start_time(pid: u32) -> Option<DateTime<Utc>> {
+fn bsd_info(pid: u32) -> Option<libc::proc_bsdinfo> {
     let pid = c_int::try_from(pid).ok().filter(|&pid| pid > 0)?;
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let size = size_of::<libc::proc_bsdinfo>() as c_int;
@@ -65,7 +64,17 @@ pub fn start_time(pid: u32) -> Option<DateTime<Utc>> {
     if written != size {
         return None;
     }
-    let info = unsafe { info.assume_init() };
+    Some(unsafe { info.assume_init() })
+}
+
+/// The process's parent id, or `None` once it has exited.
+pub fn parent_pid(pid: u32) -> Option<u32> {
+    Some(bsd_info(pid)?.pbi_ppid)
+}
+
+/// The process's start time at whole-second resolution, or `None` if unavailable.
+pub fn start_time(pid: u32) -> Option<DateTime<Utc>> {
+    let info = bsd_info(pid)?;
     // Session identities store lstart timestamps with whole-second precision.
     DateTime::from_timestamp(i64::try_from(info.pbi_start_tvsec).ok()?, 0)
 }

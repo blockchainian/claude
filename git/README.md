@@ -9,7 +9,7 @@ open "vscode://blockchainian.git/view-pr?repo=/abs/path/to/repo&url=https://gith
 ```
 
 - `view-commit` opens the repository in VS Code's git view, then runs the built-in `git.viewCommit` on `sha`, any commit name git accepts.
-- `view-folder` focuses the window that has `path` open, or opens it in a new window, never replacing the current one. A plain `vscode://file/<folder>` link replaces the last active window instead.
+- `view-folder` focuses the window that has `path` open, or opens it in a new window, never replacing a window that has a folder; a link that starts VS Code opens the folder in the window it starts with. A plain `vscode://file/<folder>` link replaces the last active window instead.
 - `view-pr` opens the pull request's description in the window of the repository holding `repo`, opening or focusing that window first. It needs the GitHub Pull Requests extension.
 
 ## Install

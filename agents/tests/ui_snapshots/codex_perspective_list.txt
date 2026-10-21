@@ -1,0 +1,37 @@
+root
+Spawn agent alpha
+Spawn agent beta
+Wait agent
+beta ← message
+Wait agent
+alpha → message
+Wait agent
+beta → message
+Wait agent
+beta → message
+Wait agent
+beta → beta 完成
+Wait agent
+alpha → alpha 完成
+alpha ← followup task
+Wait agent
+alpha → 追加完成
+
+alpha
+root → new task
+Spawn agent alpha_kid
+Wait agent
+alpha_kid → 孙子完成
+beta ← message
+root ← message
+root → new task
+
+beta
+root → new task
+root → message
+alpha → message
+Wait
+root ← 2 messages
+
+alpha_kid
+alpha → new task

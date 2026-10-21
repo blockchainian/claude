@@ -1,0 +1,2 @@
+{"type": "attachment", "timestamp": "2026-10-16T06:03:25.924Z", "attachment": {"type": "model", "identity": {"modelId": "claude-sonnet-5-5", "marketingName": "Sonnet 5.5", "knowledgeCutoff": "June 2026"}, "text": "You are powered by the model named Sonnet 5.5. The exact model ID is claude-sonnet-5-5. Assistant knowledge cutoff is June 2026."}}
+{"type": "assistant", "timestamp": "2026-10-16T06:03:29.945Z", "message": {"model": "claude-sonnet-5-5", "content": []}}

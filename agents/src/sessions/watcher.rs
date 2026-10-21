@@ -26,6 +26,12 @@ fn relevant(event: &notify::Event) -> bool {
         && (event.paths.is_empty()
             || event.paths.iter().any(|path| {
                 path.file_name().is_none_or(|name| name != "agents.json")
+                    // Manager inbox polling creates and removes these lock directories
+                    // even without messages; their contents do not change session state.
+                    && !path.components().any(|component| {
+                        let name = component.as_os_str().to_string_lossy();
+                        name.ends_with(".jsonl.lock") || name.ends_with(".json.lock")
+                    })
                     && path
                         .extension()
                         .is_none_or(|extension| extension != "key" && extension != "tmp")

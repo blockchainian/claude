@@ -1,5 +1,5 @@
 use super::rollout::{summary, tail};
-use crate::log::{Event, Kind};
+use crate::event::{Event, Kind};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -58,11 +58,12 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
 fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "type (exit 1)");
+    assert_eq!(entries[0].kind, Kind::Error);
+    assert_eq!(entries[0].body, "type · 1");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
+    assert_eq!(activity.exit_code, Some(1));
 }
 
 #[test]
@@ -77,7 +78,7 @@ fn file_change_uses_record_paths() {
         .next()
         .unwrap()
         .clone();
-    assert_eq!(entries[0].body, format!("apply_patch {path}"));
+    assert_eq!(entries[0].body, format!("Apply patch {path}"));
     assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], record);
@@ -87,7 +88,7 @@ fn file_change_uses_record_paths() {
 fn mcp_call_uses_record_server_tool_and_duration() {
     let entries = events("mcp");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "claude.ask_claude");
+    assert_eq!(entries[0].body, "claude ask claude");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("mcp")[0]);
 }
@@ -111,10 +112,7 @@ fn long_command_written_after_wrapper_output_retains_command_duration() {
 fn web_extension_is_tool_activity() {
     let entries = events("extension");
     assert_eq!(entries.len(), 1);
-    assert_eq!(
-        entries[0].body,
-        "web.search site:pond.dflow.net \"dev-quote-api.dflow.net\""
-    );
+    assert_eq!(entries[0].body, "Extension");
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records("extension")[0]);
 }
@@ -124,28 +122,89 @@ fn image_view_retains_image_path_for_rendering() {
     let entries = events("image-view");
     assert_eq!(entries.len(), 1);
     let records = records("image-view");
-    let path = records[0]["payload"]["item"]["path"].as_str().unwrap();
-    let path = path.strip_prefix("file://").unwrap();
-    assert_eq!(entries[0].body, format!("view_image {path}"));
-    assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
+    assert_eq!(entries[0].body, "ImageView");
+    assert!(entries[0].paths.is_empty());
+    let crate::event::Section::Structured { text, .. } = &entries[0].calls[0].input[0] else {
+        panic!("image arguments require JSON");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(text).unwrap()["path"],
+        records[0]["payload"]["item"]["path"]
+    );
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records[0]);
 }
 
 #[test]
 fn subagent_activity_is_rendered() {
-    let entries = events("subagent");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "subagent interacted (/root)");
-    assert_eq!(entries[0].kind, Kind::Tool);
+    assert!(events("subagent").is_empty());
 }
 
 #[test]
 fn collaboration_tool_activity_is_rendered() {
-    let entries = events("collaboration");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "wait");
-    assert_eq!(entries[0].kind, Kind::Tool);
+    assert!(events("collaboration").is_empty());
+}
+
+#[test]
+fn completed_subagent_items_have_finished_calls_without_pairing_item_ids() {
+    assert!(events("subagent-completed").is_empty());
+}
+
+#[test]
+fn completed_subagent_calls_finish_as_each_record_arrives() {
+    use std::io::Write;
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    let mut reader = super::rollout::Reader::new(file.path().to_path_buf(), false);
+    for record in records("subagent-completed") {
+        writeln!(file, "{record}").unwrap();
+        let update = reader.refresh(100).unwrap();
+        assert!(
+            update
+                .events
+                .iter()
+                .flat_map(|event| &event.calls)
+                .all(|call| call.output.is_some())
+        );
+    }
+}
+
+#[test]
+fn completed_collaboration_calls_finish_for_every_tool_and_status() {
+    for tool in [
+        "spawn_agent",
+        "send_input",
+        "resume_agent",
+        "close_agent",
+        "wait",
+    ] {
+        for status in ["completed", "failed"] {
+            let mut record = records("collaboration").remove(0);
+            record["payload"]["item"]["tool"] = tool.into();
+            record["payload"]["item"]["status"] = status.into();
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), format!("{record}\n")).unwrap();
+            let entries = tail(file.path(), 100).unwrap();
+            assert!(entries.is_empty(), "{tool}: {status}");
+        }
+    }
+}
+
+#[test]
+fn completed_items_without_result_bodies_are_finished() {
+    for name in [
+        "subagent",
+        "collaboration",
+        "extension",
+        "image-view",
+        "image-generation",
+    ] {
+        for entry in events(name) {
+            assert!(
+                entry.calls.iter().all(|call| call.output.is_some()),
+                "{name}: {entry:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -168,10 +227,10 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 }
 
 #[test]
-fn file_change_without_start_log_anchors_at_completion() {
+fn file_change_without_start_event_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "apply_patch /workspace/project/design.md");
+    assert_eq!(entries[0].body, "Apply patch /workspace/project/design.md");
     let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
     assert_eq!(entries[0].started_at, completion);
     assert_eq!(entries[0].ended_at, Some(completion));
@@ -184,7 +243,7 @@ fn file_change_without_start_summary_succeeds() {
         .unwrap()
         .activity
         .unwrap();
-    assert_eq!(activity.label, "apply_patch /workspace/project/design.md");
+    assert_eq!(activity.label, "Apply patch /workspace/project/design.md");
     assert_eq!(
         activity.at,
         DateTime::from_timestamp_millis(1781329074517).unwrap()
@@ -392,7 +451,7 @@ fn image_fixture(name: &str) -> PathBuf {
 }
 
 #[test]
-fn prompt_image_wrappers_are_not_log_text() {
+fn prompt_image_wrappers_are_not_event_text() {
     for name in ["wrapped", "fallback"] {
         let records: Vec<Value> = std::fs::read_to_string(image_fixture(name))
             .unwrap()
@@ -457,7 +516,7 @@ fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].images,
-            [crate::log::Image {
+            [crate::event::Image {
                 label: "[Image #1]".into(),
                 path: image.clone()
             }]
@@ -560,7 +619,7 @@ fn session_prompt_images_belong_to_first_user_message() {
         let session = sessions.iter().find(|s| s.id.id == "thread-0").unwrap();
         assert_eq!(
             session.prompt_images,
-            [crate::log::Image {
+            [crate::event::Image {
                 label: "[Image #1]".into(),
                 path: image.clone()
             }]
@@ -596,15 +655,17 @@ fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
         ],
     );
     assert!(
-        super::rollout::first_prompt_images(&path, later_text)
+        super::rollout::first_prompt(&path, later_text)
             .unwrap()
+            .0
             .is_empty()
     );
     // The wrapper path is usable even before the following event is appended.
     write_image_records(&path, &later[..1]);
     assert_eq!(
-        super::rollout::first_prompt_images(&path, later_text)
+        super::rollout::first_prompt(&path, later_text)
             .unwrap()
+            .0
             .len(),
         1
     );
@@ -614,8 +675,9 @@ fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
     write_image_records(&path, &[plain, later[0].clone(), later[1].clone()]);
     let first_text = first[0]["payload"]["content"][3]["text"].as_str().unwrap();
     assert!(
-        super::rollout::first_prompt_images(&path, first_text)
+        super::rollout::first_prompt(&path, first_text)
             .unwrap()
+            .0
             .is_empty()
     );
 }
@@ -638,4 +700,154 @@ fn wrapper_path_precedes_event_path_and_unavailable_path_falls_back() {
     records[1]["payload"]["turn_id"] = "different-turn".into();
     write_image_records(&path, &records);
     assert!(tail(&path, 100).unwrap()[0].images.is_empty());
+}
+
+#[test]
+fn shell_command_display_keeps_raw_name_command_output_and_timing() {
+    let entries = events("shell");
+    assert_eq!(entries.len(), 1);
+    let event = &entries[0];
+    let call = &event.calls[0];
+    assert_eq!(event.body, "sleep");
+    assert_eq!(call.name, "exec_command");
+    assert_eq!(call.title, "sleep");
+    assert_eq!(call.event_detail_title, "sleep");
+    assert_eq!(call.event_detail_left, "Exec command");
+    assert_eq!(
+        call.input,
+        vec![crate::event::Section::Shell {
+            text: "sleep 60".into(),
+            prefix: 0,
+        }]
+    );
+    assert_eq!(call.output, Some(Vec::new()));
+    assert_eq!(call.exit_code, None);
+    assert_record_timing(event, &records("shell")[1]);
+}
+
+#[test]
+fn chained_shell_subject_groups_subcommands_without_arguments() {
+    let entries = events("git-chain");
+    assert_eq!(entries.len(), 1);
+    let event = &entries[0];
+    let call = &event.calls[0];
+    assert_eq!(event.body, "git {status, diff}, sed");
+    assert_eq!(call.title, event.body);
+    assert_eq!(call.event_detail_title, "git {status, diff}, sed");
+    assert_eq!(call.event_detail_left, "Exec command");
+    assert!(event.paths.is_empty());
+    assert_eq!(call.name, "exec_command");
+    assert!(
+        matches!(&call.input[0], crate::event::Section::Shell { text, .. } if text.contains("git status --short && git diff --name-only"))
+    );
+    assert_record_timing(event, &records("git-chain")[1]);
+    assert_eq!(
+        summary(&fixture("git-chain"))
+            .unwrap()
+            .activity
+            .unwrap()
+            .label,
+        event.body
+    );
+}
+
+#[test]
+fn interaction_functions_win_over_completed_items() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/parent.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].summary(), "Spawn agent demo_sub");
+    assert_eq!(rows[0].calls[0].event_detail_left, "Spawn agent");
+    assert_eq!(
+        rows[0].calls[0].input,
+        vec![crate::event::Section::Markdown {
+            label: String::new(),
+            text: "(encrypted)".into()
+        }]
+    );
+    assert_eq!(rows[1].summary(), "Wait agent");
+    assert_eq!(
+        rows[1].calls[0].input,
+        vec![crate::event::Section::Prose {
+            text: "70000".into(),
+            markdown: false
+        }]
+    );
+    assert_eq!(
+        rows[1].calls[0].output,
+        Some(vec![crate::event::Section::Text {
+            label: "output".into(),
+            text: "Wait completed.".into()
+        }])
+    );
+    assert_eq!(rows[2].summary(), "demo_sub → 演示完成");
+}
+
+#[test]
+fn interaction_messages_keep_route_and_merge_adjacent_sender() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    assert_eq!(rows[0].summary(), "root → new task");
+    assert_eq!(rows[0].calls[0].event_detail_left, "New task");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/codex-interaction/messages.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    assert!(
+        rows.iter()
+            .any(|row| row.summary().contains("messages") && row.calls.len() > 1)
+    );
+    assert!(rows.iter().all(|row| !row.summary().contains("encrypted")));
+}
+
+#[test]
+fn interaction_message_group_survives_small_tail_page() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/codex-interaction/messages.jsonl");
+    let all = tail(&path, 100).unwrap();
+    for count in 1..all.len() {
+        assert_eq!(tail(&path, count).unwrap(), all[all.len() - count..]);
+    }
+}
+
+#[test]
+fn protocol_titles_use_sentence_case() {
+    assert_eq!(crate::providers::tool::title_name("ImageView"), "ImageView");
+    assert_eq!(
+        crate::providers::tool::title_name("FINAL_ANSWER"),
+        "Final answer"
+    );
+}
+
+#[test]
+fn child_function_message_uses_session_sender() {
+    let child = include_str!("../../../tests/fixtures/codex-interaction/child.jsonl");
+    let message = include_str!("../../../tests/fixtures/codex-collaboration/send_message.jsonl");
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        file.path(),
+        format!("{}\n{}", child.lines().next().unwrap(), message),
+    )
+    .unwrap();
+    let rows = tail(file.path(), 100).unwrap();
+    assert_eq!(rows[0].summary(), "rename_gating ← message");
+    let mut reader = super::rollout::Reader::new(file.path().to_owned(), false);
+    assert_eq!(
+        reader.refresh(100).unwrap().events[0].summary(),
+        "rename_gating ← message"
+    );
+}
+
+#[test]
+fn child_real_command_and_extension_have_complete_event_detail() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
+    let rows = tail(&path, 100).unwrap();
+    let command = rows.iter().find(|row| row.body == "sleep").unwrap();
+    assert!(
+        matches!(&command.calls[0].input[0], crate::event::Section::Shell { text, .. } if text == "sleep 60")
+    );
+    assert_eq!(command.duration.unwrap().num_seconds(), 59);
+    assert!(rows.iter().any(|row| row.body == "Extension"));
 }

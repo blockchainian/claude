@@ -1,0 +1,35 @@
+Claude
+
+
+
+Opus
+Opus 5.5
+Opus 5
+
+Fable
+Fable 5.1
+
+Sonnet
+Sonnet 5.5
+Sonnet 5
+
+Haiku
+Haiku 5.5
+---
+Codex
+
+
+Sol
+GPT-6.1-Sol
+GPT-6-Sol
+GPT-5.6-Sol
+
+Astra
+GPT-6-Astra
+
+Luna
+GPT-6-Luna
+GPT-5.6-Luna
+
+Terra
+GPT-5.6-Terra

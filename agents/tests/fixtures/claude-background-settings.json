@@ -1,0 +1,15 @@
+{
+  "template": "bg",
+  "sessionId": "b1a9a77c-c423-41e8-886a-fed1513eb68d",
+  "respawnFlags": [
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--model",
+    "sonnet",
+    "--effort",
+    "low"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-09-19T22:48:39.115Z",
+  "ordinal": 6113,
+  "type": "event_msg",
+  "payload": {
+    "type": "item_completed",
+    "thread_id": "[scrubbed]",
+    "turn_id": "[scrubbed]",
+    "item": {
+      "type": "McpToolCall",
+      "id": "[scrubbed]",
+      "server": "appium-mcp",
+      "tool": "appium_session_management",
+      "arguments": {
+        "action": "create",
+        "platform": "ios",
+        "capabilities": "[scrubbed]"
+      },
+      "readOnlyHint": false,
+      "status": "completed",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "IOS session created successfully with ID: [scrubbed]\nPlatform: iOS\nAutomation: XCUITest\nDevice: iPhone Simulator\nActive sessions: 1"
+          },
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "[scrubbed]",
+              "mimeType": "text/html",
+              "text": "[scrubbed]"
+            }
+          }
+        ]
+      },
+      "duration": {
+        "secs": 4,
+        "nanos": 313603208
+      }
+    },
+    "started_at_ms": 1789858114802,
+    "completed_at_ms": 1789858119115
+  }
+}

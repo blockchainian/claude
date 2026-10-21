@@ -1,5 +1,7 @@
 # Codex inner activity records
 
+- `subagent-completed.jsonl`: verbatim records from `2026/10/18/rollout-2026-10-18T09-54-54-01a14ff0-0c10-70f2-aaff-6b6b6c7bc8aa.jsonl`, lines 12, 21, 22 and 32. Includes distinct started/completed item IDs for the same agent, completed collaboration wait, and task completion.
+
 Extracted from real local Codex rollouts. Source paths below are relative to the Codex `sessions/` directory. Identity metadata, command output, patch diff, MCP result, and wrapper output bodies were omitted; activity fields and timestamps were retained. Review-mode details in the non-activity fixture were also omitted.
 
 - `file-change.jsonl`: `2026/10/03/rollout-2026-10-03T17-51-35-01a10465-1340-71c0-a3e6-c74f8578f5bc.jsonl`, lines 84.
@@ -16,3 +18,9 @@ Extracted from real local Codex rollouts. Source paths below are relative to the
 
 - `file-change-without-start.jsonl`: `2026/06/12/rollout-2026-06-12T22-31-00-019ebf76-46e6-7da2-acdd-4676737d367e.jsonl`, lines 150–152. Patch path scrubbed; timing fields retained, including the absent start.
 - `image-generation.jsonl`: `2026/07/21/rollout-2026-07-21T19-13-52-019f8461-d57c-7870-920d-fcac3f017a77.jsonl`, line 162. Image result omitted, prompt scrubbed, optional saved path omitted.
+
+- `../codex-command-failed.jsonl`: command completion from the same source as `command.jsonl`, line 14. Command, output, path and identifiers anonymized; non-zero exit and timing retained.
+
+- `shell.jsonl`: `2026/10/18/rollout-2026-10-18T09-54-58-01a14ff0-1c14-74c0-8f40-4d7f85ae6ecc.jsonl`, lines 17 and 27. Retains the `exec` wrapper and `sleep 60` command completion; local cwd and wrapper metadata omitted.
+
+- `git-chain.jsonl`: `2026/10/17/rollout-2026-10-17T15-01-09-01a14be2-1370-7d62-a0ba-e135a25424e6.jsonl`, lines 53, 56 and 57. Retains the exec wrapper, completed command, and wrapper output; covers repeated git subcommands and a pipeline. Local worktree paths are replaced with `/workspace`; command text is unchanged.

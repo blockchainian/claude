@@ -1,0 +1,3 @@
+{"type":"attachment","attachment":{"type":"model","identity":{"modelId":"claude-opus-5-5","marketingName":"Opus 5.5","knowledgeCutoff":"June 2026"}},"cwd":"/tmp/project","sessionId":"model-identity","timestamp":"2026-10-16T23:05:43.557Z","uuid":"model-identity-attachment"}
+{"type":"user","message":{"role":"user","content":"Which model are you?"},"cwd":"/tmp/project","sessionId":"model-identity","timestamp":"2026-10-16T23:05:44.000Z","uuid":"model-identity-user"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Opus."}]},"cwd":"/tmp/project","sessionId":"model-identity","timestamp":"2026-10-16T23:05:45.000Z","uuid":"model-identity-assistant"}

@@ -31,6 +31,9 @@ pub fn bin_of(at: DateTime<Utc>) -> i64 {
 pub struct Series {
     /// Nonempty bins by bin number.
     pub bins: BTreeMap<i64, Bin>,
+    context_tokens: Option<u64>,
+    context_window: Option<u64>,
+    claude_context: crate::providers::claude::context::Context,
     /// Bytes of complete records read so far.
     read: u64,
     /// When the next request started: the latest input record, else the end of the last request.
@@ -43,8 +46,15 @@ pub struct Series {
 }
 
 impl Series {
-    /// Reads the records appended to `path` since the last update; returns whether bins changed.
+    pub fn context_percent(&self) -> Option<u64> {
+        let tokens = self.context_tokens?;
+        let window = self.context_window.filter(|window| *window > 0)?;
+        u64::try_from((u128::from(tokens) * 100 + u128::from(window) / 2) / u128::from(window)).ok()
+    }
+
+    /// Reads appended records; returns whether the bins or context percentage changed.
     pub fn update(&mut self, path: &Path, provider: ProviderId) -> io::Result<bool> {
+        let before_context = self.context_percent();
         let mut file = File::open(path)?;
         let len = file.metadata()?.len();
         if len < self.read {
@@ -52,12 +62,12 @@ impl Series {
             *self = Self::default();
         }
         if len == self.read {
-            return Ok(false);
+            return Ok(self.context_percent() != before_context);
         }
         let before = self.bins.clone();
         self.read =
             crate::jsonl::read_lines(&mut file, self.read, |line| self.record(line, provider))?;
-        Ok(self.bins != before)
+        Ok(self.bins != before || self.context_percent() != before_context)
     }
 
     fn record(&mut self, line: &[u8], provider: ProviderId) {
@@ -80,13 +90,14 @@ impl Series {
                 let Some(ClaudeMessage {
                     id: Some(id),
                     usage: Some(usage),
+                    model,
                 }) = record.message
                 else {
                     return;
                 };
-                let prompt = usage.input_tokens
-                    + usage.cache_creation_input_tokens
-                    + usage.cache_read_input_tokens;
+                let prompt = usage.prompt_tokens();
+                self.context_tokens = Some(prompt);
+                self.context_window = self.claude_context.window(model.as_deref(), prompt);
                 let output = usage.output_tokens;
                 match &mut self.last_request {
                     Some((_, counted_output)) if self.message.as_ref() == Some(&id) => {
@@ -116,6 +127,19 @@ impl Series {
             return;
         };
         match record.kind.as_str() {
+            "event_msg" => match payload.kind.as_deref() {
+                Some("task_started") => self.context_window = payload.model_context_window,
+                Some("token_count") => {
+                    if let Some(info) = payload.info {
+                        self.context_tokens =
+                            info.last_token_usage.and_then(|usage| usage.total_tokens);
+                        if let Some(window) = info.model_context_window {
+                            self.context_window = Some(window);
+                        }
+                    }
+                }
+                _ => {}
+            },
             "response_item" => {
                 let kind = payload.kind.as_deref().unwrap_or_default();
                 let sent = kind.ends_with("_output")
@@ -199,6 +223,7 @@ struct ClaudeRecord {
 
 #[derive(Deserialize)]
 struct ClaudeMessage {
+    model: Option<String>,
     id: Option<String>,
     usage: Option<ClaudeUsage>,
 }
@@ -215,6 +240,12 @@ struct ClaudeUsage {
     output_tokens: u64,
 }
 
+impl ClaudeUsage {
+    fn prompt_tokens(&self) -> u64 {
+        self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
+    }
+}
+
 #[derive(Deserialize)]
 struct CodexRecord {
     timestamp: String,
@@ -229,10 +260,19 @@ struct CodexPayload {
     kind: Option<String>,
     role: Option<String>,
     usage: Option<CodexUsage>,
+    info: Option<CodexContext>,
+    model_context_window: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct CodexContext {
+    last_token_usage: Option<CodexUsage>,
+    model_context_window: Option<u64>,
 }
 
 #[derive(Deserialize)]
 struct CodexUsage {
+    total_tokens: Option<u64>,
     /// Every prompt token, cached ones included.
     #[serde(default)]
     input_tokens: u64,
@@ -264,6 +304,92 @@ mod tests {
     const CLAUDE_TOOL_RESULT: &str = r#"{"parentUuid":"a","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_1","type":"tool_result","content":"ok"}]},"uuid":"b","timestamp":"2026-10-14T10:25:28.100Z","sessionId":"s"}"#;
     const CLAUDE_THINKING: &str = r#"{"parentUuid":"b","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_01EYBBw4","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"","signature":"x"}],"stop_reason":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":36336,"cache_read_input_tokens":14755,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":36336},"output_tokens":260,"service_tier":"standard"}},"type":"assistant","uuid":"c","timestamp":"2026-10-14T10:25:37.798Z","sessionId":"s"}"#;
     const CLAUDE_TOOL_USE: &str = r#"{"parentUuid":"c","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_01EYBBw4","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"ls"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":36336,"cache_read_input_tokens":14755,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":36336},"output_tokens":260,"service_tier":"standard"}},"type":"assistant","uuid":"d","timestamp":"2026-10-14T10:25:37.804Z","sessionId":"s"}"#;
+
+    #[test]
+    fn context_usage_claude_uses_model_window_table() {
+        for (fixture, percent) in [("opus", Some(24)), ("old", Some(12)), ("unknown", None)] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/fixtures/claude-context/{fixture}.jsonl"));
+            let mut usage = Series::default();
+            usage.update(&path, ProviderId::Claude).unwrap();
+            assert_eq!(usage.context_percent(), percent, "{fixture}");
+        }
+    }
+
+    #[test]
+    fn context_usage_claude_remembers_long_context_after_compaction() {
+        let mut record: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/claude-context/opus.jsonl"))
+                .unwrap();
+        record["message"]["model"] = "claude-opus-4-6".into();
+        let first = record.to_string();
+        record["message"]["id"] = "compacted-response".into();
+        record["message"]["usage"]["cache_read_input_tokens"] = 50_000.into();
+        let second = record.to_string();
+        let (mut file, mut usage) = series(ProviderId::Claude, &[&first]);
+        assert_eq!(usage.context_percent(), Some(24));
+        writeln!(file, "{second}").unwrap();
+        usage.update(file.path(), ProviderId::Claude).unwrap();
+        assert_eq!(usage.context_percent(), Some(5));
+        record["message"]["model"] = "unlisted-model".into();
+        writeln!(file, "{record}").unwrap();
+        usage.update(file.path(), ProviderId::Claude).unwrap();
+        assert_eq!(usage.context_percent(), None);
+    }
+
+    #[test]
+    fn context_usage_codex_uses_last_request_not_cumulative_or_cached_tokens() {
+        let (_file, usage) = series(ProviderId::Codex, &[CODEX_TOKEN_COUNT]);
+        assert_eq!(usage.context_percent(), Some(29));
+    }
+
+    #[test]
+    fn context_usage_codex_can_take_window_from_task_started() {
+        let started = include_str!("../tests/fixtures/codex-rollout.jsonl")
+            .lines()
+            .find(|line| line.contains("task_started"))
+            .unwrap();
+        let mut count: serde_json::Value = serde_json::from_str(CODEX_TOKEN_COUNT).unwrap();
+        count["payload"]["info"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model_context_window");
+        let count = count.to_string();
+        let (_file, usage) = series(ProviderId::Codex, &[started, &count]);
+        assert_eq!(usage.context_percent(), Some(16));
+    }
+
+    #[test]
+    fn context_usage_changes_without_chart_bins_and_resets_after_rewrite() {
+        let (mut file, mut usage) = series(ProviderId::Codex, &[]);
+        writeln!(file, "{CODEX_TOKEN_COUNT}").unwrap();
+        assert!(usage.update(file.path(), ProviderId::Codex).unwrap());
+        assert_eq!(usage.context_percent(), Some(29));
+        assert!(!usage.update(file.path(), ProviderId::Codex).unwrap());
+        std::fs::write(file.path(), "").unwrap();
+        assert!(usage.update(file.path(), ProviderId::Codex).unwrap());
+        assert_eq!(usage.context_percent(), None);
+    }
+
+    #[test]
+    fn context_usage_requires_codex_usage_and_positive_window() {
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            let (_file, usage) = series(provider, &[]);
+            assert_eq!(usage.context_percent(), None);
+        }
+        for model in [Some("unlisted-model"), None] {
+            let mut message: serde_json::Value = serde_json::from_str(CLAUDE_THINKING).unwrap();
+            message["message"]["model"] = model.into();
+            let message = message.to_string();
+            let (_file, usage) = series(ProviderId::Claude, &[&message]);
+            assert_eq!(usage.context_percent(), None);
+        }
+        let mut count: serde_json::Value = serde_json::from_str(CODEX_TOKEN_COUNT).unwrap();
+        count["payload"]["info"]["model_context_window"] = 0.into();
+        let count = count.to_string();
+        let (_file, usage) = series(ProviderId::Codex, &[&count]);
+        assert_eq!(usage.context_percent(), None);
+    }
 
     #[test]
     fn claude_counts_one_response_once_with_input_at_its_start() {

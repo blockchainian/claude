@@ -1,0 +1,154 @@
+{
+  "updatedAt": 1792464842301,
+  "threads": [
+    {
+      "id": "01a156ce-a291-7681-8b90-364fa628caa5",
+      "name": "问题断线实验",
+      "cwd": "/workspace/project",
+      "turnId": "01a156ce-a425-77a0-a8bb-f02c7a3f3fc2",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15705-6c49-7123-ac61-ef728a249f2a",
+      "name": "改名模块",
+      "cwd": "/workspace/project",
+      "turnId": "01a15705-6df4-7cd0-8de3-3cc7a3d51ced",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15705-8ae5-7843-9eb8-04e0b92eef57",
+      "name": "改名记录文件",
+      "cwd": "/workspace/project",
+      "turnId": "01a15705-8c92-78a2-894d-6c37c9d7a9e1",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15705-be0b-7643-94f8-48b53f8a2b5c",
+      "name": "改名事件列表",
+      "cwd": "/workspace/project",
+      "turnId": "01a15705-bfa6-7053-88ce-de271777f9c7",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15705-f06b-7f40-9b91-9ffb4740303c",
+      "name": "改名两种详情",
+      "cwd": "/workspace/project",
+      "turnId": "01a15705-f1fa-77e2-a3e1-b6709816351a",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15706-04c4-76f3-abc5-bc269e0b22d7",
+      "name": "改名任务键",
+      "cwd": "/workspace/project",
+      "turnId": "01a15706-0658-7080-b7a2-a028be302cdf",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a1571e-0916-7062-a402-5d6a82d5243b",
+      "name": "任务状态骨架",
+      "cwd": "/workspace/project",
+      "turnId": "01a1571e-0ae4-73f0-a46a-1eb065e32ee3",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a1571e-3441-7d12-aeb5-9ee0fa0daca3",
+      "name": "状态文件格式",
+      "cwd": "/workspace/project",
+      "turnId": "01a1571e-35e4-7c10-8b6b-988db08777fa",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a1571e-518a-7c70-a038-8543180d3622",
+      "name": "Claude 重启代答",
+      "cwd": "/workspace/project",
+      "turnId": "01a1571e-5325-7b30-9464-047bdb72745d",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a1571e-7937-7992-8026-8b16c7c7fe0c",
+      "name": "半截回答写盘",
+      "cwd": "/workspace/project",
+      "turnId": "01a1571e-7ad5-79c0-9043-8862db02b436",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15720-bb25-7640-950b-aecf4b9ffa27",
+      "name": "日志列表跟任务",
+      "cwd": "/workspace/project",
+      "turnId": "01a15720-bcc1-7761-855e-3c1883e70446",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15720-d042-7161-9fcb-0bc8cb4c3d5d",
+      "name": "日志详情跟任务",
+      "cwd": "/workspace/project",
+      "turnId": "01a15720-d1e0-7ee2-b025-949369d91843",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a15720-eb23-76b1-a8ef-1aa738f257de",
+      "name": "焦点和编辑器",
+      "cwd": "/workspace/project",
+      "turnId": "01a15720-ecbb-7db0-b341-4790faf8fd94",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a1572d-b319-7d92-8ac4-33e96235c041",
+      "name": "全量检查和安装",
+      "cwd": "/workspace/project",
+      "turnId": "01a1572d-b4c2-7f81-87cf-be84a0152734",
+      "lastStatus": "completed",
+      "waiting": [],
+      "owner": "main",
+      "detached": true
+    },
+    {
+      "id": "01a1573a-ec5c-7c41-af9a-a40c72bd6208",
+      "name": "切回焦点没恢复",
+      "cwd": "/workspace/project",
+      "turnId": "01a1573a-ee08-7341-aea3-b35b8fb37dc4",
+      "lastStatus": "inProgress",
+      "waiting": [],
+      "owner": "main"
+    }
+  ]
+}

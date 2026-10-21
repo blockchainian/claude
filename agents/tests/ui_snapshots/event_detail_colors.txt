@@ -1,0 +1,40 @@
+Assistant
+  Assistant: Yellow BOLD
+  plain: Reset NONE
+  bold: Reset BOLD
+  link: Reset NONE
+  Heading: Reset BOLD
+  let value: Indexed(23) NONE
+  list plain: Yellow
+Agent
+  Agent: Yellow BOLD
+  plain: Reset NONE
+  bold: Reset BOLD
+  link: Reset NONE
+  Heading: Reset BOLD
+  let value: Indexed(23) NONE
+  list plain: Yellow
+Error
+  Error: Red BOLD
+  plain: Reset NONE
+  bold: Reset NONE
+  link: Reset NONE
+  Heading: Reset NONE
+  let value: Reset NONE
+  list plain: Red
+Denied
+  Denied: Red BOLD
+  plain: Reset NONE
+  bold: Reset NONE
+  link: Reset NONE
+  Heading: Reset NONE
+  let value: Reset NONE
+  list plain: Red
+QueuedSystem
+  Queue: Indexed(24) BOLD
+  plain: Reset NONE
+  bold: Reset BOLD
+  link: Reset NONE
+  Heading: Reset BOLD
+  let value: Indexed(23) NONE
+  list plain: Indexed(24)

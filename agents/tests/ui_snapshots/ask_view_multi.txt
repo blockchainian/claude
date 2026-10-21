@@ -1,0 +1,14 @@
+ Multi · Submit
+
+Probe multiple choices?
+
+› 1. [ ] Red
+     Red choice
+  2. [ ] Green
+     Green choice
+  3. [ ] Blue
+     Blue choice
+  4. [ ] Type something.
+
+
+←/→ switch · ↑/↓ move · Enter to confirm · Esc to cancel

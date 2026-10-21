@@ -1,12 +1,12 @@
 //! Sends input through a temporary, screen-checked Claude attach client.
 
-use crate::providers::SessionInput;
+use crate::providers::{ScreenInput, SessionInput};
 use std::fs::File;
-use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::process::CommandExt;
+use std::hash::{Hash, Hasher};
+use std::io;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -18,14 +18,24 @@ pub(super) fn send(
     settings_path: &Path,
     input: SessionInput,
 ) -> io::Result<()> {
-    if job_id.is_empty() || job_id.starts_with('-') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid Claude job id",
-        ));
-    }
+    validate_job_id(job_id)?;
     match &input {
         SessionInput::Prompt(text) => validate_text(text)?,
+        SessionInput::PromptWithImages { text, images } => {
+            validate_text(text)?;
+            if images.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "No image attachments",
+                ));
+            }
+            for path in images {
+                image_path(path)?;
+            }
+        }
+        SessionInput::Rename(_) | SessionInput::Answer { .. } => {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
         SessionInput::SetModel(value) | SessionInput::SetEffort(value) => {
             if value.is_empty() || value.chars().any(char::is_whitespace) {
                 return Err(io::Error::new(
@@ -68,6 +78,58 @@ pub(super) fn inspect(job_id: &str, cwd: &Path) -> io::Result<String> {
     }
 }
 
+/// Leaves `text` in Claude's input without submitting it.
+#[cfg(test)]
+pub(super) fn type_input(job_id: &str, cwd: &Path, text: &str) -> io::Result<()> {
+    let mut terminal = Terminal::spawn(job_id, cwd)?;
+    let result = terminal.wait_at("type-ready", ready).and_then(|()| {
+        terminal.paste(text)?;
+        terminal.wait_at("typed", left_input)
+    });
+    let detached = terminal.detach();
+    result.and(detached)
+}
+
+/// Clears text left in Claude's input, such as the prompt Claude restores after an interrupt,
+/// with Ctrl+U only: Esc or Ctrl+C would end the running turn and any pending AskUserQuestion.
+pub(super) fn clear_left_input(terminal: &mut dyn ScreenInput) -> io::Result<()> {
+    let mut screen = terminal.wait_for("initial-screen", &|screen| {
+        ready(screen) || left_input(screen)
+    })?;
+    while left_input(&screen) {
+        let before = editor_text(&screen);
+        // Ctrl+U deletes the text before the cursor on its line, then the line break.
+        terminal.write(b"\x15")?;
+        // Claude redraws the box in steps, so a frame without the box is not a result.
+        screen = terminal.wait_for("input-cleared", &|screen| {
+            input_box(screen).is_some() && editor_text(screen) != before
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_job_id(job_id: &str) -> io::Result<()> {
+    if job_id.is_empty()
+        || job_id.starts_with('-')
+        || Path::new(job_id).file_name() != Some(std::ffi::OsStr::new(job_id))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid Claude job id",
+        ));
+    }
+    Ok(())
+}
+
+fn input_lock_path(config_dir: &Path, job_id: &str) -> std::path::PathBuf {
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    config_dir.hash(&mut hash);
+    std::env::temp_dir()
+        .join("agents-attach-locks")
+        .join(format!("{:016x}", hash.finish()))
+        .join(format!("{job_id}.lock"))
+}
+
 fn validate_text(text: &str) -> io::Result<()> {
     if text
         .chars()
@@ -81,92 +143,170 @@ fn validate_text(text: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// A separate bracketed paste makes Claude load the file as an image attachment.
+fn image_path(path: &Path) -> io::Result<String> {
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Image path is not valid UTF-8")
+    })?;
+    if text.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid image path",
+        ));
+    }
+    let path = path.canonicalize()?;
+    if !path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Image path is not a file",
+        ));
+    }
+    let text = path.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Image path is not valid UTF-8")
+    })?;
+    Ok(format!("'{}'", text.replace('\'', "'\\''")))
+}
+
+fn editor_text(screen: &str) -> String {
+    let Some((row, _)) = prompt(screen) else {
+        return String::new();
+    };
+    screen
+        .lines()
+        .skip(row)
+        .take_while(|line| !line.trim_start().starts_with('─'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn image_visible(screen: &str, count: usize) -> bool {
+    editor_text(screen)
+        .split("[Image #")
+        .skip(1)
+        .filter(|suffix| {
+            suffix.split_once(']').is_some_and(|(number, _)| {
+                !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        })
+        .count()
+        == count
+}
+
+#[derive(Default)]
+struct SynchronizedOutput {
+    active: bool,
+}
+
+impl vt100::Callbacks for SynchronizedOutput {
+    fn unhandled_csi(
+        &mut self,
+        _: &mut vt100::Screen,
+        first: Option<u8>,
+        second: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if first == Some(b'?') && second.is_none() && params.iter().any(|param| *param == [2026]) {
+            match command {
+                'h' => self.active = true,
+                'l' => self.active = false,
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Defers screen checks until Claude finishes its synchronized redraw.
+struct OutputScreen {
+    parser: vt100::Parser<SynchronizedOutput>,
+}
+
+impl OutputScreen {
+    fn new() -> Self {
+        Self {
+            parser: vt100::Parser::new_with_callbacks(50, 200, 0, SynchronizedOutput::default()),
+        }
+    }
+
+    fn process(&mut self, bytes: &[u8]) {
+        self.parser.process(bytes);
+    }
+
+    fn contents(&self) -> String {
+        self.parser.screen().contents()
+    }
+
+    fn complete(&self) -> Option<String> {
+        (!self.parser.callbacks().active).then(|| self.contents())
+    }
+}
+
 struct Terminal {
-    child: Child,
-    master: File,
-    parser: vt100::Parser,
+    pty: crate::pty::Pty,
+    parser: OutputScreen,
+    // Attach clients share Claude's cursor and editor. Hold this through detach so
+    // page inspection cannot navigate while another client is answering.
+    _input_lock: File,
     #[cfg(test)]
     raw: Vec<u8>,
 }
 
 impl Terminal {
     fn spawn(job_id: &str, cwd: &Path) -> io::Result<Self> {
-        let mut master = -1;
-        let mut slave = -1;
-        let mut size = libc::winsize {
-            ws_row: 50,
-            ws_col: 200,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        // openpty returns independent owned descriptors on success.
-        if unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut size,
-            )
-        } != 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let master = unsafe { File::from_raw_fd(master) };
-        let slave = unsafe { File::from_raw_fd(slave) };
-        // Only the standard descriptors belong in the executed attach process.
-        for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
-            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
-                return Err(io::Error::last_os_error());
+        validate_job_id(job_id)?;
+        let lock_path = input_lock_path(&super::config_dir(), job_id);
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(lock_path.parent().expect("input lock directory"))?;
+        let input_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(lock_path)?;
+        let deadline = Instant::now() + READY_TIMEOUT;
+        loop {
+            match input_lock.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Claude input is busy in another dashboard",
+                    ));
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(error),
             }
         }
         let mut command = Command::new("claude");
-        command
-            .args(["attach", job_id])
-            .current_dir(cwd)
-            .env("TERM", "xterm-256color")
-            .stdin(Stdio::from(slave.try_clone()?))
-            .stdout(Stdio::from(slave.try_clone()?))
-            .stderr(Stdio::from(slave));
-        unsafe {
-            command.pre_exec(move || {
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let child = command.spawn()?;
+        command.args(["attach", job_id]).current_dir(cwd);
+        let pty = crate::pty::Pty::spawn(command, 50, 200)?;
         Ok(Self {
-            child,
-            master,
-            parser: vt100::Parser::new(50, 200, 0),
+            pty,
+            parser: OutputScreen::new(),
+            _input_lock: input_lock,
             #[cfg(test)]
             raw: Vec::new(),
         })
     }
 
     fn screen(&self) -> String {
-        self.parser.screen().contents()
+        self.parser.contents()
     }
 
     fn unexpected(&self, reason: &str) -> io::Error {
-        let screen = self.screen();
-        let first = screen
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("empty screen");
-        io::Error::other(format!("{reason}: {first}"))
+        screen_error(reason, &self.screen())
     }
 
     fn diagnostic(&self, stage: &str, error: io::Error) -> io::Error {
         #[cfg(test)]
         {
             let directory = std::env::temp_dir().join("agents-stage3-live");
-            let name = format!("driver-{}-{stage}", self.child.id());
+            let name = format!("driver-{}-{stage}", self.pty.pid());
             let saved = std::fs::create_dir_all(&directory)
                 .and_then(|()| {
                     std::fs::write(directory.join(format!("{name}.screen.txt")), self.screen())
@@ -198,16 +338,17 @@ impl Terminal {
     ) -> io::Result<()> {
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
-            let screen = self.screen();
-            if predicate(&screen) {
-                return Ok(());
+            if let Some(screen) = self.parser.complete() {
+                if predicate(&screen) {
+                    return Ok(());
+                }
+                if known_dialog(&screen)
+                    && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
+                {
+                    return Err(self.unexpected("Claude attach needs a response"));
+                }
             }
-            if known_dialog(&screen)
-                && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
-            {
-                return Err(self.unexpected("Claude attach needs a response"));
-            }
-            if self.child.try_wait()?.is_some() {
+            if self.pty.exited()? {
                 return Err(self.unexpected("Claude attach exited"));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -219,54 +360,33 @@ impl Terminal {
     }
 
     fn read(&mut self, timeout: Duration) -> io::Result<()> {
-        let mut descriptor = libc::pollfd {
-            fd: self.master.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let result = unsafe {
-            libc::poll(
-                &mut descriptor,
-                1,
-                timeout.as_millis().min(i32::MAX as u128) as i32,
-            )
-        };
-        if result < 0 {
-            let error = io::Error::last_os_error();
-            return if error.kind() == io::ErrorKind::Interrupted {
-                Ok(())
-            } else {
-                Err(error)
-            };
+        let mut bytes = Vec::new();
+        if !self.pty.read(timeout, &mut bytes)? {
+            return Err(self.unexpected("Claude attach closed its terminal"));
         }
-        if result == 0 {
-            return Ok(());
-        }
-        let mut bytes = [0; 65536];
-        match self.master.read(&mut bytes) {
-            Ok(0) => Err(self.unexpected("Claude attach closed its terminal")),
-            Ok(count) => {
-                #[cfg(test)]
-                self.raw.extend_from_slice(&bytes[..count]);
-                self.parser.process(&bytes[..count]);
-                Ok(())
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(()),
-            Err(error) => Err(error),
-        }
+        #[cfg(test)]
+        self.raw.extend_from_slice(&bytes);
+        self.parser.process(&bytes);
+        Ok(())
     }
 
     fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.master.write_all(bytes)?;
-        self.master.flush()
+        self.pty.write(bytes)
+    }
+
+    fn paste(&mut self, text: &str) -> io::Result<()> {
+        self.write(b"\x1b[200~")?;
+        self.write(text.as_bytes())?;
+        self.write(b"\x1b[201~")
     }
 
     fn submit(&mut self, text: &str) -> io::Result<String> {
-        self.write(b"\x1b[200~")?;
-        self.write(text.as_bytes())?;
-        self.write(b"\x1b[201~")?;
+        let before = editor_text(&self.screen());
+        self.paste(text)?;
         // Observe the paste before Enter, so the unchanged empty prompt cannot acknowledge it.
-        self.wait_at("paste-visible", paste_visible)?;
+        self.wait_at("paste-visible", |screen| {
+            paste_visible(screen) && editor_text(screen) != before
+        })?;
         let screen = self.screen();
         let pasted_input = prompt(&screen)
             .ok_or_else(|| self.unexpected("Claude input disappeared before submission"))?
@@ -277,6 +397,7 @@ impl Terminal {
     }
 
     fn deliver(&mut self, input: SessionInput) -> io::Result<()> {
+        clear_left_input(self)?;
         self.wait_at("initial-ready", ready)?;
         match input {
             SessionInput::Prompt(text) => {
@@ -288,55 +409,103 @@ impl Terminal {
                     prompt_accepted(screen, &pasted_input)
                 })
             }
+            SessionInput::PromptWithImages { text, images } => {
+                for (index, path) in images.iter().enumerate() {
+                    self.paste(&image_path(path)?)?;
+                    self.wait_at("image-attached", |screen| image_visible(screen, index + 1))?;
+                }
+                let pasted_input = if text.is_empty() {
+                    let pasted = prompt(&self.screen())
+                        .ok_or_else(|| self.unexpected("Claude image input disappeared"))?
+                        .1
+                        .to_owned();
+                    self.write(b"\r")?;
+                    pasted
+                } else {
+                    self.submit(&text)?
+                };
+                self.wait_at("image-submission-accepted", |screen| {
+                    prompt_accepted(screen, &pasted_input)
+                })
+            }
             SessionInput::Interrupt => self.write(b"\x1b"),
+            SessionInput::Rename(_) | SessionInput::Answer { .. } => {
+                Err(io::ErrorKind::Unsupported.into())
+            }
             SessionInput::SetModel(model) => {
+                let choices = super::models::input_choices(&super::config_dir(), None);
+                let label = choices
+                    .model(&model)
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "Unknown Claude model")
+                    })?
+                    .label
+                    .clone();
                 self.submit(&format!("/model {model}"))?;
                 self.wait_at("model-confirmation", |screen| {
-                    screen.contains("Switch model?")
+                    screen.contains("Switch model?") || model_selected(screen, &label)
                 })?;
+                if !self.screen().contains("Switch model?") {
+                    return Ok(());
+                }
                 self.write(b"\r")?;
                 // The parsed confirmation remains visible until Claude redraws after Enter.
                 self.wait_allowing(
-                    |screen| !screen.contains("Switch model?") && actual_empty(screen),
+                    |screen| !screen.contains("Switch model?") && model_selected(screen, &label),
                     Some("Switch model?"),
                 )
                 .map_err(|error| self.diagnostic("model-confirmation-cleared", error))
             }
             SessionInput::SetEffort(effort) => {
+                const CONFIRMATION: &str = "Your next response will be slower and use more tokens";
                 self.submit(&format!("/effort {effort}"))?;
-                self.wait_at("effort-submission-cleared", actual_empty)
+                self.wait_at("effort-confirmation", |screen| {
+                    actual_empty(screen)
+                        || (screen.contains(CONFIRMATION)
+                            && screen.contains(&format!("Yes, switch to {effort}")))
+                })?;
+                if !self.screen().contains(CONFIRMATION) {
+                    return Ok(());
+                }
+                self.write(b"\r")?;
+                self.wait_allowing(actual_empty, Some(CONFIRMATION))
+                    .map_err(|error| self.diagnostic("effort-confirmation-cleared", error))
             }
         }
     }
 
     fn detach(&mut self) -> io::Result<()> {
-        let write = self.write(b"\x1a");
-        let deadline = Instant::now() + DETACH_TIMEOUT;
-        loop {
-            if self.child.try_wait()?.is_some() {
-                return write;
-            }
-            if Instant::now() >= deadline {
-                self.child.kill()?;
-                self.child.wait()?;
-                return write;
-            }
-            // Drain output while waiting: a full PTY buffer must not block the child's exit.
-            let _ = self.read(Duration::from_millis(50));
-        }
+        self.pty.close(Some(b"\x1a"), DETACH_TIMEOUT)
     }
 }
 
-impl Drop for Terminal {
-    fn drop(&mut self) {
-        match self.child.try_wait() {
-            Ok(Some(_)) => {}
-            _ => {
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-            }
-        }
+impl ScreenInput for Terminal {
+    fn wait_for(&mut self, stage: &str, ready: &dyn Fn(&str) -> bool) -> io::Result<String> {
+        self.wait_at(stage, ready)?;
+        Ok(self.screen())
     }
+
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.pty.write(bytes)
+    }
+}
+
+fn screen_error(reason: &str, screen: &str) -> io::Error {
+    let mut lines: Vec<String> = screen
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.chars().all(|ch| ch == '─'))
+        .rev()
+        .take(4)
+        .map(|line| line.chars().take(160).collect())
+        .collect();
+    lines.reverse();
+    let summary = if lines.is_empty() {
+        "empty screen".into()
+    } else {
+        lines.join(" | ")
+    };
+    io::Error::other(format!("{reason}; screen: {summary}"))
 }
 
 fn prompt(screen: &str) -> Option<(usize, &str)> {
@@ -368,6 +537,46 @@ fn ready(screen: &str) -> bool {
         prompt_state(screen),
         Some(PromptState::Empty | PromptState::Queued)
     )
+}
+
+/// The state of Claude's own input box, which opens below a rule; a dialog's `❯` selection
+/// cursor and a transcript prompt are not the box.
+fn input_box(screen: &str) -> Option<PromptState<'_>> {
+    let (row, _) = prompt(screen)?;
+    row.checked_sub(1)
+        .and_then(|above| screen.lines().nth(above))
+        .is_some_and(|line| line.trim_start().starts_with('─'))
+        .then(|| prompt_state(screen))
+        .flatten()
+}
+
+fn left_input(screen: &str) -> bool {
+    matches!(input_box(screen), Some(PromptState::Editing(_)))
+}
+
+fn model_selected(screen: &str, label: &str) -> bool {
+    if input_box(screen) != Some(PromptState::Empty) {
+        return false;
+    }
+    let header = screen.lines().take(5).any(|line| {
+        line.split_once(" · ").is_some_and(|(model, _)| {
+            let model = model.trim_start_matches(|ch: char| !ch.is_alphanumeric());
+            model == label
+                || model
+                    .rsplit_once(" with ")
+                    .is_some_and(|(model, effort)| model == label && effort.ends_with(" effort"))
+        })
+    });
+    // Long transcripts scroll the header away; their status line is below the editor.
+    let row = prompt(screen).expect("empty input box has a prompt").0;
+    let footer = screen.lines().skip(row + 2).any(|line| {
+        let model = line.trim().split(" · ").next().unwrap_or("");
+        model == label
+            || model
+                .rsplit_once(' ')
+                .is_some_and(|(model, _effort)| model == label)
+    });
+    header || footer
 }
 
 fn actual_empty(screen: &str) -> bool {
@@ -407,6 +616,145 @@ fn known_dialog(screen: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attach_lock_is_outside_claude_config_and_is_scoped_by_config_and_job() {
+        let first = Path::new("/config/first");
+        let path = input_lock_path(first, "job");
+        assert!(!path.starts_with(first));
+        assert!(path.starts_with(std::env::temp_dir().join("agents-attach-locks")));
+        assert_eq!(path, input_lock_path(first, "job"));
+        assert_ne!(path, input_lock_path(Path::new("/config/second"), "job"));
+        assert_ne!(path, input_lock_path(first, "other"));
+    }
+
+    #[test]
+    fn captured_model_header_includes_the_selected_effort() {
+        let screen =
+            include_str!("../../../tests/fixtures/claude-attach/model-effort-header.screen.txt");
+        assert!(model_selected(screen, "Sonnet 5"));
+        assert!(!model_selected(screen, "Sonnet 5.5"));
+        assert!(!model_selected(screen, "Opus 5.5"));
+    }
+
+    #[test]
+    #[ignore = "starts a real Claude background session and restores global model defaults"]
+    fn real_model_command_without_confirmation() {
+        let cwd = std::env::current_dir().unwrap();
+        let output = Command::new("claude")
+            .args([
+                "--bg",
+                "--model",
+                "haiku",
+                "--setting-sources",
+                "",
+                "--strict-mcp-config",
+                "--mcp-config",
+                "{\"mcpServers\":{}}",
+                "--",
+                "Reply exactly READY. Do not use tools.",
+            ])
+            .current_dir(&cwd)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        let job = text
+            .lines()
+            .find_map(|line| line.split("backgrounded · ").nth(1))
+            .expect("background job id")
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_owned();
+        let result = std::panic::catch_unwind(|| {
+            let settings = super::super::config_dir().join("settings.json");
+            super::super::settings::with_restored_defaults(&settings, || {
+                let mut terminal = Terminal::spawn(&job, &cwd)?;
+                let invalid = terminal
+                    .deliver(SessionInput::SetModel("agents-nonexistent-model".into()))
+                    .unwrap_err();
+                assert_eq!(invalid.kind(), io::ErrorKind::InvalidInput);
+                let result = terminal.deliver(SessionInput::SetModel("claude-opus-5-5".into()));
+                let directory = cwd.join("scratchpad/model-confirmation");
+                std::fs::create_dir_all(&directory)?;
+                std::fs::write(directory.join("model.raw"), &terminal.raw)?;
+                std::fs::write(directory.join("model.screen.txt"), terminal.screen())?;
+                terminal.detach()?;
+                drop(terminal);
+                result?;
+                let screen = inspect(&job, &cwd)?;
+                std::fs::write(directory.join("reattached.screen.txt"), &screen)?;
+                assert!(screen.contains("Opus 5.5"), "{screen}");
+                Ok(())
+            })
+            .unwrap();
+        });
+        for command in ["stop", "rm"] {
+            let output = Command::new("claude")
+                .args([command, &job])
+                .current_dir(&cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "cleanup {command}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
+    fn captured_long_session_confirms_the_model_below_the_editor() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/model-footer.screen.txt");
+        assert!(model_selected(screen, "Opus 5.5"));
+        assert!(!model_selected(screen, "Fable 5.1"));
+        assert!(!model_selected(screen, "Opus 5"));
+    }
+
+    #[test]
+    fn captured_model_command_completes_without_a_confirmation_dialog() {
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/model-command.raw");
+        let mut screen = OutputScreen::new();
+        screen.process(raw);
+        let screen = screen.complete().expect("completed model command redraw");
+        assert!(screen.contains("Opus 5.5"), "{screen}");
+        assert!(!screen.contains("Switch model?"), "{screen}");
+        assert!(model_selected(&screen, "Opus 5.5"), "{screen}");
+        assert!(!model_selected(&screen, "Fable 5.1"), "{screen}");
+    }
+
+    #[test]
+    fn captured_question_redraw_waits_for_synchronized_output_end() {
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/synchronized-question.raw");
+        let end = raw
+            .windows(8)
+            .position(|bytes| bytes == b"\x1b[?2026l")
+            .unwrap();
+        for chunk_size in [1, 7, 37, 512] {
+            let mut screen = OutputScreen::new();
+            for bytes in raw[..end + 7].chunks(chunk_size) {
+                screen.process(bytes);
+            }
+            assert!(screen.contents().contains("First"));
+            assert!(screen.contents().contains("Enter to select"));
+            assert!(
+                screen.complete().is_none(),
+                "incomplete synchronized redraw accepted with {chunk_size}-byte chunks"
+            );
+            screen.process(&raw[end + 7..]);
+            let complete = screen.complete().expect("completed synchronized redraw");
+            assert!(complete.contains("First"));
+            assert!(complete.contains("Second"));
+        }
+    }
 
     #[test]
     fn captured_queue_placeholder_accepts_another_input() {
@@ -452,19 +800,49 @@ mod tests {
     #[test]
     fn captured_terminal_output_contains_ready_before_detaching() {
         let raw = include_bytes!("../../../tests/fixtures/claude-attach/attach.raw");
-        let mut parser = vt100::Parser::new(50, 200, 0);
+        let mut parser = OutputScreen::new();
         let mut saw_ready = false;
         for chunk in raw.chunks(37) {
             parser.process(chunk);
-            saw_ready |= ready(&parser.screen().contents());
+            saw_ready |= parser.complete().is_some_and(|screen| ready(&screen));
         }
-        let screen = parser.screen().contents();
+        let screen = parser.complete().expect("completed terminal output");
         assert!(
             saw_ready,
             "No empty input appeared in the real terminal capture: {screen}"
         );
         assert!(screen.contains("Resume this session with:"), "{screen}");
         assert!(!ready(&screen));
+    }
+
+    #[test]
+    fn captured_interrupted_prompt_is_left_input() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/interrupted.screen.txt");
+        assert!(left_input(screen), "{screen}");
+        assert!(!ready(screen));
+    }
+
+    #[test]
+    fn captured_idle_and_busy_screens_have_no_left_input() {
+        for screen in [
+            include_str!("../../../tests/fixtures/claude-attach/idle.screen.txt"),
+            include_str!("../../../tests/fixtures/claude-attach/busy.screen.txt"),
+            include_str!("../../../tests/fixtures/claude-attach/queued.screen.txt"),
+        ] {
+            assert!(!left_input(screen), "{screen}");
+        }
+    }
+
+    #[test]
+    fn captured_question_cursor_is_not_left_input() {
+        let raw = include_bytes!("../../../tests/fixtures/claude-attach/synchronized-question.raw");
+        let mut parser = OutputScreen::new();
+        parser.process(raw);
+        let screen = parser.complete().expect("completed question screen");
+        assert!(prompt(&screen).is_some(), "{screen}");
+        assert!(!left_input(&screen), "{screen}");
+        // A paste and Enter on a dialog would select its option.
+        assert!(!ready(&screen), "{screen}");
     }
 
     #[test]
@@ -503,4 +881,31 @@ mod tests {
     fn prompt_accepts_multiline_unicode_text() {
         assert!(validate_text("第一行\nsecond line\t✓").is_ok());
     }
+
+    #[test]
+    fn timeout_reports_captured_editor_and_footer_in_one_line() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/idle.screen.txt");
+        let message = screen_error("Claude attach timed out", screen).to_string();
+        assert!(message.starts_with("Claude attach timed out; screen: "));
+        assert!(message.contains("❯"), "{message}");
+        assert!(message.contains("auto mode on"), "{message}");
+        assert!(!message.contains("Claude Code v2.1.299"), "{message}");
+        assert_eq!(message.lines().count(), 1);
+    }
+
+    #[test]
+    fn screen_error_reports_empty_screen() {
+        assert_eq!(
+            screen_error("Claude attach timed out", "\n  \n").to_string(),
+            "Claude attach timed out; screen: empty screen"
+        );
+    }
 }
+
+#[cfg(test)]
+#[path = "attach_input_tests.rs"]
+mod input_tests;
+
+#[cfg(test)]
+#[path = "attach_image_tests.rs"]
+mod image_tests;

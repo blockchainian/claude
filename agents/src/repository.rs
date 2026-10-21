@@ -70,6 +70,64 @@ pub fn repository_identity(cwd: &Path) -> Option<RepositoryIdentity> {
     })
 }
 
+/// One row of the repository browser.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BrowseEntry {
+    Parent(PathBuf),
+    /// A folder that is not a repository but holds one a level or two below.
+    Folder(PathBuf),
+    /// A primary checkout; a linked worktree's `.git` file does not count.
+    Repository(PathBuf),
+}
+
+/// Lists `dir`'s parent, then its subfolders that are, or lead to, primary repositories, by name.
+pub fn browse_entries(dir: &Path) -> Vec<BrowseEntry> {
+    let mut entries: Vec<_> = dir
+        .parent()
+        .map(|parent| BrowseEntry::Parent(parent.to_path_buf()))
+        .into_iter()
+        .collect();
+    let mut children: Vec<_> = browsable_folders(dir)
+        .filter_map(|path| {
+            if is_primary_repository(&path) {
+                Some(BrowseEntry::Repository(path))
+            } else if leads_to_repository(&path, 2) {
+                Some(BrowseEntry::Folder(path))
+            } else {
+                None
+            }
+        })
+        .collect();
+    children.sort_by_key(|entry| match entry {
+        BrowseEntry::Parent(path) | BrowseEntry::Folder(path) | BrowseEntry::Repository(path) => {
+            path.file_name().map(|name| name.to_os_string())
+        }
+    });
+    entries.extend(children);
+    entries
+}
+
+fn is_primary_repository(path: &Path) -> bool {
+    path.join(".git").is_dir()
+}
+
+/// Real, visible subfolders: symlinks and dot-folders are skipped.
+fn browsable_folders(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .map(|entry| entry.path())
+}
+
+fn leads_to_repository(dir: &Path, depth: usize) -> bool {
+    depth > 0
+        && browsable_folders(dir)
+            .any(|path| is_primary_repository(&path) || leads_to_repository(&path, depth - 1))
+}
+
 /// The nearest ancestor holding a `.git` entry: a file for linked worktrees, a directory with `HEAD` otherwise.
 fn checkout_root(base_dir: &Path) -> Option<PathBuf> {
     let mut dir = base_dir.to_path_buf();
@@ -100,6 +158,32 @@ fn read_git_path(path: &Path, relative_to: &Path, prefix: &str) -> Option<PathBu
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn browse_lists_primary_repositories_and_folders_that_lead_to_them() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        for path in [
+            "b-repo/.git",
+            "a-folder/inner/deep/.git",
+            "c-empty/inner",
+            ".hidden/repo/.git",
+            "d-too-deep/one/two/three/.git",
+        ] {
+            fs::create_dir_all(dir.join(path)).unwrap();
+        }
+        fs::create_dir(dir.join("e-worktree")).unwrap();
+        fs::write(dir.join("e-worktree/.git"), "gitdir: elsewhere").unwrap();
+        fs::write(dir.join("f-file"), "").unwrap();
+        assert_eq!(
+            browse_entries(dir),
+            [
+                BrowseEntry::Parent(dir.parent().unwrap().to_path_buf()),
+                BrowseEntry::Folder(dir.join("a-folder")),
+                BrowseEntry::Repository(dir.join("b-repo")),
+            ]
+        );
+    }
 
     fn git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")

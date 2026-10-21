@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-09-19T21:09:49.349Z",
+  "ordinal": 1216,
+  "type": "event_msg",
+  "payload": {
+    "type": "item_completed",
+    "thread_id": "[scrubbed]",
+    "turn_id": "[scrubbed]",
+    "item": {
+      "type": "McpToolCall",
+      "id": "[scrubbed]",
+      "server": "codex_apps",
+      "tool": "plugin_management.uninstall_app",
+      "arguments": {
+        "app_ids": [
+          "computer-use@openai-bundled"
+        ],
+        "reason": "Unified Computer Use 已取代该旧入口，避免重复加载。"
+      },
+      "connectorId": "connector_openai_plugin_management",
+      "linkId": "[scrubbed]",
+      "appName": "Plugin Management",
+      "actionName": "uninstall_app",
+      "readOnlyHint": false,
+      "status": "completed",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Action completed."
+          }
+        ],
+        "structuredContent": {
+          "meta": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "computer-use@openai-bundled was not installed.",
+              "annotations": null,
+              "meta": null
+            }
+          ],
+          "structuredContent": {
+            "results": [
+              {
+                "app_id": "computer-use@openai-bundled",
+                "status": "not_installed",
+                "reason": "Unified Computer Use 已取代该旧入口，避免重复加载。"
+              }
+            ]
+          },
+          "isError": false
+        },
+        "isError": false
+      },
+      "duration": {
+        "secs": 0,
+        "nanos": 215131625
+      }
+    },
+    "started_at_ms": 1789852179177,
+    "completed_at_ms": 1789852189349
+  }
+}

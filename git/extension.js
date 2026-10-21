@@ -49,10 +49,13 @@ async function viewCommit(_, repo, sha) {
   await vscode.commands.executeCommand('git.viewCommit', vscode.Uri.file(repo), sha);
 }
 
-/** Focuses the window that has `path` open, or opens it in a new one, never replacing the current window. */
+/**
+ * Focuses the window that has `path` open, or opens it, never replacing a window that has a folder.
+ * A link that starts VS Code lands in an empty window, so the folder opens in that one.
+ */
 async function viewFolder(path) {
   await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), {
-    forceNewWindow: true,
+    forceNewWindow: (vscode.workspace.workspaceFolders ?? []).length > 0,
   });
 }
 

@@ -1,30 +1,30 @@
-  Agent command center  Group: Project  g
-   All 3   Ready 2   Working 1   Needs you 0   Inactive 0                                              tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                      Status         Updated  │ Background
-  /tmp/project  3                                                        │ ─ Check files ────────────────────────────╴
-  › ○ Parent task                                Ready           2m ago  │
-    └ ○ Review results                           Ready              now  │ Prompt
-    └ ● Check files                              Working         1m ago  │ Parent task
-                                                                         │
-                                                                         │ Project
-                                                                         │ /tmp/project
-                                                                         │
-                                                                         │ parent-model
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │ ─────────── Ready · Parent task ───────────
-  Parent task ›
-  ? help  esc back  ↑/↓ move  enter open  n new
+  Active 3                                                                                                  Inactive 0
+────────────────────────────────────────────────────────────┬───────────────────────── Ready ───────────────────────────
+                        /tmp/project                        │                        Background
+ ○ Parent task                       Ready           2m ago │ ────────────────────── Check files ──────────────────────
+ ├─ ○ Review results                 Ready              now │
+ └─ ● Check files                    Working         1m ago │                          Prompt
+                                                            │ Parent task
+                                                            │
+                                                            │
+                                                            │
+────────────────────────────────────────────────────────────┴╴project ───────────── Parent task ────────────────────────
+ Parent task ❯
+─────────────────────────────────────────────────────────────╴parent-model ─────────────────────────────────────────────
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ? help  esc previous  ↑/↓ move  enter open  n new

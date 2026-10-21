@@ -1,8 +1,0 @@
-Prompt
-PR task
-
-Project · main
-/tmp/project
-
-Unknown
-

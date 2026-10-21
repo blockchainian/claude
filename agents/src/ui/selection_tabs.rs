@@ -37,12 +37,18 @@ pub(crate) fn render_filled_tab_bar(
     if show_left {
         Line::from("‹")
             .dim()
-            .render(Rect::new(x, area.y, /*width*/ 1, /*height*/ 1), buf);
+            .render(Rect::new(x, area.y, 1, 1), buf);
         x += 2;
     }
     let right = area.right().saturating_sub(u16::from(show_right) * 2);
     let mut regions = Vec::new();
+    let justify = start == 0 && end == labels.len() && labels.len() > 1;
+    let spare = usize::from(area.width).saturating_sub(widths.iter().sum());
     for idx in start..end {
+        if justify {
+            x = area.x
+                + (widths[..idx].iter().sum::<usize>() + spare * idx / (labels.len() - 1)) as u16;
+        }
         let width = widths[idx].min(usize::from(right.saturating_sub(x))) as u16;
         let line = Line::from(format!(" {} ", labels[idx]));
         let line = truncate_line_with_ellipsis_if_overflow(line, usize::from(width));
@@ -51,21 +57,15 @@ pub(crate) fn render_filled_tab_bar(
         } else {
             line.style(inactive_tab_style())
         };
-        let tab = Rect::new(x, area.y, width, /*height*/ 1);
+        let tab = Rect::new(x, area.y, width, 1);
         line.render(tab, buf);
         regions.push((idx, tab));
-        x = x.saturating_add(width).saturating_add(/*rhs*/ 1);
+        x = x.saturating_add(width).saturating_add(1);
     }
     if show_right {
-        Line::from("›").dim().render(
-            Rect::new(
-                area.right() - 1,
-                area.y,
-                /*width*/ 1,
-                /*height*/ 1,
-            ),
-            buf,
-        );
+        Line::from(PROMPT_MARKER)
+            .dim()
+            .render(Rect::new(area.right() - 1, area.y, 1, 1), buf);
     }
     regions
 }

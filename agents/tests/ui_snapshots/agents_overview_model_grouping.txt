@@ -1,24 +1,24 @@
-  Agent command center  Group: Model  g
-   All 4   Ready 4   Working 0   Needs you 0   Inactive 0                          tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                         Status         Updated  │ Prompt
-  Unknown  1                                                │ Legacy task
-  › ○ Legacy task                   Ready           1s ago  │
-                                                            │ Project
-  model-a  2                                                │ /tmp/project
-    ○ Recent task                   Ready           2s ago  │
-    ○ Older task                    Ready           4s ago  │ Unknown
-                                                            │
-  model-b  1                                                │
-    ○ Other model                   Ready           3s ago  │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │ ─────── Ready · Legacy task ────────
-  Legacy task ›
-  ? help  esc back  ↑/↓ move  enter open  n new
+  Active 4                                                                              Inactive 0
+──────────────────────────────────────────────────┬──────────────────── Ready ──────────────────────
+                     Unknown                      │                     Prompt
+ ○ Legacy task             Ready           1s ago │ Legacy task
+                                                  │
+                     model-a                      │
+ ○ Recent task             Ready           2s ago │
+                                                  │
+──────────────────────────────────────────────────┴╴project ──────── Legacy task ───────────────────
+ Legacy task ❯
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ? help  esc previous  ↑/↓ move  enter open  n new

@@ -86,6 +86,69 @@ fn write(
     Ok(())
 }
 
+/// Registers AskUserQuestion without rewriting settings that already contain it.
+pub(super) fn ensure_ask_user_question(path: &Path, port: u16) -> io::Result<()> {
+    let settings = read(path)?;
+    let permissions = settings
+        .as_ref()
+        .map(|settings| settings.permissions.clone());
+    let mut values = settings.map(|settings| settings.values).unwrap_or_default();
+    let invalid = || {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid Claude PreToolUse hooks",
+        )
+    };
+    let hooks = values
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(invalid)?;
+    let entries = hooks
+        .entry("PreToolUse")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(invalid)?;
+    let url = format!("http://127.0.0.1:{port}/ask-user-question");
+    let mut exists = false;
+    for entry in entries.iter() {
+        let entry = entry.as_object().ok_or_else(invalid)?;
+        let matcher = match entry.get("matcher") {
+            None => None,
+            Some(Value::String(matcher)) => Some(matcher.as_str()),
+            Some(_) => return Err(invalid()),
+        };
+        let actions = entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .ok_or_else(invalid)?;
+        for action in actions {
+            let action = action.as_object().ok_or_else(invalid)?;
+            if matcher == Some("AskUserQuestion")
+                && action.get("type").and_then(Value::as_str) == Some("http")
+                && action.get("url").and_then(Value::as_str) == Some(url.as_str())
+                && action.get("timeout").and_then(Value::as_u64) == Some(3600)
+            {
+                exists = true;
+            }
+        }
+    }
+    if exists {
+        return Ok(());
+    }
+    entries.push(serde_json::json!({
+        "matcher": "AskUserQuestion",
+        "hooks": [{"type": "http", "url": url, "timeout": 3600}]
+    }));
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    write(path, &values, permissions)
+}
+
 /// Restores Claude's global model and effort defaults after an operation changes them.
 pub(super) fn with_restored_defaults<T>(
     path: &Path,
@@ -304,5 +367,81 @@ mod tests {
         fs::remove_file(&path).unwrap();
         with_restored_defaults(&path, || Ok(())).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn ask_user_question_adds_http_configuration_and_preserves_settings_and_permissions() {
+        let (directory, path) = fixture();
+        let mut before = read(&path);
+        before["permissions"] = json!({"allow": ["Read"]});
+        before["hooks"] = json!({"Stop": [{"hooks": [{"type": "command", "command": "true"}]}]});
+        write(&path, &before);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        ensure_ask_user_question(&path, 31337).unwrap();
+
+        let after = read(&path);
+        for key in ["model", "effortLevel", "permissions"] {
+            assert_eq!(after[key], before[key]);
+        }
+        assert_eq!(after["hooks"]["Stop"], before["hooks"]["Stop"]);
+        assert_eq!(
+            after["hooks"]["PreToolUse"],
+            json!([{
+                "matcher": "AskUserQuestion",
+                "hooks": [{"type": "http", "url": "http://127.0.0.1:31337/ask-user-question", "timeout": 3600}]
+            }])
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn ask_user_question_keeps_existing_equivalent_configuration_byte_for_byte() {
+        let (_directory, path) = fixture();
+        let existing = r#"{ "model":"haiku", "hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"true"},{"type":"http","url":"http://127.0.0.1:31337/ask-user-question","timeout":3600,"headers":{"X-Test":"retained"}}]}]}}"#;
+        fs::write(&path, existing).unwrap();
+        ensure_ask_user_question(&path, 31337).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), existing);
+    }
+
+    #[test]
+    fn ask_user_question_creates_missing_directory_and_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config/settings.json");
+        ensure_ask_user_question(&path, 31337).unwrap();
+        let settings = read(&path);
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["matcher"],
+            "AskUserQuestion"
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn ask_user_question_rejects_malformed_structure_without_changing_file() {
+        let (_directory, path) = fixture();
+        for invalid in [
+            "{broken",
+            "[]",
+            r#"{"hooks":null}"#,
+            r#"{"hooks":{"PreToolUse":{}}}"#,
+            r#"{"hooks":{"PreToolUse":[null]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":null}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[false]}]}}"#,
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert_eq!(
+                ensure_ask_user_question(&path, 31337).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+        }
     }
 }
