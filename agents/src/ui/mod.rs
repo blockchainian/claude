@@ -807,7 +807,7 @@ impl View {
         queue.sort_by_key(|&index| {
             let row = &self.rows[index];
             (
-                self.after_skip(
+                self.queue_position(
                     row,
                     row.ask.as_ref().map_or(row.updated_at, |ask| ask.since),
                 ),
@@ -1361,18 +1361,20 @@ impl View {
             .max_by_key(|&index| {
                 let row = &self.rows[index];
                 (
-                    std::cmp::Reverse(self.after_skip(row, row.updated_at)),
+                    std::cmp::Reverse(self.queue_position(row, row.updated_at)),
                     &row.id,
                 )
             })
             .unwrap_or(usize::MAX)
     }
 
-    /// Moves a task's waiting time to when the user last left it in the attention queue.
-    fn after_skip(&self, row: &Session, since: DateTime<Utc>) -> DateTime<Utc> {
-        self.attention_skips
-            .get(&row.id)
-            .map_or(since, |&skipped| since.max(skipped))
+    /// Orders a task the user left in the attention queue after every task it has not skipped, by
+    /// when it was left, until it starts waiting again.
+    fn queue_position(&self, row: &Session, since: DateTime<Utc>) -> (bool, DateTime<Utc>) {
+        match self.attention_skips.get(&row.id) {
+            Some(&skipped) if skipped >= since => (true, skipped),
+            _ => (false, since),
+        }
     }
 
     pub(crate) fn restore_attention_skips(&mut self, preferences: &crate::state::Preferences) {

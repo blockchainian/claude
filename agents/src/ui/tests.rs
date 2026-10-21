@@ -1555,7 +1555,7 @@ fn needs_input_queue_continues_after_sending_and_returns_to_original_tab() {
 fn needs_input_task_left_waiting_stays_behind_after_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut view = test_view(Grouping::Project, false);
-    let original = session("original", "Original", SessionStatus::Ready, 10);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
     let mut first = session("first", "First", SessionStatus::Working, 120);
     let mut second = session("second", "Second", SessionStatus::Working, 60);
     let select = |view: &mut View, id: &SessionKey| {
@@ -1582,7 +1582,10 @@ fn needs_input_task_left_waiting_stays_behind_after_restart() {
     }
     let mut restarted = test_view(Grouping::Project, false);
     restarted.restore_attention_skips(&crate::state::Preferences::load(dir.path()));
+    restarted.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(restarted.selected_id(), Some(&original.id));
     second.status = SessionStatus::NeedsInput;
+    second.updated_at = Utc::now() + Duration::seconds(1);
     restarted.set_sessions(vec![original, first, second.clone()], false);
     assert_eq!(restarted.selected_id(), Some(&second.id));
 }
