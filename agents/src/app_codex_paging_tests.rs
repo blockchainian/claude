@@ -148,8 +148,5 @@ fn c2_pins_do_not_block_loading_older_timeline_events() {
         row: separator + 1,
         modifiers: KeyModifiers::NONE,
     }));
-    assert_eq!(
-        app.view.event_list.cursor,
-        Some(app.view.matching_event_count() - 1)
-    );
+    assert_eq!(app.view.event_list.cursor, Some(1));
 }

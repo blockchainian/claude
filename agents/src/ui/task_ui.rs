@@ -36,7 +36,8 @@ pub(crate) struct EventList {
     pub cursor: Option<usize>,
     pub scroll: std::cell::Cell<usize>,
     pub pinned_scroll: std::cell::Cell<usize>,
-    pub(super) section_return: Option<EventRow>,
+    /// Keeps the timeline at its tail while a pin owns the selection.
+    pub(super) pinned_following: bool,
     pub restoring: bool,
     pub(super) tail: Option<EventId>,
 }

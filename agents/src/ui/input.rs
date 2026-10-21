@@ -60,6 +60,7 @@ impl View {
             .as_ref()
             .and_then(|saved| saved.event)
             .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
+        self.event_list.pinned_following = false;
         self.event_list.sort = sorting;
         self.prepare_event_search();
         self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
@@ -1205,24 +1206,7 @@ impl View {
                 } else if over_list {
                     self.move_selection(forward);
                 } else if over_event && self.viewport.borrow().event_panel.contains(position) {
-                    let hovered_pins = {
-                        let viewport = self.viewport.borrow();
-                        let offset = usize::from(mouse.row - viewport.event_panel.y);
-                        viewport.event_separator.and_then(|separator| {
-                            (offset != separator).then_some(offset > separator)
-                        })
-                    };
-                    let in_pins = matches!(
-                        self.selected_event_row(),
-                        Some(task_ui::EventRow::Pinned(_))
-                    );
-                    if hovered_pins.is_some_and(|pinned| pinned != in_pins) {
-                        self.pending_click = None;
-                        self.event_list.background_return = None;
-                        self.switch_event_section();
-                    } else {
-                        self.move_event_selection(forward);
-                    }
+                    self.move_event_selection(forward);
                 } else if over_task_details && let Some(selector) = self.selector.as_mut() {
                     let code = if forward { KeyCode::Down } else { KeyCode::Up };
                     selector.selected =

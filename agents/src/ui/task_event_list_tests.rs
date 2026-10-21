@@ -214,8 +214,8 @@ fn event_pin_order_and_overlapping_records() {
     let first = view.event_list.pinned[0].pin.clone();
     view.select_event(view.shown_position(2));
     view.toggle_event_pin();
-    assert_eq!(view.event_list.pinned[1].pin, first);
-    let second = view.event_list.pinned[0].pin.clone();
+    assert_eq!(view.event_list.pinned[0].pin, first);
+    let second = view.event_list.pinned[1].pin.clone();
     view.event_panel[1].source_records.extend(second.records);
     view.select_event(view.shown_position(1));
     view.toggle_event_pin();
@@ -223,7 +223,7 @@ fn event_pin_order_and_overlapping_records() {
 }
 
 #[test]
-fn event_pin_repin_moves_row_above_more_recent_pin() {
+fn event_pin_repin_appends_after_remaining_pins() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -235,8 +235,8 @@ fn event_pin_repin_moves_row_above_more_recent_pin() {
     let first = view.event_list.pinned[0].pin.clone();
     view.select_event(view.shown_position(2));
     view.toggle_event_pin();
-    let second = view.event_list.pinned[0].pin.clone();
-    assert_eq!(view.event_list.pinned[1].pin, first);
+    let second = view.event_list.pinned[1].pin.clone();
+    assert_eq!(view.event_list.pinned[0].pin, first);
 
     view.select_event(view.shown_position(1));
     view.toggle_event_pin();
@@ -245,8 +245,8 @@ fn event_pin_repin_moves_row_above_more_recent_pin() {
     view.select_event(view.shown_position(1));
     view.toggle_event_pin();
     assert_eq!(view.event_list.pinned.len(), 2);
-    assert_eq!(view.event_list.pinned[0].pin, first);
-    assert_eq!(view.event_list.pinned[1].pin, second);
+    assert_eq!(view.event_list.pinned[0].pin, second);
+    assert_eq!(view.event_list.pinned[1].pin, first);
 }
 
 #[test]
@@ -391,12 +391,11 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
     view.select_event(view.shown_row_position(EventRow::Pinned(0)));
     view.move_event_selection(true);
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
-    view.switch_event_section();
     view.navigate_event(KeyCode::Home);
     assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
     view.move_event_selection(false);
     assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
-    view.switch_event_section();
+    view.navigate_event(KeyCode::End);
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
     let area = Rect::new(0, 1, 100, 4);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 6));
@@ -441,7 +440,7 @@ fn c2_unpin_selects_nearest_pin_then_same_timeline_event() {
     view.toggle_event_pin();
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
     view.toggle_event_pin();
-    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(2)));
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(1)));
 }
 
 #[test]
@@ -515,7 +514,7 @@ fn event_pin_clock_ends_at_same_display_column_as_timeline() {
 }
 
 #[test]
-fn pinned_sections_keep_navigation_within_focused_section() {
+fn pinned_sections_navigation_clamps_at_list_ends() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -636,62 +635,6 @@ fn event_list_backtick_preserves_selected_row() {
 }
 
 #[test]
-fn pinned_sections_wheel_restores_timeline_and_mouse_focus() {
-    let (_dir, mut view, _, _, _) = fixture();
-    for row in &mut view.rows {
-        row.status = SessionStatus::Ready;
-    }
-    view.status_filter = 0;
-    view.active_panel = Panel::EventList;
-    view.select_event(Some(1));
-    view.toggle_event_pin();
-    view.select_event(view.shown_position(3));
-    let timeline = view.selected_event_row();
-    let area = Rect::new(0, 1, 100, 7);
-    let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 9));
-    view.render_event(area, &mut buffer, Utc::now());
-    for (row, expected) in [(7, Some(EventRow::Pinned(0))), (1, timeline)] {
-        view.handle_mouse(MouseEvent {
-            kind: MouseEventKind::ScrollDown,
-            column: 3,
-            row,
-            modifiers: KeyModifiers::NONE,
-        });
-        assert_eq!(view.selected_event_row(), expected);
-        view.render_event(area, &mut buffer, Utc::now());
-    }
-    for (y, pinned) in [(7, true), (1, false)] {
-        for kind in [
-            MouseEventKind::Down(MouseButton::Left),
-            MouseEventKind::Up(MouseButton::Left),
-        ] {
-            view.handle_mouse(MouseEvent {
-                kind,
-                column: 3,
-                row: y,
-                modifiers: KeyModifiers::NONE,
-            });
-        }
-        assert_eq!(
-            matches!(view.selected_event_row(), Some(EventRow::Pinned(_))),
-            pinned
-        );
-        for _ in 0..20 {
-            view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::ScrollUp,
-                column: 3,
-                row: y,
-                modifiers: KeyModifiers::NONE,
-            });
-        }
-        assert_eq!(
-            matches!(view.selected_event_row(), Some(EventRow::Pinned(_))),
-            pinned
-        );
-    }
-}
-
-#[test]
 fn pinned_sections_scroll_many_pins_without_moving_timeline() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
@@ -707,7 +650,6 @@ fn pinned_sections_scroll_many_pins_without_moving_timeline() {
     view.select_event(None);
     view.render_event(area, &mut buffer, Utc::now());
     let timeline_scroll = view.event_scroll();
-    view.switch_event_section();
     view.navigate_event(KeyCode::End);
     view.render_event(area, &mut buffer, Utc::now());
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(3)));
@@ -719,7 +661,6 @@ fn pinned_sections_scroll_many_pins_without_moving_timeline() {
             .contains(&EventRow::Pinned(3))
     );
     let pinned_scroll = view.event_list.pinned_scroll.get();
-    view.switch_event_section();
     view.navigate_event(KeyCode::Home);
     view.render_event(area, &mut buffer, Utc::now());
     assert_eq!(view.event_list.pinned_scroll.get(), pinned_scroll);
@@ -742,75 +683,47 @@ fn pinned_sections_absent_without_matching_pins() {
 }
 
 #[test]
-fn pinned_sections_wheel_targets_hovered_section_and_restores_selection() {
-    for direction in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
-        let (_dir, mut view, events, _, _) = fixture();
-        for row in &mut view.rows {
-            row.status = SessionStatus::Ready;
+fn pinned_sections_wheel_moves_current_selection_at_every_hover_position() {
+    for height in [4, 8] {
+        for sort in [EventSort::Time, EventSort::Duration] {
+            let (_dir, mut view, _, _, _) = fixture();
+            for row in &mut view.rows {
+                row.status = SessionStatus::Ready;
+            }
+            view.status_filter = 0;
+            for index in [0, 1] {
+                view.select_event(view.shown_position(index));
+                view.toggle_event_pin();
+            }
+            view.set_event_sort(sort);
+            let area = Rect::new(11, 3, 80, height);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 14));
+            for row in area.y..area.bottom() {
+                view.select_event(None);
+                view.render_event(area, &mut buffer, Utc::now());
+                for (kind, expected) in [
+                    (MouseEventKind::ScrollDown, EventRow::Pinned(0)),
+                    (MouseEventKind::ScrollDown, EventRow::Pinned(1)),
+                    (MouseEventKind::ScrollUp, EventRow::Pinned(0)),
+                ] {
+                    view.handle_mouse(MouseEvent {
+                        kind,
+                        column: area.x + 5,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                    assert_eq!(view.selected_event_row(), Some(expected));
+                    view.render_event(area, &mut buffer, Utc::now());
+                }
+                view.handle_mouse(MouseEvent {
+                    kind: MouseEventKind::ScrollUp,
+                    column: area.x + 5,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                });
+                assert_eq!(view.event_list.cursor, view.newest_event_position());
+            }
         }
-        view.status_filter = 0;
-        view.active_panel = Panel::EventList;
-        for index in [0, 1] {
-            view.select_event(view.shown_position(index));
-            view.toggle_event_pin();
-        }
-        view.select_event(view.shown_position(2));
-        let area = Rect::new(11, 3, 80, 8);
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 14));
-        view.render_event(area, &mut buffer, Utc::now());
-        let mut wheel = |kind, row, expected| {
-            view.handle_mouse(MouseEvent {
-                kind,
-                column: area.x + 5,
-                row,
-                modifiers: KeyModifiers::NONE,
-            });
-            assert_eq!(view.selected_event_row(), Some(expected));
-            let event = match expected {
-                EventRow::Pinned(index) => &view.event_list.pinned[index].event,
-                EventRow::Timeline(index) => &events[index],
-            };
-            assert_eq!(view.visible_event().unwrap().source, event.source);
-            view.render_event(area, &mut buffer, Utc::now());
-        };
-        // Switching sections consumes this wheel event.
-        wheel(direction, 9, EventRow::Pinned(0));
-        wheel(MouseEventKind::ScrollDown, 10, EventRow::Pinned(1));
-        wheel(direction, 3, EventRow::Timeline(2));
-        wheel(MouseEventKind::ScrollDown, 4, EventRow::Timeline(3));
-        wheel(direction, 10, EventRow::Pinned(1));
-        // The separator keeps routing wheel events to the selected section.
-        wheel(MouseEventKind::ScrollUp, 8, EventRow::Pinned(0));
-        wheel(direction, 3, EventRow::Timeline(3));
-        wheel(MouseEventKind::ScrollUp, 8, EventRow::Timeline(2));
-    }
-}
-
-#[test]
-fn pinned_sections_wheel_uses_rendered_separator_with_clipped_pins() {
-    let (_dir, mut view, _, _, _) = fixture();
-    for row in &mut view.rows {
-        row.status = SessionStatus::Ready;
-    }
-    view.status_filter = 0;
-    for index in 0..4 {
-        view.select_event(view.shown_position(index));
-        view.toggle_event_pin();
-    }
-    view.select_event(view.shown_position(2));
-    let area = Rect::new(11, 3, 80, 4);
-    let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 10));
-    view.render_event(area, &mut buffer, Utc::now());
-    assert_eq!(view.viewport.borrow().event_separator, Some(1));
-    for (row, expected) in [(5, EventRow::Pinned(0)), (3, EventRow::Timeline(2))] {
-        view.handle_mouse(MouseEvent {
-            kind: MouseEventKind::ScrollDown,
-            column: area.x + 5,
-            row,
-            modifiers: KeyModifiers::NONE,
-        });
-        assert_eq!(view.selected_event_row(), Some(expected));
-        view.render_event(area, &mut buffer, Utc::now());
     }
 }
 
@@ -846,19 +759,16 @@ fn pinned_sections_timeline_restore_and_live_follow_ignore_pin_indices() {
         Some(EventRow::Timeline(events.len()))
     );
     assert!(view.following_event());
-    for key in [KeyCode::Down, KeyCode::PageDown, KeyCode::End] {
-        view.navigate_event(key);
-        assert_eq!(
-            view.selected_event_row(),
-            Some(EventRow::Timeline(events.len()))
-        );
-    }
-    view.switch_event_section();
-    for key in [KeyCode::Up, KeyCode::PageUp, KeyCode::Home] {
-        view.navigate_event(key);
-        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
-        assert!(!view.following_event());
-    }
+    view.navigate_event(KeyCode::Down);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    assert!(!view.following_event());
+    view.navigate_event(KeyCode::Up);
+    assert_eq!(view.event_list.cursor, view.newest_event_position());
+    assert!(view.following_event());
+    view.navigate_event(KeyCode::End);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    view.navigate_event(KeyCode::Home);
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(0)));
 }
 
 #[test]
@@ -883,4 +793,136 @@ fn pinned_sections_short_timeline_keeps_blank_rows_out_of_hit_testing() {
         assert_eq!(viewport.event_row_at(offset), None, "row {offset}");
     }
     assert_eq!(viewport.event_row_at(7), Some(EventRow::Pinned(0)));
+}
+
+#[test]
+fn pinned_navigation_crosses_sections_in_both_sorts_and_pages() {
+    for sort in [EventSort::Time, EventSort::Duration] {
+        let (_dir, mut view, _, _, _) = fixture();
+        for row in &mut view.rows {
+            row.status = SessionStatus::Ready;
+        }
+        view.status_filter = 0;
+        for index in [0, 1, 2] {
+            view.select_event(view.shown_position(index));
+            view.toggle_event_pin();
+        }
+        view.set_event_sort(sort);
+        let area = Rect::new(0, 0, 100, 7);
+        view.render_event(area, &mut Buffer::empty(area), Utc::now());
+        view.select_event(None);
+        let last = view.newest_event_position().unwrap();
+        view.navigate_event(KeyCode::Down);
+        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+        view.navigate_event(KeyCode::Up);
+        assert_eq!(view.event_list.cursor, Some(last));
+        view.navigate_event(KeyCode::PageDown);
+        assert_eq!(
+            view.event_list.cursor,
+            Some((last + view.event_timeline_height().max(1)).min(last + 3))
+        );
+        view.navigate_event(KeyCode::End);
+        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(2)));
+        view.navigate_event(KeyCode::PageUp);
+        assert_eq!(view.event_list.cursor, Some((last + 3).saturating_sub(3)));
+        view.navigate_event(KeyCode::Home);
+        assert_eq!(view.event_list.cursor, Some(0));
+    }
+}
+
+#[test]
+fn pinned_tail_keeps_details_and_follows_updates_and_task_restore() {
+    for reset in [false, true] {
+        let (_dir, mut view, events, first, second) = fixture();
+        for row in &mut view.rows {
+            row.status = SessionStatus::Ready;
+        }
+        view.status_filter = 0;
+        for index in [0, 1] {
+            view.select_event(view.shown_position(index));
+            view.toggle_event_pin();
+        }
+        let area = Rect::new(0, 0, 100, 5);
+        view.select_event(None);
+        view.render_event(area, &mut Buffer::empty(area), Utc::now());
+        view.navigate_event(KeyCode::Down);
+        view.navigate_event(KeyCode::Down);
+        let pinned = view.visible_event().unwrap().clone();
+        let mut appended = events.clone();
+        let mut event = events.last().unwrap().clone();
+        event.source = Some("tail-arrival".into());
+        appended.push(event);
+        view.apply_event_update(crate::event::Update {
+            events: appended.clone(),
+            appended: 1,
+            reset,
+            ..Default::default()
+        });
+        view.render_event(area, &mut Buffer::empty(area), Utc::now());
+        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(1)));
+        assert_eq!(view.visible_event(), Some(&pinned));
+        assert!(!view.following_event());
+        assert_eq!(view.event_scroll(), view.event_max_scroll());
+        assert_eq!(view.event_list.unseen.get(), 0);
+        // Preserve the selected pin even if the parked timeline anchor disappears.
+        show(&mut view, &second, events.clone());
+        let mut away = appended.last().unwrap().clone();
+        away.source = Some("away-arrival".into());
+        appended = vec![away];
+        show(&mut view, &first, appended);
+        view.render_event(area, &mut Buffer::empty(area), Utc::now());
+        assert_eq!(view.visible_event(), Some(&pinned));
+        assert_eq!(view.event_list.unseen.get(), 0);
+        assert_eq!(view.event_scroll(), view.event_max_scroll());
+        view.navigate_event(KeyCode::Up);
+        view.navigate_event(KeyCode::Up);
+        assert!(view.following_event());
+        assert_eq!(
+            view.visible_event().unwrap().source.as_deref(),
+            Some("away-arrival")
+        );
+    }
+}
+
+#[test]
+fn clicking_pin_stops_tail_even_if_that_pin_is_already_selected() {
+    for enter_from_tail in [false, true] {
+        let (_dir, mut view, events, _, _) = fixture();
+        for row in &mut view.rows {
+            row.status = SessionStatus::Ready;
+        }
+        view.status_filter = 0;
+        view.select_event(Some(0));
+        view.toggle_event_pin();
+        view.select_event(None);
+        if enter_from_tail {
+            view.navigate_event(KeyCode::Down);
+        }
+        let area = Rect::new(0, 1, 100, 5);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 8));
+        view.render_event(area, &mut buffer, Utc::now());
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            view.handle_mouse(MouseEvent {
+                kind,
+                column: 3,
+                row: 5,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+        let scroll = view.event_scroll();
+        let pinned = view.visible_event().unwrap().clone();
+        let mut appended = events.clone();
+        let mut event = events.last().unwrap().clone();
+        event.source = Some("click-arrival".into());
+        appended.push(event);
+        view.set_event(appended);
+        view.render_event(area, &mut buffer, Utc::now());
+        assert_eq!(view.visible_event(), Some(&pinned));
+        assert_eq!(view.event_scroll(), scroll);
+        assert_eq!(view.event_list.unseen.get(), 1);
+    }
 }

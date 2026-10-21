@@ -645,6 +645,7 @@ impl View {
 
     /// Selects an index in the shown list; `None` selects its newest row.
     pub(super) fn select_event(&mut self, index: Option<usize>) {
+        self.event_list.pinned_following = false;
         let background = self.event_list.background.take().is_some();
         let len = self.matching_event_count();
         let index = len.checked_sub(1).map(|last| {
@@ -654,14 +655,6 @@ impl View {
         });
         if self.event_list.cursor != index || background {
             self.cancel_event_detail_selection();
-            let previous = self.selected_event_row();
-            let next =
-                index.and_then(|index| self.shown_event_rows().nth(index).map(|(row, _)| row));
-            if previous.is_some_and(|row| matches!(row, EventRow::Pinned(_)))
-                != next.is_some_and(|row| matches!(row, EventRow::Pinned(_)))
-            {
-                self.event_list.section_return = previous;
-            }
             self.event_list.cursor = index;
             self.event_detail.search.clear();
             let mut viewport = self.viewport.borrow_mut();
@@ -700,6 +693,13 @@ impl View {
             && self.event_list.background_return.is_none()
     }
 
+    fn following_timeline(&self) -> bool {
+        self.following_event()
+            || (self.event_list.sort == EventSort::Time
+                && self.event_list.pinned_following
+                && matches!(self.selected_event_row(), Some(EventRow::Pinned(_))))
+    }
+
     /// Keeps the cursor in view without moving a list being dragged for text selection.
     pub(super) fn reveal_event_selection(&self) {
         if self.mouse_press.is_some()
@@ -713,6 +713,9 @@ impl View {
         };
         let timeline = self.shown_events().count();
         if let Some(offset) = selected.checked_sub(timeline) {
+            if self.following_timeline() {
+                self.event_list.scroll.set(self.event_max_scroll());
+            }
             let height = self.event_pinned_height();
             if height > 0 {
                 let scroll = self.event_list.pinned_scroll.get();
@@ -756,17 +759,12 @@ impl View {
             }
             KeyCode::Home | KeyCode::End => {
                 self.event_list.pending_older = 0;
-                let timeline = self.shown_events().count();
-                let in_pins = matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
                 let index = if code == KeyCode::Home {
-                    if in_pins { timeline } else { 0 }
-                } else if in_pins {
-                    self.matching_event_count().saturating_sub(1)
+                    0
                 } else {
-                    timeline.saturating_sub(1)
+                    self.matching_event_count().saturating_sub(1)
                 };
-                self.select_event(Some(index));
-                self.reveal_event_selection();
+                self.navigate_to_event(index);
             }
             _ => unreachable!("list navigation action"),
         }
@@ -785,16 +783,7 @@ impl View {
             self.show_newest_event();
             return;
         };
-        let timeline = self.shown_events().count();
-        let in_pins = matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
-        if forward
-            && index + 1
-                >= if in_pins {
-                    self.matching_event_count()
-                } else {
-                    timeline
-                }
-        {
+        if forward && index + 1 >= self.matching_event_count() {
             return;
         }
         if !forward {
@@ -809,7 +798,7 @@ impl View {
                 self.event_list.pending_older += 1;
                 return;
             }
-            if index == 0 || (in_pins && index == timeline) {
+            if index == 0 {
                 return;
             }
         }
@@ -819,7 +808,15 @@ impl View {
             index.saturating_sub(1)
         };
         self.event_list.pending_older = 0;
-        self.select_event(Some(next));
+        self.navigate_to_event(next);
+    }
+
+    fn navigate_to_event(&mut self, index: usize) {
+        let keep_tail = self.following_timeline();
+        self.select_event(Some(index));
+        self.event_list.pinned_following = keep_tail
+            && self.event_list.sort == EventSort::Time
+            && matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
         self.reveal_event_selection();
     }
 
@@ -886,6 +883,20 @@ impl View {
 
     pub(crate) fn restore_event_list(&mut self) {
         self.event_list.restoring = false;
+        if self.event_list.pinned_following
+            && self.event_list.sort == EventSort::Time
+            && let Some((true, id)) = &self.event_list.selected
+            && let Some(selected) = self.row_identity_position(true, id)
+        {
+            self.event_list.cursor = Some(selected);
+            if let Some(saved) = &mut self.event_list.background_return {
+                saved.event = Some(selected);
+            }
+            self.event_list.scroll.set(self.event_max_scroll());
+            self.event_list.unseen.set(0);
+            return;
+        }
+        self.event_list.pinned_following = false;
         let at = match &self.event_list.position {
             task_ui::EventPosition::Live => None,
             task_ui::EventPosition::At { anchor, pinned } => {
@@ -938,6 +949,7 @@ impl View {
             return;
         }
         let following = self.following_event();
+        let timeline_following = self.following_timeline();
         let selected_index = self
             .event_list
             .background_return
@@ -1032,7 +1044,13 @@ impl View {
         self.cancel_event_detail_selection();
         self.viewport.borrow_mut().event_detail_layout = None;
         let max_scroll = self.event_max_scroll();
-        if update.reset && pinned_selected.is_none() && (following || reset_selected.is_none()) {
+        if pinned_selected.is_some() && timeline_following && self.mouse_press.is_none() {
+            self.event_list.scroll.set(max_scroll);
+            self.event_list.unseen.set(0);
+        } else if update.reset
+            && pinned_selected.is_none()
+            && (following || reset_selected.is_none())
+        {
             self.event_list.scroll.set(max_scroll);
             self.event_list.unseen.set(0);
             self.event_detail.scroll.borrow_mut().offset = 0;
@@ -1182,29 +1200,6 @@ impl View {
         self.event_section_heights(self.event_content_height()).0
     }
 
-    pub(super) fn switch_event_section(&mut self) {
-        let pinned = self.shown_pinned_count();
-        if pinned == 0 || self.shown_events().next().is_none() {
-            return;
-        }
-        let in_pins = matches!(self.selected_event_row(), Some(EventRow::Pinned(_)));
-        let target = self
-            .event_list
-            .section_return
-            .filter(|row| matches!(row, EventRow::Pinned(_)) != in_pins)
-            .and_then(|row| self.shown_row_position(row))
-            .unwrap_or_else(|| {
-                if in_pins {
-                    self.event_scroll()
-                } else {
-                    self.shown_events().count()
-                }
-            });
-        self.event_list.pending_older = 0;
-        self.select_event(Some(target));
-        self.reveal_event_selection();
-    }
-
     pub(super) fn event_timeline_height(&self) -> usize {
         self.event_section_heights(self.event_content_height()).1
     }
@@ -1286,13 +1281,10 @@ impl View {
             let mut snapshot = event.clone();
             snapshot.turn = None;
             snapshot.previous_end = None;
-            self.event_list.pinned.insert(
-                0,
-                PinnedRow {
-                    pin,
-                    event: snapshot,
-                },
-            );
+            self.event_list.pinned.push(PinnedRow {
+                pin,
+                event: snapshot,
+            });
         }
         self.rematch_event_at(selected);
         self.cancel_list_selection(text_selection::Panel::EventList);
