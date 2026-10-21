@@ -129,6 +129,10 @@ impl View {
         if separator > 0 {
             let rect = super::rows::heading_rect("Pinned", super::render::row(area, 0, 1));
             super::render::line("Pinned".dim(), rect, buf);
+            let mut dot = super::render::row(area, (header + pinned_height) as u16, 1);
+            dot.x += dot.width / 2;
+            dot.width = 1;
+            super::render::line("·", dot, buf);
         }
         self.viewport.borrow_mut().event_header = header > 0;
         self.viewport.borrow_mut().event_separator = (separator > 0).then_some(pinned_height);

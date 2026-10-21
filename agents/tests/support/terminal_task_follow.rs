@@ -337,3 +337,84 @@ fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
     }
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_pinned_separator_is_centered_and_not_selectable() {
+    for width in [200, 201] {
+        let (directory, tmux, _transcript) = start_probe("pinned-dot");
+        let registry = directory.path().join("claude/sessions");
+        std::fs::create_dir_all(&registry).unwrap();
+        write_entry(
+            &registry.join(format!("{}.json", std::process::id())),
+            &registry_entry(
+                "4165651d-b9e3-458d-8612-f8114e312363",
+                "Pinned separator",
+                directory.path(),
+            ),
+        );
+        tmux.wait_for(|capture| capture.lines().next().unwrap().contains("Active 1"));
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        let capture = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .nth(1)
+                .is_some_and(|row| row.width() == width)
+                && capture.lines().nth(2).is_some_and(|row| row.contains('│'))
+        });
+        let rows: Vec<_> = capture.lines().collect();
+        let border = rows[2].rfind('│').unwrap();
+        let left = rows[2][..border].width() + 2;
+        let right = width - 1;
+        let center = left + (right - left) / 2;
+        tmux.mouse(0, left, 2, true);
+        tmux.run(&["send-keys", "-t", "probe", "p"]);
+        let capture = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .nth(2)
+                .is_some_and(|row| row.contains("Pinned"))
+        });
+        let rows: Vec<_> = capture.lines().collect();
+        assert_eq!(rows[4][..rows[4].rfind('·').unwrap()].width(), center);
+        let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let parser = captured_screen(&colored, width as u16, 50);
+        let dot = parser.screen().cell(4, center as u16).unwrap();
+        assert!(!dot.dim(), "{colored}");
+        assert_eq!(dot.fgcolor(), vt100::Color::Default);
+        assert_eq!(dot.bgcolor(), vt100::Color::Default);
+        tmux.mouse(0, center, 4, true);
+        let clicked = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let clicked = captured_screen(&clicked, width as u16, 50);
+        for y in 2..7 {
+            for x in left..right {
+                assert_eq!(
+                    clicked.screen().cell(y, x as u16).unwrap().bgcolor(),
+                    parser.screen().cell(y, x as u16).unwrap().bgcolor(),
+                    "separator click changed selection"
+                );
+            }
+        }
+        let list = parser
+            .screen()
+            .rows(left as u16, (right - left) as u16)
+            .skip(2)
+            .take(5)
+            .collect::<Vec<_>>();
+        assert_eq!(list[2].trim(), "·");
+        println!("{}", list.join("\n"));
+        tmux.run(&["send-keys", "-t", "probe", "p"]);
+        tmux.wait_for(|capture| !capture.lines().nth(2).unwrap().contains("Pinned"));
+        println!(
+            "{{\"verdict\":\"pass\",\"width\":{width},\"centered\":true,\"default_style\":true,\"click_ignored\":true,\"unpin_hides_section\":true}}"
+        );
+    }
+}

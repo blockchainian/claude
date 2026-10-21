@@ -529,7 +529,7 @@ fn pinned_sections_keep_navigation_within_focused_section() {
 }
 
 #[test]
-fn pinned_sections_render_centered_dim_header_and_blank_separator() {
+fn pinned_sections_render_centered_dim_header_and_dot_separator() {
     let (_dir, mut view, _, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -553,7 +553,12 @@ fn pinned_sections_render_centered_dim_header_and_blank_separator() {
             .modifier
             .contains(ratatui::style::Modifier::DIM)
     );
-    assert!(text(2).trim().is_empty());
+    assert_eq!(text(2).trim(), "·");
+    assert_eq!(buffer[(50, 2)].symbol(), "·");
+    assert_eq!(
+        buffer[(50, 2)].style(),
+        ratatui::buffer::Cell::default().style()
+    );
     assert_eq!(view.viewport.borrow().event_row_at(0), None);
     assert_eq!(
         view.viewport.borrow().event_row_at(1),
@@ -565,6 +570,47 @@ fn pinned_sections_render_centered_dim_header_and_blank_separator() {
         Some(EventRow::Timeline(_))
     ));
     assert_eq!(view.event_timeline_height(), 2);
+}
+
+#[test]
+fn pinned_sections_dot_uses_list_width_and_ignores_mouse_clicks() {
+    let (_dir, mut view, _, _, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    view.active_panel = Panel::EventList;
+    view.select_event(Some(1));
+    view.toggle_event_pin();
+    for width in [59, 60] {
+        let area = Rect::new(11, 3, width, 5);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 12));
+        view.render_event(area, &mut buffer, Utc::now());
+        let center = area.x + area.width / 2;
+        let y = area.y + 2;
+        assert_eq!(buffer[(center, y)].symbol(), "·");
+        assert_eq!(
+            buffer[(center, y)].style(),
+            ratatui::buffer::Cell::default().style()
+        );
+        for selected in [Some(0), Some(2), None] {
+            view.select_event(selected);
+            let before = view.selected_event_row();
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                view.handle_mouse(MouseEvent {
+                    kind,
+                    column: center,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                });
+            }
+            assert_eq!(view.selected_event_row(), before);
+        }
+        assert_eq!(view.event_timeline_height(), 2);
+    }
 }
 
 #[test]
