@@ -556,3 +556,54 @@ fn task_pinned_events_write_failure_keeps_memory() {
     );
     assert_eq!(preferences, before);
 }
+
+#[test]
+fn task_filter_round_trip_and_removal_preserves_sort() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:filtered".parse().unwrap();
+    let other = "codex:other".parse().unwrap();
+    let mut preferences = Preferences::default();
+    assert_eq!(preferences.task_filter(&key), None);
+    preferences
+        .save_task_filter(dir.path(), &key, Some(TaskFilter::Message))
+        .unwrap();
+    assert_eq!(
+        document(dir.path())["state"]["tasks"]["claude:filtered"]["filter"],
+        "message"
+    );
+    let mut loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_filter(&key), Some(TaskFilter::Message));
+    assert_eq!(loaded.task_filter(&other), None);
+    loaded
+        .save_task_sort(dir.path(), &key, EventSort::Duration)
+        .unwrap();
+    preferences
+        .save_task_filter(dir.path(), &key, None)
+        .unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]["claude:filtered"]
+            .get("filter")
+            .is_none()
+    );
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.task_filter(&key), None);
+    assert_eq!(loaded.task_sort(&key), EventSort::Duration);
+    preferences
+        .save_task_filter(dir.path(), &key, Some(TaskFilter::Message))
+        .unwrap();
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Time)
+        .unwrap();
+    assert_eq!(
+        Preferences::load(dir.path()).task_filter(&key),
+        Some(TaskFilter::Message)
+    );
+    preferences
+        .save_task_filter(dir.path(), &key, None)
+        .unwrap();
+    assert!(
+        document(dir.path())["state"]["tasks"]
+            .get("claude:filtered")
+            .is_none()
+    );
+}

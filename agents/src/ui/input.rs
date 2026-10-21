@@ -49,7 +49,7 @@ enum PasteTarget {
 impl View {
     pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
         self.change_event_list(false, |list| {
-            list.sort_initialized = true;
+            list.settings_initialized = true;
             list.sort = sorting;
         });
     }
@@ -1836,8 +1836,20 @@ impl View {
             return self.toggle_event_pin();
         }
         if plain && key.code == KeyCode::Char(' ') && self.active_panel == Panel::EventList {
-            self.change_event_list(true, |list| list.messages_only = !list.messages_only);
-            return None;
+            self.change_event_list(true, |list| {
+                list.messages_only = !list.messages_only;
+                list.settings_initialized = true;
+            });
+            return self
+                .selected_id()
+                .cloned()
+                .map(|id| Action::PersistFiltering {
+                    id,
+                    filter: self
+                        .event_list
+                        .messages_only
+                        .then_some(crate::state::TaskFilter::Message),
+                });
         }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);

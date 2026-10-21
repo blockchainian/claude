@@ -41,10 +41,22 @@ fn fixture() -> (tempfile::TempDir, View) {
 }
 
 fn space(view: &mut View) {
-    assert!(
-        view.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
-            .is_none()
-    );
+    let id = view.selected_id().unwrap().clone();
+    let action = view.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    if view.active_panel == Panel::EventList {
+        assert_eq!(
+            action,
+            Some(Action::PersistFiltering {
+                id,
+                filter: view
+                    .event_list
+                    .messages_only
+                    .then_some(crate::state::TaskFilter::Message),
+            })
+        );
+    } else {
+        assert_eq!(action, None);
+    }
 }
 
 fn message(kind: &Kind) -> bool {
@@ -254,4 +266,31 @@ fn space_keeps_event_detail_space_behavior() {
     space(&mut view);
     assert!(!view.event_list.messages_only);
     assert_eq!(view.event_detail.mode, task_ui::EventDetailMode::Transcript);
+}
+
+#[test]
+fn messages_filter_restores_when_reopening_a_task() {
+    let (dir, mut view) = fixture();
+    let id = view.selected_id().unwrap().clone();
+    space(&mut view);
+    let mut preferences = crate::state::Preferences::default();
+    preferences
+        .save_task_filter(dir.path(), &id, Some(crate::state::TaskFilter::Message))
+        .unwrap();
+    preferences
+        .save_task_sort(dir.path(), &id, EventSort::Duration)
+        .unwrap();
+    let loaded = crate::state::Preferences::load(dir.path());
+    let (_reopened_dir, mut reopened) = fixture();
+    reopened.initialize_event_list(loaded.task_sort(&id), loaded.task_filter(&id));
+    assert!(reopened.event_list.messages_only);
+    assert_eq!(reopened.event_list.sort, EventSort::Duration);
+    assert!(reopened.shown_events().all(|(_, e)| message(&e.kind)));
+    space(&mut reopened);
+    reopened.initialize_event_list(loaded.task_sort(&id), loaded.task_filter(&id));
+    assert!(
+        !reopened.event_list.messages_only,
+        "refresh must not overwrite a toggle"
+    );
+    assert_eq!(reopened.shown_events().count(), reopened.event_panel.len());
 }

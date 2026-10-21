@@ -940,10 +940,15 @@ impl View {
         self.event_list.scroll.set(0);
     }
 
-    pub(crate) fn initialize_event_sort(&mut self, sorting: EventSort) {
-        if !self.event_list.sort_initialized {
+    pub(crate) fn initialize_event_list(
+        &mut self,
+        sorting: EventSort,
+        filter: Option<crate::state::TaskFilter>,
+    ) {
+        if !self.event_list.settings_initialized {
             self.event_list.sort = sorting;
-            self.event_list.sort_initialized = true;
+            self.event_list.messages_only = filter == Some(crate::state::TaskFilter::Message);
+            self.event_list.settings_initialized = true;
         }
     }
 

@@ -639,7 +639,8 @@ impl App {
     fn refresh_event(&mut self, visible: usize) {
         if let Some(id) = self.view.selected_id() {
             let sorting = self.preferences.task_sort(id);
-            self.view.initialize_event_sort(sorting);
+            self.view
+                .initialize_event_list(sorting, self.preferences.task_filter(id));
         }
         let count = if self.view.event_list.start_requested
             || self.view.transcript_fully_loaded()
@@ -1542,6 +1543,12 @@ impl App {
                 let saved = self
                     .preferences
                     .save_task_sort(&self.config_dir, &id, sorting);
+                self.report_save(saved);
+            }
+            Action::PersistFiltering { id, filter } => {
+                let saved = self
+                    .preferences
+                    .save_task_filter(&self.config_dir, &id, filter);
                 self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {

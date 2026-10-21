@@ -84,10 +84,18 @@ enum TaskSort {
     Duration,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskFilter {
+    Message,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sort: Option<TaskSort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    filter: Option<TaskFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ask: Option<StoredAsk>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -343,6 +351,10 @@ impl Preferences {
         }
     }
 
+    pub fn task_filter(&self, key: &SessionKey) -> Option<TaskFilter> {
+        self.tasks.get(key).and_then(|task| task.filter)
+    }
+
     pub fn task_ask(&self, key: &SessionKey) -> Option<&StoredAsk> {
         self.tasks.get(key).and_then(|task| task.ask.as_ref())
     }
@@ -379,13 +391,32 @@ impl Preferences {
             EventSort::Time => None,
             EventSort::Duration => Some(TaskSort::Duration),
         };
+        self.save_task_field(config_dir, key, "sort", sort)
+    }
+
+    pub fn save_task_filter(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        filter: Option<TaskFilter>,
+    ) -> io::Result<()> {
+        self.save_task_field(config_dir, key, "filter", filter)
+    }
+
+    fn save_task_field<T: Serialize>(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        field: &str,
+        value: Option<T>,
+    ) -> io::Result<()> {
         self.update_task(config_dir, key, |task| {
-            match sort {
-                Some(sort) => {
-                    task.insert("sort".into(), serde_json::to_value(sort)?);
+            match value {
+                Some(value) => {
+                    task.insert(field.into(), serde_json::to_value(value)?);
                 }
                 None => {
-                    task.remove("sort");
+                    task.remove(field);
                 }
             }
             Ok(())

@@ -26,7 +26,7 @@ pub(crate) struct EventList {
     pub search: EventSearch,
     pub messages_only: bool,
     pub sort: EventSort,
-    pub sort_initialized: bool,
+    pub settings_initialized: bool,
     pub unseen: std::cell::Cell<usize>,
     pub pending_older: usize,
     pub has_older: bool,

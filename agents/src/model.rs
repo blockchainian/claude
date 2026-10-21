@@ -294,6 +294,11 @@ pub enum Action {
         id: SessionKey,
         sorting: EventSort,
     },
+    /// Space: the event filter changed; persist it.
+    PersistFiltering {
+        id: SessionKey,
+        filter: Option<crate::state::TaskFilter>,
+    },
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,
     /// `r`: set the session display name.
