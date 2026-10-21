@@ -4,7 +4,14 @@ use super::{
     SectionScroll, draft_controls::Selector, event_search::EventSearch, line_edit::LineEdit,
     prompt_box::PromptBox, question_view::QuestionView,
 };
-use crate::{event::Event, model::EventSort};
+use crate::{event::Event, model::EventSort, state::PinnedEvent};
+
+/// A pinned log with the snapshot of the event taken when it was pinned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PinnedRow {
+    pub pin: PinnedEvent,
+    pub event: Event,
+}
 
 #[derive(Default)]
 pub(super) struct TaskUi {
@@ -21,7 +28,15 @@ pub(super) struct TaskUi {
 #[derive(Default)]
 pub(crate) struct EventList {
     pub(super) position: EventPosition,
+    /// Whether `selected` is a pinned row rather than a timeline row.
+    pub(super) selected_pinned: bool,
     pub(super) selected: Option<EventId>,
+    /// Pinned logs, the first at the top of the list.
+    pub pinned: Vec<PinnedRow>,
+    /// Index into `pinned` while the cursor is in the pinned area; `cursor` is then `None`.
+    pub pinned_cursor: Option<usize>,
+    /// Whether the transcript has events older than the loaded window, as of the last update.
+    pub has_older: bool,
     pub search: EventSearch,
     pub sort: EventSort,
     pub sort_initialized: bool,

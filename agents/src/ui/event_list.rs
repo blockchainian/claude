@@ -703,13 +703,7 @@ impl View {
         match code {
             KeyCode::Up | KeyCode::Down => self.move_event_selection(code == KeyCode::Down),
             KeyCode::PageUp | KeyCode::PageDown => {
-                let steps = self
-                    .viewport
-                    .borrow()
-                    .event_panel
-                    .height
-                    .saturating_sub(u16::from(self.event_list.search.active()))
-                    .max(1);
+                let steps = self.event_timeline_height().max(1);
                 for _ in 0..steps {
                     self.move_event_selection(code == KeyCode::PageDown);
                 }

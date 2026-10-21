@@ -281,6 +281,11 @@ pub enum Action {
         id: SessionKey,
         pinned: bool,
     },
+    /// `p` on an event: pin or unpin it; `pinned` is the task's whole ordered list afterwards.
+    ToggleEventPin {
+        task: SessionKey,
+        pinned: Vec<crate::state::PinnedEvent>,
+    },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `t`: the event sorting changed; persist it.

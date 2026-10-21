@@ -46,6 +46,14 @@ enum PasteTarget {
     Question(Rect),
 }
 
+impl Viewport {
+    /// The index in the event list of the timeline row drawn on a screen row.
+    fn timeline_event_at(&self, row: u16) -> Option<usize> {
+        let row = row.checked_sub(self.event_timeline_top)?;
+        self.event_rows.get(usize::from(row)).copied()
+    }
+}
+
 impl View {
     pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
         self.event_list.sort_initialized = true;
@@ -641,9 +649,7 @@ impl View {
             }
         }
         if viewport.event_panel.contains(position)
-            && let Some(&index) = viewport
-                .event_rows
-                .get(usize::from(position.y - viewport.event_panel.y))
+            && let Some(index) = viewport.timeline_event_at(position.y)
         {
             return Some(ClickTarget::Event { index });
         }
@@ -996,13 +1002,25 @@ impl View {
                 viewport
                     .event_panel
                     .contains(position)
-                    .then(|| usize::from(mouse.row - viewport.event_panel.y))
-                    .and_then(|row| viewport.event_rows.get(row))
-                    .and_then(|&full| self.shown_position(full))
+                    .then(|| viewport.timeline_event_at(mouse.row))
+                    .flatten()
+                    .and_then(|full| self.shown_position(full))
             };
             if let Some(event) = event {
                 self.event_list.background_return = None;
                 self.select_event(Some(event));
+            }
+            let pinned = {
+                let viewport = self.viewport.borrow();
+                viewport
+                    .event_panel
+                    .contains(position)
+                    .then(|| usize::from(mouse.row - viewport.event_panel.y))
+                    .and_then(|row| viewport.event_pinned_rows.get(row).copied())
+            };
+            if let Some(pinned) = pinned {
+                self.event_list.background_return = None;
+                self.select_pinned_event(pinned);
             }
             let background = {
                 let viewport = self.viewport.borrow();
@@ -1077,8 +1095,8 @@ impl View {
             let event_row = viewport
                 .event_panel
                 .contains(position)
-                .then(|| usize::from(mouse.row - viewport.event_panel.y))
-                .and_then(|row| viewport.event_rows.get(row).copied());
+                .then(|| viewport.timeline_event_at(mouse.row))
+                .flatten();
             // The selected event's body starts below the top rows, its header and a blank row.
             let copy_text = if viewport.task_details.contains(position) {
                 viewport
@@ -1769,6 +1787,9 @@ impl View {
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);
             return None;
+        }
+        if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
+            return self.toggle_event_pin();
         }
         if plain && key.code == KeyCode::Char('t') && self.active_panel == Panel::EventList {
             self.set_event_sort(match self.event_list.sort {

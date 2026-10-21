@@ -320,6 +320,10 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
                 KeyCode::Char('p'),
                 KeyCode::Backspace,
             ] {
+                // `p` in the event list pins the selected event.
+                if panel == Panel::EventList && code == KeyCode::Char('p') {
+                    continue;
+                }
                 assert_eq!(key(&mut view, code), None, "panel={panel:?} code={code:?}");
                 assert_eq!(view.selected, selected);
                 assert_eq!(view.event_list.cursor, event);
