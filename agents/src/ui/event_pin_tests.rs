@@ -146,6 +146,45 @@ fn rows_without_identity_or_records_or_still_queued_are_not_pinnable() {
 }
 
 #[test]
+fn a_pinned_running_tool_keeps_its_snapshot_when_the_result_arrives() {
+    let (dir, mut view, _) = fixture();
+    let path = dir
+        .path()
+        .join("projects/project/4165651d-b9e3-458d-8612-f8114e312363.jsonl");
+    let lines: Vec<&str> = include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+        .lines()
+        .collect();
+    let read = |count: usize| {
+        std::fs::write(&path, lines[..count].join("\n") + "\n").unwrap();
+        crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap()
+    };
+    let running = read(1);
+    view.set_event(running.clone());
+    pin_at(&mut view, 0);
+    let done = read(2);
+    assert_eq!(done.len(), 1);
+    assert_ne!(done[0].source_records, running[0].source_records);
+    view.set_event(done.clone());
+    assert_eq!(view.event_panel[0].source_records, done[0].source_records);
+    assert_eq!(
+        view.event_list.pinned[0].event.source_records,
+        running[0].source_records
+    );
+    assert_eq!(
+        view.event_list.pinned[0].pin.records,
+        running[0].source_records
+    );
+    // Unpinning and pinning again takes the finished tool.
+    pin_at(&mut view, 0);
+    pin_at(&mut view, 0);
+    assert_eq!(
+        view.event_list.pinned[0].event.source_records,
+        done[0].source_records
+    );
+    assert_eq!(view.event_list.pinned[0].pin.records, done[0].source_records);
+}
+
+#[test]
 fn inactive_tasks_cannot_pin_events() {
     let (_dir, mut view, events) = fixture();
     let mut session = view.selected_row().unwrap().clone();

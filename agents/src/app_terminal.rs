@@ -695,6 +695,54 @@ mod tests {
     }
 
     #[test]
+    fn moving_between_pinned_events_closes_the_terminal() {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let (directory, mut app, id) = fixture();
+        draw(&mut app);
+        super::super::event_search_tests::finish_search(&mut app);
+        let rows: Vec<_> = app
+            .view
+            .event_panel
+            .iter()
+            .filter(|event| event.source.is_some() && !event.source_records.is_empty())
+            .take(2)
+            .map(|event| crate::ui::PinnedRow {
+                pin: crate::state::PinnedEvent {
+                    source: event.source.clone().unwrap(),
+                    records: event.source_records.clone(),
+                },
+                event: event.clone(),
+            })
+            .collect();
+        assert_eq!(rows.len(), 2);
+        app.view.set_pinned_events(&id, rows);
+        draw(&mut app);
+        let focus_list = |app: &mut App| {
+            app.handle_event(Event::Key(KeyEvent::new(
+                KeyCode::Char('w'),
+                KeyModifiers::CONTROL,
+            )));
+            app.handle_event(Event::Key(KeyCode::Char('k').into()));
+        };
+        let pid = attach(&mut app, id.clone(), &directory.path().join("pid"));
+        draw(&mut app);
+        focus_list(&mut app);
+        app.handle_event(Event::Key(KeyCode::Home.into()));
+        assert_eq!(app.view.event_list.pinned_cursor, Some(0));
+        assert!(!app.view.terminal_requested());
+        finish_close(&mut app);
+        assert_reaped(pid);
+        let pid = attach(&mut app, id.clone(), &directory.path().join("pid2"));
+        draw(&mut app);
+        focus_list(&mut app);
+        app.handle_event(Event::Key(KeyCode::Down.into()));
+        assert_eq!(app.view.event_list.pinned_cursor, Some(1));
+        assert!(!app.view.terminal_requested());
+        finish_close(&mut app);
+        assert_reaped(pid);
+    }
+
+    #[test]
     fn following_new_events_and_navigation_at_the_boundary_keep_the_terminal() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         let (directory, mut app, id) = fixture();

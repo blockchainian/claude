@@ -126,6 +126,27 @@ fn stored_pins_that_no_longer_match_their_records_are_forgotten() {
 }
 
 #[test]
+fn stored_pins_with_an_offset_past_the_transcript_are_forgotten() {
+    let (directory, mut app, path, _) = registry_app("bg");
+    let id = app.view.selected_id().unwrap().clone();
+    let mut pin = pin_first_source_event(&mut app, &id);
+    pin.records[0].offset = fs::metadata(&pin.records[0].path).unwrap().len() + 100;
+    app.handle_action(Some(Action::ToggleEventPin {
+        task: id.clone(),
+        pinned: vec![pin],
+    }));
+    drop(app);
+    let app = open_app(directory.path());
+    assert!(path.exists());
+    assert!(!app.view.has_pinned_events(&id));
+    assert!(
+        Preferences::load(directory.path())
+            .task_pinned_events(&id)
+            .is_empty()
+    );
+}
+
+#[test]
 fn inactive_sessions_lose_their_stored_state() {
     let (directory, mut app, registry, _) = registry_app("bg");
     let id = app.view.selected_id().unwrap().clone();
@@ -145,6 +166,10 @@ fn inactive_sessions_lose_their_stored_state() {
     assert!(stored.task_pinned_events(&id).is_empty());
     assert!(stored.tasks.is_empty());
     assert!(!app.view.has_pinned_events(&id));
+    // A forgotten task is not written again by later refreshes.
+    fs::remove_file(directory.path().join("agents.json")).unwrap();
+    app.refresh();
+    assert!(!directory.path().join("agents.json").exists());
 }
 
 fn screen(app: &mut App) -> String {
