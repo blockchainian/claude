@@ -1682,3 +1682,51 @@ test("a detached thread is not subscribed to again when the server starts or rec
     await home.close();
   }
 });
+
+test("mcp starts a thread on an allowed model and effort, and refuses any other pair", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  try {
+    await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+    const tools = await mcp.request("tools/list", {});
+    const schema = tools.result.tools.find((tool) => tool.name === "start").inputSchema;
+    assert.deepEqual(schema.properties.model.enum, ["gpt-6.1-sol", "gpt-6-luna"]);
+    assert.deepEqual(schema.properties.effort.enum, ["medium", "high"]);
+    assert.deepEqual(schema.required, ["cwd", "prompt"]);
+
+    for (const [args, error] of [
+      [{ model: "gpt-6-luna", effort: "medium" }, "gpt-6-luna runs only at high effort"],
+      [{ model: "gpt-6.1-sol", effort: "high" }, "gpt-6.1-sol runs only at medium effort"],
+      [{ model: "gpt-6-luna" }, "gpt-6-luna runs only at high effort"],
+      [{ model: "gpt-6.1-sol" }, "gpt-6.1-sol runs only at medium effort"],
+      [{ effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "other", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "toString", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: null, effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "gpt-6-luna", effort: null }, "gpt-6-luna runs only at high effort"]
+    ]) {
+      const refused = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", ...args });
+      assert.equal(refused.isError, true);
+      assert.equal(refused.text, error);
+      assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
+    }
+
+    for (const [model, effort] of [["gpt-6-luna", "high"], ["gpt-6.1-sol", "medium"]]) {
+      const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", model, effort });
+      assert.equal(started.isError, false, started.text);
+      const start = script.messages.filter((message) => message.method === "thread/start").at(-1).params;
+      assert.equal(start.model, model);
+      assert.deepEqual(start.config, {
+        "sandbox_workspace_write.network_access": true,
+        "mcp_servers.claude-client": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" },
+        model_reasoning_effort: effort
+      });
+    }
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});

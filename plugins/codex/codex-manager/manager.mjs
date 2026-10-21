@@ -26,6 +26,7 @@ const usage = `usage:
   manager.mjs whoami                                print the resolved Claude session id`;
 
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
+const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": "medium", "gpt-6-luna": "high" });
 const APPROVALS = {
   "item/commandExecution/requestApproval": ["command", "cwd", "reason"],
   "item/fileChange/requestApproval": ["reason", "grantRoot"]
@@ -417,10 +418,14 @@ class Manager {
     return lines.length ? lines : undefined;
   }
 
-  async startThread(client, { cwd, name, sandbox, claudeTools, record }) {
+  async startThread(client, { cwd, name, sandbox, claudeTools, record, model, effort }) {
     const params = { cwd, approvalPolicy: "on-request", sandbox, serviceName: "codex-manager", ephemeral: false };
     if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
     if (claudeTools) params.config = { ...params.config, "mcp_servers.claude-client": claudeToolsServer() };
+    if (model !== undefined) {
+      params.model = model;
+      params.config = { ...params.config, model_reasoning_effort: effort };
+    }
     const started = await client.request("thread/start", params);
     const threadId = started.thread.id;
     if (name) await client.request("thread/name/set", { threadId, name });
@@ -428,11 +433,15 @@ class Manager {
     return threadId;
   }
 
-  async start({ cwd, prompt, name }) {
+  async start({ cwd, prompt, name, model, effort }) {
     if (!cwd || !prompt) throw new Error("cwd and prompt are required");
+    if (model !== undefined || effort !== undefined) {
+      if (typeof model !== "string" || !Object.hasOwn(MODEL_EFFORTS, model)) throw new Error(`model must be one of ${Object.keys(MODEL_EFFORTS).join(", ")}`);
+      if (effort !== MODEL_EFFORTS[model]) throw new Error(`${model} runs only at ${MODEL_EFFORTS[model]} effort`);
+    }
     const client = await this.connect();
     const absolute = path.resolve(cwd);
-    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true });
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true, model, effort });
     const turn = await this.startTurn(client, threadId, prompt);
     return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify_claude or ask_claude, or needs an approval." };
   }
@@ -606,7 +615,7 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
 const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
 
 const TOOLS = [
-  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "prompt"] } },
+  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: Object.values(MODEL_EFFORTS), description: "Required effort for the selected model; supply model with it." } }, required: ["cwd", "prompt"] } },
   { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. The text becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
