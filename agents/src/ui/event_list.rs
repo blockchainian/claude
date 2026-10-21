@@ -103,7 +103,7 @@ impl View {
             .set(self.event_list.scroll.get().min(max_scroll));
         self.reveal_event_selection();
         let scroll = self.event_scroll();
-        let matching: Vec<_> = self.shown_events().collect();
+        let matching: Vec<_> = self.shown_event_rows().collect();
         let selected_index = self.event_list.cursor;
         let start = scroll.min(matching.len());
         let end = (start
@@ -115,12 +115,23 @@ impl View {
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(event_index, event)) in matching[start..end].iter().enumerate() {
-            let last = if self.event_list.sort == EventSort::Duration {
-                event_index + 1 == self.event_panel.len()
-            } else {
-                start + index + 1 == matching.len()
+            let pinned = matches!(event_index, super::task_ui::EventRow::Pinned(_));
+            let last = match event_index {
+                super::task_ui::EventRow::Pinned(_) => false,
+                super::task_ui::EventRow::Timeline(full) => {
+                    if self.event_list.sort == EventSort::Duration {
+                        full + 1 == self.event_panel.len()
+                    } else {
+                        start + index + 1 == matching.len()
+                    }
+                }
             };
-            let time = event_time(event, session, last, now, self.event_list.sort);
+            let sort = if pinned {
+                EventSort::Time
+            } else {
+                self.event_list.sort
+            };
+            let time = event_time(event, session, last, now, sort);
             let links = render_event(
                 event,
                 &time,
@@ -137,7 +148,17 @@ impl View {
                     super::style::cursor_style(),
                 );
             }
-            if session.parent.is_none()
+            // Mark the boundary inside the clock gap without taking a selectable row.
+            if pinned && area.width > 1 {
+                let (_, clock) = event_row_areas(super::render::row(area, index as u16, 1));
+                if clock.x > area.x {
+                    buf[(clock.x - 1, area.y + index as u16)]
+                        .set_symbol("│")
+                        .set_style(Style::new().dim());
+                }
+            }
+            if !pinned
+                && session.parent.is_none()
                 && self.event_list.sort != EventSort::Duration
                 && let Some(turn) = event.turn
             {
@@ -183,7 +204,7 @@ impl View {
         self.event_list.background.as_ref().or_else(|| {
             self.event_list
                 .cursor
-                .and_then(|index| self.shown_events().nth(index).map(|(_, event)| event))
+                .and_then(|index| self.shown_event_rows().nth(index).map(|(_, event)| event))
         })
     }
 
@@ -444,6 +465,7 @@ impl View {
             .map(|record| (&record.path, record.offset));
         let key = event_detail_key(&(
             self.selected_id(),
+            matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
             &event.source,
             record,
             (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
@@ -636,8 +658,9 @@ impl View {
     }
 
     pub(super) fn following_event(&self) -> bool {
-        (self.event_list.cursor.is_none()
-            || self.event_list.cursor == self.matching_event_count().checked_sub(1))
+        !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))
+            && (self.event_list.cursor.is_none()
+                || self.event_list.cursor == self.matching_event_count().checked_sub(1))
             && self.event_list.background_return.is_none()
     }
 
@@ -712,6 +735,9 @@ impl View {
             return;
         };
         if !forward && index == 0 {
+            if matches!(self.selected_event_row(), Some(EventRow::Pinned(_))) {
+                return;
+            }
             if self.transcript_fully_loaded() {
                 return;
             }
@@ -747,19 +773,21 @@ impl View {
         let selected = self
             .event_list
             .cursor
-            .and_then(|index| self.shown_events().nth(index))
-            .and_then(|(_, event)| task_ui::EventId::from_event(event));
+            .and_then(|index| self.shown_event_rows().nth(index))
+            .and_then(|(row, event)| {
+                task_ui::EventId::from_event(event)
+                    .map(|id| (matches!(row, EventRow::Pinned(_)), id))
+            });
         let first = self
             .event_scroll()
             .min(self.matching_event_count().saturating_sub(1));
-        let anchor = self
-            .shown_events()
-            .nth(first)
-            .and_then(|(_, event)| task_ui::EventId::from_event(event));
+        let anchor = self.shown_event_rows().nth(first).and_then(|(row, event)| {
+            task_ui::EventId::from_event(event).map(|id| (matches!(row, EventRow::Pinned(_)), id))
+        });
         self.event_list.position = if self.following_event() {
             task_ui::EventPosition::Live
-        } else if let (Some(anchor), Some(_)) = (anchor, &selected) {
-            task_ui::EventPosition::At { anchor }
+        } else if let (Some((pinned, anchor)), Some(_)) = (anchor, &selected) {
+            task_ui::EventPosition::At { anchor, pinned }
         } else {
             task_ui::EventPosition::Live
         };
@@ -787,21 +815,18 @@ impl View {
             && matches!(self.event_list.position, task_ui::EventPosition::At { .. })
     }
 
-    pub(super) fn event_position(&self, id: &task_ui::EventId) -> Option<usize> {
-        self.shown_events()
-            .position(|(_, event)| event.has_source(&id.0))
-    }
-
     pub(crate) fn restore_event_list(&mut self) {
         self.event_list.restoring = false;
         let at = match &self.event_list.position {
             task_ui::EventPosition::Live => None,
-            task_ui::EventPosition::At { anchor } => self.event_position(anchor).zip(
-                self.event_list
-                    .selected
-                    .as_ref()
-                    .and_then(|id| self.event_position(id)),
-            ),
+            task_ui::EventPosition::At { anchor, pinned } => {
+                self.row_identity_position(*pinned, anchor).zip(
+                    self.event_list
+                        .selected
+                        .as_ref()
+                        .and_then(|(pinned, id)| self.row_identity_position(*pinned, id)),
+                )
+            }
         };
         if let Some((scroll, selected)) = at {
             self.event_list.cursor = Some(selected);
@@ -850,8 +875,15 @@ impl View {
             .as_ref()
             .and_then(|saved| saved.event)
             .or(self.event_list.cursor);
-        let selected_full =
-            selected_index.and_then(|index| self.shown_events().nth(index).map(|(full, _)| full));
+        let selected_full = selected_index
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
+        let pinned_selected = self
+            .selected_event_row()
+            .filter(|row| matches!(row, EventRow::Pinned(_)));
+        let selected_full = selected_full.and_then(|row| match row {
+            EventRow::Timeline(index) => Some(index),
+            EventRow::Pinned(_) => None,
+        });
         let reset_selected = selected_full.filter(|_| update.reset).and_then(|full| {
             let selected = &self.event_panel[full];
             update.events.iter().position(|event| {
@@ -894,7 +926,9 @@ impl View {
             .count();
         let len = self.matching_event_count();
         let reset_selected = reset_selected.and_then(|full| self.shown_position(full));
-        self.event_list.cursor = if following {
+        self.event_list.cursor = if let Some(row) = pinned_selected {
+            self.shown_row_position(row)
+        } else if following {
             len.checked_sub(1)
         } else if update.reset {
             reset_selected.or_else(|| len.checked_sub(1))
@@ -909,7 +943,7 @@ impl View {
                 self.shown_position(full)
                     .or_else(|| {
                         (self.event_list.sort == EventSort::Time)
-                            .then(|| self.shown_events().position(|(index, _)| index >= full))
+                            .then(|| self.shown_event_rows().position(|(row, _)| matches!(row, EventRow::Timeline(index) if index >= full)))
                             .flatten()
                     })
                     .or_else(|| len.checked_sub(1))
@@ -929,7 +963,7 @@ impl View {
         self.cancel_event_detail_selection();
         self.viewport.borrow_mut().event_detail_layout = None;
         let max_scroll = self.event_max_scroll();
-        if update.reset && (following || reset_selected.is_none()) {
+        if update.reset && pinned_selected.is_none() && (following || reset_selected.is_none()) {
             self.event_list.scroll.set(max_scroll);
             self.event_list.unseen.set(0);
             self.event_detail.scroll.borrow_mut().offset = 0;
@@ -1027,8 +1061,8 @@ impl View {
             && if self.event_list.sort == EventSort::Duration {
                 self.event_list
                     .cursor
-                    .and_then(|index| self.shown_events().nth(index))
-                    .is_some_and(|(full, _)| full + 1 == self.event_panel.len())
+                    .and_then(|index| self.shown_event_rows().nth(index))
+                    .is_some_and(|(row, _)| matches!(row, EventRow::Timeline(full) if full + 1 == self.event_panel.len()))
             } else {
                 self.event_list.cursor.is_some()
                     && self.event_list.cursor == self.matching_event_count().checked_sub(1)
@@ -1036,7 +1070,114 @@ impl View {
     }
 
     pub(super) fn shown_position(&self, full: usize) -> Option<usize> {
-        self.shown_events().position(|(index, _)| index == full)
+        self.shown_row_position(EventRow::Timeline(full))
+    }
+
+    pub(super) fn selected_event_row(&self) -> Option<EventRow> {
+        self.event_list
+            .cursor
+            .and_then(|index| self.shown_event_rows().nth(index).map(|(row, _)| row))
+    }
+    pub(super) fn shown_row_position(&self, row: EventRow) -> Option<usize> {
+        self.shown_event_rows()
+            .position(|(candidate, _)| candidate == row)
+    }
+    fn row_identity_position(&self, pinned: bool, id: &task_ui::EventId) -> Option<usize> {
+        self.shown_event_rows().position(|(row, event)| {
+            matches!(row, EventRow::Pinned(_)) == pinned && event.has_source(&id.0)
+        })
+    }
+    pub(super) fn shown_event_rows(&self) -> impl Iterator<Item = (EventRow, &Event)> {
+        self.event_list
+            .pinned
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.pinned_event_matches(*index))
+            .map(|(index, row)| (EventRow::Pinned(index), &row.event))
+            .chain(
+                self.shown_events()
+                    .map(|(index, event)| (EventRow::Timeline(index), event)),
+            )
+    }
+    pub fn set_pinned_events(&mut self, key: &SessionKey, rows: Vec<PinnedRow>) {
+        if self.selected_id() == Some(key) {
+            let selected = self.selected_event_row();
+            self.event_list.pinned = rows;
+            self.rematch_event_at(selected);
+            self.event_list.cursor = selected
+                .and_then(|row| self.shown_row_position(row))
+                .or_else(|| self.matching_event_count().checked_sub(1));
+            self.viewport.get_mut().event_detail_layout = None;
+        } else {
+            self.task_uis
+                .entry(draft_controls::TaskKey::Session(key.clone()))
+                .or_default()
+                .event_list
+                .pinned = rows;
+        }
+    }
+    pub fn clear_pinned_events(&mut self, key: &SessionKey) {
+        self.set_pinned_events(key, Vec::new());
+    }
+    pub fn has_pinned_events(&self, key: &SessionKey) -> bool {
+        if self.selected_id() == Some(key) {
+            !self.event_list.pinned.is_empty()
+        } else {
+            self.task_uis
+                .get(&draft_controls::TaskKey::Session(key.clone()))
+                .is_some_and(|ui| !ui.event_list.pinned.is_empty())
+        }
+    }
+    pub(super) fn toggle_event_pin(&mut self) -> Option<Action> {
+        let session = self.selected_row()?;
+        if session.status == SessionStatus::Inactive {
+            return Some(Action::Unsupported("Pin"));
+        }
+        let task = session.id.clone();
+        let event = self.visible_event()?.clone();
+        if event.source.as_deref().is_none_or(str::is_empty)
+            || event.source_records.is_empty()
+            || matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem)
+        {
+            return Some(Action::Unsupported("Pin"));
+        }
+        let selected = self.selected_event_row();
+        let overlaps = |row: &PinnedRow| {
+            row.pin
+                .records
+                .iter()
+                .any(|record| event.source_records.contains(record))
+        };
+        if self.event_list.pinned.iter().any(overlaps) {
+            self.event_list.pinned.retain(|row| !overlaps(row));
+        } else {
+            let pin = crate::state::PinnedEvent {
+                source: event.source.clone().expect("validated source"),
+                records: event.source_records.clone(),
+            };
+            let mut event = event;
+            event.turn = None;
+            event.previous_end = None;
+            self.event_list.pinned.insert(0, PinnedRow { pin, event });
+        }
+        self.rematch_event_at(selected);
+        self.cancel_list_selection(text_selection::Panel::EventList);
+        self.viewport.get_mut().event_detail_layout = None;
+        self.event_list.cursor = selected
+            .and_then(|row| match row {
+                EventRow::Timeline(_) => self.shown_row_position(row),
+                EventRow::Pinned(_) => None,
+            })
+            .or_else(|| self.matching_event_count().checked_sub(1));
+        Some(Action::ToggleEventPin {
+            task,
+            pinned: self
+                .event_list
+                .pinned
+                .iter()
+                .map(|row| row.pin.clone())
+                .collect(),
+        })
     }
 
     /// The events the search lets through, with their index in the event list.
