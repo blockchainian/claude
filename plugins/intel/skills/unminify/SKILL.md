@@ -62,9 +62,15 @@ follow export names without another model request. Unfinished files supply their
 export names but remain untouched so their journals can resume. External named import aliases
 restore the imported name deterministically when it is at least `--min-symbol-length`
 characters long; shorter imported names stay unchanged and never go to the model.
-Same-scope bindings and names that would change a reference's binding require numeric
-suffixes; unused names in enclosing or nested scopes do not. Canonically spaced
-aliases collapse to shorthand when the restored local equals the imported name; other
+When the imported name is occupied by a same-scope binding or would change a reference's
+binding, restoration first tries the source's last path segment in camelCase plus the
+capitalized imported name (for example, `node:path/posix` + `join` becomes `posixJoin`).
+Strip `node:` before taking the last segment; scoped packages also use the last segment.
+Duplicate imports with the exact same `(source, imported)` identity retain numeric suffixes
+when they alone occupy the imported name; normal runs merge these duplicates before naming.
+If the source-prefixed name also collides, use the existing numeric suffix resolver. Unoccupied imported
+names retain their existing allocation order; unused enclosing or nested names do not collide.
+Canonically spaced aliases collapse to shorthand when the restored local equals the imported name; other
 spacing and comments are preserved. Public export names stay unchanged.
 
 ## Explicit chunks

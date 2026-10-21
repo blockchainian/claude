@@ -28,6 +28,23 @@ export function toIdentifier(raw) {
   return result;
 }
 
+export function sameImportedBinding(left, right) {
+  return left.path.isImportSpecifier() && right.path.isImportSpecifier()
+    && left.path.parent.source.value === right.path.parent.source.value
+    && externalName(left.path.node.imported) === externalName(right.path.node.imported);
+}
+
+/** Prefer the external source when restoring an occupied named import. */
+export function importCollisionName(binding, proposed) {
+  const path = binding.path;
+  if (!path.isImportSpecifier() || externalName(path.node.imported) !== proposed) return proposed;
+  const source = path.parent.source.value;
+  if (source.startsWith('.')) return proposed;
+  const segment = source.replace(/^node:/, '').split('/').at(-1);
+  const name = toIdentifier(`${segment.replace(/_+/g, '-')}-${proposed[0].toUpperCase()}${proposed.slice(1)}`);
+  return name[0].toLowerCase() + name.slice(1);
+}
+
 function parseSource(source) {
   return timed('parse', () => parse(source, { sourceType: 'unambiguous', allowUndeclaredExports: true, plugins: ['jsx'] }));
 }
@@ -117,9 +134,9 @@ export function resolveNames(source, proposals, options) {
     let proposed = toIdentifier(raw);
     if (jsxTags.has(key) && /^[a-z]/.test(proposed)) proposed = proposed[0].toUpperCase() + proposed.slice(1);
     if (proposed === record.name) continue;
-    const collides = candidate => {
+    const collides = (candidate, differentImport = false) => {
       for (const other of byName.get(candidate) ?? []) {
-        if (other === record) continue;
+        if (other === record || differentImport && sameImportedBinding(record.binding, other.binding)) continue;
         for (const scope of record.scopes) for (const otherScope of other.scopes) {
           if (scope === otherScope
             || contains(scope, otherScope) && [...record.references].some(reference => contains(otherScope, reference))
@@ -131,9 +148,10 @@ export function resolveNames(source, proposals, options) {
       }
       return false;
     };
+    if (options?.restoreExternalImports && collides(proposed, true)) proposed = importCollisionName(record.binding, proposed);
     let name = proposed;
     if (collides(name)) {
-      options?.onCollision?.({ key, proposed, occupied: [...new Set([...byName.keys(), ...globals.keys()])].filter(collides), context: bindingContext(source, record.binding) });
+      options?.onCollision?.({ key, proposed, occupied: [...new Set([...byName.keys(), ...globals.keys()])].filter(candidate => collides(candidate)), context: bindingContext(source, record.binding) });
       const suffix = /^(.*?)(\d+)$/.exec(proposed);
       const stem = suffix ? suffix[1] : proposed;
       let number = suffix ? BigInt(suffix[2]) + 1n : 2n;
@@ -326,7 +344,7 @@ export function followImports(files, withFile = (file, task) => task(), fragment
       proposals.set(imported.key, name);
     }
     const names = chunks?.chunkBindings.has(file) ? chunks.resolve(file, proposals)
-      : withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals, { fragment: fragments.has(file) })));
+      : withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals, { fragment: fragments.has(file), restoreExternalImports: true })));
     resolved.set(file, names);
     return names;
   }

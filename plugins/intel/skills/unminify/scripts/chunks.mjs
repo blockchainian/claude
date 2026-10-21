@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit, identifierBinding } from './identifiers.mjs';
-import { toIdentifier, applyRenames, bindingContext } from './rename.mjs';
+import { toIdentifier, applyRenames, bindingContext, importCollisionName, sameImportedBinding } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
@@ -166,7 +166,7 @@ export function analyzeChunk(sources, {
 export function resolveChunkNames(sources, proposals, options = {}) {
   const analysis = analyzeChunk(sources, options),
     result = new Map();
-  const occupied = new Set(analysis.bindings.keys());
+  const occupied = new Map(analysis.bindings);
   const free = new Set();
   for (const file of analysis.files.values()) for (const path of file.lexical) {
     if (!path.scope.getBinding(path.node.name) && !analysis.bindings.has(path.node.name)) free.add(path.node.name);
@@ -180,19 +180,22 @@ export function resolveChunkNames(sources, proposals, options = {}) {
       path
     }) => path.isJSXIdentifier()) && /^[a-z]/.test(stem)) stem = stem[0].toUpperCase() + stem.slice(1);
     if (stem === name) continue;
-    const collides = candidate => candidate !== name && occupied.has(candidate) || free.has(candidate) || binding.references.some(({
+    const collides = (candidate, differentImport = false) => candidate !== name && occupied.has(candidate)
+      && (!differentImport || occupied.get(candidate).declarations.some(other => !sameImportedBinding(binding.declarations[0].binding, other.binding)))
+      || free.has(candidate) || binding.references.some(({
       path
     }) => {
       const other = path.scope.getBinding(candidate);
       return other && !other.scope.path.isProgram()
         && other !== binding.declarations[0].binding;
     });
+    if (options.restoreExternalImports && collides(stem, true)) stem = importCollisionName(binding.declarations[0].binding, stem);
     let candidate = stem,
       suffix = 2;
-    if (collides(candidate)) options.onCollision?.({ key: name, proposed: stem, occupied: [...new Set([...occupied, ...free, ...binding.references.flatMap(({ path }) => Object.keys(path.scope.getAllBindings()))])].filter(collides), context: bindingContext(sources.get(binding.file), binding.declarations[0].binding) });
+    if (collides(candidate)) options.onCollision?.({ key: name, proposed: stem, occupied: [...new Set([...occupied.keys(), ...free, ...binding.references.flatMap(({ path }) => Object.keys(path.scope.getAllBindings()))])].filter(candidate => collides(candidate)), context: bindingContext(sources.get(binding.file), binding.declarations[0].binding) });
     while (collides(candidate)) candidate = `${stem}${suffix++}`;
     occupied.delete(name);
-    occupied.add(candidate);
+    occupied.set(candidate, binding);
     if (candidate !== name) result.set(name, candidate);
   }
   return result;
