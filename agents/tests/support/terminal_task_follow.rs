@@ -380,21 +380,33 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
         let capture = tmux.capture_when(|capture| {
             capture
                 .lines()
-                .nth(2)
-                .is_some_and(|row| row.contains("Pinned"))
+                .any(|row| row.trim_end().ends_with("Pinned"))
         });
         let rows: Vec<_> = capture.lines().collect();
-        assert_eq!(rows[4][..rows[4].rfind('·').unwrap()].width(), center);
+        let header = rows
+            .iter()
+            .position(|row| row.trim_end().ends_with("Pinned"))
+            .unwrap();
+        let separator = header - 1;
+        let pin_row = (header + 1) as u16;
+        assert!(header > 3, "{capture}");
+        assert_eq!(
+            rows[separator][..rows[separator].rfind('·').unwrap()].width(),
+            center
+        );
         let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
         let parser = captured_screen(&colored, width as u16, 50);
-        let dot = parser.screen().cell(4, center as u16).unwrap();
+        let dot = parser
+            .screen()
+            .cell(separator as u16, center as u16)
+            .unwrap();
         assert!(!dot.dim(), "{colored}");
         assert_eq!(dot.fgcolor(), vt100::Color::Default);
         assert_eq!(dot.bgcolor(), vt100::Color::Default);
-        tmux.mouse(0, center, 4, true);
+        tmux.mouse(0, center, separator, true);
         let clicked = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
         let clicked = captured_screen(&clicked, width as u16, 50);
-        for y in 2..7 {
+        for y in 2..=pin_row {
             for x in left..right {
                 assert_eq!(
                     clicked.screen().cell(y, x as u16).unwrap().bgcolor(),
@@ -407,14 +419,14 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
             .screen()
             .rows(left as u16, (right - left) as u16)
             .skip(2)
-            .take(5)
+            .take(pin_row as usize - 1)
             .collect::<Vec<_>>();
-        assert_eq!(list[2].trim(), "·");
+        assert_eq!(list[separator - 2].trim(), "·");
         println!("{}", list.join("\n"));
         let assert_selected = |row: u16, detail: &str| {
             let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
             let parsed = captured_screen(&colored, width as u16, 50);
-            for y in [3, 5, 6] {
+            for y in [2, 3, pin_row] {
                 assert_eq!(
                     parsed.screen().cell(y, left as u16).unwrap().bgcolor(),
                     if y == row {
@@ -436,24 +448,28 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
                 "detail must follow wheel selection: {plain}"
             );
         };
-        tmux.mouse(64, center, 2, false);
-        assert_selected(3, "User");
+        tmux.mouse(64, center, header, false);
+        assert_selected(pin_row, "User");
+        tmux.mouse(65, center, pin_row as usize, false);
+        assert_selected(pin_row, "User");
         tmux.mouse(65, center, 3, false);
-        assert_selected(3, "User");
-        tmux.mouse(65, center, 6, false);
-        assert_selected(5, "User");
-        tmux.mouse(65, center, 6, false);
-        assert_selected(6, "Assistant");
+        assert_selected(2, "User");
+        tmux.mouse(65, center, 3, false);
+        assert_selected(3, "Assistant");
+        tmux.mouse(64, center, header, false);
+        assert_selected(pin_row, "User");
+        tmux.mouse(65, center, separator, false);
+        assert_selected(pin_row, "User");
         tmux.mouse(64, center, 2, false);
-        assert_selected(3, "User");
-        tmux.mouse(65, center, 4, false);
-        assert_selected(3, "User");
-        tmux.mouse(64, center, 5, false);
-        assert_selected(6, "Assistant");
-        tmux.mouse(64, center, 4, false);
-        assert_selected(5, "User");
+        assert_selected(3, "Assistant");
+        tmux.mouse(64, center, separator, false);
+        assert_selected(2, "User");
         tmux.run(&["send-keys", "-t", "probe", "p"]);
-        tmux.wait_for(|capture| !capture.lines().nth(2).unwrap().contains("Pinned"));
+        tmux.wait_for(|capture| {
+            !capture
+                .lines()
+                .any(|row| row.trim_end().ends_with("Pinned"))
+        });
         println!(
             "{{\"verdict\":\"pass\",\"width\":{width},\"centered\":true,\"default_style\":true,\"click_ignored\":true,\"unpin_hides_section\":true,\"wheel_sections\":true,\"detail_follows\":true}}"
         );

@@ -170,6 +170,7 @@ struct Viewport {
     output_borders: [Rect; 2],
     /// Index into the task event list of each drawn event row, top down.
     event_rows: Vec<EventRow>,
+    event_timeline_rows: usize,
     event_separator: Option<usize>,
     event_header: bool,
     event_detail_max: usize,
@@ -1386,14 +1387,12 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
 
 impl Viewport {
     fn event_row_at(&self, offset: usize) -> Option<EventRow> {
-        let offset = if self.event_header {
-            offset.checked_sub(1)?
-        } else {
-            offset
-        };
         let offset = match self.event_separator {
-            Some(separator) if offset == separator => return None,
-            Some(separator) if offset > separator => offset - 1,
+            Some(separator) if offset == separator || offset == separator + 1 => return None,
+            Some(separator) if offset > separator => {
+                offset - separator - 2 + self.event_timeline_rows
+            }
+            Some(_) if offset >= self.event_timeline_rows => return None,
             _ => offset,
         };
         self.event_rows.get(offset).copied()

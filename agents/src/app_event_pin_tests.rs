@@ -295,7 +295,7 @@ fn event_refresh_preserves_pinned_timeline_scroll_after_leaving_newest() {
             })
             .collect();
         app.view.set_pinned_events(&task, pins);
-        app.view.event_list.cursor = app.view.matching_event_count().checked_sub(1);
+        app.view.event_list.cursor = app.view.event_panel.len().checked_sub(1);
         let mut terminal = Terminal::new(TestBackend::new(200, 24)).unwrap();
         app.draw(&mut terminal).unwrap();
         let scroll = app.view.event_scroll();

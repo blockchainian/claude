@@ -1202,8 +1202,7 @@ impl View {
                         let viewport = self.viewport.borrow();
                         let offset = usize::from(mouse.row - viewport.event_panel.y);
                         viewport.event_separator.and_then(|separator| {
-                            let separator = separator + usize::from(viewport.event_header);
-                            (offset != separator).then_some(offset < separator)
+                            (offset != separator).then_some(offset > separator)
                         })
                     };
                     let in_pins = matches!(

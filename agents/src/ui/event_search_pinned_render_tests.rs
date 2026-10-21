@@ -2,7 +2,7 @@ use super::*;
 use crate::providers::Provider;
 
 #[test]
-fn pinned_rows_render_before_timeline_and_keep_their_order() {
+fn pinned_rows_render_after_timeline_and_keep_their_order() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
@@ -44,7 +44,7 @@ fn pinned_rows_render_before_timeline_and_keep_their_order() {
         view.prepare_event_search();
         assert_eq!(
             view.shown_event_rows()
-                .take(2)
+                .skip(view.shown_events().count())
                 .map(|(_, event)| event.body.clone())
                 .collect::<Vec<_>>(),
             pinned_bodies
@@ -59,11 +59,11 @@ fn pinned_rows_render_before_timeline_and_keep_their_order() {
     let mut buffer = Buffer::empty(area);
     view.render_event(area, &mut buffer, events[0].started_at);
     assert_eq!(
-        view.viewport.borrow().event_rows[0],
+        view.viewport.borrow().event_rows[2],
         super::super::task_ui::EventRow::Pinned(0)
     );
     assert_eq!(
-        view.viewport.borrow().event_rows[2],
+        view.viewport.borrow().event_rows[0],
         super::super::task_ui::EventRow::Timeline(0)
     );
     let snapshot = buffer

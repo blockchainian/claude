@@ -157,7 +157,7 @@ impl View {
                         .flatten()
                 })
             })
-            .or_else(|| self.matching_event_count().checked_sub(1));
+            .or_else(|| self.newest_event_position().or_else(|| self.matching_event_count().checked_sub(1)));
         let selected = self
             .event_list
             .cursor
