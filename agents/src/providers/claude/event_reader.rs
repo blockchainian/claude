@@ -1028,13 +1028,11 @@ impl EventReader {
             code[..end].parse::<i64>().ok()
         });
         let title = match background {
-            Some(((description, _), status)) => {
-                let mut title = format!("\"{description}\" {status}");
-                if let Some(code) = exit_code.filter(|code| *code != 0) {
-                    title.push_str(&format!(" · {code}"));
-                }
-                title
-            }
+            Some(((description, _), status)) => match exit_code {
+                Some(0) => format!("\"{description}\" ✓"),
+                Some(code) => format!("\"{description}\" · {code}"),
+                None => format!("\"{description}\" {status}"),
+            },
             None => summary.to_owned(),
         };
         let output = field("output-file").map(|path| {
@@ -3751,10 +3749,7 @@ pub(crate) mod tests {
         assert_eq!(events[4].started_at, at(40));
         assert_eq!(events[5].body, "finished");
         assert_eq!(events[5].started_at, at(42));
-        assert_eq!(
-            events[6].body,
-            "\"等 Codex 做日志面板\" completed"
-        );
+        assert_eq!(events[6].body, "\"等 Codex 做日志面板\" ✓");
         assert_eq!(events[6].started_at, at(43));
         assert_eq!(events[6].ended_at, Some(at(43)));
         assert_eq!(events[0].previous_end, None);
@@ -3890,7 +3885,7 @@ pub(crate) mod tests {
         assert_eq!(measured.earliest, len - 64 * 1024);
         assert_eq!(
             event_panel.entries[0].event.body,
-            "\"等 Codex 做日志面板\" completed"
+            "\"等 Codex 做日志面板\" ✓"
         );
     }
 

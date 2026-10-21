@@ -91,13 +91,13 @@ fn terminal_background_notifications_shorten_titles_and_color_exit_numbers() {
     use std::io::Write;
     let (directory, tmux, transcript) = start_probe("background-notification-titles");
     let evidence =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/short-notifications/terminal");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/claude-notification-check/terminal");
     std::fs::create_dir_all(&evidence).unwrap();
     let expected = [
-        ("\"睡12秒再输出\" completed", None),
-        ("\"给 a16z 视频改名\" completed · 1", Some("1")),
-        ("\"等右键改动\" completed · -1", Some("-1")),
-        ("\"三个配置依次快速启动\" failed · 144", Some("144")),
+        ("\"睡12秒再输出\" ✓", None),
+        ("\"给 a16z 视频改名\" · 1", Some("1")),
+        ("\"等右键改动\" · -1", Some("-1")),
+        ("\"三个配置依次快速启动\" · 144", Some("144")),
         ("\"Sleep 600 seconds in background\" killed", None),
     ];
     let fixture = include_str!("../fixtures/claude-background-notifications.jsonl");
