@@ -11,6 +11,13 @@ import { syntaxFingerprint } from './syntax/stage.mjs';
 import { hash } from './journal.mjs';
 import { checkRewrite } from './checks.mjs';
 
+// Drain every in-flight computation before propagating failure or closing its pool.
+async function settle(tasks) {
+  const results = await Promise.allSettled(tasks);
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
 /** Explicit chunks keep each stage and its group writes independently resumable. */
 export async function createChunkRun(root, settings) {
   const manifest = settings.chunks ? await loadChunks(settings.chunks, root)
@@ -32,12 +39,15 @@ export async function createChunkRun(root, settings) {
   }
   const renamePath = chunk => join(root, '.unminify', 'chunks', `${hash(chunk.id)}.jsonl`);
   const readSources = chunk => new Map(chunk.files.map(file => [file, readFileSync(join(root, file), 'utf8')]));
-  function restoreSources(inputs, fragmentContext) {
+  async function restoreSources(inputs, fragmentContext, pool) {
     const baseline = new Map(inputs);
-    for (const [file, source] of inputs) if (!ignored.has(file)) {
-      baseline.set(file, transformSyntax(source, { fragment: true, fragmentContext }).source);
-    }
-    return mergeExternalImports(baseline, { selected: new Set(inputs.keys()), ignored, chunkSiblings: true });
+    await settle([...inputs].filter(([file]) => !ignored.has(file)).map(async ([file, source]) => {
+      const options = { fragment: true, fragmentContext };
+      const result = pool ? await pool.run({ kind: 'transform', source, options }) : transformSyntax(source, options);
+      baseline.set(file, result.source);
+    }));
+    const options = { selected: new Set(inputs.keys()), ignored, chunkSiblings: true };
+    return pool ? pool.run({ kind: 'merge', sources: baseline, options }) : mergeExternalImports(baseline, options);
   }
   const selected = new Set(), completed = new Map();
   let reporting;
@@ -60,22 +70,22 @@ export async function createChunkRun(root, settings) {
       driver.jobs = manifest.chunks.filter(chunk => chunk.files.some(file => selected.has(file)));
       for (const file of manifest.files) fragments.add(file);
     },
-    syntaxPending({ fragmentContext } = {}) {
+    async syntaxPending({ fragmentContext, pool } = {}) {
       const pending = [];
-      for (const chunk of driver.jobs) {
-        const inputs = readSources(chunk), after = restoreSources(inputs, fragmentContext);
+      await settle(driver.jobs.map(async chunk => {
+        const inputs = readSources(chunk), after = await restoreSources(inputs, fragmentContext, pool);
         for (const [file, source] of inputs) if (source !== after.get(file)) pending.push(file);
-      }
+      }));
       return pending;
     },
-    restore({ emit, summary, sources, phase, fragmentContext }) {
+    async restore({ emit, summary, sources, phase, fragmentContext, pool }) {
       let rejected = 0;
-      for (const chunk of driver.jobs) {
+      await settle(driver.jobs.map(async chunk => {
         const inputs = readSources(chunk);
         for (const [file, source] of inputs) sources.set(file, source);
         if (existsSync(renamePath(chunk))) {
           emit({ chunk: chunk.id, status: 'syntax-skipped' });
-          continue;
+          return;
         }
         const journal = openChunkJournal(root, chunk.id, inputs, syntaxOptions, 'syntax/chunks');
         if (journal.done) {
@@ -83,24 +93,24 @@ export async function createChunkRun(root, settings) {
             rejected += chunk.files.filter(file => reporting.has(file)).length;
             emit({ chunk: chunk.id, status: 'rejected', reason: journal.done.reason });
           } else emit({ chunk: chunk.id, status: 'syntax-skipped' });
-          continue;
+          return;
         }
         const endSyntax = phase('syntax', chunk.id);
         try {
-          const after = restoreSources(inputs, fragmentContext);
+          const after = await restoreSources(inputs, fragmentContext, pool);
           const reason = [...after].map(([, source]) => checkRewrite(source, source,
             { fragment: true, sharedProgram: true })).find(Boolean);
           if (reason) {
             journal.complete(inputs, 'rejected', reason);
             rejected += chunk.files.filter(file => reporting.has(file)).length;
             emit({ chunk: chunk.id, status: 'rejected', reason });
-            continue;
+            return;
           }
           journal.commit(after, { status: 'syntax' });
           for (const [file, source] of after) sources.set(file, source);
           emit({ chunk: chunk.id, status: 'syntax', files: [...after].filter(([file, source]) => source !== inputs.get(file)).length });
         } finally { endSyntax(); }
-      }
+      }));
       summary.rejected += rejected;
       return rejected;
     },
