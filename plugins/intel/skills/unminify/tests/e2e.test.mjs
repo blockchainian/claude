@@ -44,7 +44,7 @@ function localExport(source, name) {
 
 function invoke(root) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [fileURLToPath(new URL('../scripts/cli.mjs', import.meta.url)), root, '--concurrency', '2'],
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./helpers/run-stages.mjs', import.meta.url)), root, '--concurrency', '2'],
       { stdio: ['ignore', 'pipe', 'pipe'], timeout: 240_000 });
     let stdout = '', stderr = '';
     child.stdout.setEncoding('utf8');

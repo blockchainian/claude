@@ -24,16 +24,26 @@ is selected the same way. Check its Git status
 before rewriting so existing work is visible.
 
 ```bash
-node "$SKILL_DIR/scripts/cli.mjs" <path>... \
+node "$SKILL_DIR/scripts/cli.mjs" restore-syntax <path>...
+node "$SKILL_DIR/scripts/cli.mjs" rename-bindings <path>... \
   --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
+node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --min-symbol-length 4
 ```
+
+Each command selects parseable `.js`/`.mjs` files and applies the ignore rules first.
+All commands accept `--ignore <file>` and `--chunks <file>`. Only `rename-bindings` accepts
+`--concurrency` and `--max-input-tokens`; `--min-symbol-length` belongs to
+`rename-bindings` and `sync-imports`. Other options fail with `invalid option`. A missing
+or unknown command prints usage and exits nonzero. Run the three commands in order;
+each stage resumes independently. Modules may be processed in batches in either order.
 
 The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user's Codex login
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
 Never print credentials.
 
-Without `--chunks`, before planning any names the command runs all 13 first-batch syntax steps in registry
-order in every selected file. Only converted source ranges are replaced; surrounding
+`restore-syntax` runs all 13 first-batch syntax steps in registry order, then merges
+duplicate external imports, in every selected file and all selected chunk members.
+Only converted source ranges are replaced; surrounding
 text stays byte-identical. Inserted statement blocks use the surrounding indentation
 step; extracted expression statements drop parentheses only when statement grammar
 and evaluation semantics allow it. Fragment files retain program binding names, declaration kinds
@@ -42,7 +52,11 @@ binding index (or the supplied input set outside Git) contains no program bindin
 `undefined`, and the current file passes binding and dynamic-scope checks. Direct
 API calls without index context retain numeric `void` in fragments.
 
-The command selects parseable `.js`/`.mjs` files and asks for names of bindings shorter
+`rename-bindings` checks the entire expanded selection before creating a model client:
+if rerunning syntax restoration or import merging would change any file, it lists every
+such file and requires `restore-syntax`. It only names bindings, resolves collisions,
+checks rewrites and writes results; it never restores syntax or follows imports.
+It asks for names of bindings shorter
 than `--min-symbol-length`, including default and namespace import locals but excluding
 named imports. It resolves naming conflicts, checks each completed file and writes it atomically. Naming
 instructions prohibit duplicate names in the same scope and reserve `is`/`has`/`should`/`can`
@@ -57,8 +71,9 @@ Planning and packing count the actual instructions, prompt and rendered context 
 batch that still cannot fit fails before sending. Placeholders are unique across
 the request; original batch IDs stay stable across resume. Collision replies use
 stable binding-specific journal IDs.
-At the end of every run, including interrupted runs, the command discovers all completed
-ordinary and chunk journals in the target Git root, including files outside this batch.
+`sync-imports` follows imports without requesting model names or restoring syntax.
+Run it after naming, including an interrupted naming run. It covers the current selection
+and discovers all completed ordinary and chunk journals in the target Git root, including files outside this batch.
 It verifies their current contents against the recorded results before following imports;
 changed or missing files are skipped and reported. Historical files receive only import
 following, never model naming. Ordinary files pass rewrite checks and journaled atomic
@@ -99,15 +114,18 @@ belong to only one chunk, including path or symlink aliases. Unlisted files reta
 ordinary file workflow.
 
 ```bash
-node "$SKILL_DIR/scripts/cli.mjs" <path>... --chunks <manifest.json> \
+node "$SKILL_DIR/scripts/cli.mjs" restore-syntax <path>... --chunks <manifest.json>
+node "$SKILL_DIR/scripts/cli.mjs" rename-bindings <path>... --chunks <manifest.json> \
   --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
+node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --chunks <manifest.json> \
+  --min-symbol-length 4
 ```
 
-References in unselected sibling files of the same chunk are always updated.
-Model naming starts with selected declarations; import
+Selecting one chunk member expands the selection to every parseable, nonignored sibling
+for all three commands. Model naming covers those declarations; import
 following also updates relative imports when the exporting binding has been renamed,
-even when their declaration and references are entirely in unselected chunk siblings.
-External named imports can also be restored entirely within unselected chunk siblings.
+including declarations and references in expanded chunk siblings.
+External named imports are also restored throughout those siblings.
 Ignored files are never rewritten. A name is frozen if more than one chunk member
 declares it, any declaration or reference is ignored, or it is a known environment or
 JavaScript global. Direct `eval` or `with` freezes all binding names in the chunk, including
@@ -138,14 +156,14 @@ authorization, ignores and dynamic-scope restrictions still apply. Its dedicated
 checks every reference's import identity, first external-module load order and all other
 bindings, and permits only the planned source edits. Naming checks use the merged code
 as their baseline. Ordinary files have independent `.unminify/merge-imports/` checkpoints;
-chunk merges replay in memory under the chunk journal's pipeline options and transaction.
+chunk syntax and merges use independent group checkpoints in `.unminify/syntax/chunks/`.
 
-A chunk prepares selected-file syntax changes in memory, merges imports, names its program bindings,
-then names selected-file function bindings and follows import names. Individual-file checks and chunk binding,
-global, export-interface and source-text checks must all pass before any member is written.
-A parse or scope-check failure leaves the whole chunk intact. Each source fragment must
-be independently parseable; slices through a token or function body are rejected.
-Unselected siblings receive only the authorized shared-name edits.
+Each chunk stage writes its own checked group transaction. `restore-syntax` validates
+syntax and merges before committing the group. `rename-bindings` names program and
+function bindings and commits checked names. `sync-imports` follows imports in a separate
+checked transaction. Chunk binding, global, export-interface and source-text checks gate
+naming and import writes. A rejected stage leaves that stage's input intact. Each source
+fragment must be independently parseable; slices through a token or function body are rejected.
 
 Chunk journals live in `.unminify/chunks/`. They store accepted replies and durable
 whole-chunk write intents, including rewritten source, to finish a partially written
@@ -168,8 +186,8 @@ syntax relative to the ignore file: directories, wildcards, `!` exceptions and w
 
 Syntax checkpoints live separately in `.unminify/syntax/<relative-path>.syntax.jsonl`.
 They record pipeline fingerprints and durable write intents, without rename offsets or
-model replies. Resume completes syntax before constructing rename plans from the resulting
-text. Existing rename journals retain ownership of their files and are resumed without
+model replies. Rerun `restore-syntax` to complete syntax before invoking `rename-bindings`.
+Existing rename journals retain ownership of their files and are resumed without
 rerunning syntax. An unfinished syntax checkpoint rejects changed source or pipeline options.
 
 Accepted replies are synced immediately to `.unminify/<relative-path>.jsonl` at the target
@@ -181,7 +199,8 @@ session ID (changes on reconnect), plus status, usage, `estimated_input_tokens` 
 auth-file contents and source text are never logged in these telemetry files.
 
 Keep the same output and batch options after interruption; the selected paths may change.
-Completed files are skipped; unfinished files reuse recorded replies against the unchanged
+Completed files in each stage are skipped; unfinished naming files reuse recorded replies
+against the unchanged
 original source. Do not delete journals during a resumable run.
 If source or batch options changed, stop and report the mismatch rather than discard records.
 The user decides whether `.unminify/` should be ignored or committed.

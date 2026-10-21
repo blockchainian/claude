@@ -8,8 +8,10 @@ import { packBatches } from './pack.mjs';
 import { transformSyntax } from './syntax/runner.mjs';
 import { mergeExternalImports, importMergeVersion } from './merge-imports.mjs';
 import { syntaxFingerprint } from './syntax/stage.mjs';
+import { hash } from './journal.mjs';
+import { checkRewrite } from './checks.mjs';
 
-/** Explicit chunks own their syntax, naming and writes as one transaction. */
+/** Explicit chunks keep each stage and its group writes independently resumable. */
 export async function createChunkRun(root, settings) {
   const manifest = settings.chunks ? await loadChunks(settings.chunks, root)
     : { chunks: [], files: new Set(), fingerprint: null };
@@ -18,11 +20,27 @@ export async function createChunkRun(root, settings) {
   const options = { manifest: manifest.fingerprint,
     ignored: [...ignored].sort(), chunkSiblings: !!settings.chunkSiblings,
     minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens, syntax: syntaxFingerprint, mergeImports: importMergeVersion };
-  if (settings.chunks) recoverChunkJournals(root, id => {
-    if (!manifest.chunks.some(chunk => chunk.id === id)) throw new Error(`chunk missing from manifest: ${id}`);
-    return options;
-  });
+  const syntaxOptions = { manifest: manifest.fingerprint, ignored: [...ignored].sort(),
+    syntax: syntaxFingerprint, mergeImports: importMergeVersion };
+  if (settings.chunks) {
+    recoverChunkJournals(root, syntaxOptions, 'syntax/chunks');
+    recoverChunkJournals(root, settings.command === 'rename-bindings' || settings.command === 'all' ? id => {
+      if (!manifest.chunks.some(chunk => chunk.id === id)) throw new Error(`chunk missing from manifest: ${id}`);
+      return options;
+    } : undefined);
+    recoverChunkJournals(root, undefined, 'imports/chunks');
+  }
+  const renamePath = chunk => join(root, '.unminify', 'chunks', `${hash(chunk.id)}.jsonl`);
+  const readSources = chunk => new Map(chunk.files.map(file => [file, readFileSync(join(root, file), 'utf8')]));
+  function restoreSources(inputs, fragmentContext) {
+    const baseline = new Map(inputs);
+    for (const [file, source] of inputs) if (!ignored.has(file)) {
+      baseline.set(file, transformSyntax(source, { fragment: true, fragmentContext }).source);
+    }
+    return mergeExternalImports(baseline, { selected: new Set(inputs.keys()), ignored, chunkSiblings: true });
+  }
   const selected = new Set(), completed = new Map();
+  let reporting;
   const driver = {
     files: manifest.files, jobs: [],
     more() {
@@ -37,9 +55,78 @@ export async function createChunkRun(root, settings) {
         chunkSiblings: options.chunkSiblings, readOnly: !journal });
     },
     select(files, fragments) {
+      reporting ??= new Set(files);
       for (const file of files) selected.add(file);
       driver.jobs = manifest.chunks.filter(chunk => chunk.files.some(file => selected.has(file)));
       for (const file of manifest.files) fragments.add(file);
+    },
+    syntaxPending({ fragmentContext } = {}) {
+      const pending = [];
+      for (const chunk of driver.jobs) {
+        const inputs = readSources(chunk), after = restoreSources(inputs, fragmentContext);
+        for (const [file, source] of inputs) if (source !== after.get(file)) pending.push(file);
+      }
+      return pending;
+    },
+    restore({ emit, summary, sources, phase, fragmentContext }) {
+      let rejected = 0;
+      for (const chunk of driver.jobs) {
+        const inputs = readSources(chunk);
+        for (const [file, source] of inputs) sources.set(file, source);
+        if (existsSync(renamePath(chunk))) {
+          emit({ chunk: chunk.id, status: 'syntax-skipped' });
+          continue;
+        }
+        const journal = openChunkJournal(root, chunk.id, inputs, syntaxOptions, 'syntax/chunks');
+        if (journal.done) {
+          if (journal.done.status === 'rejected') {
+            rejected += chunk.files.filter(file => reporting.has(file)).length;
+            emit({ chunk: chunk.id, status: 'rejected', reason: journal.done.reason });
+          } else emit({ chunk: chunk.id, status: 'syntax-skipped' });
+          continue;
+        }
+        const endSyntax = phase('syntax', chunk.id);
+        try {
+          const after = restoreSources(inputs, fragmentContext);
+          const reason = [...after].map(([, source]) => checkRewrite(source, source,
+            { fragment: true, sharedProgram: true })).find(Boolean);
+          if (reason) {
+            journal.complete(inputs, 'rejected', reason);
+            rejected += chunk.files.filter(file => reporting.has(file)).length;
+            emit({ chunk: chunk.id, status: 'rejected', reason });
+            continue;
+          }
+          journal.commit(after, { status: 'syntax' });
+          for (const [file, source] of after) sources.set(file, source);
+          emit({ chunk: chunk.id, status: 'syntax', files: [...after].filter(([file, source]) => source !== inputs.get(file)).length });
+        } finally { endSyntax(); }
+      }
+      summary.rejected += rejected;
+      return rejected;
+    },
+    prepareImports(sources) {
+      for (const chunk of driver.jobs) {
+        if (completed.has(chunk.id)) continue;
+        const inputs = readSources(chunk);
+        let journal, historyOptions;
+        if (existsSync(renamePath(chunk))) {
+          const header = JSON.parse(readFileSync(renamePath(chunk), 'utf8').split('\n')[0]);
+          historyOptions = JSON.parse(header.options);
+          journal = openChunkJournal(root, chunk.id, inputs, historyOptions);
+          if (!journal.done) {
+            driver.addHistory(chunk, inputs, null, ignores, historyOptions);
+            for (const [file, source] of inputs) sources.set(file, source);
+            continue;
+          }
+        } else {
+          historyOptions = { manifest: manifest.fingerprint, ignored: [...ignored].sort(), chunkSiblings: true };
+          journal = openChunkJournal(root, chunk.id, inputs, historyOptions, 'imports/chunks');
+          journal.begin(chunk.files.filter(file => selected.has(file)));
+          if (!journal.done) journal.complete(inputs, 'imports');
+        }
+        driver.addHistory(chunk, inputs, journal, ignores, historyOptions);
+        for (const [file, source] of inputs) sources.set(file, source);
+      }
     },
     async process(chunk, context) {
       const { api, namer, withSlot, emit, summary, sources, phase, fragmentContext } = context;
@@ -51,7 +138,7 @@ export async function createChunkRun(root, settings) {
       }
       const journal = openChunkJournal(root, chunk.id, inputs, options);
       const requested = chunk.files.filter(file => selected.has(file));
-      const count = requested.length;
+      const count = chunk.files.filter(file => reporting.has(file)).length;
       journal.begin(requested);
       const selection = new Set(journal.selection);
       if (journal.done) {
@@ -62,19 +149,7 @@ export async function createChunkRun(root, settings) {
         return;
       }
       const chunkOptions = { ...settings, selected: selection, ignored };
-      let baseline = new Map(inputs);
-      const endSyntax = phase('syntax', chunk.id);
-      try {
-        for (const [file, source] of baseline) if (selection.has(file) && !ignored.has(file)) {
-          baseline.set(file, transformSyntax(source, { fragment: true, fragmentContext }).source);
-        }
-      } finally { endSyntax(); }
-      const endMerge = phase('selection_plan', chunk.id);
-      try {
-        const merged = mergeExternalImports(baseline, chunkOptions);
-        emit({ chunk: chunk.id, status: 'merge-imports', files: [...merged].filter(([file, source]) => source !== baseline.get(file)).length });
-        baseline = merged;
-      } finally { endMerge(); }
+      const baseline = new Map(inputs);
       const analysis = analyzeChunk(baseline, chunkOptions);
       emit({ chunk: chunk.id, status: 'planned', names: analysis.candidates.length, frozen: analysis.statistics });
       const batches = planChunk(baseline, chunkOptions);
@@ -165,7 +240,11 @@ export async function createChunkRun(root, settings) {
           return;
         }
         for (const [file, source] of after) sources.set(file, source);
-        completed.set(chunk.id, { chunk, journal, inputs, sources: after, pending: true, count, batches: batches.length, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
+        journal.commit(after, { status: 'renamed' });
+        summary.completed += count;
+        summary.chunkSiblingFiles = (summary.chunkSiblingFiles ?? 0) + [...after].filter(([file, source]) => !reporting.has(file) && source !== inputs.get(file)).length;
+        emit({ chunk: chunk.id, status: 'renamed', files: count, batches: batches.length });
+        completed.set(chunk.id, { chunk, journal, inputs: after, sources: after, pending: false, count, batches: batches.length, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
       } finally { endWrite(); }
     },
     importOptions(journals) {
@@ -208,7 +287,7 @@ export async function createChunkRun(root, settings) {
             const after = applyChunkRenames(state.sources, names);
             const reason = checkChunkRewrite(state.sources, after);
             if (reason) {
-              summary.rejected += state.chunk.files.filter(file => selected.has(file)).length;
+              summary.rejected += state.chunk.files.filter(file => reporting.has(file)).length;
               if (state.pending) state.journal.complete(state.inputs, 'rejected', reason);
               for (const [file, source] of state.inputs) sources.set(file, source);
               emit({ chunk: id, status: 'imports-rejected', reason });
@@ -217,7 +296,7 @@ export async function createChunkRun(root, settings) {
             if (state.pending || names.size) {
               state.journal.commit(after, { status: state.pending ? 'renamed' : 'imports' });
               if (state.pending) summary.completed += state.count;
-              summary.chunkSiblingFiles = (summary.chunkSiblingFiles ?? 0) + [...after].filter(([file, source]) => !selected.has(file) && source !== state.inputs.get(file)).length;
+              summary.chunkSiblingFiles = (summary.chunkSiblingFiles ?? 0) + [...after].filter(([file, source]) => !reporting.has(file) && source !== state.inputs.get(file)).length;
               emit({ chunk: id, status: state.pending ? 'renamed' : 'imports', files: state.count, batches: state.batches });
             }
             state.pending = false;

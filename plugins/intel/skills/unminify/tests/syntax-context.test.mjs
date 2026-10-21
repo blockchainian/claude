@@ -54,7 +54,7 @@ for (const shadowed of [false,true]) test(`real CLI uses siblings outside its se
   execFileSync('git',['init','--initial-branch=main',root],{stdio:'ignore'});
   writeFileSync(join(root,'selected.js'),source);
   writeFileSync(join(root,'sibling.js'),`${shadowed?'var undefined = 7; ':''}consume(shared);`);
-  const result=spawnSync(process.execPath,[new URL('../scripts/cli.mjs',import.meta.url).pathname,join(root,'selected.js'),'--min-symbol-length','1'],{encoding:'utf8',env:{...process.env,CODEX_HOME:join(root,'absent-auth')},timeout:30000});
+  const result=spawnSync(process.execPath,[new URL('./helpers/run-stages.mjs',import.meta.url).pathname,join(root,'selected.js'),'--min-symbol-length','1'],{encoding:'utf8',env:{...process.env,CODEX_HOME:join(root,'absent-auth')},timeout:30000});
   assert.equal(result.status,0,result.stderr);
   assert.equal(readFileSync(join(root,'selected.js'),'utf8'),shadowed?source:'// preserved\r\nvar shared = undefined;');
 });

@@ -83,13 +83,13 @@ test('CLI runs through a symlink to the scripts directory', async t => {
   const result = spawnSync(process.execPath, [join(scripts, 'cli.mjs'), '--help'], { encoding: 'utf8' });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /unminify <path>/);
+  assert.match(result.stdout, /unminify restore-syntax <path>/);
 });
 test('arguments enforce the fixed model and positive integer limits', () => {
-  assert.equal(parseArgs(['src', '--concurrency', '2']).concurrency, 2);
-  assert.equal(parseArgs(['src']).maxInputTokens, 100000);
-  assert.deepEqual(parseArgs(['src/a', '--concurrency', '2', 'src/b']).paths.map(dir => dir.split('/').slice(-2).join('/')), ['src/a', 'src/b']);
-  for (const args of [[], ['src', '--model', 'other'], ['src', '--max-ids', '60'], ['src', '--context-bytes', '8000'], ['src', '--max-input-tokens', '0'], ['src', '--min-symbol-length', '1.5'], ['src', '--ignore']]) assert.throws(() => parseArgs(args));
+  assert.equal(parseArgs(['rename-bindings', 'src', '--concurrency', '2']).concurrency, 2);
+  assert.equal(parseArgs(['rename-bindings', 'src']).maxInputTokens, 100000);
+  assert.deepEqual(parseArgs(['rename-bindings', 'src/a', '--concurrency', '2', 'src/b']).paths.map(dir => dir.split('/').slice(-2).join('/')), ['src/a', 'src/b']);
+  for (const args of [[], ['rename-bindings', 'src', '--model', 'other'], ['rename-bindings', 'src', '--max-ids', '60'], ['rename-bindings', 'src', '--context-bytes', '8000'], ['rename-bindings', 'src', '--max-input-tokens', '0'], ['rename-bindings', 'src', '--min-symbol-length', '1.5'], ['rename-bindings', 'src', '--ignore']]) assert.throws(() => parseArgs(args));
 });
 test('one run renames the files of every given path once', async t => {
   const target = await fixture(t, { 'one/a.js': source, 'two/b.js': source });

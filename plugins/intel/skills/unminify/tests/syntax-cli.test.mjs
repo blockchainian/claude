@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
-const cli=new URL('../scripts/cli.mjs',import.meta.url);
+const cli=new URL('./helpers/run-stages.mjs',import.meta.url);
 test('real CLI finishes all syntax writes before rename planning and resumes offsets',t=>{
   const root=mkdtempSync(join(tmpdir(),'syntax-cli-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
   execFileSync('git',['init','--initial-branch=main',root],{stdio:'ignore'});
