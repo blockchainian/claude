@@ -1074,11 +1074,15 @@ pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>)
 }
 
 /// Shows a rejected ask as `Rejected` with the user's note, or as `Chat about this` with
-/// the answers its "Questions asked:" list reports; other errors keep their text.
+/// any answers its "Questions asked:" list reports; dismissed messages have no answers.
+/// Other errors keep their text.
 pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> {
     let text = text.strip_prefix("Error: ").unwrap_or(text);
+    let dismissed = |reason: &str| {
+        reason.starts_with("The user dismissed these questions because the message you sent with them was not shown.")
+    };
     let said = if let Some(reason) = text.strip_prefix("PreToolUse:AskUserQuestion hook error: ") {
-        if !reason.starts_with("The user wants to clarify these questions.") {
+        if !dismissed(reason) && !reason.starts_with("The user wants to clarify these questions.") {
             return None;
         }
         reason
@@ -1089,6 +1093,12 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
         };
         said
     };
+    if dismissed(said) {
+        return Some(format!(
+            "Chat about this\n\n{}",
+            answer_list(questions, &BTreeMap::new())
+        ));
+    }
     if !said.starts_with("The user wants to clarify these questions.") {
         return Some(format!("Rejected\n\n{}", said.trim()));
     }
@@ -1304,6 +1314,49 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn recorded_native_rejected_questions_show_chat_and_answers() {
+        for fixture in [
+            include_str!("../../tests/fixtures/claude-questions-rejected.jsonl"),
+            include_str!("../../tests/fixtures/claude-questions-hook-rejected.jsonl"),
+        ] {
+            let records: Vec<serde_json::Value> = fixture
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let questions = &records[0]["message"]["content"][0]["input"]["questions"];
+            let header = questions[0]["header"].as_str().unwrap();
+            for result in [
+                records[1]["message"]["content"][0]["content"]
+                    .as_str()
+                    .unwrap(),
+                records[1]["toolUseResult"].as_str().unwrap(),
+            ] {
+                // Keep the recorded four-line explanation and its actual question list.
+                let (prefix, asked) = result
+                    .split_once("The user wants to clarify these questions.")
+                    .unwrap();
+                let (_, list) = asked.split_once("Questions asked:").unwrap();
+                let short = format!(
+                    "{prefix}The user wants to clarify these questions. Start by asking them what they would like to clarify.\n\n    Questions asked:{list}"
+                );
+                for text in [result, short.as_str()] {
+                    assert_eq!(
+                        super::rejected_answers(questions, text).as_deref(),
+                        Some("Chat about this\n\nYou have not answered all questions")
+                    );
+                    assert_eq!(
+                        super::rejected_answers(
+                            questions,
+                            &text.replace("(No answer provided)", "Answer: Red")
+                        ),
+                        Some(format!("Chat about this\n\n● {header} → Red"))
+                    );
+                }
+            }
+        }
     }
 
     fn shell_output(command: &str, text: &str) -> Vec<crate::event::Section> {

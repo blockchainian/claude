@@ -69,7 +69,7 @@ impl Live {
     }
     fn start(&mut self, port: u16) -> String {
         let settings = json!({"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":format!("http://127.0.0.1:{port}/ask-user-question"),"timeout":3600}]}]}}).to_string();
-        let text = self.command(&["--bg", "--model", "haiku", "--effort", "low", "--tools", "AskUserQuestion", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--setting-sources", "", "--settings", &settings, "Use AskUserQuestion exactly once. Ask question \"Hook color?\", header \"Color\", multiSelect false, options Red with description Red choice and Blue with description Blue choice. After my answer, reply DONE. This is an explicit interactive question test."]);
+        let text = self.command(&["--bg", "--model", "haiku", "--effort", "low", "--tools", "AskUserQuestion", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--setting-sources", "", "--settings", &settings, "Use AskUserQuestion exactly once. Before calling it, send exactly this message: I will ask you to choose a color. Ask question \"Hook color?\", header \"Color\", multiSelect false, options Red with description Red choice and Blue with description Blue choice. After my answer, reply DONE. This is an explicit interactive question test."]);
         let job = text
             .lines()
             .find_map(|line| line.split("backgrounded · ").nth(1))
@@ -171,7 +171,7 @@ fn real_ask_user_question_dashboard_answer_and_empty_response() {
 
 #[test]
 #[ignore = "starts billable Claude sessions; requires CLAUDE_CODE_OAUTH_TOKEN"]
-fn real_ask_user_question_dashboard_escape_clarifies() {
+fn real_ask_user_question_dashboard_escape_resends_message() {
     let mut live = Live::new();
     let server = Arc::new(AskUserQuestion::bind(0, live.config.clone()).unwrap());
     live.start(server.port);
@@ -189,7 +189,7 @@ fn real_ask_user_question_dashboard_escape_clarifies() {
             event["message"]["content"].as_array().is_some_and(|blocks| blocks.iter().any(|block| {
                 block["type"] == "tool_result" && block["tool_use_id"] == ask.id
                     && block["is_error"] == true
-                    && block["content"].as_str().is_some_and(|text| text.starts_with("PreToolUse:AskUserQuestion hook error: The user wants to clarify these questions."))
+                    && block["content"].as_str().is_some_and(|text| text.starts_with("PreToolUse:AskUserQuestion hook error: The user dismissed these questions because the message you sent with them was not shown."))
             }))
         })?;
         events[rejected + 1..].iter().find_map(|event| {
@@ -207,9 +207,13 @@ fn real_ask_user_question_dashboard_escape_clarifies() {
                 return None;
             }
             println!("Claude after dashboard Esc: {text}");
+            assert_eq!(text.trim(), "I will ask you to choose a color.");
             assert!(
-                text.to_lowercase().contains("clarif"),
-                "Claude should ask what to clarify: {text}"
+                event["message"]["content"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|block| block["type"] != "tool_use")
             );
             Some(())
         })
