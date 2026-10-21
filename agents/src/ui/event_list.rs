@@ -165,11 +165,6 @@ impl View {
                     super::style::cursor_style(),
                 );
             }
-            if pinned && buf.area.contains((area.right(), area.y + y as u16).into()) {
-                buf[(area.right(), area.y + y as u16)]
-                    .set_symbol("│")
-                    .set_style(super::tool_detail::bracket_style());
-            }
             if !pinned
                 && session.parent.is_none()
                 && self.event_list.sort != EventSort::Duration

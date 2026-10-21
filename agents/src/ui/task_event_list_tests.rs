@@ -458,9 +458,41 @@ fn event_pin_fixed_above_scrolled_timeline() {
             .collect::<String>()
     };
     assert!(!row_text(0).contains('│'));
-    assert_eq!(buffer[(100, 0)].symbol(), "│");
+    assert_eq!(buffer[(100, 0)].symbol(), " ");
     assert_eq!(
         view.viewport.borrow().event_rows.last(),
         Some(&EventRow::Timeline(view.event_panel.len() - 1))
     );
+}
+
+#[test]
+fn event_pin_clock_ends_at_same_display_column_as_timeline() {
+    let (_dir, mut view, events, _, _) = fixture();
+    for row in &mut view.rows { row.status = SessionStatus::Ready; }
+    view.status_filter = 0;
+    view.select_event(Some(0));
+    view.toggle_event_pin();
+    view.select_event(Some(0));
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 30));
+    view.render_event(area, &mut buffer, events[0].started_at);
+    let line = |y| {
+        let mut text = String::new();
+        let mut x = 0;
+        while x < area.width {
+            let symbol = buffer[(x, y)].symbol();
+            text.push_str(symbol);
+            x += (symbol.width() as u16).max(1);
+        }
+        text.trim_end().to_owned()
+    };
+    let pinned = line(0);
+    let timeline = line(2);
+    let clock = super::formatting::clock_text(events[0].started_at);
+    assert!(pinned.ends_with(&clock), "{pinned}");
+    assert!(timeline.ends_with(&clock), "{timeline}");
+    assert!(pinned.chars().count() < pinned.width(), "fixture must contain wide characters");
+    assert_eq!(pinned.width(), timeline.width());
+    assert!(!pinned.contains('│'));
+    assert_eq!(buffer[(100, 0)].symbol(), " ");
 }
