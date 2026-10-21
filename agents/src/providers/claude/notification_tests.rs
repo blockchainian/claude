@@ -189,7 +189,7 @@ fn notification_await_events_keep_order_and_errors() {
 fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
     let fixture = include_str!("../../../tests/fixtures/claude-background-notifications.jsonl");
     let expected = [
-        ("\"睡12秒再输出\" ✓", Some(0)),
+        ("\"睡12秒再输出\" ✔", Some(0)),
         ("\"给 a16z 视频改名\" · 1", Some(1)),
         ("\"等右键改动\" · -1", Some(-1)),
         ("\"三个配置依次快速启动\" · 144", Some(144)),
@@ -222,7 +222,7 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         .strip_suffix(" completed (exit code 0)")
         .unwrap();
     let event = events_from(vec![row.clone()]).remove(0);
-    assert_eq!(event.body, format!("{description} ✓"));
+    assert_eq!(event.body, format!("{description} ✔"));
     assert_eq!(event.calls[0].exit_code, Some(0));
     for summary in ["Agent finished", "Monitor completed"] {
         let mut record = row.clone();
