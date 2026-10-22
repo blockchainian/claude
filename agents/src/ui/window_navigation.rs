@@ -200,10 +200,24 @@ impl View {
         else {
             return;
         };
-        // The full-width prompt sits under several panels; moving up always lands on the task list.
+        // Prefer the sole width-expanded top panel; otherwise keep the task list destination.
         if source == Panel::Prompt && direction == 'k' && !panels[0].1.is_empty() {
+            let target = self
+                .width_zoom
+                .filter(|panel| {
+                    [
+                        (Panel::TaskList, v.list),
+                        (Panel::TaskDetails, v.task_details),
+                        (Panel::EventList, v.event_panel),
+                    ]
+                    .iter()
+                    .any(|(candidate, rect)| {
+                        candidate == panel && !rect.is_empty() && rect.bottom() <= v.prompt.y
+                    })
+                })
+                .unwrap_or(Panel::TaskList);
             drop(v);
-            self.set_active_panel(Panel::TaskList);
+            self.set_active_panel(target);
             return;
         }
         let horizontal = matches!(direction, 'h' | 'l');

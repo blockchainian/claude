@@ -76,6 +76,10 @@ pub(super) struct CenterLayout {
     pub(super) event_panel: Rect,
     pub(super) prompt: Rect,
     pub(super) event_detail: Rect,
+    pub(super) prompt_top_rule: Rect,
+    pub(super) prompt_bottom_rule: Rect,
+    pub(super) event_detail_top_rule: Rect,
+    pub(super) footer_rule: Rect,
 }
 
 impl View {
@@ -146,15 +150,19 @@ impl View {
         };
         if zoom && let Some(panel) = self.height_zoom {
             let height = top_height + list_height + event_detail_height;
+            // Adjacent frame rules coincide when the panel between them disappears.
+            // The detail's first row already counts its top rule in `height`.
             match panel {
                 Panel::EventDetail if show_event => {
-                    (top_height, list_height, event_detail_height) = (0, 0, height);
+                    (top_height, list_height, event_detail_height) =
+                        (0, 0, height + u16::from(!wide));
                 }
                 Panel::EventList if show_event && !wide => {
                     (top_height, list_height, event_detail_height) = (0, height, 0);
                 }
                 Panel::TaskList | Panel::TaskDetails | Panel::EventList => {
-                    (top_height, list_height, event_detail_height) = (height, 0, 0);
+                    (top_height, list_height, event_detail_height) =
+                        (height + u16::from(show_event && !wide), 0, 0);
                 }
                 _ => {}
             }
@@ -175,12 +183,28 @@ impl View {
         let event_detail = if show_event {
             row(
                 area,
-                header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
+                header_height
+                    + top_height
+                    + 1
+                    + prompt_height
+                    + u16::from(!wide && list_height > 0)
+                    + list_height,
                 event_detail_height,
             )
         } else {
             Rect::default()
         };
+        let frame_rule = |y| {
+            if show_event {
+                row(area, y, 1)
+            } else {
+                Rect::default()
+            }
+        };
+        let prompt_top_rule = frame_rule(prompt.y.saturating_sub(area.y + 1));
+        let prompt_bottom_rule = frame_rule(prompt.bottom() - area.y);
+        let event_detail_top_rule = frame_rule(event_detail.y.saturating_sub(area.y));
+        let footer_rule = frame_rule(footer.y.saturating_sub(area.y + 1));
         let (body, mut event_list) = if wide && show_event {
             let column_width = (body.width - 2 * PANEL_GAP) / 4;
             let event_width = body.width - 2 * PANEL_GAP - 2 * column_width;
@@ -264,6 +288,10 @@ impl View {
             },
             prompt,
             event_detail,
+            prompt_top_rule,
+            prompt_bottom_rule,
+            event_detail_top_rule,
+            footer_rule,
         }
     }
     pub(crate) fn event_count(&self, area: Rect) -> usize {
@@ -533,15 +561,24 @@ impl View {
             render_input_row(&prompt, edit, layout.search, buf);
         }
         // Activity and task status share the rule immediately above the prompt.
-        let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
-        if !layout.event_detail.is_empty() {
-            rule(middle, buf);
+        for border in [
+            layout.prompt_top_rule,
+            layout.prompt_bottom_rule,
+            layout.event_detail_top_rule,
+            layout.footer_rule,
+        ] {
+            rule(border, buf);
         }
         let mut task_details = layout.task_details;
         let task_details_rule = if task_details.is_empty() {
             None
-        } else if !layout.event_detail.is_empty() {
-            Some(Rect::new(task_details.x, middle.y, task_details.width, 1))
+        } else if !layout.prompt_top_rule.is_empty() {
+            Some(Rect::new(
+                task_details.x,
+                layout.prompt_top_rule.y,
+                task_details.width,
+                1,
+            ))
         } else {
             task_details.height = task_details.height.saturating_sub(1);
             Some(row(layout.task_details, task_details.height, 1))
@@ -557,10 +594,8 @@ impl View {
         }
         self.render_event(layout.event_panel, buf, now);
         if !layout.event_detail.is_empty() {
-            rule(row(layout.event_detail, 0, 1), buf);
-            let bottom = row(area, layout.event_detail.bottom() - area.y, 1);
-            rule(bottom, buf);
-            self.viewport.borrow_mut().output_borders = [row(layout.event_detail, 0, 1), bottom];
+            self.viewport.borrow_mut().output_borders =
+                [layout.event_detail_top_rule, layout.footer_rule];
             self.render_event_detail(inset(layout.event_detail), buf, now);
         }
         let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
@@ -574,23 +609,29 @@ impl View {
             self.viewport.borrow_mut().event_borders = [
                 Rect::new(
                     layout.event_panel.x,
-                    layout.event_panel.y.saturating_sub(1),
+                    if area.width >= WIDE_LAYOUT_COLUMNS {
+                        layout.header.bottom().saturating_sub(1)
+                    } else {
+                        layout.prompt_bottom_rule.y
+                    },
                     layout.event_panel.width,
                     1,
                 ),
                 Rect::new(
                     layout.event_panel.x,
-                    layout.event_panel.bottom(),
+                    if area.width >= WIDE_LAYOUT_COLUMNS {
+                        layout.prompt_top_rule.y
+                    } else {
+                        layout.event_detail_top_rule.y
+                    },
                     layout.event_panel.width,
                     1,
                 ),
             ];
             let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.event_panel.bottom()
+                layout.prompt_top_rule.y
             } else {
-                let border = row(area, layout.prompt.bottom() - area.y, 1);
-                rule(border, buf);
-                border.y
+                layout.prompt_bottom_rule.y
             };
             // The model and effort sit between the separator's joint, or the screen's left
             // edge in the narrow layout, and the screen's right edge.
@@ -602,7 +643,7 @@ impl View {
             // The duration label sits on the border between the event list and its detail in both
             // layouts; the New button, shown only in time order, shares the model's border.
             let jump_y = if self.event_list.sort == EventSort::Duration {
-                layout.event_panel.bottom()
+                self.viewport.borrow().event_borders[1].y
             } else {
                 model_y
             };
@@ -627,7 +668,12 @@ impl View {
                 buf,
             );
             self.render_event_filter(self.viewport.borrow().event_borders[1], buf);
-            let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
+            let rule = Rect::new(
+                layout.list.x,
+                layout.prompt_top_rule.y,
+                layout.list.width,
+                1,
+            );
             self.render_activity_strip(rule, buf, now);
         }
         if let Some(task_details_rule) = task_details_rule {
