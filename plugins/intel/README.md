@@ -67,10 +67,11 @@ Each skill's `SKILL.md` covers its usage, setup and requirements.
 
 Unminify plans and packs batches within each file and stage using `--max-input-tokens`
 (default 100000). The budget counts instructions, prompt and rendered context with
-`js-tiktoken` 1.0.21 (`o200k_base`); planning has no name-count cap. Naming requests ask
-for at most 1000 names in placeholder order, repeating the same context for each part.
-Only a fully validated combined reply is journaled under the original batch IDs. Oversized
-contexts are shortened; an irreducible batch that still cannot fit fails before sending. Top-level
+`js-tiktoken` 1.0.21 (`o200k_base`); planning has no name-count cap. Naming requests
+keep their planned names together. When a response reaches its output limit, complete string pairs are accepted and missing names are requested once with
+the same context. Names still missing keep their original bindings. Combined replies
+are journaled under the original batch IDs; a packed batch with no accepted names
+stays unfinished for resume. Oversized contexts are shortened; an irreducible batch that still cannot fit fails before sending. Top-level
 naming finishes before function naming, and journals retain original batch IDs. Large chunks use memory-bounded worker threads;
 unchanged successful syntax prechecks are cached for resume. Packed chunk replies retain
 their per-batch journal records and sync the response together.

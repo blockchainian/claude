@@ -199,11 +199,18 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
           emit({ chunk: chunk.id, file, status: 'batch-failed', reason: error.message });
           return;
         }
-        const keys = Object.keys(packed.payload.placeholders);
-        if (!response.names || Object.keys(response.names).length !== keys.length || keys.some(key => typeof response.names[key] !== 'string')) throw new Error(`invalid names for chunk ${chunk.id}`);
-        return packed.parts.map(({ batch, payload }) => [
-          prefix + batch.id, new Map(Object.entries(payload.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])),
-        ]);
+        if (!response.names || Object.entries(response.names).some(([key, name]) => !Object.hasOwn(packed.payload.placeholders, key) || typeof name !== 'string')) throw new Error(`invalid names for chunk ${chunk.id}`);
+        return packed.parts.flatMap(({ batch, payload }) => {
+          const names = new Map(Object.entries(payload.placeholders).filter(([placeholder]) => Object.hasOwn(response.names, placeholder))
+            .map(([placeholder, key]) => [key, response.names[placeholder]]));
+          if (!names.size) {
+            batchFailed = true;
+            summary.failedBatches++;
+            emit({ chunk: chunk.id, file, status: 'batch-failed', batch: prefix + batch.id, reason: 'No complete names received.' });
+            return [];
+          }
+          return [[prefix + batch.id, names]];
+        });
       }
       async function requestBatches(pending, render, file, prefix = '', target = journal, concurrency = settings.concurrency) {
         const packed = iterateBatches(pending, render, settings);

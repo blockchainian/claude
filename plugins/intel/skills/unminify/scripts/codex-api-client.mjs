@@ -46,9 +46,9 @@ function refreshReason(auth) {
   return refreshed < Date.now() - 8 * 86_400_000 ? 'scheduled' : null;
 }
 
-async function consume(response, metrics) {
+async function consume(response, metrics, allowIncomplete) {
   let buffer = '', completed = false;
-  let output;
+  let output, incomplete, deltas = '';
   const items = new Map();
   const decoder = new TextDecoder();
   const stream = metrics.stream = { bytes: 0, events: 0, output_text_chars: 0,
@@ -63,7 +63,10 @@ async function consume(response, metrics) {
     stream.first_event_at ??= Date.now();
     stream.last_event_at = Date.now();
     stream.last_event = typeof e.type === 'string' ? e.type : null;
-    if (e.type === 'response.output_text.delta' && typeof e.delta === 'string') stream.output_text_chars += e.delta.length;
+    if (e.type === 'response.output_text.delta' && typeof e.delta === 'string') {
+      stream.output_text_chars += e.delta.length;
+      if (allowIncomplete) deltas += e.delta;
+    }
     if (e.response?.usage) metrics.usage = usageOf(e.response.usage);
     if (['error', 'response.failed', 'response.incomplete'].includes(e.type)
       || hasQuotaError(e.error) || hasQuotaError(e.response?.error) || hasQuotaError(e)) {
@@ -72,7 +75,12 @@ async function consume(response, metrics) {
         response_status: e.response?.status, code: error.code, type: error.type, message: error.message,
         param: error.param, incomplete_reason: e.response?.incomplete_details?.reason };
       if (hasQuotaError(error)) throw Object.assign(quotaError(), { details });
-      throw retryError('Responses stream failed.', details);
+      if (allowIncomplete && e.type === 'response.incomplete'
+        && details.incomplete_reason === 'max_output_tokens' && !e.response?.error) {
+        incomplete = details;
+        completed = true;
+        if (Array.isArray(e.response?.output)) output = e.response.output;
+      } else throw retryError('Responses stream failed.', details);
     }
     if (e.type === 'response.output_item.done') items.set(e.output_index ?? e.item?.id ?? items.size, e.item);
     if (e.type === 'response.completed') {
@@ -105,13 +113,15 @@ async function consume(response, metrics) {
       text += part.text;
     }
   }
-  if (!text) throw retryError('Missing Responses output.');
-  return text;
+  if (!text && incomplete) text = deltas;
+  if (!text) throw retryError('Missing Responses output.', incomplete);
+  return { text, incomplete };
 }
 
 /** A file-backed ChatGPT Responses client. Endpoint and timing overrides support local tests.
- * respond({ model, effort, instructions, input, schema?, validate? }) returns { output, usage }.
+ * respond({ model, effort, instructions, input, schema?, validate?, recoverIncomplete? }) returns { output, usage }.
  * With schema, output is parsed JSON; validate(output) may throw to request a retry.
+ * recoverIncomplete(text) may recover output-limit replies; validate also receives { incomplete }.
  * log receives timing, queue, session and safe response metadata for each HTTP attempt.
  * event receives shared rate-limit pause boundaries; telemetry identifies the calling batch.
  * close() drains accepted calls and prevents further calls.
@@ -385,7 +395,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     finally { if (refreshes.get(authPath) === promise) refreshes.delete(authPath); }
   }
 
-  async function run({ model, effort, instructions, input, schema, validate, telemetry = {} }) {
+  async function run({ model, effort, instructions, input, schema, validate, recoverIncomplete, telemetry = {} }) {
     const body = { model, reasoning: { effort }, instructions, input, tools: [], tool_choice: 'auto',
       parallel_tool_calls: false, store: false, stream: true, include: [],
       ...(schema === undefined ? {} : { text: { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } } }) };
@@ -424,13 +434,17 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
                 if (response.status >= 500) throw retryError(`Responses HTTP ${response.status}.`, details);
                 throw Object.assign(new Error(`Responses HTTP ${response.status}.`), { details });
               }
-              const text = await consume(response, metrics);
+              const { text, incomplete } = await consume(response, metrics, Boolean(recoverIncomplete));
               let output = text;
-              if (schema !== undefined) {
+              if (incomplete) {
+                output = recoverIncomplete(text);
+                if (!output || !Object.keys(output).length) throw retryError('Responses stream failed.', incomplete);
+                metrics.failure = failureOf({ details: incomplete });
+              } else if (schema !== undefined) {
                 try { output = JSON.parse(text); } catch { throw retryError('Responses output is not JSON.'); }
               }
               if (validate) {
-                try { await validate(output); } catch { throw retryError('Responses output failed validation.'); }
+                try { await validate(output, { incomplete: Boolean(incomplete) }); } catch { throw retryError('Responses output failed validation.'); }
               }
               return { output, usage: metrics.usage };
             } catch (error) {
@@ -451,7 +465,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
         }
       } catch (error) {
         if (['AUTH', 'USAGE_LIMIT'].includes(error.code)) throw stop(error);
-        if (!error.retryable || attempt === 3) throw Object.assign(new Error(error.message), { failure: error.failure });
+        if (!error.retryable || attempt === 3) throw Object.assign(new Error(error.message), { failure: error.failure, retryable: error.retryable });
         previousFailure = error.code ?? error.message;
         queuedAt = Date.now();
         await delay(retryDelayMs * 2 ** attempt);
