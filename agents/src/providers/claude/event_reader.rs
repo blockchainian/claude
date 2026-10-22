@@ -951,6 +951,7 @@ impl EventReader {
                                 self.tool(block, at);
                                 self.batch = None;
                                 let event = &mut self.entries.last_mut().unwrap().event;
+                                event.kind = Kind::Assistant;
                                 event.body = "advisor".to_owned();
                                 let call = event.calls.last_mut().unwrap();
                                 call.title = "advisor".to_owned();
@@ -1438,13 +1439,14 @@ pub(crate) mod tests {
         let pending = reader.refresh(20).unwrap().events;
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].body, "advisor");
+        assert_eq!(pending[0].kind, Kind::Assistant);
         assert_eq!(pending[0].ended_at, None);
         writeln!(file, "{}", records[1]).unwrap();
         let events = reader.refresh(20).unwrap().events;
         assert_eq!(events, tail_session(file.path(), 20, true).unwrap());
         assert_eq!(events.len(), 1);
         let event = &events[0];
-        assert_eq!(event.kind, Kind::Tool);
+        assert_eq!(event.kind, Kind::Assistant);
         assert_eq!(
             event.source.as_deref(),
             Some("srvtoolu_01Ybbz6gyNahapzZ5zTtxji5")

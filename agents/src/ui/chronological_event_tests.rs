@@ -772,6 +772,10 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
                 view.last_update = now - chrono::Duration::seconds(3);
                 let expected = if sort == EventSort::Time {
                     match kind {
+                        Kind::Assistant if state == "recorded" => "8s".into(),
+                        Kind::Assistant if state == "clock" => {
+                            super::formatting::clock_text(event.ended_at.unwrap())
+                        }
                         Kind::Tool | Kind::Error | Kind::Denied => match state {
                             "recorded" => "8s".into(),
                             "clock" => super::formatting::clock_text(event.ended_at.unwrap()),
@@ -784,7 +788,9 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
                 } else {
                     match kind {
                         _ if state == "missing" => String::new(),
-                        Kind::User | Kind::Assistant if state == "recorded" => String::new(),
+                        Kind::User if state == "recorded" => String::new(),
+                        Kind::Assistant if state == "recorded" => "8s".into(),
+                        Kind::Assistant if state == "clock" => String::new(),
                         Kind::User | Kind::Assistant => "7s".into(),
                         Kind::Tool | Kind::Error | Kind::Denied => match state {
                             "recorded" => "8s".into(),

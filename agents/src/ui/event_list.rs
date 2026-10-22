@@ -1451,18 +1451,37 @@ fn mode_row_time(event: &Event, session: &Session, last: bool, sort: EventSort) 
         return Some(row_time(event, session, last));
     }
     match event.kind {
+        _ if (event.kind == Kind::Assistant && event.completed_time)
+            || matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) =>
+        {
+            match row_time(event, session, last) {
+                time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
+                RowTime::Clock(_) | RowTime::Ago(_) => None,
+            }
+        }
         Kind::User | Kind::Assistant => event
             .previous_end
             .map(|previous| RowTime::Settled(event.started_at - previous)),
-        Kind::Tool | Kind::Error | Kind::Denied => match row_time(event, session, last) {
-            time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
-            RowTime::Clock(_) | RowTime::Ago(_) => None,
-        },
         _ => None,
     }
 }
 
 fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
+    if event.completed_time
+        && matches!(
+            event.kind,
+            Kind::Assistant | Kind::Tool | Kind::Error | Kind::Denied
+        )
+        && let Some(end) = event.ended_at
+    {
+        return match event.duration {
+            Some(duration) => RowTime::Settled(duration),
+            None => RowTime::Clock(end),
+        };
+    }
+    if event.completed_time && event.kind == Kind::Assistant {
+        return RowTime::Running(event.started_at);
+    }
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
             RowTime::Ago(event.started_at)
@@ -1472,14 +1491,6 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
             RowTime::Settled(event.started_at - reference)
         } else {
             RowTime::Clock(event.started_at)
-        };
-    }
-    if event.completed_time
-        && let Some(end) = event.ended_at
-    {
-        return match event.duration {
-            Some(duration) => RowTime::Settled(duration),
-            None => RowTime::Clock(end),
         };
     }
     let Some(previous) = event.previous_end else {

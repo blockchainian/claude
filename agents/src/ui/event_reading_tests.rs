@@ -25,6 +25,10 @@ fn advisor_list_row_uses_catalog_model_and_hides_encrypted_result() {
     use crate::providers::Provider;
     let fixture = include_str!("../../tests/fixtures/claude-advisor.jsonl");
     let transcript = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(transcript.path(), fixture.lines().next().unwrap()).unwrap();
+    let pending = crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true)
+        .unwrap()
+        .remove(0);
     std::fs::write(transcript.path(), fixture).unwrap();
     let mut parsed =
         crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true).unwrap();
@@ -54,6 +58,14 @@ fn advisor_list_row_uses_catalog_model_and_hides_encrypted_result() {
     let parsed =
         crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true).unwrap();
     session.last_record_at = Some(next);
+    assert_eq!(
+        row_time(&pending, &session, true),
+        RowTime::Running(pending.started_at)
+    );
+    assert_eq!(
+        sort_duration(&pending, &session, next, true),
+        Some(next - pending.started_at)
+    );
     let time = event_time(&event, &session, false, next, EventSort::Time);
     assert_eq!(time, "4m 45s");
     assert_eq!(
@@ -90,6 +102,50 @@ fn advisor_list_row_uses_catalog_model_and_hides_encrypted_result() {
     assert!(!view.event_detail_text(&event).contains("encrypted_content"));
     assert!(display.calls[0].output.as_ref().is_none_or(Vec::is_empty));
     assert_eq!(event.body, "advisor");
+    let advisor_x = row.find("advisor").unwrap() as u16;
+    assert_eq!(
+        buffer[(advisor_x, 0)].fg,
+        style::event_styles(&Kind::Assistant).1.fg.unwrap()
+    );
+    assert_eq!(event.kind, Kind::Assistant);
+    assert_eq!(
+        sort_duration(&event, &session, next, false),
+        Some(end - event.started_at)
+    );
+    assert_eq!(
+        event_time(&event, &session, true, next, EventSort::Time),
+        "4m 45s"
+    );
+    let tool = &parsed[1];
+    let mut buffer = Buffer::empty(area);
+    render_event(
+        tool,
+        "2s",
+        true,
+        area,
+        &mut buffer,
+        None,
+        Path::new("/workspace"),
+    );
+    let first = buffer
+        .content
+        .iter()
+        .find(|cell| !cell.symbol().trim().is_empty())
+        .unwrap();
+    assert_eq!(first.fg, style::event_styles(&Kind::Tool).1.fg.unwrap());
+    view.set_sessions(vec![session], false);
+    view.set_event(parsed);
+    for (filter, expected) in [
+        (crate::event::EventFilter::Message, Kind::Assistant),
+        (crate::event::EventFilter::Tool, Kind::Tool),
+    ] {
+        view.event_list.filter = filter;
+        let shown: Vec<_> = view
+            .shown_events()
+            .map(|(_, event)| event.kind.clone())
+            .collect();
+        assert_eq!(shown, vec![expected]);
+    }
 }
 
 #[test]
