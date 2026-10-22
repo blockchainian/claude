@@ -24,6 +24,9 @@ mod terminal_weekly_usage;
 #[path = "support/terminal_message_text.rs"]
 mod terminal_message_text;
 
+#[path = "support/terminal_mermaid.rs"]
+mod terminal_mermaid;
+
 #[path = "support/terminal_structured.rs"]
 mod terminal_structured;
 

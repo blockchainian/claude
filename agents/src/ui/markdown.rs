@@ -7,6 +7,42 @@ use ratatui::{
     style::Style,
     text::{Line, Span},
 };
+use std::{
+    collections::HashMap,
+    io::Write,
+    process::{Command, Stdio},
+    sync::{LazyLock, Mutex},
+};
+
+fn mermaid(text: &str) -> Option<String> {
+    static CACHE: LazyLock<Mutex<HashMap<String, Option<String>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    CACHE
+        .lock()
+        .expect("mermaid cache lock")
+        .entry(text.to_owned())
+        .or_insert_with(|| {
+            let mut child = Command::new("mermaid-ascii")
+                .args(["-f", "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()?;
+            let written = child
+                .stdin
+                .take()
+                .expect("mermaid stdin")
+                .write_all(text.as_bytes());
+            let output = child.wait_with_output().ok()?;
+            written.ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8(output.stdout).ok()
+        })
+        .clone()
+}
 
 /// Recognize supported Markdown structure without treating ordinary line breaks as prose.
 pub(super) fn has_markers(text: &str) -> bool {
@@ -256,7 +292,17 @@ impl Writer {
     }
 
     fn code_lines(&mut self) {
-        let text = std::mem::take(&mut self.code_text)
+        let text = std::mem::take(&mut self.code_text);
+        let lang = self.code_lang.take();
+        let diagram = lang.as_deref() == Some("mermaid");
+        if diagram && let Some(output) = mermaid(&text) {
+            for part in output.lines() {
+                self.push(part, Style::default());
+                self.flush_code();
+            }
+            return;
+        }
+        let text = text
             .chars()
             .map(|ch| {
                 if ch.is_control() && ch != '\n' {
@@ -266,7 +312,6 @@ impl Writer {
                 }
             })
             .collect::<String>();
-        let lang = self.code_lang.take();
         let mut highlighted = lang
             .filter(|lang| highlight::find_syntax(lang).is_some())
             .map(|lang| highlight::code_lines(&text, &lang).into_iter());
@@ -287,6 +332,13 @@ impl Writer {
             }
         }
         self.flush();
+        if diagram {
+            self.push(
+                "Install mermaid-ascii to render this diagram.",
+                super::style::time_style(),
+            );
+            self.flush_code();
+        }
     }
 
     fn flush(&mut self) {
@@ -326,6 +378,131 @@ mod tests {
 
     fn plain(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
+    }
+
+    fn mermaid_process(name: &str, installed: bool) -> bool {
+        if std::env::var_os("AGENTS_MERMAID_TEST").is_some() {
+            return true;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        if installed {
+            let binary = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join("go/bin/mermaid-ascii");
+            assert!(
+                binary.is_file(),
+                "install mermaid-ascii in ~/go/bin for this test"
+            );
+            std::os::unix::fs::symlink(binary, directory.path().join("mermaid-ascii")).unwrap();
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("ui::markdown::tests::{name}"),
+                "--nocapture",
+            ])
+            .env("AGENTS_MERMAID_TEST", "1")
+            .env("PATH", directory.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        false
+    }
+
+    #[test]
+    fn mermaid_renders_box_drawing_and_caches_across_widths() {
+        if !mermaid_process("mermaid_renders_box_drawing_and_caches_across_widths", true) {
+            return;
+        }
+        let source = "```mermaid\ngraph LR\n A[Start] --> B[Finish]\n```";
+        let lines = render(source, 80);
+        assert!(plain(&lines).join("\n").contains('┌'));
+        assert!(plain(&lines).join("\n").contains("Start"));
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style == Style::default())
+        );
+        std::fs::remove_file(
+            std::path::PathBuf::from(std::env::var_os("PATH").unwrap()).join("mermaid-ascii"),
+        )
+        .unwrap();
+        assert_eq!(render(source, 10), lines);
+    }
+
+    #[test]
+    fn mermaid_missing_program_preserves_source_and_caches_failure() {
+        if !mermaid_process(
+            "mermaid_missing_program_preserves_source_and_caches_failure",
+            false,
+        ) {
+            return;
+        }
+        let source = "```mermaid\ngraph TD\n A[Missing] --> B[Program]\n```";
+        let lines = render(source, 100);
+        assert_eq!(
+            plain(&lines),
+            [
+                "graph TD",
+                " A[Missing] --> B[Program]",
+                "Install mermaid-ascii to render this diagram."
+            ]
+        );
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(lines[2].spans[0].style, super::super::style::time_style());
+        let binary = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+            .join("go/bin/mermaid-ascii");
+        std::os::unix::fs::symlink(
+            binary,
+            std::path::PathBuf::from(std::env::var_os("PATH").unwrap()).join("mermaid-ascii"),
+        )
+        .unwrap();
+        assert_eq!(render(source, 80), lines);
+    }
+
+    #[test]
+    fn mermaid_failed_program_preserves_source_and_hint() {
+        if !mermaid_process("mermaid_failed_program_preserves_source_and_hint", true) {
+            return;
+        }
+        assert_eq!(
+            plain(&render("```mermaid\ninvalid diagram\n```", 100)),
+            [
+                "invalid diagram",
+                "Install mermaid-ascii to render this diagram."
+            ]
+        );
+    }
+
+    #[test]
+    fn mermaid_wide_diagram_is_clipped_without_wrapping() {
+        if !mermaid_process("mermaid_wide_diagram_is_clipped_without_wrapping", true) {
+            return;
+        }
+        let source = "```mermaid\ngraph LR\n A[Wide start] --> B[Wide finish]\n```";
+        let lines = render(source, 10);
+        assert!(lines.iter().any(|line| line.width() > 10));
+        assert!(plain(&lines).join("\n").contains('─'));
+        let area = ratatui::layout::Rect::new(0, 0, 10, lines.len() as u16);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        ratatui::widgets::Widget::render(
+            ratatui::widgets::Paragraph::new(lines.clone()),
+            area,
+            &mut buffer,
+        );
+        for (row, line) in lines.iter().enumerate() {
+            let visible: String = (0..10)
+                .map(|column| buffer[(column, row as u16)].symbol())
+                .collect();
+            assert_eq!(
+                visible.trim_end(),
+                line.to_string()
+                    .chars()
+                    .take(10)
+                    .collect::<String>()
+                    .trim_end()
+            );
+        }
     }
 
     #[test]
