@@ -196,7 +196,7 @@ fn title_editing_allows_task_row_click_and_list_wheel() {
 }
 
 #[test]
-fn horizontal_list_wheel_keeps_focus_and_task_wheel_activates_panel() {
+fn horizontal_wheel_activates_the_list_and_task_panels() {
     for kind in [MouseEventKind::ScrollLeft, MouseEventKind::ScrollRight] {
         let (_directory, mut view) = fixture();
         view.prepare_prompt();
@@ -208,7 +208,7 @@ fn horizontal_list_wheel_keeps_focus_and_task_wheel_activates_panel() {
             modifiers: KeyModifiers::NONE,
         };
         assert_eq!(view.handle_mouse(event), None);
-        assert_eq!(view.active_panel, Panel::Prompt);
+        assert_eq!(view.active_panel, Panel::TaskList);
         let events = view.viewport.borrow().event_panel;
         assert!(!events.is_empty());
         assert_eq!(

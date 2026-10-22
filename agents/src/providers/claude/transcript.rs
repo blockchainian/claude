@@ -453,26 +453,29 @@ impl QueueOperation {
 
 /// Text of a prompt the model acted on: a typed user message, or a queued
 /// message absorbed into a running turn, which Claude Code stores as an
-/// attachment instead of a user record.
-fn prompt_text(record: &Value) -> Option<String> {
+/// attachment instead of a user record. A message from another session or
+/// agent is a prompt only when `peers` is set, as in a subagent, whose
+/// prompts all come from its parent.
+fn prompt_text(record: &Value, peers: bool) -> Option<String> {
+    let peer = |(name, body)| peers.then(|| crate::event::participant_text(name, body));
     match record["type"].as_str()? {
         "user" => {
-            if let Some((name, body)) = super::peer::origin_message(record) {
-                return Some(crate::event::participant_text(name, body));
+            if let Some(message) = super::peer::origin_message(record) {
+                return peer(message);
             }
             if record["isMeta"] == true {
                 return None;
             }
             let text = content_text(record, false)?;
-            Some(match super::peer::wrapped_message(&text) {
-                Some((_, (name, body))) => crate::event::participant_text(name, body),
-                None => typed_text(text),
-            })
+            match super::peer::wrapped_message(&text) {
+                Some((_, message)) => peer(message),
+                None => Some(typed_text(text)),
+            }
         }
         "attachment" => {
             let prompt = super::images::queued_prompt(record)?;
-            if let Some((name, body)) = super::peer::origin_message(record) {
-                return Some(crate::event::participant_text(name, body));
+            if let Some(message) = super::peer::origin_message(record) {
+                return peer(message);
             }
             prompt
                 .as_str()
@@ -780,7 +783,7 @@ fn read_messages(
             absorbed = None;
         }
         if !prompt_found
-            && let Some(prompt) = prompt_text(&record)
+            && let Some(prompt) = prompt_text(&record, sidechains)
             && !prompt.trim().is_empty()
             && super::event_reader::is_prompt_text(&record, &prompt)
         {
@@ -1402,7 +1405,23 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn peer_prompts_show_sender_and_body() {
+    fn peer_messages_are_not_a_session_prompt() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"user","timestamp":"2026-10-12T06:00:00.000Z","isSidechain":false,"message":{{"role":"user","content":"Typed prompt"}}}}"#
+        )
+        .unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/claude-peer-prompts.jsonl"
+        ))
+        .unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.prompt, "Typed prompt");
+    }
+
+    #[test]
+    fn subagent_peer_prompts_show_sender_and_body() {
         let expected = [
             "translate-pdf → translate-pdf: user approved the pilot; second file (MathJax page) done: ~/Documents/MIT-zh/6.1910-Computation Structures/L01-notes-basics-of-information.pdf. Asking the user now whether to batch the remaining 155.",
             "general-purpose → 41 files: 23209 bytes before, 19698 bytes after. All files parse, so none are left unfixed.",
@@ -1415,7 +1434,7 @@ pub(super) mod tests {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             writeln!(file, "{line}").unwrap();
             let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-            assert_eq!(summary.prompt, expected);
+            assert_eq!(summary.prompt, "");
             let mut record: Value = serde_json::from_str(line).unwrap();
             record["isSidechain"] = true.into();
             std::fs::write(file.path(), format!("{record}\n")).unwrap();

@@ -24,8 +24,9 @@ pub(crate) struct EventList {
     pub(super) selected: Option<(bool, EventId)>,
     pub pinned: Vec<PinnedRow>,
     pub search: EventSearch,
+    pub filter: crate::event::EventFilter,
     pub sort: EventSort,
-    pub sort_initialized: bool,
+    pub settings_initialized: bool,
     pub unseen: std::cell::Cell<usize>,
     pub pending_older: usize,
     pub has_older: bool,
@@ -45,8 +46,15 @@ pub(crate) struct EventList {
 #[derive(Default)]
 pub(super) struct EventDetail {
     pub mode: EventDetailMode,
+    pub return_mode: EventDetailMode,
+    pub transcript: Option<Transcript>,
     pub scroll: std::cell::RefCell<super::event_detail::EventDetailScroll>,
     pub search: EventSearch,
+}
+
+pub(super) struct Transcript {
+    pub records: Vec<crate::event::SourceRecord>,
+    pub text: Result<String, String>,
 }
 
 #[derive(Default)]
@@ -92,10 +100,11 @@ pub(super) enum EventPosition {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(super) enum EventDetailMode {
     #[default]
     Event,
+    Transcript,
     Terminal,
 }
 

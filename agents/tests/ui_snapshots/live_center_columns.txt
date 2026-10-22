@@ -1,7 +1,7 @@
   Active 5                                                                                                                                          Inactive 1
 ────────────────────────────────────────┬──────────────── Ready ─────────────────┬──────────────────────────────────────────────────────────────────────────────
                  Pinned                 │                 Prompt                 │
- ○ Current task             Ready       │ Current task                           │
+ ○ Current task             Ready       │              Current task              │
  ● Needs an answer          Needs input │                                        │
                                         │                                        │
               /tmp/project              │                                        │

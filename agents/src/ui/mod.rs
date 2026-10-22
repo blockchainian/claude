@@ -16,6 +16,8 @@ mod event_agent;
 mod event_detail;
 mod event_list;
 #[cfg(test)]
+mod event_messages_tests;
+#[cfg(test)]
 #[path = "event_scroll_tests.rs"]
 mod event_scroll_tests;
 mod event_search;
@@ -66,6 +68,7 @@ pub(crate) use timeline::timeline_seconds;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crate::providers::{Capabilities, ProviderId, SessionKey};
+use crate::state::TaskPins;
 use chrono::{DateTime, Utc};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -288,7 +291,7 @@ pub struct View {
     attention_skips: HashMap<SessionKey, DateTime<Utc>>,
     grouping: Grouping,
     use_colors: bool,
-    pinned: Vec<SessionKey>,
+    pinned: TaskPins<SessionKey>,
     hidden: HashSet<SessionKey>,
     /// Parent tasks whose subtree is folded away in each task list tab.
     collapsed: Vec<HashSet<SessionKey>>,
@@ -427,7 +430,7 @@ impl View {
             attention_skips: HashMap::new(),
             grouping,
             use_colors,
-            pinned: Vec::new(),
+            pinned: TaskPins::default(),
             hidden: HashSet::new(),
             collapsed: vec![HashSet::new(); TASK_FILTERS.len()],
             status_filter: 0,
@@ -700,7 +703,12 @@ impl View {
         let selected = self.selected_id().cloned();
         if self.attention_selection.is_some() && self.attention_selection != selected {
             if let Some(id) = self.attention_selection.take() {
-                self.attention_skips.insert(id, Utc::now());
+                let skipped_at = Utc::now();
+                self.attention_skips.insert(id.clone(), skipped_at);
+                self.pending_actions.push(Action::PersistSkip {
+                    id,
+                    skipped_at: Some(skipped_at),
+                });
             }
             self.interrupted_selection = None;
         }
@@ -766,7 +774,19 @@ impl View {
             .filter(|row| row.status == SessionStatus::NeedsInput)
             .map(|row| row.id.clone())
             .collect();
-        self.attention_skips.retain(|id, _| waiting.contains(id));
+        let answered: Vec<_> = self
+            .attention_skips
+            .keys()
+            .filter(|id| !waiting.contains(*id) && self.rows.iter().any(|row| &row.id == *id))
+            .cloned()
+            .collect();
+        for id in answered {
+            self.attention_skips.remove(&id);
+            self.pending_actions.push(Action::PersistSkip {
+                id,
+                skipped_at: None,
+            });
+        }
         if self
             .selected_draft()
             .is_some_and(|draft| draft.name.is_none())
@@ -787,11 +807,11 @@ impl View {
             .collect();
         queue.sort_by_key(|&index| {
             let row = &self.rows[index];
-            let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
             (
-                self.attention_skips
-                    .get(&row.id)
-                    .map_or(since, |&skipped| since.max(skipped)),
+                self.queue_position(
+                    row,
+                    row.ask.as_ref().map_or(row.updated_at, |ask| ask.since),
+                ),
                 row.id.clone(),
             )
         });
@@ -848,8 +868,8 @@ impl View {
     pub fn set_loading(&mut self, loading: bool) {
         self.loading = loading;
     }
-    pub fn set_pinned(&mut self, ids: &[SessionKey]) {
-        self.pinned = ids.to_vec();
+    pub fn set_pinned(&mut self, pins: &TaskPins<SessionKey>) {
+        self.pinned = pins.clone();
         self.reconcile_selection();
     }
     /// Lists a hidden task again, as when its deletion failed.
@@ -968,17 +988,36 @@ impl View {
         let root = self.ancestors(index).last().unwrap_or(index);
         self.rows[root].parent.is_none().then_some(root)
     }
+    fn can_pin(&self, index: usize) -> bool {
+        self.rows[index].status != SessionStatus::Inactive
+            || self
+                .group_index(index)
+                .is_some_and(|root| self.rows[root].status != SessionStatus::Inactive)
+    }
     fn is_pinned(&self, index: usize) -> bool {
-        self.group_index(index)
-            .is_some_and(|parent| self.pinned.contains(&self.rows[parent].id))
+        self.pinned
+            .for_tab(self.status_filter)
+            .contains(&self.rows[index].id)
+    }
+    fn in_pinned_group(&self, index: usize) -> bool {
+        self.is_pinned(index)
+            || self
+                .ancestors(index)
+                .any(|ancestor| self.is_pinned(ancestor))
+    }
+    fn tree_index(&self, index: usize) -> Option<usize> {
+        std::iter::once(index)
+            .chain(self.ancestors(index))
+            .find(|&index| self.is_pinned(index))
+            .or_else(|| self.group_index(index))
     }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
+        if self.in_pinned_group(left) || self.in_pinned_group(right) {
+            return self.in_pinned_group(left) && self.in_pinned_group(right);
+        }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
         };
-        if self.is_pinned(left) || self.is_pinned(right) {
-            return self.is_pinned(left) && self.is_pinned(right);
-        }
         match grouping {
             Grouping::Project => {
                 self.project_groups[left].key() == self.project_groups[right].key()
@@ -1008,12 +1047,21 @@ impl View {
     }
     fn visible_indices_for_filter(&self, tab: usize) -> Vec<usize> {
         let filter = TASK_FILTERS[tab].1;
+        let pins = self.pinned.for_tab(tab);
+        let is_pinned = |index: usize| pins.contains(&self.rows[index].id);
         let sessions: HashMap<_, _> = self.rows.iter().map(|s| (&s.id, s)).collect();
         let mut matching = HashSet::new();
-        for session in self.rows.iter().filter(|s| filter.contains(&s.status)) {
+        for (_, session) in self.rows.iter().enumerate().filter(|(index, session)| {
+            filter.contains(&session.status)
+                || (tab == 0 && is_pinned(*index) && self.can_pin(*index))
+        }) {
             let mut current = Some(session);
             while let Some(session) = current {
                 if self.hidden.contains(&session.id) || !matching.insert(&session.id) {
+                    break;
+                }
+                // Pinned subtrees stand on their own, without adding ancestor headers.
+                if pins.contains(&session.id) {
                     break;
                 }
                 current = session
@@ -1037,19 +1085,15 @@ impl View {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, session)| {
-                session.parent.is_none()
+            .filter(|(index, session)| {
+                (session.parent.is_none() || is_pinned(*index))
                     && !self.hidden.contains(&session.id)
                     && matching.contains(&session.id)
                     && self.matches_search(session)
             })
             .map(|(index, _)| index)
-            .partition(|index| self.is_pinned(*index));
-        pinned.sort_by_key(|index| {
-            self.pinned
-                .iter()
-                .position(|id| *id == self.rows[*index].id)
-        });
+            .partition(|index| is_pinned(*index));
+        pinned.sort_by_key(|index| pins.iter().position(|id| *id == self.rows[*index].id));
         match self.grouping {
             Grouping::Project => visible.sort_by_key(|index| {
                 (
@@ -1077,7 +1121,13 @@ impl View {
                 continue;
             }
             if let Some(siblings) = children.get(&self.rows[index].id) {
-                pending.extend(siblings.iter().rev().copied());
+                pending.extend(
+                    siblings
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|&child| !is_pinned(child)),
+                );
             }
         }
         rows
@@ -1170,9 +1220,7 @@ impl View {
         }
         self.park_event_list();
         let task_list_focused = self.active_panel == Panel::TaskList;
-        let restores_task = selected
-            .as_ref()
-            .is_some_and(|id| self.task_uis.get(id).is_some_and(|ui| ui.focus.is_some()));
+        let restores_task = self.has_parked_focus(selected.as_ref());
         let focus = self
             .panels_task
             .as_ref()
@@ -1341,8 +1389,31 @@ impl View {
         selectable
             .into_iter()
             .filter(|&index| !prefer_active || self.rows[index].status != SessionStatus::Inactive)
-            .max_by_key(|&index| session_order(&self.rows[index]))
+            .max_by_key(|&index| {
+                let row = &self.rows[index];
+                (
+                    std::cmp::Reverse(self.queue_position(row, row.updated_at)),
+                    &row.id,
+                )
+            })
             .unwrap_or(usize::MAX)
+    }
+
+    /// Orders a task the user left in the attention queue after every task it has not skipped, by
+    /// when it was left, until it starts waiting again.
+    fn queue_position(&self, row: &Session, since: DateTime<Utc>) -> (bool, DateTime<Utc>) {
+        match self.attention_skips.get(&row.id) {
+            Some(&skipped) if skipped >= since => (true, skipped),
+            _ => (false, since),
+        }
+    }
+
+    pub(crate) fn restore_attention_skips(&mut self, preferences: &crate::state::Preferences) {
+        self.attention_skips = preferences
+            .tasks
+            .keys()
+            .filter_map(|id| Some((id.clone(), preferences.task_skipped_at(id)?)))
+            .collect();
     }
     /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
     /// keeps its color while the list changes.

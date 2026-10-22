@@ -18,6 +18,34 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 }
 
 impl View {
+    pub(super) fn refresh_transcript(&mut self) {
+        let mode = if self.terminal_requested() {
+            self.event_detail.return_mode
+        } else {
+            self.event_detail.mode
+        };
+        if mode != task_ui::EventDetailMode::Transcript {
+            return;
+        }
+        let Some(event) = self.visible_event() else {
+            self.event_detail.transcript = None;
+            return;
+        };
+        if self
+            .event_detail
+            .transcript
+            .as_ref()
+            .is_some_and(|cached| cached.records == event.source_records)
+        {
+            return;
+        }
+        self.event_detail.transcript = Some(task_ui::Transcript {
+            records: event.source_records.clone(),
+            text: event.raw_text().map_err(|error| error.to_string()),
+        });
+        self.viewport.borrow_mut().event_detail_layout = None;
+    }
+
     /// Resolve recorded agent settings with the same catalog as session borders and pickers.
     pub(super) fn display_event<'a>(&self, event: &'a Event) -> std::borrow::Cow<'a, Event> {
         if !event.calls.iter().any(|call| call.model_settings.is_some()) {
@@ -29,6 +57,10 @@ impl View {
                 if let Some(model) = settings.model.as_deref().filter(|model| !model.is_empty()) {
                     let model = self.model_text(settings.provider, model);
                     call.event_detail_title.push_str(&format!(" · {model}"));
+                    if call.name == "advisor" {
+                        call.title.push_str(&format!(" · {model}"));
+                        display.body.clone_from(&call.title);
+                    }
                 }
                 if let Some(effort) = settings
                     .effort
@@ -43,6 +75,16 @@ impl View {
     }
 
     pub(super) fn event_detail_text(&self, event: &Event) -> String {
+        if self.event_detail.mode == task_ui::EventDetailMode::Transcript {
+            return self
+                .event_detail
+                .transcript
+                .as_ref()
+                .expect("transcript loaded")
+                .text
+                .clone()
+                .unwrap_or_else(|error| format!("Cannot read transcript records: {error}"));
+        }
         open_text(&self.display_event(event))
     }
 
@@ -53,6 +95,21 @@ impl View {
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> EventDetailLayout {
+        if self.event_detail.mode == task_ui::EventDetailMode::Transcript {
+            let transcript = self
+                .event_detail
+                .transcript
+                .as_ref()
+                .expect("transcript loaded");
+            let sections = super::tool_detail::transcript_content(
+                &transcript.text,
+                self.selected_id()
+                    .expect("detail belongs to a session")
+                    .provider,
+            )
+            .sections;
+            return event_detail_parts_layout(event, columns, cwd, now, sections);
+        }
         let display = self.display_event(event);
         let sections =
             super::tool_detail::event_detail_content(&display, String::new(), Style::new().dim())
@@ -152,8 +209,9 @@ impl View {
                 self.event_list.sort
             };
             let time = event_time(event, session, last, now, sort);
+            let display = self.display_event(event);
             let links = render_event(
-                event,
+                &display,
                 &time,
                 last,
                 super::render::row(area, y as u16, 1),
@@ -344,10 +402,11 @@ impl View {
                 layout
             }
         };
-        if (!shows_calls(event)
-            || (event.calls.len() == 1
-                && (self.event_list.sort == EventSort::Duration
-                    || event.calls[0].started_at.is_none())))
+        if self.event_detail.mode != task_ui::EventDetailMode::Transcript
+            && (!shows_calls(event)
+                || (event.calls.len() == 1
+                    && (self.event_list.sort == EventSort::Duration
+                        || event.calls[0].started_at.is_none())))
             && let Some((_, span)) = layout.times.first_mut()
         {
             span.content = time.to_owned().into();
@@ -485,12 +544,14 @@ impl View {
             .map(|record| (&record.path, record.offset));
         let key = event_detail_key(&(
             self.selected_id(),
+            self.event_detail.mode,
             matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
             &event.source,
             record,
             (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
         ));
         let switched = detail.key != Some(key);
+        let follow_output = std::mem::take(&mut detail.follow_output) && !switched;
         let entry = detail.entry.take().filter(|_| switched);
         if switched {
             let mut left = std::mem::take(&mut detail.state);
@@ -516,7 +577,8 @@ impl View {
             .map(|body| body.len())
             .collect::<Vec<_>>();
         let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
-        let allocations = if height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
+        let allocations = if self.event_detail.mode != task_ui::EventDetailMode::Transcript
+            && height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
             && !self.event_detail.search.active()
             && !external_scroll
             && state.offset == 0
@@ -537,7 +599,7 @@ impl View {
             0..0,
             height,
         );
-        if entry == Some(false) {
+        if entry == Some(false) || follow_output {
             if allocations.is_some() {
                 state.reveal = state.hidden.clone();
             } else {
@@ -661,6 +723,7 @@ impl View {
         if self.following_event() {
             self.event_list.unseen.set(0);
         }
+        self.refresh_transcript();
     }
 
     #[cfg(test)]
@@ -883,10 +946,15 @@ impl View {
         self.event_list.scroll.set(0);
     }
 
-    pub(crate) fn initialize_event_sort(&mut self, sorting: EventSort) {
-        if !self.event_list.sort_initialized {
+    pub(crate) fn initialize_event_list(
+        &mut self,
+        sorting: EventSort,
+        filter: crate::event::EventFilter,
+    ) {
+        if !self.event_list.settings_initialized {
             self.event_list.sort = sorting;
-            self.event_list.sort_initialized = true;
+            self.event_list.filter = filter;
+            self.event_list.settings_initialized = true;
         }
     }
 
@@ -908,6 +976,7 @@ impl View {
             }
             self.event_list.scroll.set(self.event_max_scroll());
             self.event_list.unseen.set(0);
+            self.refresh_transcript();
             return;
         }
         self.event_list.pinned_following = false;
@@ -950,10 +1019,12 @@ impl View {
             self.event_list.background_return = None;
             self.event_list.background = None;
         }
+        self.refresh_transcript();
     }
 
     /// Applies structural changes without comparing row contents.
     pub(crate) fn apply_event_update(&mut self, update: crate::event::Update) {
+        self.event_detail.transcript = None;
         if self.event_list.restoring {
             self.last_update = Utc::now();
             self.event_panel = update.events;
@@ -1091,6 +1162,7 @@ impl View {
         {
             self.select_event(Some(index.saturating_sub(pending)));
         }
+        self.refresh_transcript();
     }
 
     #[cfg(test)]
@@ -1329,7 +1401,7 @@ impl View {
         })
     }
 
-    /// The events the search lets through, with their index in the event list.
+    /// The timeline events the active filters let through, with their full index.
     pub(super) fn shown_events(&self) -> impl Iterator<Item = (usize, &Event)> {
         let order: Box<dyn Iterator<Item = usize> + '_> =
             if self.event_list.sort == EventSort::Duration {
@@ -1339,6 +1411,11 @@ impl View {
             };
         order
             .filter(|&index| self.event_matches(index))
+            .filter(|&index| {
+                self.event_list
+                    .filter
+                    .includes(&self.event_panel[index].kind)
+            })
             .map(|index| (index, &self.event_panel[index]))
     }
 }
@@ -1374,18 +1451,37 @@ fn mode_row_time(event: &Event, session: &Session, last: bool, sort: EventSort) 
         return Some(row_time(event, session, last));
     }
     match event.kind {
+        _ if (event.kind == Kind::Assistant && event.completed_time)
+            || matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) =>
+        {
+            match row_time(event, session, last) {
+                time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
+                RowTime::Clock(_) | RowTime::Ago(_) => None,
+            }
+        }
         Kind::User | Kind::Assistant => event
             .previous_end
             .map(|previous| RowTime::Settled(event.started_at - previous)),
-        Kind::Tool | Kind::Error | Kind::Denied => match row_time(event, session, last) {
-            time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
-            RowTime::Clock(_) | RowTime::Ago(_) => None,
-        },
         _ => None,
     }
 }
 
 fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
+    if event.completed_time
+        && matches!(
+            event.kind,
+            Kind::Assistant | Kind::Tool | Kind::Error | Kind::Denied
+        )
+        && let Some(end) = event.ended_at
+    {
+        return match event.duration {
+            Some(duration) => RowTime::Settled(duration),
+            None => RowTime::Clock(end),
+        };
+    }
+    if event.completed_time && event.kind == Kind::Assistant {
+        return RowTime::Running(event.started_at);
+    }
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
             RowTime::Ago(event.started_at)
@@ -1395,14 +1491,6 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
             RowTime::Settled(event.started_at - reference)
         } else {
             RowTime::Clock(event.started_at)
-        };
-    }
-    if event.completed_time
-        && let Some(end) = event.ended_at
-    {
-        return match event.duration {
-            Some(duration) => RowTime::Settled(duration),
-            None => RowTime::Clock(end),
         };
     }
     let Some(previous) = event.previous_end else {
@@ -1705,12 +1793,12 @@ fn event_detail_parts_layout(
                 .parts
                 .into_iter()
                 .map(|part| {
-                    let lines = part.lines_in(
-                        usize::from(columns.reading_width.min(columns.text.width)),
-                        body_style,
-                        now,
-                        cwd,
-                    );
+                    let reading_width = if part.reading_column() {
+                        columns.reading_width.min(columns.text.width)
+                    } else {
+                        columns.text.width
+                    };
+                    let lines = part.lines_in(usize::from(reading_width), body_style, now, cwd);
                     (part, lines)
                 })
                 .collect();
@@ -2088,7 +2176,7 @@ pub(super) mod event_markdown {
         let events = notification_events(dir.path(), Some("all 3 tests passed"));
         assert_eq!(events.len(), 1);
         for event in events {
-            let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+            let summary = "等 tab 线程 ✓";
             assert_eq!(event.kind, Kind::Tool);
             assert_eq!(event.body, summary);
             assert_eq!(event.calls[0].title, summary);
@@ -2710,6 +2798,32 @@ mod panel_detail_tests {
                 assert_eq!(layout.rows[row + 2].0, id + 1);
             }
         }
+    }
+
+    #[test]
+    fn json_detail_keeps_its_body_without_an_event_list() {
+        let columns = event_detail_columns(Rect::new(0, 0, 80, 12), Rect::default());
+        assert_eq!(columns.reading_width, 0);
+        assert!(columns.text.width > 0);
+        let raw = include_str!("../../tests/fixtures/codex-manager-await.jsonl");
+        let part = Part::text(raw.into(), false);
+        let expected = part.lines(
+            usize::from(columns.text.width),
+            Style::default(),
+            DateTime::UNIX_EPOCH,
+        );
+        let layout = layout_part(columns, part);
+        assert_eq!(layout.lines.len(), expected.len() + 2);
+        assert_eq!(
+            layout.lines[2..]
+                .iter()
+                .map(|line| line.to_string().trim_start().to_owned())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|line| line.to_string().trim_start().to_owned())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

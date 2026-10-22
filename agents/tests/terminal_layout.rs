@@ -24,6 +24,9 @@ mod terminal_weekly_usage;
 #[path = "support/terminal_message_text.rs"]
 mod terminal_message_text;
 
+#[path = "support/terminal_mermaid.rs"]
+mod terminal_mermaid;
+
 #[path = "support/terminal_structured.rs"]
 mod terminal_structured;
 
@@ -349,7 +352,7 @@ fn start_probe_with_command(
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    tmux.wait_for(|capture| capture.contains("Update"));
+    tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
     (directory, tmux, transcript)
 }
 
@@ -1593,16 +1596,16 @@ fn terminal_task_notification_shows_summary_without_id_and_missing_file() {
         "{record}"
     )
     .unwrap();
-    let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+    let summary = "\"等 tab 线程\" ✓";
     tmux.wait_for(|capture| capture.contains(summary));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     println!("{capture}");
     let rows: Vec<_> = capture.lines().collect();
     let rule = rows
         .iter()
-        .rposition(|line| line.matches('─').count() > 100)
-        .expect("log detail rule");
-    let detail = rows[rule + 1..rows.len() - 1].join("\n");
+        .rposition(|line| line.contains(summary))
+        .expect("log detail title");
+    let detail = rows[rule..rows.len() - 1].join("\n");
     assert_eq!(detail.matches(summary).count(), 1, "{capture}");
     assert!(!detail.contains("Task b9wi31ww0"), "{capture}");
     assert!(detail.contains("File no longer exists"), "{capture}");
@@ -3344,3 +3347,179 @@ fn terminal_inactive_elapsed_stays_at_last_record() {
 
 #[path = "support/terminal_window_navigation.rs"]
 mod terminal_window_navigation;
+
+#[path = "support/terminal_transcript.rs"]
+mod terminal_transcript;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_filtered_event_labels_and_typed_prompts() {
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/bottom-filter-label-probe");
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(output.join("verdict.json"), r#"{"verdict":"incomplete"}"#).unwrap();
+    let mut results = Vec::new();
+    for width in [200_usize, 112] {
+        let (_directory, tmux, _transcript) = start_probe_with_transcript(
+            &format!("filtered-event-labels-{width}"),
+            include_str!("fixtures/claude-main-model-history.jsonl"),
+        );
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        let initial = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .any(|row| row.contains("medium") && row.width() == width)
+                && capture.contains("看 Codex 结果")
+        });
+        let rows: Vec<_> = initial.lines().collect();
+        let model_y = rows.iter().position(|row| row.contains("medium")).unwrap();
+        let wide = width >= 150;
+        let event_left = if wide {
+            rows[2][..rows[2].rfind('│').unwrap()].width() + 2
+        } else {
+            1
+        };
+        let top_border_y = if wide { 1 } else { model_y };
+        let event_top = if wide { 2 } else { model_y + 1 };
+        let event_bottom = if wide {
+            model_y
+        } else {
+            (event_top..rows.len())
+                .find(|&y| rows[y].matches('─').count() > width / 2)
+                .unwrap()
+        };
+        let border_y = event_bottom;
+        tmux.mouse(0, event_left + 1, event_top, true);
+        for (mode, label) in [
+            ("all", None),
+            ("messages", Some("Assistant")),
+            ("tools", Some("Tool")),
+        ] {
+            if label.is_some() {
+                tmux.run(&["send-keys", "-t", "probe", "Space"]);
+            }
+            let capture = tmux.capture_when(|capture| {
+                let Some(border) = capture.lines().nth(border_y) else {
+                    return false;
+                };
+                match label {
+                    Some(label) => border.contains(&format!(" {label} ")),
+                    None => !border.contains(" Assistant ") && !border.contains(" Tool "),
+                }
+            });
+            let rows: Vec<_> = capture.lines().collect();
+            let border = rows[border_y];
+            let screen = captured_screen(&capture, width as u16, 50);
+            let list = (event_top..event_bottom)
+                .map(|y| {
+                    (event_left..width)
+                        .map(|x| screen.screen().cell(y as u16, x as u16).unwrap().contents())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            match mode {
+                "all" => assert!(
+                    list.contains("那个 agent command center"),
+                    "typed prompt missing: {capture}"
+                ),
+                "messages" => {
+                    assert!(
+                        !list.contains("那个 agent command center"),
+                        "typed prompt leaked: {capture}"
+                    );
+                    assert!(!list.contains("看 Codex 结果"), "tool leaked: {capture}");
+                }
+                "tools" => {
+                    assert!(
+                        !list.contains("那个 agent command center"),
+                        "typed prompt leaked: {capture}"
+                    );
+                    assert!(list.contains("看 Codex 结果"), "tool missing: {capture}");
+                }
+                _ => unreachable!(),
+            }
+            let label_column = label.map(|label| {
+                let column = border[..border.find(label).unwrap()].width();
+                let expected = event_left + (width - event_left - 1 - label.width() - 2) / 2 + 1;
+                assert_eq!(column, expected, "{mode}, width {width}: {border}");
+                let top = rows[top_border_y];
+                assert!(
+                    !top.contains(" Assistant ") && !top.contains(" Tool "),
+                    "{top}"
+                );
+                let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+                let parser = captured_screen(&colored, width as u16, 50);
+                let status_y = rows
+                    .iter()
+                    .position(|row| row.contains(" Inactive ") && row.contains('─'))
+                    .unwrap();
+                let status_x = rows[status_y][..rows[status_y].find("Inactive").unwrap()].width();
+                let status = parser
+                    .screen()
+                    .cell(status_y as u16, status_x as u16)
+                    .unwrap();
+                for x in column..column + label.width() {
+                    let cell = parser.screen().cell(border_y as u16, x as u16).unwrap();
+                    assert_eq!(cell.bold(), status.bold());
+                    assert_eq!(cell.fgcolor(), status.fgcolor());
+                    assert_eq!(cell.bgcolor(), status.bgcolor());
+                }
+                column
+            });
+            let stem = format!("{width}-{mode}");
+            std::fs::write(output.join(format!("{stem}-screen.txt")), &capture).unwrap();
+            std::fs::write(
+                output.join(format!("{stem}-border.txt")),
+                format!("{border}\n"),
+            )
+            .unwrap();
+            results.push(serde_json::json!({
+                "width": width, "mode": mode, "border_y": border_y,
+                "label_column": label_column, "border": border,
+            }));
+        }
+        tmux.run(&["send-keys", "-t", "probe", "t"]);
+        let duration = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .nth(border_y)
+                .is_some_and(|border| border.contains(" Tool ") && border.contains(" duration"))
+        });
+        let border = duration.lines().nth(border_y).unwrap();
+        assert!(
+            border.find("Tool").unwrap() + 4 < border.find("duration").unwrap(),
+            "{border}"
+        );
+        std::fs::write(
+            output.join(format!("{width}-duration-border.txt")),
+            format!("{border}\n"),
+        )
+        .unwrap();
+        results.push(serde_json::json!({"width": width, "mode": "duration", "border": border}));
+        tmux.run(&["send-keys", "-t", "probe", "Space"]);
+        tmux.wait_for(|capture| {
+            capture
+                .lines()
+                .nth(border_y)
+                .is_some_and(|border| !border.contains(" Assistant ") && !border.contains(" Tool "))
+        });
+    }
+    let verdict = serde_json::json!({"verdict":"pass", "cases": results});
+    std::fs::write(
+        output.join("verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}
+
+#[path = "support/terminal_output_follow.rs"]
+mod terminal_output_follow;

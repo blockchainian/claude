@@ -228,6 +228,10 @@ pub enum Action {
         id: SessionKey,
         ask: Option<crate::state::StoredAsk>,
     },
+    PersistSkip {
+        id: SessionKey,
+        skipped_at: Option<DateTime<Utc>>,
+    },
     PasteImage,
     PasteText,
     /// Puts text an input deleted on the clipboard, without a copy confirmation.
@@ -280,6 +284,7 @@ pub enum Action {
     Hide(SessionKey),
     /// `p`: pin or unpin the session.
     TogglePin {
+        tab: usize,
         id: SessionKey,
         pinned: bool,
     },
@@ -293,6 +298,11 @@ pub enum Action {
     PersistSorting {
         id: SessionKey,
         sorting: EventSort,
+    },
+    /// Space: the event filter changed; persist it.
+    PersistFiltering {
+        id: SessionKey,
+        filter: crate::event::EventFilter,
     },
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,

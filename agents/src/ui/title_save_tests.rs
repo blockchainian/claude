@@ -290,6 +290,8 @@ fn task_return_routes_restore_parked_title_and_caret() {
         view.select(view.rows.iter().position(|row| row.id == second).unwrap());
         if route == "mouse" {
             click_task_row(&mut view, &first);
+            assert_eq!(view.active_panel, Panel::TaskList);
+            assert_eq!(key(&mut view, KeyCode::Enter), None);
         } else if route == "previous" {
             assert_eq!(key(&mut view, KeyCode::Esc), None);
         } else {
@@ -407,14 +409,14 @@ fn revisited_task_right_restores_prompt() {
 }
 
 #[test]
-fn revisited_task_row_click_restores_prompt_without_delete() {
+fn revisited_task_row_click_keeps_delete() {
     let (_directory, mut view, id) = revisited_prompt_task(200);
     click_task_row(&mut view, &id);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.active_panel, Panel::Prompt);
-    assert!(!view.task_entry_pending);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(view.confirm_dialog.is_none());
+    assert!(view.confirm_dialog.is_some());
 }
 
 #[test]

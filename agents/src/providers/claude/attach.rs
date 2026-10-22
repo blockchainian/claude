@@ -342,10 +342,10 @@ impl Terminal {
                 if predicate(&screen) {
                     return Ok(());
                 }
-                if known_dialog(&screen)
-                    && !allowed_dialog.is_some_and(|marker| screen.contains(marker))
+                if let Some(dialog) = known_dialog(&screen)
+                    && !allowed_dialog.is_some_and(|marker| dialog.text.contains(marker))
                 {
-                    return Err(self.unexpected("Claude attach needs a response"));
+                    return Err(dialog_error(&dialog));
                 }
             }
             if self.pty.exited()? {
@@ -443,15 +443,17 @@ impl Terminal {
                     .clone();
                 self.submit(&format!("/model {model}"))?;
                 self.wait_at("model-confirmation", |screen| {
-                    screen.contains("Switch model?") || model_selected(screen, &label)
+                    dialog_shows(screen, "Switch model?") || model_selected(screen, &label)
                 })?;
-                if !self.screen().contains("Switch model?") {
+                if !dialog_shows(&self.screen(), "Switch model?") {
                     return Ok(());
                 }
                 self.write(b"\r")?;
                 // The parsed confirmation remains visible until Claude redraws after Enter.
                 self.wait_allowing(
-                    |screen| !screen.contains("Switch model?") && model_selected(screen, &label),
+                    |screen| {
+                        !dialog_shows(screen, "Switch model?") && model_selected(screen, &label)
+                    },
                     Some("Switch model?"),
                 )
                 .map_err(|error| self.diagnostic("model-confirmation-cleared", error))
@@ -461,10 +463,10 @@ impl Terminal {
                 self.submit(&format!("/effort {effort}"))?;
                 self.wait_at("effort-confirmation", |screen| {
                     actual_empty(screen)
-                        || (screen.contains(CONFIRMATION)
-                            && screen.contains(&format!("Yes, switch to {effort}")))
+                        || (dialog_shows(screen, CONFIRMATION)
+                            && dialog_shows(screen, &format!("Yes, switch to {effort}")))
                 })?;
-                if !self.screen().contains(CONFIRMATION) {
+                if !dialog_shows(&self.screen(), CONFIRMATION) {
                     return Ok(());
                 }
                 self.write(b"\r")?;
@@ -597,8 +599,40 @@ fn prompt_accepted(screen: &str, pasted_input: &str) -> bool {
     }
 }
 
-fn known_dialog(screen: &str) -> bool {
-    [
+/// The block Claude draws in place of its input box to ask something: a `▔` border line, a title,
+/// then the body and options.
+struct Dialog<'a> {
+    title: &'a str,
+    text: String,
+}
+
+/// Chat text above the block can mention any dialog string, so only the block counts. A frame
+/// with a border but no title below it is a redraw in progress.
+fn dialog(screen: &str) -> Option<Dialog<'_>> {
+    if input_box(screen).is_some() {
+        return None;
+    }
+    let lines: Vec<&str> = screen.lines().collect();
+    let border = lines
+        .iter()
+        .rposition(|line| line.trim_start().starts_with('▔'))?;
+    let block = &lines[border + 1..];
+    let title = block
+        .iter()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty())?;
+    Some(Dialog {
+        title,
+        text: block.join("\n"),
+    })
+}
+
+fn dialog_shows(screen: &str, text: &str) -> bool {
+    dialog(screen).is_some_and(|dialog| dialog.text.contains(text))
+}
+
+fn known_dialog(screen: &str) -> Option<Dialog<'_>> {
+    const MARKERS: [&str; 9] = [
         "Do you trust",
         "Workspace not trusted",
         "Do you want to proceed?",
@@ -608,9 +642,23 @@ fn known_dialog(screen: &str) -> bool {
         "Switch model?",
         "Sign in",
         "Select login method",
-    ]
-    .iter()
-    .any(|marker| screen.contains(marker))
+    ];
+    dialog(screen).filter(|dialog| MARKERS.iter().any(|marker| dialog.text.contains(marker)))
+}
+
+fn dialog_error(dialog: &Dialog) -> io::Error {
+    let body: Vec<String> = dialog
+        .text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != dialog.title)
+        .map(|line| line.chars().take(160).collect())
+        .collect();
+    io::Error::other(format!(
+        "Claude attach needs a response; dialog: {} | {}",
+        dialog.title,
+        body.join(" | ")
+    ))
 }
 
 #[cfg(test)]
@@ -727,8 +775,68 @@ mod tests {
         let screen = screen.complete().expect("completed model command redraw");
         assert!(screen.contains("Opus 5.5"), "{screen}");
         assert!(!screen.contains("Switch model?"), "{screen}");
+        assert!(dialog(&screen).is_none(), "{screen}");
         assert!(model_selected(&screen, "Opus 5.5"), "{screen}");
         assert!(!model_selected(&screen, "Fable 5.1"), "{screen}");
+    }
+
+    #[test]
+    fn chat_text_with_dialog_markers_is_not_a_dialog() {
+        let screen = include_str!(
+            "../../../tests/fixtures/claude-attach/chat-text-with-dialog-markers.screen.txt"
+        );
+        assert!(ready(screen), "{screen}");
+        assert!(dialog(screen).is_none(), "{screen}");
+        assert!(known_dialog(screen).is_none(), "{screen}");
+    }
+
+    #[test]
+    fn captured_switch_model_dialog_is_found_by_its_border_and_title() {
+        let screen =
+            include_str!("../../../tests/fixtures/claude-attach/switch-model-dialog.screen.txt");
+        let dialog = dialog(screen).expect("dialog block");
+        assert_eq!(dialog.title, "Switch model?");
+        assert!(dialog.text.contains("No, go back"), "{}", dialog.text);
+        assert!(!dialog.text.contains("Crunched"), "{}", dialog.text);
+        assert!(known_dialog(screen).is_some());
+        assert!(!ready(screen));
+        let error = dialog_error(&known_dialog(screen).unwrap()).to_string();
+        assert!(
+            error.contains("Switch model? | Your next response"),
+            "{error}"
+        );
+        assert!(error.contains("2. No, go back"), "{error}");
+    }
+
+    #[test]
+    fn captured_effort_dialog_is_found_even_when_its_border_carries_text() {
+        let screen =
+            include_str!("../../../tests/fixtures/claude-attach/change-effort-dialog.screen.txt");
+        let dialog = dialog(screen).expect("dialog block");
+        assert_eq!(dialog.title, "Change effort level?");
+        assert!(dialog_shows(screen, "Yes, switch to high"));
+        assert!(dialog_shows(
+            screen,
+            "Your next response will be slower and use more tokens"
+        ));
+    }
+
+    #[test]
+    fn border_without_a_title_is_a_redraw_in_progress() {
+        let screen = "Done\n▔▔▔▔▔▔▔▔▔▔▔▔\n\n";
+        assert!(dialog(screen).is_none());
+    }
+
+    #[test]
+    fn dialog_text_mentioned_above_the_dialog_is_not_the_dialog() {
+        let screen =
+            include_str!("../../../tests/fixtures/claude-attach/switch-model-dialog.screen.txt")
+                .replace(
+                    "Switch model? Allow once.",
+                    "Allow once. Enter to confirm. Sign in",
+                );
+        assert_eq!(dialog(&screen).unwrap().title, "Switch model?");
+        assert!(!dialog_shows(&screen, "Sign in"));
     }
 
     #[test]

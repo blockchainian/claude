@@ -48,7 +48,17 @@ enum PasteTarget {
 
 impl View {
     pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
-        self.event_list.sort_initialized = true;
+        self.change_event_list(false, |list| {
+            list.settings_initialized = true;
+            list.sort = sorting;
+        });
+    }
+
+    fn change_event_list(
+        &mut self,
+        keep_selection: bool,
+        change: impl FnOnce(&mut task_ui::EventList),
+    ) {
         let following = self.following_event();
         let full = self
             .event_list
@@ -61,9 +71,14 @@ impl View {
             .and_then(|saved| saved.event)
             .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         self.event_list.pinned_following = false;
-        self.event_list.sort = sorting;
+        change(&mut self.event_list);
         self.prepare_event_search();
-        self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        if keep_selection {
+            self.rematch_event_at(full);
+            self.cancel_list_selection(text_selection::Panel::EventList);
+        } else {
+            self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        }
         let background_event = background_full.and_then(|full| self.shown_row_position(full));
         if let Some(saved) = &mut self.event_list.background_return {
             saved.event = background_event;
@@ -72,7 +87,7 @@ impl View {
         self.event_list.unseen.set(0);
         if matches!(full, Some(EventRow::Pinned(_))) {
             self.reveal_event_selection();
-        } else if self.event_list.background_return.is_none() {
+        } else if self.event_list.background_return.is_none() && (!keep_selection || following) {
             self.show_newest_event();
         } else if following {
             self.event_list.scroll.set(self.event_max_scroll());
@@ -110,8 +125,8 @@ impl View {
         }
     }
 
-    /// Double click on a task details body: select the event it came from, or copy a body no
-    /// event backs, such as a queued prompt or the task list.
+    /// Click on a task details body: select the event it came from, or, on a double click, copy
+    /// a body no event backs, such as a queued prompt or the task list.
     fn activate_task_details(&mut self, target: ClickTarget) -> Option<Action> {
         let ClickTarget::TaskDetails {
             session,
@@ -217,13 +232,6 @@ impl View {
         let Some(output) = task.output.as_deref() else {
             return;
         };
-        let body = match std::fs::read_to_string(output) {
-            Ok(body) => body,
-            Err(error) => {
-                self.set_notice(Some(format!("Cannot read background events: {error}")));
-                return;
-            }
-        };
         if self.event_list.background_return.is_none() {
             self.event_list.background_return = Some(BackgroundReturn {
                 event: self.event_list.cursor,
@@ -262,7 +270,7 @@ impl View {
                 title: task.description,
                 name: "background".into(),
                 input: Vec::new(),
-                output: Some(vec![crate::codex_await_output::section(body)]),
+                output: Some(vec![crate::event::Section::OutputFile(output.into())]),
                 exit_code: None,
                 is_error: false,
                 duration: None,
@@ -271,6 +279,7 @@ impl View {
 
         self.viewport.borrow_mut().event_detail_layout = None;
         self.event_detail.scroll.borrow_mut().offset = 0;
+        self.refresh_transcript();
     }
 
     fn set_filter(&mut self, idx: usize) {
@@ -341,8 +350,11 @@ impl View {
                 });
         }
         if let Some(panel) = panel {
-            if panel != Panel::TaskList || !self.browsing_task_list(mouse) {
-                self.set_active_panel(panel);
+            let leaves_task = panel == Panel::TaskList && self.active_panel != Panel::TaskList;
+            self.set_active_panel(panel);
+            // The task the user left keeps its parked focus one Enter away.
+            if leaves_task {
+                self.task_entry_pending = self.has_parked_focus(self.panels_task.as_ref());
             }
         }
         if let Some(action) = self.overlay_mouse(mouse) {
@@ -375,23 +387,6 @@ impl View {
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
-        }
-    }
-
-    fn browsing_task_list(&self, mouse: MouseEvent) -> bool {
-        match mouse.kind {
-            MouseEventKind::ScrollUp
-            | MouseEventKind::ScrollDown
-            | MouseEventKind::ScrollLeft
-            | MouseEventKind::ScrollRight => self
-                .viewport
-                .borrow()
-                .list
-                .contains((mouse.column, mouse.row).into()),
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
-                self.pressed_task.is_some()
-            }
-            _ => false,
         }
     }
 
@@ -799,9 +794,7 @@ impl View {
             }
             return None;
         }
-        if (self.active_panel == Panel::TaskDetails
-            && self.rename_target.is_some()
-            && !self.browsing_task_list(mouse))
+        if (self.active_panel == Panel::TaskDetails && self.rename_target.is_some())
             || self.searching
         {
             self.mouse_press = None;
@@ -1024,9 +1017,8 @@ impl View {
                     .flatten()
             };
             if let Some(task) = background {
-                if self.defer_click(ClickTarget::Background(task.clone())) {
-                    self.open_background(task);
-                }
+                self.pending_click = None;
+                self.open_background(task);
                 return None;
             }
             if let Some(target) = self.link_at(position) {
@@ -1138,9 +1130,6 @@ impl View {
                         last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
-                    if self.task_entry_pending {
-                        self.enter_task();
-                    }
                     if let Some(id) = fold_toggle.filter(|id| *id == self.rows[task].id) {
                         if !self.collapsed[self.status_filter].remove(&id) {
                             self.collapsed[self.status_filter].insert(id);
@@ -1156,6 +1145,10 @@ impl View {
                 } else if let Some(target @ ClickTarget::TaskDetails { .. }) =
                     self.click_target_at(position)
                 {
+                    if matches!(target, ClickTarget::TaskDetails { source: Some(_), .. }) {
+                        self.pending_click = None;
+                        return self.activate_task_details(target);
+                    }
                     if self.defer_click(target) {
                         return self
                             .task_details_target(position)
@@ -1621,7 +1614,7 @@ impl View {
             && plain
             && matches!(
                 key.code,
-                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h' | 'p')
+                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h')
             )
         {
             return self
@@ -1635,7 +1628,6 @@ impl View {
                         KeyCode::Char('a') => "Archive",
                         KeyCode::Backspace => "Delete",
                         KeyCode::Char('h') => "Hide",
-                        KeyCode::Char('p') => "Pin",
                         _ => unreachable!("subagent session key is gated above"),
                     })
                 });
@@ -1702,7 +1694,10 @@ impl View {
             self.jump_event_detail_match();
             return None;
         }
-        if self.active_panel == Panel::EventList && self.event_list.search.editing {
+        if self.active_panel == Panel::EventList
+            && self.event_list.search.editing
+            && !(plain && key.code == KeyCode::Char(' '))
+        {
             let selected_full = self
                 .event_list
                 .cursor
@@ -1787,12 +1782,48 @@ impl View {
             }
             return None;
         }
+        if plain
+            && self.active_panel == Panel::EventDetail
+            && !self.terminal_requested()
+            && key.code == KeyCode::Char(' ')
+        {
+            self.event_detail.mode = match self.event_detail.mode {
+                super::task_ui::EventDetailMode::Event => {
+                    super::task_ui::EventDetailMode::Transcript
+                }
+                super::task_ui::EventDetailMode::Transcript => {
+                    super::task_ui::EventDetailMode::Event
+                }
+                super::task_ui::EventDetailMode::Terminal => {
+                    unreachable!("terminal input handled above")
+                }
+            };
+            self.cancel_event_detail_selection();
+            self.event_detail.search.clear();
+            self.event_detail.scroll.borrow_mut().offset = 0;
+            self.viewport.borrow_mut().event_detail_layout = None;
+            self.refresh_transcript();
+            return None;
+        }
         if plain && key.code == KeyCode::Enter && self.active_panel == Panel::EventList {
             self.jump_event_agent();
             return None;
         }
         if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
             return self.toggle_event_pin();
+        }
+        if plain && key.code == KeyCode::Char(' ') && self.active_panel == Panel::EventList {
+            self.change_event_list(true, |list| {
+                list.filter = list.filter.next();
+                list.settings_initialized = true;
+            });
+            return self
+                .selected_id()
+                .cloned()
+                .map(|id| Action::PersistFiltering {
+                    id,
+                    filter: self.event_list.filter,
+                });
         }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);
@@ -1915,14 +1946,16 @@ impl View {
                 return Some(Action::Hide(id));
             }
             KeyCode::Char('p') => {
-                self.selected_id()?;
-                let group = self.group_index(self.selected)?;
-                if self.rows[group].status == SessionStatus::Inactive {
+                let id = self.selected_id()?.clone();
+                if self.status_filter == 0 && !self.can_pin(self.selected) {
                     return Some(Action::Unsupported("Pin"));
                 }
-                let id = self.rows[group].id.clone();
                 let pinned = !self.is_pinned(self.selected);
-                return Some(Action::TogglePin { id, pinned });
+                return Some(Action::TogglePin {
+                    id,
+                    pinned,
+                    tab: self.status_filter,
+                });
             }
             _ => {}
         }

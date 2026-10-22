@@ -366,7 +366,8 @@ impl Reader {
                     .into_iter()
                     .flatten()
                 {
-                    if block["type"] == "tool_use"
+                    if (block["type"] == "tool_use"
+                        || (block["type"] == "server_tool_use" && block["name"] == "advisor"))
                         && let Some(id) = block["id"].as_str()
                     {
                         requests.insert(id, group.unwrap_or(*offset));
@@ -390,10 +391,12 @@ impl Reader {
                 .into_iter()
                 .flatten()
             {
-                if block["type"] == "tool_result"
-                    && let Some(offset) = block["tool_use_id"]
-                        .as_str()
-                        .and_then(|id| requests.get(id))
+                if matches!(
+                    block["type"].as_str(),
+                    Some("tool_result" | "advisor_tool_result")
+                ) && let Some(offset) = block["tool_use_id"]
+                    .as_str()
+                    .and_then(|id| requests.get(id))
                 {
                     start = start.min(*offset);
                 }
@@ -709,6 +712,15 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         .map(|result| tool::result_state(&result.content, &serde_json::Value::Null, result.error));
     let exit_code = state.as_ref().and_then(|state| state.exit_code);
     let output = result.map(|result| {
+        if matches!(mode, Some(Output::Shell))
+            && !result.error
+            && result.value["backgroundTaskId"].is_string()
+            && let Some((_, path)) = result.content.split_once("Output is being written to: ")
+            && let Some((path, _)) = path.split_once(". You will be notified")
+            && !path.is_empty()
+        {
+            return vec![Section::OutputFile(path.into())];
+        }
         tool::output(
             mode,
             input,
@@ -933,6 +945,42 @@ impl EventReader {
                                 }
                             }
                             Some("tool_use") => self.tool(block, at),
+                            Some("server_tool_use") if block["name"] == "advisor" => {
+                                // Advisor calls occupy their own row, even within one message.
+                                self.batch = None;
+                                self.tool(block, at);
+                                self.batch = None;
+                                let event = &mut self.entries.last_mut().unwrap().event;
+                                event.kind = Kind::Assistant;
+                                event.body = "advisor".to_owned();
+                                let call = event.calls.last_mut().unwrap();
+                                call.title = "advisor".to_owned();
+                                call.event_detail_title = "advisor".to_owned();
+                                call.model_settings = Some(crate::event::ModelSettings {
+                                    provider: crate::providers::ProviderId::Claude,
+                                    model: record["advisorModel"].as_str().map(str::to_owned),
+                                    effort: None,
+                                });
+                                event.completed_time = true;
+                                event.duration = call.duration;
+                            }
+                            Some("advisor_tool_result") => {
+                                if let Some(id) = block["tool_use_id"].as_str() {
+                                    // The result exists, but its payload is encrypted.
+                                    let content = crate::event::agent::Content::Encrypted.text();
+                                    let source_records = self.source_records();
+                                    self.results.entry(id.to_owned()).or_insert(ResultAt {
+                                        source_records,
+                                        at,
+                                        sequence: self.sequence,
+                                        error: false,
+                                        denial: None,
+                                        content: content.to_owned(),
+                                        raw_content: content.into(),
+                                        value: serde_json::Value::Null,
+                                    });
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -1015,73 +1063,28 @@ impl EventReader {
                 .find(|line| !line.is_empty())
                 .unwrap_or("")
         });
-        let output = field("output-file").map(|path| {
-            let text = match std::fs::read_to_string(path) {
-                Ok(text) => text,
-                Err(error) => {
-                    return Section::Placeholder(if error.kind() == io::ErrorKind::NotFound {
-                        "File no longer exists".to_owned()
-                    } else {
-                        error.to_string()
-                    });
-                }
-            };
-            if let Some(text) = crate::codex_await_output::message(&text) {
-                return Section::Markdown {
-                    label: String::new(),
-                    text,
-                };
-            }
-            let records = text
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(serde_json::from_str::<serde_json::Value>)
-                .collect::<Result<Vec<_>, _>>()
-                .ok()
-                .filter(|records| {
-                    records.iter().all(|record| record["type"].is_string())
-                        && records.iter().any(|record| {
-                            matches!(record["type"].as_str(), Some("assistant" | "user"))
-                                && record["message"]["role"] == record["type"]
-                                && record["message"]["content"].is_array()
-                        })
-                });
-            let Some(records) = records else {
-                return Section::Text {
-                    label: String::new(),
-                    text,
-                };
-            };
-            let handback = records
-                .iter()
-                .filter(|record| record["type"] == "assistant")
-                .filter_map(|record| record["message"]["content"].as_array())
-                .flatten()
-                .rfind(|block| block["type"] == "tool_use" && block["name"] == "SubagentHandback")
-                .and_then(|block| block["input"]["message"].as_str())
-                .map(str::to_owned);
-            let message = handback.or_else(|| {
-                let last = records.last()?;
-                if last["type"] != "assistant" {
-                    return None;
-                }
-                last["message"]["content"]
-                    .as_array()?
-                    .iter()
-                    .map(|block| {
-                        (block["type"] == "text")
-                            .then(|| block["text"].as_str())
-                            .flatten()
-                    })
-                    .collect::<Option<Vec<_>>>()
-                    .map(|parts| parts.join("\n"))
-            });
-            Section::Markdown {
-                label: String::new(),
-                text: message.unwrap_or_default(),
-            }
+        // Split at the closing description quote, preserving embedded and escaped quotes.
+        let background = summary
+            .strip_prefix("Background command \"")
+            .and_then(|text| text.rsplit_once("\" "))
+            .zip(field("status"));
+        let exit_code = background.and_then(|((_, suffix), _)| {
+            let code = suffix.split_once("exit code ")?.1;
+            let end = code
+                .find(|ch: char| ch != '-' && !ch.is_ascii_digit())
+                .unwrap_or(code.len());
+            code[..end].parse::<i64>().ok()
         });
-        self.push(Kind::Tool, summary.to_owned(), at);
+        let title = match background {
+            Some(((description, _), status)) => match exit_code {
+                Some(0) => format!("{description} ✓"),
+                Some(code) => format!("{description} · {code}"),
+                None => format!("{description} {status}"),
+            },
+            None => summary.to_owned(),
+        };
+        let output = field("output-file").map(|path| Section::OutputFile(path.into()));
+        self.push(Kind::Tool, title.clone(), at);
         let event = &mut self.entries.last_mut().unwrap().event;
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
@@ -1093,14 +1096,14 @@ impl EventReader {
                 agent_thread_id: None,
                 agent_path: None,
                 event_detail_left: String::new(),
-                event_detail_title: summary.to_owned(),
+                event_detail_title: title.clone(),
                 show_event_detail: false,
                 id: field("task-id").unwrap_or("").to_owned(),
-                title: summary.to_owned(),
+                title,
                 name: "task-notification".to_owned(),
                 input: Vec::new(),
                 output: Some(output.into_iter().collect()),
-                exit_code: None,
+                exit_code,
                 is_error: false,
                 duration: None,
             });
@@ -1425,6 +1428,105 @@ pub(super) fn prompt_body(text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     #[test]
+    fn advisor_real_records_keep_a_separate_timed_row() {
+        let fixture = include_str!("../../../tests/fixtures/claude-advisor.jsonl");
+        let records: Vec<Value> = fixture
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = Reader::new(file.path().into(), true);
+        writeln!(file, "{}", records[0]).unwrap();
+        let pending = reader.refresh(20).unwrap().events;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].body, "advisor");
+        assert_eq!(pending[0].kind, Kind::Assistant);
+        assert_eq!(pending[0].ended_at, None);
+        writeln!(file, "{}", records[1]).unwrap();
+        let events = reader.refresh(20).unwrap().events;
+        assert_eq!(events, tail_session(file.path(), 20, true).unwrap());
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.kind, Kind::Assistant);
+        assert_eq!(
+            event.source.as_deref(),
+            Some("srvtoolu_01Ybbz6gyNahapzZ5zTtxji5")
+        );
+        let start = records[0]["timestamp"]
+            .as_str()
+            .unwrap()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let end = records[1]["timestamp"]
+            .as_str()
+            .unwrap()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        assert_eq!(event.started_at, start);
+        assert_eq!(event.ended_at, Some(end));
+        assert_eq!(event.calls[0].duration, Some(end - start));
+        assert_eq!((end - start).num_milliseconds(), 285889);
+        assert_eq!(
+            event.calls[0]
+                .model_settings
+                .as_ref()
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("claude-fable-5-1")
+        );
+        assert!(
+            event.calls[0]
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.is_empty())
+        );
+        assert_eq!(event.source_records.len(), 2);
+        let mut following: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+                .lines()
+                .nth(6)
+                .unwrap(),
+        )
+        .unwrap();
+        following["message"]["id"] = records[0]["message"]["id"].clone();
+        following["timestamp"] = (end + chrono::Duration::seconds(2)).to_rfc3339().into();
+        writeln!(file, "{following}").unwrap();
+        let events = reader.refresh(20).unwrap().events;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].previous_end, Some(end));
+        assert_eq!(events[1].calls.len(), 1);
+        assert_eq!(
+            tail_session(file.path(), 1, true).unwrap(),
+            vec![events[1].clone()]
+        );
+        assert_eq!(events, tail_session(file.path(), 20, true).unwrap());
+    }
+
+    #[test]
+    fn advisor_pairs_by_tool_id_and_ignores_other_server_tools() {
+        let mut records: Vec<Value> = include_str!("../../../tests/fixtures/claude-advisor.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        records[1]["message"]["content"][0]["tool_use_id"] = "another-advisor".into();
+        for record in &records {
+            writeln!(file, "{record}").unwrap();
+        }
+        let events = tail_session(file.path(), 20, true).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].ended_at, None);
+        assert_eq!(events[0].calls[0].duration, None);
+        records[0]["message"]["content"][0]["name"] = "web_search".into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in &records {
+            writeln!(file, "{record}").unwrap();
+        }
+        assert!(tail_session(file.path(), 20, true).unwrap().is_empty());
+    }
+
+    #[test]
     fn dequeued_prompt_uses_delivery_position_and_time_in_incremental_and_tail_reads() {
         let fixture = include_str!("../../../tests/fixtures/claude-queued-dequeue.jsonl");
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -1715,12 +1817,14 @@ pub(crate) mod tests {
         let update = reader.refresh(usize::MAX).unwrap();
         let expected = [lines[1], lines[2], lines[2]]
             .into_iter()
-            .map(|line| {
-                serde_json::to_string_pretty(&serde_json::from_str::<Value>(line).unwrap()).unwrap()
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let raw = update.events.last().unwrap().raw_text().unwrap();
+        let actual = serde_json::Deserializer::from_str(&raw)
+            .into_iter::<Value>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -1738,16 +1842,17 @@ pub(crate) mod tests {
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
-        let expected = rows[1..]
-            .iter()
-            .map(|row| serde_json::to_string_pretty(row).unwrap())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+        let raw = update.events.last().unwrap().raw_text().unwrap();
+        let actual = serde_json::Deserializer::from_str(&raw)
+            .into_iter::<serde_json::Value>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(actual, rows[1..]);
         assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
         assert_eq!(
-            update.events[0].raw_text().unwrap(),
-            serde_json::to_string_pretty(&rows[0]).unwrap()
+            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap())
+                .unwrap(),
+            rows[0]
         );
     }
 
@@ -2634,7 +2739,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn real_absorbed_handback_shows_sender_and_report() {
+    fn real_absorbed_handback_shows_sender_and_report_but_is_no_prompt() {
         let fixture = include_str!("../../../tests/fixtures/claude-peer-handback-absorbed.jsonl");
         let origin = &serde_json::from_str::<Value>(fixture.lines().last().unwrap()).unwrap()["attachment"]
             ["origin"];
@@ -2649,10 +2754,7 @@ pub(crate) mod tests {
         let summary =
             super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
                 .unwrap();
-        assert_eq!(
-            summary.prompt,
-            crate::event::participant_text(Some("general-purpose"), report)
-        );
+        assert_eq!(summary.prompt, "");
     }
 
     #[test]
@@ -3726,10 +3828,7 @@ pub(crate) mod tests {
         assert_eq!(events[4].started_at, at(40));
         assert_eq!(events[5].body, "finished");
         assert_eq!(events[5].started_at, at(42));
-        assert_eq!(
-            events[6].body,
-            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
-        );
+        assert_eq!(events[6].body, "等 Codex 做日志面板 ✓");
         assert_eq!(events[6].started_at, at(43));
         assert_eq!(events[6].ended_at, Some(at(43)));
         assert_eq!(events[0].previous_end, None);
@@ -3865,7 +3964,7 @@ pub(crate) mod tests {
         assert_eq!(measured.earliest, len - 64 * 1024);
         assert_eq!(
             event_panel.entries[0].event.body,
-            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
+            "等 Codex 做日志面板 ✓"
         );
     }
 

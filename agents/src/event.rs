@@ -31,6 +31,42 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventFilter {
+    #[default]
+    All,
+    Message,
+    Tool,
+}
+
+impl EventFilter {
+    pub fn is_all(&self) -> bool {
+        *self == Self::All
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Message,
+            Self::Message => Self::Tool,
+            Self::Tool => Self::All,
+        }
+    }
+
+    pub fn includes(self, kind: &Kind) -> bool {
+        let category = match kind {
+            Kind::User | Kind::QueuedUser => Self::All,
+            Kind::Assistant
+            | Kind::Compaction
+            | Kind::QueuedSystem
+            | Kind::Agent
+            | Kind::Session => Self::Message,
+            Kind::Tool | Kind::Error | Kind::Denied => Self::Tool,
+        };
+        self == Self::All || self == category
+    }
+}
+
 /// Transcript turn containing a row, including whether its boundaries are known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Turn {
@@ -143,7 +179,6 @@ impl Event {
         }
     }
 
-    #[cfg(test)]
     pub fn raw_text(&self) -> std::io::Result<String> {
         use std::io::{BufRead, Seek};
         let mut records = self.source_records.iter().collect::<Vec<_>>();
@@ -156,13 +191,14 @@ impl Event {
                 file.seek(std::io::SeekFrom::Start(record.offset))?;
                 let mut line = Vec::new();
                 std::io::BufReader::new(file).read_until(b'\n', &mut line)?;
-                let value: serde_json::Value = serde_json::from_slice(&line)
+                let line = std::str::from_utf8(&line)
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-                serde_json::to_string_pretty(&value)
-                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+                serde_json::from_str::<serde_json::Value>(line)
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+                Ok(line.trim_end_matches(['\r', '\n']).to_owned())
             })
             .collect::<std::io::Result<Vec<_>>>()
-            .map(|records| records.join("\n\n"))
+            .map(|records| records.join("\n"))
     }
 }
 
@@ -232,6 +268,8 @@ pub struct ModelSettings {
 /// One labelled part of a tool call's input or output, as the open event draws it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
+    /// Background output read from its current file contents.
+    OutputFile(std::path::PathBuf),
     /// Shell source; `prefix` bytes before the command remain part of copied text.
     Shell { text: String, prefix: usize },
     /// Free text using the shared reading column.
@@ -267,3 +305,68 @@ pub struct Image {
 #[cfg(test)]
 #[path = "event/agent_tests.rs"]
 mod agent_tests;
+
+#[cfg(test)]
+#[path = "event/raw_tests.rs"]
+mod raw_tests;
+
+impl Section {
+    /// Reads the current background output, retaining message-specific formatting.
+    pub(crate) fn read_output_file(path: &std::path::Path) -> Self {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) => {
+                return Self::Placeholder(if error.kind() == std::io::ErrorKind::NotFound {
+                    "File no longer exists".to_owned()
+                } else {
+                    error.to_string()
+                });
+            }
+        };
+        let records = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(serde_json::from_str::<serde_json::Value>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+            .filter(|records| {
+                records.iter().all(|record| record["type"].is_string())
+                    && records.iter().any(|record| {
+                        matches!(record["type"].as_str(), Some("assistant" | "user"))
+                            && record["message"]["role"] == record["type"]
+                            && record["message"]["content"].is_array()
+                    })
+            });
+        let Some(records) = records else {
+            return crate::codex_await_output::section(text);
+        };
+        let handback = records
+            .iter()
+            .filter(|record| record["type"] == "assistant")
+            .filter_map(|record| record["message"]["content"].as_array())
+            .flatten()
+            .rfind(|block| block["type"] == "tool_use" && block["name"] == "SubagentHandback")
+            .and_then(|block| block["input"]["message"].as_str())
+            .map(str::to_owned);
+        let message = handback.or_else(|| {
+            let last = records.last()?;
+            if last["type"] != "assistant" {
+                return None;
+            }
+            last["message"]["content"]
+                .as_array()?
+                .iter()
+                .map(|block| {
+                    (block["type"] == "text")
+                        .then(|| block["text"].as_str())
+                        .flatten()
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|parts| parts.join("\n"))
+        });
+        Section::Markdown {
+            label: String::new(),
+            text: message.unwrap_or_default(),
+        }
+    }
+}

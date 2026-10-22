@@ -223,10 +223,13 @@ impl CodexProvider {
             }
             sessions.push(session);
         }
-        self.models
+        // Codex rewrites the cache in place, so a read can see a partial file;
+        // the previous catalog stays and the next refresh reads it again.
+        let _ = self
+            .models
             .lock()
             .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?
-            .refresh(&self.home.join("models_cache.json"))?;
+            .refresh(&self.home.join("models_cache.json"));
         sessions.sort_by(|a, b| {
             b.updated_at
                 .cmp(&a.updated_at)

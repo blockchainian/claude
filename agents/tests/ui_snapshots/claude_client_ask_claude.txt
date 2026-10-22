@@ -1,7 +1,7 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
               /tmp/project              │                 Prompt                 │ claude-client ask claude 状 态 线 程 正 在  agents/tests/support/termi…        9s
- ● Task log example         Working     │ Task log example                       │
+ ● Task log example         Working     │            Task log example            │
                                         │                                        │
                                         │                                        │
                                         │                                        │

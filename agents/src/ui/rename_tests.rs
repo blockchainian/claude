@@ -100,7 +100,6 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
         (KeyCode::Char('a'), KeyModifiers::NONE, Some("Archive")),
         (KeyCode::Backspace, KeyModifiers::NONE, Some("Delete")),
         (KeyCode::Char('h'), KeyModifiers::NONE, Some("Hide")),
-        (KeyCode::Char('p'), KeyModifiers::NONE, Some("Pin")),
     ] {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
@@ -116,7 +115,7 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
             assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
-            assert!(view.pinned.is_empty());
+            assert!(view.pinned.active.is_empty());
             assert!(view.hidden.is_empty());
         }
     }
@@ -169,7 +168,7 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
 }
 
 #[test]
-fn manager_thread_hides_itself_and_pins_its_parent_group() {
+fn manager_thread_hides_and_pins_itself() {
     let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
     let child = view.selected_row().unwrap().clone();
     let parent = child.parent.clone().unwrap();
@@ -177,14 +176,19 @@ fn manager_thread_hides_itself_and_pins_its_parent_group() {
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
             Some(Action::TogglePin {
-                id: parent.clone(),
+                tab: 0,
+                id: child.id.clone(),
                 pinned
             })
         );
-        view.set_pinned(if pinned {
-            std::slice::from_ref(&parent)
-        } else {
-            &[]
+        view.set_pinned(&crate::state::TaskPins {
+            active: (if pinned {
+                std::slice::from_ref(&child.id)
+            } else {
+                &[]
+            })
+            .to_vec(),
+            inactive: vec![],
         });
         assert_eq!(view.is_pinned(view.selected), pinned);
     }
@@ -319,3 +323,17 @@ fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
 
 #[path = "title_save_tests.rs"]
 mod title_save_tests;
+
+#[test]
+fn codex_spawn_child_pins_itself() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
+    let id = view.selected_id().unwrap().clone();
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
+        Some(Action::TogglePin {
+            tab: 0,
+            id,
+            pinned: true
+        })
+    );
+}

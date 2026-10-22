@@ -169,6 +169,12 @@ pub(super) fn event_jump_style() -> Style {
 pub(super) fn exit_code_line(text: String, code: Option<i64>, style: Style) -> Line<'static> {
     if let Some(code) = code.filter(|code| *code != 0) {
         let digits = code.to_string();
+        if text == digits {
+            return Line::from(Span::styled(
+                digits,
+                event_styles(&crate::event::Kind::Error).1.not_dim(),
+            ));
+        }
         if let Some(prefix) = text.strip_suffix(&format!(" · {digits}")) {
             return Line::from(vec![
                 Span::styled(format!("{prefix} · "), style),

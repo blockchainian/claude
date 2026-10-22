@@ -46,6 +46,7 @@ enum Input {
     },
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<notify::Event>),
+    EventOutput(notify::Result<notify::Event>),
     Sessions {
         refresh: Box<crate::sessions::Refresh>,
         generation: u64,
@@ -231,6 +232,7 @@ impl App {
         view.set_pinned(&preferences.pinned);
         view.set_drafts(&preferences.drafts);
         view.restore_question_answers(&preferences);
+        view.restore_attention_skips(&preferences);
         if !preferences.draft_notices.is_empty() {
             view.set_notice(Some(preferences.draft_notices.join("; ")));
         }
@@ -330,6 +332,11 @@ impl App {
                 None
             }
         };
+        let output = self.sender.clone();
+        let mut output_watcher = crate::sessions::OutputWatcher::new(move |event| {
+            let _ = output.send(Input::EventOutput(event));
+        })
+        .map_err(io::Error::other)?;
         let _reader = InputReader::start(self.sender.clone())?;
         let mut schedule = RefreshSchedule::new(
             Instant::now(),
@@ -366,6 +373,11 @@ impl App {
             let action = self.view.take_pending_action();
             if self.handle_action(action) {
                 return Ok(());
+            }
+            match output_watcher.set_path(self.view.event_output_path()) {
+                Ok(true) => self.view.refresh_event_output(),
+                Ok(false) => {}
+                Err(error) => self.view.set_notice(Some(error.to_string())),
             }
             self.draw(terminal)?;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
@@ -519,6 +531,10 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::EventOutput(Ok(_)) => self.view.refresh_event_output(),
+                Input::EventOutput(Err(error)) => {
+                    self.view.set_notice(Some(error.to_string()));
+                }
                 Input::EventsLoaded {
                     token,
                     reader,
@@ -639,7 +655,8 @@ impl App {
     fn refresh_event(&mut self, visible: usize) {
         if let Some(id) = self.view.selected_id() {
             let sorting = self.preferences.task_sort(id);
-            self.view.initialize_event_sort(sorting);
+            self.view
+                .initialize_event_list(sorting, self.preferences.task_filter(id));
         }
         let count = if self.view.event_list.start_requested
             || self.view.transcript_fully_loaded()
@@ -1075,7 +1092,7 @@ impl App {
         self.view.set_sessions(sessions, has_more);
     }
 
-    /// Finished tasks leave the Pinned group and discard their saved interface state.
+    /// Finished tasks discard saved interface state; task pins last while they or their root are active.
     fn forget_inactive_state(&mut self, sessions: &[Session]) {
         for session in sessions
             .iter()
@@ -1087,13 +1104,28 @@ impl App {
             }
             self.view.clear_pinned_events(&session.id);
         }
-        let pinned = self.preferences.pinned.len();
-        self.preferences.pinned.retain(|id| {
-            !sessions
-                .iter()
-                .any(|session| &session.id == id && session.status == SessionStatus::Inactive)
+        let pinned = self.preferences.pinned.active.len();
+        self.preferences.pinned.active.retain(|id| {
+            let Some(session) = sessions.iter().find(|session| &session.id == id) else {
+                return true;
+            };
+            if session.status != SessionStatus::Inactive {
+                return true;
+            }
+            let mut root = session;
+            for _ in 0..sessions.len() {
+                let Some(parent) = root
+                    .parent
+                    .as_ref()
+                    .and_then(|id| sessions.iter().find(|session| &session.id == id))
+                else {
+                    break;
+                };
+                root = parent;
+            }
+            root.parent.is_none() && root.status != SessionStatus::Inactive
         });
-        if self.preferences.pinned.len() != pinned {
+        if self.preferences.pinned.active.len() != pinned {
             let saved = self.preferences.save_pinned(&self.config_dir);
             self.report_save(saved);
             self.view.set_pinned(&self.preferences.pinned);
@@ -1375,8 +1407,7 @@ impl App {
             | Action::Rename { id, .. }
             | Action::Delete(id)
             | Action::Archive(id)
-            | Action::Stop(id)
-            | Action::TogglePin { id, .. } => Some(id),
+            | Action::Stop(id) => Some(id),
             _ => None,
         };
         if let Some(session) = target.and_then(|id| self.session(id))
@@ -1431,6 +1462,12 @@ impl App {
             }
             Action::PersistQuestion { id, ask } => {
                 let saved = self.preferences.save_task_ask(&self.config_dir, &id, ask);
+                self.report_save(saved);
+            }
+            Action::PersistSkip { id, skipped_at } => {
+                let saved =
+                    self.preferences
+                        .save_task_skipped_at(&self.config_dir, &id, skipped_at);
                 self.report_save(saved);
             }
             Action::AnswerQuestions { ask, answer } => {
@@ -1518,10 +1555,11 @@ impl App {
                 self.send_input(id, SessionInput::Interrupt);
             }
             Action::Hide(_) => {}
-            Action::TogglePin { id, pinned } => {
-                self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
+            Action::TogglePin { id, pinned, tab } => {
+                let pins = self.preferences.pinned.for_tab_mut(tab);
+                pins.retain(|pinned_id| pinned_id != &id);
                 if pinned {
-                    self.preferences.pinned.insert(0, id);
+                    pins.insert(0, id);
                 }
                 let saved = self.preferences.save_pinned(&self.config_dir);
                 self.report_save(saved);
@@ -1542,6 +1580,12 @@ impl App {
                 let saved = self
                     .preferences
                     .save_task_sort(&self.config_dir, &id, sorting);
+                self.report_save(saved);
+            }
+            Action::PersistFiltering { id, filter } => {
+                let saved = self
+                    .preferences
+                    .save_task_filter(&self.config_dir, &id, filter);
                 self.report_save(saved);
             }
             Action::PersistGrouping(grouping) => {

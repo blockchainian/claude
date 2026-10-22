@@ -2,6 +2,89 @@
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
+#[cfg(not(target_os = "macos"))]
+use std::sync::{Arc, Mutex};
+
+#[cfg(target_os = "macos")]
+#[path = "output_vnode.rs"]
+mod output_vnode;
+#[cfg(target_os = "macos")]
+pub use output_vnode::OutputWatcher;
+
+/// Watches only the output file currently displayed in event details.
+#[cfg(not(target_os = "macos"))]
+pub struct OutputWatcher {
+    watcher: RecommendedWatcher,
+    path: Arc<Mutex<Option<PathBuf>>>,
+    requested: Option<PathBuf>,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl OutputWatcher {
+    pub fn new(
+        mut changed: impl FnMut(notify::Result<notify::Event>) + Send + 'static,
+    ) -> notify::Result<Self> {
+        let path = Arc::new(Mutex::new(None::<PathBuf>));
+        let selected = path.clone();
+        let watcher =
+            notify::recommended_watcher(
+                move |result: notify::Result<notify::Event>| match result {
+                    Ok(event) => {
+                        let path = selected.lock().expect("output watcher path poisoned");
+                        if path.as_ref().is_some_and(|path| {
+                            !matches!(event.kind, EventKind::Access(_))
+                                && (event.need_rescan()
+                                    || event.paths.iter().any(|changed| changed == path))
+                        }) {
+                            changed(Ok(event));
+                        }
+                    }
+                    Err(error) => changed(Err(error)),
+                },
+            )?;
+        Ok(Self {
+            watcher,
+            path,
+            requested: None,
+        })
+    }
+
+    /// Watches the parent directory so an absent file can be created later.
+    pub fn set_path(&mut self, path: Option<PathBuf>) -> notify::Result<bool> {
+        if self.requested == path {
+            return Ok(false);
+        }
+        self.requested = path.clone();
+        let previous = self
+            .path
+            .lock()
+            .expect("output watcher path poisoned")
+            .take();
+        if let Some(previous) = previous {
+            self.watcher
+                .unwatch(previous.parent().expect("output file has parent"))?;
+        }
+        let path = path
+            .map(|path| {
+                let parent = path
+                    .parent()
+                    .ok_or_else(|| notify::Error::generic("Output file has no parent directory"))?;
+                let name = path
+                    .file_name()
+                    .ok_or_else(|| notify::Error::generic("Output file has no file name"))?;
+                Ok::<_, notify::Error>(parent.canonicalize()?.join(name))
+            })
+            .transpose()?;
+        if let Some(path) = &path {
+            self.watcher.watch(
+                path.parent().expect("output file has parent"),
+                RecursiveMode::NonRecursive,
+            )?;
+        }
+        *self.path.lock().expect("output watcher path poisoned") = path;
+        Ok(true)
+    }
+}
 
 pub fn watch(
     roots: &[PathBuf],
@@ -41,3 +124,7 @@ fn relevant(event: &notify::Event) -> bool {
 #[cfg(test)]
 #[path = "../providers/claude/watcher_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "output_watcher_tests.rs"]
+mod output_tests;

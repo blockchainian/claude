@@ -210,28 +210,32 @@ fn batch_dispatches_in_order_and_stops_when_action_exits() {
     let id = app.view.selected_id().unwrap().clone();
     assert!(!app.handle_action(Some(Action::Batch(vec![
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: true
         },
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: false
         },
     ]))));
-    assert!(Preferences::load(directory.path()).pinned.is_empty());
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
     assert!(app.handle_action(Some(Action::Batch(vec![
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: true
         },
         Action::Quit,
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: false
         },
     ]))));
     let preferences = Preferences::load(directory.path());
-    assert_eq!(preferences.pinned, vec![id]);
+    assert_eq!(preferences.pinned.active, vec![id]);
 }
 
 #[test]
@@ -243,19 +247,20 @@ fn pinning_puts_the_session_first() {
         ..first.clone()
     };
     let pin = |id: &SessionKey, pinned| Action::TogglePin {
+        tab: 0,
         id: id.clone(),
         pinned,
     };
     app.handle_action(Some(pin(&first, true)));
     app.handle_action(Some(pin(&second, true)));
     assert_eq!(
-        Preferences::load(directory.path()).pinned,
+        Preferences::load(directory.path()).pinned.active,
         vec![second.clone(), first.clone()]
     );
     app.handle_action(Some(pin(&first, false)));
     app.handle_action(Some(pin(&first, true)));
     assert_eq!(
-        Preferences::load(directory.path()).pinned,
+        Preferences::load(directory.path()).pinned.active,
         vec![first, second]
     );
 }
@@ -265,6 +270,7 @@ fn inactive_sessions_lose_their_pin() {
     let (directory, mut app, registry, _) = registry_app("bg");
     let id = app.view.selected_id().unwrap().clone();
     app.handle_action(Some(Action::TogglePin {
+        tab: 0,
         id: id.clone(),
         pinned: true,
     }));
@@ -275,7 +281,7 @@ fn inactive_sessions_lose_their_pin() {
         app.session(&id).unwrap().status,
         crate::model::SessionStatus::Inactive
     );
-    assert!(Preferences::load(directory.path()).pinned.is_empty());
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
     assert!(!screen(&mut app).contains("Pinned"));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
@@ -283,7 +289,11 @@ fn inactive_sessions_lose_their_pin() {
     assert_eq!(
         app.view
             .handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
-        Some(Action::Unsupported("Pin"))
+        Some(Action::TogglePin {
+            tab: 1,
+            id,
+            pinned: true
+        })
     );
 }
 
@@ -599,4 +609,128 @@ fn duplicate_inputs_keep_the_screen_and_do_not_start_another_job() {
     }
     complete_input(&mut app, "Claude background session identity changed");
     assert!(app.receiver.try_recv().is_err());
+}
+
+#[test]
+fn child_pin_persists_independently_and_survives_inactive_parent() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut parent = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let mut child = parent.clone();
+    child.id.id = "child".into();
+    child.parent = Some(parent.id.clone());
+    app.view
+        .set_sessions(vec![parent.clone(), child.clone()], false);
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: parent.id.clone(),
+        pinned: true,
+    }));
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![child.id.clone(), parent.id.clone()]
+    );
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: false,
+    }));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![parent.id.clone()]
+    );
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    parent.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[parent.clone(), child.clone()]);
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![child.id.clone()]
+    );
+    child.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[parent, child]);
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
+}
+
+#[test]
+fn inactive_child_pin_survives_until_its_root_is_inactive() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut root = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let mut parent = root.clone();
+    parent.id.id = "parent".into();
+    parent.parent = Some(root.id.clone());
+    parent.status = crate::model::SessionStatus::Inactive;
+    let mut child = parent.clone();
+    child.id.id = "child".into();
+    child.parent = Some(parent.id.clone());
+    app.sessions = vec![child.clone(), parent.clone(), root.clone()];
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    app.forget_inactive_state(&[child.clone(), parent.clone(), root.clone()]);
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![child.id.clone()]
+    );
+    assert!(screen(&mut app).contains("Pinned"));
+    root.status = crate::model::SessionStatus::Inactive;
+    parent.status = crate::model::SessionStatus::Working;
+    app.forget_inactive_state(&[child, parent, root]);
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
+    assert!(!screen(&mut app).contains("Pinned"));
+}
+
+#[test]
+fn tab_pins_persist_independently_and_only_active_pins_expire() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut session = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let id = session.id.clone();
+    let second = SessionKey {
+        id: "second".into(),
+        ..id.clone()
+    };
+    let pin = |id: &SessionKey, tab, pinned| {
+        Some(Action::TogglePin {
+            id: id.clone(),
+            tab,
+            pinned,
+        })
+    };
+    for tab in [0, 1] {
+        app.handle_action(pin(&id, tab, true));
+        app.handle_action(pin(&second, tab, true));
+    }
+    app.handle_action(pin(&id, 0, false));
+    let pins = Preferences::load(directory.path()).pinned;
+    assert_eq!(pins.active, [second.clone()]);
+    assert_eq!(pins.inactive, [second.clone(), id.clone()]);
+    app.handle_action(pin(&id, 0, true));
+    session.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[session]);
+    let pins = Preferences::load(directory.path()).pinned;
+    assert_eq!(pins.active, [second.clone()]);
+    assert_eq!(pins.inactive, [second.clone(), id.clone()]);
+    app.handle_action(pin(&id, 1, false));
+    let pins = Preferences::load(directory.path()).pinned;
+    assert_eq!(pins.active, [second.clone()]);
+    assert_eq!(pins.inactive, [second]);
 }

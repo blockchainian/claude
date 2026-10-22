@@ -160,6 +160,10 @@ impl Part {
         matches!(self.body, Body::Markdown | Body::Prose(true))
     }
 
+    pub fn reading_column(&self) -> bool {
+        matches!(self.body.content_kind(), ContentKind::Prose)
+    }
+
     pub fn running(&self) -> bool {
         matches!(self.body, Body::Running)
     }
@@ -316,7 +320,7 @@ impl Part {
                 lines
             }
             Body::Shell(commands) => shell_lines(&self.source, commands),
-            Body::Structured(document) => document.highlighted(),
+            Body::Structured(document) => document.lines(width),
             Body::Diff => highlight::diff_lines(source),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
             Body::Note => source
@@ -438,6 +442,68 @@ fn shell_maps(
     maps
 }
 
+/// Each raw record uses the shared document renderer under its own title.
+pub(super) fn transcript_content(
+    raw: &Result<String, String>,
+    provider: crate::providers::ProviderId,
+) -> EventDetailContent {
+    let message = |text: String| EventDetailContent {
+        sections: vec![EventDetailSection {
+            title: TitleRow {
+                left: None,
+                exit_code: None,
+                title: String::new(),
+                title_style: Style::default(),
+                time: None,
+                meta_style: Style::new().dim(),
+            },
+            groups: vec![Group {
+                parts: vec![Part::new(text, Body::Text)],
+            }],
+        }],
+    };
+    let raw = match raw {
+        Ok(raw) if raw.is_empty() => return message("No transcript records".into()),
+        Ok(raw) => raw,
+        Err(error) => return message(format!("Cannot read transcript records: {error}")),
+    };
+    // raw_text retains one original JSON line per record.
+    let sections = raw
+        .lines()
+        .map(|text| {
+            let record: serde_json::Value =
+                serde_json::from_str(text).expect("raw_text validates JSON");
+            let mut title = record["type"].as_str().unwrap_or_default().to_owned();
+            if provider == crate::providers::ProviderId::Codex
+                && let Some(kind) = record["payload"]["type"].as_str()
+            {
+                if !title.is_empty() {
+                    title.push_str(" / ");
+                }
+                title.push_str(kind);
+            }
+            let time = record["timestamp"]
+                .as_str()
+                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                .map(|time| super::formatting::clock_text(time.with_timezone(&chrono::Utc)));
+            EventDetailSection {
+                title: TitleRow {
+                    left: time,
+                    exit_code: None,
+                    title,
+                    title_style: Style::default(),
+                    time: None,
+                    meta_style: Style::new().dim(),
+                },
+                groups: vec![Group {
+                    parts: vec![Part::text(text.to_owned(), false)],
+                }],
+            }
+        })
+        .collect();
+    EventDetailContent { sections }
+}
+
 /// Build one titled section per message or tool call.
 pub(super) fn event_detail_content(
     event: &Event,
@@ -505,9 +571,10 @@ fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
     let mut left = call.event_detail_left.clone();
     if let Some(code) = call.exit_code.filter(|code| *code != 0) {
         if left.is_empty() {
-            left = call.name.clone();
+            left = code.to_string();
+        } else {
+            left.push_str(&format!(" · {code}"));
         }
-        left.push_str(&format!(" · {code}"));
     }
     (
         (!left.is_empty()).then_some(left),
@@ -611,6 +678,15 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
 
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
+        Section::OutputFile(path) => {
+            push_section(
+                parts,
+                &Section::read_output_file(path),
+                label_style,
+                text_output,
+            );
+            return;
+        }
         Section::Shell { text, prefix } => {
             parts.push(shell_part(text.clone(), *prefix));
             return;
@@ -859,6 +935,26 @@ mod tests {
     }
 
     #[test]
+    fn claude_advisor_detail_shows_encrypted_output() {
+        let events = crate::providers::claude::event_reader::tail_session(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-advisor.jsonl"),
+            20,
+            true,
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        let parts = flattened_parts(&events[0]);
+        let output: Vec<_> = parts
+            .iter()
+            .skip_while(|part| !matches!(part.body, Body::Arrow))
+            .skip(1)
+            .map(|part| part.source.as_str())
+            .collect();
+        assert_eq!(output, ["(encrypted)"]);
+    }
+
+    #[test]
     fn codex_agent_message_has_a_named_title_and_no_output_arrow() {
         let events = codex_fixture_events("tests/fixtures/codex-agent-messages/new-task.jsonl");
         let event = events.first().unwrap();
@@ -1034,6 +1130,10 @@ mod tests {
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id · 1"));
         call.event_detail_left = "Read".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Read · 1"));
+        call.event_detail_left = "Bash".into();
+        assert_eq!(call_title(&call).0.as_deref(), Some("Bash · 1"));
+        call.event_detail_left.clear();
+        assert_eq!(call_title(&call).0.as_deref(), Some("1"));
     }
 
     #[test]
@@ -1170,10 +1270,7 @@ mod tests {
         assert_eq!(text[first + 1], " ".repeat(column));
         assert_eq!(
             text[first + 2],
-            format!(
-                "{}三个区块单击定位、双击复制已实现。\",",
-                " ".repeat(column)
-            )
+            format!("{}三个区块单击定位、双击复制已实现。\"", " ".repeat(column))
         );
         assert_eq!(part.source, text.join("\n"));
         let key = lines[first]
@@ -1246,6 +1343,56 @@ mod tests {
                 .add_modifier
                 .contains(ratatui::style::Modifier::DIM)
         }));
+    }
+
+    #[test]
+    fn json_documents_keep_record_key_order() {
+        let raw = include_str!("../../tests/fixtures/codex-raw-detail.jsonl")
+            .lines()
+            .nth(1)
+            .unwrap();
+        let part = Part::text(raw.into(), false);
+        let positions = [
+            "\"type\"",
+            "\"timestamp\"",
+            "\"payload\"",
+            "\"name\"",
+            "\"arguments\"",
+            "\"call_id\"",
+        ]
+        .map(|key| part.source.find(key).unwrap());
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{}",
+            part.source
+        );
+    }
+
+    #[test]
+    fn json_documents_wrap_complete_lines_with_styles() {
+        let raw = include_str!("../../tests/fixtures/codex-raw-detail.jsonl")
+            .lines()
+            .nth(2)
+            .unwrap();
+        let part = Part::text(raw.into(), false);
+        let narrow = part.lines(33, Style::default(), chrono::Utc::now());
+        assert!(narrow.iter().all(|line| line.width() <= 33));
+        let styled = |lines: Vec<Line<'static>>| {
+            lines
+                .into_iter()
+                .flat_map(|line| line.spans)
+                .flat_map(|span| {
+                    span.content
+                        .bytes()
+                        .map(|byte| (byte, span.style))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            styled(narrow),
+            styled(part.lines(usize::MAX, Style::default(), chrono::Utc::now()))
+        );
     }
 
     #[test]
@@ -1992,3 +2139,7 @@ mod tests {
 #[cfg(test)]
 #[path = "structured_text_tests.rs"]
 mod structured_text_tests;
+
+#[cfg(test)]
+#[path = "tool_detail_output_tests.rs"]
+mod output_tests;

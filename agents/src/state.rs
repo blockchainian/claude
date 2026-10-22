@@ -1,3 +1,4 @@
+use crate::event::EventFilter;
 use crate::model::{EventSort, Grouping};
 use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
@@ -88,10 +89,61 @@ enum TaskSort {
 pub(crate) struct StoredTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sort: Option<TaskSort>,
+    #[serde(default, skip_serializing_if = "EventFilter::is_all")]
+    filter: EventFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ask: Option<StoredAsk>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pinned_events: Vec<PinnedEvent>,
+    /// When the user last left this task while the attention queue had brought it forward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skipped_at: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TaskPins<T> {
+    pub active: Vec<T>,
+    pub inactive: Vec<T>,
+}
+
+impl<T> Default for TaskPins<T> {
+    fn default() -> Self {
+        Self {
+            active: Vec::new(),
+            inactive: Vec::new(),
+        }
+    }
+}
+
+impl<T> TaskPins<T> {
+    pub fn for_tab(&self, tab: usize) -> &[T] {
+        match tab {
+            0 => &self.active,
+            1 => &self.inactive,
+            _ => panic!("unknown task tab: {tab}"),
+        }
+    }
+
+    pub fn for_tab_mut(&mut self, tab: usize) -> &mut Vec<T> {
+        match tab {
+            0 => &mut self.active,
+            1 => &mut self.inactive,
+            _ => panic!("unknown task tab: {tab}"),
+        }
+    }
+
+    fn map<U>(&self, mut map: impl FnMut(&[T]) -> Vec<U>) -> TaskPins<U> {
+        TaskPins {
+            active: map(&self.active),
+            inactive: map(&self.inactive),
+        }
+    }
+}
+
+impl TaskPins<SessionKey> {
+    fn stored(&self) -> TaskPins<String> {
+        self.map(|ids| ids.iter().map(ToString::to_string).collect())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,7 +151,7 @@ pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
     pub grouping: Grouping,
-    pub pinned: Vec<SessionKey>,
+    pub pinned: TaskPins<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
     /// A `.tmTheme` file that highlights code on a light background instead of the bundled `light`.
@@ -152,7 +204,7 @@ impl Default for StoredConfig {
 #[derive(Default, Deserialize, Serialize)]
 #[serde(default)]
 struct StoredState {
-    pinned: Vec<String>,
+    pinned: TaskPins<String>,
     usage: StoredUsage,
     tasks: HashMap<String, StoredTask>,
     drafts: Vec<serde_json::Value>,
@@ -203,7 +255,7 @@ impl Default for Preferences {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default(),
-            pinned: Vec::new(),
+            pinned: TaskPins::default(),
             theme: None,
             light_theme: None,
             dark_theme: None,
@@ -266,9 +318,7 @@ impl Preferences {
             pinned: stored
                 .state
                 .pinned
-                .into_iter()
-                .filter_map(|value| value.parse().ok())
-                .collect(),
+                .map(|ids| ids.iter().filter_map(|value| value.parse().ok()).collect()),
             theme: stored.config.theme,
             light_theme: stored.config.light_theme,
             dark_theme: stored.config.dark_theme,
@@ -287,12 +337,7 @@ impl Preferences {
 
     pub fn save_pinned(&self, config_dir: &Path) -> io::Result<()> {
         update(config_dir, |document| {
-            document["state"]["pinned"] = serde_json::to_value(
-                self.pinned
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-            )?;
+            document["state"]["pinned"] = serde_json::to_value(self.pinned.stored())?;
             Ok(())
         })
     }
@@ -343,8 +388,35 @@ impl Preferences {
         }
     }
 
+    pub fn task_filter(&self, key: &SessionKey) -> EventFilter {
+        self.tasks
+            .get(key)
+            .map(|task| task.filter)
+            .unwrap_or_default()
+    }
+
     pub fn task_ask(&self, key: &SessionKey) -> Option<&StoredAsk> {
         self.tasks.get(key).and_then(|task| task.ask.as_ref())
+    }
+
+    pub fn task_skipped_at(&self, key: &SessionKey) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.tasks
+            .get(key)
+            .and_then(|task| task.skipped_at.as_deref()?.parse().ok())
+    }
+
+    pub fn save_task_skipped_at(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        skipped_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> io::Result<()> {
+        self.save_task_field(
+            config_dir,
+            key,
+            "skipped_at",
+            skipped_at.map(|time| time.to_rfc3339()),
+        )
     }
 
     pub fn task_pinned_events(&self, key: &SessionKey) -> &[PinnedEvent] {
@@ -379,13 +451,37 @@ impl Preferences {
             EventSort::Time => None,
             EventSort::Duration => Some(TaskSort::Duration),
         };
+        self.save_task_field(config_dir, key, "sort", sort)
+    }
+
+    pub fn save_task_filter(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        filter: EventFilter,
+    ) -> io::Result<()> {
+        self.save_task_field(
+            config_dir,
+            key,
+            "filter",
+            (!filter.is_all()).then_some(filter),
+        )
+    }
+
+    fn save_task_field<T: Serialize>(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        field: &str,
+        value: Option<T>,
+    ) -> io::Result<()> {
         self.update_task(config_dir, key, |task| {
-            match sort {
-                Some(sort) => {
-                    task.insert("sort".into(), serde_json::to_value(sort)?);
+            match value {
+                Some(value) => {
+                    task.insert(field.into(), serde_json::to_value(value)?);
                 }
                 None => {
-                    task.remove("sort");
+                    task.remove(field);
                 }
             }
             Ok(())
@@ -478,7 +574,7 @@ impl Preferences {
                     dark_theme: self.dark_theme.clone(),
                 },
                 state: StoredState {
-                    pinned: self.pinned.iter().map(ToString::to_string).collect(),
+                    pinned: self.pinned.stored(),
                     tasks: self
                         .tasks
                         .iter()

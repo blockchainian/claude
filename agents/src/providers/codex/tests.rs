@@ -362,7 +362,6 @@ fn capabilities_gate_codex_actions_in_the_view() {
         assert!(!view.pasting_prompt());
     }
     for (code, label) in [
-        (KeyCode::Char('p'), "Pin"),
         (KeyCode::Char('f'), "Fork"),
         (KeyCode::Char('r'), "Rename"),
         (KeyCode::Backspace, "Delete"),
@@ -913,7 +912,14 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     for (code, expected) in [
         (KeyCode::Char('f'), Action::Fork(key("thread-12".into()))),
         (KeyCode::Char('x'), Action::Stop(key("thread-12".into()))),
-        (KeyCode::Char('p'), Action::Unsupported("Pin")),
+        (
+            KeyCode::Char('p'),
+            Action::TogglePin {
+                tab: 0,
+                id: key("thread-12".into()),
+                pinned: true,
+            },
+        ),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
@@ -1206,6 +1212,14 @@ fn model_catalog_labels_refresh_only_when_modified() {
     assert_eq!(label(&mut provider).as_deref(), Some("GPT-6-Astra"));
     std::fs::remove_file(path).unwrap();
     assert_eq!(label(&mut provider), None);
+}
+
+#[test]
+fn sessions_load_while_codex_rewrites_the_model_cache() {
+    let (dir, mut provider) = fixture();
+    // Codex truncates models_cache.json before rewriting it in place.
+    std::fs::write(dir.path().join("models_cache.json"), "").unwrap();
+    assert!(!provider.refresh(1).sessions.is_empty());
 }
 
 #[test]

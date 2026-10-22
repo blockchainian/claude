@@ -21,6 +21,134 @@ fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
 }
 
 #[test]
+fn advisor_list_row_uses_catalog_model_and_hides_encrypted_payload() {
+    use crate::providers::Provider;
+    let fixture = include_str!("../../tests/fixtures/claude-advisor.jsonl");
+    let transcript = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(transcript.path(), fixture.lines().next().unwrap()).unwrap();
+    let pending = crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true)
+        .unwrap()
+        .remove(0);
+    std::fs::write(transcript.path(), fixture).unwrap();
+    let mut parsed =
+        crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true).unwrap();
+    let event = parsed.remove(0);
+    let config = tempfile::tempdir().unwrap();
+    crate::providers::claude::write_fixture_cache(config.path());
+    let project = config.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut provider = crate::providers::claude::ClaudeProvider::new(config.path().into());
+    let mut session = provider.refresh(1).sessions.remove(0);
+    let mut following: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-tool-details.jsonl")
+            .lines()
+            .nth(6)
+            .unwrap(),
+    )
+    .unwrap();
+    let end = event.ended_at.unwrap();
+    let next = end + chrono::Duration::seconds(2);
+    following["timestamp"] = next.to_rfc3339().into();
+    std::fs::write(transcript.path(), format!("{fixture}{following}\n")).unwrap();
+    let parsed =
+        crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true).unwrap();
+    session.last_record_at = Some(next);
+    assert_eq!(
+        row_time(&pending, &session, true),
+        RowTime::Running(pending.started_at)
+    );
+    assert_eq!(
+        sort_duration(&pending, &session, next, true),
+        Some(next - pending.started_at)
+    );
+    let time = event_time(&event, &session, false, next, EventSort::Time);
+    assert_eq!(time, "4m 45s");
+    assert_eq!(
+        event_time(&parsed[1], &session, true, next, EventSort::Time),
+        "2s"
+    );
+    let mut view = View::new(Grouping::Project, false);
+    view.set_input_choices(HashMap::from([(
+        ProviderId::Claude,
+        provider.input_choices(),
+    )]));
+    let display = view.display_event(&event);
+    assert_eq!(display.body, "advisor · Fable 5.1");
+    assert_eq!(display.calls[0].title, "advisor · Fable 5.1");
+    assert_eq!(display.calls[0].event_detail_title, "advisor · Fable 5.1");
+    let area = Rect::new(0, 0, 100, 1);
+    let mut buffer = Buffer::empty(area);
+    render_event(
+        &display,
+        &time,
+        true,
+        area,
+        &mut buffer,
+        None,
+        Path::new("/workspace"),
+    );
+    let row = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(row.contains("advisor · Fable 5.1"), "{row}");
+    assert!(row.contains("4m 45s"), "{row}");
+    assert!(!view.event_detail_text(&event).contains("encrypted_content"));
+    assert!(view.event_detail_text(&event).contains("(encrypted)"));
+    assert_eq!(event.body, "advisor");
+    let advisor_x = row.find("advisor").unwrap() as u16;
+    assert_eq!(
+        buffer[(advisor_x, 0)].fg,
+        style::event_styles(&Kind::Assistant).1.fg.unwrap()
+    );
+    assert_eq!(event.kind, Kind::Assistant);
+    assert_eq!(
+        sort_duration(&event, &session, next, false),
+        Some(end - event.started_at)
+    );
+    assert_eq!(
+        event_time(&event, &session, true, next, EventSort::Time),
+        "4m 45s"
+    );
+    let tool = &parsed[1];
+    let mut buffer = Buffer::empty(area);
+    render_event(
+        tool,
+        "2s",
+        true,
+        area,
+        &mut buffer,
+        None,
+        Path::new("/workspace"),
+    );
+    let first = buffer
+        .content
+        .iter()
+        .find(|cell| !cell.symbol().trim().is_empty())
+        .unwrap();
+    assert_eq!(first.fg, style::event_styles(&Kind::Tool).1.fg.unwrap());
+    view.set_sessions(vec![session], false);
+    view.set_event(parsed);
+    for (filter, expected) in [
+        (crate::event::EventFilter::Message, Kind::Assistant),
+        (crate::event::EventFilter::Tool, Kind::Tool),
+    ] {
+        view.event_list.filter = filter;
+        let shown: Vec<_> = view
+            .shown_events()
+            .map(|(_, event)| event.kind.clone())
+            .collect();
+        assert_eq!(shown, vec![expected]);
+    }
+}
+
+#[test]
 fn codex_agent_messages_show_routes_and_payload() {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
@@ -360,7 +488,15 @@ fn command_and_all_output_body_formats_keep_their_width() {
     for part in body_parts(&event) {
         for width in [200, 120] {
             let lines = part.lines(width, Style::default(), DateTime::UNIX_EPOCH);
-            if part.markdown() {
+            let json = super::super::structured_text::parse(&part.source)
+                .is_some_and(|document| document.syntax() == "json");
+            if json {
+                assert!(
+                    lines.len() > part.source.lines().count(),
+                    "long JSON values wrap at {width}"
+                );
+                assert!(lines.iter().all(|line| line.width() <= width));
+            } else if part.markdown() {
                 assert!(lines.iter().all(|line| line.width() <= width));
             } else if part.source.contains(&text) {
                 assert!(lines.iter().any(|line| line.width() > width));
@@ -495,7 +631,11 @@ fn assert_centered_event_detail(
                 .iter()
                 .flat_map(|part| {
                     part.lines_in(
-                        usize::from(drawn.columns.reading_width.min(drawn.columns.text.width)),
+                        usize::from(if part.reading_column() {
+                            drawn.columns.reading_width.min(drawn.columns.text.width)
+                        } else {
+                            drawn.columns.text.width
+                        }),
                         Style::default(),
                         DateTime::UNIX_EPOCH,
                         Path::new("/workspace"),
@@ -684,8 +824,18 @@ fn notification_preformatted_blocks_preserve_logical_lines() {
         .find(|line| line.ends_with("Claude provider:"))
         .unwrap();
     assert_eq!(
-        event.calls[0].output.as_ref().unwrap(),
-        &vec![crate::event::Section::Markdown {
+        event.calls[0]
+            .output
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|section| match section {
+                crate::event::Section::OutputFile(path) =>
+                    crate::event::Section::read_output_file(path),
+                section => section.clone(),
+            })
+            .collect::<Vec<_>>(),
+        vec![crate::event::Section::Markdown {
             label: String::new(),
             text: message.into(),
         }]
@@ -1177,4 +1327,46 @@ fn codex_perspective_list_snapshot() {
         std::fs::write(&path, &snapshot).unwrap();
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}
+
+#[test]
+fn background_notification_titles_show_only_exit_numbers_on_the_left() {
+    let fixture = include_str!("../../tests/fixtures/claude-background-notifications.jsonl");
+    let events = events(fixture);
+    for (event, code) in events
+        .iter()
+        .zip([None, Some(1), Some(-1), Some(144), None, None])
+    {
+        let detail =
+            super::super::tool_detail::event_detail_content(event, String::new(), Style::new());
+        assert_eq!(
+            detail.sections[0].title.left,
+            code.map(|code| code.to_string())
+        );
+        assert_eq!(detail.sections[0].title.exit_code, code);
+        assert_eq!(detail.sections[0].title.title, event.body);
+        let line = super::body_line(event, 300, Path::new("/workspace"));
+        assert_eq!(line.to_string(), event.body);
+        if let Some(code) = code {
+            let columns = super::super::event_detail::event_detail_columns(
+                Rect::new(0, 0, 300, 20),
+                Rect::new(0, 0, 300, 20),
+            );
+            let (header, _) = detail.sections[0].title.line(columns);
+            assert!(
+                header
+                    .spans
+                    .iter()
+                    .any(|span| span.content == code.to_string()
+                        && span.style
+                            == super::super::style::event_styles(&Kind::Error).1.not_dim())
+            );
+            assert!(
+                line.spans
+                    .iter()
+                    .any(|span| span.content == code.to_string()
+                        && span.style.fg == super::super::style::event_styles(&Kind::Error).0.fg)
+            );
+        }
+    }
 }

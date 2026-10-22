@@ -47,7 +47,7 @@ pub(super) fn heading_rect(text: &str, area: Rect) -> Rect {
 
 impl View {
     pub(super) fn group_heading(&self, index: usize, width: u16) -> String {
-        let group = if self.is_pinned(index) {
+        let group = if self.in_pinned_group(index) {
             "Pinned".to_owned()
         } else {
             match self.grouping {
@@ -72,7 +72,7 @@ impl View {
                     .unwrap_or_else(|| "Unknown".to_owned()),
             }
         };
-        if self.grouping == Grouping::Project && !self.is_pinned(index) {
+        if self.grouping == Grouping::Project && !self.in_pinned_group(index) {
             super::line_truncation::abbreviate_path(&group, usize::from(width).min(64), None)
         } else {
             group
@@ -192,7 +192,7 @@ impl View {
                 let rect = heading_rect(&group, rect);
                 line(group.clone().dim(), rect, buf);
                 if self.grouping == Grouping::Project
-                    && !self.is_pinned(index)
+                    && !self.in_pinned_group(index)
                     && let Some(directory) =
                         self.project_groups[self.group_index(index).unwrap()].directory()
                 {
@@ -221,10 +221,18 @@ impl View {
             if selected {
                 state.marker = Some((rect.x, rect.y));
             }
-            let depth = self.ancestors(index).count();
+            let root = self.tree_index(index).unwrap_or(index);
+            let depth = if index == root {
+                0
+            } else {
+                self.ancestors(index)
+                    .take_while(|&ancestor| ancestor != root)
+                    .count()
+                    + 1
+            };
             let indent = u16::try_from(depth).unwrap_or(u16::MAX).saturating_mul(3);
             if indent > 0 {
-                let ancestors: Vec<_> = self.ancestors(index).collect();
+                let ancestors: Vec<_> = self.ancestors(index).take(depth).collect();
                 let mut prefix = String::new();
                 for ancestor in ancestors.iter().rev().skip(1) {
                     prefix.push_str(if has_next_sibling[*ancestor] {

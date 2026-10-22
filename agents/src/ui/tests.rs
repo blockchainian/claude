@@ -1208,7 +1208,10 @@ fn fixture() -> View {
         ],
         false,
     );
-    view.set_pinned(&[session_key("42"), session_key("44")]);
+    view.set_pinned(&crate::state::TaskPins {
+        active: vec![session_key("42"), session_key("44")],
+        inactive: vec![],
+    });
     let selected = view
         .rows
         .iter()
@@ -1549,6 +1552,45 @@ fn needs_input_queue_continues_after_sending_and_returns_to_original_tab() {
     assert_eq!(view.status_filter, tab_for_status(original.status));
     assert!(view.attention_selection.is_none());
     assert!(view.interrupted_selection.is_none());
+}
+
+#[test]
+fn needs_input_task_left_waiting_stays_behind_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut view = test_view(Grouping::Project, false);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let mut first = session("first", "First", SessionStatus::Working, 120);
+    let mut second = session("second", "Second", SessionStatus::Working, 60);
+    let select = |view: &mut View, id: &SessionKey| {
+        view.select(view.rows.iter().position(|row| &row.id == id).unwrap());
+    };
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    select(&mut view, &original.id);
+    first.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&first.id));
+    select(&mut view, &original.id);
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+
+    let mut preferences = crate::state::Preferences::default();
+    let mut actions = vec![view.take_pending_action().unwrap()];
+    while let Some(action) = actions.pop() {
+        match action {
+            Action::Batch(batch) => actions.extend(batch),
+            Action::PersistSkip { id, skipped_at } => preferences
+                .save_task_skipped_at(dir.path(), &id, skipped_at)
+                .unwrap(),
+            _ => {}
+        }
+    }
+    let mut restarted = test_view(Grouping::Project, false);
+    restarted.restore_attention_skips(&crate::state::Preferences::load(dir.path()));
+    restarted.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(restarted.selected_id(), Some(&original.id));
+    second.status = SessionStatus::NeedsInput;
+    second.updated_at = Utc::now() + Duration::seconds(1);
+    restarted.set_sessions(vec![original, first, second.clone()], false);
+    assert_eq!(restarted.selected_id(), Some(&second.id));
 }
 
 #[test]
@@ -2101,7 +2143,10 @@ fn group_headers_have_no_count() {
                     false,
                 );
                 if pinned {
-                    view.set_pinned(&[session_key("ready"), session_key("working")]);
+                    view.set_pinned(&crate::state::TaskPins {
+                        active: vec![session_key("ready"), session_key("working")],
+                        inactive: vec![],
+                    });
                 }
                 view.status_filter = filter;
                 let area = Rect::new(0, 0, 80, 12);
@@ -2276,6 +2321,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(
         key(&mut view, KeyCode::Char('p')),
         Some(Action::TogglePin {
+            tab: 0,
             id: session_key("42"),
             pinned: false
         })
@@ -3433,7 +3479,7 @@ fn task_details_activity_uses_tool_color() {
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Run checks".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 1)];
+        let cell = &buf[(25 + offset as u16, y + 1)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, crate::theme::text_accent_color());
         assert!(!cell.modifier.contains(Modifier::DIM));
@@ -3476,7 +3522,7 @@ fn task_details_message_uses_model_color_under_markdown() {
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Plain code bold italic".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 1)];
+        let cell = &buf[(19 + offset as u16, y + 1)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(
             cell.fg,
@@ -3495,7 +3541,7 @@ fn task_details_message_uses_model_color_under_markdown() {
         }
     }
     for (offset, character) in "Second paragraph".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 3)];
+        let cell = &buf[(19 + offset as u16, y + 3)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, Color::Yellow);
     }
@@ -4088,20 +4134,20 @@ fn task_details_queued_messages_render_all_paragraphs_and_message_style() {
     assert_eq!(
         &rows[1..11],
         &[
-            "Current prompt",
+            "             Current prompt",
             "",
-            "First queued line",
-            "Second queued line",
+            " First queued line",
+            " Second queued line",
             "",
-            "Another paragraph with words that wrap",
-            "across the panel width",
+            " Another paragraph with words that wrap",
+            " across the panel width",
             "",
-            "Next queued message",
+            "          Next queued message",
             "",
         ]
     );
     for y in [3, 4, 6, 7, 9] {
-        for x in 0..rows[y].len() {
+        for x in rows[y].len() - rows[y].trim_start().len()..rows[y].len() {
             assert_eq!(
                 buf[(x as u16, y as u16)]
                     .modifier
@@ -4114,7 +4160,7 @@ fn task_details_queued_messages_render_all_paragraphs_and_message_style() {
         }
     }
     assert!(
-        !buf[(0, 1)]
+        !buf[(13, 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
@@ -4494,21 +4540,21 @@ fn task_details_markdown_snapshot() {
         .position(|line| line.trim() == "Update")
         .unwrap() as u16;
     assert_eq!(
-        buffer[(4, prompt_y + 1)].fg,
+        buffer[(14, prompt_y + 1)].fg,
         crate::theme::inline_code_color()
     );
     assert!(
-        buffer[(14, prompt_y + 1)]
+        buffer[(24, prompt_y + 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, prompt_y + 3)]
+        buffer[(14, prompt_y + 3)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, update_y + 3)].fg, Color::Yellow);
-    assert_eq!(buffer[(0, update_y + 5)].fg, Color::Cyan);
+    assert_eq!(buffer[(19, update_y + 3)].fg, Color::Yellow);
+    assert_eq!(buffer[(13, update_y + 5)].fg, Color::Cyan);
 }
 
 #[test]
@@ -6443,7 +6489,11 @@ mod event_search {
                 .contains("enter keep")
         );
         for c in "time out".chars() {
-            key(&mut view, KeyCode::Char(c));
+            if c == ' ' {
+                view.handle_paste(" ");
+            } else {
+                key(&mut view, KeyCode::Char(c));
+            }
         }
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain timeout bold"));
@@ -6505,9 +6555,7 @@ mod event_search {
             ("user café", vec![3]),
         ] {
             open(&mut view);
-            for c in query.chars() {
-                key(&mut view, KeyCode::Char(c));
-            }
+            view.handle_paste(query);
             let matches: Vec<_> = (0..view.event_panel.len())
                 .filter(|&i| view.event_matches(i))
                 .collect();
@@ -7176,7 +7224,10 @@ mod subagent_rows {
         for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
             view.grouping = grouping;
             for pins in [vec![], vec![session_key("parent")]] {
-                view.set_pinned(&pins);
+                view.set_pinned(&crate::state::TaskPins {
+                    active: pins.clone(),
+                    inactive: vec![],
+                });
                 let expected = vec!["parent", "agent-newer", "agent-older"];
                 assert_eq!(ids(&view), expected);
                 let entries = view.center_rows(&view.visible_indices(), grouping);
@@ -7212,7 +7263,10 @@ mod subagent_rows {
             assert_eq!(ids(&view), expected);
         }
         view.grouping = Grouping::Project;
-        view.set_pinned(&[session_key("parent")]);
+        view.set_pinned(&crate::state::TaskPins {
+            active: vec![session_key("parent")],
+            inactive: vec![],
+        });
         assert_eq!(
             ids(&view),
             ["parent", "agent-newer", "agent-older", "other"]
@@ -7231,20 +7285,26 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         for grouping in [Grouping::Project, Grouping::Model] {
             view.grouping = grouping;
-            view.set_pinned(&[]);
+            view.set_pinned(&crate::state::TaskPins {
+                active: vec![],
+                inactive: vec![],
+            });
             set_filter(&mut view, 0);
             assert_eq!(
                 ids(&view),
                 ["other", "parent", "agent-newer", "agent-older"]
             );
-            view.set_pinned(&[session_key("parent")]);
+            view.set_pinned(&crate::state::TaskPins {
+                active: vec![session_key("parent")],
+                inactive: vec![],
+            });
             assert_eq!(
                 ids(&view),
                 ["parent", "agent-newer", "agent-older", "other"]
             );
             set_filter(&mut view, 1);
             assert_eq!(ids(&view), ["parent"]);
-            assert!(screen(&view, 120, 30).contains("Pinned"));
+            assert!(!screen(&view, 120, 30).contains("Pinned"));
         }
         view.hide(&session_key("agent-older"));
         assert_eq!(ids(&view), ["parent"]);
@@ -7370,7 +7430,7 @@ mod subagent_actions {
         assert!(view.rename.text().is_empty());
         assert!(view.confirm_dialog.is_none());
         assert!(view.hidden.is_empty());
-        assert!(view.pinned.is_empty());
+        assert!(view.pinned.active.is_empty());
         assert!(!view.searching);
         assert!(!view.help);
         assert_eq!(subagent_rows::screen(view, 120, 30), before);
@@ -7415,7 +7475,18 @@ mod subagent_actions {
     unsupported_key!(delete, KeyCode::Backspace, KeyModifiers::NONE, "Delete");
     unsupported_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE, "Archive");
     unsupported_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE, "Hide");
-    unsupported_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE, "Pin");
+    #[test]
+    fn pin() {
+        let mut view = fixture();
+        assert_eq!(
+            key(&mut view, KeyCode::Char('p')),
+            Some(Action::TogglePin {
+                tab: 0,
+                id: session_key("agent-older"),
+                pinned: true,
+            })
+        );
+    }
 
     #[test]
     fn open_keys_leave_disabled_subagent_on_list() {
@@ -7597,7 +7668,7 @@ fn ask_user_question_details_snapshot() {
             "Needs input\n{}",
             row.pending_questions
                 .iter()
-                .map(|question| question.replace('`', ""))
+                .map(|question| format!("                {}", question.replace('`', "")))
                 .collect::<Vec<_>>()
                 .join("\n")
         )),
@@ -7611,7 +7682,7 @@ fn ask_user_question_details_snapshot() {
     row.pending_questions.clear();
     view.set_sessions(vec![row.clone()], false);
     let answered = render(&view);
-    assert!(answered.contains("Needs input\nOpen task to review.\nWaiting for your response."));
+    assert!(answered.contains("Needs input\n                                                                   Open task to review.\n                                                                   Waiting for your response."));
     assert_eq!(
         answered,
         include_str!("../../tests/ui_snapshots/task_details_questions_answered.txt")
@@ -7647,7 +7718,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
             .collect::<String>();
         if text.trim_start().starts_with("Pick a color?") {
             questions += 1;
-            assert_eq!(cells[0].fg, Color::Yellow);
+            assert_eq!(cells[43].fg, Color::Yellow);
         }
         if text.starts_with("Needs input") {
             assert_eq!(cells[0].fg, Color::LightRed);
@@ -9713,17 +9784,17 @@ mod task_details_group_tests;
 mod task_details_order;
 
 #[test]
-fn task_details_activity_double_click_selects_source() {
+fn task_details_activity_click_selects_source() {
     task_details_click_selects_source(7, "Copied last activity");
 }
 
 #[test]
-fn task_details_update_double_click_selects_source() {
+fn task_details_update_click_selects_source() {
     task_details_click_selects_source(6, "Copied update");
 }
 
 #[test]
-fn task_details_prompt_double_click_selects_source() {
+fn task_details_prompt_click_selects_source() {
     task_details_click_selects_source(0, "Copied prompt");
 }
 
@@ -9764,16 +9835,9 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
         .start;
     let x = view.viewport.borrow().task_details.x;
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    let previous = view.event_panel[1].clone();
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + view.double_click_interval),
-        None
-    );
-    assert_eq!(view.visible_event(), Some(&previous), "{label}\n{rendered}");
-    assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(view.visible_event(), Some(&expected), "{label}\n{rendered}");
+    assert!(view.pending_click.is_none());
     event_screen(&view, 160, 45, now);
     assert!(
         view.viewport
@@ -9784,7 +9848,6 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
     assert_eq!(view.visible_event() == view.event_panel.last(), index == 7);
     view.set_event(Vec::new());
     event_screen(&view, 160, 45, now);
-    assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(view.event_list.cursor.is_none());
 }
@@ -11305,3 +11368,6 @@ mod active_panel_tests;
 
 #[path = "task_tree_collapse_tests.rs"]
 mod task_tree_collapse_tests;
+
+#[path = "transcript_tests.rs"]
+mod transcript_tests;

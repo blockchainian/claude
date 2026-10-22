@@ -7,7 +7,65 @@ use ratatui::{
 };
 
 pub(super) struct Json;
-struct JsonDocument(serde_json::Value);
+struct JsonDocument(Value);
+
+/// Object entries retain source order, including repeated keys.
+enum Value {
+    Object(Vec<(String, Value)>),
+    Array(Vec<Value>),
+    Scalar(serde_json::Value),
+}
+
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Value;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Value, M::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry()? {
+                    entries.push(entry);
+                }
+                Ok(Value::Object(entries))
+            }
+            fn visit_seq<S: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: S,
+            ) -> Result<Value, S::Error> {
+                let mut values = Vec::new();
+                while let Some(value) = seq.next_element()? {
+                    values.push(value);
+                }
+                Ok(Value::Array(values))
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Value, E> {
+                Ok(Value::Scalar(value.into()))
+            }
+            fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Value, E> {
+                Ok(Value::Scalar(value.into()))
+            }
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Value, E> {
+                Ok(Value::Scalar(value.into()))
+            }
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Value, E> {
+                Ok(Value::Scalar(value.into()))
+            }
+            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Value, E> {
+                Ok(Value::Scalar(value.into()))
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
+                Ok(Value::Scalar(serde_json::Value::Null))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
 
 impl Format for Json {
     fn candidate(&self, source: &str, start: usize) -> Option<usize> {
@@ -15,8 +73,8 @@ impl Format for Json {
     }
 
     fn parse(&self, source: &str) -> Option<Box<dyn Document>> {
-        let value: serde_json::Value = serde_json::from_str(source).ok()?;
-        (value.is_object() || value.is_array())
+        let value: Value = serde_json::from_str(source).ok()?;
+        matches!(value, Value::Object(_) | Value::Array(_))
             .then(|| Box::new(JsonDocument(value)) as Box<dyn Document>)
     }
 }
@@ -33,11 +91,45 @@ impl Document for JsonDocument {
         "json"
     }
     fn is_empty(&self) -> bool {
-        self.0.as_object().is_some_and(|value| value.is_empty())
-            || self.0.as_array().is_some_and(|value| value.is_empty())
+        match &self.0 {
+            Value::Object(entries) => entries.is_empty(),
+            Value::Array(values) => values.is_empty(),
+            Value::Scalar(_) => false,
+        }
     }
     fn highlighted(&self) -> Vec<Line<'static>> {
-        json_lines(&self.0)
+        value_lines(&self.0)
+    }
+    fn lines(&self, width: usize) -> Vec<Line<'static>> {
+        use unicode_width::UnicodeWidthStr;
+        if width == 0 {
+            return Vec::new();
+        }
+        let mut lines = Vec::new();
+        for line in self.highlighted() {
+            let mut row = Line::default();
+            let mut used = 0;
+            for grapheme in line.styled_graphemes(Style::default()) {
+                let cells = grapheme.symbol.width();
+                if used > 0 && used + cells > width {
+                    lines.push(std::mem::take(&mut row));
+                    used = 0;
+                }
+                if let Some(span) = row
+                    .spans
+                    .last_mut()
+                    .filter(|span| span.style == grapheme.style)
+                {
+                    span.content.to_mut().push_str(grapheme.symbol);
+                } else {
+                    row.spans
+                        .push(Span::styled(grapheme.symbol.to_owned(), grapheme.style));
+                }
+                used += cells;
+            }
+            lines.push(row);
+        }
+        lines
     }
 }
 
@@ -106,7 +198,14 @@ fn candidate_end(source: &str, start: usize) -> usize {
 }
 
 /// Pretty JSON with string line breaks aligned to the opening content column.
+#[cfg(test)]
 pub(in super::super) fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
+    Json.parse(&value.to_string())
+        .expect("JSON document")
+        .highlighted()
+}
+
+fn value_lines(value: &Value) -> Vec<Line<'static>> {
     use highlight::JsonToken;
 
     struct Printer {
@@ -198,8 +297,7 @@ pub(in super::super) fn json_lines(value: &serde_json::Value) -> Vec<Line<'stati
             self.push("\"", JsonToken::StringQuote);
         }
 
-        fn value(&mut self, value: &serde_json::Value, indent: usize) {
-            use serde_json::Value;
+        fn value(&mut self, value: &Value, indent: usize) {
             match value {
                 Value::Object(values) => {
                     self.push("{", JsonToken::Punctuation);
@@ -231,14 +329,18 @@ pub(in super::super) fn json_lines(value: &serde_json::Value) -> Vec<Line<'stati
                     }
                     self.push("]", JsonToken::Punctuation);
                 }
-                Value::String(text)
+                Value::Scalar(serde_json::Value::String(text))
                     if text.contains('\n') && super::super::markdown::has_markers(text) =>
                 {
                     self.markdown(text, indent)
                 }
-                Value::String(text) => self.string(text, JsonToken::String, true, indent),
-                Value::Number(number) => self.push(number.to_string(), JsonToken::Number),
-                Value::Bool(_) | Value::Null => self.push(value.to_string(), JsonToken::Literal),
+                Value::Scalar(serde_json::Value::String(text)) => {
+                    self.string(text, JsonToken::String, true, indent)
+                }
+                Value::Scalar(serde_json::Value::Number(number)) => {
+                    self.push(number.to_string(), JsonToken::Number)
+                }
+                Value::Scalar(value) => self.push(value.to_string(), JsonToken::Literal),
             }
         }
     }

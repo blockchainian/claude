@@ -36,6 +36,11 @@ impl View {
         }
     }
 
+    pub(super) fn has_parked_focus(&self, task: Option<&super::draft_controls::TaskKey>) -> bool {
+        task.and_then(|key| self.task_uis.get(key))
+            .is_some_and(|ui| ui.focus.is_some())
+    }
+
     /// Enters a task selected by list browsing without replacing its parked focus.
     pub(super) fn enter_task(&mut self) -> bool {
         if !self.task_entry_pending || self.help || self.confirm_dialog.is_some() {

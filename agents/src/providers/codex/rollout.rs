@@ -2845,16 +2845,16 @@ mod tests {
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
-        let expected = rows[1..]
-            .iter()
-            .map(|row| serde_json::to_string_pretty(row).unwrap())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        assert_eq!(update.events.last().unwrap().raw_text().unwrap(), expected);
+        let raw = update.events.last().unwrap().raw_text().unwrap();
+        let actual = serde_json::Deserializer::from_str(&raw)
+            .into_iter::<serde_json::Value>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(actual, rows[1..]);
         assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
         assert_eq!(
-            update.events[0].raw_text().unwrap(),
-            serde_json::to_string_pretty(&rows[0]).unwrap()
+            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap()).unwrap(),
+            rows[0]
         );
     }
 

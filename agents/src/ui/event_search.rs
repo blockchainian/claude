@@ -166,6 +166,7 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
         }
+        self.refresh_transcript();
     }
 
     pub(crate) fn matching_event_count(&self) -> usize {

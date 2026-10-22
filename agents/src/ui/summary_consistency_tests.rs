@@ -101,9 +101,19 @@ fn assert_summary_surface(event: &crate::event::Event, width: u16, child: bool) 
                 rendered.join("\n")
             )
         });
+    let indent = if child {
+        0
+    } else {
+        (usize::from(width) - line.width()) / 2
+    };
     for x in 0..line.width().min(usize::from(width)) {
-        let got = &actual[(x as u16, y as u16)];
+        let got = &actual[((indent + x) as u16, y as u16)];
         let want = &expected[(x as u16, 0)];
+        assert_eq!(
+            cell_text(got.symbol()),
+            cell_text(want.symbol()),
+            "child={child}, width={width}, column={x}"
+        );
         assert_eq!(
             got.style(),
             want.style(),
@@ -141,7 +151,7 @@ fn assert_summary_surface(event: &crate::event::Event, width: u16, child: bool) 
             .trim_end()
     );
     let mut previous = None;
-    for x in 0..line.width().min(usize::from(width)) {
+    for x in 0..indent + line.width().min(usize::from(width)) {
         if x > 0 && actual[((x - 1) as u16, y as u16)].symbol().width() > 1 {
             continue;
         }

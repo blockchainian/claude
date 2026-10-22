@@ -994,3 +994,151 @@ fn event_detail_task_switch_discards_scroll_without_the_selected_identity() {
         assert_eq!(view.event_detail.search.query.text(), "detail");
     }
 }
+
+fn output_file_event(path: &Path) -> crate::event::Event {
+    let mut record: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-task-notifications.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    record["content"] = record["content"]
+        .as_str()
+        .unwrap()
+        .replace(
+            "/tmp/agents-notification/tasks/b9wi31ww0.output",
+            path.to_str().unwrap(),
+        )
+        .into();
+    let transcript = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(transcript.path(), format!("{record}\n")).unwrap();
+    crate::providers::claude::event_reader::tail(transcript.path(), 1)
+        .unwrap()
+        .remove(0)
+}
+
+fn append_output(path: &Path, start: usize, end: usize) {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    for row in start..end {
+        writeln!(file, "output row {row:03}").unwrap();
+    }
+}
+
+#[test]
+fn output_file_append_follows_bottom_and_preserves_scrolled_position() {
+    for width in [100, 200] {
+        for scrolled_up in [false, true] {
+            let output = tempfile::NamedTempFile::new().unwrap();
+            append_output(output.path(), 0, 60);
+            let (mut view, _) = fixture(false);
+            view.set_event(vec![output_file_event(output.path())]);
+            view.select_event(Some(0));
+            screen_rows(&view, width, 30);
+            view.event_detail.scroll.borrow_mut().offset = usize::MAX;
+            screen_rows(&view, width, 30);
+            if scrolled_up {
+                event_detail_wheel(&mut view, false);
+                screen_rows(&view, width, 30);
+            }
+            let before = view.event_detail.scroll.borrow().offset;
+            assert!(before > 0);
+            append_output(output.path(), 60, 90);
+            view.refresh_event_output();
+            let rendered = screen_rows(&view, width, 30).join("\n");
+            let after = view.event_detail.scroll.borrow().offset;
+            if scrolled_up {
+                assert_eq!(after, before, "{width}");
+                assert!(!rendered.contains("output row 089"));
+            } else {
+                assert!(after > before, "{width}: {before} -> {after}");
+                assert_eq!(after, view.viewport.borrow().event_detail_max);
+                assert!(rendered.contains("output row 089"), "{rendered}");
+            }
+        }
+    }
+}
+
+#[test]
+fn empty_output_file_follows_first_content() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 0);
+    append_output(output.path(), 0, 80);
+    view.refresh_event_output();
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert!(rendered.contains("output row 079"), "{rendered}");
+    assert_eq!(
+        view.event_detail.scroll.borrow().offset,
+        view.viewport.borrow().event_detail_max
+    );
+}
+
+#[test]
+fn output_file_notifications_before_one_draw_keep_following_the_bottom() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    append_output(output.path(), 0, 40);
+    view.refresh_event_output();
+    append_output(output.path(), 40, 80);
+    view.refresh_event_output();
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert!(rendered.contains("output row 079"), "{rendered}");
+}
+
+#[test]
+fn output_file_append_follows_fully_revealed_sections() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    append_output(output.path(), 0, 60);
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    for _ in 0..100 {
+        let bottom = {
+            let detail = view.event_detail.scroll.borrow();
+            detail.state.reveal == detail.state.hidden
+        };
+        if bottom {
+            break;
+        }
+        event_detail_wheel(&mut view, true);
+        screen_rows(&view, 120, 30);
+    }
+    {
+        let detail = view.event_detail.scroll.borrow();
+        assert_eq!(detail.state.fallback_max, None);
+        assert_eq!(detail.state.reveal, detail.state.hidden);
+    }
+    append_output(output.path(), 60, 90);
+    view.refresh_event_output();
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert!(rendered.contains("output row 089"), "{rendered}");
+}
+
+#[test]
+fn empty_output_file_keeps_following_across_separate_appends() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 200, 50);
+    for (start, end) in [(0, 80), (80, 90), (90, 100)] {
+        append_output(output.path(), start, end);
+        view.set_event(view.event_panel.clone());
+        view.refresh_event_output();
+        let rendered = screen_rows(&view, 200, 50).join("\n");
+        assert!(
+            rendered.contains(&format!("output row {:03}", end - 1)),
+            "{rendered}"
+        );
+        screen_rows(&view, 200, 50);
+    }
+}

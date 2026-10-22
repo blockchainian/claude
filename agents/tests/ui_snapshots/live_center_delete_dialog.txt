@@ -1,7 +1,7 @@
   Active 0                                                                  Inactive 1
 ────────────────────────────────────────────┬──────────────── Inactive ─────────────────
                 /tmp/project                │                  Prompt
- ○ Unloaded task                Inactive    │ Unloaded task
+ ○ Unloaded task                Inactive    │               Unloaded task
     ┌──────────────────────────────────────────────────────────────────────────────┐
     │ Permanently delete “Unloaded task”?                                          │
     │ This stops any running work in this task and its child agents, then          │

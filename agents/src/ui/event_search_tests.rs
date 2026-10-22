@@ -267,6 +267,7 @@ fn duration_keys_include_messages_none_ties_and_running_update_time() {
     events[2].kind = crate::event::Kind::User;
     events[2].previous_end = Some(events[2].started_at - chrono::Duration::seconds(3));
     events[3].kind = crate::event::Kind::Assistant;
+    events[3].completed_time = false;
     events[3].previous_end = Some(events[3].started_at - chrono::Duration::seconds(2));
     // Claude spans use previous_end even without Event.duration.
     events[4].completed_time = false;

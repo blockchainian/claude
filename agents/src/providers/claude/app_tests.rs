@@ -927,12 +927,22 @@ fn subagent_delete_is_ignored() {
 }
 
 #[test]
-fn subagent_pin_is_ignored() {
-    for pinned in [false, true] {
-        assert_subagent_action_blocked(|id| Action::TogglePin {
-            id: id.clone(),
+fn subagent_pin_persists_and_unpins() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (dir, mut app, child) = subagent_fixture();
+    for pinned in [true, false] {
+        assert!(!app.handle_action(Some(Action::TogglePin {
+            tab: 0,
+            id: child.id.clone(),
             pinned,
-        });
+        })));
+        let expected = if pinned {
+            vec![child.id.clone()]
+        } else {
+            vec![]
+        };
+        assert_eq!(app.preferences.pinned.active, expected);
+        assert_eq!(Preferences::load(dir.path()).pinned.active, expected);
     }
 }
 
@@ -1050,14 +1060,10 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
             for action in [
                 Action::Fork(child.id.clone()),
                 Action::Delete(child.id.clone()),
-                Action::TogglePin {
-                    id: child.id.clone(),
-                    pinned: true,
-                },
             ] {
                 assert!(!app.handle_action(Some(action)));
                 assert!(app.launch.is_none());
-                assert!(app.preferences.pinned.is_empty());
+                assert!(app.preferences.pinned.active.is_empty());
             }
         }
         let mut claude_child = app.sessions[0].clone();
@@ -1122,14 +1128,10 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
                 Action::Delete(child.id.clone()),
                 Action::Archive(child.id.clone()),
                 Action::Stop(child.id.clone()),
-                Action::TogglePin {
-                    id: child.id.clone(),
-                    pinned: true,
-                },
             ] {
                 assert!(!app.handle_action(Some(action)));
                 assert!(app.launch.is_none());
-                assert!(app.preferences.pinned.is_empty());
+                assert!(app.preferences.pinned.active.is_empty());
             }
         }
     }

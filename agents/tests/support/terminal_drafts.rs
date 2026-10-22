@@ -161,7 +161,7 @@ sys.exit(1)
         &transcript_at(&source),
         |directory| {
             std::fs::write(directory.join("claude/agents.json"), serde_json::to_vec(
-                &serde_json::json!({"config":{"worktree_root": root.path().join("trees"), "grouping":"project"}, "state":{"pinned":[]}})
+                &serde_json::json!({"config":{"worktree_root": root.path().join("trees"), "grouping":"project"}, "state":{"pinned":{"active":[],"inactive":[]}}})
             ).unwrap()).unwrap();
         },
     );
@@ -763,7 +763,7 @@ fn terminal_draft_wizard_focus_order_and_clicks() {
                 &transcript_at(&source),
                 |directory| {
                     std::fs::write(directory.join("claude/agents.json"), serde_json::to_vec(
-                        &serde_json::json!({"config":{"worktree_root":root.path().join("trees"),"grouping":"project"},"state":{"pinned":[]}})
+                        &serde_json::json!({"config":{"worktree_root":root.path().join("trees"),"grouping":"project"},"state":{"pinned":{"active":[],"inactive":[]}}})
                     ).unwrap()).unwrap();
                 },
             );

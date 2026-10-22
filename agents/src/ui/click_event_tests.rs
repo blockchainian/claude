@@ -419,10 +419,9 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
     let screen = event_screen(view, 160, 40, now);
     let (x, y) = rendered_cell(&screen, "Real background");
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
-    assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert!(
         view.event_list.cursor.is_some(),
-        "Background double click must open its full log"
+        "Background click must open its full log"
     );
     assert!(
         super::super::event_list::open_text(view.visible_event().unwrap()).contains("globalState")
@@ -431,7 +430,7 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
 }
 
 #[test]
-fn background_double_click_returns_to_previous_list() {
+fn background_click_returns_to_previous_list() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
@@ -439,7 +438,7 @@ fn background_double_click_returns_to_previous_list() {
 }
 
 #[test]
-fn background_double_click_restores_previous_detail_and_scroll() {
+fn background_click_restores_previous_detail_and_scroll() {
     let (mut view, now, _output) = with_background();
     let previous = view
         .event_panel

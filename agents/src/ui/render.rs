@@ -559,6 +559,7 @@ impl View {
                 ),
                 buf,
             );
+            self.render_event_filter(self.viewport.borrow().event_borders[1], buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
@@ -712,12 +713,19 @@ impl View {
         let cache_remaining = session
             .and_then(|session| session.cache_expires_at)
             .map(|expires| expires - now);
+        // A Claude subagent's five-minute cache counts down only in its last minute.
+        let countdown_window = if session.is_some_and(|session| {
+            session.id.provider == ProviderId::Claude && session.parent.is_some()
+        }) {
+            chrono::Duration::seconds(59)
+        } else {
+            chrono::Duration::minutes(15)
+        };
         let elapsed = elapsed.map(|elapsed| {
             let mut spans = Vec::new();
             if let Some(seconds) = cache_remaining
                 .filter(|remaining| {
-                    *remaining >= chrono::Duration::seconds(1)
-                        && *remaining <= chrono::Duration::minutes(15)
+                    *remaining >= chrono::Duration::seconds(1) && *remaining <= countdown_window
                 })
                 .map(|remaining| remaining.num_seconds())
             {
@@ -764,12 +772,7 @@ impl View {
             };
             truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width)
         };
-        let mut header = truncate_line_to_width(status, width);
-        header.spans.insert(0, " ".into());
-        header.spans.push(" ".into());
-        let label_width = header.width() as u16;
-        let x = rule.x + rule.width.saturating_sub(label_width) / 2;
-        let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
+        let (header, label) = centered_rule_label(truncate_line_to_width(status, width), rule);
         Clear.render(label, buf);
         line(header, label, buf);
     }
@@ -917,6 +920,30 @@ impl View {
         }
         super::links::underline(buf, &links);
         viewport.task_details_links.extend(links);
+    }
+
+    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) {
+        let title = match self.event_list.filter {
+            crate::event::EventFilter::All => return,
+            crate::event::EventFilter::Message => "Assistant",
+            crate::event::EventFilter::Tool => "Tool",
+        };
+        let width = title.width() as u16;
+        if rule.is_empty() || rule.width < width + 4 {
+            return;
+        }
+        let (header, label) = centered_rule_label(Line::from(title), rule);
+        let viewport = self.viewport.borrow();
+        if label.intersects(viewport.event_label)
+            || viewport
+                .field_targets
+                .iter()
+                .any(|(target, _)| label.intersects(*target))
+        {
+            return;
+        }
+        Clear.render(label, buf);
+        line(header, label, buf);
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
@@ -1310,6 +1337,12 @@ impl View {
             .collect::<Vec<_>>()
             .join("\n");
         if !tasks.is_empty() {
+            // The tasks section sits on the panel's bottom row when everything fits.
+            let above = items.iter().map(Item::height).sum::<usize>();
+            let section = usize::from(!items.is_empty()) + 1 + tasks.len();
+            let gap = usize::from(area.height).saturating_sub(above + section);
+            items.extend((0..gap).map(|_| Item::Decoration(Line::default())));
+            item_links.resize(items.len(), Vec::new());
             separate_section(&mut items);
             let in_progress = tasks
                 .iter()
@@ -1384,7 +1417,7 @@ impl View {
         };
         let available = usize::from(area.height);
         let budget = budget_task_details(&items, &bodies, background, available);
-        let (scroll, body_rows, total) = {
+        let (scroll, body_rows, total, indents) = {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.task_details_scroll;
             state.content_top = content_top;
@@ -1424,6 +1457,24 @@ impl View {
                 }
                 item_links[cut].retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
             }
+            // Each body's rows share one left edge, centered as a block in the panel.
+            let mut indents = vec![0; items.len()];
+            for body in &bodies {
+                let block = items[body.clone()]
+                    .iter()
+                    .map(|item| match item {
+                        Item::Text(text) => text.width(),
+                        _ => 0,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                let indent = (width.saturating_sub(block) / 2) as u16;
+                for index in body.clone() {
+                    if matches!(items[index], Item::Text(_)) {
+                        indents[index] = indent;
+                    }
+                }
+            }
             let mut keep = vec![false; items.len()];
             for &index in &layout.kept {
                 keep[index] = true;
@@ -1436,7 +1487,9 @@ impl View {
             text_rows.retain(|_| *rows.next().unwrap());
             let mut rows = keep.iter();
             item_links.retain(|_| *rows.next().unwrap());
-            (layout.scroll, state.bodies.clone(), layout.total)
+            let mut rows = keep.iter();
+            indents.retain(|_| *rows.next().unwrap());
+            (layout.scroll, state.bodies.clone(), layout.total, indents)
         };
         self.viewport.borrow_mut().task_details_copy = body_rows
             .into_iter()
@@ -1453,16 +1506,18 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for (((item, mapped), links), id) in items
+        for ((((item, mapped), links), id), indent) in items
             .into_iter()
             .zip(text_rows)
             .zip(item_links)
             .zip(item_ids)
+            .zip(indents)
         {
             let fallback = mapped.is_none() && !matches!(item, Item::Decoration(_));
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if let Some(mut mapped) = mapped {
+                    mapped.x += indent;
                     mapped.y = y;
                     self.viewport
                         .borrow_mut()
@@ -1472,7 +1527,12 @@ impl View {
                 }
                 drawn_links.extend(links.into_iter().map(|(columns, target)| {
                     (
-                        Rect::new(area.x + columns.start, y, columns.end - columns.start, 1),
+                        Rect::new(
+                            area.x + indent + columns.start,
+                            y,
+                            columns.end - columns.start,
+                            1,
+                        ),
                         target,
                     )
                 }));
@@ -1481,7 +1541,10 @@ impl View {
             let item_area = row(content_area, offset as u16, height as u16);
             let title_columns = match item {
                 Item::Text(text) | Item::Decoration(text) => {
-                    line(text, item_area, &mut content);
+                    let mut text_area = item_area;
+                    text_area.x += indent;
+                    text_area.width = text_area.width.saturating_sub(indent);
+                    line(text, text_area, &mut content);
                     None
                 }
                 Item::Background { task, output } => {
@@ -1773,6 +1836,16 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
             }
         }
     }
+}
+
+fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
+    let mut header = title.bold();
+    header.spans.insert(0, " ".into());
+    header.spans.push(" ".into());
+    let width = header.width() as u16;
+    let x = rule.x + rule.width.saturating_sub(width) / 2;
+    let label = Rect::new(x, rule.y, width.min(rule.width), 1).intersection(rule);
+    (header, label)
 }
 
 /// Draws a dim rule across `area`'s first row.

@@ -485,27 +485,9 @@ fn mouse_activation_every_event_routes_subsequent_paging() {
                 } else {
                     Panel::TaskList
                 });
-                let selected = view.selected_id().cloned();
                 view.handle_mouse(mouse(kind, area.x, area.y + (area.height - 1).min(1)));
-                let expected = if panel == Panel::TaskList
-                    && matches!(
-                        kind,
-                        MouseEventKind::ScrollUp
-                            | MouseEventKind::ScrollDown
-                            | MouseEventKind::ScrollLeft
-                            | MouseEventKind::ScrollRight
-                            | MouseEventKind::Down(MouseButton::Left)
-                    ) {
-                    if view.selected_id() == selected.as_ref() {
-                        Panel::EventDetail
-                    } else {
-                        Panel::Prompt
-                    }
-                } else {
-                    panel
-                };
-                assert_eq!(view.active_panel, expected, "width={width} kind={kind:?}");
-                assert_mouse_panel_paging(&mut view, expected);
+                assert_eq!(view.active_panel, panel, "width={width} kind={kind:?}");
+                assert_mouse_panel_paging(&mut view, panel);
             }
         }
     }
@@ -534,14 +516,7 @@ fn mouse_activation_double_click_and_drag_keep_the_pressed_panel() {
                     area.x,
                     area.y + (area.height - 1).min(1),
                 ));
-                assert_eq!(
-                    view.active_panel,
-                    if panel == Panel::TaskList {
-                        Panel::EventDetail
-                    } else {
-                        panel
-                    }
-                );
+                assert_eq!(view.active_panel, panel);
                 if double {
                     view.handle_mouse(mouse(
                         MouseEventKind::Up(MouseButton::Left),
@@ -579,12 +554,7 @@ fn mouse_activation_double_click_and_drag_keep_the_pressed_panel() {
                         other.y + 1,
                     ));
                 }
-                let expected = if panel == Panel::TaskList && double {
-                    Panel::EventDetail
-                } else {
-                    panel
-                };
-                assert_mouse_panel_paging(&mut view, expected);
+                assert_mouse_panel_paging(&mut view, panel);
             }
         }
     }
