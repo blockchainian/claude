@@ -1,6 +1,6 @@
   Active 0                                                                  Inactive 1
 ────────────────────────────────────────────┬──────────────── Inactive ─────────────────
-                /tmp/project                │                  Prompt
+                  project                   │                  Prompt
  ○ Unloaded task                Inactive    │               Unloaded task
     ┌──────────────────────────────────────────────────────────────────────────────┐
     │ Permanently delete “Unloaded task”?                                          │

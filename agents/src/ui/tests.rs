@@ -955,7 +955,8 @@ fn mouse_list_group_and_gap_clicks_do_nothing() {
             line.chars()
                 .take(usize::from(list.right()))
                 .collect::<String>()
-                .contains("/tmp/project")
+                .trim()
+                == "project"
         })
         .unwrap() as u16;
     for row in [y, next_group - 1] {
@@ -2229,7 +2230,7 @@ fn group_headers_have_no_count() {
                         "Pinned".to_owned()
                     } else {
                         match grouping {
-                            Grouping::Project => "/tmp/project".to_owned(),
+                            Grouping::Project => "project".to_owned(),
                             Grouping::Status => view.rows[*index].status.label().to_owned(),
                             Grouping::Model => view.session_model_text(&view.rows[*index]).unwrap(),
                         }
@@ -6403,7 +6404,7 @@ fn task_details_status_uses_the_shared_home_directory_display() {
 }
 
 #[test]
-fn path_abbreviation_in_group_header_preserves_last_component() {
+fn group_header_shows_the_directory_basename() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
     task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
     let mut view = test_view(Grouping::Project, false);
@@ -6421,9 +6422,9 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
                 .trim_end()
                 .to_owned()
         })
-        .find(|row| row.trim_start().starts_with('/'))
+        .find(|row| row.contains("agents-panel"))
         .unwrap();
-    assert_eq!(heading.trim(), "/…/.worktrees/agents-panel");
+    assert_eq!(heading.trim(), "agents-panel");
 }
 
 mod event_path_abbrev {
@@ -8755,7 +8756,7 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
 fn project_group_header_opens_its_directory() {
     let mut view = fixture();
     let rendered = screen(&view, 120, 40);
-    let (x, y) = rendered_cell(&rendered, "/tmp/project  ");
+    let (x, y) = rendered_cell(&rendered, " project  ");
     assert_eq!(
         click_mouse(
             &mut view,

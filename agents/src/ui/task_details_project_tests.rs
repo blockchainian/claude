@@ -220,5 +220,10 @@ fn status_rule_names_a_worktree_task_by_its_repository_and_opens_the_worktree() 
                 .collect::<String>(),
             "repository"
         );
+        let mut task = session("tree", "T", SessionStatus::Ready, 0);
+        task.cwd = cwd.clone();
+        let mut list = test_view(Grouping::Project, false);
+        list.set_sessions(vec![task], false);
+        assert_eq!(list.group_heading(0, 80), "repository");
     }
 }

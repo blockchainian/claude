@@ -1,6 +1,6 @@
   Active 1                                                                                                                                                              Inactive 0
 ─────────────────────────────────────────────┬────────────────── Working ──────────────────┬────────────────────────────────────────────────────────────────────────────────────────
-                /tmp/project                 │                   Prompt                    │                                        WebSearch                             12:49:23
+                   project                   │                   Prompt                    │                                        WebSearch                             12:49:23
  ● Task log example              Working     │              Task log example               │
                                              │                                             │
                                              │                                             │

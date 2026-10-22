@@ -1,6 +1,6 @@
   Active 1                                                                                                  Inactive 0
 ────────────────────────────────────────────────────────────┬──────────────────────── Working ──────────────────────────
-                        /tmp/project                        │                          Prompt
+                          project                           │                          Prompt
  ● Task log example                  Working            now │                     Task log example
                                                             │
                                                             │

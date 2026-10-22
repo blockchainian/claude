@@ -1,6 +1,6 @@
   Active 2                  Inactive 1
 ────────────────────┬──── Inactive ─────
-    /tmp/project    │      Prompt
+      project       │      Prompt
  ○ Unloaded task    │   Unloaded task
                     │
                     │

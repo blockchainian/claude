@@ -1,6 +1,6 @@
   Active 3                                                                                                  Inactive 0
 ────────────────────────────────────────────────────────────┬──────────────────────── Working ──────────────────────────
-                        /tmp/project                        │                          Prompt
+                          project                           │                          Prompt
  ○ Parent task                       Ready           2m ago │                        Check files
  ├─ ○ Review results                 Ready              now │
  └─ ● Check files                    Working         1m ago │

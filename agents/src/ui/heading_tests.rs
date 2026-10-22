@@ -14,9 +14,7 @@ fn headings_center_at_wide_and_narrow_widths() {
             let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 10));
             view.render_center_rows(area, &mut buf, Utc::now());
             let label = match grouping {
-                Grouping::Project => {
-                    line_truncation::abbreviate_path("/tmp/project", usize::from(width), None)
-                }
+                Grouping::Project => "project".to_owned(),
                 Grouping::Model => "Unknown".to_owned(),
                 Grouping::Status => "Ready".to_owned(),
             };
@@ -49,8 +47,10 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
         let area = Rect::new(3, 2, width, 6);
         let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 10));
         view.render_center_rows(area, &mut buf, Utc::now());
-        let label =
-            line_truncation::abbreviate_path("/tmp/project", usize::from(width).min(64), None);
+        let label = formatting::format_directory_display(
+            Path::new("/tmp/project"),
+            Some(usize::from(width)),
+        );
         let start = area.x + (width - label.width() as u16) / 2;
         let end = start + label.width() as u16;
         let links = view.viewport.borrow().list_links.clone();

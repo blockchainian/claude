@@ -1,6 +1,6 @@
   Active 1                                                                                                                                                                                  Inactive 2
 ──────────────────────────────────────────────────┬──────────────────── Working ─────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────
-                   /tmp/project                   │                      Prompt                      │
+                     project                      │                      Prompt                      │
  ● Parent task             Working         2m ago │                   Parent task                    │
  └─ ○ Finished child       Inactive        1m ago │                                                  │
                                                   │                                                  │

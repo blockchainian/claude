@@ -1,6 +1,6 @@
   Active 1                                                                                                                                                              Inactive 0
 ─────────────────────────────────────────────┬────────────────── Working ──────────────────┬────────────────────────────────────────────────────────────────────────────────────────
-                /tmp/project                 │                   Prompt                    │ Done. Rust crate/module names in paths now render as plain body text in bo…  19:19:52
+                   project                   │                   Prompt                    │ Done. Rust crate/module names in paths now render as plain body text in bo…  19:19:52
  ● Task log example              Working     │              Task log example               │
                                              │                                             │
                                              │                                             │

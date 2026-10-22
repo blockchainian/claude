@@ -47,22 +47,16 @@ pub(super) fn heading_rect(text: &str, area: Rect) -> Rect {
 
 impl View {
     pub(super) fn group_heading(&self, index: usize, width: u16) -> String {
-        let group = if self.in_pinned_group(index) {
+        if self.in_pinned_group(index) {
             "Pinned".to_owned()
         } else {
             match self.grouping {
-                Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
-                    .directory()
-                    .map_or_else(
-                        || format_directory_display(Path::new(""), None),
-                        |path| {
-                            super::line_truncation::abbreviate_path(
-                                &path.to_string_lossy(),
-                                usize::MAX,
-                                None,
-                            )
-                        },
-                    ),
+                Grouping::Project => format_directory_display(
+                    self.project_groups[self.group_index(index).unwrap()]
+                        .directory()
+                        .unwrap_or(Path::new("")),
+                    Some(usize::from(width)),
+                ),
                 Grouping::Status => self.rows[self.group_index(index).unwrap()]
                     .status
                     .label()
@@ -71,11 +65,6 @@ impl View {
                     .session_model_text(&self.rows[self.group_index(index).unwrap()])
                     .unwrap_or_else(|| "Unknown".to_owned()),
             }
-        };
-        if self.grouping == Grouping::Project && !self.in_pinned_group(index) {
-            super::line_truncation::abbreviate_path(&group, usize::from(width).min(64), None)
-        } else {
-            group
         }
     }
 

@@ -61,7 +61,7 @@ fn project_heading_returns_when_reselecting_first_inactive_task_after_paging() {
                 .collect();
             let heading = rows
                 .iter()
-                .position(|line| line.contains("/workspace/alpha"));
+                .position(|line| line.trim() == "alpha");
             let task = rows
                 .iter()
                 .position(|line| line.contains("Project task 0"))
@@ -141,8 +141,8 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
             .take_while(|line| !line.starts_with(" Project task"))
             .filter(|line| {
                 line.contains("Project task")
-                    || line.contains("/tmp/alpha")
-                    || line.contains("/tmp/zulu")
+                    || line.trim() == "alpha"
+                    || line.trim() == "zulu"
                     || line.contains("No directory")
             })
             .map(|line| match line.find("Project task") {

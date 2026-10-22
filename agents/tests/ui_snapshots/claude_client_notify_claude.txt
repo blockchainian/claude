@@ -1,6 +1,6 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │ claude-client notify claude Step 4 provider/App/UI分 发 已 完 成 。 共 …       1ms
+                project                 │                 Prompt                 │ claude-client notify claude Step 4 provider/App/UI分 发 已 完 成 。 共 …       1ms
  ● Task log example         Working     │            Task log example            │
                                         │                                        │
                                         │                                        │
