@@ -24,10 +24,11 @@ impl ActivityEvent {
             return;
         }
         self.event_panel.record(record, usize::MAX);
-        if let Some(index) =
-            self.event_panel.entries.iter().position(|entry| {
-                !entry.event.calls.is_empty() || entry.event.kind == Kind::Thinking
-            })
+        if let Some(index) = self
+            .event_panel
+            .entries
+            .iter()
+            .position(|entry| !entry.event.calls.is_empty())
         {
             let event = &self.event_panel.entries[index].event;
             let message = event
@@ -77,7 +78,7 @@ impl ActivityEvent {
         )
         .into_iter()
         .rev()
-        .find(|event| !event.calls.is_empty() || event.kind == Kind::Thinking))
+        .find(|event| !event.calls.is_empty()))
     }
 }
 
@@ -142,7 +143,7 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
     events.reverse();
     let mut previous_end = None;
     for event in &mut events {
-        if !matches!(event.kind, Kind::Assistant | Kind::Thinking) || event.previous_end.is_none() {
+        if event.kind != Kind::Assistant || event.previous_end.is_none() {
             event.previous_end = previous_end;
         }
         previous_end = end(event);
@@ -336,9 +337,7 @@ impl Reader {
         let mut previous_end = None;
         for entry in &mut self.entries {
             let event = &mut entry.event;
-            if !matches!(event.kind, Kind::Assistant | Kind::Thinking)
-                || event.previous_end.is_none()
-            {
+            if event.kind != Kind::Assistant || event.previous_end.is_none() {
                 event.previous_end = previous_end;
             }
             previous_end = end(event);
@@ -915,7 +914,7 @@ impl EventReader {
                         blocks.iter().any(|block| block["type"] == "tool_result")
                     })
                     && let Some(entry) = self.entries.last_mut()
-                    && matches!(entry.event.kind, Kind::Assistant | Kind::Thinking)
+                    && entry.event.kind == Kind::Assistant
                     && entry.event.previous_end.is_none()
                 {
                     entry.event.previous_end = Some(at);
@@ -932,18 +931,6 @@ impl EventReader {
                                         .as_str()
                                         .map(|uuid| format!("{uuid}:text:{index}"));
                                 }
-                            }
-                            Some("thinking") => {
-                                let text = block["thinking"].as_str().unwrap_or("");
-                                let body = if text.is_empty() && block["signature"].is_string() {
-                                    "(encrypted)"
-                                } else {
-                                    text
-                                };
-                                self.push(Kind::Thinking, body.to_owned(), at);
-                                self.entries.last_mut().unwrap().event.source = record["uuid"]
-                                    .as_str()
-                                    .map(|uuid| format!("{uuid}:thinking:{index}"));
                             }
                             Some("tool_use") => self.tool(block, at),
                             _ => {}
@@ -1761,8 +1748,7 @@ pub(crate) mod tests {
         assert_eq!(actual, rows[1..]);
         assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap())
-                .unwrap(),
+            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap()).unwrap(),
             rows[0]
         );
     }
@@ -3941,69 +3927,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn real_encrypted_thinking_keeps_timing_sources_and_latest_activity() {
-        let fixture = include_str!("../../../tests/fixtures/claude-thinking.jsonl");
-        let records: Vec<serde_json::Value> = fixture
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
-        let thinking_at = DateTime::parse_from_rfc3339(records[0]["timestamp"].as_str().unwrap())
-            .unwrap()
-            .with_timezone(&Utc);
-        let previous = thinking_at - chrono::Duration::milliseconds(231782);
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(
-            file,
-            "{}",
-            json!({"type":"user", "timestamp":previous.to_rfc3339(),
-            "message":{"content":"Inspect images"}})
-        )
-        .unwrap();
-        let mut reader = Reader::new(file.path().into(), true);
-        reader.refresh(20).unwrap();
-        for (index, line) in fixture.lines().enumerate() {
-            writeln!(file, "{line}").unwrap();
-            let events = reader.refresh(20).unwrap().events;
-            assert_eq!(events, tail_session(file.path(), 20, true).unwrap());
-            assert_eq!(events.len(), index + 2);
-            let thinking = &events[1];
-            assert_eq!(thinking.kind, Kind::Thinking);
-            assert_eq!(thinking.body, "(encrypted)");
-            assert_eq!(thinking.started_at, thinking_at);
-            assert_eq!(thinking.previous_end, Some(previous));
-            assert_eq!(
-                thinking.started_at - thinking.previous_end.unwrap(),
-                chrono::Duration::milliseconds(231782)
-            );
-            assert_eq!(
-                thinking.source.as_deref(),
-                Some("0fc9ecce-6833-481e-83e3-9710b47b68d2:thinking:0")
-            );
-            assert_eq!(thinking.source_records.len(), 1);
-            use crate::event::Reader as _;
-            let decoded = reader
-                .read_events(std::slice::from_ref(&thinking.source_records))
-                .unwrap();
-            assert_eq!(decoded[0].as_ref().unwrap().body, "(encrypted)");
-            if index == 0 {
-                let summary = super::super::transcript::read_subagent(
-                    file.path(),
-                    file.as_file().metadata().unwrap().len(),
-                )
-                .unwrap();
-                let activity = summary.activity.unwrap();
-                assert_eq!(activity.kind, thinking.kind);
-                assert_eq!(activity.label, thinking.body);
-                assert_eq!(summary.task_details_sources[0], thinking.source);
-            } else {
-                assert_eq!(events[2].previous_end, Some(thinking_at));
-                assert_eq!((events[2].started_at - thinking_at).num_milliseconds(), 675);
-            }
-        }
-    }
-
-    #[test]
-    fn text_blocks_keep_order_include_thinking_and_keep_unterminated_last_record() {
+    fn text_blocks_keep_order_skip_thinking_and_keep_unterminated_last_record() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(
             file,
@@ -4019,7 +3943,7 @@ pub(crate) mod tests {
         let events = tail(file.path(), 8).unwrap();
         assert_eq!(
             events.iter().map(|e| e.body.as_str()).collect::<Vec<_>>(),
-            ["first\nsecond", "private", "one", "two"]
+            ["first\nsecond", "one", "two"]
         );
         assert_eq!(events[1].previous_end, Some(at(1)));
         assert_eq!(events[2].previous_end, Some(at(2)));

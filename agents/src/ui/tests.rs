@@ -1,5 +1,3 @@
-#[path = "thinking_tests.rs"]
-mod thinking_tests;
 #[path = "middle_paste_tests.rs"]
 mod middle_paste_tests;
 #[path = "subagent_handback_tests.rs"]

@@ -118,9 +118,7 @@ pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
     use crate::event::Kind;
     let body = match kind {
         Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
-        Kind::Assistant | Kind::Thinking | Kind::Agent | Kind::Session => {
-            Style::default().fg(Color::Yellow)
-        }
+        Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
         Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
         Kind::Error | Kind::Denied => error_style(),
     };
