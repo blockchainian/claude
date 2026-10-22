@@ -182,14 +182,13 @@ impl View {
                 line(group.clone().dim(), rect, buf);
                 if self.grouping == Grouping::Project
                     && !self.in_pinned_group(index)
-                    && let Some(directory) =
-                        self.project_groups[self.group_index(index).unwrap()].directory()
-                    // A deleted folder has nothing to open, so its heading stays plain text.
-                    && directory.is_dir()
+                    && let Some(directory) = self.project_groups[self.group_index(index).unwrap()]
+                        .directory()
+                        .and_then(|directory| super::links::existing(directory.to_path_buf()))
                 {
                     let link =
                         Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);
-                    let links = [(link, directory.to_path_buf())];
+                    let links = [(link, directory)];
                     state.list_links.extend(links);
                 }
                 continue;

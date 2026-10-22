@@ -1026,11 +1026,10 @@ impl View {
             return;
         };
         let mut links = Vec::new();
-        // A deleted folder has nothing to open, so its name stays plain text.
         if let Some(area) = folder_area
-            && cwd.is_dir()
+            && let Some(target) = super::links::existing(cwd.clone())
         {
-            links.push((area, cwd.clone()));
+            links.push((area, target));
         }
         if let (Some(area), Some(pr)) = (right_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)

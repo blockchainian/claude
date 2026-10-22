@@ -26,9 +26,12 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image])
         }
     }
     for image in images {
+        let Some(target) = existing(image.path.clone()) else {
+            continue;
+        };
         links.extend(text.match_indices(&image.label).map(|(at, label)| Link {
             range: at..at + label.len(),
-            target: image.path.clone(),
+            target: target.clone(),
         }));
     }
     links.sort_by_key(|link| link.range.start);
@@ -121,6 +124,11 @@ pub(super) fn resolve(path: &str, cwd: &Path) -> Option<PathBuf> {
     } else {
         cwd.join(path)
     };
+    existing(target)
+}
+
+/// `target` while it is on disk: every local path is linked through here, since a deleted one opens nothing.
+pub(super) fn existing(target: PathBuf) -> Option<PathBuf> {
     target.exists().then_some(target)
 }
 
@@ -303,9 +311,11 @@ mod tests {
             "see `src/ui/log.rs`, and/or ~/., {} and https://x.io/a/b [Image #1]",
             absolute.display()
         );
+        let image = dir.path().join("1.png");
+        std::fs::write(&image, "").unwrap();
         let images = [crate::event::Image {
             label: "[Image #1]".into(),
-            path: "/tmp/1.png".into(),
+            path: image.clone(),
         }];
         let links = text_links(&text, dir.path(), &images);
         let targets: Vec<_> = links
@@ -318,9 +328,18 @@ mod tests {
                 ("src/ui/log.rs", dir.path().join("src/ui/log.rs")),
                 ("~/", home),
                 (absolute.to_str().unwrap(), absolute.clone()),
-                ("[Image #1]", PathBuf::from("/tmp/1.png")),
+                ("[Image #1]", image),
             ]
         );
+    }
+
+    #[test]
+    fn deleted_images_are_not_links() {
+        let images = [crate::event::Image {
+            label: "[Image #1]".into(),
+            path: "/nonexistent/1.png".into(),
+        }];
+        assert!(text_links("see [Image #1]", Path::new("/"), &images).is_empty());
     }
 
     #[test]

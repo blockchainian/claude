@@ -8572,17 +8572,18 @@ fn task_event_click_on_a_path_in_free_tool_text_opens_the_full_path() {
 #[test]
 fn task_event_click_on_an_image_placeholder_opens_the_image() {
     let (mut view, now) = event_fixture();
+    let (_dir, image) = temp_event_path("2.png");
     view.event_panel[0].body = "Please look at [Image #1] and [Image #2]".into();
     view.event_panel[0].images = vec![crate::event::Image {
         label: "[Image #2]".into(),
-        path: "/tmp/images/2.png".into(),
+        path: image.clone(),
     }];
     let list = event_screen(&view, 100, 40, now);
     assert!(list.contains("[Image #1] and [Image #2]"), "{list}");
     assert_eq!(click_text(&mut view, &list, "[Image #1]"), None);
     assert_eq!(
         click_text(&mut view, &list, "[Image #2]"),
-        Some(Action::OpenPath("/tmp/images/2.png".into()))
+        Some(Action::OpenPath(image))
     );
 }
 
@@ -8610,11 +8611,13 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     let mut view = fixture();
     let (_dir, target) = temp_event_path("report.md");
     let path = target.to_str().unwrap();
+    let image = target.with_file_name("1.png");
+    std::fs::write(&image, "").unwrap();
     let selected = &mut view.rows[view.selected];
     selected.prompt = format!("Look at [Image #1] and the report in {path} please");
     selected.prompt_images = vec![crate::event::Image {
         label: "[Image #1]".into(),
-        path: "/tmp/images/1.png".into(),
+        path: image.clone(),
     }];
     let rendered = screen(&view, 120, 40);
     assert!(!rendered.contains(path), "{rendered}");
@@ -8625,7 +8628,7 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     );
     assert_eq!(
         click_text(&mut view, &rendered, "[Image #1]"),
-        Some(Action::OpenPath("/tmp/images/1.png".into()))
+        Some(Action::OpenPath(image))
     );
     assert_eq!(click_text(&mut view, &rendered, "Look at"), None);
     assert_eq!(
