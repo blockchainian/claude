@@ -10,6 +10,8 @@ pub(super) struct Metadata {
     name: Option<String>,
     task_kind: Option<String>,
     team_name: Option<String>,
+    #[serde(default)]
+    finished: bool,
 }
 
 impl Metadata {
@@ -35,6 +37,9 @@ impl Metadata {
     }
 
     pub(super) fn status(&self, summary: &Summary, config: &Path, alive: bool) -> SessionStatus {
+        if self.finished {
+            return SessionStatus::Inactive;
+        }
         let Some(last) = summary.subagent_records.last() else {
             return SessionStatus::Inactive;
         };
@@ -237,6 +242,69 @@ mod tests {
     fn handback_result_finishes() {
         assert_eq!(
             status(records(), false, false, true),
+            SessionStatus::Inactive
+        );
+    }
+
+    #[test]
+    fn finished_wait_with_prompt_snapshot_is_inactive() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = registry::tests::fixture(dir.path());
+        let parent = transcript(dir.path(), entry["sessionId"].as_str().unwrap(), 0);
+        fs::write(dir.path().join("sessions/live.json"), entry.to_string()).unwrap();
+        let agents = parent.with_extension("").join("subagents");
+        fs::create_dir_all(&agents).unwrap();
+        let path = agents.join("agent-a1f849f784f4f1c99.jsonl");
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-finished-wait.jsonl"),
+        )
+        .unwrap();
+        let mut metadata: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-finished-wait.meta.json"
+        ))
+        .unwrap();
+        metadata["finished"] = false.into();
+        fs::write(path.with_extension("meta.json"), metadata.to_string()).unwrap();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-a1f849f784f4f1c99")
+            .unwrap();
+        assert_eq!(child.status, SessionStatus::Working);
+        fs::write(
+            path.with_extension("meta.json"),
+            include_str!("../../../tests/fixtures/claude-finished-wait.meta.json"),
+        )
+        .unwrap();
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-a1f849f784f4f1c99")
+            .unwrap();
+        assert_eq!(child.title, "wait");
+        assert_eq!(child.status, SessionStatus::Inactive);
+
+        // Completion metadata also works without a terminal transcript record.
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-finished-wait.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .refresh(1)
+                .sessions
+                .iter()
+                .find(|s| s.id.id == "agent-a1f849f784f4f1c99")
+                .unwrap()
+                .status,
             SessionStatus::Inactive
         );
     }
