@@ -1193,3 +1193,103 @@ fn task_details_default_selection_background_and_subagent() {
     }
     assert_eq!(drag_text(&mut view, "Background"), None);
 }
+
+#[test]
+fn event_detail_zoom_drag_ignores_hidden_task_details() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("selection.jsonl");
+    let mut record: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    record["message"]["content"][0]["input"]["command"] =
+        "cd /workspace/project && git log -1 --oneline && git status -sb | head -1; echo done; pwd"
+            .into();
+    std::fs::write(&path, format!("{record}\n")).unwrap();
+    let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.kind == crate::event::Kind::Tool)
+        .unwrap();
+    let mut view = fixture();
+    view.rows[0].transcript = Some(path);
+    view.event_session = Some(view.rows[0].id.clone());
+    view.select_fixture_event(Some(event));
+    let area = Rect::new(0, 0, 200, 50);
+    let render = |view: &View| {
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, view.rows[0].updated_at);
+        buf
+    };
+    let initial = render(&view);
+    let details = view.viewport.borrow().event_text.area;
+    let focus = position_in(&initial, "cd /workspace/project", details);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        focus.0,
+        focus.1,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        focus.0,
+        focus.1,
+    ));
+    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    view.handle_key(KeyEvent::new(KeyCode::Char('_'), KeyModifiers::SHIFT));
+    let buf = render(&view);
+    let details = view.viewport.borrow().event_text.area;
+    let start = position_in(&buf, "cd /workspace/project", details);
+    let end = position_in(&buf, "pwd", details);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    render(&view);
+    view.set_pinned_events(&view.rows[0].id.clone(), Vec::new());
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end.0 + 3,
+        end.1,
+    ));
+    let held = render(&view);
+    let highlighted = held[start]
+        .modifier
+        .contains(ratatui::style::Modifier::REVERSED);
+    view.set_pinned_events(&view.rows[0].id.clone(), Vec::new());
+    let copied = view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        end.0 + 3,
+        end.1,
+    ));
+    assert_eq!(
+        copied_text(copied),
+        "cd /workspace/project\ngit log -1 --oneline\ngit status -sb | head -1\necho done\npwd",
+        "visible command highlighted: {highlighted}"
+    );
+    assert!(highlighted);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end.0 + 3,
+        end.1,
+    ));
+    view.event_list.search.query.set_text("no matching event");
+    view.rematch_event();
+    assert!(view.visible_event().is_none());
+    assert_eq!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            end.0 + 3,
+            end.1
+        )),
+        None
+    );
+}

@@ -116,7 +116,6 @@ impl View {
     }
 
     pub(super) fn rematch_event_at(&mut self, selected_full: Option<super::task_ui::EventRow>) {
-        self.cancel_event_detail_selection();
         let pattern = self.event_list.search.pattern();
         let mut matcher = self.event_list.search.matcher.borrow_mut();
         self.event_list.search.matches = self
@@ -163,6 +162,7 @@ impl View {
             .cursor
             .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         if selected != selected_full {
+            self.cancel_event_detail_selection();
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
         }
