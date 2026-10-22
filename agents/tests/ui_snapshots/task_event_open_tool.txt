@@ -45,4 +45,4 @@
                                                   ↓
                                                  •··
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help  Esc previous  ↑/↓ move  Enter open  n new

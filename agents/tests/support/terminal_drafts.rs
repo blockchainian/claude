@@ -520,7 +520,7 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     let column = line[..line.find(value).unwrap()].width();
                     tmux.mouse(0, column, row, true);
                     let picker = tmux.capture_when(|capture| {
-                        capture.contains("esc back") && capture.contains("enter select")
+                        capture.contains("Esc back") && capture.contains("Enter select")
                     });
                     assert!(!picker.contains("Unknown"), "{picker}");
                     assert!(!picker.contains("Default"), "{picker}");
@@ -534,14 +534,14 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     );
                     tmux.mouse(0, column, row, true);
                     tmux.wait_for(|capture| {
-                        capture.contains(title) && !capture.contains("enter select")
+                        capture.contains(title) && !capture.contains("Enter select")
                     });
                     tmux.mouse(0, column, row, true);
-                    tmux.wait_for(|capture| capture.contains("enter select"));
+                    tmux.wait_for(|capture| capture.contains("Enter select"));
                     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
                     tmux.wait_for(|capture| {
                         capture.contains(title)
-                            && !capture.contains("enter select")
+                            && !capture.contains("Enter select")
                             && capture
                                 .lines()
                                 .any(|line| line.contains(model) && line.contains(effort))
@@ -551,7 +551,7 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     let capture = tmux.capture_when(|capture| {
                         capture.lines().any(|line| {
                             line.contains(title) && line.contains("source") && line.contains("main")
-                        }) && !capture.contains("enter select")
+                        }) && !capture.contains("Enter select")
                     });
                     let (row, line) = capture
                         .lines()
@@ -560,10 +560,10 @@ fn terminal_draft_defaults_and_inherited_choices() {
                         .unwrap();
                     let column = line[..line.find(value).unwrap()].width();
                     tmux.mouse(0, column, row, true);
-                    tmux.wait_for(|capture| capture.contains("enter select"));
+                    tmux.wait_for(|capture| capture.contains("Enter select"));
                     tmux.mouse(0, column, row, true);
                     tmux.wait_for(|capture| {
-                        !capture.contains("enter select")
+                        !capture.contains("Enter select")
                             && capture.lines().any(|line| {
                                 line.contains(title)
                                     && line.contains("source")
@@ -660,7 +660,7 @@ fn terminal_picker_bottom_layout() {
         .unwrap();
     tmux.mouse(0, line[..line.find("Opus 5.5").unwrap()].width(), row, true);
     let capture =
-        tmux.capture_when(|capture| capture.contains("enter select") && capture.contains("Sonnet"));
+        tmux.capture_when(|capture| capture.contains("Enter select") && capture.contains("Sonnet"));
     let lines: Vec<_> = capture.lines().collect();
     let bottom = lines
         .iter()
@@ -899,9 +899,9 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
         begin_named_draft(&tmux, "Escape focus");
         let capture = tmux.capture_when(|capture| {
             title_rule_position(capture, "Escape focus").is_some()
-                && !capture.contains("enter select")
+                && !capture.contains("Enter select")
         });
-        assert!(!capture.contains("enter select"), "{capture}");
+        assert!(!capture.contains("Enter select"), "{capture}");
         let (row, line) = capture
             .lines()
             .enumerate()
@@ -913,7 +913,7 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
         tmux.wait_for(|capture| capture.contains("Create new branch"));
         // Closing the branch selector leaves Details active with no child UI open.
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| !capture.contains("enter select"));
+        tmux.wait_for(|capture| !capture.contains("Enter select"));
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| capture.contains("Permanently delete “Escape focus”"));
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
@@ -921,7 +921,7 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
             !capture.contains("Permanently delete “")
                 && title_rule_position(capture, "Escape focus").is_some()
         });
-        assert!(!capture.contains("enter select"), "{capture}");
+        assert!(!capture.contains("Enter select"), "{capture}");
         let (row, line) = capture
             .lines()
             .enumerate()
@@ -987,10 +987,10 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
         tmux.wait_for(|capture| capture.contains("New branch ❯ foo"));
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| {
-            !capture.contains("New branch ❯") && capture.contains("enter select")
+            !capture.contains("New branch ❯") && capture.contains("Enter select")
         });
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| !capture.contains("enter select"));
+        tmux.wait_for(|capture| !capture.contains("Enter select"));
         checks.push(serde_json::json!({"width":width,"task_details_empty_escape":"delete_confirmation","prompt_with_branch_selector_escape":"delete_confirmation","cancel_preserves_draft":true,"branch_blur_saved":"foo","branch_reopen_prefilled":true,"branch_escape_layers":true}));
     }
     let verdict = serde_json::json!({"verdict":"pass","checks":checks});

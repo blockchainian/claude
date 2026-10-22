@@ -87,4 +87,4 @@
                                                        a worktreeDir setting, since Claude Code hardcodes the worktree location
                                                        to .claude/worktrees/<name>. The issue is marked closed, but the results…
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help  Esc previous  ↑/↓ move  Enter open  n new

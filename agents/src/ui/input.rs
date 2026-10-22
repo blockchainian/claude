@@ -299,12 +299,60 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        if let Some(action) = self.hint_mouse(mouse) {
+            return action;
+        }
         let focus = self.task_focus();
         let action = self.handle_panel_mouse(mouse);
         if self.task_focus() != focus {
             self.set_active_panel(self.active_panel);
         }
         self.finish_panel_action(action)
+    }
+
+    /// Routes a completed click on a rendered hint through keyboard handling.
+    fn hint_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
+        let at = |x, y| {
+            self.viewport
+                .borrow()
+                .hint_keys
+                .iter()
+                .find(|target| target.area.contains((x, y).into()))
+                .copied()
+        };
+        let target = at(mouse.column, mouse.row);
+        let pressed = self.mouse_press.and_then(|(button, x, y, dragged)| {
+            (button == MouseButton::Left)
+                .then(|| at(x, y).map(|target| (target, dragged)))
+                .flatten()
+        });
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) if target.is_some() => {
+                self.mouse_press = Some((MouseButton::Left, mouse.column, mouse.row, false));
+                self.mouse_panel = None;
+                Some(None)
+            }
+            MouseEventKind::Drag(MouseButton::Left) if pressed.is_some() => {
+                if let Some((_, _, _, dragged)) = self.mouse_press.as_mut() {
+                    *dragged = true;
+                }
+                Some(None)
+            }
+            MouseEventKind::Up(MouseButton::Left) if pressed.is_some() || target.is_some() => {
+                self.mouse_press = None;
+                if let (Some((start, false)), Some(end)) = (pressed, target)
+                    && start.area == end.area
+                    && start.key == end.key
+                {
+                    if let Some(panel) = end.panel {
+                        self.set_active_panel(panel);
+                    }
+                    return Some(self.handle_key(end.key));
+                }
+                Some(None)
+            }
+            _ => None,
+        }
     }
 
     fn handle_panel_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {

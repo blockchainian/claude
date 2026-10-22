@@ -9,16 +9,16 @@
  ⌃w _        Max height
  ⌃w |        Max width
  ⌃w =        Reset size
- enter       Open
+ Enter       Open
  →           Open
- pgup        Page up
- pgdn        Page down
+ PgUp        Page up
+ PgDn        Page down
  ⌃c          Quit
- esc         Previous
+ Esc         Previous
 
  Tasks
  n          New
  o          Open
  f          Fork
  … resize to see all
- esc back
+ Esc back

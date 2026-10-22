@@ -399,7 +399,7 @@ impl View {
         title: Option<(Line<'static>, super::event_detail::EventDetailColumns)>,
         buf: &mut Buffer,
     ) {
-        super::footer::Footer {
+        let keys = super::footer::Footer {
             hints: self.center_footer_hints(),
             title: title.filter(|_| self.footer_shows_task_hints()),
             feedback: self
@@ -409,10 +409,15 @@ impl View {
                 .or_else(|| self.selection_failure().map(|failure| failure.line())),
         }
         .render(area, wide, buf);
+        self.viewport.borrow_mut().hint_keys.extend(keys);
     }
     pub(super) fn clear_overlay(&self, area: Rect, modal: bool, buf: &mut Buffer) {
         use ratatui::buffer::CellWidth;
 
+        self.viewport
+            .borrow_mut()
+            .hint_keys
+            .retain(|target| !target.area.intersects(area));
         self.viewport
             .borrow_mut()
             .overlays
@@ -449,6 +454,7 @@ impl View {
             viewport.overlays.clear();
             viewport.picker_rows.clear();
             viewport.confirm_options.clear();
+            viewport.hint_keys.clear();
             viewport.list_links.clear();
             viewport.marker = None;
             viewport.field_targets.clear();
@@ -468,7 +474,19 @@ impl View {
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
         if let Some(question) = self.active_question() {
-            question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
+            let area = layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0));
+            question.render(area, buf);
+            if !area.is_empty() {
+                let footer = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+                self.viewport
+                    .borrow_mut()
+                    .hint_keys
+                    .extend(super::hints::key_targets(
+                        &question.footer()[0],
+                        footer,
+                        Some(Panel::Prompt),
+                    ));
+            }
         } else {
             self.input_box.render(
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),

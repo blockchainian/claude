@@ -7,11 +7,60 @@ pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
         if !line.spans.is_empty() {
             line.spans.push("  ".dim());
         }
-        line.spans.push(key.to_string().bold());
+        line.spans.push(key_span(key));
         line.spans.push(format!(" {label}").dim().not_bold());
     }
     line
 }
+
+pub(super) fn key_span(key: &str) -> Span<'static> {
+    super::key_name::display(key).bold()
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct KeyTarget {
+    pub area: Rect,
+    pub key: KeyEvent,
+    pub panel: Option<Panel>,
+}
+
+/// Records only the visible key cells, splitting arrow combinations at their slash.
+pub(super) fn key_targets(line: &Line<'_>, area: Rect, panel: Option<Panel>) -> Vec<KeyTarget> {
+    let mut targets = Vec::new();
+    let mut x = area.x;
+    for span in &line.spans {
+        if span
+            .style
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+        {
+            let parts: Vec<_> = if span.content.contains('/') && span.content.as_ref() != "/" {
+                span.content.split('/').collect()
+            } else {
+                vec![span.content.as_ref()]
+            };
+            let mut offset = 0;
+            for part in parts {
+                let width = part.width() as u16;
+                if let Some(key) = super::key_name::event(part) {
+                    let rect =
+                        Rect::new(x.saturating_add(offset), area.y, width, 1).intersection(area);
+                    if !rect.is_empty() {
+                        targets.push(KeyTarget {
+                            area: rect,
+                            key,
+                            panel,
+                        });
+                    }
+                }
+                offset += width + 1;
+            }
+        }
+        x = x.saturating_add(span.width() as u16);
+    }
+    targets
+}
+
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
         if self.confirm_dialog.is_some() {
@@ -151,17 +200,113 @@ impl View {
 mod tests {
     use super::*;
 
+    fn render(view: &View) -> Buffer {
+        let area = Rect::new(0, 0, 160, 50);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        buffer
+    }
+
+    fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
+        let event = |kind| MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        };
+        view.handle_mouse(event(MouseEventKind::Down(MouseButton::Left)));
+        view.handle_mouse(event(MouseEventKind::Up(MouseButton::Left)))
+    }
+
+    #[test]
+    fn hint_keys_capitalize_special_names() {
+        assert_eq!(
+            hint_line(&[("esc", "back"), ("enter", "open"), ("n", "new")]).to_string(),
+            "Esc back  Enter open  n new"
+        );
+    }
+
+    #[test]
+    fn footer_clicks_follow_keyboard_for_escape_enter_and_letter() {
+        for code in [KeyCode::Esc, KeyCode::Enter, KeyCode::Char('n')] {
+            let prepare = || {
+                let mut view = View::default();
+                if code == KeyCode::Esc {
+                    view.help = true;
+                }
+                if code == KeyCode::Enter {
+                    view.confirm_dialog = Some(ConfirmDialog {
+                        action: ConfirmAction::Delete("claude:footer".parse().unwrap()),
+                        title: "Footer test".into(),
+                        confirm: false,
+                    });
+                }
+                view
+            };
+            let mut mouse = prepare();
+            let mut keyboard = prepare();
+            let buffer = render(&mouse);
+            let footer = mouse.center_layout(buffer.area).footer;
+            let text = (0..buffer.area.width)
+                .map(|x| buffer[(x, footer.y)].symbol())
+                .collect::<String>();
+            let key = match code {
+                KeyCode::Esc => "esc",
+                KeyCode::Enter => "enter",
+                _ => "n new",
+            };
+            let start = text.to_lowercase().find(key).unwrap();
+            let x = text[..start].width() as u16;
+            assert_eq!(
+                click(&mut mouse, x, footer.y),
+                keyboard.handle_key(code.into())
+            );
+            assert_eq!(mouse.help, keyboard.help);
+            assert_eq!(
+                mouse.confirm_dialog.is_some(),
+                keyboard.confirm_dialog.is_some()
+            );
+            assert_eq!(
+                mouse.selected_draft().is_some(),
+                keyboard.selected_draft().is_some()
+            );
+            assert_eq!(mouse.active_panel, keyboard.active_panel);
+        }
+    }
+
+    #[test]
+    fn help_key_columns_do_not_handle_clicks() {
+        let mut view = View {
+            help: true,
+            ..View::default()
+        };
+        let buffer = render(&view);
+        let (row, x) = (0..buffer.area.height - 1)
+            .find_map(|y| {
+                let line = (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>();
+                line.to_lowercase()
+                    .find("enter")
+                    .map(|start| (y, line[..start].width() as u16))
+            })
+            .expect("help Enter key");
+        assert!(click(&mut view, x, row).is_none());
+        assert!(view.help);
+        assert_eq!(render(&view), buffer);
+    }
+
     #[test]
     fn task_footer_uses_open_and_lowercase_descriptions() {
         let mut view = View::default();
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "? help  esc previous  ↑/↓ move  enter open  n new"
+            "? help  Esc previous  ↑/↓ move  Enter open  n new"
         );
         view.searching = true;
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "esc back  enter open"
+            "Esc back  Enter open"
         );
     }
 
@@ -169,7 +314,7 @@ mod tests {
     fn task_help_describes_open_keys_without_control_l() {
         let view = View::default();
         let lines = view.center_help_lines(120);
-        for key in ["enter", "→", "o"] {
+        for key in ["Enter", "→", "o"] {
             assert!(
                 lines.iter().any(|line| {
                     let text = line.to_string();

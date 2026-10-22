@@ -26,6 +26,7 @@ pub(crate) mod highlight;
 mod hints;
 mod hyperlink;
 mod input;
+mod key_name;
 mod line_edit;
 mod line_truncation;
 mod links;
@@ -171,6 +172,7 @@ struct Viewport {
     /// The selected task's name on the task details panel's lower rule.
     task_details_title: Rect,
     confirm_options: Vec<(Rect, bool)>,
+    hint_keys: Vec<hints::KeyTarget>,
     /// Where the last render drew the button that jumps back to the newest event row.
     event_jump: Rect,
     /// Space reserved for the New button or duration label.

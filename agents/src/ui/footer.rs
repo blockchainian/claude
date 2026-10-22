@@ -45,7 +45,8 @@ pub(super) struct Footer {
 }
 
 impl Footer {
-    pub(super) fn render(self, area: Rect, wide: bool, buf: &mut Buffer) {
+    pub(super) fn render(self, area: Rect, wide: bool, buf: &mut Buffer) -> Vec<hints::KeyTarget> {
+        let mut keys = hints::key_targets(&self.hints, area, None);
         let start = area
             .x
             .saturating_add(self.hints.width() as u16)
@@ -61,13 +62,18 @@ impl Footer {
             // Feedback over the hints clears the cells it covers and the gap before it.
             if x < start {
                 let gap = x.saturating_sub(2).max(area.x);
+                let visible = Rect::new(area.x, area.y, gap.saturating_sub(area.x), area.height);
+                for target in &mut keys {
+                    target.area = target.area.intersection(visible);
+                }
+                keys.retain(|target| !target.area.is_empty());
                 for column in gap..x {
                     buf[(column, area.y)].reset();
                 }
             }
             feedback.render(Rect::new(x, area.y, width, 1), buf);
             if !wide {
-                return;
+                return keys;
             }
             end = x.saturating_sub(2);
         }
@@ -75,6 +81,7 @@ impl Footer {
             let span = Rect::new(start, area.y, end.saturating_sub(start), 1);
             render_title(title, columns, span, wide, buf);
         }
+        keys
     }
 }
 

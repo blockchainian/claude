@@ -119,18 +119,24 @@ impl QuestionView {
         self.error.as_deref()
     }
 
-    fn footer(&self) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-        let switch = if self.tabs() > 1 {
-            "←/→ switch · "
-        } else {
-            ""
-        };
-        lines.push(Line::styled(
-            format!("{switch}↑/↓ move · Enter to confirm · Esc to cancel"),
-            Style::default().dim(),
-        ));
-        lines
+    pub(super) fn footer(&self) -> Vec<Line<'static>> {
+        let mut spans = Vec::new();
+        if self.tabs() > 1 {
+            spans.push(super::hints::key_span("←/→"));
+            spans.push(Span::styled(
+                " switch · ",
+                Style::default().dim().not_bold(),
+            ));
+        }
+        for (key, label) in [
+            ("↑/↓", " move · "),
+            ("Enter", " to confirm · "),
+            ("Esc", " to cancel"),
+        ] {
+            spans.push(super::hints::key_span(key));
+            spans.push(Span::styled(label, Style::default().dim().not_bold()));
+        }
+        vec![Line::from(spans)]
     }
 
     fn body_height(&self, area: Rect) -> usize {
@@ -761,6 +767,27 @@ mod tests {
     }
 
     #[test]
+    fn ask_footer_hotkeys_are_bold_and_not_dim() {
+        for header in ["Single", "Multi", "First"] {
+            let view = QuestionView::new(fixture(header));
+            let footer = view.footer().remove(0);
+            for key in ["←/→", "↑/↓", "Enter", "Esc"] {
+                if key == "←/→" && view.tabs() == 1 {
+                    continue;
+                }
+                let span = footer
+                    .spans
+                    .iter()
+                    .find(|span| span.content == key)
+                    .unwrap_or_else(|| panic!("missing key span: {key}"));
+                assert!(span.style.add_modifier.contains(Modifier::BOLD), "{key}");
+                assert!(!span.style.add_modifier.contains(Modifier::DIM), "{key}");
+                assert_eq!(span.style.fg, None, "{key}");
+            }
+        }
+    }
+
+    #[test]
     fn ask_view_stored_round_trip_keeps_labels_text_and_review_page() {
         let mut view = QuestionView::new(fixture("Multi"));
         view.choose(2);
@@ -957,19 +984,25 @@ mod tests {
             ),
         ] {
             let view = QuestionView::new(fixture(header));
+            let mut rendered = screen(&view, 60, 14);
+            rendered.push_str("\nFooter spans:\n");
+            for span in &view.footer()[0].spans {
+                rendered.push_str(&format!(
+                    "{:?}: bold={}, dim={}\n",
+                    span.content,
+                    span.style.add_modifier.contains(Modifier::BOLD),
+                    span.style.add_modifier.contains(Modifier::DIM),
+                ));
+            }
             if let Some(directory) = std::env::var_os("UPDATE_ASK_VIEW_SNAPSHOT") {
                 let name = match header {
                     "Single" => "ask_view_single.txt",
                     "Multi" => "ask_view_multi.txt",
                     _ => "ask_view_two.txt",
                 };
-                std::fs::write(
-                    std::path::Path::new(&directory).join(name),
-                    screen(&view, 60, 14),
-                )
-                .unwrap();
+                std::fs::write(std::path::Path::new(&directory).join(name), &rendered).unwrap();
             }
-            assert_eq!(screen(&view, 60, 14), expected, "{header}");
+            assert_eq!(rendered, expected, "{header}");
         }
     }
     #[test]

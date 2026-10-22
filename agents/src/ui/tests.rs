@@ -2655,7 +2655,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
     view.set_active_panel(Panel::TaskDetails);
     assert_eq!(
         view.center_footer_hints().to_string(),
-        "esc back  enter rename"
+        "Esc back  Enter rename"
     );
     for code in [
         KeyCode::Up,
@@ -2817,7 +2817,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     assert!(rendered.find("1. Cancel").unwrap() < rendered.find("2. Permanently delete").unwrap());
     assert_eq!(
         view.center_footer_hints().to_string(),
-        "↑/↓ move  enter select  esc back"
+        "↑/↓ move  Enter select  Esc back"
     );
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert!(view.confirm_dialog.is_none());
@@ -6567,7 +6567,7 @@ mod event_search {
         assert!(
             view.center_footer_hints()
                 .to_string()
-                .contains("enter keep")
+                .contains("Enter keep")
         );
         for c in "time out".chars() {
             if c == ' ' {
@@ -7632,7 +7632,7 @@ mod subagent_actions {
         let view = fixture();
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "? help  esc previous  ↑/↓ move  n new"
+            "? help  Esc previous  ↑/↓ move  n new"
         );
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),

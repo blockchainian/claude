@@ -904,7 +904,7 @@ fn terminal_dashboard_tabs_and_footer() {
         tmux.wait_for(|capture| {
             // The clipped pre-resize frame can already have the expected height and footer.
             capture.lines().count() == 45
-                && capture.contains("? help  esc back  ↑/↓ move  enter open  n new")
+                && capture.contains("? help  Esc back  ↑/↓ move  Enter open  n new")
                 && capture
                     .lines()
                     .next()
@@ -918,7 +918,7 @@ fn terminal_dashboard_tabs_and_footer() {
         assert!(!capture.contains("Agent command center"), "{capture}");
         assert_eq!(
             rows[44].trim(),
-            "? help  esc back  ↑/↓ move  enter open  n new",
+            "? help  Esc back  ↑/↓ move  Enter open  n new",
             "{capture}"
         );
         let path = std::env::temp_dir().join(format!("agents-dashboard-{width}x45.txt"));

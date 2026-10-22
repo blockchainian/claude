@@ -179,12 +179,12 @@ fn open_and_history_hints_match_keys() {
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("enter open")
+            .contains("Enter open")
     );
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("esc previous")
+            .contains("Esc previous")
     );
 }
 

@@ -634,7 +634,7 @@ mod tests {
         assert!(
             view.center_footer_hints()
                 .to_string()
-                .contains("enter rename")
+                .contains("Enter rename")
         );
     }
 
@@ -847,6 +847,55 @@ mod tests {
             .lines()
             .position(|line| line.contains(text))
             .unwrap_or_else(|| panic!("{text} missing: {screen}")) as u16
+    }
+
+    #[test]
+    fn ask_footer_clicks_match_enter_and_escape() {
+        use unicode_width::UnicodeWidthStr;
+        for review in [false, true] {
+            for code in [KeyCode::Enter, KeyCode::Esc] {
+                let key = if code == KeyCode::Enter {
+                    "Enter"
+                } else {
+                    "Esc"
+                };
+                for offset in 0..key.len() as u16 {
+                    let mut keyboard = if review { multi_fixture() } else { fixture() };
+                    keyboard.handle_key(KeyCode::Down.into());
+                    if review {
+                        keyboard.handle_key(KeyCode::Enter.into());
+                        keyboard.handle_key(KeyCode::Right.into());
+                    }
+                    let mut mouse = if review { multi_fixture() } else { fixture() };
+                    mouse.handle_key(KeyCode::Down.into());
+                    if review {
+                        mouse.handle_key(KeyCode::Enter.into());
+                        mouse.handle_key(KeyCode::Right.into());
+                    }
+                    let text = screen(&mouse, 100, 40);
+                    let row = row_of(&text, "Enter to confirm");
+                    let line = text.lines().nth(usize::from(row)).unwrap();
+                    let column = line[..line.find(key).unwrap()].width() as u16;
+                    let Some(Action::AnswerQuestions {
+                        answer: clicked, ..
+                    }) = click(&mut mouse, column + offset, row)
+                    else {
+                        panic!("{key} offset {offset}, review {review} did not submit");
+                    };
+                    let Some(Action::AnswerQuestions {
+                        answer: pressed, ..
+                    }) = keyboard.handle_key(code.into())
+                    else {
+                        panic!("keyboard did not submit");
+                    };
+                    assert_eq!(clicked, pressed);
+                    assert_eq!(
+                        mouse.active_question().unwrap().stored(),
+                        keyboard.active_question().unwrap().stored()
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -200,7 +200,7 @@ fn manager_thread_hides_and_pins_itself() {
     assert!(
         view.center_footer_hints()
             .to_string()
-            .contains("enter open")
+            .contains("Enter open")
     );
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),

@@ -17,13 +17,13 @@ impl Group {
         let key_width = self
             .entries
             .iter()
-            .map(|entry| Span::raw(&entry.key).width())
+            .map(|entry| Span::raw(super::key_name::display(&entry.key)).width())
             .max()
             .unwrap_or(0);
         let mut lines = vec![self.title.bold().into()];
         for entry in &self.entries {
             let key = Span::styled(
-                entry.key.clone(),
+                super::key_name::display(&entry.key),
                 Style {
                     fg: accent_color(),
                     ..Style::default()
@@ -83,4 +83,31 @@ fn columns(groups: &[Vec<Line<'static>>], widths: &[usize]) -> Vec<Line<'static>
             line
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_key_column_uses_display_names_and_widths() {
+        let group = Group {
+            title: "Keys",
+            entries: vec![
+                Shortcut {
+                    key: "tab/⇧tab".into(),
+                    action: "Filter",
+                },
+                Shortcut {
+                    key: "esc".into(),
+                    action: "Back",
+                },
+            ],
+        };
+        let lines = group.lines();
+        assert_eq!(lines[1].spans[0].content, "Tab/⇧Tab");
+        assert_eq!(lines[2].spans[0].content, "Esc");
+        assert_eq!(lines[1].spans[0].width() + lines[1].spans[1].width(), 10);
+        assert_eq!(lines[2].spans[0].width() + lines[2].spans[1].width(), 10);
+    }
 }
