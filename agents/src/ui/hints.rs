@@ -103,7 +103,6 @@ impl View {
                     ("backspace", "Delete"),
                     ("esc", "Back"),
                     ("⌃c", "Quit"),
-                    ("", ""),
                     ("tab/⇧tab", "Filter"),
                     ("/", "Search"),
                     ("g", "Group"),
@@ -122,7 +121,6 @@ impl View {
                     ("↓", "Down"),
                     ("pgup", "Page up"),
                     ("pgdn", "Page down"),
-                    ("", ""),
                     ("⌃w _", "Max width"),
                     ("⌃w |", "Max height"),
                     ("⌃w =", "Reset size"),
@@ -349,9 +347,9 @@ mod tests {
                     lines[2].split_whitespace().collect::<Vec<_>>(),
                     ["Tasks", "Events", "Navigate"]
                 );
-                let tasks: Vec<_> = lines[3..17]
+                let tasks: Vec<_> = lines[3..16]
                     .iter()
-                    .map(|line| line.split_whitespace().next().unwrap_or(""))
+                    .map(|line| line.split_whitespace().next().unwrap())
                     .collect();
                 assert_eq!(
                     tasks,
@@ -365,7 +363,6 @@ mod tests {
                         "Backspace",
                         "Esc",
                         "⌃c",
-                        "",
                         "Tab/⇧Tab",
                         "/",
                         "g",

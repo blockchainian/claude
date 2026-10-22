@@ -12,7 +12,6 @@
  Backspace  Delete
  Esc        Back
  ⌃c         Quit
-
  Tab/⇧Tab   Filter
  /          Search
  g          Group
@@ -20,5 +19,6 @@
 
  Navigate
  ⌃w h/j/k/l  Focus left/down/up/right
+ ↑           Up
  … resize to see all
  Esc back
