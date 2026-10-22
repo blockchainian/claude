@@ -26,7 +26,7 @@ const usage = `usage:
   manager.mjs whoami                                print the resolved Claude session id`;
 
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
-const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["medium", "high"] });
+const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["high"] });
 const APPROVALS = {
   "item/commandExecution/requestApproval": ["command", "cwd", "reason"],
   "item/fileChange/requestApproval": ["reason", "grantRoot"]
