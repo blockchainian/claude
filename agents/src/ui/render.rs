@@ -1337,9 +1337,9 @@ impl View {
             .collect::<Vec<_>>()
             .join("\n");
         if !tasks.is_empty() {
-            // The tasks section ends one blank row above the panel's bottom when everything fits.
+            // The tasks section sits on the panel's bottom row when everything fits.
             let above = items.iter().map(Item::height).sum::<usize>();
-            let section = usize::from(!items.is_empty()) + 1 + tasks.len() + 1;
+            let section = usize::from(!items.is_empty()) + 1 + tasks.len();
             let gap = usize::from(area.height).saturating_sub(above + section);
             items.extend((0..gap).map(|_| Item::Decoration(Line::default())));
             item_links.resize(items.len(), Vec::new());
