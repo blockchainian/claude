@@ -12,9 +12,9 @@
  r          Rename                        Enter       Open
  x          Stop                          →           Open
  a          Archive                       PgUp        Page up
- h          Hide                          PgDn        Page down
- Backspace  Delete                        ⌃c          Quit
- p          Pin/unpin                     Esc         Previous
+ Backspace  Delete                        PgDn        Page down
+ p          Pin/unpin                     ⌃c          Quit
+                                          Esc         Previous
 
 
 

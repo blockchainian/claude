@@ -99,7 +99,6 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
         (KeyCode::Char('x'), KeyModifiers::NONE, Some("Stop")),
         (KeyCode::Char('a'), KeyModifiers::NONE, Some("Archive")),
         (KeyCode::Backspace, KeyModifiers::NONE, Some("Delete")),
-        (KeyCode::Char('h'), KeyModifiers::NONE, Some("Hide")),
     ] {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
@@ -121,7 +120,6 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
             assert!(view.pinned.active.is_empty());
-            assert!(view.hidden.is_empty());
         }
     }
 }
@@ -173,10 +171,9 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
 }
 
 #[test]
-fn manager_thread_hides_and_pins_itself() {
+fn manager_thread_pins_itself() {
     let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
     let child = view.selected_row().unwrap().clone();
-    let parent = child.parent.clone().unwrap();
     for pinned in [true, false] {
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
@@ -198,12 +195,6 @@ fn manager_thread_hides_and_pins_itself() {
         assert_eq!(view.is_pinned(view.selected), pinned);
     }
     assert_eq!(view.center_footer_hints().to_string(), "? help");
-    assert_eq!(
-        view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),
-        Some(Action::Hide(child.id.clone()))
-    );
-    assert!(view.hidden.contains(&child.id));
-    assert!(!view.hidden.contains(&parent));
 }
 
 #[test]

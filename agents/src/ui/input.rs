@@ -1698,7 +1698,7 @@ impl View {
             && plain
             && matches!(
                 key.code,
-                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h')
+                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a')
             )
         {
             return self
@@ -1711,7 +1711,6 @@ impl View {
                         KeyCode::Char('x') => "Stop",
                         KeyCode::Char('a') => "Archive",
                         KeyCode::Backspace => "Delete",
-                        KeyCode::Char('h') => "Hide",
                         _ => unreachable!("subagent session key is gated above"),
                     })
                 });
@@ -1937,14 +1936,14 @@ impl View {
             return None;
         }
         if self.selected_draft.is_some()
-            && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r' | 'h'))
+            && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r'))
         {
             return Some(Action::Unsupported(match key.code {
                 KeyCode::Char('f') => "Fork",
                 KeyCode::Char('a') => "Archive",
                 KeyCode::Char('x') => "Stop",
                 KeyCode::Char('r') => "Rename",
-                _ => "Hide",
+                _ => unreachable!("draft session key is gated above"),
             }));
         }
         if key.code == KeyCode::Esc && self.selected_draft.is_some() {
@@ -2015,11 +2014,6 @@ impl View {
                 } else {
                     Action::Unsupported("Stop")
                 });
-            }
-            KeyCode::Char('h') => {
-                let id = self.selected_id()?.to_owned();
-                self.hide(&id);
-                return Some(Action::Hide(id));
             }
             KeyCode::Char('p') => {
                 let id = self.selected_id()?.clone();

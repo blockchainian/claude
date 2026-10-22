@@ -300,7 +300,7 @@ pub struct View {
     grouping: Grouping,
     use_colors: bool,
     pinned: TaskPins<SessionKey>,
-    hidden: HashSet<SessionKey>,
+    removing: HashSet<SessionKey>,
     /// Parent tasks whose subtree is folded away in each task list tab.
     collapsed: Vec<HashSet<SessionKey>>,
     status_filter: usize,
@@ -439,7 +439,7 @@ impl View {
             grouping,
             use_colors,
             pinned: TaskPins::default(),
-            hidden: HashSet::new(),
+            removing: HashSet::new(),
             collapsed: vec![HashSet::new(); TASK_FILTERS.len()],
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
@@ -870,18 +870,18 @@ impl View {
         self.pinned = pins.clone();
         self.reconcile_selection();
     }
-    /// Lists a hidden task again, as when its deletion failed.
-    pub fn unhide(&mut self, id: &SessionKey) {
-        self.hidden.remove(id);
+    /// Finishes a pending archive or deletion so refreshed rows can be listed.
+    pub fn finish_removal(&mut self, id: &SessionKey) {
+        self.removing.remove(id);
     }
-    pub fn hide(&mut self, id: &SessionKey) {
+    pub fn begin_removal(&mut self, id: &SessionKey) {
         let visible = self.selectable_indices();
         let position = visible
             .iter()
             .position(|i| *i == self.selected)
             .unwrap_or(0);
         let selected = self.selected_id() == Some(id);
-        self.hidden.insert(id.to_owned());
+        self.removing.insert(id.to_owned());
         if selected {
             let visible = self.selectable_indices();
             let selected = visible
@@ -1061,7 +1061,7 @@ impl View {
         }) {
             let mut current = Some(session);
             while let Some(session) = current {
-                if self.hidden.contains(&session.id) || !matching.insert(&session.id) {
+                if self.removing.contains(&session.id) || !matching.insert(&session.id) {
                     break;
                 }
                 // Pinned subtrees stand on their own, without adding ancestor headers.
@@ -1077,7 +1077,7 @@ impl View {
         let mut children = std::collections::HashMap::<&SessionKey, Vec<usize>>::new();
         for (index, session) in self.rows.iter().enumerate() {
             if let Some(parent) = session.parent.as_ref()
-                && !self.hidden.contains(&session.id)
+                && !self.removing.contains(&session.id)
             {
                 children.entry(parent).or_default().push(index);
             }
@@ -1094,7 +1094,7 @@ impl View {
             .enumerate()
             .filter(|(index, session)| {
                 (session.parent.is_none() || is_pinned(*index))
-                    && !self.hidden.contains(&session.id)
+                    && !self.removing.contains(&session.id)
                     && matching.contains(&session.id)
                     && self.matches_search(session)
             })

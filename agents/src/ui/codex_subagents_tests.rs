@@ -203,12 +203,6 @@ fn nested_connectors_continue_through_ancestors_with_visible_siblings() {
         connector_row(&view, "Deep worker", 12)[..9].concat(),
         "│  │  └─ "
     );
-    view.hidden.insert(session_key("grand-sibling"));
-    view.hidden.insert(session_key("sibling"));
-    assert_eq!(
-        connector_row(&view, "Deep worker", 12)[..9].concat(),
-        "      └─ "
-    );
 }
 
 #[test]

@@ -1770,15 +1770,12 @@ fn needs_input_queue_uses_question_time_before_session_update() {
 }
 
 #[test]
-fn needs_input_skips_hidden_children_and_search_mismatches() {
-    for excluded in ["hidden", "child", "search"] {
+fn needs_input_skips_children_and_search_mismatches() {
+    for excluded in ["child", "search"] {
         let mut view = test_view(Grouping::Project, false);
         let original = session("original", "Visible original", SessionStatus::Ready, 300);
         let mut waiting = session("waiting", "Visible waiting", SessionStatus::Working, 60);
         match excluded {
-            "hidden" => {
-                view.hidden.insert(waiting.id.clone());
-            }
             "child" => waiting.parent = Some(original.id.clone()),
             "search" => {
                 view.search.set_text("original");
@@ -2379,7 +2376,7 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     assert_eq!(key(&mut view, KeyCode::Esc), None);
 }
 #[test]
-fn actions_and_hide_move_to_next_visible_row() {
+fn task_list_actions() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('o')), None);
     assert_eq!(view.active_panel, Panel::Prompt);
@@ -2403,10 +2400,7 @@ fn actions_and_hide_move_to_next_visible_row() {
             pinned: false
         })
     );
-    assert_eq!(
-        key(&mut view, KeyCode::Char('h')),
-        Some(Action::Hide(session_key("42")))
-    );
+    key(&mut view, KeyCode::Down);
     assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
@@ -2695,7 +2689,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
 }
 
 #[test]
-fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
+fn rename_parks_inactive_target_and_drops_removed_target() {
     let mut view = fixture();
     view.status_filter = TASK_FILTERS
         .iter()
@@ -2714,17 +2708,6 @@ fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
     assert!(
         view.task_uis[&draft_controls::TaskKey::Session(session_key("42"))]
-            .task_details
-            .title
-            .is_some()
-    );
-    view.set_active_panel(Panel::TaskList);
-    key(&mut view, KeyCode::Char('r'));
-    view.set_active_panel(Panel::TaskDetails);
-    view.hide(&session_key("46"));
-    assert_ne!(view.rename_target.as_ref(), Some(&session_key("46")));
-    assert!(
-        view.task_uis[&draft_controls::TaskKey::Session(session_key("46"))]
             .task_details
             .title
             .is_some()
@@ -7393,8 +7376,6 @@ mod subagent_rows {
             assert_eq!(ids(&view), ["parent"]);
             assert!(!screen(&view, 120, 30).contains("Pinned"));
         }
-        view.hide(&session_key("agent-older"));
-        assert_eq!(ids(&view), ["parent"]);
     }
 
     #[test]
@@ -7447,11 +7428,8 @@ mod subagent_rows {
     }
 
     #[test]
-    fn children_disappear_with_hidden_or_missing_parent() {
+    fn children_disappear_with_missing_parent() {
         let mut view = fixture();
-        view.hide(&session_key("parent"));
-        assert!(ids(&view).is_empty());
-        view.hidden.clear();
         let rows = view
             .rows
             .iter()
@@ -7516,7 +7494,6 @@ mod subagent_actions {
         assert!(view.rename_target.is_none());
         assert!(view.rename.text().is_empty());
         assert!(view.confirm_dialog.is_none());
-        assert!(view.hidden.is_empty());
         assert!(view.pinned.active.is_empty());
         assert!(!view.searching);
         assert!(!view.help);
@@ -7571,7 +7548,6 @@ mod subagent_actions {
     unsupported_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE, "Stop");
     unsupported_key!(delete, KeyCode::Backspace, KeyModifiers::NONE, "Delete");
     unsupported_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE, "Archive");
-    unsupported_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE, "Hide");
     #[test]
     fn pin() {
         let mut view = fixture();
@@ -10802,7 +10778,7 @@ mod reading_interaction_tests;
 mod terminal_panel_tests;
 
 #[test]
-fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
+fn pending_archive_preserves_tab_and_nearby_selection_after_refresh() {
     for provider in [ProviderId::Claude, ProviderId::Codex] {
         for position in 0..3 {
             let mut view = fixture();
@@ -10816,7 +10792,7 @@ fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
             let visible = view.selectable_indices();
             let target = view.rows[visible[position]].id.clone();
             view.select(visible[position]);
-            view.hide(&target);
+            view.begin_removal(&target);
             let next = view.selected_id().cloned();
             assert!(next.is_some());
             let mut rows = view.rows.clone();
@@ -10824,7 +10800,7 @@ fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
             // Filesystem refreshes can arrive before the worker completion.
             view.set_sessions(rows.clone(), false);
             assert_eq!(view.selected_id(), next.as_ref());
-            view.unhide(&target);
+            view.finish_removal(&target);
             view.set_sessions(rows, false);
             assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
             assert_eq!(view.selected_id(), next.as_ref());

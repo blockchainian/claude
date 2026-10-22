@@ -103,7 +103,6 @@ impl View {
                     ("r", "Rename"),
                     ("x", "Stop"),
                     ("a", "Archive"),
-                    ("h", "Hide"),
                     ("backspace", "Delete"),
                     ("p", "Pin/unpin"),
                 ],
@@ -354,7 +353,7 @@ mod tests {
                     lines[2].split_whitespace().collect::<Vec<_>>(),
                     ["Tasks", "Events", "Navigate"]
                 );
-                let tasks: Vec<_> = lines[3..]
+                let tasks: Vec<_> = lines[3..14]
                     .iter()
                     .map(|line| line.split_whitespace().next().unwrap())
                     .collect();
@@ -370,7 +369,6 @@ mod tests {
                         "r",
                         "x",
                         "a",
-                        "h",
                         "Backspace",
                         "p"
                     ]

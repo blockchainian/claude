@@ -104,7 +104,7 @@ impl View {
         let with_subtasks: std::collections::HashSet<_> = self
             .rows
             .iter()
-            .filter(|row| !self.hidden.contains(&row.id))
+            .filter(|row| !self.removing.contains(&row.id))
             .filter_map(|row| row.parent.as_ref())
             .collect();
         // Hand out accents top to bottom before drawing.

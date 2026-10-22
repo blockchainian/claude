@@ -1314,10 +1314,10 @@ impl App {
         }
     }
 
-    /// Hides the session at once and deletes it on a worker thread.
+    /// Removes the session from the list while its deletion runs on a worker thread.
     fn delete(&mut self, session: Session) {
         let id = session.id.clone();
-        self.view.hide(&id);
+        self.view.begin_removal(&id);
         let job = match self.hub.provider(id.provider).delete(&session) {
             Ok(job) => job,
             Err(error) => return self.deleted(&id, Err(error)),
@@ -1335,7 +1335,7 @@ impl App {
 
     fn archive(&mut self, session: Session) {
         let id = session.id.clone();
-        self.view.hide(&id);
+        self.view.begin_removal(&id);
         let job = match self.hub.provider(id.provider).archive(&session) {
             Ok(job) => job,
             Err(error) => return self.archived(&id, Err(error)),
@@ -1369,7 +1369,7 @@ impl App {
     }
 
     fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
-        self.view.unhide(id);
+        self.view.finish_removal(id);
         self.request_refresh();
         if let Err(error) = result {
             self.view.show_error(format!("Cannot archive: {error}"));
@@ -1384,7 +1384,7 @@ impl App {
                 self.request_refresh();
             }
             Err(error) => {
-                self.view.unhide(id);
+                self.view.finish_removal(id);
                 self.request_refresh();
                 self.view.show_error(format!("Cannot delete: {error}"));
             }
@@ -1546,7 +1546,6 @@ impl App {
             Action::Stop(id) => {
                 self.send_input(id, SessionInput::Interrupt);
             }
-            Action::Hide(_) => {}
             Action::TogglePin { id, pinned, tab } => {
                 let pins = self.preferences.pinned.for_tab_mut(tab);
                 pins.retain(|pinned_id| pinned_id != &id);

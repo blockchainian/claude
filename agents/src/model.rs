@@ -280,8 +280,6 @@ pub enum Action {
     Fork(SessionKey),
     /// Start a session when there is no previous task to return to.
     New,
-    /// `h`: hide the session until the next launch.
-    Hide(SessionKey),
     /// `p`: pin or unpin the session.
     TogglePin {
         tab: usize,

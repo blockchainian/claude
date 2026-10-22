@@ -12,7 +12,6 @@
  r          Rename
  x          Stop
  a          Archive
- h          Hide
  Backspace  Delete
  p          Pin/unpin
 
@@ -20,5 +19,6 @@
  ↑           Up
  ↓           Down
  ⌃w h/j/k/l  Focus left/down/up/right
+ ⌃w _        Max height
  … resize to see all
  Esc back

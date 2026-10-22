@@ -99,16 +99,13 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
 }
 
 #[test]
-fn escape_skips_removed_and_hidden_tasks() {
+fn escape_skips_removed_tasks() {
     let mut view = tasks();
     view.set_selected(view.selectable_indices()[0]);
     let first = view.selected_id().cloned();
     key(&mut view, KeyCode::Down);
     let removed = view.selected_id().cloned();
     key(&mut view, KeyCode::Down);
-    let hidden = view.selected_id().unwrap().clone();
-    key(&mut view, KeyCode::Down);
-    view.hidden.insert(hidden);
     view.set_sessions(
         view.rows
             .clone()
@@ -255,5 +252,39 @@ fn task_list_wheel_stops_at_both_ends() {
         view.handle_mouse(mouse(kind, list.x, list.y));
         assert_eq!(view.selected, selected, "{kind:?} at boundary");
         assert_eq!(view.viewport.borrow().scroll, scroll);
+    }
+}
+
+#[test]
+fn unknown_task_list_keys_do_nothing() {
+    for code in [KeyCode::Char('h'), KeyCode::Char('z')] {
+        for kind in 0..3 {
+            let mut view = tasks();
+            match kind {
+                0 => {}
+                1 => {
+                    view.rows[view.selected].parent = Some(session_key("parent"));
+                }
+                2 => {
+                    view.add_draft(DraftSetup {
+                        provider: ProviderId::Claude,
+                        cwd: crate::test_project(),
+                        model: None,
+                        effort: None,
+                        branch: "main".into(),
+                    });
+                    view.name_target = None;
+                }
+                _ => unreachable!(),
+            }
+            view.set_active_panel(Panel::TaskList);
+            let selected = view.selected_id().cloned();
+            let draft = view.selected_draft;
+            let before = screen(&view, 120, 40);
+            assert_eq!(key(&mut view, code), None, "{code:?}, kind {kind}");
+            assert_eq!(view.selected_id(), selected.as_ref());
+            assert_eq!(view.selected_draft, draft);
+            assert_eq!(screen(&view, 120, 40), before);
+        }
     }
 }
