@@ -148,15 +148,17 @@ fn terminal_shared_footer_clicks_and_help_keys() {
     tmux.run(&["send-keys", "-t", "probe", "-l", &click]);
     // A queued capture is processed after the click; the help page remains unchanged.
     assert_eq!(tmux.run(&["capture-pane", "-t", "probe", "-p"]), help);
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    assert_eq!(help.lines().last().unwrap().trim(), "Esc back");
+    click_hint(&tmux, &help, "Esc");
     tmux.wait_for(|capture| !capture.contains("Task shortcuts"));
     tmux.run(&["send-keys", "-t", "probe", "n"]);
     assert_title_caret(&tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "-l", "Footer probe"]);
     let capture = tmux.capture_when(|capture| capture.contains("Footer probe"));
     click_hint(&tmux, &capture, "?");
-    tmux.wait_for(|capture| capture.contains("Task shortcuts"));
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let help = tmux.capture_when(|capture| capture.contains("Task shortcuts"));
+    assert_eq!(help.lines().last().unwrap().trim(), "Esc back");
+    click_hint(&tmux, &help, "Esc");
     assert_title_caret(&tmux, "Footer probe", "Footer probe".width());
     // Continue to the repository browser and focus the prompt editor.
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
@@ -171,11 +173,21 @@ fn terminal_shared_footer_clicks_and_help_keys() {
     tmux.run(&["send-keys", "-t", "probe", "-l", "prompt text"]);
     let capture = tmux.capture_when(|capture| capture.contains("prompt text"));
     click_hint(&tmux, &capture, "?");
-    tmux.wait_for(|capture| capture.contains("Task shortcuts"));
-    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let help = tmux.capture_when(|capture| capture.contains("Task shortcuts"));
+    assert_eq!(help.lines().last().unwrap().trim(), "Esc back");
+    click_hint(&tmux, &help, "Esc");
     let restored = tmux.capture_when(|capture| capture.contains("prompt text"));
     assert!(!restored.contains("prompt text?"), "{restored}");
-    let verdict = serde_json::json!({"verdict":"pass", "clicks":["?"], "focused_inputs":["title","prompt"], "help_keys":"display only"});
+    let returned = tmux.capture_when(|capture| capture.lines().last().unwrap().trim() == "? help");
+    tmux.run(&["send-keys", "-t", "probe", "-l", " retained"]);
+    tmux.wait_for(|capture| capture.contains("prompt text retained"));
+    let evidence = serde_json::json!({"help":help, "returned":returned});
+    std::fs::write(
+        std::env::temp_dir().join("agents-help-footer-captures.json"),
+        serde_json::to_vec_pretty(&evidence).unwrap(),
+    )
+    .unwrap();
+    let verdict = serde_json::json!({"verdict":"pass", "clicks":["?","Esc"], "focused_inputs":["title","prompt"], "help_keys":"display only"});
     std::fs::write(
         std::env::temp_dir().join("agents-shared-footer-probe.json"),
         serde_json::to_vec_pretty(&verdict).unwrap(),

@@ -8,6 +8,7 @@ pub(super) fn key_span(key: &str) -> Span<'static> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum HintAction {
     Help,
+    CloseHelp,
     Question(question_view::FooterAction),
 }
 
@@ -59,7 +60,12 @@ pub(super) fn action_targets(
 
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        Line::from(vec!["?".bold(), " help".dim().not_bold()])
+        let (key, label) = if self.help {
+            ("Esc", " back")
+        } else {
+            ("?", " help")
+        };
+        Line::from(vec![key.bold(), label.dim().not_bold()])
     }
     /// Whether the footer shows the task title outside dialogs, editors and searches.
     pub(super) fn footer_shows_task_title(&self) -> bool {
@@ -170,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn footer_help_click_preserves_focused_input() {
+    fn footer_help_and_back_clicks_preserve_focused_input() {
         for panel in [
             Panel::Prompt,
             Panel::TaskDetails,
@@ -224,7 +230,24 @@ mod tests {
                 .map(|cell| cell.symbol())
                 .collect::<String>();
             assert!(text.contains("Task shortcuts"), "panel {panel:?}");
-            view.handle_key(KeyCode::Esc.into());
+            let target = view
+                .viewport
+                .borrow()
+                .hint_targets
+                .iter()
+                .find(|target| {
+                    target.area.y == view.center_layout(Rect::new(0, 0, 160, 50)).footer.y
+                })
+                .copied()
+                .expect("back target");
+            click(&mut view, target.area.x, target.area.y);
+            assert_eq!(view.active_panel, panel);
+            assert_eq!(view.searching, panel == Panel::TaskList);
+            assert_eq!(view.event_list.search.editing, panel == Panel::EventList);
+            assert_eq!(
+                view.event_detail.search.editing,
+                panel == Panel::EventDetail
+            );
             assert!(!view.help, "help did not close in {panel:?}");
             assert_eq!(view.input_box.editor.text(), "draft");
             assert_eq!(view.rename.text(), "title");
@@ -257,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn footer_only_shows_help_in_every_state() {
+    fn footer_shows_back_in_help_and_help_in_other_states() {
         for mode in 0..8 {
             let mut view = View::default();
             match mode {
@@ -287,7 +310,21 @@ mod tests {
                 _ => unreachable!(),
             }
             let line = view.center_footer_hints();
-            assert_eq!(line.to_string(), "? help", "mode {mode}");
+            let expected = if view.help { "Esc back" } else { "? help" };
+            assert_eq!(line.to_string(), expected, "mode {mode}");
+            let buffer = render(&view);
+            let footer = view.center_layout(buffer.area).footer;
+            let rendered = (0..buffer.area.width)
+                .map(|x| buffer[(x, footer.y)].symbol())
+                .collect::<String>();
+            assert_eq!(rendered.trim(), expected, "mode {mode}");
+            assert_eq!(line.spans[0].style.fg, None);
+            assert!(
+                !line.spans[0]
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
             assert!(
                 line.spans[0]
                     .style

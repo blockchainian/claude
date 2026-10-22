@@ -349,6 +349,10 @@ impl View {
                             self.help = true;
                             None
                         }
+                        hints::HintAction::CloseHelp => {
+                            self.help = false;
+                            None
+                        }
                         hints::HintAction::Question(action) => self.question_footer_action(action),
                     });
                 }
