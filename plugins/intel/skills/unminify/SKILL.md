@@ -84,7 +84,13 @@ gets one more model request with the occupied names and binding context before n
 suffixes are used. These requests obey the input token budget and are journaled for resume.
 Top-level
 batches finish before function batches. Within each file and stage, pending batches are greedily
-packed in order within `--max-input-tokens` (default 100000), with no name-count cap.
+packed in order within `--max-input-tokens` (default 100000), with no planning name-count cap.
+The naming client splits requests above 1000 placeholders in their original order, keeping
+the same rendered context in every part. All parts must pass schema validation before
+the combined reply reaches the original journal records. Failed parts leave the original
+batches pending; resume requests those batches again. Existing replies replay unchanged.
+Attempt telemetry retains original batch IDs and adds one-based `subrequest_index` and
+`subrequest_count` for split requests; each part has its own retry chain.
 Planning and packing count the actual instructions, prompt and rendered context using
 `js-tiktoken` 1.0.21 with `o200k_base`. Oversized contexts are shortened; an irreducible
 batch that still cannot fit fails before sending. Placeholders are unique across
