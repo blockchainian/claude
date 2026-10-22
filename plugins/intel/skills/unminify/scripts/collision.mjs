@@ -31,6 +31,11 @@ function collisionGroups(collisions) {
 /** Reconsider each colliding proposal once; durable replies survive interrupted rewrites. */
 export async function reconsiderNames({ proposals, resolve, journal, id, namer, maxInputTokens, telemetry }) {
   const attempted = new Set();
+  function requestId(group) {
+    const keys = group.map(collision => collision.key);
+    return group.length === 1 ? `collision:${id}:${keys[0]}`
+      : `collision-group:${id}:${createHash('sha256').update(JSON.stringify(keys)).digest('hex')}`;
+  }
   for (;;) {
     const collisions = [];
     resolve(proposals, collision => { if (!attempted.has(collision.key)) collisions.push(collision); });
@@ -40,6 +45,16 @@ export async function reconsiderNames({ proposals, resolve, journal, id, namer, 
     if (saved) {
       attempted.add(saved.key);
       proposals.set(saved.key, journal.replies.get(`collision:${id}:${saved.key}`)[saved.key]);
+      continue;
+    }
+    const savedWhole = collisionGroups(collisions).find(group => journal.replies.has(requestId(group)));
+    if (savedWhole) {
+      const names = journal.replies.get(requestId(savedWhole));
+      for (const { key } of savedWhole) {
+        attempted.add(key);
+        if (Object.hasOwn(names, key)) proposals.set(key, names[key]);
+        else proposals.delete(key);
+      }
       continue;
     }
     // Split replies remain reusable when the budget or remaining collision groups change.
@@ -59,8 +74,7 @@ export async function reconsiderNames({ proposals, resolve, journal, id, namer, 
     }
     function requestsFor(group) {
       const keys = group.map(collision => collision.key);
-      const retryId = group.length === 1 ? `collision:${id}:${keys[0]}`
-        : `collision-group:${id}:${createHash('sha256').update(JSON.stringify(keys)).digest('hex')}`;
+      const retryId = requestId(group);
       const occupied = [...new Set(group.flatMap(collision => collision.occupied))];
       const payload = {
         placeholders: Object.fromEntries(keys.map((key, index) => [`v${index + 1}`, key])),
@@ -82,19 +96,22 @@ export async function reconsiderNames({ proposals, resolve, journal, id, namer, 
       const response = await namer.name(payload, { ...telemetry, batch_id: retryId, batch_ids: [retryId],
         name_count: Object.keys(payload.placeholders).length, phase: 'model', queued_at: Date.now() });
       const entries = Object.entries(payload.placeholders);
-      if (!response.names || Object.keys(response.names).length !== entries.length || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string'))
+      if (!response.names || Object.entries(response.names).some(([placeholder, name]) => !Object.hasOwn(payload.placeholders, placeholder) || typeof name !== 'string'))
         throw new Error(`invalid names for ${retryId}`);
-      return Object.fromEntries(entries.map(([placeholder, key]) => [key, response.names[placeholder]]));
+      return Object.fromEntries(entries.filter(([placeholder]) => Object.hasOwn(response.names, placeholder))
+        .map(([placeholder, key]) => [key, response.names[placeholder]]));
     }));
     let failure;
     // Drain accepted replies even when a peer fails; arrival order never changes the journal.
     for (const [index, { group, retryId }] of requests.entries()) {
       const reply = replies[index];
       if (reply.status === 'rejected') { failure ??= reply.reason; continue; }
-      journal.response(retryId, new Map(group.map(({ key }) => [key, reply.value[key]])));
+      const names = new Map(group.filter(({ key }) => Object.hasOwn(reply.value, key)).map(({ key }) => [key, reply.value[key]]));
+      if (names.size) journal.response(retryId, names);
       for (const { key } of group) {
         attempted.add(key);
-        proposals.set(key, reply.value[key]);
+        if (Object.hasOwn(reply.value, key)) proposals.set(key, reply.value[key]);
+        else proposals.delete(key);
       }
     }
     if (failure) throw failure;

@@ -273,10 +273,17 @@ export async function run(options, dependencies) {
                       }
                       return;
                     }
-                    const entries = Object.entries(payload.placeholders);
-                    if (!response.names || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string') || Object.keys(response.names).length !== entries.length) throw new Error(`invalid names for ${file}:${batchIds.join(',')}`);
+                    if (!response.names || Object.entries(response.names).some(([placeholder, name]) => !Object.hasOwn(payload.placeholders, placeholder) || typeof name !== 'string')) throw new Error(`invalid names for ${file}:${batchIds.join(',')}`);
                     for (const { batch, payload: original } of parts) {
-                      journal.response(`proposal:${batch.id}`, new Map(Object.entries(original.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])));
+                      const names = new Map(Object.entries(original.placeholders).filter(([placeholder]) => Object.hasOwn(response.names, placeholder))
+                        .map(([placeholder, key]) => [key, response.names[placeholder]]));
+                      if (!names.size) {
+                        batchFailed = true;
+                        summary.failedBatches++;
+                        emit({ file, status: 'batch-failed', batch: batch.id, reason: 'No complete names received.' });
+                        continue;
+                      }
+                      journal.response(`proposal:${batch.id}`, names);
                     }
                   });
                 } finally { metrics.last_batch_at = Date.now(); }
