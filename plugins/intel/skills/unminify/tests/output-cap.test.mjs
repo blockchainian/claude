@@ -67,7 +67,7 @@ async function fixture(t) {
     }) };
 }
 
-test('output-bounded naming preserves order, context, schema and child retry identity', async t => {
+test('naming preserves order, context, schema and original batch identity', async t => {
   const f = await fixture(t);
   const placeholders = Object.fromEntries(Array.from({ length: 2031 }, (_, i) => [`v${i + 1}`, i]));
   const payload = { context: 'const v1 = v2031; // shared context', placeholders };
@@ -81,22 +81,22 @@ test('output-bounded naming preserves order, context, schema and child retry ide
     assert.deepEqual(Object.keys(body.text.format.schema.properties), body.text.format.schema.required);
     assert.equal(body.text.format.schema.additionalProperties, false);
   }
-  assert.deepEqual(f.logs.map(row => [row.subrequest_index, row.subrequest_count, row.name_count, row.attempt]),
-    [[undefined, undefined, 2031, 1]]);
+  assert.deepEqual(f.logs.map(row => [row.name_count, row.attempt]),
+    [[2031, 1]]);
   assert(f.logs.every(row => row.batch_id === 'original' && row.batch_ids[0] === 'original'));
   assert.equal(result.usage.input_tokens, 12);
   assert.equal(result.usage.output_tokens, 2031 * 8);
   assert.equal(Object.keys(payload.placeholders).length, 2031);
 });
 
-test('the exact name bound stays one request', async t => {
+test('naming 1000 bindings stays one request', async t => {
   const f = await fixture(t);
   await f.namer.name({ context: 'const v1 = 1;', placeholders:
     Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`v${i + 1}`, i])) });
   assert.equal(f.bodies.length, 1);
 });
 
-for (const mode of ['incomplete', 'invalid']) test(`a later ${mode} child leaves no partial journal reply and resumes the original batch`, async t => {
+for (const mode of ['incomplete', 'invalid']) test(`an ${mode} reply leaves no partial journal reply and resumes the original batch`, async t => {
   const f = await fixture(t);
   const source = sourceWithNames(1001);
   await writeFile(join(f.root, 'input.js'), source);
@@ -109,8 +109,8 @@ for (const mode of ['incomplete', 'invalid']) test(`a later ${mode} child leaves
   assert.equal(interrupted.length, 1, 'no child output is durable before all children validate');
   assert.equal(await readFile(join(f.root, 'input.js'), 'utf8'), source);
   const attempts = await records(join(f.root, '.unminify/requests.jsonl'));
-  assert.deepEqual(attempts.map(row => [row.subrequest_index, row.subrequest_count, row.name_count, row.attempt]),
-    [[undefined, undefined, 1001, 1], [undefined, undefined, 1001, 2], [undefined, undefined, 1001, 3], [undefined, undefined, 1001, 4]]);
+  assert.deepEqual(attempts.map(row => [row.name_count, row.attempt]),
+    [[1001, 1], [1001, 2], [1001, 3], [1001, 4]]);
   if (mode === 'incomplete') assert(attempts.every(row => row.failure.incomplete_reason === 'max_output_tokens'));
   assert.deepEqual(f.bodies.map(body => body.text.format.schema.required.length), [1001, 1001, 1001, 1001]);
   f.controls.failKey = f.controls.invalidKey = null;
@@ -127,7 +127,7 @@ for (const mode of ['incomplete', 'invalid']) test(`a later ${mode} child leaves
   const finished = f.bodies.length;
   assert.equal((await f.run()).exitCode, 0);
   assert.equal(f.bodies.length, finished);
-  // A pre-splitting accepted proposal replays without sending any child request.
+  // An accepted proposal replays without sending another naming request.
   await writeFile(join(f.root, 'input.js'), source);
   await writeFile(path, accepted.slice(0, 2).map(JSON.stringify).join('\n') + '\n');
   const journal = openJournal(f.root, 'input.js', source, { minSymbolLength: 4, maxInputTokens: 100000 });
@@ -136,7 +136,7 @@ for (const mode of ['incomplete', 'invalid']) test(`a later ${mode} child leaves
   assert.equal(f.bodies.length, finished);
 });
 
-test('chunk program naming commits one complete original reply after all children validate', async t => {
+test('chunk program naming commits one complete reply after validation', async t => {
   const f = await fixture(t);
   const source = sourceWithNames(1001);
   await writeFile(join(f.root, 'input.js'), source);
