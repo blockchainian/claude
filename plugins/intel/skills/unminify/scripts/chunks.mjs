@@ -1,9 +1,10 @@
 import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
-import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit, identifierBinding } from './identifiers.mjs';
+import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit } from './identifiers.mjs';
 import { toIdentifier, applyRenames, bindingContext, importCollisionName, sameImportedBinding, orderImportRestores } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
+import { analyzeImportChunkFile, applyImportChunkFile } from './import-chunk-file.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
 const traverse = traverseModule.default ?? traverseModule;
@@ -282,31 +283,35 @@ export function applyChunkRenames(sources, names) {
   }
   return output;
 }
-function identityFacts(analysis) {
-  const result = [];
-  for (const [file, record] of analysis.files) {
-    const local = [];
-    traverse(record.ast, {
-      Scope(path) {
-        for (const binding of Object.values(path.scope.bindings)) if (!local.includes(binding)) local.push(binding);
-      }
+// Keep only scalar facts across files; Babel paths and scopes stay file-local.
+function rewriteFacts(sources) {
+  const files = new Map(), declarations = new Map();
+  let hasWith = false, directEval = false;
+  for (const [file, source] of sources) {
+    const record = analyzeImportChunkFile(source);
+    const bindings = record.bindings.map(binding => binding.name);
+    for (const [index, name] of bindings.entries()) {
+      if (!declarations.has(name)) declarations.set(name, []);
+      declarations.get(name).push({ file, index });
+    }
+    files.set(file, {
+      bindings,
+      allBindings: record.allBindings,
+      lexical: record.lexical.filter(token => !token.exported)
+        .map(token => ({ name: token.name, local: token.identityLocal })),
     });
-    local.sort((a, b) => a.identifier.start - b.identifier.start);
-    const declarations = new Map(local.map(binding => [binding.identifier, binding]));
-    result.push([file, record.lexical.filter(path => !path.parentPath.isExportSpecifier()).map(path => {
-      const name = path.node.name,
-        binding = identifierBinding(path, declarations),
-        owners = analysis.declarations.get(name);
-      if (binding && binding.scope !== record.program.scope) return `local:${local.indexOf(binding)}`;
-      if (owners?.length === 1) {
-        const owner = owners[0],
-          index = analysis.files.get(owner.file).bindings.indexOf(owner.binding);
-        return `chunk:${owner.file}:${index}`;
-      }
-      return owners?.length > 1 ? `ambiguous:${name}` : `global:${name}`;
-    })]);
+    hasWith ||= record.hasWith;
+    directEval ||= record.directEval;
   }
-  return JSON.stringify(result);
+  return { files, declarations, dynamicScope: hasWith || directEval && !declarations.has('eval') };
+}
+function identityFacts(analysis) {
+  return JSON.stringify([...analysis.files].map(([file, record]) => [file, record.lexical.map(token => {
+    if (token.local !== null) return `local:${token.local}`;
+    const owners = analysis.declarations.get(token.name);
+    if (owners?.length === 1) return `chunk:${owners[0].file}:${owners[0].index}`;
+    return owners?.length > 1 ? `ambiguous:${token.name}` : `global:${token.name}`;
+  })]));
 }
 
 /** Invert only proven program renames, then reuse the strict single-file guard. */
@@ -314,19 +319,10 @@ export function checkChunkRewrite(before, after) {
   try {
     if (JSON.stringify([...before.keys()]) !== JSON.stringify([...after.keys()])) return 'CHUNK_FILES_CHANGED';
     if ([...before].every(([file, source]) => after.get(file) === source)) return null;
-    const a = inspect(before),
-      b = inspect(after),
-      inverse = new Map();
+    const a = rewriteFacts(before), b = rewriteFacts(after), inverse = new Map();
     if (a.dynamicScope) {
-      const bindingNames = analysis => [...analysis.files].map(([file, record]) => {
-        const bindings = new Set();
-        traverse(record.ast, {
-          Scope(path) {
-            for (const binding of Object.values(path.scope.bindings)) bindings.add(binding);
-          }
-        });
-        return [file, [...bindings].sort((left, right) => left.identifier.start - right.identifier.start).map(binding => binding.identifier.name)];
-      });
+      const bindingNames = analysis => [...analysis.files].map(([file, record]) =>
+        [file, record.allBindings.map(binding => binding.name)]);
       if (JSON.stringify(bindingNames(a)) !== JSON.stringify(bindingNames(b))) return 'CHUNK_DYNAMIC_SCOPE';
     }
     if (identityFacts(a) !== identityFacts(b)) return 'CHUNK_BINDING_CHANGED';
@@ -334,43 +330,32 @@ export function checkChunkRewrite(before, after) {
       const next = b.files.get(file);
       if (record.bindings.length !== next.bindings.length) return 'CHUNK_BINDINGS_CHANGED';
       for (let i = 0; i < record.bindings.length; i++) {
-        const original = record.bindings[i].identifier.name,
-          renamed = next.bindings[i].identifier.name;
+        const original = record.bindings[i], renamed = next.bindings[i];
         if (original !== renamed) {
-          if ((a.declarations.get(original)?.length ?? 0) > 1) return 'CHUNK_DUPLICATE_CHANGED';
+          if (a.declarations.get(original).length > 1) return 'CHUNK_DUPLICATE_CHANGED';
           if (inverse.has(renamed) && inverse.get(renamed) !== original) return 'CHUNK_DUPLICATE_ADDED';
           inverse.set(renamed, original);
         }
       }
     }
-    // Restore nested names first so inversion cannot capture a legal local
-    // rename that happens to reuse a program binding's original spelling.
-    const localsRestored = new Map(after);
+    const localNames = new Map();
     for (const [file, original] of a.files) {
-      const current = b.files.get(file),
-        bindingsOf = record => {
-          const entries = new Set();
-          traverse(record.ast, {
-            Scope(path) {
-              for (const binding of Object.values(path.scope.bindings)) if (binding.scope !== record.program.scope) entries.add(binding);
-            }
-          });
-          return [...entries].sort((x, y) => x.identifier.start - y.identifier.start);
-        };
-      const oldBindings = bindingsOf(original),
-        newBindings = bindingsOf(current),
+      const oldBindings = original.allBindings.filter(binding => !binding.top),
+        newBindings = b.files.get(file).allBindings.filter(binding => !binding.top),
         names = new Map();
       if (oldBindings.length !== newBindings.length) return 'CHUNK_BINDINGS_CHANGED';
-      for (let i = 0; i < oldBindings.length; i++) if (oldBindings[i].identifier.name !== newBindings[i].identifier.name) names.set(newBindings[i].identifier.start, oldBindings[i].identifier.name);
-      if (names.size) localsRestored.set(file, applyRenames(after.get(file), names));
+      for (let i = 0; i < oldBindings.length; i++) if (oldBindings[i].name !== newBindings[i].name)
+        names.set(newBindings[i].key, oldBindings[i].name);
+      localNames.set(file, names);
     }
-    const restored = applyChunkRenames(localsRestored, inverse);
+    // Restore nested names before program inversion so legal local reuse cannot capture it.
+    // Parse, edit and check one member at a time, retaining no chunk-wide AST graphs.
     for (const [file, source] of before) {
-      // Chunk identity checks already passed; identical bytes need no file guard.
-      if (source === restored.get(file)) continue;
-      const reason = checkRewrite(source, restored.get(file), {
-        fragment: false, sharedProgram: true
-      });
+      const names = localNames.get(file);
+      let restored = names.size ? applyRenames(after.get(file), names) : after.get(file);
+      restored = applyImportChunkFile(restored, inverse, analyzeImportChunkFile(restored));
+      if (source === restored) continue;
+      const reason = checkRewrite(source, restored, { fragment: false, sharedProgram: true });
       if (reason) return `${file}: ${reason}`;
     }
     return null;
