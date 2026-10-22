@@ -689,6 +689,93 @@ fn assert_centered_event_detail(
 }
 
 #[test]
+fn diff_block_centers_like_code_and_bounds_its_background() {
+    let event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
+        .into_iter()
+        .find(|event| event.calls.iter().any(|call| call.name == "Edit"))
+        .unwrap();
+    let source = event.calls[0]
+        .input
+        .iter()
+        .chain(event.calls[0].output.iter().flatten())
+        .find_map(|section| match section {
+            crate::event::Section::Diff { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(source.contains('装'));
+    let mut code = event.clone();
+    let call = &mut code.calls[0];
+    for section in call
+        .input
+        .iter_mut()
+        .chain(call.output.iter_mut().flatten())
+    {
+        if let crate::event::Section::Diff { label, lang, text } = section {
+            *section = crate::event::Section::Code {
+                label: label.clone(),
+                lang: lang.clone(),
+                text: text.clone(),
+            };
+        }
+    }
+    for light in [false, true] {
+        super::super::highlight::use_theme(light, None).unwrap();
+        for width in [41, 120, 200] {
+            let diff = layout(&event, width);
+            let code_layout = layout(&code, width);
+            let marker = "+    fn wrapped_path_ends";
+            let diff_line = diff
+                .lines
+                .iter()
+                .find(|line| line.to_string().contains(marker))
+                .unwrap();
+            let code_line = code_layout
+                .lines
+                .iter()
+                .find(|line| line.to_string().contains(marker))
+                .unwrap();
+            let start = diff_line.to_string().find(marker).unwrap();
+            assert_eq!(
+                start,
+                code_line.to_string().find(marker).unwrap(),
+                "width={width}"
+            );
+            if width == 200 {
+                let block_width = body_parts(&code)
+                    .into_iter()
+                    .find(|part| part.source == source)
+                    .unwrap()
+                    .lines_in(
+                        usize::from(code_layout.columns.text.width),
+                        Style::default(),
+                        DateTime::UNIX_EPOCH,
+                        Path::new("/workspace"),
+                    )
+                    .iter()
+                    .map(Line::width)
+                    .max()
+                    .unwrap();
+                assert!(start > 0);
+                for line in &diff.lines {
+                    let mut column = 0;
+                    for span in &line.spans {
+                        let end = column + span.width();
+                        if span.style.bg.is_some() {
+                            assert!(column >= start && end <= start + block_width);
+                        }
+                        column = end;
+                    }
+                    if line.to_string().trim_start().starts_with('+') {
+                        assert_eq!(column, start + block_width);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn subagent_activity_blocks_are_centered() {
     let events = codex_events("codex-collaboration/spawn_agent.jsonl");
     assert_eq!(events.len(), 1);

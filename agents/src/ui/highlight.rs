@@ -414,7 +414,7 @@ pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
 }
 
 /// Unified diff hunks with separate syntax state for the before and after code.
-/// Preformatted rows are clipped by the view, so only short changed rows need padding.
+/// Changed rows fill the block width; the shared preformatted layout centers and clips it.
 pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'static>> {
     let diff_style = |name| {
         let mut style = scope_style(name);
@@ -431,6 +431,12 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
     let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
     let syntax = !exceeds_limits(text) && find_syntax(lang).is_some();
     let rows: Vec<_> = text.lines().collect();
+    let width = rows
+        .iter()
+        .map(|row| Line::from(*row).width())
+        .max()
+        .unwrap_or(0)
+        .min(width);
     rows.split_inclusive(|line| line.starts_with("@@"))
         .flat_map(|hunk| {
             let code = |skip| {
@@ -945,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_backgrounds_fill_width_in_both_themes() {
+    fn diff_backgrounds_fill_block_width_in_both_themes() {
         for (light, removed, added) in [
             (false, Color::Rgb(34, 10, 10), Color::Rgb(0, 20, 8)),
             (true, Color::Rgb(208, 185, 185), Color::Rgb(125, 212, 183)),
@@ -953,7 +959,7 @@ mod tests {
             use_theme(light, None).unwrap();
             let lines = diff_lines("@@ -1 +1 @@\n-旧\n+新\n same", "", 20);
             for (line, background) in lines[1..3].iter().zip([removed, added]) {
-                assert_eq!(line.width(), 20);
+                assert_eq!(line.width(), 11);
                 assert!(
                     line.spans
                         .iter()
@@ -962,6 +968,32 @@ mod tests {
             }
             for line in [&lines[0], &lines[3]] {
                 assert!(line.spans.iter().all(|span| span.style.bg.is_none()));
+            }
+        }
+    }
+
+    #[test]
+    fn diff_block_width_includes_context_and_wide_characters() {
+        for light in [false, true] {
+            use_theme(light, None).unwrap();
+            for (source, expected) in [
+                ("@@\n-旧\n+新\n 中文日本語", 11),
+                ("@@\n-中文日本語\n+新\n same", 11),
+                ("@@ -1 +1 @@\n-旧\n+新\n same", 11),
+            ] {
+                for width in [0, 4, 20] {
+                    let lines = diff_lines(source, "", width);
+                    for (line, original) in lines.iter().zip(source.lines()) {
+                        let original_width = Line::from(original).width();
+                        if original.starts_with(['+', '-']) {
+                            assert_eq!(line.width(), original_width.max(expected.min(width)));
+                            assert!(line.spans.iter().all(|span| span.style.bg.is_some()));
+                        } else {
+                            assert_eq!(line.width(), original_width);
+                            assert!(line.spans.iter().all(|span| span.style.bg.is_none()));
+                        }
+                    }
+                }
             }
         }
     }
