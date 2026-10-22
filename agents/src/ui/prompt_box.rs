@@ -96,26 +96,29 @@ impl PromptBox {
             .search
             .as_ref()
             .map(|search| format!("History: {}", search.query.text()));
-        // A failed send keeps its reason after the label until the next send.
-        let failed_label = match &self.state {
-            SendState::Failed(reason) => {
-                Some(format!("{label} {}", reason.lines().next().unwrap_or("")))
+        // A failed send reverses the marker and keeps its reason after it until the next send.
+        let failed_reason = match &self.state {
+            SendState::Failed(reason) if self.search.is_none() => {
+                Some(reason.lines().next().unwrap_or(""))
             }
-            SendState::Ready => None,
+            _ => None,
         };
-        let label = search_label
-            .as_deref()
-            .or(failed_label.as_deref())
-            .unwrap_or(label);
+        let label = search_label.as_deref().unwrap_or(label);
         let prefix_budget = usize::from(width.saturating_sub((width / 3).max(1)));
-        let label_budget = if self.search.is_some() || failed_label.is_some() {
+        let label_budget = if self.search.is_some() {
             prefix_budget.saturating_sub(3)
         } else {
             usize::from(width / 3).min(prefix_budget.saturating_sub(3))
         };
-        let shows_task = self.search.is_none() && failed_label.is_none();
+        let shows_task = self.search.is_none() && failed_reason.is_none();
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
-        let heading = format!("{} ", prompt_heading(&label, PROMPT_MARKER));
+        let heading = match failed_reason {
+            Some(reason) => format!(
+                "{} {reason} ",
+                prompt_heading(&label, DISABLED_PROMPT_MARKER)
+            ),
+            None => format!("{} ", prompt_heading(&label, PROMPT_MARKER)),
+        };
         let prefix = clip(&heading, prefix_budget);
         let task_label_len = if shows_task {
             label.len().min(prefix.len())
@@ -502,20 +505,20 @@ mod tests {
     }
 
     #[test]
-    fn failed_send_shows_its_reason_in_red_after_the_label() {
+    fn failed_send_reverses_the_marker_and_shows_its_reason_after_it() {
         let mut editor = focused();
         editor.editor.set_text("retry me");
         editor.state = SendState::Failed("Claude attach timed out\nscreen".into());
         let area = Rect::new(0, 0, 80, 1);
         let mut buffer = Buffer::empty(area);
         editor.render(area, &mut buffer, "Task", Style::default(), None, true);
-        let heading = "Task Claude attach timed out ❯ retry me";
+        let heading = "Task ❮ Claude attach timed out retry me";
         let screen: String = (0..heading.chars().count() as u16)
             .map(|column| buffer[(column, 0)].symbol().to_owned())
             .collect();
         assert_eq!(screen, heading);
-        let marker = heading.find('❯').unwrap();
-        for column in 0..=heading[..marker].chars().count() as u16 {
+        let reason_end = heading.find(" retry").unwrap();
+        for column in 0..heading[..reason_end].chars().count() as u16 {
             assert_eq!(buffer[(column, 0)].fg, Color::Red, "column {column}");
         }
         assert_ne!(
