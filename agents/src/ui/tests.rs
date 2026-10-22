@@ -4256,7 +4256,7 @@ fn task_details_queued_messages_keep_links_selection_and_copy() {
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end_x, end_y)),
         Some(Action::Copy {
-            text: queued[..queued.find("finish").unwrap()].into(),
+            text: "Queued first line\n\nRead report and ".into(),
             label: "Copied prompt".into(),
         })
     );
