@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { runChunkWorkers } from './chunk-workers.mjs';
+import { runSyntaxPreflight } from './syntax-preflight.mjs';
+import { syntaxFingerprint } from './syntax/stage.mjs';
+import { importMergeVersion } from './merge-imports.mjs';
 import { loadHistory, loadImportContext } from './history.mjs';
 import { createChunkIgnore } from './chunk-manifest.mjs';
 import { runMergeFile } from './merge-imports.mjs';
@@ -174,16 +178,22 @@ export async function run(options, dependencies) {
       }
     }
     if (settings.command === 'rename-bindings') {
+      const endPreflight = phase('syntax_preflight');
       const [chunkPending, ordinaryPending] = await Promise.all([
         chunkDriver.syntaxPending({ fragmentContext, pool: syntaxPool }),
         syntaxFiles(async file => {
-          const source = readFileSync(join(root, file), 'utf8');
-          const restored = await syntaxPool.run({ kind: 'transform', source,
-            options: { fragment: fragments.has(file), fragmentContext } });
-          const merged = await syntaxPool.run({ kind: 'merge', sources: new Map([[file, restored.source]]) });
-          return source !== merged.get(file) ? file : null;
+          const result = await runSyntaxPreflight(root, {scope: file, files: [file], fragmentContext,
+            syntaxFingerprint, importMergeVersion}, async () => {
+            const source = readFileSync(join(root, file), 'utf8');
+            const restored = await syntaxPool.run({ kind: 'transform', source,
+              options: { fragment: fragments.has(file), fragmentContext } });
+            const merged = await syntaxPool.run({ kind: 'merge', sources: new Map([[file, restored.source]]) });
+            return source !== merged.get(file) ? [file] : [];
+          });
+          return result.pending[0] ?? null;
         }),
       ]);
+      endPreflight();
       const pending = [...chunkPending, ...ordinaryPending.filter(Boolean)];
       if (pending.length) throw new Error(`Run restore-syntax before rename-bindings:\n${[...new Set(pending)].sort().join('\n')}`);
     }
@@ -326,13 +336,23 @@ export async function run(options, dependencies) {
       do {
         const ordinary = tasks.filter(task => typeof task === 'string');
         const fileConcurrency = Math.min(ordinary.length, settings.concurrency * 2);
-        const fileQueue = ordinary.values(), chunkQueue = tasks.filter(task => typeof task !== 'string').values();
+        const largeChunks = [], smallChunks = [];
+        for (const task of tasks.filter(task => typeof task !== 'string')) {
+          // Small groups cost less to parse than starting another isolate.
+          const bytes = task.files.reduce((sum, file) => sum + statSync(join(root, file)).size, 0);
+          (bytes >= 256 * 1024 ? largeChunks : smallChunks).push(task);
+        }
+        const fileQueue = ordinary.values(), chunkQueue = smallChunks.values();
         async function worker(queue) {
           for (const task of queue) {
             const file = typeof task === 'string' ? task : task.id;
             try {
               if (typeof task === 'string') await processFile(task);
-              else await chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext });
+              else {
+                const cpu_ms = {};
+                try { await withTimings(cpu_ms, () => chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext })); }
+                finally { emit({chunk: task.id, status: 'cpu-timing', cpu_ms, threadId: 0}); }
+              }
             }
             catch (error) {
               summary.exitCode = 1;
@@ -340,8 +360,13 @@ export async function run(options, dependencies) {
             }
           }
         }
-        // A chunk retains every member's Babel graph; request slots still run in parallel.
-        await Promise.all([...Array.from({ length: fileConcurrency }, () => worker(fileQueue)), worker(chunkQueue)]);
+        const chunkWork = runChunkWorkers(largeChunks, { root, settings, selected: selectedFiles, fragmentContext,
+          namer, withSlot, emit, summary, sources, phase }).catch(error => {
+            summary.exitCode = 1;
+            emit({status: 'interrupted', reason: error.message});
+          });
+        await Promise.all([...Array.from({ length: fileConcurrency }, () => worker(fileQueue)), worker(chunkQueue), chunkWork]);
+        if (syncing && largeChunks.length) chunkDriver.prepareImports(sources, largeChunks, true);
         if (!syncing) break;
         if (!naming) await chunkDriver.prepareImports(sources);
         loadHistory(root, { sources, journals, chunks: chunkDriver, ignores, emit });
@@ -427,7 +452,7 @@ export async function run(options, dependencies) {
       summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
       if (!Object.keys(summary.quota).length) summary.quota = "没测到";
       summary.total_ms = endedAt - startedAt;
-      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
+      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.syntax_preflight ? ['syntax_preflight'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
         .map(key => [key, intervalMs(phases[key] ?? [])]));
       Object.assign(summary, requestStats(requests, pauses, summary.total_ms));
       event({ type: 'run_end', at: endedAt, total_ms: summary.total_ms });

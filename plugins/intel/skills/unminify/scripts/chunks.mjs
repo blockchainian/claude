@@ -366,6 +366,8 @@ export function checkChunkRewrite(before, after) {
     }
     const restored = applyChunkRenames(localsRestored, inverse);
     for (const [file, source] of before) {
+      // Chunk identity checks already passed; identical bytes need no file guard.
+      if (source === restored.get(file)) continue;
       const reason = checkRewrite(source, restored.get(file), {
         fragment: false, sharedProgram: true
       });
