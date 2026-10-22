@@ -8752,9 +8752,39 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
     assert_eq!(click_mouse(&mut view, cwd_cell), None);
 }
 
+/// A real directory named `project`, for group headings that link only to existing folders.
+pub(super) fn existing_project() -> (tempfile::TempDir, PathBuf) {
+    let parent = tempfile::tempdir().unwrap();
+    let project = parent.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    (parent, project)
+}
+
+#[test]
+fn project_group_header_of_a_missing_directory_is_not_a_link() {
+    let mut task = session("gone", "Gone task", SessionStatus::Ready, 0);
+    task.cwd = "/nonexistent/build".into();
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![task], false);
+    let rendered = screen(&view, 120, 40);
+    assert!(rendered.contains(" build "), "{rendered}");
+    assert!(view.viewport.borrow().list_links.is_empty());
+}
+
 #[test]
 fn project_group_header_opens_its_directory() {
+    let (_parent, project) = existing_project();
     let mut view = fixture();
+    let sessions = view
+        .rows
+        .iter()
+        .cloned()
+        .map(|mut session| {
+            session.cwd = project.clone();
+            session
+        })
+        .collect();
+    view.set_sessions(sessions, false);
     let rendered = screen(&view, 120, 40);
     let (x, y) = rendered_cell(&rendered, " project  ");
     assert_eq!(
@@ -8766,7 +8796,7 @@ fn project_group_header_opens_its_directory() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
-        Some(Action::OpenPath("/tmp/project".into()))
+        Some(Action::OpenPath(project.clone()))
     );
     let selected = view.selected;
     assert_eq!(

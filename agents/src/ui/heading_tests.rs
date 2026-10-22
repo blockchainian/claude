@@ -38,28 +38,22 @@ fn headings_center_at_wide_and_narrow_widths() {
 
 #[test]
 fn centered_project_heading_clicks_and_underline_cover_only_text() {
+    let (_parent, project) = existing_project();
     for width in [8, 13, 20, 39, 80, 120] {
         let mut view = test_view(Grouping::Project, false);
-        view.set_sessions(
-            vec![session("heading", "Task", SessionStatus::Ready, 0)],
-            false,
-        );
+        let mut task = session("heading", "Task", SessionStatus::Ready, 0);
+        task.cwd = project.clone();
+        view.set_sessions(vec![task], false);
         let area = Rect::new(3, 2, width, 6);
         let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 10));
         view.render_center_rows(area, &mut buf, Utc::now());
-        let label = formatting::format_directory_display(
-            Path::new("/tmp/project"),
-            Some(usize::from(width)),
-        );
+        let label = formatting::format_directory_display(&project, Some(usize::from(width)));
         let start = area.x + (width - label.width() as u16) / 2;
         let end = start + label.width() as u16;
         let links = view.viewport.borrow().list_links.clone();
         assert_eq!(
             links,
-            vec![(
-                Rect::new(start, area.y, end - start, 1),
-                PathBuf::from("/tmp/project")
-            )]
+            vec![(Rect::new(start, area.y, end - start, 1), project.clone())]
         );
         links::underline(&mut buf, &links);
         for x in area.x..area.right() {
@@ -80,7 +74,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
                 view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1));
             assert_eq!(
                 action,
-                on_text.then(|| Action::OpenPath("/tmp/project".into())),
+                on_text.then(|| Action::OpenPath(project.clone())),
                 "click x={x}, width={width}"
             );
             if on_text {
@@ -97,7 +91,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
                         mouse(MouseEventKind::Down(MouseButton::Left), x, area.y)
                     ),
                     Some(Action::NewDraft {
-                        cwd: "/tmp/project".into()
+                        cwd: project.clone()
                     })
                 );
             } else {

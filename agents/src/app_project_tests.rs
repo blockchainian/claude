@@ -59,9 +59,7 @@ fn project_heading_returns_when_reselecting_first_inactive_task_after_paging() {
                         .replace("\u{1b}[24m", "")
                 })
                 .collect();
-            let heading = rows
-                .iter()
-                .position(|line| line.trim() == "alpha");
+            let heading = rows.iter().position(|line| line.trim() == "alpha");
             let task = rows
                 .iter()
                 .position(|line| line.contains("Project task 0"))

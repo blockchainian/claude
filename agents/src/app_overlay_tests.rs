@@ -28,14 +28,12 @@ fn delete_dialog_covers_project_link_underlines_through_app() {
         .unwrap();
     db.execute("DELETE FROM threads WHERE id NOT IN ('thread-0', 'thread-1', 'thread-2', 'thread-3', 'thread-4', 'thread-5')", []).unwrap();
     for index in 0..6 {
+        let project = directory.path().join(format!("project-{index}"));
+        std::fs::create_dir(&project).unwrap();
         db.execute(
             "UPDATE threads SET cwd=?1, title=?2 WHERE id=?3",
             rusqlite::params![
-                directory
-                    .path()
-                    .join(format!("project-{index}"))
-                    .to_str()
-                    .unwrap(),
+                project.to_str().unwrap(),
                 format!("Overlay task {index}"),
                 format!("thread-{index}")
             ],
