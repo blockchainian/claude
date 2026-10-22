@@ -78,7 +78,10 @@ Unfinished files supply their current export names without being rewritten, pres
 Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
 `.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
 performance summaries to `.unminify/performance.jsonl` in the target Git root. Telemetry
-contains no credentials or source text. Analyze the latest run locally with
+records selected error fields with credentials redacted and messages capped at 2048 characters,
+along with request IDs, SSE event counts, timing, received bytes and output-text character counts.
+It retains no request or output text. Each attempt's `failure` records its own error; HTTP 200
+and token usage alone do not establish success. Analyze the latest run locally with
 `node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo>`; optional `--run-id <id>`,
 `--window-seconds 10` and `--slow-files 10` select the run, window size and slow-file count.
 The JSON report and run summary include model HTTP-attempt count and median/mean names per
