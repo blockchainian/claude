@@ -596,7 +596,14 @@ impl View {
         if !layout.event_detail.is_empty() {
             self.viewport.borrow_mut().output_borders =
                 [layout.event_detail_top_rule, layout.footer_rule];
-            self.render_event_detail(inset(layout.event_detail), buf, now);
+            self.render_event_detail(
+                super::event_detail::EventDetailArea {
+                    panel: layout.event_detail,
+                    content: inset(layout.event_detail),
+                },
+                buf,
+                now,
+            );
         }
         let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
         self.render_footer(

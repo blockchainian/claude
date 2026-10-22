@@ -1470,7 +1470,11 @@ fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
                 view.render_event_detail_content(
                     event,
                     "12:34:56",
-                    panel,
+                    super::super::event_detail::EventDetailArea {
+                        panel,
+                        content: panel
+                            .inner(Margin::new(super::super::render::HORIZONTAL_PADDING, 0)),
+                    },
                     &mut buffer,
                     Path::new("/workspace"),
                     DateTime::UNIX_EPOCH,
@@ -1488,7 +1492,8 @@ fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
                     markers.extend(marker);
                     let y = panel.y + EVENT_TOP + row as u16;
                     let expected = if changed {
-                        let x = panel.x + text.chars().position(|c| c != ' ').unwrap() as u16;
+                        let x = layout.columns.text.x
+                            + text.chars().position(|c| c != ' ').unwrap() as u16;
                         let background = buffer[(x, y)].bg;
                         assert_ne!(background, ratatui::style::Color::Reset);
                         background
@@ -1509,4 +1514,83 @@ fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
         }
     }
     assert!(markers.contains(&'+') && markers.contains(&'-') && markers.contains(&'@'));
+}
+
+#[test]
+fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
+    use crate::providers::Provider;
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut provider = crate::providers::claude::ClaudeProvider::new(dir.path().into());
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(provider.refresh(1).sessions, false);
+    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    view.event_session = view.selected_id().cloned();
+    let now = DateTime::UNIX_EPOCH;
+    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+    cases.extend(codex_events("codex-file-changes.jsonl"));
+    let mut markers = std::collections::HashSet::new();
+    for light in [false, true] {
+        super::super::highlight::use_theme(light, None).unwrap();
+        for event in &cases {
+            view.set_event(vec![event.clone()]);
+            view.select_fixture_event(Some(event.clone()));
+            for width in [41, 120, 200] {
+                let area = Rect::new(0, 0, width, 250);
+                let mut buffer = Buffer::empty(area);
+                view.render_at(area, &mut buffer, now);
+                let viewport = view.viewport.borrow();
+                let layout = viewport.event_detail_layout.as_ref().unwrap();
+                let panel = view.center_layout(area).event_detail;
+                // Compare both renderers at the same inset content rectangle.
+                let reference = View::new(Grouping::Project, false);
+                let mut before = Buffer::empty(area);
+                reference.render_event_detail_content(
+                    event,
+                    "12:34:56",
+                    viewport.event_detail,
+                    &mut before,
+                    &view.selected_row().unwrap().cwd,
+                    now,
+                );
+                for (row, &source) in layout.visible.iter().enumerate() {
+                    let line = &layout.lines[source];
+                    let marker = line.to_string().trim_start().chars().next();
+                    let changed = line.style.bg.is_some();
+                    if changed {
+                        markers.extend(marker);
+                    }
+                    let y = panel.y + EVENT_TOP + row as u16;
+                    let expected = line.style.bg.unwrap_or(ratatui::style::Color::Reset);
+                    for x in panel.x..panel.right() {
+                        if changed
+                            || x < viewport.event_detail.x
+                            || x >= viewport.event_detail.right()
+                        {
+                            assert_eq!(
+                                buffer[(x, y)].bg,
+                                expected,
+                                "light={light}, width={width}, x={x}, row={row}, marker={marker:?}"
+                            );
+                        }
+                        // Padding changes only the background, preserving the centered text.
+                        if !layout.times.iter().any(|(time_row, _)| *time_row == source) {
+                            assert_eq!(
+                                cell_text(buffer[(x, y)].symbol()),
+                                cell_text(before[(x, y)].symbol()),
+                                "text moved at ({x}, {y}), width={width}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(markers.contains(&'+') && markers.contains(&'-'));
 }

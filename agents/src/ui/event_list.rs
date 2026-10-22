@@ -1,4 +1,4 @@
-use super::event_detail::{EventDetailColumns, Section, event_detail_columns};
+use super::event_detail::{EventDetailArea, EventDetailColumns, Section, event_detail_columns};
 use super::formatting::{format_event_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
@@ -287,7 +287,14 @@ impl View {
         })
     }
 
-    pub(super) fn render_event_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+    pub(super) fn render_event_detail(
+        &self,
+        areas: impl Into<EventDetailArea>,
+        buf: &mut Buffer,
+        now: DateTime<Utc>,
+    ) {
+        let areas = areas.into();
+        let area = areas.content;
         if self.event_session.as_ref() == self.selected_id() {
             self.restore_event_detail();
         }
@@ -312,7 +319,7 @@ impl View {
             self.event_list.sort,
         );
         let list_links = self.viewport.borrow().event_links.clone();
-        self.render_event_detail_content(event, &time, area, buf, &session.cwd, now);
+        self.render_event_detail_content(event, &time, areas, buf, &session.cwd, now);
         self.viewport.borrow_mut().event_links.extend(list_links);
     }
 
@@ -358,11 +365,13 @@ impl View {
         &self,
         event: &Event,
         time: &str,
-        area: Rect,
+        areas: impl Into<EventDetailArea>,
         buf: &mut Buffer,
         cwd: &std::path::Path,
         now: DateTime<Utc>,
     ) {
+        let areas = areas.into();
+        let area = areas.content;
         let list = self.center_layout(buf.area).event_panel;
         let columns = event_detail_columns(area, list);
         let mut body_area = super::render::row(
@@ -513,14 +522,14 @@ impl View {
         for line in &mut visible {
             highlight_matches(line, &self.event_detail.search);
         }
-        // Text reserves the clock column; changed-row backgrounds cover the whole panel.
+        // Text keeps its inset and clock column; changed rows fill the pane including padding.
         for (row, line) in visible.iter().enumerate() {
             if let Some(background) = line.style.bg {
                 buf.set_style(
                     Rect::new(
-                        columns.panel.x,
+                        areas.panel.x,
                         body_area.y + row as u16,
-                        columns.panel.width,
+                        areas.panel.width,
                         1,
                     ),
                     Style::new().bg(background),

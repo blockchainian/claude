@@ -5,6 +5,22 @@ use super::tool_detail::Part;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
+/// The pane's full background area and its inset content area.
+#[derive(Clone, Copy)]
+pub(super) struct EventDetailArea {
+    pub panel: Rect,
+    pub content: Rect,
+}
+
+impl From<Rect> for EventDetailArea {
+    fn from(area: Rect) -> Self {
+        Self {
+            panel: area,
+            content: area,
+        }
+    }
+}
+
 /// The detail panel's columns, computed from the panel alone exactly like an event list row's:
 /// a time column at the panel's right edge after a two-cell gap, and the text area left of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
