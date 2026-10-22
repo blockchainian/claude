@@ -1,4 +1,4 @@
-import { timed } from './timing.mjs';
+import { timed, captureTimings } from './timing.mjs';
 import { runSyntaxPreflight } from './syntax-preflight.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +12,7 @@ import { transformSyntax } from './syntax/runner.mjs';
 import { mergeExternalImports, importMergeVersion } from './merge-imports.mjs';
 import { syntaxFingerprint } from './syntax/stage.mjs';
 import { hash } from './journal.mjs';
-import { checkRewrite } from './checks.mjs';
+import { checkRewrite, checkRewriteAsync } from './checks.mjs';
 
 // Drain every in-flight computation before propagating failure or closing its pool.
 async function settle(tasks) {
@@ -150,7 +150,9 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
     async process(chunk, context) {
       const { namer, withSlot, emit, summary, sources, phase, fragmentContext } = context;
       const api = { ...context.api };
-      for (const name of ['planFile', 'renderBatch', 'resolveNames', 'applyRenames', 'checkRewrite']) {
+      // Preserve caller-supplied checks; the built-in checker has an async path.
+      const checkLocalRewrite = api.checkRewrite === checkRewrite ? checkRewriteAsync : api.checkRewrite;
+      for (const name of ['planFile', 'renderBatch', 'resolveNames', 'applyRenames']) {
         api[name] = (...args) => timed(name, () => context.api[name](...args));
       }
       completed.delete(chunk.id);
@@ -198,22 +200,28 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
         }
         const keys = Object.keys(packed.payload.placeholders);
         if (!response.names || Object.keys(response.names).length !== keys.length || keys.some(key => typeof response.names[key] !== 'string')) throw new Error(`invalid names for chunk ${chunk.id}`);
-        timed('journalBatchWrite', () => journal.batchMany(packed.parts.map(({ batch, payload }) => [
+        return packed.parts.map(({ batch, payload }) => [
           prefix + batch.id, new Map(Object.entries(payload.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])),
-        ])));
+        ]);
       }
-      async function requestBatches(pending, render, file, prefix = '') {
+      async function requestBatches(pending, render, file, prefix = '', target = journal, concurrency = settings.concurrency) {
         const packed = iterateBatches(pending, render, settings);
         let finished = false;
+        const replies = [];
         async function worker() {
           while (!finished) await withSlot(async () => {
             const next = timed('packBatches', () => packed.next());
             if (next.done) { finished = true; return; }
-            await request(next.value, file, prefix);
+            const index = replies.length;
+            replies.push(null);
+            replies[index] = await request(next.value, file, prefix);
           });
         }
-        try { await settle(Array.from({ length: settings.concurrency }, worker)); }
-        finally { packed.return(); }
+        try { await settle(Array.from({ length: concurrency }, worker)); }
+        finally {
+          packed.return();
+          timed('journalBatchWrite', () => target.batchMany(replies.filter(Boolean).flat()));
+        }
       }
       const endModel = phase('model', chunk.id);
       let after;
@@ -228,35 +236,70 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
           resolve: (values, onCollision) => timedResolveChunkNames(baseline, values, { ...chunkOptions, onCollision }) });
         journal.batch('program-resolved', names);
         after = timedApplyChunkRenames(baseline, names);
-        for (const file of chunk.files.filter(file => !analysis.statistics.dynamicScope && selection.has(file) && !ignored.has(file))) {
-          const source = after.get(file), local = new Map(), prefix = `local:${file}:`;
-          let stages;
-          try {
-            ({ stages } = api.planFile(source, { ...settings, fragment: true }));
-            for (const stage of stages) {
-              for (const batch of stage) if (journal.batches.has(prefix + batch.id)) {
-                for (const [key, name] of Object.entries(journal.batches.get(prefix + batch.id))) local.set(Number(key), name);
+        const files = chunk.files.filter(file => !analysis.statistics.dynamicScope && selection.has(file) && !ignored.has(file));
+        const results = new Array(files.length);
+        let nextFile = 0, stopped = false;
+        async function localWorker() {
+          while (!stopped && nextFile < files.length) {
+            const index = nextFile++, file = files[index];
+            const source = after.get(file), local = new Map(), prefix = `local:${file}:`;
+            // Each member sees its own replies immediately. Persist in member order
+            // after draining, so response timing cannot change the journal.
+            const writes = [];
+            const localJournal = {
+              batches: new Map(journal.batches), replies: new Map(journal.replies),
+              batchMany(entries) {
+                writes.push(() => journal.batchMany(entries));
+                for (const [id, names] of entries) this.batches.set(id, Object.fromEntries(names));
+              },
+              response(id, names) {
+                writes.push(() => journal.response(id, names));
+                this.replies.set(id, Object.fromEntries(names));
+              },
+            };
+            const result = results[index] = { writes };
+            let stages;
+            try {
+              ({ stages } = api.planFile(source, { ...settings, fragment: true }));
+              for (const stage of stages) {
+                for (const batch of stage) if (localJournal.batches.has(prefix + batch.id)) {
+                  for (const [key, name] of Object.entries(localJournal.batches.get(prefix + batch.id))) local.set(Number(key), name);
+                }
+                const localPending = stage.filter(batch => !localJournal.batches.has(prefix + batch.id));
+                const replayedLocal = api.resolveNames(source, local, { fragment: true });
+                await requestBatches(localPending, (batch, placeholders) => api.renderBatch(source, batch, replayedLocal, placeholders), file, prefix, localJournal, 1);
+                if (batchFailed) { stopped = true; return; }
+                for (const batch of stage) for (const [key, name] of Object.entries(localJournal.batches.get(prefix + batch.id))) local.set(Number(key), name);
               }
-              const localPending = stage.filter(batch => !journal.batches.has(prefix + batch.id));
-              const replayedLocal = api.resolveNames(source, local, { fragment: true });
-              await requestBatches(localPending, (batch, placeholders) => api.renderBatch(source, batch, replayedLocal, placeholders), file, prefix);
-              if (batchFailed) return;
-              for (const batch of stage) for (const [key, name] of Object.entries(journal.batches.get(prefix + batch.id))) local.set(Number(key), name);
-            }
-            const resolved = await reconsiderNames({ proposals: local, journal, id: prefix, namer: { name: (...args) => withSlot(() => namer.name(...args)) },
-              maxInputTokens: settings.maxInputTokens, telemetry: { file, chunk: chunk.id },
-              resolve: (values, onCollision) => api.resolveNames(source, values, { fragment: true, onCollision }) });
-            const rewritten = api.applyRenames(source, resolved);
-            const reason = api.checkRewrite(source, rewritten, { fragment: true });
-            if (reason) {
-              journal.complete(inputs, 'rejected', reason);
-              summary.rejected += count;
-              emit({ chunk: chunk.id, status: 'rejected', reason });
-              return;
-            }
-            after.set(file, rewritten);
-          } finally { if (stages) api.releasePlan?.(stages); }
+              const resolved = await reconsiderNames({ proposals: local, journal: localJournal, id: prefix, namer: { name: (...args) => withSlot(() => namer.name(...args)) },
+                maxInputTokens: settings.maxInputTokens, telemetry: { file, chunk: chunk.id },
+                resolve: (values, onCollision) => api.resolveNames(source, values, { fragment: true, onCollision }) });
+              result.source = api.applyRenames(source, resolved);
+              const recordTimings = captureTimings(), started = performance.now();
+              try { result.reason = await checkLocalRewrite(source, result.source, { fragment: true }); }
+              finally { recordTimings({ checkRewrite: performance.now() - started }); }
+              if (result.reason) stopped = true;
+            } catch (error) {
+              result.error = error;
+              stopped = true;
+            } finally { if (stages) api.releasePlan?.(stages); }
+          }
         }
+        await settle(Array.from({ length: Math.min(settings.concurrency, files.length) }, localWorker));
+        for (const result of results) if (result) for (const write of result.writes) {
+          timed('journalBatchWrite', write);
+        }
+        const failure = results.find(result => result?.error);
+        if (failure) throw failure.error;
+        const rejected = results.find(result => result?.reason);
+        if (rejected) {
+          journal.complete(inputs, 'rejected', rejected.reason);
+          summary.rejected += count;
+          emit({ chunk: chunk.id, status: 'rejected', reason: rejected.reason });
+          return;
+        }
+        if (batchFailed) return;
+        for (const [index, file] of files.entries()) after.set(file, results[index].source);
       } finally { endModel(); }
       const endWrite = phase('check_write', chunk.id);
       try {

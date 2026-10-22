@@ -2,7 +2,7 @@ import { timed } from './timing.mjs';
 import { isLexicalIdentifier, identifierBinding } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 // Rejects rewrites that change module contracts, scope resolution or source text.
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 
@@ -191,8 +191,7 @@ function analyze(source, ast, options) {
   return { globals, constReassigned, earlyUse, structure, references, text, ...facts };
 }
 
-/** Returns null on success, otherwise a single-line rejection reason. */
-export function checkRewrite(before, after, options) {
+function prepareRewrite(before, after) {
   let original;
   let result;
   try {
@@ -203,10 +202,38 @@ export function checkRewrite(before, after, options) {
     // Node requires local exports to be declared. Supply only the missing
     // sibling declarations for its syntax check; scope checks use the real AST.
     const declarations = unboundExports.size ? `\nlet ${[...unboundExports].join(',')};` : '';
-    execFileSync(process.execPath, ['--input-type=module', '--check'], { input: after + declarations, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 });
+    return { original, result, input: after + declarations };
   } catch {
-    return 'PARSE_FAIL';
+    return null;
   }
+}
+
+/** Returns null on success, otherwise a single-line rejection reason. */
+export function checkRewrite(before, after, options) {
+  const prepared = prepareRewrite(before, after);
+  if (!prepared) return 'PARSE_FAIL';
+  try {
+    execFileSync(process.execPath, ['--input-type=module', '--check'], { input: prepared.input, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 });
+  } catch { return 'PARSE_FAIL'; }
+  return checkBindings(before, after, options, prepared);
+}
+
+/** Run Node's syntax check without blocking other members' requests. */
+export async function checkRewriteAsync(before, after, options) {
+  const prepared = prepareRewrite(before, after);
+  if (!prepared) return 'PARSE_FAIL';
+  try {
+    await new Promise((resolve, reject) => {
+      const child = execFile(process.execPath, ['--input-type=module', '--check'], { timeout: 10000 },
+        error => error ? reject(error) : resolve());
+      child.stdin.on('error', reject);
+      child.stdin.end(prepared.input);
+    });
+  } catch { return 'PARSE_FAIL'; }
+  return checkBindings(before, after, options, prepared);
+}
+
+function checkBindings(before, after, options, { original, result }) {
   const originalModule = moduleFacts(original);
   const resultModule = moduleFacts(result);
   if (originalModule.names !== resultModule.names) return 'INTERFACE_CHANGED';
