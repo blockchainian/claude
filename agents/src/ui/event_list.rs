@@ -513,6 +513,20 @@ impl View {
         for line in &mut visible {
             highlight_matches(line, &self.event_detail.search);
         }
+        // Text reserves the clock column; changed-row backgrounds cover the whole panel.
+        for (row, line) in visible.iter().enumerate() {
+            if let Some(background) = line.style.bg {
+                buf.set_style(
+                    Rect::new(
+                        columns.panel.x,
+                        body_area.y + row as u16,
+                        columns.panel.width,
+                        1,
+                    ),
+                    Style::new().bg(background),
+                );
+            }
+        }
         Paragraph::new(visible).render(body_area, buf);
         for (row, time) in times {
             if let Some(row) = visible_rows.iter().position(|&source| source == row) {

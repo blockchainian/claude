@@ -689,7 +689,7 @@ fn assert_centered_event_detail(
 }
 
 #[test]
-fn diff_block_centers_like_code_and_bounds_its_background() {
+fn diff_block_centers_like_code() {
     let event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
         .into_iter()
         .find(|event| event.calls.iter().any(|call| call.name == "Edit"))
@@ -742,35 +742,12 @@ fn diff_block_centers_like_code_and_bounds_its_background() {
                 "width={width}"
             );
             if width == 200 {
-                let block_width = body_parts(&code)
-                    .into_iter()
-                    .find(|part| part.source == source)
-                    .unwrap()
-                    .lines_in(
-                        usize::from(code_layout.columns.text.width),
-                        Style::default(),
-                        DateTime::UNIX_EPOCH,
-                        Path::new("/workspace"),
-                    )
-                    .iter()
-                    .map(Line::width)
-                    .max()
-                    .unwrap();
                 assert!(start > 0);
-                for line in &diff.lines {
-                    let mut column = 0;
-                    for span in &line.spans {
-                        let end = column + span.width();
-                        if span.style.bg.is_some() {
-                            assert!(column >= start && end <= start + block_width);
-                        }
-                        column = end;
-                    }
-                    if line.to_string().trim_start().starts_with('+') {
-                        assert_eq!(column, start + block_width);
-                    }
-                }
             }
+            assert_eq!(
+                diff_line.to_string().trim_end(),
+                code_line.to_string().trim_end()
+            );
         }
     }
 }
@@ -1456,4 +1433,80 @@ fn background_notification_titles_show_only_exit_numbers_on_the_left() {
             );
         }
     }
+}
+
+#[test]
+fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
+    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+    cases.extend(codex_events("codex-file-changes.jsonl"));
+    let cases: Vec<_> = cases
+        .into_iter()
+        .filter(|event| {
+            event.calls.iter().any(|call| {
+                call.input
+                    .iter()
+                    .chain(call.output.iter().flatten())
+                    .any(|section| matches!(section, crate::event::Section::Diff { .. }))
+            })
+        })
+        .collect();
+    let mut markers = std::collections::HashSet::new();
+    for light in [false, true] {
+        super::super::highlight::use_theme(light, None).unwrap();
+        for event in &cases {
+            let sources: Vec<_> = event
+                .calls
+                .iter()
+                .flat_map(|call| call.input.iter().chain(call.output.iter().flatten()))
+                .filter_map(|section| match section {
+                    crate::event::Section::Diff { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            for width in [16, 41, 120, 200] {
+                let panel = Rect::new(3, 2, width, 250);
+                let mut buffer = Buffer::empty(Rect::new(0, 0, width + 6, 254));
+                let view = View::new(Grouping::Project, false);
+                view.render_event_detail_content(
+                    event,
+                    "12:34:56",
+                    panel,
+                    &mut buffer,
+                    Path::new("/workspace"),
+                    DateTime::UNIX_EPOCH,
+                );
+                let viewport = view.viewport.borrow();
+                let layout = viewport.event_detail_layout.as_ref().unwrap();
+                for (row, source) in layout.visible.iter().enumerate() {
+                    let segment = layout.rows[*source].0;
+                    if !sources.contains(&layout.sources[segment].text.as_ref()) {
+                        continue;
+                    }
+                    let text = layout.lines[*source].to_string();
+                    let marker = text.trim_start().chars().next();
+                    let changed = matches!(marker, Some('+' | '-'));
+                    markers.extend(marker);
+                    let y = panel.y + EVENT_TOP + row as u16;
+                    let expected = if changed {
+                        let x = panel.x + text.chars().position(|c| c != ' ').unwrap() as u16;
+                        let background = buffer[(x, y)].bg;
+                        assert_ne!(background, ratatui::style::Color::Reset);
+                        background
+                    } else {
+                        ratatui::style::Color::Reset
+                    };
+                    for x in panel.x..panel.right() {
+                        assert_eq!(
+                            buffer[(x, y)].bg,
+                            expected,
+                            "light={light}, width={width}, x={x}, text={text}"
+                        );
+                    }
+                    assert_eq!(buffer[(panel.x - 1, y)].bg, ratatui::style::Color::Reset);
+                    assert_eq!(buffer[(panel.right(), y)].bg, ratatui::style::Color::Reset);
+                }
+            }
+        }
+    }
+    assert!(markers.contains(&'+') && markers.contains(&'-') && markers.contains(&'@'));
 }

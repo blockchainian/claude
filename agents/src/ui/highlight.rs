@@ -414,7 +414,7 @@ pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
 }
 
 /// Unified diff hunks with separate syntax state for the before and after code.
-/// Changed rows fill the block width; the shared preformatted layout centers and clips it.
+/// Changed rows carry a background for the panel renderer; layout centers and clips the text.
 pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'static>> {
     let diff_style = |name| {
         let mut style = scope_style(name);
@@ -492,6 +492,7 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
                         spans.push(Span::styled(source[1..].to_owned(), style));
                     }
                     let mut line = Line::from(spans);
+                    line.style.bg = style.bg;
                     if style.bg.is_some() && line.width() < width {
                         line.spans
                             .push(Span::styled(" ".repeat(width - line.width()), style));
