@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, openSync, closeSync, ftruncateSync, fsyncSync } from 'node:fs';
+import { readFileSync, readdirSync, openSync, closeSync, ftruncateSync, fsyncSync, writeFileSync } from 'node:fs';
 import { join, isAbsolute, normalize, resolve, relative } from 'node:path';
 import { hash, appendRecord, atomicWrite, validateResponse, responseValues } from './journal.mjs';
 
@@ -31,6 +31,15 @@ function recordsAt(path) {
     try { ftruncateSync(fd, end); fsyncSync(fd); } finally { closeSync(fd); }
   }
   return data.subarray(0, end).toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+}
+function appendBatches(path, batches) {
+  const text = [...batches].map(([id, names]) => `${JSON.stringify({ type: 'chunk-batch', id, names })}\n`).join('');
+  // The header already made this directory entry durable; appends only change file data.
+  const fd = openSync(path, 'a');
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
 }
 function stateAt(path) {
   const records = recordsAt(path);
@@ -153,14 +162,23 @@ export function openChunkJournal(root, id, sources, options = {}, journalDirecto
     },
     get done() { return state.done; },
     batch(batchId, names) {
-      const values = Object.fromEntries(names);
-      if (state.batches.has(batchId)) {
-        if (stable(state.batches.get(batchId)) !== stable(values)) throw new Error(`conflicting batch: ${batchId}`);
-        return;
+      journal.batchMany([[batchId, names]]);
+    },
+    batchMany(entries) {
+      const pending = new Map();
+      for (const [batchId, names] of entries) {
+        if (typeof batchId !== 'string') throw new Error('chunk batch requires a string id');
+        const values = Object.fromEntries(names);
+        const existing = pending.has(batchId) ? pending.get(batchId) : state.batches.get(batchId);
+        if (pending.has(batchId) || state.batches.has(batchId)) {
+          if (stable(existing) !== stable(values)) throw new Error(`conflicting batch: ${batchId}`);
+          continue;
+        }
+        pending.set(batchId, values);
       }
-      if (typeof batchId !== 'string') throw new Error('chunk batch requires a string id');
-      appendRecord(path, { type: 'chunk-batch', id: batchId, names: values });
-      state.batches.set(batchId, values);
+      if (!pending.size) return;
+      appendBatches(path, pending);
+      for (const [batchId, values] of pending) state.batches.set(batchId, values);
     },
     prepare(before, after, status = 'changed') {
       if (state.intent) throw new Error(`chunk write already pending: ${id}`);

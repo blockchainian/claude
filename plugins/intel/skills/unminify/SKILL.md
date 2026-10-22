@@ -66,6 +66,15 @@ API calls without index context retain numeric `void` in fragments.
 if rerunning syntax restoration or import merging would change any file, it lists every
 such file and requires `restore-syntax`. It only names bindings, resolves collisions,
 checks rewrites and writes results; it never restores syntax or follows imports.
+Successful prechecks are cached per file or chunk using source hashes, chunk order, ignored
+members, fragment flags, shadowed syntax globals and pipeline versions. Unchanged groups
+reuse that verdict on resume; failed checks are never cached.
+Chunks totaling at least 256 KiB run in separate worker threads. Each worker owns one chunk
+and exits after it finishes. The worker count is bounded by available cores, one worker per
+8 GiB of machine memory and a maximum of eight; each worker has a 3 GiB old-generation heap
+limit. Smaller groups share one main-thread consumer. All model requests use the same global
+request slots. Packed replies append their original batch records together and sync them
+before continuing, preserving journal IDs and durable resume.
 It asks for names of bindings shorter
 than `--min-symbol-length`, including default and namespace import locals but excluding
 named imports. It resolves naming conflicts, checks each completed file and writes it atomically. Naming

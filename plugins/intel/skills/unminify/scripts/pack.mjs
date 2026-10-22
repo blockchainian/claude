@@ -1,3 +1,4 @@
+import { timed } from './timing.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
 /** Pack one file's pending stage, measuring the complete naming input. */
@@ -24,7 +25,7 @@ export function* iterateBatches(batches, render, { maxInputTokens }) {
           .map(({ batch, payload }) => `// Batch ${batch.id}\n${payload.context}`).join('\n\n'),
         placeholders: Object.assign({}, ...parts.map(part => part.payload.placeholders)),
       };
-      const request = { parts, payload, estimated_input_tokens: estimateInputTokens(payload) };
+      const request = { parts, payload, estimated_input_tokens: timed('estimateInputTokens', () => estimateInputTokens(payload)) };
       candidates.set(length, request);
       return request;
     }

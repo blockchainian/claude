@@ -1,3 +1,5 @@
+import { timed } from './timing.mjs';
+import { runSyntaxPreflight } from './syntax-preflight.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadChunks, createChunkIgnore } from './chunk-manifest.mjs';
@@ -20,7 +22,7 @@ async function settle(tasks) {
 }
 
 /** Explicit chunks keep each stage and its group writes independently resumable. */
-export async function createChunkRun(root, settings, ignores) {
+export async function createChunkRun(root, settings, ignores, { recover = true } = {}) {
   const manifest = settings.chunks ? await loadChunks(settings.chunks, root)
     : { chunks: [], files: new Set(), fingerprint: null };
   ignores ??= await createChunkIgnore(root, settings.ignoreFile);
@@ -30,7 +32,7 @@ export async function createChunkRun(root, settings, ignores) {
     minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens, syntax: syntaxFingerprint, mergeImports: importMergeVersion };
   const syntaxOptions = { manifest: manifest.fingerprint, ignored: [...ignored].sort(),
     syntax: syntaxFingerprint, mergeImports: importMergeVersion };
-  if (settings.chunks) {
+  if (settings.chunks && recover) {
     recoverChunkJournals(root, syntaxOptions, 'syntax/chunks');
     recoverChunkJournals(root, settings.command === 'rename-bindings' || settings.command === 'all' ? id => {
       if (!manifest.chunks.some(chunk => chunk.id === id)) throw new Error(`chunk missing from manifest: ${id}`);
@@ -74,8 +76,12 @@ export async function createChunkRun(root, settings, ignores) {
     async syntaxPending({ fragmentContext, pool } = {}) {
       const pending = [];
       await settle(driver.jobs.map(async chunk => {
-        const inputs = readSources(chunk), after = await restoreSources(inputs, fragmentContext, pool);
-        for (const [file, source] of inputs) if (source !== after.get(file)) pending.push(file);
+        const result = await runSyntaxPreflight(root, {scope: chunk.id, files: chunk.files, chunks: [chunk], ignored,
+          fragmentContext, syntaxFingerprint, importMergeVersion}, async () => {
+          const inputs = readSources(chunk), after = await restoreSources(inputs, fragmentContext, pool);
+          return [...inputs].filter(([file, source]) => source !== after.get(file)).map(([file]) => file);
+        });
+        pending.push(...result.pending);
       }));
       return pending;
     },
@@ -115,8 +121,9 @@ export async function createChunkRun(root, settings, ignores) {
       summary.rejected += rejected;
       return rejected;
     },
-    prepareImports(sources) {
-      for (const chunk of driver.jobs) {
+    prepareImports(sources, chunks = driver.jobs, refresh = false) {
+      for (const chunk of chunks) {
+        if (refresh) completed.delete(chunk.id);
         if (completed.has(chunk.id)) continue;
         const inputs = readSources(chunk);
         let journal, historyOptions;
@@ -124,6 +131,7 @@ export async function createChunkRun(root, settings, ignores) {
           const header = JSON.parse(readFileSync(renamePath(chunk), 'utf8').split('\n')[0]);
           historyOptions = JSON.parse(header.options);
           journal = openChunkJournal(root, chunk.id, inputs, historyOptions);
+          if (refresh && journal.done?.status === 'rejected') continue;
           if (!journal.done) {
             driver.addHistory(chunk, inputs, null, ignores, historyOptions);
             for (const [file, source] of inputs) sources.set(file, source);
@@ -140,7 +148,11 @@ export async function createChunkRun(root, settings, ignores) {
       }
     },
     async process(chunk, context) {
-      const { api, namer, withSlot, emit, summary, sources, phase, fragmentContext } = context;
+      const { namer, withSlot, emit, summary, sources, phase, fragmentContext } = context;
+      const api = { ...context.api };
+      for (const name of ['planFile', 'renderBatch', 'resolveNames', 'applyRenames', 'checkRewrite']) {
+        api[name] = (...args) => timed(name, () => context.api[name](...args));
+      }
       completed.delete(chunk.id);
       const inputs = new Map(chunk.files.map(file => [file, readFileSync(join(root, file), 'utf8')]));
       for (const file of chunk.files) {
@@ -161,14 +173,14 @@ export async function createChunkRun(root, settings, ignores) {
       }
       const chunkOptions = { ...settings, selected: selection, ignored };
       const baseline = new Map(inputs);
-      const analysis = analyzeChunk(baseline, chunkOptions);
+      const analysis = timedAnalyzeChunk(baseline, chunkOptions);
       emit({ chunk: chunk.id, status: 'planned', names: analysis.candidates.length, frozen: analysis.statistics });
-      const batches = planChunk(baseline, chunkOptions);
+      const batches = timedPlanChunk(baseline, chunkOptions);
       const proposals = new Map();
       for (const batch of batches) if (journal.batches.has(batch.id)) {
         for (const [key, name] of Object.entries(journal.batches.get(batch.id))) proposals.set(key, name);
       }
-      const replayed = resolveChunkNames(baseline, proposals, chunkOptions);
+      const replayed = timedResolveChunkNames(baseline, proposals, chunkOptions);
       const pending = batches.filter(batch => !journal.batches.has(batch.id));
       let batchFailed = false;
       async function request(packed, file, prefix = '') {
@@ -186,16 +198,16 @@ export async function createChunkRun(root, settings, ignores) {
         }
         const keys = Object.keys(packed.payload.placeholders);
         if (!response.names || Object.keys(response.names).length !== keys.length || keys.some(key => typeof response.names[key] !== 'string')) throw new Error(`invalid names for chunk ${chunk.id}`);
-        for (const { batch, payload } of packed.parts) {
-          journal.batch(prefix + batch.id, new Map(Object.entries(payload.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])));
-        }
+        timed('journalBatchWrite', () => journal.batchMany(packed.parts.map(({ batch, payload }) => [
+          prefix + batch.id, new Map(Object.entries(payload.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])),
+        ])));
       }
       async function requestBatches(pending, render, file, prefix = '') {
         const packed = iterateBatches(pending, render, settings);
         let finished = false;
         async function worker() {
           while (!finished) await withSlot(async () => {
-            const next = packed.next();
+            const next = timed('packBatches', () => packed.next());
             if (next.done) { finished = true; return; }
             await request(next.value, file, prefix);
           });
@@ -206,16 +218,16 @@ export async function createChunkRun(root, settings, ignores) {
       const endModel = phase('model', chunk.id);
       let after;
       try {
-        await requestBatches(pending, (batch, placeholders) => renderChunkBatch(baseline, batch, replayed, placeholders), chunk.id);
+        await requestBatches(pending, (batch, placeholders) => timedRenderChunkBatch(baseline, batch, replayed, placeholders), chunk.id);
         if (batchFailed) return;
         // Response arrival order never decides collision suffixes or resume output.
         proposals.clear();
         for (const batch of batches) for (const [key, name] of Object.entries(journal.batches.get(batch.id))) proposals.set(key, name);
         const names = await reconsiderNames({ proposals, journal, id: 'program', namer: { name: (...args) => withSlot(() => namer.name(...args)) },
           maxInputTokens: settings.maxInputTokens, telemetry: { file: chunk.id, chunk: chunk.id },
-          resolve: (values, onCollision) => resolveChunkNames(baseline, values, { ...chunkOptions, onCollision }) });
+          resolve: (values, onCollision) => timedResolveChunkNames(baseline, values, { ...chunkOptions, onCollision }) });
         journal.batch('program-resolved', names);
-        after = applyChunkRenames(baseline, names);
+        after = timedApplyChunkRenames(baseline, names);
         for (const file of chunk.files.filter(file => !analysis.statistics.dynamicScope && selection.has(file) && !ignored.has(file))) {
           const source = after.get(file), local = new Map(), prefix = `local:${file}:`;
           let stages;
@@ -248,7 +260,7 @@ export async function createChunkRun(root, settings, ignores) {
       } finally { endModel(); }
       const endWrite = phase('check_write', chunk.id);
       try {
-        const reason = checkChunkRewrite(baseline, after);
+        const reason = timedCheckChunkRewrite(baseline, after);
         if (reason) {
           journal.complete(inputs, 'rejected', reason);
           summary.rejected += count;
@@ -256,7 +268,7 @@ export async function createChunkRun(root, settings, ignores) {
           return;
         }
         for (const [file, source] of after) sources.set(file, source);
-        journal.commit(after, { status: 'renamed' });
+        timed('write', () => journal.commit(after, { status: 'renamed' }));
         summary.completed += count;
         summary.chunkSiblingFiles = (summary.chunkSiblingFiles ?? 0) + [...after].filter(([file, source]) => !reporting.has(file) && source !== inputs.get(file)).length;
         emit({ chunk: chunk.id, status: 'renamed', files: count, batches: batches.length });
@@ -349,3 +361,15 @@ export async function createChunkRun(root, settings, ignores) {
   };
   return driver;
 }
+
+function timedAnalyzeChunk(...args) { return timed('analyzeChunk', () => analyzeChunk(...args)); }
+
+function timedPlanChunk(...args) { return timed('planChunk', () => planChunk(...args)); }
+
+function timedRenderChunkBatch(...args) { return timed('renderChunkBatch', () => renderChunkBatch(...args)); }
+
+function timedResolveChunkNames(...args) { return timed('resolveChunkNames', () => resolveChunkNames(...args)); }
+
+function timedApplyChunkRenames(...args) { return timed('applyChunkRenames', () => applyChunkRenames(...args)); }
+
+function timedCheckChunkRewrite(...args) { return timed('checkChunkRewrite', () => checkChunkRewrite(...args)); }
