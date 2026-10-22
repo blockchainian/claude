@@ -1007,19 +1007,9 @@ impl View {
             .find(|&index| self.is_pinned(index))
             .or_else(|| self.group_index(index))
     }
-    /// Whether the row sits under a waiting top-level task, which leads the list in its own group.
-    fn in_waiting_group(&self, index: usize) -> bool {
-        !self.in_pinned_group(index)
-            && self
-                .group_index(index)
-                .is_some_and(|root| self.rows[root].status == SessionStatus::NeedsInput)
-    }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
         if self.in_pinned_group(left) || self.in_pinned_group(right) {
             return self.in_pinned_group(left) && self.in_pinned_group(right);
-        }
-        if self.in_waiting_group(left) || self.in_waiting_group(right) {
-            return self.in_waiting_group(left) && self.in_waiting_group(right);
         }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
@@ -1085,7 +1075,10 @@ impl View {
             }
         }
         for siblings in children.values_mut() {
-            siblings.sort_by_key(|&index| session_order(&self.rows[index]));
+            siblings.sort_by_key(|&index| {
+                let row = &self.rows[index];
+                (self.waiting_first(row), session_order(row))
+            });
         }
         let (mut pinned, mut visible): (Vec<_>, Vec<_>) = self
             .rows
@@ -1102,25 +1095,27 @@ impl View {
         pinned.sort_by_key(|index| pins.iter().position(|id| *id == self.rows[*index].id));
         match self.grouping {
             Grouping::Project => visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
                 (
                     self.project_groups[*index].key(),
-                    session_order(&self.rows[*index]),
+                    self.waiting_first(row),
+                    session_order(row),
                 )
             }),
-            Grouping::Status => visible.sort_by_key(|index| self.rows[*index].status),
+            Grouping::Status => visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
+                (row.status, self.waiting_first(row))
+            }),
             Grouping::Model => visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
                 (
-                    self.session_model_text(&self.rows[*index]),
-                    session_order(&self.rows[*index]),
+                    self.session_model_text(row),
+                    self.waiting_first(row),
+                    session_order(row),
                 )
             }),
         }
-        let (mut waiting, rest): (Vec<_>, Vec<_>) = visible
-            .into_iter()
-            .partition(|&index| self.rows[index].status == SessionStatus::NeedsInput);
-        waiting.sort_by_key(|&index| self.attention_order(&self.rows[index]));
-        pinned.extend(waiting);
-        pinned.extend(rest);
+        pinned.extend(visible);
         let mut rows = Vec::new();
         let mut pending: Vec<_> = pinned.into_iter().rev().collect();
         while let Some(index) = pending.pop() {
@@ -1414,6 +1409,15 @@ impl View {
     fn attention_order<'a>(&self, row: &'a Session) -> ((bool, DateTime<Utc>), &'a SessionKey) {
         let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
         (self.queue_position(row, since), &row.id)
+    }
+
+    /// Puts waiting tasks first among their neighbors, in attention queue order.
+    fn waiting_first<'a>(
+        &self,
+        row: &'a Session,
+    ) -> (bool, Option<((bool, DateTime<Utc>), &'a SessionKey)>) {
+        let waiting = row.status == SessionStatus::NeedsInput;
+        (!waiting, waiting.then(|| self.attention_order(row)))
     }
 
     /// Orders a task the user left in the attention queue after every task it has not skipped, by
