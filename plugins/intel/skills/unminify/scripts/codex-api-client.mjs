@@ -203,7 +203,6 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     const metrics = { kind, run_id: runId, file: context.file ?? null, batch_id: context.batch_id ?? null,
       estimated_input_tokens: context.estimated_input_tokens ?? null,
       batch_ids: context.batch_ids ?? null, name_count: context.name_count ?? null,
-      ...(context.subrequest_index === undefined ? {} : { subrequest_index: context.subrequest_index, subrequest_count: context.subrequest_count }),
       phase: context.phase ?? 'auth', queued_at: context.queued_at ?? Date.now(), sent_at: null,
       headers_at: null, ended_at: null, attempt: context.attempt ?? 1,
       previous_failure: context.previous_failure ?? null, session_id: null, body_bytes: 0,
@@ -402,7 +401,6 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     let recovered = false, httpAttempt = 0, previousFailure = null;
     let queuedAt = telemetry.queued_at ?? Date.now();
     const context = () => ({ file: telemetry.file, batch_id: telemetry.batch_id, batch_ids: telemetry.batch_ids,
-      subrequest_index: telemetry.subrequest_index, subrequest_count: telemetry.subrequest_count,
       estimated_input_tokens: telemetry.estimated_input_tokens, name_count: telemetry.name_count, phase: telemetry.phase,
       queued_at: queuedAt, attempt: ++httpAttempt, previous_failure: previousFailure });
     for (let attempt = 0; ; attempt++) {
