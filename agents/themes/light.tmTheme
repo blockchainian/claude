@@ -463,7 +463,7 @@
 				<key>background</key>
 				<string>#d0b9b9</string>
 				<key>foreground</key>
-				<string>#82071e</string>
+				<string>#000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -487,7 +487,7 @@
 				<key>background</key>
 				<string>#7dd4b7</string>
 				<key>foreground</key>
-				<string>#116329</string>
+				<string>#000000</string>
 			</dict>
 		</dict>
 		<dict>

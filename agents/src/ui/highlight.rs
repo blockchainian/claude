@@ -428,6 +428,7 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
     };
     let deleted = diff_style("markup.deleted");
     let inserted = diff_style("markup.inserted");
+    let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
     let syntax = !exceeds_limits(text) && find_syntax(lang).is_some();
     let rows: Vec<_> = text.lines().collect();
     rows.split_inclusive(|line| line.starts_with("@@"))
@@ -473,6 +474,11 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
                     let mut spans = vec![Span::styled(source[..1].to_owned(), style)];
                     if let Some(content) = content {
                         spans.extend(content.spans.into_iter().map(|mut span| {
+                            if matches!(marker, Some(b'+' | b'-'))
+                                && (span.style.fg.is_none() || span.style.fg == foreground)
+                            {
+                                span.style.fg = style.fg;
+                            }
                             span.style.bg = style.bg;
                             span
                         }));
@@ -516,6 +522,7 @@ mod tests {
             let source = source
                 .replace("#a0635d", error)
                 .replace("#4a8b4f", quote)
+                .replace("#3f8f7f", "#789abc")
                 .replace("#220a0a", "#456789")
                 .replace("#001408", "#56789a")
                 .replace("#e9000000", selection)
@@ -558,8 +565,8 @@ mod tests {
                     rgb(accent),
                     rgb(quote),
                     Some(Color::Rgb(0x56, 0x78, 0x9a)),
-                    rgb(error),
-                    rgb(quote)
+                    rgb("#789abc"),
+                    rgb("#789abc")
                 ]
             );
             assert_eq!(diff[0].spans[0].style.bg, rgb("#456789"));
@@ -579,8 +586,13 @@ mod tests {
             assert_eq!(scope_style("markup.quote").fg, Some(quote));
             assert_eq!(scope_style("markup.raw.block").fg, Some(Color::Cyan));
             let diff = diff_lines("-removed\n+added", "", 0);
-            assert_eq!(diff[0].spans[0].style.fg, Some(error));
-            assert_eq!(diff[1].spans[0].style.fg, Some(quote));
+            let markup = if light {
+                Color::Rgb(0, 0, 0)
+            } else {
+                Color::Rgb(63, 143, 127)
+            };
+            assert_eq!(diff[0].spans[0].style.fg, Some(markup));
+            assert_eq!(diff[1].spans[0].style.fg, Some(markup));
         }
         // An external theme may omit every UI setting and scope.
         let mut minimal = plist::Value::from_reader_xml(std::io::Cursor::new(source)).unwrap();
@@ -955,11 +967,73 @@ mod tests {
     }
 
     #[test]
+    fn diff_plain_text_uses_markup_foregrounds_and_preserves_syntax_colors() {
+        let payload: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .nth(5)
+                .unwrap(),
+        )
+        .unwrap();
+        let code = payload["toolUseResult"]["structuredPatch"][0]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .find(|line| line.starts_with("+        let word = "))
+            .unwrap()
+            .strip_prefix('+')
+            .unwrap();
+        for light in [false, true] {
+            for terminal_default in [false, true] {
+                let mut theme = bundled_theme(light);
+                if terminal_default {
+                    theme.settings.foreground = Some(syntect::highlighting::Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 1,
+                    });
+                }
+                let default = theme.settings.foreground.and_then(terminal_color);
+                with_current_theme(|current| current.theme = Some(theme));
+                let expected = byte_styles(&code_lines(code, "rs"));
+                assert!(expected[0].iter().any(|style| style.fg == default));
+                assert!(expected[0].iter().any(|style| style.fg != default));
+                let lines = diff_lines(&format!("@@ -1 +1 @@\n-{code}\n+{code}\n {code}"), "rs", 0);
+                assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
+                let actual = byte_styles(&lines);
+                for (row, scope) in [(1, "markup.deleted"), (2, "markup.inserted")] {
+                    let markup = scope_style(scope).fg;
+                    assert_ne!(default, markup);
+                    assert_eq!(actual[row][0].fg, markup);
+                    for (actual, expected) in actual[row][1..].iter().zip(&expected[0]) {
+                        let foreground = if expected.fg.is_none() || expected.fg == default {
+                            markup
+                        } else {
+                            expected.fg
+                        };
+                        assert_eq!(
+                            actual.fg, foreground,
+                            "light={light}, terminal_default={terminal_default}"
+                        );
+                        assert_eq!(actual.add_modifier, expected.add_modifier);
+                    }
+                }
+                for (actual, expected) in actual[3][1..].iter().zip(&expected[0]) {
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn diff_code_matches_rust_highlighting() {
         use_theme(false, None).unwrap();
         let code = "fn main() { let value = 42; }";
         let lines = diff_lines(&format!("-{code}\n+{code}"), "rs", 40);
         let expected = byte_styles(&code_lines(code, "rs"));
+        let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
         for (line, scope) in lines.iter().zip(["markup.deleted", "markup.inserted"]) {
             assert_eq!(line.spans[0].content.len(), 1);
             assert_eq!(line.spans[0].style.fg, scope_style(scope).fg);
@@ -969,10 +1043,19 @@ mod tests {
                     .all(|span| span.style.bg == line.spans[0].style.bg)
             );
             assert!(line.spans[0].style.bg.is_some());
-            assert_ne!(line.spans[1].style.fg, line.spans[0].style.fg);
+            assert!(
+                line.spans
+                    .iter()
+                    .any(|span| span.style.fg != line.spans[0].style.fg)
+            );
             let actual = byte_styles(std::slice::from_ref(line));
             for (actual, expected) in actual[0][1..].iter().zip(&expected[0]) {
-                assert_eq!(actual.fg, expected.fg);
+                let expected = if expected.fg.is_none() || expected.fg == foreground {
+                    scope_style(scope).fg
+                } else {
+                    expected.fg
+                };
+                assert_eq!(actual.fg, expected);
             }
         }
     }
@@ -1047,7 +1130,15 @@ mod tests {
         }
         for (row, code) in [(6, "fn before() {}"), (7, "fn after() {}")] {
             let expected = byte_styles(&code_lines(code, "rs"));
-            assert_eq!(styles[row][1].fg, expected[0][0].fg);
+            let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
+            for (actual, expected) in styles[row][1..].iter().zip(&expected[0]) {
+                let expected = if expected.fg.is_none() || expected.fg == foreground {
+                    styles[row][0].fg
+                } else {
+                    expected.fg
+                };
+                assert_eq!(actual.fg, expected);
+            }
         }
     }
 
@@ -1067,8 +1158,8 @@ mod tests {
         let lines = diff_lines("@@ -1 +1 @@\n-old\n+new\n same", "", 0);
         assert_eq!(text(&lines), ["@@ -1 +1 @@", "-old", "+new", " same"]);
         assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Rgb(160, 99, 93)));
-        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Rgb(74, 139, 79)));
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Rgb(63, 143, 127)));
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Rgb(63, 143, 127)));
         assert_eq!(lines[3].spans[0].style.fg, None);
     }
 }
