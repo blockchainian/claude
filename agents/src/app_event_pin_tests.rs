@@ -19,6 +19,7 @@ fn inactive_snapshot_forgets_all_task_state_once() {
         )
         .unwrap();
     app.handle_action(Some(Action::TogglePin {
+        tab: 0,
         id: id.clone(),
         pinned: true,
     }));
@@ -30,7 +31,7 @@ fn inactive_snapshot_forgets_all_task_state_once() {
     });
     let saved = Preferences::load(dir.path());
     assert!(!saved.tasks.contains_key(&id));
-    assert!(saved.pinned.is_empty());
+    assert!(saved.pinned.active.is_empty());
     let store = dir.path().join("agents.json");
     let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(60);
     std::fs::File::options()

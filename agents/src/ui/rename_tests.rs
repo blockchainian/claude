@@ -115,7 +115,7 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
             assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
-            assert!(view.pinned.is_empty());
+            assert!(view.pinned.active.is_empty());
             assert!(view.hidden.is_empty());
         }
     }
@@ -176,14 +176,19 @@ fn manager_thread_hides_and_pins_itself() {
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
             Some(Action::TogglePin {
+                tab: 0,
                 id: child.id.clone(),
                 pinned
             })
         );
-        view.set_pinned(if pinned {
-            std::slice::from_ref(&child.id)
-        } else {
-            &[]
+        view.set_pinned(&crate::state::TaskPins {
+            active: (if pinned {
+                std::slice::from_ref(&child.id)
+            } else {
+                &[]
+            })
+            .to_vec(),
+            inactive: vec![],
         });
         assert_eq!(view.is_pinned(view.selected), pinned);
     }
@@ -325,6 +330,10 @@ fn codex_spawn_child_pins_itself() {
     let id = view.selected_id().unwrap().clone();
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
-        Some(Action::TogglePin { id, pinned: true })
+        Some(Action::TogglePin {
+            tab: 0,
+            id,
+            pinned: true
+        })
     );
 }

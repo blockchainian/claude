@@ -4,11 +4,25 @@ use super::*;
 fn nested_config_and_state_load() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("agents.json"),
-        r#"{"config":{"grouping":"model","double_click_ms":200},"state":{"pinned":["codex:cached"]}}"#).unwrap();
+        r#"{"config":{"grouping":"model","double_click_ms":200},"state":{"pinned":{"active":["codex:cached"],"inactive":["claude:cached"]}}}"#).unwrap();
     let preferences = Preferences::load(dir.path());
     assert_eq!(preferences.grouping, Grouping::Model);
     assert_eq!(preferences.double_click_ms, 200);
-    assert_eq!(preferences.pinned, vec!["codex:cached".parse().unwrap()]);
+    assert_eq!(
+        preferences.pinned.active,
+        vec!["codex:cached".parse().unwrap()]
+    );
+    assert_eq!(
+        preferences.pinned.inactive,
+        vec!["claude:cached".parse().unwrap()]
+    );
+    preferences.save_pinned(dir.path()).unwrap();
+    let stored: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
+    assert_eq!(
+        stored["state"]["pinned"],
+        serde_json::json!({"active": ["codex:cached"], "inactive": ["claude:cached"]})
+    );
 }
 
 #[test]
@@ -37,10 +51,16 @@ fn preferences_round_trip_and_corrupt_defaults() {
         worktree_root: Some(dir.path().join("trees")),
         double_click_ms: 200,
         grouping: Grouping::Model,
-        pinned: vec![
-            "claude:second".parse().unwrap(),
-            "codex:first".parse().unwrap(),
-        ],
+        pinned: TaskPins {
+            active: vec![
+                "claude:second".parse().unwrap(),
+                "codex:first".parse().unwrap(),
+            ],
+            inactive: vec![
+                "codex:archived".parse().unwrap(),
+                "claude:archived".parse().unwrap(),
+            ],
+        },
         theme: Some(PathBuf::from("custom.tmTheme")),
         light_theme: Some(PathBuf::from("light.tmTheme")),
         dark_theme: Some(PathBuf::from("dark.tmTheme")),
@@ -83,7 +103,7 @@ fn preferences_round_trip_and_corrupt_defaults() {
 fn unsupported_format_and_invalid_values_use_defaults() {
     let dir = tempfile::tempdir().unwrap();
     for json in [
-        r#"{"grouping":"model","pinned":["codex:old"],"double_click_ms":450}"#,
+        r#"{"grouping":"model","pinned":{"active":["codex:old"],"inactive":[]},"double_click_ms":450}"#,
         r#"{"config":{"grouping":"other"},"state":{}}"#,
         r#"{"config":{"usage_view":"other"},"state":{}}"#,
         r#"{"config":{},"state":{"usage":{"weekly":{"claude":{"used_percent":101}}}}}"#,
@@ -97,12 +117,13 @@ fn unsupported_format_and_invalid_values_use_defaults() {
 #[test]
 fn invalid_pins_are_dropped_and_optional_values_omitted() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("agents.json"), r#"{"config":{"grouping":"model"},"state":{"pinned":["old-id","claude:kept","codex:kept","unknown:id","claude:"]}}"#).unwrap();
+    fs::write(dir.path().join("agents.json"), r#"{"config":{"grouping":"model"},"state":{"pinned":{"active":["old-id","claude:kept","codex:kept","unknown:id","claude:"],"inactive":[]}}}"#).unwrap();
     let preferences = Preferences::load(dir.path());
     assert_eq!(preferences.grouping, Grouping::Model);
     assert_eq!(
         preferences
             .pinned
+            .active
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>(),
@@ -119,13 +140,13 @@ fn invalid_pins_are_dropped_and_optional_values_omitted() {
 #[test]
 fn stale_writers_only_replace_their_field() {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("agents.json"), r#"{"config":{"grouping":"project","double_click_ms":450,"custom":"keep"},"state":{"pinned":[],"custom":"keep"}}"#).unwrap();
+    fs::write(dir.path().join("agents.json"), r#"{"config":{"grouping":"project","double_click_ms":450,"custom":"keep"},"state":{"pinned":{"active":[],"inactive":[]},"custom":"keep"}}"#).unwrap();
     let mut pins = Preferences::load(dir.path());
     let mut view = pins.clone();
     let mut grouping = pins.clone();
     let mut sorting = pins.clone();
     let task = "codex:sorted".parse().unwrap();
-    pins.pinned = vec!["claude:pinned".parse().unwrap()];
+    pins.pinned.active = vec!["claude:pinned".parse().unwrap()];
     view.usage_view = UsageView::Detailed;
     grouping.grouping = Grouping::Model;
     pins.save_pinned(dir.path()).unwrap();
@@ -178,7 +199,7 @@ fn concurrent_processes_preserve_independent_fields() {
     }
     let preferences = Preferences::load(dir.path());
     assert_eq!(
-        preferences.pinned,
+        preferences.pinned.active,
         vec!["claude:concurrent".parse().unwrap()]
     );
     assert_eq!(preferences.usage_view, UsageView::Detailed);
@@ -200,7 +221,7 @@ fn state_writer_process() {
     let field = std::env::var("AGENTS_STATE_TEST_FIELD").unwrap();
     let dir = Path::new(&directory);
     let mut preferences = Preferences::load(dir);
-    preferences.pinned = vec!["claude:concurrent".parse().unwrap()];
+    preferences.pinned.active = vec!["claude:concurrent".parse().unwrap()];
     preferences.usage_view = UsageView::Detailed;
     for _ in 0..25 {
         match field.as_str() {
@@ -251,7 +272,10 @@ fn draft_fixture(name: &str) -> StoredDraft {
 fn drafts_round_trip_drop_unnamed_and_malformed_without_losing_other_state() {
     let dir = tempfile::tempdir().unwrap();
     let mut preferences = Preferences {
-        pinned: vec!["claude:kept".parse().unwrap()],
+        pinned: TaskPins {
+            active: vec!["claude:kept".parse().unwrap()],
+            inactive: vec![],
+        },
         ..Preferences::default()
     };
     preferences

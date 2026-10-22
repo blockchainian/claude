@@ -1104,8 +1104,8 @@ impl App {
             }
             self.view.clear_pinned_events(&session.id);
         }
-        let pinned = self.preferences.pinned.len();
-        self.preferences.pinned.retain(|id| {
+        let pinned = self.preferences.pinned.active.len();
+        self.preferences.pinned.active.retain(|id| {
             let Some(session) = sessions.iter().find(|session| &session.id == id) else {
                 return true;
             };
@@ -1125,7 +1125,7 @@ impl App {
             }
             root.parent.is_none() && root.status != SessionStatus::Inactive
         });
-        if self.preferences.pinned.len() != pinned {
+        if self.preferences.pinned.active.len() != pinned {
             let saved = self.preferences.save_pinned(&self.config_dir);
             self.report_save(saved);
             self.view.set_pinned(&self.preferences.pinned);
@@ -1555,10 +1555,11 @@ impl App {
                 self.send_input(id, SessionInput::Interrupt);
             }
             Action::Hide(_) => {}
-            Action::TogglePin { id, pinned } => {
-                self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
+            Action::TogglePin { id, pinned, tab } => {
+                let pins = self.preferences.pinned.for_tab_mut(tab);
+                pins.retain(|pinned_id| pinned_id != &id);
                 if pinned {
-                    self.preferences.pinned.insert(0, id);
+                    pins.insert(0, id);
                 }
                 let saved = self.preferences.save_pinned(&self.config_dir);
                 self.report_save(saved);

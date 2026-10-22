@@ -1266,7 +1266,7 @@ fn task_tabs_ignore_saved_removed_filter() {
         std::fs::write(
             directory.path().join("agents.json"),
             serde_json::to_vec(&serde_json::json!({
-                "grouping": "project", "pinned": [], "status_filter": filter,
+                "grouping": "project", "pinned": {"active": [], "inactive": []}, "status_filter": filter,
             }))
             .unwrap(),
         )

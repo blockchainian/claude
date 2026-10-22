@@ -284,6 +284,7 @@ pub enum Action {
     Hide(SessionKey),
     /// `p`: pin or unpin the session.
     TogglePin {
+        tab: usize,
         id: SessionKey,
         pinned: bool,
     },

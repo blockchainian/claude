@@ -915,6 +915,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
         (
             KeyCode::Char('p'),
             Action::TogglePin {
+                tab: 0,
                 id: key("thread-12".into()),
                 pinned: true,
             },

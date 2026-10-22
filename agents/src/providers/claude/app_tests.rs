@@ -932,6 +932,7 @@ fn subagent_pin_persists_and_unpins() {
     let (dir, mut app, child) = subagent_fixture();
     for pinned in [true, false] {
         assert!(!app.handle_action(Some(Action::TogglePin {
+            tab: 0,
             id: child.id.clone(),
             pinned,
         })));
@@ -940,8 +941,8 @@ fn subagent_pin_persists_and_unpins() {
         } else {
             vec![]
         };
-        assert_eq!(app.preferences.pinned, expected);
-        assert_eq!(Preferences::load(dir.path()).pinned, expected);
+        assert_eq!(app.preferences.pinned.active, expected);
+        assert_eq!(Preferences::load(dir.path()).pinned.active, expected);
     }
 }
 
@@ -1062,7 +1063,7 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
             ] {
                 assert!(!app.handle_action(Some(action)));
                 assert!(app.launch.is_none());
-                assert!(app.preferences.pinned.is_empty());
+                assert!(app.preferences.pinned.active.is_empty());
             }
         }
         let mut claude_child = app.sessions[0].clone();
@@ -1130,7 +1131,7 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
             ] {
                 assert!(!app.handle_action(Some(action)));
                 assert!(app.launch.is_none());
-                assert!(app.preferences.pinned.is_empty());
+                assert!(app.preferences.pinned.active.is_empty());
             }
         }
     }

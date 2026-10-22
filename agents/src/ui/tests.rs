@@ -1208,7 +1208,10 @@ fn fixture() -> View {
         ],
         false,
     );
-    view.set_pinned(&[session_key("42"), session_key("44")]);
+    view.set_pinned(&crate::state::TaskPins {
+        active: vec![session_key("42"), session_key("44")],
+        inactive: vec![],
+    });
     let selected = view
         .rows
         .iter()
@@ -2140,7 +2143,10 @@ fn group_headers_have_no_count() {
                     false,
                 );
                 if pinned {
-                    view.set_pinned(&[session_key("ready"), session_key("working")]);
+                    view.set_pinned(&crate::state::TaskPins {
+                        active: vec![session_key("ready"), session_key("working")],
+                        inactive: vec![],
+                    });
                 }
                 view.status_filter = filter;
                 let area = Rect::new(0, 0, 80, 12);
@@ -2315,6 +2321,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(
         key(&mut view, KeyCode::Char('p')),
         Some(Action::TogglePin {
+            tab: 0,
             id: session_key("42"),
             pinned: false
         })
@@ -7217,7 +7224,10 @@ mod subagent_rows {
         for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
             view.grouping = grouping;
             for pins in [vec![], vec![session_key("parent")]] {
-                view.set_pinned(&pins);
+                view.set_pinned(&crate::state::TaskPins {
+                    active: pins.clone(),
+                    inactive: vec![],
+                });
                 let expected = vec!["parent", "agent-newer", "agent-older"];
                 assert_eq!(ids(&view), expected);
                 let entries = view.center_rows(&view.visible_indices(), grouping);
@@ -7253,7 +7263,10 @@ mod subagent_rows {
             assert_eq!(ids(&view), expected);
         }
         view.grouping = Grouping::Project;
-        view.set_pinned(&[session_key("parent")]);
+        view.set_pinned(&crate::state::TaskPins {
+            active: vec![session_key("parent")],
+            inactive: vec![],
+        });
         assert_eq!(
             ids(&view),
             ["parent", "agent-newer", "agent-older", "other"]
@@ -7272,20 +7285,26 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         for grouping in [Grouping::Project, Grouping::Model] {
             view.grouping = grouping;
-            view.set_pinned(&[]);
+            view.set_pinned(&crate::state::TaskPins {
+                active: vec![],
+                inactive: vec![],
+            });
             set_filter(&mut view, 0);
             assert_eq!(
                 ids(&view),
                 ["other", "parent", "agent-newer", "agent-older"]
             );
-            view.set_pinned(&[session_key("parent")]);
+            view.set_pinned(&crate::state::TaskPins {
+                active: vec![session_key("parent")],
+                inactive: vec![],
+            });
             assert_eq!(
                 ids(&view),
                 ["parent", "agent-newer", "agent-older", "other"]
             );
             set_filter(&mut view, 1);
             assert_eq!(ids(&view), ["parent"]);
-            assert!(screen(&view, 120, 30).contains("Pinned"));
+            assert!(!screen(&view, 120, 30).contains("Pinned"));
         }
         view.hide(&session_key("agent-older"));
         assert_eq!(ids(&view), ["parent"]);
@@ -7411,7 +7430,7 @@ mod subagent_actions {
         assert!(view.rename.text().is_empty());
         assert!(view.confirm_dialog.is_none());
         assert!(view.hidden.is_empty());
-        assert!(view.pinned.is_empty());
+        assert!(view.pinned.active.is_empty());
         assert!(!view.searching);
         assert!(!view.help);
         assert_eq!(subagent_rows::screen(view, 120, 30), before);
@@ -7462,6 +7481,7 @@ mod subagent_actions {
         assert_eq!(
             key(&mut view, KeyCode::Char('p')),
             Some(Action::TogglePin {
+                tab: 0,
                 id: session_key("agent-older"),
                 pinned: true,
             })

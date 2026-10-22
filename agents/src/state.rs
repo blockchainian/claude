@@ -100,12 +100,58 @@ pub(crate) struct StoredTask {
     skipped_at: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TaskPins<T> {
+    pub active: Vec<T>,
+    pub inactive: Vec<T>,
+}
+
+impl<T> Default for TaskPins<T> {
+    fn default() -> Self {
+        Self {
+            active: Vec::new(),
+            inactive: Vec::new(),
+        }
+    }
+}
+
+impl<T> TaskPins<T> {
+    pub fn for_tab(&self, tab: usize) -> &[T] {
+        match tab {
+            0 => &self.active,
+            1 => &self.inactive,
+            _ => panic!("unknown task tab: {tab}"),
+        }
+    }
+
+    pub fn for_tab_mut(&mut self, tab: usize) -> &mut Vec<T> {
+        match tab {
+            0 => &mut self.active,
+            1 => &mut self.inactive,
+            _ => panic!("unknown task tab: {tab}"),
+        }
+    }
+
+    fn map<U>(&self, mut map: impl FnMut(&[T]) -> Vec<U>) -> TaskPins<U> {
+        TaskPins {
+            active: map(&self.active),
+            inactive: map(&self.inactive),
+        }
+    }
+}
+
+impl TaskPins<SessionKey> {
+    fn stored(&self) -> TaskPins<String> {
+        self.map(|ids| ids.iter().map(ToString::to_string).collect())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
     pub grouping: Grouping,
-    pub pinned: Vec<SessionKey>,
+    pub pinned: TaskPins<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
     /// A `.tmTheme` file that highlights code on a light background instead of the bundled `light`.
@@ -158,7 +204,7 @@ impl Default for StoredConfig {
 #[derive(Default, Deserialize, Serialize)]
 #[serde(default)]
 struct StoredState {
-    pinned: Vec<String>,
+    pinned: TaskPins<String>,
     usage: StoredUsage,
     tasks: HashMap<String, StoredTask>,
     drafts: Vec<serde_json::Value>,
@@ -209,7 +255,7 @@ impl Default for Preferences {
             worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default(),
-            pinned: Vec::new(),
+            pinned: TaskPins::default(),
             theme: None,
             light_theme: None,
             dark_theme: None,
@@ -272,9 +318,7 @@ impl Preferences {
             pinned: stored
                 .state
                 .pinned
-                .into_iter()
-                .filter_map(|value| value.parse().ok())
-                .collect(),
+                .map(|ids| ids.iter().filter_map(|value| value.parse().ok()).collect()),
             theme: stored.config.theme,
             light_theme: stored.config.light_theme,
             dark_theme: stored.config.dark_theme,
@@ -293,12 +337,7 @@ impl Preferences {
 
     pub fn save_pinned(&self, config_dir: &Path) -> io::Result<()> {
         update(config_dir, |document| {
-            document["state"]["pinned"] = serde_json::to_value(
-                self.pinned
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-            )?;
+            document["state"]["pinned"] = serde_json::to_value(self.pinned.stored())?;
             Ok(())
         })
     }
@@ -535,7 +574,7 @@ impl Preferences {
                     dark_theme: self.dark_theme.clone(),
                 },
                 state: StoredState {
-                    pinned: self.pinned.iter().map(ToString::to_string).collect(),
+                    pinned: self.pinned.stored(),
                     tasks: self
                         .tasks
                         .iter()

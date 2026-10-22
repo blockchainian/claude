@@ -68,6 +68,7 @@ pub(crate) use timeline::timeline_seconds;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crate::providers::{Capabilities, ProviderId, SessionKey};
+use crate::state::TaskPins;
 use chrono::{DateTime, Utc};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -290,7 +291,7 @@ pub struct View {
     attention_skips: HashMap<SessionKey, DateTime<Utc>>,
     grouping: Grouping,
     use_colors: bool,
-    pinned: Vec<SessionKey>,
+    pinned: TaskPins<SessionKey>,
     hidden: HashSet<SessionKey>,
     /// Parent tasks whose subtree is folded away in each task list tab.
     collapsed: Vec<HashSet<SessionKey>>,
@@ -429,7 +430,7 @@ impl View {
             attention_skips: HashMap::new(),
             grouping,
             use_colors,
-            pinned: Vec::new(),
+            pinned: TaskPins::default(),
             hidden: HashSet::new(),
             collapsed: vec![HashSet::new(); TASK_FILTERS.len()],
             status_filter: 0,
@@ -867,8 +868,8 @@ impl View {
     pub fn set_loading(&mut self, loading: bool) {
         self.loading = loading;
     }
-    pub fn set_pinned(&mut self, ids: &[SessionKey]) {
-        self.pinned = ids.to_vec();
+    pub fn set_pinned(&mut self, pins: &TaskPins<SessionKey>) {
+        self.pinned = pins.clone();
         self.reconcile_selection();
     }
     /// Lists a hidden task again, as when its deletion failed.
@@ -994,7 +995,9 @@ impl View {
                 .is_some_and(|root| self.rows[root].status != SessionStatus::Inactive)
     }
     fn is_pinned(&self, index: usize) -> bool {
-        self.pinned.contains(&self.rows[index].id)
+        self.pinned
+            .for_tab(self.status_filter)
+            .contains(&self.rows[index].id)
     }
     fn in_pinned_group(&self, index: usize) -> bool {
         self.is_pinned(index)
@@ -1044,11 +1047,13 @@ impl View {
     }
     fn visible_indices_for_filter(&self, tab: usize) -> Vec<usize> {
         let filter = TASK_FILTERS[tab].1;
+        let pins = self.pinned.for_tab(tab);
+        let is_pinned = |index: usize| pins.contains(&self.rows[index].id);
         let sessions: HashMap<_, _> = self.rows.iter().map(|s| (&s.id, s)).collect();
         let mut matching = HashSet::new();
         for (_, session) in self.rows.iter().enumerate().filter(|(index, session)| {
             filter.contains(&session.status)
-                || (tab == 0 && self.is_pinned(*index) && self.can_pin(*index))
+                || (tab == 0 && is_pinned(*index) && self.can_pin(*index))
         }) {
             let mut current = Some(session);
             while let Some(session) = current {
@@ -1056,7 +1061,7 @@ impl View {
                     break;
                 }
                 // Pinned subtrees stand on their own, without adding ancestor headers.
-                if self.pinned.contains(&session.id) {
+                if pins.contains(&session.id) {
                     break;
                 }
                 current = session
@@ -1081,18 +1086,14 @@ impl View {
             .iter()
             .enumerate()
             .filter(|(index, session)| {
-                (session.parent.is_none() || self.is_pinned(*index))
+                (session.parent.is_none() || is_pinned(*index))
                     && !self.hidden.contains(&session.id)
                     && matching.contains(&session.id)
                     && self.matches_search(session)
             })
             .map(|(index, _)| index)
-            .partition(|index| self.is_pinned(*index));
-        pinned.sort_by_key(|index| {
-            self.pinned
-                .iter()
-                .position(|id| *id == self.rows[*index].id)
-        });
+            .partition(|index| is_pinned(*index));
+        pinned.sort_by_key(|index| pins.iter().position(|id| *id == self.rows[*index].id));
         match self.grouping {
             Grouping::Project => visible.sort_by_key(|index| {
                 (
@@ -1125,7 +1126,7 @@ impl View {
                         .iter()
                         .rev()
                         .copied()
-                        .filter(|&child| !self.is_pinned(child)),
+                        .filter(|&child| !is_pinned(child)),
                 );
             }
         }
