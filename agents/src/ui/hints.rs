@@ -95,18 +95,18 @@ impl View {
                 "Tasks",
                 &[
                     ("n", "New"),
-                    ("enter, o", "Open"),
-                    ("f", "Fork"),
+                    ("o, enter", "Open"),
                     ("r", "Rename"),
-                    ("x", "Stop"),
                     ("a", "Archive"),
                     ("backspace", "Delete"),
                     ("esc", "Back"),
-                    ("⌃c", "Quit"),
-                    ("tab/⇧tab", "Filter"),
+                    ("f", "Fork"),
+                    ("x", "Stop"),
                     ("/", "Search"),
+                    ("tab/⇧tab", "Filter"),
                     ("g", "Group"),
                     ("p", "Pin/unpin"),
+                    ("⌃c", "Quit"),
                 ],
             ),
             group(
@@ -355,18 +355,18 @@ mod tests {
                     tasks,
                     [
                         "n",
-                        "Enter,",
-                        "f",
+                        "o,",
                         "r",
-                        "x",
                         "a",
                         "Backspace",
                         "Esc",
-                        "⌃c",
-                        "Tab/⇧Tab",
+                        "f",
+                        "x",
                         "/",
+                        "Tab/⇧Tab",
                         "g",
-                        "p"
+                        "p",
+                        "⌃c"
                     ]
                 );
             } else if width == 70 {
@@ -395,7 +395,7 @@ mod tests {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .windows(3)
-                .any(|words| words == ["Enter,", "o", "Open"])
+                .any(|words| words == ["o,", "Enter", "Open"])
         }));
         assert!(lines.iter().all(|line| !line.to_string().contains("⌃l")));
     }

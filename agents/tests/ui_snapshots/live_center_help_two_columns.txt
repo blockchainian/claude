@@ -4,18 +4,18 @@
 
  Tasks                                   Events
  n          New                          Space  Filter
- Enter, o   Open                         /      Search
- f          Fork                         t      Sort
- r          Rename
- x          Stop
+ o, Enter   Open                         /      Search
+ r          Rename                       t      Sort
  a          Archive
  Backspace  Delete
  Esc        Back
- ⌃c         Quit
- Tab/⇧Tab   Filter
+ f          Fork
+ x          Stop
  /          Search
+ Tab/⇧Tab   Filter
  g          Group
  p          Pin/unpin
+ ⌃c         Quit
 
  Navigate
  ⌃w h/j/k/l  Focus left/down/up/right

@@ -4,18 +4,18 @@
 
  Tasks                   Events           Navigate
  n          New          Space  Filter    ⌃w h/j/k/l  Focus left/down/up/right
- Enter, o   Open         /      Search    ↑           Up
- f          Fork         t      Sort      ↓           Down
- r          Rename                        PgUp        Page up
- x          Stop                          PgDn        Page down
- a          Archive                       ⌃w _        Max width
- Backspace  Delete                        ⌃w |        Max height
- Esc        Back                          ⌃w =        Reset size
- ⌃c         Quit
- Tab/⇧Tab   Filter
+ o, Enter   Open         /      Search    ↑           Up
+ r          Rename       t      Sort      ↓           Down
+ a          Archive                       PgUp        Page up
+ Backspace  Delete                        PgDn        Page down
+ Esc        Back                          ⌃w _        Max width
+ f          Fork                          ⌃w |        Max height
+ x          Stop                          ⌃w =        Reset size
  /          Search
+ Tab/⇧Tab   Filter
  g          Group
  p          Pin/unpin
+ ⌃c         Quit
 
 
 
