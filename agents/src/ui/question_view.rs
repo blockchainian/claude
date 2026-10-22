@@ -114,17 +114,13 @@ impl QuestionView {
         self.error = error;
     }
 
-    fn footer(&self, width: u16) -> Vec<Line<'static>> {
+    /// Why the last answer failed to send, until the next attempt.
+    pub(super) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    fn footer(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
-        if let Some(error) = &self.error {
-            lines.extend(
-                textwrap::wrap(error, usize::from(width.max(1)))
-                    .into_iter()
-                    .map(|text| {
-                        Line::styled(text.into_owned(), super::style::attention_title_style())
-                    }),
-            );
-        }
         let switch = if self.tabs() > 1 {
             "←/→ switch · "
         } else {
@@ -139,7 +135,7 @@ impl QuestionView {
 
     fn body_height(&self, area: Rect) -> usize {
         let height = usize::from(area.height);
-        height.saturating_sub(self.footer(area.width).len())
+        height.saturating_sub(self.footer().len())
     }
 
     fn questions(&self) -> &[Question] {
@@ -552,7 +548,7 @@ impl QuestionView {
             .unwrap_or(0);
         lines.push(Line::default());
         rows.push(None);
-        lines.extend(self.footer(width));
+        lines.extend(self.footer());
         (lines, focus_row, rows)
     }
 
@@ -639,14 +635,14 @@ impl QuestionView {
         let height = usize::from(area.height);
         if lines.len() <= height {
             // Blank rows above the footer keep it on the area's last line on a shorter tab.
-            let footer = lines.len() - self.footer(area.width).len();
+            let footer = lines.len() - self.footer().len();
             lines.splice(
                 footer..footer,
                 std::iter::repeat_n(Line::default(), height - lines.len()),
             );
             return (lines, rows, 0);
         }
-        let footer = lines.split_off(lines.len() - self.footer(area.width).len());
+        let footer = lines.split_off(lines.len() - self.footer().len());
         let body_height = self.body_height(area);
         let offset = (focus + 1).saturating_sub(body_height);
         let rows = rows.into_iter().skip(offset).take(body_height).collect();
@@ -1165,7 +1161,8 @@ mod tests {
         view.set_error(Some("Question changed".into()));
         let rendered = screen(&view, 24, 4);
         assert!(rendered.contains("› 4."), "{rendered}");
-        assert!(rendered.contains("Question changed"), "{rendered}");
+        assert!(!rendered.contains("Question changed"), "{rendered}");
+        assert_eq!(view.error(), Some("Question changed"));
         assert!(rendered.contains("Enter"), "{rendered}");
     }
 }

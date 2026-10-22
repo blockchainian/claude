@@ -203,8 +203,8 @@ fn failed_prompt_restores_submitted_text_without_losing_the_next_draft() {
         };
         assert_eq!(view.input_box.editor.text(), expected);
         assert_eq!(
-            view.notice.as_ref().map(|(text, _)| text.as_str()),
-            Some("attach timed out")
+            view.feedback.clone().map(|(feedback, _)| feedback),
+            Some(footer::Feedback::Error("attach timed out".into()))
         );
         assert_eq!(
             view.input_box.state,

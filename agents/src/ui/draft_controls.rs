@@ -308,7 +308,7 @@ impl View {
         let branches = match crate::tasks::local_branches(&draft.setup.cwd) {
             Ok(branches) => branches,
             Err(error) => {
-                self.set_notice(Some(format!("Cannot read branches: {error}")));
+                self.show_error(format!("Cannot read branches: {error}"));
                 return false;
             }
         };
@@ -1257,6 +1257,12 @@ mod tests {
         view.draft_created(
             view.selected_draft.unwrap(),
             Err(std::io::Error::other("Creation was interrupted")),
+        );
+        assert_eq!(
+            view.selection_failure(),
+            Some(super::footer::Feedback::Error(
+                "Creation was interrupted".into()
+            ))
         );
         states.push(panel_rows(&view, area).join("\n"));
         view.set_active_panel(Panel::Prompt);

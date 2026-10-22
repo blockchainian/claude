@@ -235,30 +235,6 @@ fn overlay_confirmation_covers_links_and_clicks() {
 }
 
 #[test]
-fn overlay_notice_covers_links_and_clicks() {
-    let (_directory, mut view) = recorded_view();
-    let area = Rect::new(0, 0, 120, 18);
-    let mut before = Buffer::empty(area);
-    draw(&view, &mut before);
-    let list = view.center_layout(area).list;
-    view.set_notice(Some("Notice".into()));
-    let mut after = Buffer::empty(area);
-    draw(&view, &mut after);
-    let cover = Rect::new(list.x, list.bottom() - 1, list.width, 1);
-    for x in cover.x..cover.right() {
-        assert!(!after[(x, cover.y)].symbol().contains("\x1b[4:4m"));
-        assert_eq!(
-            click_mouse(
-                &mut view,
-                mouse(MouseEventKind::Down(MouseButton::Left), x, cover.y)
-            ),
-            None
-        );
-        assert!(view.text_selection.borrow().is_none());
-    }
-}
-
-#[test]
 fn overlay_picker_blank_click_does_not_open_or_copy() {
     picker("model", false);
 }

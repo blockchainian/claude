@@ -234,7 +234,7 @@ impl App {
         view.restore_question_answers(&preferences);
         view.restore_attention_skips(&preferences);
         if !preferences.draft_notices.is_empty() {
-            view.set_notice(Some(preferences.draft_notices.join("; ")));
+            view.show_error(preferences.draft_notices.join("; "));
         }
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
@@ -244,7 +244,7 @@ impl App {
             if let Some((_, defaults)) = hub.task_defaults(&draft.cwd) {
                 match defaults {
                     Ok(defaults) => view.set_draft_defaults(&draft.cwd, defaults),
-                    Err(error) => view.set_notice(Some(format!("Cannot create draft: {error}"))),
+                    Err(error) => view.show_error(format!("Cannot create draft: {error}")),
                 }
             }
         }
@@ -306,7 +306,9 @@ impl App {
                 )),
                 Err(error) => Some(format!("Cannot start {:?}: {error}", command.get_program())),
             };
-            self.view.set_notice(notice);
+            if let Some(notice) = notice {
+                self.view.show_error(notice);
+            }
         }
     }
 
@@ -326,11 +328,7 @@ impl App {
             });
         let mut watcher = match watch {
             Ok(watcher) => Some(watcher),
-            Err(error) => {
-                self.view
-                    .set_notice(Some(format!("Falling back to polling: {error}")));
-                None
-            }
+            Err(_) => None,
         };
         let output = self.sender.clone();
         let mut output_watcher = crate::sessions::OutputWatcher::new(move |event| {
@@ -377,7 +375,7 @@ impl App {
             match output_watcher.set_path(self.view.event_output_path()) {
                 Ok(true) => self.view.refresh_event_output(),
                 Ok(false) => {}
-                Err(error) => self.view.set_notice(Some(error.to_string())),
+                Err(error) => self.view.show_error(error.to_string()),
             }
             self.draw(terminal)?;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
@@ -524,16 +522,14 @@ impl App {
                     };
                     schedule.paths_changed(Instant::now(), request);
                 }
-                Input::Filesystem(Err(error)) if watcher.is_some() => {
-                    self.view
-                        .set_notice(Some(format!("Falling back to polling: {error}")));
+                Input::Filesystem(Err(_)) if watcher.is_some() => {
                     *watcher = None;
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
                 Input::EventOutput(Ok(_)) => self.view.refresh_event_output(),
                 Input::EventOutput(Err(error)) => {
-                    self.view.set_notice(Some(error.to_string()));
+                    self.view.show_error(error.to_string());
                 }
                 Input::EventsLoaded {
                     token,
@@ -595,12 +591,10 @@ impl App {
         if let Some(path) = &self.preferences.theme
             && let Err(error) = crate::theme::use_theme_file(path, light)
         {
-            self.view
-                .set_notice(Some(format!("Theme not loaded: {error}")));
+            self.view.show_error(format!("Theme not loaded: {error}"));
         }
         if let Err(error) = crate::ui::use_highlight_theme(light, self.highlight_theme(light)) {
-            self.view
-                .set_notice(Some(format!("Theme not loaded: {error}")));
+            self.view.show_error(format!("Theme not loaded: {error}"));
         }
     }
 
@@ -644,7 +638,7 @@ impl App {
             match crate::images::ImageAttachment::from_paste(text) {
                 Ok(Some(image)) => self.view.attach_image(image),
                 Ok(None) => self.view.handle_paste(text),
-                Err(error) => self.view.set_notice(Some(error.to_string())),
+                Err(error) => self.view.show_error(error.to_string()),
             }
         } else {
             self.view.handle_paste(text);
@@ -910,7 +904,7 @@ impl App {
                     self.view.event_session = None;
                 }
                 self.view
-                    .set_notice(Some(format!("Cannot read task events: {error}")));
+                    .show_error(format!("Cannot read task events: {error}"));
             }
         }
     }
@@ -1037,8 +1031,7 @@ impl App {
             .redeem_reset_credit(request.clone())
         else {
             self.view.reset_credit_completed(provider);
-            self.view
-                .set_notice(Some(io::ErrorKind::Unsupported.to_string()));
+            self.view.show_error(io::ErrorKind::Unsupported.to_string());
             return;
         };
         let sender = self.sender.clone();
@@ -1075,12 +1068,12 @@ impl App {
                 };
                 if let Some(failure) = failure {
                     self.view
-                        .set_notice(Some(redemption.reason.unwrap_or_else(|| failure.into())));
+                        .show_error(redemption.reason.unwrap_or_else(|| failure.into()));
                 }
             }
             Err(error) => {
                 self.view.reset_credit_failed(provider, &request);
-                self.view.set_notice(Some(error.to_string()));
+                self.view.show_error(error.to_string());
             }
         }
     }
@@ -1164,7 +1157,7 @@ impl App {
 
     fn input_error(&mut self, input: &SessionInput, error: String) {
         if matches!(input, SessionInput::Interrupt) {
-            self.view.set_notice(Some(format!("Cannot stop: {error}")));
+            self.view.show_error(format!("Cannot stop: {error}"));
         } else {
             self.view.input_failed(error);
         }
@@ -1196,7 +1189,7 @@ impl App {
             Err(error) => {
                 self.pending_inputs.remove(&id);
                 if interrupt {
-                    self.view.set_notice(Some(format!("Cannot stop: {error}")));
+                    self.view.show_error(format!("Cannot stop: {error}"));
                 } else {
                     self.view.input_complete(&id, &input, Err(error));
                 }
@@ -1227,7 +1220,7 @@ impl App {
             }
             Err(error) => self
                 .view
-                .set_notice(Some(format!("Cannot create draft: {error}"))),
+                .show_error(format!("Cannot create draft: {error}")),
         }
     }
 
@@ -1375,8 +1368,7 @@ impl App {
         self.view.unhide(id);
         self.request_refresh();
         if let Err(error) = result {
-            self.view
-                .set_notice(Some(format!("Cannot archive: {error}")));
+            self.view.show_error(format!("Cannot archive: {error}"));
         }
     }
 
@@ -1390,8 +1382,7 @@ impl App {
             Err(error) => {
                 self.view.unhide(id);
                 self.request_refresh();
-                self.view
-                    .set_notice(Some(format!("Cannot delete: {error}")));
+                self.view.show_error(format!("Cannot delete: {error}"));
             }
         }
     }
@@ -1485,8 +1476,7 @@ impl App {
                         },
                     );
                 } else {
-                    self.view
-                        .set_notice(Some("Session has no transcript".into()));
+                    self.view.show_error("Session has no transcript".into());
                 }
             }
             Action::SendImages { id, text, images } => {
@@ -1494,11 +1484,11 @@ impl App {
             }
             Action::PasteImage => match self.clipboard.image() {
                 Ok(image) => self.view.attach_image(image),
-                Err(error) => self.view.set_notice(Some(error.to_string())),
+                Err(error) => self.view.show_error(error.to_string()),
             },
             Action::PasteText => match self.clipboard.text() {
                 Ok(text) => return self.paste(&text),
-                Err(error) => self.view.set_notice(Some(error.to_string())),
+                Err(error) => self.view.show_error(error.to_string()),
             },
             Action::ShowMore => {
                 self.hub.show_more();
@@ -1532,13 +1522,11 @@ impl App {
                             Ok(()) => {
                                 self.request_refresh();
                             }
-                            Err(error) => self
-                                .view
-                                .set_notice(Some(format!("Cannot rename: {error}"))),
+                            Err(error) => self.view.show_error(format!("Cannot rename: {error}")),
                         }
                     } else {
                         self.view
-                            .set_notice(Some("Cannot rename: session has no transcript".into()));
+                            .show_error("Cannot rename: session has no transcript".into());
                     }
                 }
             }
@@ -1595,16 +1583,15 @@ impl App {
             }
             Action::Cut(text) => {
                 if let Err(error) = self.clipboard.copy(&text) {
-                    self.view.set_notice(Some(format!("Cannot copy: {error}")));
+                    self.view.show_error(format!("Cannot copy: {error}"));
                 }
             }
             Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
-                Err(error) => self.view.set_notice(Some(format!("Cannot copy: {error}"))),
+                Err(error) => self.view.show_error(format!("Cannot copy: {error}")),
             },
             Action::Unsupported(what) => {
-                self.view
-                    .set_notice(Some(format!("{what} is not supported")));
+                self.view.show_error(format!("{what} is not supported"));
             }
             Action::OpenPath(target) => {
                 let link = crate::ui::vscode::open_target(&target);
@@ -1621,7 +1608,7 @@ impl App {
                     }
                     Err(error) => self
                         .view
-                        .set_notice(Some(format!("Cannot open {}: {error}", target.display()))),
+                        .show_error(format!("Cannot open {}: {error}", target.display())),
                 }
             }
         }
@@ -1646,7 +1633,7 @@ impl App {
     fn report_save(&mut self, result: io::Result<()>) {
         if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Cannot save preferences: {error}")));
+                .show_error(format!("Cannot save preferences: {error}"));
         }
     }
 
@@ -1660,10 +1647,10 @@ impl App {
             return false;
         }
         if !session.cwd.is_dir() {
-            self.view.set_notice(Some(format!(
+            self.view.show_error(format!(
                 "Directory no longer exists: {}",
                 session.cwd.display()
-            )));
+            ));
             return false;
         }
         self.launch = self

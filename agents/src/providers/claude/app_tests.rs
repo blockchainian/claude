@@ -882,7 +882,8 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
                 .collect::<String>()
                 .contains(&format!("{operation} is not supported"))
         );
-        app.view.set_notice(None);
+        app.view
+            .expire_messages(std::time::Instant::now() + std::time::Duration::from_secs(60));
         after = ratatui::buffer::Buffer::empty(area);
         app.view.render_at(area, &mut after, child.updated_at);
     }

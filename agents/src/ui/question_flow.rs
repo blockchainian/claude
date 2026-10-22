@@ -770,7 +770,7 @@ mod tests {
                 "Claude AskUserQuestion disconnected",
             )),
         );
-        view.expire_messages(Instant::now() + Duration::from_secs(2));
+        view.expire_messages(Instant::now() + Duration::from_secs(6));
         assert!(screen(&view, 100, 40).contains("Claude AskUserQuestion disconnected"));
         assert!(matches!(
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),

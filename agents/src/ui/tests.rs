@@ -2496,20 +2496,14 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     key(&mut view, KeyCode::Char('z'));
     assert_empty_task_list(&view);
     key(&mut view, KeyCode::Esc);
-    view.set_notice(Some("Notice".into()));
+    view.show_error("Notice".into());
     let lines = screen(&view, 80, 12);
-    let lines = lines.lines().collect::<Vec<_>>();
-    let notice_row = view.center_layout(Rect::new(0, 0, 80, 12)).list.bottom() - 1;
-    assert_eq!(
-        lines[usize::from(notice_row)]
-            .split(['│', '├'])
-            .next()
-            .unwrap()
-            .trim_end(),
-        " Notice"
+    assert!(
+        lines.lines().last().unwrap().trim_end().ends_with("Notice"),
+        "{lines}"
     );
     key(&mut view, KeyCode::Left);
-    assert!(view.notice.is_none());
+    assert!(view.feedback.is_none());
     key(&mut view, KeyCode::Char('?'));
     assert_eq!(key(&mut view, KeyCode::Char('n')), None);
     assert_eq!(
@@ -7446,13 +7440,18 @@ mod subagent_actions {
             fn $name() {
                 for notice in [None, Some("Keep this notice".to_owned())] {
                     let mut view = fixture();
-                    view.set_notice(notice.clone());
+                    if let Some(notice) = &notice {
+                        view.show_error(notice.clone());
+                    }
                     let before = subagent_rows::screen(&view, 120, 30);
                     assert_eq!(
                         view.handle_key(KeyEvent::new($code, $modifiers)),
                         Some(Action::Unsupported($label))
                     );
-                    assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
+                    assert_eq!(
+                        view.feedback.clone().map(|(feedback, _)| feedback),
+                        notice.map(footer::Feedback::Error)
+                    );
                     assert_unchanged(&view, &before);
                 }
             }
@@ -7463,13 +7462,18 @@ mod subagent_actions {
     fn control_l() {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let mut view = fixture();
-            view.set_notice(notice.clone());
+            if let Some(notice) = &notice {
+                view.show_error(notice.clone());
+            }
             let before = subagent_rows::screen(&view, 120, 30);
             assert_eq!(
                 view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
                 None
             );
-            assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
+            assert_eq!(
+                view.feedback.clone().map(|(feedback, _)| feedback),
+                notice.map(footer::Feedback::Error)
+            );
             assert_unchanged(&view, &before);
         }
     }
@@ -8863,45 +8867,81 @@ fn copy_confirmation_sits_at_footer_right_for_one_second() {
 }
 
 #[test]
-fn notice_sits_at_task_list_bottom_left_for_one_second() {
+fn error_sits_at_footer_right_in_the_error_color_for_five_seconds() {
     let (mut view, now) = event_fixture();
+    // Keep logical time behind wall time so mixing the clocks fails deterministically.
+    let start = Instant::now() - std::time::Duration::from_secs(10);
+    view.show_feedback_at(
+        footer::Feedback::Error("Resume is not supported".into()),
+        start,
+    );
     let area = Rect::new(0, 0, 100, 25);
-    let list = view.center_layout(area).list;
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, now);
+    let footer = (0..area.width)
+        .map(|x| buffer[(x, area.bottom() - 1)].symbol().to_owned())
+        .collect::<String>();
+    assert!(
+        footer.trim_end().ends_with("Resume is not supported"),
+        "{footer}"
+    );
+    let x = footer.trim_end().width() as u16 - 1;
+    assert_eq!(
+        buffer[(x, area.bottom() - 1)].fg,
+        style::error_style().fg.unwrap()
+    );
+    assert_eq!(
+        view.expire_messages(start + std::time::Duration::from_secs(1)),
+        Some(std::time::Duration::from_secs(4))
+    );
+    assert_eq!(
+        view.expire_messages(start + std::time::Duration::from_secs(5)),
+        None
+    );
+    assert!(!event_screen(&view, 100, 25, now).contains("Resume is not supported"));
+}
+
+#[test]
+fn footer_feedback_grows_over_the_hints_and_stays_on_one_row() {
+    let (mut view, now) = event_fixture();
     let hints = event_screen(&view, 100, 25, now)
         .lines()
         .last()
         .unwrap()
+        .trim_end()
         .to_owned();
-    // Keep logical time behind wall time so mixing the clocks fails deterministically.
-    let start = Instant::now() - std::time::Duration::from_secs(2);
-    view.set_notice_at(Some("Resume is not supported".into()), start);
+    let long = "x".repeat(90);
+    view.show_error(long.clone());
     let rendered = event_screen(&view, 100, 25, now);
-    let lines = rendered.lines().collect::<Vec<_>>();
-    let notice_row = lines[usize::from(list.bottom() - 1)];
-    let notice_cells = notice_row
-        .chars()
-        .skip(usize::from(list.x))
-        .take(usize::from(list.width))
-        .collect::<String>();
-    assert_eq!(
-        notice_cells.trim_end(),
-        "Resume is not supported",
+    let footer = rendered.lines().last().unwrap();
+    assert!(footer.trim_end().ends_with(&long), "{footer}");
+    assert!(!footer.contains(&hints), "{footer}");
+    view.show_error("y".repeat(200));
+    let rendered = event_screen(&view, 100, 25, now);
+    let footer = rendered.lines().last().unwrap();
+    assert!(
+        footer.trim().starts_with('y') && footer.trim_end().ends_with('…'),
+        "{footer}"
+    );
+    assert_eq!(rendered.lines().count(), 25);
+}
+
+#[test]
+fn selected_prompt_failure_shows_at_footer_right() {
+    let (mut view, now) = event_fixture();
+    view.input_box.state = prompt_box::SendState::Failed("attach timed out".into());
+    let rendered = event_screen(&view, 100, 25, now);
+    assert!(
+        rendered
+            .lines()
+            .last()
+            .unwrap()
+            .trim_end()
+            .ends_with("attach timed out"),
         "{rendered}"
     );
-    assert_eq!(*lines.last().unwrap(), hints);
-    assert_eq!(
-        view.expire_messages(start),
-        Some(std::time::Duration::from_secs(1))
-    );
-    assert_eq!(
-        view.expire_messages(start + std::time::Duration::from_millis(400)),
-        Some(std::time::Duration::from_millis(600))
-    );
-    assert_eq!(
-        view.expire_messages(start + std::time::Duration::from_secs(1)),
-        None
-    );
-    assert!(!event_screen(&view, 100, 25, now).contains("Resume is not supported"));
+    view.input_box.state = prompt_box::SendState::Ready;
+    assert!(!event_screen(&view, 100, 25, now).contains("attach timed out"));
 }
 
 #[test]
@@ -10554,14 +10594,8 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
             }),
             "search row must not contain chart dots: {width}x{height}"
         );
-        view.set_notice(Some("Notice".into()));
+        view.show_error("Notice".into());
         view.render_at(area, &mut after, now);
-        if !layout.list.is_empty() {
-            let notice: String = (layout.list.x..layout.list.right())
-                .map(|x| cell_text(after[(x, layout.list.bottom() - 1)].symbol()))
-                .collect();
-            assert!(notice.contains("Notice"));
-        }
         let input: String = (layout.search.x..layout.search.right())
             .map(|x| cell_text(after[(x, layout.search.y)].symbol()))
             .collect();

@@ -1,10 +1,42 @@
 //! The footer row: key hints on the left, the scrolled-off section title in the middle and
-//! feedback, such as a copy confirmation, on the right. A narrow layout has no middle, so
-//! the title takes the right whenever no feedback shows.
+//! feedback, such as a copy confirmation or an error, on the right. A narrow layout has no
+//! middle, so the title takes the right whenever no feedback shows. Feedback too wide for the
+//! right grows leftward over the middle and then the hints, and is clipped to the row.
 
 use super::event_detail::EventDetailColumns;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
+
+/// A message for the footer's right end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Feedback {
+    Info(String),
+    Error(String),
+}
+
+impl Feedback {
+    pub(super) fn line(&self) -> Line<'static> {
+        match self {
+            Self::Info(text) => Line::from(text.clone().dim()),
+            Self::Error(text) => Line::styled(text.clone(), style::error_style()),
+        }
+    }
+}
+
+impl View {
+    /// The failure kept by the selected draft, question or prompt until it is retried.
+    pub(super) fn selection_failure(&self) -> Option<Feedback> {
+        let text = match self.selected_draft() {
+            Some(draft) => draft.error.clone(),
+            None => self
+                .active_question()
+                .and_then(|question| question.error())
+                .or_else(|| self.input_box.failure())
+                .map(str::to_owned),
+        }?;
+        Some(Feedback::Error(text))
+    }
+}
 
 pub(super) struct Footer {
     pub hints: Line<'static>,
@@ -22,14 +54,22 @@ impl Footer {
         // Each part after the hints keeps two cells clear of the one before it.
         let mut end = area.right();
         if let Some(feedback) = self.feedback {
-            let width = usize::from(area.right().saturating_sub(start));
-            let feedback = truncate_line_with_ellipsis_if_overflow(feedback, width);
+            let feedback =
+                truncate_line_with_ellipsis_if_overflow(feedback, usize::from(area.width));
             let width = feedback.width() as u16;
-            feedback.render(Rect::new(area.right() - width, area.y, width, 1), buf);
+            let x = area.right() - width;
+            // Feedback over the hints clears the cells it covers and the gap before it.
+            if x < start {
+                let gap = x.saturating_sub(2).max(area.x);
+                for column in gap..x {
+                    buf[(column, area.y)].reset();
+                }
+            }
+            feedback.render(Rect::new(x, area.y, width, 1), buf);
             if !wide {
                 return;
             }
-            end = (area.right() - width).saturating_sub(2);
+            end = x.saturating_sub(2);
         }
         if let Some((title, columns)) = self.title {
             let span = Rect::new(start, area.y, end.saturating_sub(start), 1);

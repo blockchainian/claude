@@ -311,7 +311,7 @@ impl View {
         self.render_at(area, buf, chrono::Utc::now());
     }
     /// Draws the footer: the hints, the scrolled-off section `title` beside the task hints, and
-    /// the copy confirmation.
+    /// the latest feedback, or else the failure of the selected draft, question or prompt.
     fn render_footer(
         &self,
         area: Rect,
@@ -323,9 +323,10 @@ impl View {
             hints: self.center_footer_hints(),
             title: title.filter(|_| self.footer_shows_task_hints()),
             feedback: self
-                .copied
+                .feedback
                 .as_ref()
-                .map(|(label, _)| Line::from(label.clone().dim())),
+                .map(|(feedback, _)| feedback.line())
+                .or_else(|| self.selection_failure().map(|failure| failure.line())),
         }
         .render(area, wide, buf);
     }
@@ -475,13 +476,6 @@ impl View {
             let (prompt, edit) = self.input();
             Clear.render(layout.search, buf);
             render_input_row(&prompt, edit, layout.search, buf);
-        }
-        if let Some((notice, _)) = &self.notice
-            && !layout.list.is_empty()
-        {
-            let bottom = row(layout.list, layout.list.height - 1, 1);
-            self.clear_overlay(bottom, false, buf);
-            line(notice.clone().dim(), bottom, buf);
         }
         // Activity and task status share the rule immediately above the prompt.
         let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
@@ -1059,13 +1053,8 @@ impl View {
             viewport.task_details_links.clear();
             viewport.task_details_text = text_selection::TextRegion::default();
         }
-        if let Some(draft) = self.selected_draft() {
+        if self.selected_draft().is_some() {
             self.viewport.borrow_mut().task_details = area;
-            if let Some(error) = &draft.error {
-                Paragraph::new(error.as_str())
-                    .wrap(ratatui::widgets::Wrap { trim: false })
-                    .render(area, buf);
-            }
             return;
         }
         let Some(session) = self.selected_row() else {

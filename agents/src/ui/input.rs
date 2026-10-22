@@ -1145,7 +1145,13 @@ impl View {
                 } else if let Some(target @ ClickTarget::TaskDetails { .. }) =
                     self.click_target_at(position)
                 {
-                    if matches!(target, ClickTarget::TaskDetails { source: Some(_), .. }) {
+                    if matches!(
+                        target,
+                        ClickTarget::TaskDetails {
+                            source: Some(_),
+                            ..
+                        }
+                    ) {
                         self.pending_click = None;
                         return self.activate_task_details(target);
                     }
@@ -1632,7 +1638,7 @@ impl View {
                     })
                 });
         }
-        self.notice = None;
+        self.feedback = None;
         if let Some(dialog) = &mut self.confirm_dialog {
             if plain {
                 match key.code {

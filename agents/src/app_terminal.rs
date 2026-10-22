@@ -18,15 +18,15 @@ impl App {
             return;
         };
         if !session.cwd.is_dir() {
-            self.view.set_notice(Some(format!(
+            self.view.show_error(format!(
                 "Directory no longer exists: {}",
                 session.cwd.display()
-            )));
+            ));
             return;
         }
         let Some(size) = self.view.terminal_size() else {
             self.view
-                .set_notice(Some("The event detail panel is hidden".into()));
+                .show_error("The event detail panel is hidden".into());
             return;
         };
         if self.closing_terminals.contains_key(&id) {
@@ -38,7 +38,7 @@ impl App {
             Ok(cleanup) => cleanup,
             Err(error) => {
                 self.view
-                    .set_notice(Some(format!("Cannot open the terminal: {error}")));
+                    .show_error(format!("Cannot open the terminal: {error}"));
                 return;
             }
         };
@@ -46,7 +46,7 @@ impl App {
             match self.hub.provider(id.provider).terminal_command(&session) {
                 Ok(command) => command,
                 Err(reason) => {
-                    self.view.set_notice(Some(reason.into()));
+                    self.view.show_error(reason.into());
                     return;
                 }
             };
@@ -64,7 +64,7 @@ impl App {
             }
             Err(error) => self
                 .view
-                .set_notice(Some(format!("Cannot open the terminal: {error}"))),
+                .show_error(format!("Cannot open the terminal: {error}")),
         }
     }
 
@@ -122,7 +122,7 @@ impl App {
         self.closing_terminals.remove(id);
         if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Cannot close the terminal: {error}")));
+                .show_error(format!("Cannot close the terminal: {error}"));
         }
     }
 
@@ -131,7 +131,7 @@ impl App {
             && let Err(error) = terminal.write(bytes)
         {
             self.view
-                .set_notice(Some(format!("Cannot write to the terminal: {error}")));
+                .show_error(format!("Cannot write to the terminal: {error}"));
         }
     }
 
@@ -140,7 +140,7 @@ impl App {
             && let Err(error) = terminal.paste(text)
         {
             self.view
-                .set_notice(Some(format!("Cannot write to the terminal: {error}")));
+                .show_error(format!("Cannot write to the terminal: {error}"));
         }
     }
 
@@ -198,7 +198,7 @@ impl App {
             && let Err(error) = terminal.resize(rows, cols)
         {
             self.view
-                .set_notice(Some(format!("Cannot resize the terminal: {error}")));
+                .show_error(format!("Cannot resize the terminal: {error}"));
         }
     }
 

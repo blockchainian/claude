@@ -531,7 +531,7 @@ impl View {
                 value.id.parse::<DraftKey>(),
                 format!("{}:{}", value.provider, value.id).parse::<SessionKey>(),
             ) else {
-                self.set_notice(Some("Invalid draft identity".into()));
+                self.show_error("Invalid draft identity".into());
                 continue;
             };
             let mut error = value.error.clone();

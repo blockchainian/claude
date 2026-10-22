@@ -54,8 +54,6 @@ struct PromptLayout {
     lines: Vec<String>,
     /// The caret's column within the box and its row.
     caret: (u16, usize),
-    /// A failed send's reason, right-aligned on the last row.
-    failed_reason: Option<String>,
 }
 
 fn prompt_heading(label: &str, marker: &str) -> String {
@@ -98,14 +96,8 @@ impl PromptBox {
             .search
             .as_ref()
             .map(|search| format!("History: {}", search.query.text()));
-        // A failed send reverses the marker and keeps its reason until the next send.
-        let failed_reason = match &self.state {
-            SendState::Failed(reason) if self.search.is_none() => Some(clip(
-                reason.lines().next().unwrap_or(""),
-                usize::from(width),
-            )),
-            _ => None,
-        };
+        // A failed send reverses the marker until the next send.
+        let failed = self.search.is_none() && self.failure().is_some();
         let label = search_label.as_deref().unwrap_or(label);
         let prefix_budget = usize::from(width.saturating_sub((width / 3).max(1)));
         let label_budget = if self.search.is_some() {
@@ -113,9 +105,9 @@ impl PromptBox {
         } else {
             usize::from(width / 3).min(prefix_budget.saturating_sub(3))
         };
-        let shows_task = self.search.is_none() && failed_reason.is_none();
+        let shows_task = self.search.is_none() && !failed;
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
-        let marker = if failed_reason.is_some() {
+        let marker = if failed {
             DISABLED_PROMPT_MARKER
         } else {
             PROMPT_MARKER
@@ -147,21 +139,12 @@ impl PromptBox {
                 lines[row].push_str(grapheme);
             }
         }
-        // The reason shares the last row when a space still separates it from the text.
-        if let Some(reason) = &failed_reason {
-            let last = lines.len() - 1;
-            let inset = if last == 0 { usize::from(inset) } else { 0 };
-            if inset + lines[last].width() + 1 + reason.width() > usize::from(width) {
-                lines.push(String::new());
-            }
-        }
         PromptLayout {
             prefix,
             task_label_len,
             inset,
             lines,
             caret,
-            failed_reason,
         }
     }
 
@@ -233,14 +216,6 @@ impl PromptBox {
                 Style::default(),
             );
         }
-        if let Some(reason) = &layout.failed_reason
-            && let Some(row) = (layout.lines.len() - 1)
-                .checked_sub(start)
-                .filter(|&row| row < height)
-        {
-            let column = area.right() - reason.width() as u16;
-            buf.set_string(column, area.y + row as u16, reason, style);
-        }
         self.highlight_mouse_selection(area, buf, start);
     }
 
@@ -259,6 +234,14 @@ impl PromptBox {
             area.x + layout.caret.0.min(area.width - 1),
             area.y + row as u16,
         ))
+    }
+
+    /// Why the last send failed, until the next send.
+    pub(super) fn failure(&self) -> Option<&str> {
+        match &self.state {
+            SendState::Failed(reason) => Some(reason),
+            SendState::Ready => None,
+        }
     }
 
     pub(super) fn searching_history(&self) -> bool {
@@ -527,46 +510,25 @@ mod tests {
     }
 
     #[test]
-    fn failed_send_reverses_the_marker_and_right_aligns_its_reason_after_the_text() {
+    fn failed_send_reverses_the_marker_and_keeps_its_reason_for_the_footer() {
         let mut editor = focused();
         editor.editor.set_text("retry me");
-        editor.state = SendState::Failed("Claude attach timed out\nscreen".into());
+        editor.state = SendState::Failed("Claude attach timed out".into());
         let area = Rect::new(0, 0, 40, 1);
         let mut buffer = Buffer::empty(area);
         editor.render(area, &mut buffer, "Task", Style::default(), None, true);
         let screen: String = (0..area.width)
             .map(|column| buffer[(column, 0)].symbol().to_owned())
             .collect();
-        assert_eq!(screen, "Task ❮ retry me  Claude attach timed out");
-        let reason = 40 - "Claude attach timed out".len() as u16;
-        for column in (0..7).chain(reason..40) {
-            assert_eq!(
-                buffer[(column, 0)].fg,
-                Color::Rgb(160, 99, 93),
-                "column {column}"
-            );
+        assert_eq!(screen.trim_end(), "Task ❮ retry me");
+        for column in 0..7 {
+            assert_eq!(buffer[(column, 0)].fg, style::error_style().fg.unwrap());
         }
-        assert_ne!(buffer[(7, 0)].fg, Color::Rgb(160, 99, 93));
+        assert_eq!(editor.failure(), Some("Claude attach timed out"));
         assert_eq!(editor.cursor(area, "Task"), Some((15, 0)));
         editor.state = SendState::Ready;
-        assert!(!rendered(&editor, 40, None).contains("timed out"));
-    }
-
-    #[test]
-    fn failed_reason_takes_its_own_row_when_the_last_row_is_too_full() {
-        let mut editor = focused();
-        editor.editor.set_text("first line\nretry me now please");
-        editor.state = SendState::Failed("attach timed out".into());
-        let screen = rendered(&editor, 30, None);
-        let rows: Vec<_> = screen.lines().map(str::trim_end).collect();
-        assert_eq!(
-            rows,
-            [
-                "Task ❮ first line",
-                "retry me now please",
-                "              attach timed out"
-            ]
-        );
+        assert_eq!(editor.failure(), None);
+        assert!(rendered(&editor, 40, None).starts_with("Task ❯ retry me"));
     }
 
     #[test]

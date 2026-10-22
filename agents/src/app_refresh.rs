@@ -153,7 +153,7 @@ impl App {
                 return;
             }
         }
-        self.view.set_notice(Some("Nothing to delete".into()));
+        self.view.show_info("Nothing to delete".into());
     }
 
     /// Applies completed real-provider refreshes for synchronous fixture assertions.

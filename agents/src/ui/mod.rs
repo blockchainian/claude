@@ -106,8 +106,9 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
-/// How long a copy confirmation or a notice stays on screen.
+/// How long footer feedback stays on screen, unless a key press clears it first.
 const MESSAGE_LIFETIME: Duration = Duration::from_secs(1);
+const ERROR_LIFETIME: Duration = Duration::from_secs(5);
 
 /// Longest gap between two clicks on one task that still opens it.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
@@ -312,8 +313,6 @@ pub struct View {
     help: bool,
     loading: bool,
     has_more: bool,
-    /// A notice at the task list's bottom-left, shown until it expires.
-    notice: Option<(String, Instant)>,
     viewport: RefCell<Viewport>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
@@ -327,8 +326,8 @@ pub struct View {
     pressed_task: Option<SessionKey>,
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
-    /// The confirmation of the last copy, shown at the footer's right end until it expires.
-    copied: Option<(String, Instant)>,
+    /// The footer's right-side feedback, shown until it expires or a key press clears it.
+    feedback: Option<(footer::Feedback, Instant)>,
     text_selection: RefCell<Option<text_selection::Selection>>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
@@ -448,7 +447,6 @@ impl View {
             help: false,
             loading: false,
             has_more: false,
-            notice: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
             double_click_interval: DOUBLE_CLICK_INTERVAL,
@@ -458,7 +456,7 @@ impl View {
             mouse_panel: None,
             pressed_task: None,
             last_copy_click: None,
-            copied: None,
+            feedback: None,
             text_selection: RefCell::new(None),
             title_slots: RefCell::new(HashMap::new()),
             panels_task: None,
@@ -631,7 +629,7 @@ impl View {
                 self.set_active_panel(Panel::Prompt);
             }
             if let Err(error) = result {
-                self.set_notice(Some(error.to_string()));
+                self.show_error(error.to_string());
             }
             return;
         }
@@ -650,7 +648,7 @@ impl View {
             Err(error) => prompt_box::SendState::Failed(error.to_string()),
         };
         if let Some(error) = error {
-            self.set_notice(Some(error));
+            self.show_error(error);
         }
     }
 
@@ -670,7 +668,7 @@ impl View {
 
     pub(crate) fn input_failed(&mut self, reason: String) {
         self.input_box.state = prompt_box::SendState::Failed(reason.clone());
-        self.set_notice(Some(reason));
+        self.show_error(reason);
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {
@@ -895,26 +893,32 @@ impl View {
         }
         self.reconcile_selection();
     }
-    /// Shows `notice` at the task list's bottom-left for `MESSAGE_LIFETIME`.
-    pub fn set_notice(&mut self, notice: Option<String>) {
-        self.set_notice_at(notice, Instant::now());
+    /// Shows `text` at the footer's right end for `MESSAGE_LIFETIME`.
+    pub fn show_info(&mut self, text: String) {
+        self.show_feedback_at(footer::Feedback::Info(text), Instant::now());
     }
 
-    fn set_notice_at(&mut self, notice: Option<String>, now: Instant) {
-        self.notice = notice.map(|text| (text, now + MESSAGE_LIFETIME));
+    /// Shows `text` in the error color at the footer's right end for `ERROR_LIFETIME`.
+    pub fn show_error(&mut self, text: String) {
+        self.show_feedback_at(footer::Feedback::Error(text), Instant::now());
     }
 
     /// Shows `label` at the footer's right end until `MESSAGE_LIFETIME` after `now`.
     pub fn show_copied(&mut self, label: String, now: Instant) {
-        self.copied = Some((label, now + MESSAGE_LIFETIME));
+        self.show_feedback_at(footer::Feedback::Info(label), now);
     }
 
-    /// Clears an expired copy confirmation and notice, and returns how long the first of the
-    /// shown ones has left.
+    fn show_feedback_at(&mut self, feedback: footer::Feedback, now: Instant) {
+        let lifetime = match feedback {
+            footer::Feedback::Info(_) => MESSAGE_LIFETIME,
+            footer::Feedback::Error(_) => ERROR_LIFETIME,
+        };
+        self.feedback = Some((feedback, now + lifetime));
+    }
+
+    /// Clears expired feedback and returns how long the shown feedback has left.
     pub fn expire_messages(&mut self, now: Instant) -> Option<Duration> {
-        let copied = expire(&mut self.copied, now);
-        let notice = expire(&mut self.notice, now);
-        copied.into_iter().chain(notice).min()
+        expire(&mut self.feedback, now)
     }
     /// Where the selected row starts, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {
@@ -1456,7 +1460,7 @@ mod tests;
 mod text_selection_tests;
 
 /// Clears `message` once `now` reaches its expiry, and returns how long it has left.
-fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Duration> {
+fn expire<T>(message: &mut Option<(T, Instant)>, now: Instant) -> Option<Duration> {
     let (_, expires_at) = message.as_ref()?;
     let left = expires_at
         .checked_duration_since(now)

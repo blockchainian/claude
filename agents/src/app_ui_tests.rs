@@ -1383,7 +1383,7 @@ fn terminal_repaint_never_shows_the_hardware_cursor_over_painted_cells() {
     assert!(!hardware.screen().hide_cursor());
     let cursor = hardware.screen().cursor_position();
 
-    app.view.set_notice(Some("repaint".into()));
+    app.view.show_info("repaint".into());
     app.draw_at(&mut terminal, now).unwrap();
     let repainted = std::fs::read(output.path()).unwrap();
     for byte in &repainted[first.len()..] {

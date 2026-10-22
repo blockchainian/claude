@@ -38,7 +38,7 @@ New branch ❯ feature/probe
                                                                                 ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
  named task ❯ unfinished task
 ---
-Creation was interrupted
+
 
 
 
