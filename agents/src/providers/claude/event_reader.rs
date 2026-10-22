@@ -966,7 +966,8 @@ impl EventReader {
                             }
                             Some("advisor_tool_result") => {
                                 if let Some(id) = block["tool_use_id"].as_str() {
-                                    // Only the completion time is visible; the payload is encrypted.
+                                    // The result exists, but its payload is encrypted.
+                                    let content = crate::event::agent::Content::Encrypted.text();
                                     let source_records = self.source_records();
                                     self.results.entry(id.to_owned()).or_insert(ResultAt {
                                         source_records,
@@ -974,8 +975,8 @@ impl EventReader {
                                         sequence: self.sequence,
                                         error: false,
                                         denial: None,
-                                        content: String::new(),
-                                        raw_content: serde_json::Value::Null,
+                                        content: content.to_owned(),
+                                        raw_content: content.into(),
                                         value: serde_json::Value::Null,
                                     });
                                 }
@@ -1474,7 +1475,12 @@ pub(crate) mod tests {
                 .as_deref(),
             Some("claude-fable-5-1")
         );
-        assert!(event.calls[0].output.as_ref().is_none_or(Vec::is_empty));
+        assert!(
+            event.calls[0]
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.is_empty())
+        );
         assert_eq!(event.source_records.len(), 2);
         let mut following: Value = serde_json::from_str(
             include_str!("../../../tests/fixtures/claude-tool-details.jsonl")

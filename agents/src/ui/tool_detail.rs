@@ -935,6 +935,26 @@ mod tests {
     }
 
     #[test]
+    fn claude_advisor_detail_shows_encrypted_output() {
+        let events = crate::providers::claude::event_reader::tail_session(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-advisor.jsonl"),
+            20,
+            true,
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        let parts = flattened_parts(&events[0]);
+        let output: Vec<_> = parts
+            .iter()
+            .skip_while(|part| !matches!(part.body, Body::Arrow))
+            .skip(1)
+            .map(|part| part.source.as_str())
+            .collect();
+        assert_eq!(output, ["(encrypted)"]);
+    }
+
+    #[test]
     fn codex_agent_message_has_a_named_title_and_no_output_arrow() {
         let events = codex_fixture_events("tests/fixtures/codex-agent-messages/new-task.jsonl");
         let event = events.first().unwrap();

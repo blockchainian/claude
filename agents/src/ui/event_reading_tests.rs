@@ -21,7 +21,7 @@ fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
 }
 
 #[test]
-fn advisor_list_row_uses_catalog_model_and_hides_encrypted_result() {
+fn advisor_list_row_uses_catalog_model_and_hides_encrypted_payload() {
     use crate::providers::Provider;
     let fixture = include_str!("../../tests/fixtures/claude-advisor.jsonl");
     let transcript = tempfile::NamedTempFile::new().unwrap();
@@ -100,7 +100,7 @@ fn advisor_list_row_uses_catalog_model_and_hides_encrypted_result() {
     assert!(row.contains("advisor · Fable 5.1"), "{row}");
     assert!(row.contains("4m 45s"), "{row}");
     assert!(!view.event_detail_text(&event).contains("encrypted_content"));
-    assert!(display.calls[0].output.as_ref().is_none_or(Vec::is_empty));
+    assert!(view.event_detail_text(&event).contains("(encrypted)"));
     assert_eq!(event.body, "advisor");
     let advisor_x = row.find("advisor").unwrap() as u16;
     assert_eq!(
