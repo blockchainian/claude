@@ -324,11 +324,12 @@ export async function run(options, dependencies) {
       // Keep a second window ready while request slots drain or files write back.
       let tasks = naming ? [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))] : [];
       do {
-        const fileConcurrency = Math.min(tasks.length, settings.concurrency * 2);
-        let nextFile = 0;
-        async function worker() {
-          while (nextFile < tasks.length) {
-            const task = tasks[nextFile++], file = typeof task === 'string' ? task : task.id;
+        const ordinary = tasks.filter(task => typeof task === 'string');
+        const fileConcurrency = Math.min(ordinary.length, settings.concurrency * 2);
+        const fileQueue = ordinary.values(), chunkQueue = tasks.filter(task => typeof task !== 'string').values();
+        async function worker(queue) {
+          for (const task of queue) {
+            const file = typeof task === 'string' ? task : task.id;
             try {
               if (typeof task === 'string') await processFile(task);
               else await chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext });
@@ -339,7 +340,8 @@ export async function run(options, dependencies) {
             }
           }
         }
-        await Promise.all(Array.from({ length: fileConcurrency }, worker));
+        // A chunk retains every member's Babel graph; request slots still run in parallel.
+        await Promise.all([...Array.from({ length: fileConcurrency }, () => worker(fileQueue)), worker(chunkQueue)]);
         if (!syncing) break;
         if (!naming) await chunkDriver.prepareImports(sources);
         loadHistory(root, { sources, journals, chunks: chunkDriver, ignores, emit });
