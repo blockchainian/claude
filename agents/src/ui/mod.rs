@@ -6,6 +6,7 @@ mod draft_controls;
 mod draft_flow_tests;
 mod drafts;
 use draft_controls::{Field, Selector};
+mod footer;
 mod formatting;
 pub(crate) use drafts::DraftSetup;
 mod centering;

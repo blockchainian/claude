@@ -310,6 +310,25 @@ impl View {
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }
+    /// Draws the footer: the hints, the scrolled-off section `title` beside the task hints, and
+    /// the copy confirmation.
+    fn render_footer(
+        &self,
+        area: Rect,
+        wide: bool,
+        title: Option<(Line<'static>, super::event_detail::EventDetailColumns)>,
+        buf: &mut Buffer,
+    ) {
+        super::footer::Footer {
+            hints: self.center_footer_hints(),
+            title: title.filter(|_| self.footer_shows_task_hints()),
+            feedback: self
+                .copied
+                .as_ref()
+                .map(|(label, _)| Line::from(label.clone().dim())),
+        }
+        .render(area, wide, buf);
+    }
     pub(super) fn clear_overlay(&self, area: Rect, modal: bool, buf: &mut Buffer) {
         use ratatui::buffer::CellWidth;
 
@@ -412,12 +431,6 @@ impl View {
         }
         rule(row(layout.header, 1, 1), buf);
 
-        line(self.center_footer_hints(), inset(layout.footer), buf);
-        if let Some((label, _)) = &self.copied {
-            Line::from(label.clone().dim())
-                .right_aligned()
-                .render(inset(layout.footer), buf);
-        }
         if self.help {
             let body = inset(row(
                 area,
@@ -431,6 +444,12 @@ impl View {
                 lines.push("… resize to see all".dim().into());
             }
             Paragraph::new(lines).render(body, buf);
+            self.render_footer(
+                inset(layout.footer),
+                area.width >= WIDE_LAYOUT_COLUMNS,
+                None,
+                buf,
+            );
             return;
         }
         for y in layout.gap.y..layout.gap.bottom() {
@@ -496,19 +515,12 @@ impl View {
             self.render_event_detail(inset(layout.event_detail), buf, now);
         }
         let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
-        if let Some((title, columns)) = footer_title
-            && self.copied.is_none()
-            && self.footer_shows_task_hints()
-        {
-            super::event_list::render_footer_title(
-                title,
-                columns,
-                inset(layout.footer),
-                self.center_footer_hints().width() as u16,
-                area.width >= WIDE_LAYOUT_COLUMNS,
-                buf,
-            );
-        }
+        self.render_footer(
+            inset(layout.footer),
+            area.width >= WIDE_LAYOUT_COLUMNS,
+            footer_title,
+            buf,
+        );
         if !layout.event_panel.is_empty() {
             self.viewport.borrow_mut().event_borders = [
                 Rect::new(

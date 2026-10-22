@@ -653,6 +653,27 @@ fn event_detail_footer_shows_the_scrolled_off_title() {
 }
 
 #[test]
+fn footer_feedback_takes_the_right_and_a_narrow_title_yields_to_it() {
+    for width in [100, 160] {
+        let (mut view, _) = fixture(true);
+        let hints = screen_rows(&view, width, 40).last().unwrap().clone();
+        let hints = hints.trim_end();
+        event_detail_wheel(&mut view, true);
+        let titled = screen_rows(&view, width, 40).last().unwrap().clone();
+        view.show_copied("Copied message".into(), std::time::Instant::now());
+        let footer = screen_rows(&view, width, 40).last().unwrap().clone();
+        assert!(footer.trim_end().ends_with("Copied message"), "{footer}");
+        let title = titled[hints.len()..].trim();
+        assert!(!title.is_empty(), "{titled}");
+        if width >= super::render::WIDE_LAYOUT_COLUMNS {
+            assert!(footer.contains(title), "wide keeps the middle: {footer}");
+        } else {
+            assert!(!footer.contains(title), "narrow has no middle: {footer}");
+        }
+    }
+}
+
+#[test]
 fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
     let (mut view, _) = tool_fixture();
     let mut events = view.event_panel.clone();
