@@ -1092,7 +1092,7 @@ impl App {
         self.view.set_sessions(sessions, has_more);
     }
 
-    /// Finished tasks leave the Pinned group and discard their saved interface state.
+    /// Finished tasks discard saved interface state; task pins last while they or their root are active.
     fn forget_inactive_state(&mut self, sessions: &[Session]) {
         for session in sessions
             .iter()
@@ -1106,9 +1106,24 @@ impl App {
         }
         let pinned = self.preferences.pinned.len();
         self.preferences.pinned.retain(|id| {
-            !sessions
-                .iter()
-                .any(|session| &session.id == id && session.status == SessionStatus::Inactive)
+            let Some(session) = sessions.iter().find(|session| &session.id == id) else {
+                return true;
+            };
+            if session.status != SessionStatus::Inactive {
+                return true;
+            }
+            let mut root = session;
+            for _ in 0..sessions.len() {
+                let Some(parent) = root
+                    .parent
+                    .as_ref()
+                    .and_then(|id| sessions.iter().find(|session| &session.id == id))
+                else {
+                    break;
+                };
+                root = parent;
+            }
+            root.parent.is_none() && root.status != SessionStatus::Inactive
         });
         if self.preferences.pinned.len() != pinned {
             let saved = self.preferences.save_pinned(&self.config_dir);
@@ -1392,8 +1407,7 @@ impl App {
             | Action::Rename { id, .. }
             | Action::Delete(id)
             | Action::Archive(id)
-            | Action::Stop(id)
-            | Action::TogglePin { id, .. } => Some(id),
+            | Action::Stop(id) => Some(id),
             _ => None,
         };
         if let Some(session) = target.and_then(|id| self.session(id))

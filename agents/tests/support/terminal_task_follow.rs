@@ -495,3 +495,82 @@ fn terminal_pinned_separator_is_centered_and_not_selectable() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_inactive_child_pin_lasts_until_root_finishes() {
+    let (directory, tmux, transcript) = start_probe("inactive-child-pin");
+    let select_child = || {
+        let capture = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .any(|line| line.contains("Pin review") && line.contains("Inactive"))
+        });
+        let row = capture
+            .lines()
+            .position(|line| line.contains("Pin review") && line.contains("Inactive"))
+            .unwrap();
+        // Click the title rather than the child's collapse indicator.
+        tmux.mouse(0, 12, row, true);
+        tmux.wait_for(|capture| selected(capture, "Pin review"));
+    };
+    let config = directory.path().join("claude");
+    let registry = config.join("sessions/pin-root.json");
+    std::fs::create_dir_all(registry.parent().unwrap()).unwrap();
+    let entry = registry_entry(
+        "4165651d-b9e3-458d-8612-f8114e312363",
+        "Pin root",
+        directory.path(),
+    );
+    write_entry(&registry, &entry);
+    tmux.wait_for(|capture| capture.contains("Active 1"));
+    let children = transcript.with_extension("").join("subagents");
+    std::fs::create_dir_all(&children).unwrap();
+    std::fs::write(
+        children.join("agent-done.jsonl"),
+        include_str!("../fixtures/subagent.jsonl"),
+    )
+    .unwrap();
+    std::fs::write(
+        children.join("agent-done.meta.json"),
+        r#"{"description":"Pin review"}"#,
+    )
+    .unwrap();
+    tmux.wait_for(|capture| capture.contains("Inactive 2"));
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    select_child();
+    tmux.run(&["send-keys", "-t", "probe", "p"]);
+    tmux.wait_for(|capture| capture.contains("Pinned"));
+    let preferences = || -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(config.join("agents.json")).unwrap()).unwrap()
+    };
+    let pin = preferences()["state"]["pinned"].clone();
+    assert_eq!(pin.as_array().unwrap().len(), 1);
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    let active =
+        tmux.capture_when(|capture| capture.contains("Pinned") && capture.contains("Pin review"));
+    assert!(!active.contains("Pin is not supported"), "{active}");
+    select_child();
+    tmux.run(&["send-keys", "-t", "probe", "p"]);
+    tmux.wait_for(|capture| !capture.contains("Pinned"));
+    assert_eq!(preferences()["state"]["pinned"], serde_json::json!([]));
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    select_child();
+    tmux.run(&["send-keys", "-t", "probe", "p"]);
+    tmux.wait_for(|capture| capture.contains("Pinned"));
+    assert_eq!(preferences()["state"]["pinned"], pin);
+    std::fs::remove_file(&registry).unwrap();
+    let finished =
+        tmux.capture_when(|capture| capture.contains("Inactive 2") && !capture.contains("Pinned"));
+    assert_eq!(preferences()["state"]["pinned"], serde_json::json!([]));
+    let verdict = serde_json::json!({
+        "verdict": "pass",
+        "inactive_child_pin": true,
+        "active_tab": active,
+        "unpin_and_repin": true,
+        "root_finished": finished,
+    });
+    let path = std::env::temp_dir().join("agents-inactive-child-pin-verdict.json");
+    std::fs::write(path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    println!("{verdict}");
+}

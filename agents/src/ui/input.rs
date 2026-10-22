@@ -1947,7 +1947,7 @@ impl View {
             }
             KeyCode::Char('p') => {
                 let id = self.selected_id()?.clone();
-                if self.rows[self.selected].status == SessionStatus::Inactive {
+                if !self.can_pin(self.selected) {
                     return Some(Action::Unsupported("Pin"));
                 }
                 let pinned = !self.is_pinned(self.selected);

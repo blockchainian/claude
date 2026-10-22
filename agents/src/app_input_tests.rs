@@ -647,3 +647,36 @@ fn child_pin_persists_independently_and_survives_inactive_parent() {
     app.forget_inactive_state(&[parent, child]);
     assert!(Preferences::load(directory.path()).pinned.is_empty());
 }
+
+#[test]
+fn inactive_child_pin_survives_until_its_root_is_inactive() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut root = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let mut parent = root.clone();
+    parent.id.id = "parent".into();
+    parent.parent = Some(root.id.clone());
+    parent.status = crate::model::SessionStatus::Inactive;
+    let mut child = parent.clone();
+    child.id.id = "child".into();
+    child.parent = Some(parent.id.clone());
+    app.sessions = vec![child.clone(), parent.clone(), root.clone()];
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.handle_action(Some(Action::TogglePin {
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    app.forget_inactive_state(&[child.clone(), parent.clone(), root.clone()]);
+    assert_eq!(
+        Preferences::load(directory.path()).pinned,
+        vec![child.id.clone()]
+    );
+    assert!(screen(&mut app).contains("Pinned"));
+    root.status = crate::model::SessionStatus::Inactive;
+    parent.status = crate::model::SessionStatus::Working;
+    app.forget_inactive_state(&[child, parent, root]);
+    assert!(Preferences::load(directory.path()).pinned.is_empty());
+    assert!(!screen(&mut app).contains("Pinned"));
+}

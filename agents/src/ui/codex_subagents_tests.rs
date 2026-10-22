@@ -382,7 +382,7 @@ fn inactive_merged_tree_keeps_cross_provider_ancestors_and_flat_sessions() {
 }
 
 #[test]
-fn child_pin_toggles_only_selected_task_and_checks_its_status() {
+fn child_pin_toggles_only_selected_task_and_checks_root_and_own_status() {
     let mut view = tree();
     let root = view.rows.iter().position(|s| s.id.id == "root").unwrap();
     let child = view
@@ -411,14 +411,29 @@ fn child_pin_toggles_only_selected_task_and_checks_its_status() {
             })
         );
     }
-    view.rows[root].status = SessionStatus::Ready;
     view.rows[child].status = SessionStatus::Inactive;
-    view.set_selected(child);
-    view.set_active_panel(Panel::TaskList);
-    assert_eq!(
-        key(&mut view, KeyCode::Char('p')),
-        Some(Action::Unsupported("Pin"))
-    );
+    for (root_status, expected) in [
+        (
+            SessionStatus::Ready,
+            Action::TogglePin {
+                id: session_key("grandchild"),
+                pinned: true,
+            },
+        ),
+        (SessionStatus::Inactive, Action::Unsupported("Pin")),
+    ] {
+        view.rows[root].status = root_status;
+        // The active immediate parent must not replace the actual root check.
+        view.rows
+            .iter_mut()
+            .find(|s| s.id.id == "child")
+            .unwrap()
+            .status = SessionStatus::Ready;
+        view.set_pinned(&[]);
+        view.set_selected(child);
+        view.set_active_panel(Panel::TaskList);
+        assert_eq!(key(&mut view, KeyCode::Char('p')), Some(expected));
+    }
 }
 
 #[test]
@@ -485,4 +500,27 @@ fn child_pin_stays_visible_under_inactive_parent_in_active_tab() {
     assert!(rendered.contains("Pinned"));
     assert!(rendered.contains("Provider adapters"));
     assert!(!rendered.contains("Root task"));
+}
+
+#[test]
+fn inactive_child_pin_stays_visible_with_active_root_in_active_tab() {
+    let mut view = tree();
+    for row in &mut view.rows {
+        if row.id.id != "root" {
+            row.status = SessionStatus::Inactive;
+        }
+    }
+    view.set_pinned(&[session_key("grandchild")]);
+    assert_eq!(ids(&view), ["grandchild", "root"]);
+    let rendered = screen(&view, 160, 35);
+    assert!(rendered.contains("Pinned"));
+    assert!(rendered.contains("Provider adapters"));
+    view.rows
+        .iter_mut()
+        .find(|s| s.id.id == "deep")
+        .unwrap()
+        .status = SessionStatus::Working;
+    assert_eq!(ids(&view), ["grandchild", "deep", "root"]);
+    let rendered = screen(&view, 160, 35);
+    assert!(rendered.contains("Deep worker"));
 }

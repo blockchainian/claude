@@ -987,6 +987,12 @@ impl View {
         let root = self.ancestors(index).last().unwrap_or(index);
         self.rows[root].parent.is_none().then_some(root)
     }
+    fn can_pin(&self, index: usize) -> bool {
+        self.rows[index].status != SessionStatus::Inactive
+            || self
+                .group_index(index)
+                .is_some_and(|root| self.rows[root].status != SessionStatus::Inactive)
+    }
     fn is_pinned(&self, index: usize) -> bool {
         self.pinned.contains(&self.rows[index].id)
     }
@@ -1040,7 +1046,10 @@ impl View {
         let filter = TASK_FILTERS[tab].1;
         let sessions: HashMap<_, _> = self.rows.iter().map(|s| (&s.id, s)).collect();
         let mut matching = HashSet::new();
-        for session in self.rows.iter().filter(|s| filter.contains(&s.status)) {
+        for (_, session) in self.rows.iter().enumerate().filter(|(index, session)| {
+            filter.contains(&session.status)
+                || (tab == 0 && self.is_pinned(*index) && self.can_pin(*index))
+        }) {
             let mut current = Some(session);
             while let Some(session) = current {
                 if self.hidden.contains(&session.id) || !matching.insert(&session.id) {
