@@ -828,7 +828,11 @@ fn read_messages(
         return Err(error);
     }
     if let Some(event) = activity.finish()? {
-        summary.task_details_sources[0] = event.calls.first().map(|call| call.id.clone());
+        summary.task_details_sources[0] = if event.kind == crate::event::Kind::Thinking {
+            event.source.clone()
+        } else {
+            event.calls.first().map(|call| call.id.clone())
+        };
         summary.activity = Some(event.activity());
     }
     summary.completed_background = background.completed.clone();
@@ -917,7 +921,7 @@ fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     Ok(summary)
 }
 
-/// Reads one tail chunk; subagent files have no queue quiet point to bound a walk.
+/// Reads the bounded subagent tail, completing its newest record when it spans the chunk.
 #[cfg(test)]
 pub(super) fn read_subagent(path: &Path, len: u64) -> io::Result<Summary> {
     read_subagent_cached(path, len, None)
@@ -934,15 +938,49 @@ pub(super) fn read_subagent_cached(
 }
 
 pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
-    let start = len.saturating_sub(CHUNK + 1);
+    let mut start = len.saturating_sub(CHUNK + 1);
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
     file.take(CHUNK + 1).read_to_end(&mut bytes)?;
-    if start > 0 {
-        let skip = bytes
+    let skip = if start == 0 {
+        0
+    } else {
+        bytes
             .iter()
             .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |index| index + 1);
+            .map_or(bytes.len(), |index| index + 1)
+    };
+    // A complete tail activity makes older partial records unnecessary.
+    let mut activity = super::event_reader::ActivityEvent::default();
+    for record in records_with_sidechains(&bytes[skip..], true).rev() {
+        activity.record(record);
+        if activity.ready() {
+            break;
+        }
+    }
+    if start > 0 && activity.finish()?.is_none() {
+        // A long thinking signature can occupy the whole tail chunk.
+        while start > 0 && bytes.first() != Some(&b'\n') {
+            let previous = start.saturating_sub(CHUNK);
+            file.seek(SeekFrom::Start(previous))?;
+            let mut block = Vec::new();
+            (&mut *file)
+                .take(start - previous)
+                .read_to_end(&mut block)?;
+            if let Some(newline) = block.iter().rposition(|byte| *byte == b'\n') {
+                block.drain(..newline);
+                block.extend_from_slice(&bytes);
+                bytes = block;
+                break;
+            }
+            block.extend_from_slice(&bytes);
+            bytes = block;
+            start = previous;
+        }
+        if bytes.first() == Some(&b'\n') {
+            bytes.remove(0);
+        }
+    } else {
         bytes.drain(..skip);
     }
     let mut summary = Summary::default();
