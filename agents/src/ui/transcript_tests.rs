@@ -163,8 +163,8 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
     let sources = view.viewport.borrow().event_text.sources.clone();
     assert_eq!(sources.len(), 4);
     for (index, (source, title)) in [
-        (claude, "assistant"),
-        (codex, "response_item / custom_tool_call"),
+        (claude, "Assistant"),
+        (codex, "Response Item / Custom Tool Call"),
     ]
     .into_iter()
     .enumerate()
@@ -285,12 +285,16 @@ fn transcript_titles_use_provider_fields_and_leave_missing_metadata_empty() {
     let raw = Ok(r#"{"type":"assistant","payload":{"type":"nested"}}"#.to_owned());
     let claude =
         super::super::tool_detail::transcript_content(&raw, ProviderId::Claude, &Kind::Assistant);
-    assert_eq!(claude.sections[0].title.title, "assistant");
+    assert_eq!(claude.sections[0].title.title, "Assistant");
+    let mode = Ok(r#"{"type":"permission-mode"}"#.to_owned());
+    let mode =
+        super::super::tool_detail::transcript_content(&mode, ProviderId::Claude, &Kind::Assistant);
+    assert_eq!(mode.sections[0].title.title, "Permission Mode");
     assert_eq!(claude.sections[0].title.left, None);
     for (raw, title) in [
         (
             r#"{"type":"session_meta","payload":{"cwd":"/tmp"}}"#,
-            "session_meta",
+            "Session Meta",
         ),
         ("{}", ""),
     ] {

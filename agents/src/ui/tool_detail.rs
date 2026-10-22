@@ -475,14 +475,14 @@ pub(super) fn transcript_content(
         .map(|text| {
             let record: serde_json::Value =
                 serde_json::from_str(text).expect("raw_text validates JSON");
-            let mut title = record["type"].as_str().unwrap_or_default().to_owned();
+            let mut title = record_title(record["type"].as_str().unwrap_or_default());
             if provider == crate::providers::ProviderId::Codex
                 && let Some(kind) = record["payload"]["type"].as_str()
             {
                 if !title.is_empty() {
                     title.push_str(" / ");
                 }
-                title.push_str(kind);
+                title.push_str(&record_title(kind));
             }
             let time = record["timestamp"]
                 .as_str()
@@ -504,6 +504,21 @@ pub(super) fn transcript_content(
         })
         .collect();
     EventDetailContent { sections }
+}
+
+/// A record type such as `permission-mode` or `custom_tool_call` as capitalized words.
+fn record_title(kind: &str) -> String {
+    kind.split(['-', '_'])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Build one titled section per message or tool call.
