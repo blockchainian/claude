@@ -1,5 +1,3 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 pub(super) fn display(key: &str) -> String {
     let mut result = String::with_capacity(key.len());
     for part in key.split_inclusive(|ch: char| !ch.is_ascii_alphanumeric()) {
@@ -35,36 +33,6 @@ pub(super) fn display(key: &str) -> String {
         result.push_str(&part[end..]);
     }
     result
-}
-
-/// The key event represented by a hint's displayed key name.
-pub(super) fn event(key: &str) -> Option<KeyEvent> {
-    let code = match display(key).as_str() {
-        "Esc" => KeyCode::Esc,
-        "Enter" => KeyCode::Enter,
-        "Tab" => KeyCode::Tab,
-        "Space" => KeyCode::Char(' '),
-        "Backspace" => KeyCode::Backspace,
-        "PgUp" => KeyCode::PageUp,
-        "PgDn" => KeyCode::PageDown,
-        "Delete" => KeyCode::Delete,
-        "Insert" => KeyCode::Insert,
-        "Home" => KeyCode::Home,
-        "End" => KeyCode::End,
-        "↑" | "Up" => KeyCode::Up,
-        "↓" | "Down" => KeyCode::Down,
-        "←" | "Left" => KeyCode::Left,
-        "→" | "Right" => KeyCode::Right,
-        _ => {
-            let mut chars = key.chars();
-            let ch = chars.next()?;
-            if chars.next().is_some() {
-                return None;
-            }
-            KeyCode::Char(ch)
-        }
-    };
-    Some(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
 #[cfg(test)]

@@ -9,4 +9,4 @@
 ────────────────────┴─── Unloaded … ────
  Unloaded tas ❯
 ────────────────────────────────────────
- ? help  Esc previous  ↑/↓ move  Enter…
+ ? help

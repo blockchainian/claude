@@ -2653,10 +2653,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
     let hints = view.center_footer_hints().to_string();
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
-    assert_eq!(
-        view.center_footer_hints().to_string(),
-        "Esc back  Enter rename"
-    );
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
     for code in [
         KeyCode::Up,
         KeyCode::Down,
@@ -2815,10 +2812,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
     let rendered = screen(&view, 120, 48);
     assert!(rendered.find("1. Cancel").unwrap() < rendered.find("2. Permanently delete").unwrap());
-    assert_eq!(
-        view.center_footer_hints().to_string(),
-        "↑/↓ move  Enter select  Esc back"
-    );
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
@@ -6564,11 +6558,7 @@ mod event_search {
         .to_vec();
         open(&mut view);
         assert!(text(&panel(&view, now)).contains("Search ❯ "));
-        assert!(
-            view.center_footer_hints()
-                .to_string()
-                .contains("Enter keep")
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
         for c in "time out".chars() {
             if c == ' ' {
                 view.handle_paste(" ");
@@ -6683,17 +6673,7 @@ mod event_search {
         view.event_session = Some(session_key("second"));
         let buf = panel(&view, now);
         assert!(!text(&buf).contains("Search ❯ "));
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            super::super::hints::hint_line(&[
-                ("?", "help"),
-                ("esc", "previous"),
-                ("↑/↓", "move"),
-                ("enter", "open"),
-                ("n", "new"),
-            ])
-            .to_string()
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
     }
 }
 
@@ -7630,10 +7610,7 @@ mod subagent_actions {
     #[test]
     fn footer_snapshot() {
         let view = fixture();
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            "? help  Esc previous  ↑/↓ move  n new"
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),
             include_str!("../../tests/ui_snapshots/agents_overview_subagent_selected.txt")
@@ -8102,7 +8079,9 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
             assert_eq!(
                 view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, row.y)),
                 Some(Action::Copy {
-                    text: row.cells.iter()
+                    text: row
+                        .cells
+                        .iter()
                         .map(|(columns, _)| buf[(body.x + columns.start, row.y)].symbol())
                         .collect(),
                     label: "Copied message".into()
@@ -9009,7 +8988,7 @@ fn footer_feedback_grows_over_the_hints_and_stays_on_one_row() {
         .unwrap()
         .trim_end()
         .to_owned();
-    let long = "x".repeat(90);
+    let long = "x".repeat(95);
     view.show_error(long.clone());
     let rendered = event_screen(&view, 100, 25, now);
     let footer = rendered.lines().last().unwrap();

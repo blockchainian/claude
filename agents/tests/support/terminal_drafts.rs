@@ -1,5 +1,13 @@
 use super::*;
 
+fn picker_has_row(capture: &str, label: &str) -> bool {
+    capture.lines().any(|line| {
+        line.split('│')
+            .nth(1)
+            .is_some_and(|part| part.trim() == label)
+    })
+}
+
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_draft_delete_focus_allows_repeated_new_task() {
@@ -519,9 +527,7 @@ fn terminal_draft_defaults_and_inherited_choices() {
                         .unwrap();
                     let column = line[..line.find(value).unwrap()].width();
                     tmux.mouse(0, column, row, true);
-                    let picker = tmux.capture_when(|capture| {
-                        capture.contains("Esc back") && capture.contains("Enter select")
-                    });
+                    let picker = tmux.capture_when(|capture| picker_has_row(capture, value));
                     assert!(!picker.contains("Unknown"), "{picker}");
                     assert!(!picker.contains("Default"), "{picker}");
                     assert_eq!(
@@ -534,14 +540,14 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     );
                     tmux.mouse(0, column, row, true);
                     tmux.wait_for(|capture| {
-                        capture.contains(title) && !capture.contains("Enter select")
+                        capture.contains(title) && !picker_has_row(capture, value)
                     });
                     tmux.mouse(0, column, row, true);
-                    tmux.wait_for(|capture| capture.contains("Enter select"));
+                    tmux.wait_for(|capture| picker_has_row(capture, value));
                     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
                     tmux.wait_for(|capture| {
                         capture.contains(title)
-                            && !capture.contains("Enter select")
+                            && !picker_has_row(capture, value)
                             && capture
                                 .lines()
                                 .any(|line| line.contains(model) && line.contains(effort))
@@ -551,7 +557,7 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     let capture = tmux.capture_when(|capture| {
                         capture.lines().any(|line| {
                             line.contains(title) && line.contains("source") && line.contains("main")
-                        }) && !capture.contains("Enter select")
+                        }) && !picker_has_row(capture, value)
                     });
                     let (row, line) = capture
                         .lines()
@@ -560,10 +566,10 @@ fn terminal_draft_defaults_and_inherited_choices() {
                         .unwrap();
                     let column = line[..line.find(value).unwrap()].width();
                     tmux.mouse(0, column, row, true);
-                    tmux.wait_for(|capture| capture.contains("Enter select"));
+                    tmux.wait_for(|capture| picker_has_row(capture, value));
                     tmux.mouse(0, column, row, true);
                     tmux.wait_for(|capture| {
-                        !capture.contains("Enter select")
+                        !picker_has_row(capture, value)
                             && capture.lines().any(|line| {
                                 line.contains(title)
                                     && line.contains("source")
@@ -659,8 +665,7 @@ fn terminal_picker_bottom_layout() {
         .find(|(_, line)| line.contains("Opus 5.5") && line.contains("medium"))
         .unwrap();
     tmux.mouse(0, line[..line.find("Opus 5.5").unwrap()].width(), row, true);
-    let capture =
-        tmux.capture_when(|capture| capture.contains("Enter select") && capture.contains("Sonnet"));
+    let capture = tmux.capture_when(|capture| picker_has_row(capture, "Sonnet"));
     let lines: Vec<_> = capture.lines().collect();
     let bottom = lines
         .iter()
@@ -899,9 +904,9 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
         begin_named_draft(&tmux, "Escape focus");
         let capture = tmux.capture_when(|capture| {
             title_rule_position(capture, "Escape focus").is_some()
-                && !capture.contains("Enter select")
+                && !capture.contains("Create new branch")
         });
-        assert!(!capture.contains("Enter select"), "{capture}");
+        assert!(!capture.contains("Create new branch"), "{capture}");
         let (row, line) = capture
             .lines()
             .enumerate()
@@ -913,7 +918,7 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
         tmux.wait_for(|capture| capture.contains("Create new branch"));
         // Closing the branch selector leaves Details active with no child UI open.
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| !capture.contains("Enter select"));
+        tmux.wait_for(|capture| !capture.contains("Create new branch"));
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| capture.contains("Permanently delete “Escape focus”"));
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
@@ -921,7 +926,7 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
             !capture.contains("Permanently delete “")
                 && title_rule_position(capture, "Escape focus").is_some()
         });
-        assert!(!capture.contains("Enter select"), "{capture}");
+        assert!(!capture.contains("Create new branch"), "{capture}");
         let (row, line) = capture
             .lines()
             .enumerate()
@@ -987,10 +992,10 @@ fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
         tmux.wait_for(|capture| capture.contains("New branch ❯ foo"));
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
         tmux.wait_for(|capture| {
-            !capture.contains("New branch ❯") && capture.contains("Enter select")
+            !capture.contains("New branch ❯") && picker_has_row(capture, "foo")
         });
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| !capture.contains("Enter select"));
+        tmux.wait_for(|capture| !picker_has_row(capture, "foo"));
         checks.push(serde_json::json!({"width":width,"task_details_empty_escape":"delete_confirmation","prompt_with_branch_selector_escape":"delete_confirmation","cancel_preserves_draft":true,"branch_blur_saved":"foo","branch_reopen_prefilled":true,"branch_escape_layers":true}));
     }
     let verdict = serde_json::json!({"verdict":"pass","checks":checks});

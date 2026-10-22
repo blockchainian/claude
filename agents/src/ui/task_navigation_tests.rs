@@ -176,16 +176,7 @@ fn open_and_history_hints_match_keys() {
     assert!(help.contains("→") && help.contains("Open"));
     assert!(!help.contains("⌃l"));
     assert!(help.contains("Previous"));
-    assert!(
-        view.center_footer_hints()
-            .to_string()
-            .contains("Enter open")
-    );
-    assert!(
-        view.center_footer_hints()
-            .to_string()
-            .contains("Esc previous")
-    );
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
 }
 
 #[test]

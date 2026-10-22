@@ -310,12 +310,12 @@ impl View {
         self.finish_panel_action(action)
     }
 
-    /// Routes a completed click on a rendered hint through keyboard handling.
+    /// Executes the action of a completed click on a rendered hint.
     fn hint_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
         let at = |x, y| {
             self.viewport
                 .borrow()
-                .hint_keys
+                .hint_targets
                 .iter()
                 .find(|target| target.area.contains((x, y).into()))
                 .copied()
@@ -342,12 +342,15 @@ impl View {
                 self.mouse_press = None;
                 if let (Some((start, false)), Some(end)) = (pressed, target)
                     && start.area == end.area
-                    && start.key == end.key
+                    && start.action == end.action
                 {
-                    if let Some(panel) = end.panel {
-                        self.set_active_panel(panel);
-                    }
-                    return Some(self.handle_key(end.key));
+                    return Some(match end.action {
+                        hints::HintAction::Help => {
+                            self.help = true;
+                            None
+                        }
+                        hints::HintAction::Question(action) => self.question_footer_action(action),
+                    });
                 }
                 Some(None)
             }
@@ -1553,6 +1556,17 @@ impl View {
     }
 
     fn handle_panel_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let plain = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+        if self.help {
+            if key.code == KeyCode::Esc
+                || (plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press)
+            {
+                self.help = false;
+            }
+            return None;
+        }
         if self.active_panel == Panel::TaskList
             && key.code == KeyCode::Char('l')
             && key.modifiers == KeyModifiers::CONTROL
@@ -1669,9 +1683,6 @@ impl View {
                 None => None,
             };
         }
-        let plain = !key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
         if self.active_panel == Panel::TaskList
             && self.confirm_dialog.is_none()
             && !self.help
@@ -1738,14 +1749,6 @@ impl View {
                     KeyCode::Char('f') => dialog.confirm = true,
                     _ => {}
                 }
-            }
-            return None;
-        }
-        if self.help {
-            if key.code == KeyCode::Esc
-                || (plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press)
-            {
-                self.help = false;
             }
             return None;
         }

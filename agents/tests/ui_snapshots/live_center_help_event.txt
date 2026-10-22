@@ -21,4 +21,4 @@
  /         Search                        t                       Sort
  g         Group                         Space                   Messages/tools
  … resize to see all
- Esc back
+ ? help

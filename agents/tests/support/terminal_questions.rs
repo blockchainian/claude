@@ -85,14 +85,22 @@ fn terminal_question_footer_styles_and_clicks() {
             assert!(label.dim());
             assert!(!label.bold());
         }
+        // Select the free-text row and keep it editing when clicking either action.
         tmux.run(&["send-keys", "-t", "probe", "Down"]);
-        tmux.wait_for(|capture| capture.contains("› 2. Blue"));
+        tmux.run(&["send-keys", "-t", "probe", "Down"]);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "typed answer"]);
+        tmux.wait_for(|capture| capture.contains("typed answer"));
         let column = line[..line.find(action).unwrap()].width() + 1;
         let click = format!("\x1b[<0;{column};{}M\x1b[<0;{column};{}m", row + 1, row + 1);
         tmux.run(&["send-keys", "-t", "probe", "-l", &click]);
         // Both actions reach the real transport, isolated from the user's daemon.
         let result =
             tmux.capture_when(|capture| capture.contains("app-server daemon isn't running"));
+        assert!(result.contains("typed answer"), "{result}");
+        assert!(
+            !result.contains(&format!("typed answer{action}")),
+            "{result}"
+        );
         std::fs::write(
             std::env::temp_dir().join(format!("agents-question-footer-{action}.txt")),
             result,
@@ -124,7 +132,7 @@ fn click_hint(tmux: &Tmux, capture: &str, key: &str) {
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shared_footer_clicks_and_help_keys() {
     let (_directory, tmux, _) = start_probe("shared-footer");
-    let capture = tmux.capture_when(|capture| capture.contains("Enter open"));
+    let capture = tmux.capture_when(|capture| capture.lines().last().unwrap().trim() == "? help");
     click_hint(&tmux, &capture, "?");
     let help = tmux.capture_when(|capture| capture.contains("Task shortcuts"));
     assert!(help.contains("PgUp"));
@@ -140,19 +148,34 @@ fn terminal_shared_footer_clicks_and_help_keys() {
     tmux.run(&["send-keys", "-t", "probe", "-l", &click]);
     // A queued capture is processed after the click; the help page remains unchanged.
     assert_eq!(tmux.run(&["capture-pane", "-t", "probe", "-p"]), help);
-    click_hint(&tmux, &help, "Esc");
-    let capture = tmux.capture_when(|capture| !capture.contains("Task shortcuts"));
-    click_hint(&tmux, &capture, "n new");
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| !capture.contains("Task shortcuts"));
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
     assert_title_caret(&tmux, "New task", 0);
     tmux.run(&["send-keys", "-t", "probe", "-l", "Footer probe"]);
-    let capture = tmux.capture_when(|capture| capture.contains("Enter next"));
-    click_hint(&tmux, &capture, "Enter");
+    let capture = tmux.capture_when(|capture| capture.contains("Footer probe"));
+    click_hint(&tmux, &capture, "?");
+    tmux.wait_for(|capture| capture.contains("Task shortcuts"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    assert_title_caret(&tmux, "Footer probe", "Footer probe".width());
+    // Continue to the repository browser and focus the prompt editor.
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| {
         capture
             .lines()
             .any(|line| line.split('│').any(|part| part.trim() == ".."))
     });
-    let verdict = serde_json::json!({"verdict":"pass", "clicks":["?","Esc","n","Enter"], "help_keys":"display only"});
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.run(&["send-keys", "-t", "probe", "C-w"]);
+    tmux.run(&["send-keys", "-t", "probe", "j"]);
+    tmux.run(&["send-keys", "-t", "probe", "-l", "prompt text"]);
+    let capture = tmux.capture_when(|capture| capture.contains("prompt text"));
+    click_hint(&tmux, &capture, "?");
+    tmux.wait_for(|capture| capture.contains("Task shortcuts"));
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let restored = tmux.capture_when(|capture| capture.contains("prompt text"));
+    assert!(!restored.contains("prompt text?"), "{restored}");
+    let verdict = serde_json::json!({"verdict":"pass", "clicks":["?"], "focused_inputs":["title","prompt"], "help_keys":"display only"});
     std::fs::write(
         std::env::temp_dir().join("agents-shared-footer-probe.json"),
         serde_json::to_vec_pretty(&verdict).unwrap(),

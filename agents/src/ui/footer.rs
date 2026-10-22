@@ -45,8 +45,8 @@ pub(super) struct Footer {
 }
 
 impl Footer {
-    pub(super) fn render(self, area: Rect, wide: bool, buf: &mut Buffer) -> Vec<hints::KeyTarget> {
-        let mut keys = hints::key_targets(&self.hints, area, None);
+    pub(super) fn render(self, area: Rect, wide: bool, buf: &mut Buffer) -> Vec<hints::HintTarget> {
+        let mut keys = hints::action_targets(&self.hints, area, &[("?", hints::HintAction::Help)]);
         let start = area
             .x
             .saturating_add(self.hints.width() as u16)

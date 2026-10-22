@@ -1,31 +1,28 @@
 use super::shortcut_help::{Group, Shortcut};
 use super::*;
 
-pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
-    let mut line = Line::default();
-    for (key, label) in items {
-        if !line.spans.is_empty() {
-            line.spans.push("  ".dim());
-        }
-        line.spans.push(key_span(key));
-        line.spans.push(format!(" {label}").dim().not_bold());
-    }
-    line
-}
-
 pub(super) fn key_span(key: &str) -> Span<'static> {
     super::key_name::display(key).bold()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HintAction {
+    Help,
+    Question(question_view::FooterAction),
+}
+
 #[derive(Clone, Copy, Debug)]
-pub(super) struct KeyTarget {
+pub(super) struct HintTarget {
     pub area: Rect,
-    pub key: KeyEvent,
-    pub panel: Option<Panel>,
+    pub action: HintAction,
 }
 
 /// Records only the visible key cells, splitting arrow combinations at their slash.
-pub(super) fn key_targets(line: &Line<'_>, area: Rect, panel: Option<Panel>) -> Vec<KeyTarget> {
+pub(super) fn action_targets(
+    line: &Line<'_>,
+    area: Rect,
+    actions: &[(&str, HintAction)],
+) -> Vec<HintTarget> {
     let mut targets = Vec::new();
     let mut x = area.x;
     for span in &line.spans {
@@ -42,14 +39,13 @@ pub(super) fn key_targets(line: &Line<'_>, area: Rect, panel: Option<Panel>) -> 
             let mut offset = 0;
             for part in parts {
                 let width = part.width() as u16;
-                if let Some(key) = super::key_name::event(part) {
+                if let Some((_, action)) = actions.iter().find(|(label, _)| *label == part) {
                     let rect =
                         Rect::new(x.saturating_add(offset), area.y, width, 1).intersection(area);
                     if !rect.is_empty() {
-                        targets.push(KeyTarget {
+                        targets.push(HintTarget {
                             area: rect,
-                            key,
-                            panel,
+                            action: *action,
                         });
                     }
                 }
@@ -63,55 +59,10 @@ pub(super) fn key_targets(line: &Line<'_>, area: Rect, panel: Option<Panel>) -> 
 
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        if self.confirm_dialog.is_some() {
-            hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
-        } else if self.help {
-            hint_line(&[("esc", "back")])
-        } else if self.active_panel == Panel::TaskDetails && self.title_editor().is_some() {
-            if self.name_target.is_some() {
-                hint_line(&[("esc", "cancel"), ("enter", "next")])
-            } else {
-                hint_line(&[("esc", "back"), ("enter", "rename")])
-            }
-        } else if self.active_panel == Panel::Prompt && self.active_question().is_some() {
-            hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
-        } else if self.selected_draft().is_some()
-            && (self.prompt_focused()
-                || (self.active_panel == Panel::TaskDetails && self.selector.is_some()))
-        {
-            if self.prompt_focused() {
-                hint_line(&[("esc", "cancel"), ("enter", "next")])
-            } else if self.selector.as_ref().is_some_and(Selector::input_active) {
-                hint_line(&[("esc", "back"), ("enter", "select")])
-            } else {
-                hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
-            }
-        } else if self.task_search_editing() {
-            hint_line(&[("esc", "back"), ("enter", "keep")])
-        } else if self
-            .selected_row()
-            .is_some_and(|session| !session.can_resume())
-        {
-            hint_line(&[
-                ("?", "help"),
-                ("esc", "previous"),
-                ("↑/↓", "move"),
-                ("n", "new"),
-            ])
-        } else if self.searching {
-            hint_line(&[("esc", "back"), ("enter", "open")])
-        } else {
-            hint_line(&[
-                ("?", "help"),
-                ("esc", "previous"),
-                ("↑/↓", "move"),
-                ("enter", "open"),
-                ("n", "new"),
-            ])
-        }
+        Line::from(vec!["?".bold(), " help".dim().not_bold()])
     }
-    /// Whether the footer shows the task hints rather than a dialog's, an editor's or a search's.
-    pub(super) fn footer_shows_task_hints(&self) -> bool {
+    /// Whether the footer shows the task title outside dialogs, editors and searches.
+    pub(super) fn footer_shows_task_title(&self) -> bool {
         !(self.confirm_dialog.is_some()
             || self.help
             || (self.active_panel == Panel::TaskDetails && self.title_editor().is_some())
@@ -219,58 +170,67 @@ mod tests {
     }
 
     #[test]
-    fn hint_keys_capitalize_special_names() {
-        assert_eq!(
-            hint_line(&[("esc", "back"), ("enter", "open"), ("n", "new")]).to_string(),
-            "Esc back  Enter open  n new"
-        );
-    }
-
-    #[test]
-    fn footer_clicks_follow_keyboard_for_escape_enter_and_letter() {
-        for code in [KeyCode::Esc, KeyCode::Enter, KeyCode::Char('n')] {
-            let prepare = || {
-                let mut view = View::default();
-                if code == KeyCode::Esc {
-                    view.help = true;
-                }
-                if code == KeyCode::Enter {
-                    view.confirm_dialog = Some(ConfirmDialog {
-                        action: ConfirmAction::Delete("claude:footer".parse().unwrap()),
-                        title: "Footer test".into(),
-                        confirm: false,
-                    });
-                }
-                view
-            };
-            let mut mouse = prepare();
-            let mut keyboard = prepare();
-            let buffer = render(&mouse);
-            let footer = mouse.center_layout(buffer.area).footer;
-            let text = (0..buffer.area.width)
-                .map(|x| buffer[(x, footer.y)].symbol())
+    fn footer_help_click_preserves_focused_input() {
+        for panel in [
+            Panel::Prompt,
+            Panel::TaskDetails,
+            Panel::TaskList,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            let mut view = View::default();
+            view.add_draft(DraftSetup {
+                provider: ProviderId::Claude,
+                cwd: crate::test_project(),
+                model: None,
+                effort: None,
+                branch: "main".into(),
+            });
+            if panel != Panel::TaskDetails {
+                view.name_target = None;
+            }
+            view.set_active_panel(panel);
+            view.searching = panel == Panel::TaskList;
+            view.event_list.search.editing = panel == Panel::EventList;
+            view.event_detail.search.editing = panel == Panel::EventDetail;
+            view.input_box.editor.set_text("draft");
+            view.rename.set_text("title");
+            view.search.set_text("search");
+            view.event_list.search.query.set_text("event");
+            view.event_detail.search.query.set_text("detail");
+            render(&view);
+            let target = view
+                .viewport
+                .borrow()
+                .hint_targets
+                .iter()
+                .find(|target| {
+                    target.area.y == view.center_layout(Rect::new(0, 0, 160, 50)).footer.y
+                })
+                .copied()
+                .expect("help target");
+            click(&mut view, target.area.x, target.area.y);
+            assert!(view.help, "panel {panel:?}");
+            assert_eq!(view.input_box.editor.text(), "draft");
+            assert_eq!(view.rename.text(), "title");
+            assert_eq!(view.search.text(), "search");
+            assert_eq!(view.event_list.search.query.text(), "event");
+            assert_eq!(view.event_detail.search.query.text(), "detail");
+            assert_eq!(view.active_panel, panel);
+            let buffer = render(&view);
+            let text = buffer
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
                 .collect::<String>();
-            let key = match code {
-                KeyCode::Esc => "esc",
-                KeyCode::Enter => "enter",
-                _ => "n new",
-            };
-            let start = text.to_lowercase().find(key).unwrap();
-            let x = text[..start].width() as u16;
-            assert_eq!(
-                click(&mut mouse, x, footer.y),
-                keyboard.handle_key(code.into())
-            );
-            assert_eq!(mouse.help, keyboard.help);
-            assert_eq!(
-                mouse.confirm_dialog.is_some(),
-                keyboard.confirm_dialog.is_some()
-            );
-            assert_eq!(
-                mouse.selected_draft().is_some(),
-                keyboard.selected_draft().is_some()
-            );
-            assert_eq!(mouse.active_panel, keyboard.active_panel);
+            assert!(text.contains("Task shortcuts"), "panel {panel:?}");
+            view.handle_key(KeyCode::Esc.into());
+            assert!(!view.help, "help did not close in {panel:?}");
+            assert_eq!(view.input_box.editor.text(), "draft");
+            assert_eq!(view.rename.text(), "title");
+            assert_eq!(view.search.text(), "search");
+            assert_eq!(view.event_list.search.query.text(), "event");
+            assert_eq!(view.event_detail.search.query.text(), "detail");
         }
     }
 
@@ -297,17 +257,50 @@ mod tests {
     }
 
     #[test]
-    fn task_footer_uses_open_and_lowercase_descriptions() {
-        let mut view = View::default();
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            "? help  Esc previous  ↑/↓ move  Enter open  n new"
-        );
-        view.searching = true;
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            "Esc back  Enter open"
-        );
+    fn footer_only_shows_help_in_every_state() {
+        for mode in 0..8 {
+            let mut view = View::default();
+            match mode {
+                0 => {}
+                1 => view.help = true,
+                2 => view.searching = true,
+                3 => view.active_panel = Panel::Prompt,
+                4 => {
+                    view.confirm_dialog = Some(ConfirmDialog {
+                        action: ConfirmAction::Delete("claude:footer".parse().unwrap()),
+                        title: "Task".into(),
+                        confirm: false,
+                    })
+                }
+                5 => {
+                    view.rename_target = Some("claude:footer".parse().unwrap());
+                    view.set_active_panel(Panel::TaskDetails);
+                }
+                6 => {
+                    view.set_active_panel(Panel::EventList);
+                    view.event_list.search.editing = true;
+                }
+                7 => {
+                    view.set_active_panel(Panel::EventDetail);
+                    view.event_detail.search.editing = true;
+                }
+                _ => unreachable!(),
+            }
+            let line = view.center_footer_hints();
+            assert_eq!(line.to_string(), "? help", "mode {mode}");
+            assert!(
+                line.spans[0]
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
+            assert!(
+                line.spans[1]
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+        }
     }
 
     #[test]
@@ -347,65 +340,10 @@ mod tests {
                 let text = line.to_string();
                 text.contains("g") && text.contains("Group")
             }));
-            assert!(
-                !view
-                    .center_footer_hints()
-                    .to_string()
-                    .contains("g group by")
-            );
             assert_eq!(
                 view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
                 Some(Action::PersistGrouping(grouping.next()))
             );
-        }
-    }
-
-    #[test]
-    fn grouping_hint_is_hidden_when_the_grouping_key_is_consumed() {
-        for mode in 0..7 {
-            let mut view = View::new(Grouping::Project, false);
-            let id = SessionKey {
-                provider: ProviderId::Claude,
-                id: "task".into(),
-            };
-            match mode {
-                0 => view.active_panel = Panel::Prompt,
-                1 => {
-                    view.confirm_dialog = Some(ConfirmDialog {
-                        action: ConfirmAction::Delete(id),
-                        title: "Task".into(),
-                        confirm: false,
-                    });
-                }
-                2 => view.help = true,
-                3 => {
-                    view.rename_target = Some(id);
-                    view.set_active_panel(Panel::TaskDetails);
-                }
-                4 => {
-                    view.set_active_panel(Panel::EventList);
-                    view.event_list.search.editing = true;
-                }
-                5 => {
-                    view.set_active_panel(Panel::EventDetail);
-                    view.event_detail.search.editing = true;
-                }
-                6 => view.searching = true,
-                _ => unreachable!(),
-            }
-            assert!(
-                !view
-                    .center_footer_hints()
-                    .to_string()
-                    .contains("g group by"),
-                "mode {mode}"
-            );
-            assert_eq!(
-                view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
-                None,
-                "mode {mode}"
-            );
-            assert_eq!(view.grouping(), Grouping::Project, "mode {mode}");
         }
     }
 }

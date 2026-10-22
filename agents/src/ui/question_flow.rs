@@ -168,6 +168,23 @@ impl View {
         Some(self.question_outcome(id, outcome))
     }
 
+    pub(super) fn question_footer_action(
+        &mut self,
+        action: question_view::FooterAction,
+    ) -> Option<Action> {
+        let id = self.selected_id()?.clone();
+        self.questions.visible(&id)?;
+        if self.questions.sending.contains(&id) {
+            return None;
+        }
+        self.set_active_panel(Panel::Prompt);
+        let view = self.questions.views.get_mut(&id).expect("visible question");
+        let before = view.stored();
+        let outcome = view.footer_action(action);
+        self.questions.changed(&id, before);
+        self.question_outcome(id, outcome)
+    }
+
     fn question_outcome(&mut self, id: SessionKey, outcome: Option<Outcome>) -> Option<Action> {
         let ask = self.questions.views[&id].ask().clone();
         match outcome? {
@@ -631,11 +648,7 @@ mod tests {
         view.render(area, &mut buffer);
         let input = view.viewport.borrow().title_input;
         assert_eq!(view.cursor_pos(area), Some((input.x + 4, input.y)));
-        assert!(
-            view.center_footer_hints()
-                .to_string()
-                .contains("Enter rename")
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
     }
 
     #[test]
@@ -899,6 +912,31 @@ mod tests {
     }
 
     #[test]
+    fn ask_footer_confirms_or_cancels_while_editing_other() {
+        use unicode_width::UnicodeWidthStr;
+        for key in ["Enter", "Esc"] {
+            let mut view = fixture();
+            let other = row_of(&screen(&view, 100, 40), "Type something.");
+            click(&mut view, 10, other);
+            view.handle_paste("typed answer");
+            let before = view.active_question().unwrap().stored();
+            let text = screen(&view, 100, 40);
+            let row = row_of(&text, "Enter to confirm");
+            let line = text.lines().nth(usize::from(row)).unwrap();
+            let column = line[..line.find(key).unwrap()].width() as u16;
+            let Some(Action::AnswerQuestions { answer, .. }) = click(&mut view, column, row) else {
+                panic!("{key} did not submit while editing");
+            };
+            assert_eq!(answer.rejected, key == "Esc");
+            assert_eq!(
+                answer.answers["Probe single choice?"].other.as_deref(),
+                Some("typed answer")
+            );
+            assert_eq!(view.active_question().unwrap().stored(), before);
+        }
+    }
+
+    #[test]
     fn ask_flow_single_click_answers() {
         let mut view = fixture();
         let before = screen(&view, 100, 40);
@@ -1023,10 +1061,9 @@ mod tests {
     }
 
     #[test]
-    fn ask_flow_uses_question_footer_instead_of_open_hint() {
+    fn ask_flow_keeps_help_in_main_footer() {
         let view = fixture();
         let text = view.center_footer_hints().to_string();
-        assert!(!text.contains("open"), "{text}");
-        assert!(text.contains("confirm"), "{text}");
+        assert_eq!(text, "? help");
     }
 }

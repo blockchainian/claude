@@ -17,6 +17,16 @@ pub(super) enum Outcome {
     Submit(Answer),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FooterAction {
+    PreviousTab,
+    NextTab,
+    Up,
+    Down,
+    Confirm,
+    Cancel,
+}
+
 /// What a mouse position points at: the question tab row, or an option row.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Target {
@@ -139,6 +149,63 @@ impl QuestionView {
         vec![Line::from(spans)]
     }
 
+    pub(super) fn footer_targets(&self, area: Rect) -> Vec<super::hints::HintTarget> {
+        use super::hints::HintAction::Question;
+        super::hints::action_targets(
+            &self.footer()[0],
+            area,
+            &[
+                ("←", Question(FooterAction::PreviousTab)),
+                ("→", Question(FooterAction::NextTab)),
+                ("↑", Question(FooterAction::Up)),
+                ("↓", Question(FooterAction::Down)),
+                ("Enter", Question(FooterAction::Confirm)),
+                ("Esc", Question(FooterAction::Cancel)),
+            ],
+        )
+    }
+
+    pub(super) fn footer_action(&mut self, action: FooterAction) -> Option<Outcome> {
+        if action == FooterAction::Cancel {
+            return Some(self.submit(true));
+        }
+        if self.pages.is_empty() {
+            return None;
+        }
+        match action {
+            FooterAction::PreviousTab => self.scroll(false, true),
+            FooterAction::NextTab => self.scroll(true, true),
+            FooterAction::Up | FooterAction::Down => {
+                if self.reviewing() {
+                    self.review_focus = 1 - self.review_focus;
+                } else {
+                    let focus = self.pages[self.page].focus;
+                    let rows = self.rows();
+                    let row = if action == FooterAction::Down {
+                        (focus + 1) % rows
+                    } else {
+                        (focus + rows - 1) % rows
+                    };
+                    self.set_focus(row);
+                }
+            }
+            FooterAction::Confirm => {
+                if self.reviewing() {
+                    return self.choose(self.review_focus);
+                }
+                if self.editing() && !self.pages[self.page].other.is_empty() {
+                    if !self.questions()[self.page].multi {
+                        self.pages[self.page].selected.clear();
+                    }
+                    return self.advance();
+                }
+                return self.choose(self.pages[self.page].focus);
+            }
+            FooterAction::Cancel => unreachable!(),
+        }
+        None
+    }
+
     fn body_height(&self, area: Rect) -> usize {
         let height = usize::from(area.height);
         height.saturating_sub(self.footer().len())
@@ -248,12 +315,15 @@ impl QuestionView {
             return None;
         }
         if key.code == KeyCode::Esc {
-            return Some(self.submit(true));
+            return self.footer_action(FooterAction::Cancel);
         }
         if self.pages.is_empty() {
             return None;
         }
         let modifiers = key.modifiers - KeyModifiers::SHIFT;
+        if key.code == KeyCode::Enter && modifiers == KeyModifiers::NONE {
+            return self.footer_action(FooterAction::Confirm);
+        }
         if matches!(
             (key.code, modifiers),
             (KeyCode::PageUp, KeyModifiers::NONE) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
@@ -270,17 +340,11 @@ impl QuestionView {
         }
         if self.editing() {
             match key.code {
-                KeyCode::Char(' ') | KeyCode::Enter
+                KeyCode::Char(' ')
                     if modifiers == KeyModifiers::NONE
                         && self.pages[self.page].other.is_empty() =>
                 {
                     return self.choose(self.pages[self.page].focus);
-                }
-                KeyCode::Enter if modifiers == KeyModifiers::NONE => {
-                    if !self.questions()[self.page].multi {
-                        self.pages[self.page].selected.clear();
-                    }
-                    return self.advance();
                 }
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
                 _ => {
@@ -297,13 +361,13 @@ impl QuestionView {
         if self.reviewing() {
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-                    self.review_focus = 1 - self.review_focus;
+                    return self.footer_action(FooterAction::Down);
                 }
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
                 KeyCode::Char(digit @ '1'..='9') => {
                     return self.choose(digit as usize - '1' as usize);
                 }
-                KeyCode::Char(' ') | KeyCode::Enter => return self.choose(self.review_focus),
+                KeyCode::Char(' ') => return self.choose(self.review_focus),
                 _ => {}
             }
             return None;
@@ -311,17 +375,17 @@ impl QuestionView {
         let focus = self.pages[self.page].focus;
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.set_focus((focus + self.rows() - 1) % self.rows());
+                return self.footer_action(FooterAction::Up);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.set_focus((focus + 1) % self.rows());
+                return self.footer_action(FooterAction::Down);
             }
             KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
             KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.scroll(true, true),
             KeyCode::Char(digit @ '1'..='9') => {
                 return self.choose(digit as usize - '1' as usize);
             }
-            KeyCode::Char(' ') | KeyCode::Enter => return self.choose(focus),
+            KeyCode::Char(' ') => return self.choose(focus),
             KeyCode::Backspace | KeyCode::Delete => {
                 self.pages[self.page].selected.clear();
             }
