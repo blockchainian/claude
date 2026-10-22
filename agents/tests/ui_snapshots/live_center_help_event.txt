@@ -7,16 +7,16 @@
  Enter, o   Open         /      Search    ↑           Up
  f          Fork         t      Sort      ↓           Down
  r          Rename                        PgUp        Page up
- p          Pin/unpin                     PgDn        Page down
- x          Stop
- a          Archive                       ⌃w _        Max width
- Backspace  Delete                        ⌃w |        Max height
- Esc        Back                          ⌃w =        Reset size
- ⌃c         Quit
+ x          Stop                          PgDn        Page down
+ a          Archive
+ Backspace  Delete                        ⌃w _        Max width
+ Esc        Back                          ⌃w |        Max height
+ ⌃c         Quit                          ⌃w =        Reset size
 
  Tab/⇧Tab   Filter
  /          Search
  g          Group
+ p          Pin/unpin
 
 
 

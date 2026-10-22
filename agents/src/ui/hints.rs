@@ -98,7 +98,6 @@ impl View {
                     ("enter, o", "Open"),
                     ("f", "Fork"),
                     ("r", "Rename"),
-                    ("p", "Pin/unpin"),
                     ("x", "Stop"),
                     ("a", "Archive"),
                     ("backspace", "Delete"),
@@ -108,6 +107,7 @@ impl View {
                     ("tab/⇧tab", "Filter"),
                     ("/", "Search"),
                     ("g", "Group"),
+                    ("p", "Pin/unpin"),
                 ],
             ),
             group(
@@ -360,7 +360,6 @@ mod tests {
                         "Enter,",
                         "f",
                         "r",
-                        "p",
                         "x",
                         "a",
                         "Backspace",
@@ -369,7 +368,8 @@ mod tests {
                         "",
                         "Tab/⇧Tab",
                         "/",
-                        "g"
+                        "g",
+                        "p"
                     ]
                 );
             } else if width == 70 {

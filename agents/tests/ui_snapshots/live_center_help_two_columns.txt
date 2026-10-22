@@ -7,7 +7,6 @@
  Enter, o   Open                         /      Search
  f          Fork                         t      Sort
  r          Rename
- p          Pin/unpin
  x          Stop
  a          Archive
  Backspace  Delete
@@ -17,6 +16,7 @@
  Tab/⇧Tab   Filter
  /          Search
  g          Group
+ p          Pin/unpin
 
  Navigate
  ⌃w h/j/k/l  Focus left/down/up/right
