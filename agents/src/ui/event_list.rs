@@ -1435,7 +1435,7 @@ fn mode_row_time(event: &Event, session: &Session, last: bool, sort: EventSort) 
         return Some(row_time(event, session, last));
     }
     match event.kind {
-        Kind::User | Kind::Assistant | Kind::Thinking => event
+        Kind::User | Kind::Assistant => event
             .previous_end
             .map(|previous| RowTime::Settled(event.started_at - previous)),
         Kind::Tool | Kind::Error | Kind::Denied => match row_time(event, session, last) {
@@ -1447,11 +1447,6 @@ fn mode_row_time(event: &Event, session: &Session, last: bool, sort: EventSort) 
 }
 
 fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
-    if event.kind == Kind::Thinking
-        && let Some(previous) = event.previous_end
-    {
-        return RowTime::Settled(event.started_at - previous);
-    }
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
             RowTime::Ago(event.started_at)
@@ -1942,7 +1937,6 @@ pub(super) fn kind_label(kind: &Kind) -> &'static str {
         Kind::User => "User",
         Kind::Compaction => "Compaction",
         Kind::Assistant => "Assistant",
-        Kind::Thinking => "Thinking",
         Kind::Agent => "Agent",
         Kind::Session => "Session",
         Kind::Tool => "Tool",
