@@ -546,6 +546,7 @@ impl View {
             (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
         ));
         let switched = detail.key != Some(key);
+        let follow_output = std::mem::take(&mut detail.follow_output) && !switched;
         let entry = detail.entry.take().filter(|_| switched);
         if switched {
             let mut left = std::mem::take(&mut detail.state);
@@ -593,7 +594,7 @@ impl View {
             0..0,
             height,
         );
-        if entry == Some(false) {
+        if entry == Some(false) || follow_output {
             if allocations.is_some() {
                 state.reveal = state.hidden.clone();
             } else {

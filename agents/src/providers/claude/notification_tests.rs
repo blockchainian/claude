@@ -31,6 +31,12 @@ fn notification_output(contents: Option<&str>, summary: &str) -> Vec<Section> {
         .output
         .clone()
         .unwrap()
+        .into_iter()
+        .map(|section| match section {
+            Section::OutputFile(path) => Section::read_output_file(&path),
+            section => section,
+        })
+        .collect()
 }
 
 #[test]

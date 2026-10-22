@@ -696,8 +696,18 @@ fn notification_preformatted_blocks_preserve_logical_lines() {
         .find(|line| line.ends_with("Claude provider:"))
         .unwrap();
     assert_eq!(
-        event.calls[0].output.as_ref().unwrap(),
-        &vec![crate::event::Section::Markdown {
+        event.calls[0]
+            .output
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|section| match section {
+                crate::event::Section::OutputFile(path) =>
+                    crate::event::Section::read_output_file(path),
+                section => section.clone(),
+            })
+            .collect::<Vec<_>>(),
+        vec![crate::event::Section::Markdown {
             label: String::new(),
             text: message.into(),
         }]

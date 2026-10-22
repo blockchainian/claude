@@ -46,6 +46,7 @@ enum Input {
     },
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<notify::Event>),
+    EventOutput(notify::Result<notify::Event>),
     Sessions {
         refresh: Box<crate::sessions::Refresh>,
         generation: u64,
@@ -331,6 +332,11 @@ impl App {
                 None
             }
         };
+        let output = self.sender.clone();
+        let mut output_watcher = crate::sessions::OutputWatcher::new(move |event| {
+            let _ = output.send(Input::EventOutput(event));
+        })
+        .map_err(io::Error::other)?;
         let _reader = InputReader::start(self.sender.clone())?;
         let mut schedule = RefreshSchedule::new(
             Instant::now(),
@@ -367,6 +373,11 @@ impl App {
             let action = self.view.take_pending_action();
             if self.handle_action(action) {
                 return Ok(());
+            }
+            match output_watcher.set_path(self.view.event_output_path()) {
+                Ok(true) => self.view.refresh_event_output(),
+                Ok(false) => {}
+                Err(error) => self.view.set_notice(Some(error.to_string())),
             }
             self.draw(terminal)?;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
@@ -520,6 +531,10 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::EventOutput(Ok(_)) => self.view.refresh_event_output(),
+                Input::EventOutput(Err(error)) => {
+                    self.view.set_notice(Some(error.to_string()));
+                }
                 Input::EventsLoaded {
                     token,
                     reader,

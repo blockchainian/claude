@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use watcher::watch;
+pub use watcher::{OutputWatcher, watch};
 
 pub struct Hub {
     providers: Vec<Box<dyn Provider>>,

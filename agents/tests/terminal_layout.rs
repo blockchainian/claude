@@ -3520,3 +3520,6 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
     .unwrap();
     println!("{verdict}");
 }
+
+#[path = "support/terminal_output_follow.rs"]
+mod terminal_output_follow;

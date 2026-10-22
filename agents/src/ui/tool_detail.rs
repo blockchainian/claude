@@ -678,6 +678,15 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
 
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
+        Section::OutputFile(path) => {
+            push_section(
+                parts,
+                &Section::read_output_file(path),
+                label_style,
+                text_output,
+            );
+            return;
+        }
         Section::Shell { text, prefix } => {
             parts.push(shell_part(text.clone(), *prefix));
             return;
@@ -2110,3 +2119,7 @@ mod tests {
 #[cfg(test)]
 #[path = "structured_text_tests.rs"]
 mod structured_text_tests;
+
+#[cfg(test)]
+#[path = "tool_detail_output_tests.rs"]
+mod output_tests;

@@ -232,13 +232,6 @@ impl View {
         let Some(output) = task.output.as_deref() else {
             return;
         };
-        let body = match std::fs::read_to_string(output) {
-            Ok(body) => body,
-            Err(error) => {
-                self.set_notice(Some(format!("Cannot read background events: {error}")));
-                return;
-            }
-        };
         if self.event_list.background_return.is_none() {
             self.event_list.background_return = Some(BackgroundReturn {
                 event: self.event_list.cursor,
@@ -277,7 +270,7 @@ impl View {
                 title: task.description,
                 name: "background".into(),
                 input: Vec::new(),
-                output: Some(vec![crate::codex_await_output::section(body)]),
+                output: Some(vec![crate::event::Section::OutputFile(output.into())]),
                 exit_code: None,
                 is_error: false,
                 duration: None,
