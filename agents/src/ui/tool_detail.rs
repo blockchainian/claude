@@ -442,10 +442,12 @@ fn shell_maps(
     maps
 }
 
-/// Each raw record uses the shared document renderer under its own title.
+/// Each raw record uses the shared document renderer under its own title,
+/// styled like the event's title, with its timestamp in the time column.
 pub(super) fn transcript_content(
     raw: &Result<String, String>,
     provider: crate::providers::ProviderId,
+    kind: &Kind,
 ) -> EventDetailContent {
     let message = |text: String| EventDetailContent {
         sections: vec![EventDetailSection {
@@ -488,11 +490,11 @@ pub(super) fn transcript_content(
                 .map(|time| super::formatting::clock_text(time.with_timezone(&chrono::Utc)));
             EventDetailSection {
                 title: TitleRow {
-                    left: time,
+                    left: None,
                     exit_code: None,
                     title,
-                    title_style: Style::default(),
-                    time: None,
+                    title_style: super::style::event_styles(kind).0,
+                    time,
                     meta_style: Style::new().dim(),
                 },
                 groups: vec![Group {

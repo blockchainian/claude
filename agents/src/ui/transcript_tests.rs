@@ -56,6 +56,7 @@ fn transcript_multiline_json_matches_event_document_lines() {
     let content = super::super::tool_detail::transcript_content(
         &Ok(raw.into()),
         crate::providers::ProviderId::Claude,
+        &crate::event::Kind::Assistant,
     );
     let (view, now) = event_fixture();
     let mut event = view.event_panel[0].clone();
@@ -183,8 +184,8 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
             .find(|line| {
                 line.contains(title)
                     && line
-                        .trim_start()
-                        .starts_with(&super::super::formatting::clock_text(at))
+                        .trim_end_matches(['▕', ' '])
+                        .ends_with(&super::super::formatting::clock_text(at))
             })
             .unwrap_or_else(|| panic!("missing record clock: {rendered}"));
         assert!(drawn_header.contains(title));
@@ -234,6 +235,7 @@ fn transcript_json_uses_shared_path_rendering() {
     let content = super::super::tool_detail::transcript_content(
         &Ok(serde_json::json!({"type":"user", "path":absolute}).to_string()),
         crate::providers::ProviderId::Claude,
+        &crate::event::Kind::Assistant,
     );
     let part = &content.sections[0].groups[0].parts[0];
     let expected = super::super::tool_detail::Part::text(
@@ -278,9 +280,11 @@ fn transcript_refresh_reloads_rewritten_records_at_the_same_offset() {
 
 #[test]
 fn transcript_titles_use_provider_fields_and_leave_missing_metadata_empty() {
+    use crate::event::Kind;
     use crate::providers::ProviderId;
     let raw = Ok(r#"{"type":"assistant","payload":{"type":"nested"}}"#.to_owned());
-    let claude = super::super::tool_detail::transcript_content(&raw, ProviderId::Claude);
+    let claude =
+        super::super::tool_detail::transcript_content(&raw, ProviderId::Claude, &Kind::Assistant);
     assert_eq!(claude.sections[0].title.title, "assistant");
     assert_eq!(claude.sections[0].title.left, None);
     for (raw, title) in [
@@ -290,11 +294,40 @@ fn transcript_titles_use_provider_fields_and_leave_missing_metadata_empty() {
         ),
         ("{}", ""),
     ] {
-        let content =
-            super::super::tool_detail::transcript_content(&Ok(raw.into()), ProviderId::Codex);
+        let content = super::super::tool_detail::transcript_content(
+            &Ok(raw.into()),
+            ProviderId::Codex,
+            &Kind::Assistant,
+        );
         assert_eq!(content.sections[0].title.title, title);
         assert_eq!(content.sections[0].title.left, None);
     }
+}
+
+#[test]
+fn transcript_titles_match_the_event_title_with_the_record_time_in_the_time_column() {
+    use crate::event::Kind;
+    let raw = Ok(
+        r#"{"timestamp":"2026-10-22T08:15:30Z","type":"response_item","payload":{"type":"message"}}"#
+            .to_owned(),
+    );
+    let content = super::super::tool_detail::transcript_content(
+        &raw,
+        crate::providers::ProviderId::Codex,
+        &Kind::Assistant,
+    );
+    let title = &content.sections[0].title;
+    assert_eq!(title.left, None);
+    assert_eq!(
+        title.time,
+        Some(super::super::formatting::clock_text(
+            "2026-10-22T08:15:30Z".parse().unwrap()
+        ))
+    );
+    assert_eq!(
+        title.title_style,
+        super::super::style::event_styles(&Kind::Assistant).0
+    );
 }
 
 #[test]
@@ -306,6 +339,7 @@ fn transcript_long_json_lines_wrap_without_losing_text_or_syntax_styles() {
     let content = super::super::tool_detail::transcript_content(
         &Ok(raw.to_owned()),
         crate::providers::ProviderId::Codex,
+        &crate::event::Kind::Assistant,
     );
     let part = &content.sections[0].groups[0].parts[0];
     let lines = part.lines(33, Style::default(), Utc::now());

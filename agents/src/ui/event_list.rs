@@ -106,6 +106,7 @@ impl View {
                 self.selected_id()
                     .expect("detail belongs to a session")
                     .provider,
+                &event.kind,
             )
             .sections;
             return event_detail_parts_layout(event, columns, cwd, now, sections);
