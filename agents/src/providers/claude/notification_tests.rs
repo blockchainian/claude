@@ -200,10 +200,7 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         ("等右键改动 · -1", Some(-1)),
         ("三个配置依次快速启动 · 144", Some(144)),
         ("Sleep 600 seconds in background killed", None),
-        (
-            "mkdir -p /tmp/mermaid-debug/m && cd /tmp/mermaid-debug/m && npm init -y >/dev/null && npm i mermaid@11.12.2 jsdom 2>&1 | tail -3 ✓",
-            Some(0),
-        ),
+        ("mkdir, cd, npm {init, i}, tail ✓", Some(0)),
     ];
     for (line, (title, code)) in fixture.lines().zip(expected) {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -216,6 +213,17 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         assert_eq!(call.exit_code, code);
         assert_eq!(event.raw_text().unwrap(), line);
     }
+    let chain = fixture.lines().nth(5).unwrap();
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    writeln!(file, "{chain}").unwrap();
+    let call = tail(file.path(), 1).unwrap().remove(0).calls.remove(0);
+    assert_eq!(
+        call.input,
+        [Section::Shell {
+            text: "mkdir -p /tmp/mermaid-debug/m && cd /tmp/mermaid-debug/m && npm init -y >/dev/null && npm i mermaid@11.12.2 jsdom 2>&1 | tail -3".into(),
+            prefix: 0,
+        }]
+    );
     let row: Value = serde_json::from_str(fixture.lines().last().unwrap()).unwrap();
     let summary = row["content"]
         .as_str()

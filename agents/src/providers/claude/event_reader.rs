@@ -1077,12 +1077,31 @@ impl EventReader {
                 .unwrap_or(code.len());
             code[..end].parse::<i64>().ok()
         });
+        // Claude Code names a command run without a description by its full text;
+        // a chain of commands then reads like a Bash call: its command names, with the full
+        // text as input.
+        let chain = background.and_then(|((description, _), _)| {
+            let names =
+                crate::providers::tool::shell_summary::summarize_shell_commands(description);
+            names.contains(", ").then_some((names, description))
+        });
+        let input = chain
+            .as_ref()
+            .map(|(_, command)| Section::Shell {
+                text: (*command).to_owned(),
+                prefix: 0,
+            })
+            .into_iter()
+            .collect();
         let title = match background {
-            Some(((description, _), status)) => match exit_code {
-                Some(0) => format!("{description} ✓"),
-                Some(code) => format!("{description} · {code}"),
-                None => format!("{description} {status}"),
-            },
+            Some(((description, _), status)) => {
+                let description = chain.as_ref().map_or(description, |(names, _)| names);
+                match exit_code {
+                    Some(0) => format!("{description} ✓"),
+                    Some(code) => format!("{description} · {code}"),
+                    None => format!("{description} {status}"),
+                }
+            }
             None => summary.clone(),
         };
         let output = field("output-file").map(|path| Section::OutputFile(path.into()));
@@ -1103,7 +1122,7 @@ impl EventReader {
                 id: field("task-id").unwrap_or_default(),
                 title,
                 name: "task-notification".to_owned(),
-                input: Vec::new(),
+                input,
                 output: Some(output.into_iter().collect()),
                 exit_code,
                 is_error: false,
@@ -3973,10 +3992,7 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(measured.bytes_read, 64 * 1024);
         assert_eq!(measured.earliest, len - 64 * 1024);
-        assert_eq!(
-            event_panel.entries[0].event.body,
-            "等 Codex 做日志面板 ✓"
-        );
+        assert_eq!(event_panel.entries[0].event.body, "等 Codex 做日志面板 ✓");
     }
 
     #[test]
