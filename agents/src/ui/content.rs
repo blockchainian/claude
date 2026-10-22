@@ -17,24 +17,44 @@ pub(super) struct Block {
 
 impl Block {
     pub fn layout(self, options: textwrap::Options<'_>) -> Vec<Line<'static>> {
+        self.layout_with_breaks(options).0
+    }
+
+    /// Each row starts a display line unless wrapping continued the preceding row.
+    pub fn layout_with_breaks(
+        self,
+        options: textwrap::Options<'_>,
+    ) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
+        let mut lines = Vec::new();
+        let mut breaks = Vec::new();
         match self.kind {
-            Kind::Prose => self
-                .lines
-                .into_iter()
-                .flat_map(|line| wrap(line, self.indent, options.clone()))
-                .collect(),
-            Kind::Preformatted => self.lines,
+            Kind::Prose => {
+                for line in self.lines {
+                    let (wrapped, joins) = wrap(line, self.indent, options.clone());
+                    lines.extend(wrapped);
+                    breaks.extend(joins);
+                }
+            }
+            Kind::Preformatted => {
+                breaks.resize(self.lines.len(), None);
+                lines = self.lines;
+            }
         }
+        (lines, breaks)
     }
 }
 
-fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> Vec<Line<'static>> {
+fn wrap(
+    line: Line<'static>,
+    indent: usize,
+    options: textwrap::Options<'_>,
+) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
     let width = options.width;
     if width == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     if line.width() <= width {
-        return vec![line];
+        return (vec![line], vec![None]);
     }
     let plain = line.to_string();
     let padding = " ".repeat(indent.min(width.saturating_sub(1)));
@@ -42,7 +62,8 @@ fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> V
         .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit)
         .subsequent_indent(&padding);
     let mut offset = 0;
-    textwrap::wrap(&plain, options)
+    let mut breaks = Vec::new();
+    let lines = textwrap::wrap(&plain, options)
         .into_iter()
         .enumerate()
         .map(|(i, text)| {
@@ -52,6 +73,7 @@ fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> V
                     .find(text)
                     .expect("wrapped text belongs to source");
             let end = start + text.len();
+            breaks.push((i > 0).then_some(start > offset));
             offset = end;
             let mut spans = Vec::new();
             if i > 0 && !padding.is_empty() {
@@ -72,5 +94,6 @@ fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> V
             }
             Line::from(spans)
         })
-        .collect()
+        .collect();
+    (lines, breaks)
 }

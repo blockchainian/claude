@@ -473,9 +473,12 @@ impl View {
                 }
                 text_selection::DrawnRow {
                     segment: *segment,
+                    index: source,
+                    continuation: layout.continuations.get(&source).copied(),
                     x: body_area.x,
                     y: body_area.y + row as u16,
                     cells,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -1654,6 +1657,7 @@ fn render_event(
                 x: body_x,
                 y: area.y,
                 cells,
+                ..Default::default()
             }],
             &links,
         )
@@ -1688,6 +1692,7 @@ pub(super) struct EventDetailLayout {
     visible: Vec<usize>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
+    continuations: std::collections::BTreeMap<usize, bool>,
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
@@ -1768,6 +1773,7 @@ fn event_detail_parts_layout(
         running: Vec::new(),
         visible: Vec::new(),
         rows: Vec::new(),
+        continuations: Default::default(),
         sources: Vec::new(),
         links: Vec::new(),
         times: Vec::new(),
@@ -1822,13 +1828,14 @@ fn event_detail_parts_layout(
                     } else {
                         columns.text.width
                     };
-                    let lines = part.lines_in(usize::from(reading_width), body_style, now, cwd);
-                    (part, lines)
+                    let (lines, breaks) =
+                        part.layout_in(usize::from(reading_width), body_style, now, cwd);
+                    (part, lines, breaks)
                 })
                 .collect();
             let group_width = rendered
                 .iter()
-                .flat_map(|(_, lines)| lines.iter())
+                .flat_map(|(_, lines, _)| lines.iter())
                 .map(Line::width)
                 .max()
                 .unwrap_or(0)
@@ -1836,10 +1843,16 @@ fn event_detail_parts_layout(
             let group_x =
                 super::centering::centered_x(columns.panel, columns.text, group_width as u16);
             let padding = usize::from(group_x - columns.text.x);
-            for (part, lines) in rendered {
+            for (part, lines, breaks) in rendered {
                 let id = layout.sources.len();
                 let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
+                layout.continuations.extend(
+                    breaks
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(row, join)| join.map(|space| (first + row, space))),
+                );
                 if part.running() && width > 0 {
                     layout.running.push(first);
                 }

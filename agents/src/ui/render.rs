@@ -1173,6 +1173,7 @@ impl View {
         // messages, needs input, tasks. The title sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
+        let mut continuations = std::collections::BTreeMap::new();
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
         let mut copies: Vec<Option<(&str, &'static str)>> = Vec::new();
@@ -1312,8 +1313,15 @@ impl View {
             )));
             let start = items.len();
             let body_style = style::event_styles(&crate::event::Kind::Assistant).1;
+            let (lines, breaks) = super::text::layout(message, &session.cwd, width, true);
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
+            );
             items.extend(
-                super::text::lines(message, &session.cwd, width, true)
+                lines
                     .into_iter()
                     .map(|mut line| {
                         for span in &mut line.spans {
@@ -1347,7 +1355,13 @@ impl View {
                 prompt => prompt,
             };
             let prompt_start = items.len();
-            let prompt_body = super::text::lines(prompt_text, &session.cwd, width, true);
+            let (prompt_body, breaks) = super::text::layout(prompt_text, &session.cwd, width, true);
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (prompt_start + row, space))),
+            );
             items.extend(prompt_body.into_iter().map(Item::from));
             bodies.push(prompt_start..items.len());
             keys.push(body_key("Prompt", &session.prompt));
@@ -1365,11 +1379,14 @@ impl View {
         for queued in &session.queued {
             separate_section(&mut items);
             let start = items.len();
-            items.extend(
-                super::text::lines(queued, &session.cwd, width, true)
+            let (lines, breaks) = super::text::layout(queued, &session.cwd, width, true);
+            continuations.extend(
+                breaks
                     .into_iter()
-                    .map(Item::from),
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
             );
+            items.extend(lines.into_iter().map(Item::from));
             bodies.push(start..items.len());
             keys.push(body_key("Prompt", queued));
             copies.push(Some((queued.as_str(), "Copied prompt")));
@@ -1513,9 +1530,12 @@ impl View {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
                 text_rows[index] = Some(text_selection::DrawnRow {
                     segment: body.start,
+                    index,
+                    continuation: continuations.get(&index).copied(),
                     x: area.x,
                     y: 0,
                     cells,
+                    ..Default::default()
                 });
             }
             sources.push(text_selection::Source {
@@ -1771,9 +1791,11 @@ impl View {
                                 .rows
                                 .push(text_selection::DrawnRow {
                                     segment: id,
+                                    index: y,
                                     x: area.x,
                                     y: area.y + (y - scroll) as u16,
                                     cells,
+                                    ..Default::default()
                                 });
                         }
                     }

@@ -150,6 +150,30 @@ fn drag_wrapped_markdown_copies_one_line_with_word_spaces() {
 }
 
 #[test]
+fn drag_bold_at_wrap_boundary_copies_one_visible_line() {
+    let mut view = fixture();
+    let body = markdown_body();
+    let end = body.find("原").unwrap();
+    view.rows[0].prompt = body[..end].trim_end().replace("**结论:** ", "**结论:**\n");
+    let mut buf = Buffer::empty(Rect::new(0, 0, 80, 80));
+    view.render_task_details(Rect::new(2, 1, 7, 70), &mut buf, Utc::now());
+    let start = position(&buf, "结论:");
+    let rows = view.viewport.borrow().task_details_text.rows.clone();
+    let last = rows
+        .iter()
+        .filter(|row| row.y >= start.1 && !row.cells.is_empty())
+        .last()
+        .unwrap();
+    assert!(last.y > start.1);
+    view.begin_text_selection(start.0, start.1);
+    view.extend_text_selection(8, last.y);
+    assert_eq!(
+        copied_text(view.finish_text_selection(8, last.y)),
+        "结论: 子代理的 Bash 行就是一个光秃秃的 Bash。"
+    );
+}
+
+#[test]
 fn drag_soft_wrapped_body_copies_source_without_wrap_newlines() {
     let mut view = fixture();
     let buf = task_details(&view);
@@ -368,7 +392,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
 }
 
 #[test]
-fn drag_between_bodies_joins_original_text_with_one_newline() {
+fn drag_between_bodies_copies_displayed_lines_and_joins_soft_wraps() {
     let mut view = fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
     let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
@@ -388,9 +412,27 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
     let message = view.rows[0].last_message.as_ref().unwrap();
     let expected = format!(
-        "{}\n{}",
-        message[message.find("⏺ Ran").unwrap()..].replace('`', ""),
-        &view.rows[0].prompt[..view.rows[0].prompt.find("对，").unwrap()]
+        "{}\n{}\n",
+        [
+            "⏺ Ran 4 stop hooks",
+            "⎿ \u{a0}Stop hook error: codex-man…",
+            "",
+            "codex thread 01a11210-f266-71…",
+            "node \"~/Code/blockchainian/do…",
+            "",
+            "codex thread 01a11211-aa6e-76…",
+            "node \"~/Code/blockchainian/do…",
+            "",
+            "",
+            "",
+        ]
+        .join("\n"),
+        message
+            .rsplit_once("```\n\n")
+            .unwrap()
+            .1
+            .replace('`', "")
+            .trim_end(),
     );
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1)),

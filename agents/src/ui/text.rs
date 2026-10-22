@@ -10,10 +10,24 @@ use std::ops::Range;
 use std::path::Path;
 
 pub(super) fn lines(text: &str, cwd: &Path, width: usize, markdown: bool) -> Vec<Line<'static>> {
-    Part::prose_parts(text.to_owned(), markdown)
-        .into_iter()
-        .flat_map(|part| part.lines_in(width, Style::default(), chrono::DateTime::UNIX_EPOCH, cwd))
-        .collect()
+    layout(text, cwd, width, markdown).0
+}
+
+pub(super) fn layout(
+    text: &str,
+    cwd: &Path,
+    width: usize,
+    markdown: bool,
+) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
+    let mut lines = Vec::new();
+    let mut breaks = Vec::new();
+    for part in Part::prose_parts(text.to_owned(), markdown) {
+        let (drawn, joins) =
+            part.layout_in(width, Style::default(), chrono::DateTime::UNIX_EPOCH, cwd);
+        lines.extend(drawn);
+        breaks.extend(joins);
+    }
+    (lines, breaks)
 }
 
 /// Whether a summary uses the message body's Markdown interpretation.

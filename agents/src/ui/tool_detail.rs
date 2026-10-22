@@ -237,6 +237,16 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
         cwd: &std::path::Path,
     ) -> Vec<Line<'static>> {
+        self.layout_in(width, body_style, now, cwd).0
+    }
+
+    pub fn layout_in(
+        &self,
+        width: usize,
+        body_style: Style,
+        now: chrono::DateTime<chrono::Utc>,
+        cwd: &std::path::Path,
+    ) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
         let text = crate::providers::text::printable(&self.source);
         let paths = super::paths::text_paths(&text, cwd);
         let display =
@@ -258,6 +268,7 @@ impl Part {
                 kind,
             }],
         };
+        let mut breaks = Vec::new();
         let lines: Vec<_> = blocks
             .into_iter()
             .flat_map(|mut block| {
@@ -275,13 +286,15 @@ impl Part {
                         }
                     }
                 }
-                block.layout(options.clone())
+                let (lines, joins) = block.layout_with_breaks(options.clone());
+                breaks.extend(joins);
+                lines
             })
             .collect();
         if matches!(self.body, Body::Arrow) {
-            return lines;
+            return (lines, breaks);
         }
-        lines
+        let lines = lines
             .into_iter()
             .map(|mut line| {
                 for span in &mut line.spans {
@@ -289,7 +302,8 @@ impl Part {
                 }
                 line
             })
-            .collect()
+            .collect();
+        (lines, breaks)
     }
 
     fn render_lines(

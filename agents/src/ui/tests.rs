@@ -8100,7 +8100,9 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
             assert_eq!(
                 view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, row.y)),
                 Some(Action::Copy {
-                    text: title.into(),
+                    text: row.cells.iter()
+                        .map(|(columns, _)| buf[(body.x + columns.start, row.y)].symbol())
+                        .collect(),
                     label: "Copied message".into()
                 })
             );
@@ -8109,7 +8111,7 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
 }
 
 #[test]
-fn shell_commands_share_center_and_copy_original_without_connector_hits() {
+fn shell_commands_share_center_and_copy_display_lines_without_connector_hits() {
     let command = "cat /workspace/a && printf longer && echo done; pwd\n";
     let (mut view, now) = open_tool_fixture();
     let mut event = view.event_panel[7].clone();
@@ -8196,11 +8198,11 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, first.y));
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, last.y));
     view.render_at(buf.area, &mut buf, now);
-    // A drag covers visible bytes; a whole-section copy also retains its trailing newline.
+    // A drag copies display lines; a whole-section copy also retains its trailing newline.
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, last.y)),
         Some(Action::Copy {
-            text: command.trim_end_matches('\n').into(),
+            text: "cat /workspace/a\nprintf longer\necho done\npwd".into(),
             label: "Copied message".into(),
         })
     );
@@ -9233,7 +9235,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
 }
 
 #[test]
-fn real_tabs_survive_copy_and_expanded_cell_selection() {
+fn real_tabs_copy_as_displayed_spaces_and_allow_partial_selection() {
     let record: serde_json::Value = serde_json::from_str(
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
@@ -9270,20 +9272,26 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
     assert_eq!(
         view.finish_text_selection(x + source.replace('\t', "    ").len() as u16, y),
         Some(Action::Copy {
-            text: source.into(),
+            text: source.replace('\t', "    "),
             label: "Copied message".into()
         })
     );
     view.begin_text_selection(x + 2, y);
     view.extend_text_selection(x + 4, y);
-    assert_eq!(view.finish_text_selection(x + 4, y), None);
-    // All four display cells refer to one byte, and crossing the tab's end copies it once.
+    assert_eq!(
+        view.finish_text_selection(x + 4, y),
+        Some(Action::Copy {
+            text: "  ".into(),
+            label: "Copied message".into(),
+        })
+    );
+    // Each space is selectable even though all four map to the same source byte.
     view.begin_text_selection(x + 2, y);
     view.extend_text_selection(x + 6, y);
     assert_eq!(
         view.finish_text_selection(x + 6, y),
         Some(Action::Copy {
-            text: "\t".into(),
+            text: "    ".into(),
             label: "Copied message".into()
         })
     );

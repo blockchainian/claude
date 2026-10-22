@@ -167,6 +167,7 @@ pub(super) fn row_links(
         x: 0,
         y: 0,
         cells: cells.to_vec(),
+        ..Default::default()
     };
     drawn_links(std::slice::from_ref(&row), links)
         .into_iter()

@@ -38,6 +38,7 @@ fn cwd_paths_match_in_tool_titles_bodies_and_links() {
             x: 0,
             y: 0,
             cells: layout.rows[0].1.clone(),
+            ..Default::default()
         }];
         let drawn = super::links::drawn_links(&rows, &links);
         assert!(!drawn.is_empty(), "{name}: title lost its link");
@@ -109,6 +110,7 @@ fn markdown_path_labels_are_relative_and_keep_the_absolute_destination() {
                     x: 0,
                     y: row as u16,
                     cells: cells.clone(),
+                    ..Default::default()
                 }],
                 &layout.links[*id],
             )

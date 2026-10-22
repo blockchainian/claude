@@ -3523,3 +3523,6 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
 
 #[path = "support/terminal_output_follow.rs"]
 mod terminal_output_follow;
+
+#[path = "support/terminal_selection_display.rs"]
+mod terminal_selection_display;
