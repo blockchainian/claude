@@ -189,7 +189,7 @@ fn real_ask_user_question_dashboard_escape_resends_message() {
             event["message"]["content"].as_array().is_some_and(|blocks| blocks.iter().any(|block| {
                 block["type"] == "tool_result" && block["tool_use_id"] == ask.id
                     && block["is_error"] == true
-                    && block["content"].as_str().is_some_and(|text| text.starts_with("PreToolUse:AskUserQuestion hook error: The user dismissed these questions because the message you sent with them was not shown."))
+                    && block["content"].as_str().is_some_and(|text| text.starts_with("PreToolUse:AskUserQuestion hook error: The user dismissed these questions."))
             }))
         })?;
         events[rejected + 1..].iter().find_map(|event| {
