@@ -522,7 +522,7 @@ pub(super) fn event_detail_content(
     } else {
         let mut parts = if matches!(
             event.kind,
-            Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
+            Kind::User | Kind::Compaction | Kind::Assistant | Kind::Thinking | Kind::Agent
         ) {
             Part::prose_parts(
                 event
@@ -1108,6 +1108,7 @@ mod tests {
             Kind::User,
             Kind::Compaction,
             Kind::Assistant,
+            Kind::Thinking,
             Kind::Agent,
             Kind::Session,
             Kind::Error,
@@ -1144,6 +1145,7 @@ mod tests {
                 Kind::User
                     | Kind::Compaction
                     | Kind::Assistant
+                    | Kind::Thinking
                     | Kind::Agent
                     | Kind::QueuedUser
                     | Kind::QueuedSystem

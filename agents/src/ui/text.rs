@@ -23,6 +23,7 @@ pub(super) fn is_prose(kind: &Kind) -> bool {
         Kind::User
             | Kind::Compaction
             | Kind::Assistant
+            | Kind::Thinking
             | Kind::Agent
             | Kind::QueuedUser
             | Kind::QueuedSystem

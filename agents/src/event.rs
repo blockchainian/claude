@@ -23,6 +23,7 @@ pub enum Kind {
     User,
     Compaction,
     Assistant,
+    Thinking,
     Agent,
     Session,
     Tool,
