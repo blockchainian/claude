@@ -286,8 +286,12 @@ pub enum Section {
         lang: String,
         text: String,
     },
-    /// Unified diff hunks; the label is the changed file's path.
-    Diff { label: String, text: String },
+    /// Unified diff hunks highlighted by the changed file's language.
+    Diff {
+        label: String,
+        lang: String,
+        text: String,
+    },
     /// Prose rendered as Markdown.
     Markdown { label: String, text: String },
     /// Plain text wrapped at the panel width.

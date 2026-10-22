@@ -413,22 +413,80 @@ pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// Unified diff hunks: theme foregrounds for removed and added lines, hunk headers dim.
-pub(super) fn diff_lines(text: &str) -> Vec<Line<'static>> {
-    let deleted = scope_style("markup.deleted");
-    let inserted = scope_style("markup.inserted");
-    text.lines()
-        .map(|line| {
-            let style = if line.starts_with("@@") {
-                Style::default().add_modifier(Modifier::DIM)
-            } else if line.starts_with('-') {
-                deleted
-            } else if line.starts_with('+') {
-                inserted
-            } else {
-                Style::default()
+/// Unified diff hunks with separate syntax state for the before and after code.
+/// Preformatted rows are clipped by the view, so only short changed rows need padding.
+pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'static>> {
+    let diff_style = |name| {
+        let mut style = scope_style(name);
+        style.bg = with_theme(|theme| {
+            Highlighter::new(theme)
+                .style_mod_for_stack(&[Scope::new(name).expect("diff scope is valid")])
+                .background
+                .and_then(terminal_color)
+        });
+        style
+    };
+    let deleted = diff_style("markup.deleted");
+    let inserted = diff_style("markup.inserted");
+    let syntax = !exceeds_limits(text) && find_syntax(lang).is_some();
+    let rows: Vec<_> = text.lines().collect();
+    rows.split_inclusive(|line| line.starts_with("@@"))
+        .flat_map(|hunk| {
+            let code = |skip| {
+                let source: String = hunk
+                    .iter()
+                    .filter(|line| {
+                        matches!(line.as_bytes().first(), Some(b'+' | b'-' | b' '))
+                            && !line.starts_with(skip)
+                    })
+                    .map(|line| format!("{}\n", &line[1..]))
+                    .collect();
+                code_lines(&source, lang).into_iter()
             };
-            Line::from(Span::styled(line.to_owned(), style))
+            let mut before = syntax.then(|| code('+'));
+            let mut after = syntax.then(|| code('-'));
+            hunk.iter()
+                .map(|source| {
+                    let marker = source.as_bytes().first().copied();
+                    let style = match marker {
+                        Some(b'-') => deleted,
+                        Some(b'+') => inserted,
+                        _ => Style::default(),
+                    };
+                    if !matches!(marker, Some(b'+' | b'-' | b' ')) {
+                        return Line::from(Span::styled(
+                            (*source).to_owned(),
+                            if source.starts_with("@@") {
+                                Style::new().dim()
+                            } else {
+                                Style::default()
+                            },
+                        ));
+                    }
+                    let old = (marker != Some(b'+'))
+                        .then(|| before.as_mut().and_then(Iterator::next))
+                        .flatten();
+                    let new = (marker != Some(b'-'))
+                        .then(|| after.as_mut().and_then(Iterator::next))
+                        .flatten();
+                    let content = if marker == Some(b'-') { old } else { new };
+                    let mut spans = vec![Span::styled(source[..1].to_owned(), style)];
+                    if let Some(content) = content {
+                        spans.extend(content.spans.into_iter().map(|mut span| {
+                            span.style.bg = style.bg;
+                            span
+                        }));
+                    } else {
+                        spans.push(Span::styled(source[1..].to_owned(), style));
+                    }
+                    let mut line = Line::from(spans);
+                    if style.bg.is_some() && line.width() < width {
+                        line.spans
+                            .push(Span::styled(" ".repeat(width - line.width()), style));
+                    }
+                    line
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -458,6 +516,8 @@ mod tests {
             let source = source
                 .replace("#a0635d", error)
                 .replace("#4a8b4f", quote)
+                .replace("#220a0a", "#456789")
+                .replace("#001408", "#56789a")
                 .replace("#e9000000", selection)
                 .replacen("#06000000", accent, 1)
                 .replace("#06000000", "#56789a");
@@ -479,7 +539,7 @@ mod tests {
                 );
                 assert_eq!(theme.settings.accent.and_then(terminal_color), rgb(accent));
             });
-            let diff = diff_lines("-removed\n+added");
+            let diff = diff_lines("-removed\n+added", "", 0);
             let quote_lines = super::super::markdown::render("> quote", 80);
             let code = super::super::markdown::render("```\ncode\n```", 80);
             assert_eq!(
@@ -502,7 +562,8 @@ mod tests {
                     rgb(quote)
                 ]
             );
-            assert!(diff.iter().all(|line| line.spans[0].style.bg.is_none()));
+            assert_eq!(diff[0].spans[0].style.bg, rgb("#456789"));
+            assert_eq!(diff[1].spans[0].style.bg, rgb("#56789a"));
         }
         for (light, error, quote, selection) in [
             (true, Color::Rgb(130, 7, 30), Color::Rgb(17, 99, 41), 111),
@@ -517,7 +578,7 @@ mod tests {
             assert_eq!(super::super::style::accent_color(), Some(Color::Cyan));
             assert_eq!(scope_style("markup.quote").fg, Some(quote));
             assert_eq!(scope_style("markup.raw.block").fg, Some(Color::Cyan));
-            let diff = diff_lines("-removed\n+added");
+            let diff = diff_lines("-removed\n+added", "", 0);
             assert_eq!(diff[0].spans[0].style.fg, Some(error));
             assert_eq!(diff[1].spans[0].style.fg, Some(quote));
         }
@@ -872,10 +933,138 @@ mod tests {
     }
 
     #[test]
+    fn diff_backgrounds_fill_width_in_both_themes() {
+        for (light, removed, added) in [
+            (false, Color::Rgb(34, 10, 10), Color::Rgb(0, 20, 8)),
+            (true, Color::Rgb(208, 185, 185), Color::Rgb(125, 212, 183)),
+        ] {
+            use_theme(light, None).unwrap();
+            let lines = diff_lines("@@ -1 +1 @@\n-旧\n+新\n same", "", 20);
+            for (line, background) in lines[1..3].iter().zip([removed, added]) {
+                assert_eq!(line.width(), 20);
+                assert!(
+                    line.spans
+                        .iter()
+                        .all(|span| span.style.bg == Some(background))
+                );
+            }
+            for line in [&lines[0], &lines[3]] {
+                assert!(line.spans.iter().all(|span| span.style.bg.is_none()));
+            }
+        }
+    }
+
+    #[test]
+    fn diff_code_matches_rust_highlighting() {
+        use_theme(false, None).unwrap();
+        let code = "fn main() { let value = 42; }";
+        let lines = diff_lines(&format!("-{code}\n+{code}"), "rs", 40);
+        let expected = byte_styles(&code_lines(code, "rs"));
+        for (line, scope) in lines.iter().zip(["markup.deleted", "markup.inserted"]) {
+            assert_eq!(line.spans[0].content.len(), 1);
+            assert_eq!(line.spans[0].style.fg, scope_style(scope).fg);
+            assert!(
+                line.spans
+                    .iter()
+                    .all(|span| span.style.bg == line.spans[0].style.bg)
+            );
+            assert!(line.spans[0].style.bg.is_some());
+            assert_ne!(line.spans[1].style.fg, line.spans[0].style.fg);
+            let actual = byte_styles(std::slice::from_ref(line));
+            for (actual, expected) in actual[0][1..].iter().zip(&expected[0]) {
+                assert_eq!(actual.fg, expected.fg);
+            }
+        }
+    }
+
+    #[test]
+    fn diff_unknown_and_oversized_code_keeps_markup_foregrounds() {
+        use_theme(false, None).unwrap();
+        for (lang, code) in [
+            ("unknown-language", "fn main() {}".to_owned()),
+            ("rs", "x".repeat(MAX_LINE_BYTES + 1)),
+            ("rs", "x\n".repeat(MAX_LINES + 1)),
+            (
+                "rs",
+                format!("{}\n", "x".repeat(256)).repeat(MAX_BYTES / 256 + 1),
+            ),
+        ] {
+            let source = format!("-{code}\n+{code}");
+            let lines = diff_lines(&source, lang, 20);
+            for line in lines.iter().filter(|line| {
+                line.spans
+                    .first()
+                    .is_some_and(|span| matches!(span.content.as_ref(), "-" | "+"))
+            }) {
+                let scope = if line.spans[0].content == "-" {
+                    "markup.deleted"
+                } else {
+                    "markup.inserted"
+                };
+                assert!(
+                    line.spans
+                        .iter()
+                        .all(|span| span.style.fg == scope_style(scope).fg)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn diff_uses_only_explicit_scope_backgrounds() {
+        let mut theme = bundled_theme(false);
+        for item in &mut theme.scopes {
+            item.style.background = None;
+        }
+        with_current_theme(|current| current.theme = Some(theme));
+        let lines = diff_lines("-fn main() {}\n+fn main() {}", "rs", 80);
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style.bg.is_none())
+        );
+        assert_eq!(lines[0].width(), 13);
+    }
+
+    #[test]
+    fn diff_keeps_before_and_after_multiline_syntax_separate() {
+        use_theme(false, None).unwrap();
+        let source = "@@ -1,3 +1,3 @@\n /* start\n-old comment\n+new comment\n */\n@@ -9 +9 @@\n-fn before() {}\n+fn after() {}";
+        let lines = diff_lines(source, "rs", 0);
+        let before = byte_styles(&code_lines("/* start\nold comment\n*/", "rs"));
+        let after = byte_styles(&code_lines("/* start\nnew comment\n*/", "rs"));
+        let styles = byte_styles(&lines);
+        for (row, expected) in [
+            (1, &after[0]),
+            (2, &before[1]),
+            (3, &after[1]),
+            (4, &after[2]),
+        ] {
+            for (actual, expected) in styles[row][1..].iter().zip(expected) {
+                assert_eq!(actual.fg, expected.fg);
+            }
+        }
+        for (row, code) in [(6, "fn before() {}"), (7, "fn after() {}")] {
+            let expected = byte_styles(&code_lines(code, "rs"));
+            assert_eq!(styles[row][1].fg, expected[0][0].fg);
+        }
+    }
+
+    #[test]
+    fn diff_keeps_wide_rows_unwrapped() {
+        let source = "+中文代码很长";
+        let lines = diff_lines(source, "rs", 4);
+        assert_eq!(text(&lines), [source]);
+        assert!(lines[0].width() > 4);
+        assert_eq!(diff_lines("+", "rs", 0)[0].width(), 1);
+    }
+
+    #[test]
     fn diff_lines_colour_by_marker() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         use_theme(false, None).unwrap();
-        let lines = diff_lines("@@ -1 +1 @@\n-old\n+new\n same");
+        let lines = diff_lines("@@ -1 +1 @@\n-old\n+new\n same", "", 0);
         assert_eq!(text(&lines), ["@@ -1 +1 @@", "-old", "+new", " same"]);
         assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(lines[1].spans[0].style.fg, Some(Color::Rgb(160, 99, 93)));

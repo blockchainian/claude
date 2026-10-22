@@ -743,6 +743,7 @@ fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
 fn section(label: &str, segment: Option<&Segment>, text: &str) -> Section {
     match segment.map(|s| &s.kind) {
         Some(Kind::Diff) => Section::Diff {
+            lang: String::new(),
             label: String::new(),
             text: text.into(),
         },

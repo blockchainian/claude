@@ -460,6 +460,8 @@
 			<string>markup.deleted, meta.diff.header.from-file, punctuation.definition.deleted</string>
 			<key>settings</key>
 			<dict>
+				<key>background</key>
+				<string>#220a0a</string>
 				<key>foreground</key>
 				<string>#a0635d</string>
 			</dict>
@@ -482,6 +484,8 @@
 			<string>markup.inserted, meta.diff.header.to-file, punctuation.definition.inserted</string>
 			<key>settings</key>
 			<dict>
+				<key>background</key>
+				<string>#001408</string>
 				<key>foreground</key>
 				<string>#4a8b4f</string>
 			</dict>

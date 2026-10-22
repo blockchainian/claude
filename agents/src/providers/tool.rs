@@ -984,7 +984,7 @@ pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
     }
 }
 
-fn file_language(path: &str) -> &str {
+pub(crate) fn file_language(path: &str) -> &str {
     let path = std::path::Path::new(path);
     path.extension()
         .or_else(|| path.file_name())
@@ -1026,6 +1026,7 @@ fn patch_section(value: &serde_json::Value) -> Option<Section> {
         .collect::<Vec<_>>()
         .join("\n");
     Some(Section::Diff {
+        lang: file_language(value["filePath"].as_str()?).to_owned(),
         label: String::new(),
         text,
     })
@@ -1280,6 +1281,19 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn captured_edit_patch_carries_file_language() {
+        let record = include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| record["toolUseResult"]["structuredPatch"].is_array())
+            .unwrap();
+        let section = super::patch_section(&record["toolUseResult"]).unwrap();
+        assert!(
+            matches!(section, crate::event::Section::Diff { lang, label, .. } if lang == "rs" && label.is_empty())
+        );
+    }
+
     #[test]
     fn hook_rejected_questions_show_chat_and_answers() {
         let records: Vec<serde_json::Value> =

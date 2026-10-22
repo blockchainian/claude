@@ -9159,6 +9159,7 @@ fn narrow_scrolled_tool_label_drag_stays_inside_the_buffer() {
     let (mut view, now) = open_tool_fixture();
     let mut event = view.event_panel[7].clone();
     event.calls[0].input = vec![crate::event::Section::Diff {
+        lang: "rs".into(),
         label: "/workspace/very/long/path/to/source.rs".repeat(6),
         text: "+中文".into(),
     }];

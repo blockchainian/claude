@@ -31,7 +31,7 @@ enum Body {
     Shell(Vec<super::shell_commands::Command>),
     /// Parsed structured content with its format-owned rendering.
     Structured(Box<dyn Document>),
-    Diff,
+    Diff(String),
     Markdown,
     /// A message or free-text input, with a shared reading column.
     Prose(bool),
@@ -50,7 +50,7 @@ impl Body {
             | Self::Code(_)
             | Self::Shell(_)
             | Self::Structured(_)
-            | Self::Diff
+            | Self::Diff(_)
             | Self::Note
             | Self::Text => ContentKind::Preformatted,
         }
@@ -321,7 +321,7 @@ impl Part {
             }
             Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Structured(document) => document.lines(width),
-            Body::Diff => highlight::diff_lines(source),
+            Body::Diff(lang) => highlight::diff_lines(source, lang, width),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
             Body::Note => source
                 .split('\n')
@@ -716,7 +716,9 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
         Section::Code { label, lang, text } => {
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
-        Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
+        Section::Diff { label, lang, text } => {
+            (label, Part::new(cells(text), Body::Diff(lang.clone())))
+        }
         Section::Markdown { text, .. } => {
             parts.extend(if text_output {
                 Part::text_parts(cells(text), true)
@@ -1977,6 +1979,7 @@ mod tests {
             title: "Edit".into(),
             name: "Edit".into(),
             input: vec![Section::Diff {
+                lang: "rs".into(),
                 label: "a.rs".into(),
                 text: "+中文字符串很长\n-short".into(),
             }],
@@ -1994,7 +1997,7 @@ mod tests {
             [
                 "a.rs",
                 "+中文字符串很长",
-                "-short",
+                "-short   ",
                 "↓",
                 "let value = \"abcdefghij\";"
             ]

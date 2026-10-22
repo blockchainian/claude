@@ -702,8 +702,9 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             let changes = item["changes"].as_object().unwrap();
             let output = changes
                 .iter()
-                .filter_map(|(_, change)| {
+                .filter_map(|(path, change)| {
                     Some(Section::Diff {
+                        lang: crate::providers::tool::file_language(path).to_owned(),
                         label: String::new(),
                         text: file_change_diff(change)?,
                     })
@@ -3325,6 +3326,7 @@ mod tests {
         let event = completed_tool(record).unwrap().unwrap();
         assert!(event.calls[0].input.is_empty());
         assert_eq!(event.calls[0].output, Some(vec![Section::Diff {
+            lang: "rs".into(),
             label: String::new(),
             text: record["payload"]["item"]["changes"]["/workspace/agents/src/processes.rs"]["unified_diff"].as_str().unwrap().to_owned(),
         }]));
@@ -3346,10 +3348,12 @@ mod tests {
             .collect();
         assert_eq!(outputs, [
             Some(vec![Section::Diff {
+                lang: "mjs".into(),
                 label: String::new(),
                 text: "@@ -0,0 +1,2 @@\n+// Ported from wakaru v1.14.0 SimplifySequence (Apache-2.0).\n+export default { name: 'SimplifySequence', visitor() { return {}; } };".to_owned(),
             }]),
             Some(vec![Section::Diff {
+                lang: "txt".into(),
                 label: String::new(),
                 text: "@@ -1,7 +0,0 @@\n-                 Prompt\n-Current prompt Current prompt Current\n-prompt Current prompt Current prompt\n-Current prompt Current prompt Current\n-prompt Current prompt Current prompt\n-Current prompt Current prompt\n-Queued prompt that extends beyond the".to_owned(),
             }]),
@@ -3403,7 +3407,7 @@ mod tests {
             .unwrap();
         let event = completed_tool(file).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::event::Section::Diff { label, text } if label.is_empty() && text.starts_with("@@ -132,2 +132,22 @@"))
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::event::Section::Diff { label, text, .. } if label.is_empty() && text.starts_with("@@ -132,2 +132,22 @@"))
         );
     }
 
