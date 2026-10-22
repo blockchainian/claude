@@ -366,7 +366,8 @@ impl Reader {
                     .into_iter()
                     .flatten()
                 {
-                    if block["type"] == "tool_use"
+                    if (block["type"] == "tool_use"
+                        || (block["type"] == "server_tool_use" && block["name"] == "advisor"))
                         && let Some(id) = block["id"].as_str()
                     {
                         requests.insert(id, group.unwrap_or(*offset));
@@ -390,10 +391,12 @@ impl Reader {
                 .into_iter()
                 .flatten()
             {
-                if block["type"] == "tool_result"
-                    && let Some(offset) = block["tool_use_id"]
-                        .as_str()
-                        .and_then(|id| requests.get(id))
+                if matches!(
+                    block["type"].as_str(),
+                    Some("tool_result" | "advisor_tool_result")
+                ) && let Some(offset) = block["tool_use_id"]
+                    .as_str()
+                    .and_then(|id| requests.get(id))
                 {
                     start = start.min(*offset);
                 }
@@ -942,6 +945,40 @@ impl EventReader {
                                 }
                             }
                             Some("tool_use") => self.tool(block, at),
+                            Some("server_tool_use") if block["name"] == "advisor" => {
+                                // Advisor calls occupy their own row, even within one message.
+                                self.batch = None;
+                                self.tool(block, at);
+                                self.batch = None;
+                                let event = &mut self.entries.last_mut().unwrap().event;
+                                event.body = "advisor".to_owned();
+                                let call = event.calls.last_mut().unwrap();
+                                call.title = "advisor".to_owned();
+                                call.event_detail_title = "advisor".to_owned();
+                                call.model_settings = Some(crate::event::ModelSettings {
+                                    provider: crate::providers::ProviderId::Claude,
+                                    model: record["advisorModel"].as_str().map(str::to_owned),
+                                    effort: None,
+                                });
+                                event.completed_time = true;
+                                event.duration = call.duration;
+                            }
+                            Some("advisor_tool_result") => {
+                                if let Some(id) = block["tool_use_id"].as_str() {
+                                    // Only the completion time is visible; the payload is encrypted.
+                                    let source_records = self.source_records();
+                                    self.results.entry(id.to_owned()).or_insert(ResultAt {
+                                        source_records,
+                                        at,
+                                        sequence: self.sequence,
+                                        error: false,
+                                        denial: None,
+                                        content: String::new(),
+                                        raw_content: serde_json::Value::Null,
+                                        value: serde_json::Value::Null,
+                                    });
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -1388,6 +1425,99 @@ pub(super) fn prompt_body(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn advisor_real_records_keep_a_separate_timed_row() {
+        let fixture = include_str!("../../../tests/fixtures/claude-advisor.jsonl");
+        let records: Vec<Value> = fixture
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = Reader::new(file.path().into(), true);
+        writeln!(file, "{}", records[0]).unwrap();
+        let pending = reader.refresh(20).unwrap().events;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].body, "advisor");
+        assert_eq!(pending[0].ended_at, None);
+        writeln!(file, "{}", records[1]).unwrap();
+        let events = reader.refresh(20).unwrap().events;
+        assert_eq!(events, tail_session(file.path(), 20, true).unwrap());
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.kind, Kind::Tool);
+        assert_eq!(
+            event.source.as_deref(),
+            Some("srvtoolu_01Ybbz6gyNahapzZ5zTtxji5")
+        );
+        let start = records[0]["timestamp"]
+            .as_str()
+            .unwrap()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let end = records[1]["timestamp"]
+            .as_str()
+            .unwrap()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        assert_eq!(event.started_at, start);
+        assert_eq!(event.ended_at, Some(end));
+        assert_eq!(event.calls[0].duration, Some(end - start));
+        assert_eq!((end - start).num_milliseconds(), 285889);
+        assert_eq!(
+            event.calls[0]
+                .model_settings
+                .as_ref()
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("claude-fable-5-1")
+        );
+        assert!(event.calls[0].output.as_ref().is_none_or(Vec::is_empty));
+        assert_eq!(event.source_records.len(), 2);
+        let mut following: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+                .lines()
+                .nth(6)
+                .unwrap(),
+        )
+        .unwrap();
+        following["message"]["id"] = records[0]["message"]["id"].clone();
+        following["timestamp"] = (end + chrono::Duration::seconds(2)).to_rfc3339().into();
+        writeln!(file, "{following}").unwrap();
+        let events = reader.refresh(20).unwrap().events;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].previous_end, Some(end));
+        assert_eq!(events[1].calls.len(), 1);
+        assert_eq!(
+            tail_session(file.path(), 1, true).unwrap(),
+            vec![events[1].clone()]
+        );
+        assert_eq!(events, tail_session(file.path(), 20, true).unwrap());
+    }
+
+    #[test]
+    fn advisor_pairs_by_tool_id_and_ignores_other_server_tools() {
+        let mut records: Vec<Value> = include_str!("../../../tests/fixtures/claude-advisor.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        records[1]["message"]["content"][0]["tool_use_id"] = "another-advisor".into();
+        for record in &records {
+            writeln!(file, "{record}").unwrap();
+        }
+        let events = tail_session(file.path(), 20, true).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].ended_at, None);
+        assert_eq!(events[0].calls[0].duration, None);
+        records[0]["message"]["content"][0]["name"] = "web_search".into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in &records {
+            writeln!(file, "{record}").unwrap();
+        }
+        assert!(tail_session(file.path(), 20, true).unwrap().is_empty());
+    }
+
     #[test]
     fn dequeued_prompt_uses_delivery_position_and_time_in_incremental_and_tail_reads() {
         let fixture = include_str!("../../../tests/fixtures/claude-queued-dequeue.jsonl");

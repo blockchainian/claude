@@ -57,6 +57,10 @@ impl View {
                 if let Some(model) = settings.model.as_deref().filter(|model| !model.is_empty()) {
                     let model = self.model_text(settings.provider, model);
                     call.event_detail_title.push_str(&format!(" · {model}"));
+                    if call.name == "advisor" {
+                        call.title.push_str(&format!(" · {model}"));
+                        display.body.clone_from(&call.title);
+                    }
                 }
                 if let Some(effort) = settings
                     .effort
@@ -205,8 +209,9 @@ impl View {
                 self.event_list.sort
             };
             let time = event_time(event, session, last, now, sort);
+            let display = self.display_event(event);
             let links = render_event(
-                event,
+                &display,
                 &time,
                 last,
                 super::render::row(area, y as u16, 1),

@@ -21,6 +21,78 @@ fn body_parts(event: &Event) -> Vec<super::super::tool_detail::Part> {
 }
 
 #[test]
+fn advisor_list_row_uses_catalog_model_and_hides_encrypted_result() {
+    use crate::providers::Provider;
+    let fixture = include_str!("../../tests/fixtures/claude-advisor.jsonl");
+    let transcript = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(transcript.path(), fixture).unwrap();
+    let mut parsed =
+        crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true).unwrap();
+    let event = parsed.remove(0);
+    let config = tempfile::tempdir().unwrap();
+    crate::providers::claude::write_fixture_cache(config.path());
+    let project = config.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut provider = crate::providers::claude::ClaudeProvider::new(config.path().into());
+    let mut session = provider.refresh(1).sessions.remove(0);
+    let mut following: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-tool-details.jsonl")
+            .lines()
+            .nth(6)
+            .unwrap(),
+    )
+    .unwrap();
+    let end = event.ended_at.unwrap();
+    let next = end + chrono::Duration::seconds(2);
+    following["timestamp"] = next.to_rfc3339().into();
+    std::fs::write(transcript.path(), format!("{fixture}{following}\n")).unwrap();
+    let parsed =
+        crate::providers::claude::event_reader::tail_session(transcript.path(), 20, true).unwrap();
+    session.last_record_at = Some(next);
+    let time = event_time(&event, &session, false, next, EventSort::Time);
+    assert_eq!(time, "4m 45s");
+    assert_eq!(
+        event_time(&parsed[1], &session, true, next, EventSort::Time),
+        "2s"
+    );
+    let mut view = View::new(Grouping::Project, false);
+    view.set_input_choices(HashMap::from([(
+        ProviderId::Claude,
+        provider.input_choices(),
+    )]));
+    let display = view.display_event(&event);
+    assert_eq!(display.body, "advisor · Fable 5.1");
+    assert_eq!(display.calls[0].title, "advisor · Fable 5.1");
+    assert_eq!(display.calls[0].event_detail_title, "advisor · Fable 5.1");
+    let area = Rect::new(0, 0, 100, 1);
+    let mut buffer = Buffer::empty(area);
+    render_event(
+        &display,
+        &time,
+        true,
+        area,
+        &mut buffer,
+        None,
+        Path::new("/workspace"),
+    );
+    let row = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(row.contains("advisor · Fable 5.1"), "{row}");
+    assert!(row.contains("4m 45s"), "{row}");
+    assert!(!view.event_detail_text(&event).contains("encrypted_content"));
+    assert!(display.calls[0].output.as_ref().is_none_or(Vec::is_empty));
+    assert_eq!(event.body, "advisor");
+}
+
+#[test]
 fn codex_agent_messages_show_routes_and_payload() {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
