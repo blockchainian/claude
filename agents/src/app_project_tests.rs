@@ -116,7 +116,6 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
     for status in [
         SessionStatus::Ready,
         SessionStatus::Working,
-        SessionStatus::NeedsInput,
         SessionStatus::Inactive,
     ] {
         // Keep provider-loaded sessions and exercise each tab's status filter.

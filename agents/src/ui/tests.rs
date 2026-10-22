@@ -1640,6 +1640,36 @@ fn needs_input_task_left_waiting_queues_behind_tasks_that_start_waiting_later() 
 }
 
 #[test]
+fn needs_input_tasks_lead_the_list_in_queue_order() {
+    for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+        let mut view = test_view(grouping, false);
+        let mut ready = session("ready", "Ready", SessionStatus::Ready, 0);
+        ready.cwd = "/tmp/another".into();
+        let newer = session("newer", "Newer", SessionStatus::NeedsInput, 60);
+        let older = session("older", "Older", SessionStatus::NeedsInput, 300);
+        let left = session("left", "Left", SessionStatus::NeedsInput, 600);
+        view.attention_skips
+            .insert(left.id.clone(), Utc::now() - Duration::seconds(30));
+        view.set_sessions(vec![ready, newer, older, left], false);
+
+        let order: Vec<_> = view
+            .visible_indices()
+            .into_iter()
+            .map(|index| view.rows[index].id.id.clone())
+            .collect();
+        assert_eq!(order, ["older", "newer", "left", "ready"], "{grouping:?}");
+        let screen = screen(&view, 100, 20);
+        let lines: Vec<_> = screen.lines().collect();
+        let heading = lines.iter().position(|line| {
+            line.contains("Needs input")
+                && !["Older", "Newer", "Left"].iter().any(|t| line.contains(t))
+        });
+        let first = lines.iter().position(|line| line.contains("Older"));
+        assert!(heading.is_some() && heading < first, "{screen}");
+    }
+}
+
+#[test]
 fn needs_input_queue_uses_question_time_before_session_update() {
     let payload: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/claude-ask-user-question/post.json"
@@ -2460,10 +2490,14 @@ fn task_details_include_attention_and_clip_messages() {
         assert!(rendered.contains(label), "{label}");
     }
     let position = |label: &str| {
-        rendered.lines().position(|line| {
-            line.split('│')
-                .any(|section| section.trim_start().starts_with(label))
-        })
+        rendered
+            .lines()
+            .collect::<Vec<_>>()
+            .iter()
+            .rposition(|line| {
+                line.split('│')
+                    .any(|section| section.trim_start().starts_with(label))
+            })
     };
     assert!(position("Update") < position("Prompt"));
     assert!(position("Prompt") < position("Needs input"));

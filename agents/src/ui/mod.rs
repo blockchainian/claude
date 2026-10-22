@@ -804,16 +804,7 @@ impl View {
                 })
             })
             .collect();
-        queue.sort_by_key(|&index| {
-            let row = &self.rows[index];
-            (
-                self.queue_position(
-                    row,
-                    row.ask.as_ref().map_or(row.updated_at, |ask| ask.since),
-                ),
-                row.id.clone(),
-            )
-        });
+        queue.sort_by_key(|&index| self.attention_order(&self.rows[index]));
         self.status_filter = tab;
         let starts_waiting = had_sessions
             && queue
@@ -1016,9 +1007,19 @@ impl View {
             .find(|&index| self.is_pinned(index))
             .or_else(|| self.group_index(index))
     }
+    /// Whether the row sits under a waiting top-level task, which leads the list in its own group.
+    fn in_waiting_group(&self, index: usize) -> bool {
+        !self.in_pinned_group(index)
+            && self
+                .group_index(index)
+                .is_some_and(|root| self.rows[root].status == SessionStatus::NeedsInput)
+    }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
         if self.in_pinned_group(left) || self.in_pinned_group(right) {
             return self.in_pinned_group(left) && self.in_pinned_group(right);
+        }
+        if self.in_waiting_group(left) || self.in_waiting_group(right) {
+            return self.in_waiting_group(left) && self.in_waiting_group(right);
         }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
@@ -1114,7 +1115,12 @@ impl View {
                 )
             }),
         }
-        pinned.extend(visible);
+        let (mut waiting, rest): (Vec<_>, Vec<_>) = visible
+            .into_iter()
+            .partition(|&index| self.rows[index].status == SessionStatus::NeedsInput);
+        waiting.sort_by_key(|&index| self.attention_order(&self.rows[index]));
+        pinned.extend(waiting);
+        pinned.extend(rest);
         let mut rows = Vec::new();
         let mut pending: Vec<_> = pinned.into_iter().rev().collect();
         while let Some(index) = pending.pop() {
@@ -1402,6 +1408,12 @@ impl View {
                 )
             })
             .unwrap_or(usize::MAX)
+    }
+
+    /// Orders waiting tasks the way the attention queue visits them.
+    fn attention_order<'a>(&self, row: &'a Session) -> ((bool, DateTime<Utc>), &'a SessionKey) {
+        let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
+        (self.queue_position(row, since), &row.id)
     }
 
     /// Orders a task the user left in the attention queue after every task it has not skipped, by

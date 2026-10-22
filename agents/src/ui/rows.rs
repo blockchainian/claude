@@ -49,6 +49,8 @@ impl View {
     pub(super) fn group_heading(&self, index: usize, width: u16) -> String {
         let group = if self.in_pinned_group(index) {
             "Pinned".to_owned()
+        } else if self.in_waiting_group(index) {
+            SessionStatus::NeedsInput.label().to_owned()
         } else {
             match self.grouping {
                 Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
@@ -72,7 +74,10 @@ impl View {
                     .unwrap_or_else(|| "Unknown".to_owned()),
             }
         };
-        if self.grouping == Grouping::Project && !self.in_pinned_group(index) {
+        if self.grouping == Grouping::Project
+            && !self.in_pinned_group(index)
+            && !self.in_waiting_group(index)
+        {
             super::line_truncation::abbreviate_path(&group, usize::from(width).min(64), None)
         } else {
             group

@@ -4,10 +4,10 @@
  ○ Current task             Ready       │              Current task              │
  ● Needs an answer          Needs input │                                        │
                                         │                                        │
-              /tmp/project              │                                        │
- ○ A longer task title th…  Ready       │                                        │
+              Needs input               │                                        │
  ● Failed task              Needs input │                                        │
- ● Working task             Working     │                                        │
+                                        │                                        │
+              /tmp/project              │                                        │
                                         │                                        │
 ────────────────────────────────────────┴╴project ──── Current task ─────────────┴──────────────────────────────────────────────────────────────────────────────
  Current task ❯
