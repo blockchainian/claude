@@ -545,15 +545,13 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS
+        let event_separator = (area.width >= WIDE_LAYOUT_COLUMNS
             && !layout.event_panel.is_empty()
-            && layout.event_panel.x > layout.top.x
-        {
+            && layout.event_panel.x > layout.top.x)
+            .then(|| layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1));
+        if let Some(x) = event_separator {
             for y in layout.event_panel.y..layout.event_panel.bottom() {
-                buf[(
-                    layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
-                    y,
-                )]
+                buf[(x, y)]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
@@ -646,12 +644,8 @@ impl View {
                 layout.prompt_bottom_rule.y
             };
             // The model and effort sit between the separator's joint, or the screen's left
-            // edge in the narrow layout, and the screen's right edge.
-            let left = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1)
-            } else {
-                area.x
-            };
+            // edge without a separator, and the screen's right edge.
+            let left = event_separator.unwrap_or(area.x);
             // The duration label sits on the border between the event list and its detail in both
             // layouts; the New button, shown only in time order, shares the model's border.
             let jump_y = if self.event_list.sort == EventSort::Duration {
@@ -716,12 +710,8 @@ impl View {
                 layout.gap.bottom(),
             ));
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
-            separators.push((
-                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
-                layout.event_panel.y,
-                layout.event_panel.bottom(),
-            ));
+        if let Some(x) = event_separator {
+            separators.push((x, layout.event_panel.y, layout.event_panel.bottom()));
         }
         join_separators(&separators, area, buf);
         self.render_controls(task_details, buf);

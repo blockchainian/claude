@@ -413,6 +413,54 @@ fn panel_zoom_narrow_detail_has_no_collapsed_frame() {
 }
 
 #[test]
+fn panel_zoom_event_list_has_no_left_separator_joints() {
+    for x in [0, 7] {
+        let (mut view, now) = event_fixture();
+        view.rows[0].model = Some("claude-opus-4-6".into());
+        view.rows[0].effort = Some("medium".into());
+        let area = Rect::new(x, 0, 200, 50);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        view.set_active_panel(Panel::TaskDetails);
+        assert_eq!(chord(&mut view, 'l'), None);
+        assert_eq!(view.active_panel, Panel::EventList);
+        view.render_at(area, &mut buf, now);
+        let original = buf.clone();
+        let layout = view.center_layout(area);
+        let joint_x = layout.event_panel.x - render::HORIZONTAL_PADDING - 1;
+        let rows = [layout.header.bottom() - 1, layout.prompt_top_rule.y];
+        for (y, symbol) in rows.into_iter().zip(["┬", "┴"]) {
+            assert_eq!(buf[(joint_x, y)].symbol(), symbol);
+        }
+
+        zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+        view.render_at(area, &mut buf, now);
+        for y in rows {
+            assert!(
+                !matches!(buf[(area.x, y)].symbol(), "┬" | "┴" | "│"),
+                "left separator residue at ({}, {y}): {}",
+                area.x,
+                buf[(area.x, y)].symbol()
+            );
+        }
+        let model = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .map(|(target, _)| *target)
+            .unwrap();
+        assert_eq!(model.x, area.x + 2);
+        assert_eq!(model.y, rows[1]);
+
+        zoom_key(&mut view, '=', KeyModifiers::NONE);
+        view.render_at(area, &mut buf, now);
+        assert_eq!(buf, original);
+    }
+}
+
+#[test]
 fn panel_zoom_collapsed_panels_leave_no_decorations() {
     for width in [92, 149, 150, 200] {
         for panel in [
