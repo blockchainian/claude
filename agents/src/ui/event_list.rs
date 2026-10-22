@@ -1930,18 +1930,8 @@ pub(super) fn copied_label(_event: &Event) -> String {
     "Copied message".into()
 }
 
-pub(super) fn kind_label(kind: &Kind) -> &'static str {
-    match kind {
-        Kind::User => "User",
-        Kind::Compaction => "Compaction",
-        Kind::Assistant => "Assistant",
-        Kind::Agent => "Agent",
-        Kind::Session => "Session",
-        Kind::Tool => "Tool",
-        Kind::Error => "Error",
-        Kind::Denied => "Denied",
-        Kind::QueuedUser | Kind::QueuedSystem => "Queue",
-    }
+pub(super) fn kind_label(kind: &Kind) -> String {
+    super::formatting::title_words(&format!("{kind:?}"))
 }
 
 use super::text::is_prose;

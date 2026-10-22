@@ -31,7 +31,7 @@ Denied
   let value: Reset NONE
   list plain: Rgb(160, 99, 93)
 QueuedSystem
-  Queue: Indexed(24) BOLD
+  Queued System: Indexed(24) BOLD
   plain: Reset NONE
   bold: Reset BOLD
   link: Reset NONE

@@ -4620,6 +4620,18 @@ fn task_details_markdown_snapshot() {
 }
 
 #[test]
+fn kind_labels_are_kind_names_as_capitalized_words() {
+    use crate::event::Kind;
+    for (kind, label) in [
+        (Kind::Assistant, "Assistant"),
+        (Kind::QueuedUser, "Queued User"),
+        (Kind::QueuedSystem, "Queued System"),
+    ] {
+        assert_eq!(super::event_list::kind_label(&kind), label);
+    }
+}
+
+#[test]
 fn compaction_summary_renders_compaction_tag_and_keeps_visible_body() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/claude-compaction.jsonl");

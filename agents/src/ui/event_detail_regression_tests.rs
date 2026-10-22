@@ -130,7 +130,7 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
             Path::new("/"),
             now,
         );
-        let title = text_cell(&buffer, kind_label(&event.kind));
+        let title = text_cell(&buffer, &kind_label(&event.kind));
         assert_eq!(
             title.fg,
             super::super::style::event_styles(&event.kind).0.fg.unwrap()
@@ -181,8 +181,9 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
             super::super::style::event_styles(&event.kind).1.fg.unwrap()
         );
         snapshot.push_str(&format!("{:?}\n", event.kind));
+        let label = kind_label(&event.kind);
         for text in [
-            kind_label(&event.kind),
+            label.as_str(),
             "plain",
             "bold",
             "link",
