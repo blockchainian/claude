@@ -83,6 +83,72 @@ fn position(buf: &Buffer, text: &str) -> (u16, u16) {
     panic!("text not drawn: {text}");
 }
 
+fn markdown_body() -> String {
+    include_str!("../../tests/fixtures/claude-notification-reply.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find_map(|record| {
+            record["message"]["content"][0]["text"]
+                .as_str()
+                .filter(|text| text.starts_with("**结论:**"))
+                .map(str::to_owned)
+        })
+        .unwrap()
+}
+
+#[test]
+fn drag_markdown_copies_visible_text_without_markers() {
+    let mut view = fixture();
+    view.rows[0].prompt = markdown_body();
+    let mut buf = Buffer::empty(Rect::new(0, 0, 160, 80));
+    view.render_task_details(Rect::new(2, 1, 150, 70), &mut buf, Utc::now());
+    let start = position(&buf, "结论:");
+    let end = position(&buf, "原");
+    assert_eq!(start.1, end.1);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1))),
+        "结论: 子代理的 Bash 行就是一个光秃秃的 Bash。"
+    );
+}
+
+#[test]
+fn drag_wrapped_markdown_copies_one_line_with_word_spaces() {
+    let mut view = fixture();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+    let mut event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.body == view.rows[0].prompt)
+        .unwrap();
+    event.body = markdown_body();
+    view.rows[0].transcript = Some(path);
+    view.event_session = Some(view.rows[0].id.clone());
+    view.select_fixture_event(Some(event));
+    let area = Rect::new(2, 1, 20, 70);
+    view.viewport.borrow_mut().event_detail = area;
+    let mut buf = Buffer::empty(Rect::new(0, 0, 40, 80));
+    view.render_event_detail(area, &mut buf, Utc::now());
+    let start = position(&buf, "结论:");
+    let end = position(&buf, "原");
+    assert!(end.1 > start.1);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1))),
+        "结论: 子代理的 Bash 行就是一个光秃秃的 Bash。"
+    );
+}
+
 #[test]
 fn drag_soft_wrapped_body_copies_source_without_wrap_newlines() {
     let mut view = fixture();
@@ -227,7 +293,7 @@ fn edge_drag_scrolls_and_copies_beyond_the_first_screen() {
     let Some(Action::Copy { text, .. }) = action else {
         panic!("missing copy: {action:?}");
     };
-    assert!(view.rows[0].prompt.starts_with(&text));
+    assert!(view.rows[0].prompt.replace('`', "").starts_with(&text));
     assert!(text.contains("界面上显示成"), "{text}");
     assert!(!view.tick_text_selection());
 }
@@ -290,7 +356,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
     )) else {
         panic!("missing copy");
     };
-    assert!(source.starts_with(&text));
+    assert!(source.replace('`', "").starts_with(&text));
     assert!(text.contains("界面上显示成"));
     assert!(
         !render(&view)
@@ -323,7 +389,7 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
     let message = view.rows[0].last_message.as_ref().unwrap();
     let expected = format!(
         "{}\n{}",
-        &message[message.find("⏺ Ran").unwrap()..],
+        message[message.find("⏺ Ran").unwrap()..].replace('`', ""),
         &view.rows[0].prompt[..view.rows[0].prompt.find("对，").unwrap()]
     );
     assert_eq!(

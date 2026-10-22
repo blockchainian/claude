@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -101,9 +102,20 @@ pub(super) struct Selection {
     pointer: (u16, u16),
     dragged: bool,
     sources: Vec<Source>,
+    /// Rendered byte boundaries by source, retained while scrolling.
+    cells: BTreeMap<usize, BTreeMap<usize, usize>>,
 }
 
 impl Selection {
+    fn remember_cells(&mut self, region: &TextRegion) {
+        for row in &region.rows {
+            let cells = self.cells.entry(row.segment).or_default();
+            for (_, bytes) in &row.cells {
+                cells.insert(bytes.start, bytes.end);
+            }
+        }
+    }
+
     fn bounds(&self) -> (Anchor, Anchor) {
         (self.start.min(self.end), self.start.max(self.end))
     }
@@ -140,12 +152,28 @@ impl Selection {
             .iter()
             .filter_map(|source| {
                 let range = self.range(source)?;
-                let text = &source.text[range];
-                Some(if self.panel.is_list() {
-                    text.trim_end_matches(' ')
-                } else {
-                    text
-                })
+                if self.panel.is_list() {
+                    return Some(source.text[range].trim_end_matches(' ').to_owned());
+                }
+                let mut text = String::new();
+                let mut end = range.start;
+                for (&from, &to) in self.cells.get(&source.id).into_iter().flatten() {
+                    let from = from.max(end);
+                    let to = to.min(range.end);
+                    if from >= to {
+                        continue;
+                    }
+                    let gap = &source.text[end..from];
+                    if gap.contains('\n') {
+                        text.extend(gap.chars().filter(|&ch| ch == '\n'));
+                    } else if !gap.is_empty() && gap.chars().any(char::is_whitespace) {
+                        text.push(' ');
+                    }
+                    text.push_str(&source.text[from..to]);
+                    end = to;
+                }
+                text.extend(source.text[end..range.end].chars().filter(|&ch| ch == '\n'));
+                Some(text)
             })
             .collect();
         let text = parts.join("\n");
@@ -198,14 +226,17 @@ impl View {
         .find_map(|panel| {
             let region = Self::text_region(&viewport, panel);
             let anchor = region.hit(x, y, true, panel.is_list())?;
-            Some(Selection {
+            let mut selection = Selection {
                 panel,
                 start: anchor,
                 end: anchor,
                 pointer: (x, y),
                 dragged: false,
                 sources: region.sources.clone(),
-            })
+                cells: BTreeMap::new(),
+            };
+            selection.remember_cells(region);
+            Some(selection)
         });
         *self.text_selection.borrow_mut() = selection;
     }
@@ -365,6 +396,7 @@ impl View {
         else {
             return;
         };
+        selection.remember_cells(region);
         if panel.is_list() || panel == Panel::TaskDetails {
             for source in &region.sources {
                 if let Some(cached) = selection
@@ -452,6 +484,10 @@ impl View {
         for source in &mut selection.sources {
             source.id += rows;
         }
+        selection.cells = std::mem::take(&mut selection.cells)
+            .into_iter()
+            .map(|(id, cells)| (id + rows, cells))
+            .collect();
     }
 
     pub(super) fn selecting_list(&self, panel: Panel) -> bool {
