@@ -1535,10 +1535,10 @@ impl View {
             {
                 match command {
                     '=' => self.clear_panel_zoom(),
-                    '_' if self.active_panel != Panel::Prompt => {
+                    '|' if self.active_panel != Panel::Prompt => {
                         self.height_zoom = Some(self.active_panel);
                     }
-                    '|' if self.active_panel != Panel::Prompt
+                    '_' if self.active_panel != Panel::Prompt
                         && !(super::render::ScreenLayout::for_width(
                             self.viewport.borrow().area.width,
                         ) == super::render::ScreenLayout::Small

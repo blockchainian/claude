@@ -410,7 +410,7 @@ fn panel_zoom_medium_detail_has_no_collapsed_frame() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 92, 110, now);
     view.set_active_panel(Panel::EventDetail);
-    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+    zoom_key(&mut view, '|', KeyModifiers::SHIFT);
     let screen = event_screen(&view, 92, 110, now);
     let rows: Vec<_> = screen.lines().collect();
     assert!(
@@ -450,7 +450,7 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
             assert_eq!(buf[(joint_x, y)].symbol(), symbol);
         }
 
-        zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+        zoom_key(&mut view, '_', KeyModifiers::SHIFT);
         view.render_at(area, &mut buf, now);
         for y in rows {
             assert!(
@@ -486,7 +486,7 @@ fn panel_zoom_collapsed_panels_keep_frame_labels() {
             Panel::EventList,
             Panel::EventDetail,
         ] {
-            for commands in ["", "_", "|", "_|", "|_"] {
+            for commands in ["", "|", "_", "|_", "_|"] {
                 let (mut view, now) = event_fixture();
                 view.set_activity(
                     (0..400)
@@ -558,7 +558,7 @@ fn panel_zoom_rects_and_reset_in_large_and_medium_layouts() {
                     Panel::EventDetail => l.event_detail,
                     Panel::Prompt => unreachable!(),
                 };
-                zoom_key(&mut view, '_', modifiers);
+                zoom_key(&mut view, '|', modifiers);
                 let tall = view.center_layout(area);
                 assert_eq!(rect(&tall).height, height, "{width} {panel:?}");
                 let y = if in_top {
@@ -597,7 +597,7 @@ fn panel_zoom_rects_and_reset_in_large_and_medium_layouts() {
                     );
                 }
                 assert_eq!((tall.header, tall.footer, tall.prompt.height), fixed);
-                zoom_key(&mut view, '|', modifiers);
+                zoom_key(&mut view, '_', modifiers);
                 let both = view.center_layout(area);
                 assert_eq!(rect(&both).height, height);
                 assert_eq!(
@@ -637,7 +637,7 @@ fn panel_zoom_rects_and_reset_in_large_and_medium_layouts() {
                 event_screen(&view, width, 45, now);
                 zoom_key(&mut view, '=', KeyModifiers::NONE);
                 assert_eq!(zoom_rects(view.center_layout(area)), zoom_rects(original));
-                zoom_key(&mut view, '|', modifiers);
+                zoom_key(&mut view, '_', modifiers);
                 let wide = view.center_layout(area);
                 assert_eq!(
                     rect(&wide).width,
@@ -664,8 +664,8 @@ fn panel_zoom_reveals_hidden_focus_and_ignores_prompt() {
             let area = Rect::new(0, 0, width, 45);
             event_screen(&view, width, 45, now);
             let baseline = zoom_rects(view.center_layout(area));
-            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
             zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
             event_screen(&view, width, 45, now);
             if direction == 'l' {
                 chord(&mut view, direction);
@@ -674,8 +674,8 @@ fn panel_zoom_reveals_hidden_focus_and_ignores_prompt() {
             }
             assert_eq!(zoom_rects(view.center_layout(area)), baseline);
             view.set_active_panel(Panel::Prompt);
-            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
             zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
             assert_eq!(zoom_rects(view.center_layout(area)), baseline);
         }
     }
@@ -694,7 +694,7 @@ fn panel_zoom_zero_sized_regions_render_without_panics() {
                 let (mut view, now) = event_fixture();
                 event_screen(&view, width, height, now);
                 view.set_active_panel(panel);
-                for c in ['_', '|', '='] {
+                for c in ['|', '_', '='] {
                     zoom_key(&mut view, c, KeyModifiers::SHIFT);
                     event_screen(&view, width, height, now);
                 }
@@ -712,7 +712,7 @@ fn panel_zoom_frame_rules_survive_collapsed_panels() {
             Panel::EventList,
             Panel::EventDetail,
         ] {
-            for commands in ["", "_", "|", "_|", "|_"] {
+            for commands in ["", "|", "_", "|_", "_|"] {
                 let (mut view, now) = event_fixture();
                 let area = Rect::new(0, 0, width, 50);
                 event_screen(&view, width, 50, now);
@@ -845,7 +845,7 @@ fn panel_zoom_prompt_up_returns_to_width_zoomed_top_panel() {
             if width == 120 && panel == Panel::EventList {
                 continue;
             }
-            for commands in ["_", "|", "_|", "|_"] {
+            for commands in ["|", "_", "|_", "_|"] {
                 let (mut view, now) = event_fixture();
                 event_screen(&view, width, 50, now);
                 view.set_active_panel(panel);
@@ -858,7 +858,7 @@ fn panel_zoom_prompt_up_returns_to_width_zoomed_top_panel() {
                 event_screen(&view, width, 50, now);
                 let zoom = (view.height_zoom, view.width_zoom);
                 chord(&mut view, 'k');
-                let expected = if commands.contains('|') {
+                let expected = if commands.contains('_') {
                     panel
                 } else {
                     Panel::TaskList
@@ -874,7 +874,7 @@ fn panel_zoom_prompt_up_returns_to_width_zoomed_top_panel() {
 fn hidden_focus_resize_recovers_and_does_not_return_on_growth() {
     for width in [200, 110] {
         for source in [Panel::EventList, Panel::EventDetail] {
-            for zoom in ["", "_", "|", "_|"] {
+            for zoom in ["", "|", "_", "|_"] {
                 for input in [true, false] {
                     let (mut view, now) = event_fixture();
                     if input {
@@ -909,8 +909,8 @@ fn hidden_focus_resize_recovers_and_does_not_return_on_growth() {
                     }
                     chord(&mut view, 'l');
                     assert_eq!(view.active_panel, Panel::TaskDetails);
-                    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
                     zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+                    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
                     let layout = view.center_layout(Rect::new(0, 0, width, 18));
                     assert!(!layout.task_details.is_empty());
                     assert!(layout.list.is_empty());
@@ -924,7 +924,7 @@ fn hidden_focus_resize_recovers_and_does_not_return_on_growth() {
 fn hidden_focus_navigation_recovers_without_resize_notification() {
     for width in [200, 110] {
         for source in [Panel::EventList, Panel::EventDetail] {
-            for zoom in ["", "_|"] {
+            for zoom in ["", "|_"] {
                 for input in [true, false] {
                     for direction in ['h', 'j', 'k', 'l'] {
                         let (mut view, now) = event_fixture();
@@ -974,12 +974,12 @@ fn small_task_panel_width_zoom_changes_nothing() {
                 event_screen(&view, 70, 60, now);
                 view.set_active_panel(panel);
                 if height_zoom {
-                    zoom_key(&mut view, '_', modifiers);
+                    zoom_key(&mut view, '|', modifiers);
                 }
                 let before = zoom_rects(view.center_layout(area));
                 let screen = event_screen(&view, 70, 60, now);
                 let zoom = (view.height_zoom, view.width_zoom);
-                zoom_key(&mut view, '|', modifiers);
+                zoom_key(&mut view, '_', modifiers);
                 assert_eq!(
                     zoom_rects(view.center_layout(area)),
                     before,
@@ -1004,7 +1004,7 @@ fn small_height_zoom_keeps_medium_content_shares() {
             let (mut view, now) = event_fixture();
             event_screen(&view, width, 60, now);
             view.set_active_panel(panel);
-            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '|', KeyModifiers::SHIFT);
             view.center_layout(Rect::new(0, 0, width, 60))
         };
         let small = layout(70);
@@ -1030,7 +1030,7 @@ fn small_prompt_up_after_resize_ignores_medium_width_zoom_destination() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 100, 60, now);
     view.set_active_panel(Panel::TaskDetails);
-    zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
     view.resize(70, 60);
     event_screen(&view, 70, 60, now);
     view.set_active_panel(Panel::Prompt);
