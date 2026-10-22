@@ -614,6 +614,10 @@ impl App {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::Paste(text) => return self.paste(&text),
+            Event::Resize(width, height) => {
+                self.view.resize(width, height);
+                return false;
+            }
             Event::ThemeChanged(theme) => {
                 self.apply_background(theme == Theme::Light);
                 return false;

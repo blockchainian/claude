@@ -168,6 +168,66 @@ impl View {
         self.width_zoom = None;
     }
 
+    pub(crate) fn resize(&mut self, width: u16, height: u16) {
+        let area = ratatui::layout::Rect::new(0, 0, width, height);
+        self.viewport.borrow_mut().area = area;
+        self.recover_visible_focus();
+    }
+
+    /// Rehomes a panel hidden by layout changes without restoring it on later growth.
+    fn recover_visible_focus(&mut self) {
+        let area = self.viewport.borrow().area;
+        let layout = self.center_layout(area);
+        let active = match self.active_panel {
+            Panel::TaskList => layout.list,
+            Panel::TaskDetails => layout.task_details,
+            Panel::EventList => layout.event_panel,
+            Panel::Prompt => layout.prompt,
+            Panel::EventDetail => layout.event_detail,
+        };
+        if !active.is_empty() {
+            return;
+        }
+        // A hidden zoom target must not hide the recovered focus when the window grows.
+        self.clear_panel_zoom();
+        let layout = self.center_layout(area);
+        let panels = [
+            (Panel::TaskList, layout.list),
+            (Panel::TaskDetails, layout.task_details),
+            (Panel::EventList, layout.event_panel),
+            (Panel::Prompt, layout.prompt),
+            (Panel::EventDetail, layout.event_detail),
+        ];
+        let visible = |panel| {
+            panels
+                .iter()
+                .any(|(candidate, area)| *candidate == panel && !area.is_empty())
+        };
+        // Both event panels border the input; disabled input falls back to the task list.
+        let nearest = if matches!(self.active_panel, Panel::EventList | Panel::EventDetail)
+            && self.task_focus_available(self.input_focus())
+        {
+            Panel::Prompt
+        } else {
+            Panel::TaskList
+        };
+        if let Some(panel) = [
+            nearest,
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+            Panel::Prompt,
+        ]
+        .into_iter()
+        .find(|panel| {
+            visible(*panel)
+                && (*panel != Panel::Prompt || self.task_focus_available(self.input_focus()))
+        }) {
+            self.set_active_panel(panel);
+        }
+    }
+
     pub(super) fn move_panel(&mut self, direction: char) {
         let v = self.viewport.borrow();
         let bottom = if self.shown_terminal().is_some() {
@@ -198,6 +258,8 @@ impl View {
             .iter()
             .find(|(panel, area)| *panel == source && !area.is_empty())
         else {
+            drop(v);
+            self.recover_visible_focus();
             return;
         };
         // Prefer the sole width-expanded top panel; otherwise keep the task list destination.
