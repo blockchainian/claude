@@ -2657,7 +2657,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn real_absorbed_handback_shows_sender_and_report() {
+    fn real_absorbed_handback_shows_sender_and_report_but_is_no_prompt() {
         let fixture = include_str!("../../../tests/fixtures/claude-peer-handback-absorbed.jsonl");
         let origin = &serde_json::from_str::<Value>(fixture.lines().last().unwrap()).unwrap()["attachment"]
             ["origin"];
@@ -2672,10 +2672,7 @@ pub(crate) mod tests {
         let summary =
             super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
                 .unwrap();
-        assert_eq!(
-            summary.prompt,
-            crate::event::participant_text(Some("general-purpose"), report)
-        );
+        assert_eq!(summary.prompt, "");
     }
 
     #[test]
