@@ -2,7 +2,8 @@ import { timed } from './timing.mjs';
 import { isLexicalIdentifier, identifierBinding } from './identifiers.mjs';
 import { fragmentFacts } from './fragments.mjs';
 // Rejects rewrites that change module contracts, scope resolution or source text.
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
 
@@ -191,7 +192,14 @@ function analyze(source, ast, options) {
   return { globals, constReassigned, earlyUse, structure, references, text, ...facts };
 }
 
-function prepareRewrite(before, after) {
+function parseFailure(error, options) {
+  const diagnostic = String(error.stderr ?? error.message);
+  if (!(error instanceof SyntaxError) && !diagnostic.includes('SyntaxError:')) throw error;
+  options?.onParseError?.(diagnostic.trim());
+  return 'PARSE_FAIL';
+}
+
+function prepareRewrite(before, after, options) {
   let original;
   let result;
   try {
@@ -203,33 +211,44 @@ function prepareRewrite(before, after) {
     // sibling declarations for its syntax check; scope checks use the real AST.
     const declarations = unboundExports.size ? `\nlet ${[...unboundExports].join(',')};` : '';
     return { original, result, input: after + declarations };
-  } catch {
+  } catch (error) {
+    parseFailure(error, options);
     return null;
   }
 }
 
 /** Returns null on success, otherwise a single-line rejection reason. */
 export function checkRewrite(before, after, options) {
-  const prepared = prepareRewrite(before, after);
+  const prepared = prepareRewrite(before, after, options);
   if (!prepared) return 'PARSE_FAIL';
   try {
     execFileSync(process.execPath, ['--input-type=module', '--check'], { input: prepared.input, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 });
-  } catch { return 'PARSE_FAIL'; }
+  } catch (error) { return parseFailure(error, options); }
   return checkBindings(before, after, options, prepared);
 }
 
 /** Run Node's syntax check without blocking other members' requests. */
 export async function checkRewriteAsync(before, after, options) {
-  const prepared = prepareRewrite(before, after);
+  const prepared = prepareRewrite(before, after, options);
   if (!prepared) return 'PARSE_FAIL';
   try {
     await new Promise((resolve, reject) => {
-      const child = execFile(process.execPath, ['--input-type=module', '--check'], { timeout: 10000 },
-        error => error ? reject(error) : resolve());
-      child.stdin.on('error', reject);
-      child.stdin.end(prepared.input);
+      // The worker owns stdin and the deadline, independent of caller CPU work.
+      const worker = new Worker(new URL('./check-worker.mjs', import.meta.url), {
+        workerData: prepared.input, execArgv: [],
+      });
+      let received = false;
+      worker.once('message', result => {
+        received = true;
+        if (result.error) reject(Object.assign(new Error(result.error.message), result.error));
+        else resolve();
+      });
+      worker.once('error', reject);
+      worker.once('exit', code => {
+        if (!received) reject(new Error(`Syntax check worker exited without a result: ${code}`));
+      });
     });
-  } catch { return 'PARSE_FAIL'; }
+  } catch (error) { return parseFailure(error, options); }
   return checkBindings(before, after, options, prepared);
 }
 

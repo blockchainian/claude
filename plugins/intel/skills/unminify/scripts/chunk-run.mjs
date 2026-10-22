@@ -170,7 +170,8 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
         summary.skipped += count;
         if (journal.done.status === 'rejected') summary.rejected += count;
         else completed.set(chunk.id, { chunk, journal, inputs, sources: inputs, pending: false, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
-        emit({ chunk: chunk.id, status: 'skipped', previous: journal.done.status, reason: journal.done.reason });
+        emit({ chunk: chunk.id, status: 'skipped', previous: journal.done.status, reason: journal.done.reason,
+          ...(journal.done.file ? { file: journal.done.file, parseError: journal.done.parseError } : {}) });
         return;
       }
       const chunkOptions = { ...settings, selected: selection, ignored };
@@ -257,7 +258,7 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
                 this.replies.set(id, Object.fromEntries(names));
               },
             };
-            const result = results[index] = { writes };
+            const result = results[index] = { writes, file };
             let stages;
             try {
               ({ stages } = api.planFile(source, { ...settings, fragment: true }));
@@ -276,7 +277,9 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
                 resolve: (values, onCollision) => api.resolveNames(source, values, { fragment: true, onCollision }) });
               result.source = api.applyRenames(source, resolved);
               const recordTimings = captureTimings(), started = performance.now();
-              try { result.reason = await checkLocalRewrite(source, result.source, { fragment: true }); }
+              try { result.reason = await checkLocalRewrite(source, result.source, {
+                fragment: true, onParseError: message => { result.parseError = message; },
+              }); }
               finally { recordTimings({ checkRewrite: performance.now() - started }); }
               if (result.reason) stopped = true;
             } catch (error) {
@@ -293,9 +296,10 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
         if (failure) throw failure.error;
         const rejected = results.find(result => result?.reason);
         if (rejected) {
-          journal.complete(inputs, 'rejected', rejected.reason);
+          const details = { file: rejected.file, ...(rejected.parseError ? { parseError: rejected.parseError } : {}) };
+          journal.complete(inputs, 'rejected', rejected.reason, details);
           summary.rejected += count;
-          emit({ chunk: chunk.id, status: 'rejected', reason: rejected.reason });
+          emit({ chunk: chunk.id, status: 'rejected', reason: rejected.reason, ...details });
           return;
         }
         if (batchFailed) return;

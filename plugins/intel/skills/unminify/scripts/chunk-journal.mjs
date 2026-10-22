@@ -192,13 +192,13 @@ export function openChunkJournal(root, id, sources, options = {}, journalDirecto
       appendRecord(path, intent);
       state.intent = intent;
     },
-    complete(completed, status, reason) {
+    complete(completed, status, reason, details = {}) {
       const entries = sourceEntries(root, completed), completedHashes = fingerprints(entries);
       const target = state.intent?.after ?? fingerprints(current);
       sameMembership(target, completedHashes, id);
       verifyHashes(completedHashes, target, id);
       verifyHashes(diskHashes(root, target, id), target, id);
-      const done = { type: 'chunk-done', hashes: completedHashes, status, ...(reason ? { reason } : {}) };
+      const done = { type: 'chunk-done', hashes: completedHashes, status, ...(reason ? { reason } : {}), ...details };
       appendRecord(path, done);
       state.done = done;
       state.intent = null;
