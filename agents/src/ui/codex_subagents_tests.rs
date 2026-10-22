@@ -38,7 +38,8 @@ fn nested_tree_filters_status_and_follows_root_search_group_and_pin() {
         let deep = view.rows.iter().position(|s| s.id.id == "deep").unwrap();
         assert_eq!(view.rows[view.group_index(deep).unwrap()].id.id, "root");
         view.set_pinned(&[session_key("root")]);
-        assert!(view.is_pinned(deep));
+        assert!(!view.is_pinned(deep));
+        assert!(view.in_pinned_group(deep));
     }
     view.search.set_text("Root task");
     assert_eq!(ids(&view), ["root", "child", "grandchild", "deep"]);
@@ -378,4 +379,110 @@ fn inactive_merged_tree_keeps_cross_provider_ancestors_and_flat_sessions() {
         ),
         view.rows.iter().position(|row| row.id.id == "flat-history")
     );
+}
+
+#[test]
+fn child_pin_toggles_only_selected_task_and_checks_its_status() {
+    let mut view = tree();
+    let root = view.rows.iter().position(|s| s.id.id == "root").unwrap();
+    let child = view
+        .rows
+        .iter()
+        .position(|s| s.id.id == "grandchild")
+        .unwrap();
+    view.rows[root].status = SessionStatus::Inactive;
+    view.set_selected(child);
+    view.set_active_panel(Panel::TaskList);
+    for (pins, pinned) in [
+        (vec![], true),
+        (vec![session_key("root")], true),
+        (vec![session_key("root"), session_key("grandchild")], false),
+    ] {
+        view.set_pinned(&pins);
+        view.set_selected(child);
+        view.set_active_panel(Panel::TaskList);
+        assert_eq!(view.selected_id(), Some(&session_key("grandchild")));
+        assert_eq!(view.rows[view.selected].status, SessionStatus::Working);
+        assert_eq!(
+            key(&mut view, KeyCode::Char('p')),
+            Some(Action::TogglePin {
+                id: session_key("grandchild"),
+                pinned,
+            })
+        );
+    }
+    view.rows[root].status = SessionStatus::Ready;
+    view.rows[child].status = SessionStatus::Inactive;
+    view.set_selected(child);
+    view.set_active_panel(Panel::TaskList);
+    assert_eq!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::Unsupported("Pin"))
+    );
+}
+
+#[test]
+fn child_pin_subtrees_keep_pin_order_and_grouping() {
+    let mut view = tree();
+    view.rows
+        .iter_mut()
+        .find(|s| s.id.id == "child")
+        .unwrap()
+        .status = SessionStatus::Ready;
+    for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+        view.grouping = grouping;
+        for (pins, expected) in [
+            (
+                vec!["grandchild"],
+                vec!["grandchild", "deep", "root", "child"],
+            ),
+            (
+                vec!["grandchild", "root"],
+                vec!["grandchild", "deep", "root", "child"],
+            ),
+            (
+                vec!["root", "grandchild"],
+                vec!["root", "child", "grandchild", "deep"],
+            ),
+            (vec!["deep"], vec!["deep", "root", "child", "grandchild"]),
+        ] {
+            view.set_pinned(&pins.iter().map(|id| session_key(id)).collect::<Vec<_>>());
+            assert_eq!(ids(&view), expected);
+            let indices = view.visible_indices();
+            let entries = view.center_rows(&indices, grouping);
+            assert!(
+                !entries
+                    .iter()
+                    .any(|row| matches!(row, super::super::navigation::CenterRow::Parent(_)))
+            );
+            let headings: Vec<_> = entries
+                .iter()
+                .filter_map(|row| {
+                    if let super::super::navigation::CenterRow::Group(index) = row {
+                        Some(view.group_heading(*index, 80))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(headings[0], "Pinned");
+            assert_eq!(headings.len(), if pins.contains(&"root") { 1 } else { 2 });
+        }
+    }
+}
+
+#[test]
+fn child_pin_stays_visible_under_inactive_parent_in_active_tab() {
+    let mut view = tree();
+    view.rows
+        .iter_mut()
+        .find(|s| s.id.id == "root")
+        .unwrap()
+        .status = SessionStatus::Inactive;
+    view.set_pinned(&[session_key("grandchild")]);
+    assert_eq!(ids(&view), ["grandchild", "deep"]);
+    let rendered = screen(&view, 160, 35);
+    assert!(rendered.contains("Pinned"));
+    assert!(rendered.contains("Provider adapters"));
+    assert!(!rendered.contains("Root task"));
 }

@@ -600,3 +600,50 @@ fn duplicate_inputs_keep_the_screen_and_do_not_start_another_job() {
     complete_input(&mut app, "Claude background session identity changed");
     assert!(app.receiver.try_recv().is_err());
 }
+
+#[test]
+fn child_pin_persists_independently_and_survives_inactive_parent() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut parent = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let mut child = parent.clone();
+    child.id.id = "child".into();
+    child.parent = Some(parent.id.clone());
+    app.view
+        .set_sessions(vec![parent.clone(), child.clone()], false);
+    app.handle_action(Some(Action::TogglePin {
+        id: parent.id.clone(),
+        pinned: true,
+    }));
+    app.handle_action(Some(Action::TogglePin {
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned,
+        vec![child.id.clone(), parent.id.clone()]
+    );
+    app.handle_action(Some(Action::TogglePin {
+        id: child.id.clone(),
+        pinned: false,
+    }));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned,
+        vec![parent.id.clone()]
+    );
+    app.handle_action(Some(Action::TogglePin {
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    parent.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[parent.clone(), child.clone()]);
+    assert_eq!(
+        Preferences::load(directory.path()).pinned,
+        vec![child.id.clone()]
+    );
+    child.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[parent, child]);
+    assert!(Preferences::load(directory.path()).pinned.is_empty());
+}

@@ -988,16 +988,27 @@ impl View {
         self.rows[root].parent.is_none().then_some(root)
     }
     fn is_pinned(&self, index: usize) -> bool {
-        self.group_index(index)
-            .is_some_and(|parent| self.pinned.contains(&self.rows[parent].id))
+        self.pinned.contains(&self.rows[index].id)
+    }
+    fn in_pinned_group(&self, index: usize) -> bool {
+        self.is_pinned(index)
+            || self
+                .ancestors(index)
+                .any(|ancestor| self.is_pinned(ancestor))
+    }
+    fn tree_index(&self, index: usize) -> Option<usize> {
+        std::iter::once(index)
+            .chain(self.ancestors(index))
+            .find(|&index| self.is_pinned(index))
+            .or_else(|| self.group_index(index))
     }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
+        if self.in_pinned_group(left) || self.in_pinned_group(right) {
+            return self.in_pinned_group(left) && self.in_pinned_group(right);
+        }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
         };
-        if self.is_pinned(left) || self.is_pinned(right) {
-            return self.is_pinned(left) && self.is_pinned(right);
-        }
         match grouping {
             Grouping::Project => {
                 self.project_groups[left].key() == self.project_groups[right].key()
@@ -1035,6 +1046,10 @@ impl View {
                 if self.hidden.contains(&session.id) || !matching.insert(&session.id) {
                     break;
                 }
+                // Pinned subtrees stand on their own, without adding ancestor headers.
+                if self.pinned.contains(&session.id) {
+                    break;
+                }
                 current = session
                     .parent
                     .as_ref()
@@ -1056,8 +1071,8 @@ impl View {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, session)| {
-                session.parent.is_none()
+            .filter(|(index, session)| {
+                (session.parent.is_none() || self.is_pinned(*index))
                     && !self.hidden.contains(&session.id)
                     && matching.contains(&session.id)
                     && self.matches_search(session)
@@ -1096,7 +1111,13 @@ impl View {
                 continue;
             }
             if let Some(siblings) = children.get(&self.rows[index].id) {
-                pending.extend(siblings.iter().rev().copied());
+                pending.extend(
+                    siblings
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|&child| !self.is_pinned(child)),
+                );
             }
         }
         rows

@@ -1614,7 +1614,7 @@ impl View {
             && plain
             && matches!(
                 key.code,
-                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h' | 'p')
+                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h')
             )
         {
             return self
@@ -1628,7 +1628,6 @@ impl View {
                         KeyCode::Char('a') => "Archive",
                         KeyCode::Backspace => "Delete",
                         KeyCode::Char('h') => "Hide",
-                        KeyCode::Char('p') => "Pin",
                         _ => unreachable!("subagent session key is gated above"),
                     })
                 });
@@ -1947,12 +1946,10 @@ impl View {
                 return Some(Action::Hide(id));
             }
             KeyCode::Char('p') => {
-                self.selected_id()?;
-                let group = self.group_index(self.selected)?;
-                if self.rows[group].status == SessionStatus::Inactive {
+                let id = self.selected_id()?.clone();
+                if self.rows[self.selected].status == SessionStatus::Inactive {
                     return Some(Action::Unsupported("Pin"));
                 }
-                let id = self.rows[group].id.clone();
                 let pinned = !self.is_pinned(self.selected);
                 return Some(Action::TogglePin { id, pinned });
             }

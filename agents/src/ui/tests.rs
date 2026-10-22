@@ -7456,7 +7456,17 @@ mod subagent_actions {
     unsupported_key!(delete, KeyCode::Backspace, KeyModifiers::NONE, "Delete");
     unsupported_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE, "Archive");
     unsupported_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE, "Hide");
-    unsupported_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE, "Pin");
+    #[test]
+    fn pin() {
+        let mut view = fixture();
+        assert_eq!(
+            key(&mut view, KeyCode::Char('p')),
+            Some(Action::TogglePin {
+                id: session_key("agent-older"),
+                pinned: true,
+            })
+        );
+    }
 
     #[test]
     fn open_keys_leave_disabled_subagent_on_list() {

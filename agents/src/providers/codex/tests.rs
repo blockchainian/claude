@@ -362,7 +362,6 @@ fn capabilities_gate_codex_actions_in_the_view() {
         assert!(!view.pasting_prompt());
     }
     for (code, label) in [
-        (KeyCode::Char('p'), "Pin"),
         (KeyCode::Char('f'), "Fork"),
         (KeyCode::Char('r'), "Rename"),
         (KeyCode::Backspace, "Delete"),
@@ -913,7 +912,13 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     for (code, expected) in [
         (KeyCode::Char('f'), Action::Fork(key("thread-12".into()))),
         (KeyCode::Char('x'), Action::Stop(key("thread-12".into()))),
-        (KeyCode::Char('p'), Action::Unsupported("Pin")),
+        (
+            KeyCode::Char('p'),
+            Action::TogglePin {
+                id: key("thread-12".into()),
+                pinned: true,
+            },
+        ),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
