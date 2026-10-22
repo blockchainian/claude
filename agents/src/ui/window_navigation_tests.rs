@@ -365,3 +365,205 @@ fn task_search_editors_survive_task_list_switches() {
         assert_eq!(search.query.text(), "a");
     }
 }
+
+fn zoom_rects(layout: render::CenterLayout) -> [Rect; 11] {
+    [
+        layout.header,
+        layout.top,
+        layout.list,
+        layout.gap,
+        layout.task_details,
+        layout.search,
+        layout.usage_chart,
+        layout.footer,
+        layout.event_panel,
+        layout.prompt,
+        layout.event_detail,
+    ]
+}
+
+fn zoom_key(view: &mut View, key: char, modifiers: KeyModifiers) {
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char(key), modifiers)),
+        None
+    );
+}
+
+#[test]
+fn panel_zoom_rects_and_reset_in_both_layouts() {
+    for width in [120, 200] {
+        for panel in [
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            for modifiers in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+                let (mut view, now) = event_fixture();
+                let area = Rect::new(0, 0, width, 45);
+                event_screen(&view, width, 45, now);
+                view.set_active_panel(panel);
+                let original = view.center_layout(area);
+                let fixed = (original.header, original.footer, original.prompt.height);
+                let height = original.top.height
+                    + original.event_detail.height
+                    + if width < 150 {
+                        original.event_panel.height
+                    } else {
+                        0
+                    };
+                let in_top =
+                    panel != Panel::EventDetail && (width >= 150 || panel != Panel::EventList);
+                let rect = |l: &render::CenterLayout| match panel {
+                    Panel::TaskList => l.list,
+                    Panel::TaskDetails => l.task_details,
+                    Panel::EventList => l.event_panel,
+                    Panel::EventDetail => l.event_detail,
+                    Panel::Prompt => unreachable!(),
+                };
+                zoom_key(&mut view, '_', modifiers);
+                let tall = view.center_layout(area);
+                assert_eq!(rect(&tall).height, height, "{width} {panel:?}");
+                let y = if in_top {
+                    original.header.bottom()
+                } else {
+                    original.header.bottom() + original.prompt.height + 1 + u16::from(width < 150)
+                };
+                assert_eq!(
+                    rect(&tall),
+                    Rect::new(rect(&original).x, y, rect(&original).width, height)
+                );
+                assert_eq!(
+                    tall.prompt,
+                    Rect::new(
+                        0,
+                        original.header.bottom() + if in_top { height + 1 } else { 1 },
+                        width,
+                        original.prompt.height
+                    )
+                );
+                assert_eq!(tall.top.height, if in_top { height } else { 0 });
+                assert_eq!(
+                    tall.event_detail.height,
+                    if panel == Panel::EventDetail {
+                        height
+                    } else {
+                        0
+                    }
+                );
+                if width < 150 {
+                    assert_eq!(
+                        tall.event_panel.height,
+                        if panel == Panel::EventList { height } else { 0 }
+                    );
+                }
+                assert_eq!((tall.header, tall.footer, tall.prompt.height), fixed);
+                zoom_key(&mut view, '|', modifiers);
+                let both = view.center_layout(area);
+                assert_eq!(rect(&both).height, height);
+                assert_eq!(
+                    rect(&both),
+                    Rect::new(
+                        if panel == Panel::EventDetail { 0 } else { 1 },
+                        y,
+                        if panel == Panel::EventDetail {
+                            width
+                        } else {
+                            width - 2
+                        },
+                        height
+                    )
+                );
+                assert_eq!(
+                    rect(&both).width,
+                    if panel == Panel::EventDetail {
+                        width
+                    } else {
+                        width - 2
+                    }
+                );
+                if in_top {
+                    assert!(both.gap.is_empty());
+                    for (other, r) in [
+                        (Panel::TaskList, both.list),
+                        (Panel::TaskDetails, both.task_details),
+                        (Panel::EventList, both.event_panel),
+                    ] {
+                        if other != panel {
+                            assert!(r.is_empty());
+                        }
+                    }
+                }
+                assert_eq!(both.usage_chart, both.list);
+                event_screen(&view, width, 45, now);
+                zoom_key(&mut view, '=', KeyModifiers::NONE);
+                assert_eq!(zoom_rects(view.center_layout(area)), zoom_rects(original));
+                zoom_key(&mut view, '|', modifiers);
+                let wide = view.center_layout(area);
+                assert_eq!(
+                    rect(&wide).width,
+                    if panel == Panel::EventDetail {
+                        width
+                    } else {
+                        width - 2
+                    }
+                );
+                assert_eq!(rect(&wide).height, rect(&original).height);
+                assert_eq!(wide.prompt, original.prompt);
+                zoom_key(&mut view, '=', KeyModifiers::NONE);
+                assert_eq!(zoom_rects(view.center_layout(area)), zoom_rects(original));
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_zoom_reveals_hidden_focus_and_ignores_prompt() {
+    for width in [120, 200] {
+        for direction in ['j', 'l'] {
+            let (mut view, now) = event_fixture();
+            let area = Rect::new(0, 0, width, 45);
+            event_screen(&view, width, 45, now);
+            let baseline = zoom_rects(view.center_layout(area));
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+            event_screen(&view, width, 45, now);
+            if direction == 'l' {
+                chord(&mut view, direction);
+            } else {
+                view.set_active_panel(Panel::EventDetail);
+            }
+            assert_eq!(zoom_rects(view.center_layout(area)), baseline);
+            view.set_active_panel(Panel::Prompt);
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+            assert_eq!(zoom_rects(view.center_layout(area)), baseline);
+        }
+    }
+}
+
+#[test]
+fn panel_zoom_zero_sized_regions_render_without_panics() {
+    for width in [1, 8, 120, 200] {
+        for height in [0, 1, 5, 18, 45] {
+            for panel in [
+                Panel::TaskList,
+                Panel::TaskDetails,
+                Panel::EventList,
+                Panel::EventDetail,
+            ] {
+                let (mut view, now) = event_fixture();
+                event_screen(&view, width, height, now);
+                view.set_active_panel(panel);
+                for c in ['_', '|', '='] {
+                    zoom_key(&mut view, c, KeyModifiers::SHIFT);
+                    event_screen(&view, width, height, now);
+                }
+            }
+        }
+    }
+}

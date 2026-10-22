@@ -376,6 +376,31 @@ mod tests {
     }
 
     #[test]
+    fn panel_zoom_preserves_question_height() {
+        for width in [120, 200] {
+            let mut view = fixture();
+            let area = Rect::new(0, 0, width, 45);
+            assert!(view.active_question().is_some());
+            screen(&view, width, 45);
+            let before = view.center_layout(area).prompt.height;
+            for panel in [
+                Panel::TaskList,
+                Panel::TaskDetails,
+                Panel::EventList,
+                Panel::EventDetail,
+            ] {
+                view.set_active_panel(panel);
+                for c in ['_', '|', '='] {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    view.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT));
+                    assert_eq!(view.center_layout(area).prompt.height, before);
+                    screen(&view, width, 45);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn half_answer_changes_queue_persistence_and_restore_after_restart() {
         let mut view = multi_fixture();
         view.handle_key(KeyCode::Char('2').into());

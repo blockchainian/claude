@@ -99,6 +99,20 @@ impl View {
             self.pending_actions.push(action);
         }
         // Cleanup may activate another panel; the requested destination takes precedence.
+        if self.height_zoom.is_some() || self.width_zoom.is_some() {
+            let area = self.viewport.borrow().area;
+            let layout = self.center_layout(area);
+            let visible = match panel {
+                Panel::TaskList => layout.list,
+                Panel::TaskDetails => layout.task_details,
+                Panel::EventList => layout.event_panel,
+                Panel::EventDetail => layout.event_detail,
+                Panel::Prompt => layout.prompt,
+            };
+            if visible.is_empty() {
+                self.clear_panel_zoom();
+            }
+        }
         self.active_panel = panel;
         if panel != Panel::TaskList {
             self.task_entry_pending = false;
@@ -149,6 +163,11 @@ impl View {
         self.take_pending_action()
     }
 
+    pub(super) fn clear_panel_zoom(&mut self) {
+        self.height_zoom = None;
+        self.width_zoom = None;
+    }
+
     pub(super) fn move_panel(&mut self, direction: char) {
         let v = self.viewport.borrow();
         let bottom = if self.shown_terminal().is_some() {
@@ -156,13 +175,24 @@ impl View {
         } else {
             (Panel::EventDetail, v.event_detail)
         };
-        let panels = [
+        let mut panels = [
             (Panel::TaskList, v.list),
             (Panel::TaskDetails, v.task_details),
             (Panel::EventList, v.event_panel),
             (Panel::Prompt, v.prompt),
             bottom,
         ];
+        if (self.height_zoom.is_some() || self.width_zoom.is_some())
+            && let Some(layout) = v.navigation_layout
+        {
+            panels = [
+                (Panel::TaskList, layout.list),
+                (Panel::TaskDetails, layout.task_details),
+                (Panel::EventList, layout.event_panel),
+                (Panel::Prompt, layout.prompt),
+                (Panel::EventDetail, layout.event_detail),
+            ];
+        }
         let source = self.active_panel;
         let Some((_, from)) = panels
             .iter()
@@ -171,7 +201,7 @@ impl View {
             return;
         };
         // The full-width prompt sits under several panels; moving up always lands on the task list.
-        if source == Panel::Prompt && direction == 'k' && !v.list.is_empty() {
+        if source == Panel::Prompt && direction == 'k' && !panels[0].1.is_empty() {
             drop(v);
             self.set_active_panel(Panel::TaskList);
             return;

@@ -143,6 +143,8 @@ struct Overlay {
 
 #[derive(Default)]
 struct Viewport {
+    area: Rect,
+    navigation_layout: Option<render::CenterLayout>,
     scroll: usize,
     task_selection: Option<SessionKey>,
     page_height: usize,
@@ -259,6 +261,8 @@ pub struct View {
     /// Actions created by panel changes outside keyboard and mouse handlers.
     pending_actions: Vec<Action>,
     window_prefix: Option<KeyEvent>,
+    height_zoom: Option<Panel>,
+    width_zoom: Option<Panel>,
     /// The session whose program runs in the event detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
     pub(crate) startup_cwd: PathBuf,
@@ -398,6 +402,8 @@ impl View {
             task_entry_pending: false,
             pending_actions: Vec::new(),
             window_prefix: None,
+            height_zoom: None,
+            width_zoom: None,
             terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             event_panel: Vec::new(),

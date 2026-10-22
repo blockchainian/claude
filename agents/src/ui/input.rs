@@ -1475,6 +1475,21 @@ impl View {
                 self.move_panel(direction);
                 return None;
             }
+            if (key.modifiers - KeyModifiers::SHIFT).is_empty()
+                && let KeyCode::Char(command @ ('_' | '|' | '=')) = key.code
+            {
+                match command {
+                    '=' => self.clear_panel_zoom(),
+                    '_' if self.active_panel != Panel::Prompt => {
+                        self.height_zoom = Some(self.active_panel);
+                    }
+                    '|' if self.active_panel != Panel::Prompt => {
+                        self.width_zoom = Some(self.active_panel);
+                    }
+                    _ => {}
+                }
+                return None;
+            }
             let first = self.handle_panel_key(prefix);
             let second = self.handle_panel_key(key);
             return match (first, second) {

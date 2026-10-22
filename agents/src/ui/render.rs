@@ -62,6 +62,7 @@ pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
 
 pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
 
+#[derive(Clone, Copy)]
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
     /// The panels above the prompt, where global dialogs center.
@@ -83,6 +84,10 @@ impl View {
     }
 
     pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
+        self.panel_layout(area, true)
+    }
+
+    pub(super) fn panel_layout(&self, area: Rect, zoom: bool) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
         let header_height = if area.height >= 6 { 2 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
@@ -121,7 +126,7 @@ impl View {
         let content_height = area
             .height
             .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
-        let (top_height, list_height, event_detail_height) = if !show_event {
+        let (mut top_height, mut list_height, mut event_detail_height) = if !show_event {
             (
                 area.height
                     .saturating_sub(header_height + footer_height + prompt_height),
@@ -139,6 +144,21 @@ impl View {
                 content_height / 3,
             )
         };
+        if zoom && let Some(panel) = self.height_zoom {
+            let height = top_height + list_height + event_detail_height;
+            match panel {
+                Panel::EventDetail if show_event => {
+                    (top_height, list_height, event_detail_height) = (0, 0, height);
+                }
+                Panel::EventList if show_event && !wide => {
+                    (top_height, list_height, event_detail_height) = (0, height, 0);
+                }
+                Panel::TaskList | Panel::TaskDetails | Panel::EventList => {
+                    (top_height, list_height, event_detail_height) = (height, 0, 0);
+                }
+                _ => {}
+            }
+        }
         let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
         let top = body;
         let prompt = row(
@@ -146,7 +166,7 @@ impl View {
             header_height + top_height + u16::from(show_event),
             prompt_height,
         );
-        let event_panel = if show_event && !wide {
+        let mut event_panel = if show_event && !wide {
             row(area, prompt.bottom() - area.y + 1, list_height)
                 .inner(Margin::new(HORIZONTAL_PADDING, 0))
         } else {
@@ -161,7 +181,7 @@ impl View {
         } else {
             Rect::default()
         };
-        let (body, event_list) = if wide && show_event {
+        let (body, mut event_list) = if wide && show_event {
             let column_width = (body.width - 2 * PANEL_GAP) / 4;
             let event_width = body.width - 2 * PANEL_GAP - 2 * column_width;
             (
@@ -174,7 +194,7 @@ impl View {
         } else {
             (body, Rect::default())
         };
-        let [list, gap, task_details] = if body.width >= 2 * PANEL_GAP + 1 {
+        let [mut list, mut gap, mut task_details] = if body.width >= 2 * PANEL_GAP + 1 {
             let content = Rect {
                 width: body.width - PANEL_GAP,
                 ..body
@@ -188,6 +208,35 @@ impl View {
         } else {
             [body, Rect::default(), Rect::default()]
         };
+        if zoom && let Some(panel) = self.width_zoom {
+            match panel {
+                Panel::TaskList | Panel::TaskDetails => {
+                    list = if panel == Panel::TaskList {
+                        top
+                    } else {
+                        Rect::default()
+                    };
+                    task_details = if panel == Panel::TaskDetails {
+                        top
+                    } else {
+                        Rect::default()
+                    };
+                    gap = Rect::default();
+                    event_list = Rect::default();
+                }
+                Panel::EventList if wide && show_event => {
+                    event_list = top;
+                    list = Rect::default();
+                    gap = Rect::default();
+                    task_details = Rect::default();
+                }
+                _ => {}
+            }
+        }
+        // Empty rows retain no usable hit targets.
+        if event_panel.is_empty() {
+            event_panel = Rect::default();
+        }
         // Keep the chart's original canvas and scale when the input row takes list space.
         let usage_chart = list;
         let (list, search) = if self.searching {
@@ -360,9 +409,12 @@ impl View {
         now: chrono::DateTime<chrono::Utc>,
     ) {
         Clear.render(area, buf);
+        let navigation_layout = self.panel_layout(area, false);
         {
             // A panel this frame leaves out keeps no links from the last one.
             let mut viewport = self.viewport.borrow_mut();
+            viewport.area = area;
+            viewport.navigation_layout = Some(navigation_layout);
             viewport.overlays.clear();
             viewport.picker_rows.clear();
             viewport.confirm_options.clear();
@@ -460,7 +512,10 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+        if area.width >= WIDE_LAYOUT_COLUMNS
+            && !layout.event_panel.is_empty()
+            && layout.event_panel.x > layout.top.x
+        {
             for y in layout.event_panel.y..layout.event_panel.bottom() {
                 buf[(
                     layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),

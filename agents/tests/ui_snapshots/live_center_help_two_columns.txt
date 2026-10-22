@@ -6,6 +6,9 @@
  ↑           Up
  ↓           Down
  ⌃w h/j/k/l  Focus left/down/up/right
+ ⌃w _        Max height
+ ⌃w |        Max width
+ ⌃w =        Reset size
  enter       Open
  →           Open
  pgup        Page up
@@ -17,8 +20,5 @@
  n          New
  o          Open
  f          Fork
- r          Rename
- x          Stop
- a          Archive
  … resize to see all
  esc back
