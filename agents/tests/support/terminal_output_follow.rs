@@ -1,8 +1,7 @@
 use super::*;
 use std::io::Write;
 
-fn append_rows(path: &Path, first: usize, last: usize) {
-    let mut output = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+fn append_rows(output: &mut std::fs::File, first: usize, last: usize) {
     for row in first..=last {
         writeln!(output, "live output row {row:03}").unwrap();
     }
@@ -87,6 +86,10 @@ fn terminal_output_files_follow_appends_and_preserve_reading_position() {
             },
         );
         let output = output_path.unwrap();
+        let mut writer = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&output)
+            .unwrap();
         tmux.wait_for(|capture| capture.contains("Live output probe"));
         if form == "notification" {
             let mut record: serde_json::Value = serde_json::from_str(
@@ -145,16 +148,28 @@ fn terminal_output_files_follow_appends_and_preserve_reading_position() {
                 "Live output probe"
             })
         });
-        append_rows(&output, 1, 80);
+        append_rows(&mut writer, 1, 80);
         let first =
             tmux.capture_when(|capture| output_detail(capture).contains("live output row 080"));
         std::fs::write(evidence.join(format!("{form}-first.txt")), &first).unwrap();
-        append_rows(&output, 81, 90);
+        append_rows(&mut writer, 81, 90);
         tmux.wait_for(|capture| output_detail(capture).contains("live output row 090"));
+        for row in 91..=93 {
+            std::thread::sleep(Duration::from_secs(1));
+            append_rows(&mut writer, row, row);
+            let started = std::time::Instant::now();
+            tmux.wait_for(|capture| {
+                output_detail(capture).contains(&format!("live output row {row:03}"))
+            });
+            assert!(
+                started.elapsed() < Duration::from_millis(900),
+                "{form}: live line was delayed"
+            );
+        }
         tmux.mouse(64, 150, 43, false);
         tmux.mouse(64, 150, 43, false);
         let before = tmux.capture_when(|capture| {
-            !output_detail(capture).contains("live output row 090")
+            !output_detail(capture).contains("live output row 093")
                 && output_detail(capture).contains("live output row")
         });
         let detail = |capture: &str| {
@@ -166,7 +181,7 @@ fn terminal_output_files_follow_appends_and_preserve_reading_position() {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        append_rows(&output, 91, 100);
+        append_rows(&mut writer, 94, 100);
         std::thread::sleep(Duration::from_millis(500));
         let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert_eq!(

@@ -2,15 +2,24 @@
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
+#[cfg(not(target_os = "macos"))]
 use std::sync::{Arc, Mutex};
 
+#[cfg(target_os = "macos")]
+#[path = "output_vnode.rs"]
+mod output_vnode;
+#[cfg(target_os = "macos")]
+pub use output_vnode::OutputWatcher;
+
 /// Watches only the output file currently displayed in event details.
+#[cfg(not(target_os = "macos"))]
 pub struct OutputWatcher {
     watcher: RecommendedWatcher,
     path: Arc<Mutex<Option<PathBuf>>>,
     requested: Option<PathBuf>,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl OutputWatcher {
     pub fn new(
         mut changed: impl FnMut(notify::Result<notify::Event>) + Send + 'static,
