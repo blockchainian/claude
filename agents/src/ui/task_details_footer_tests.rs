@@ -50,7 +50,7 @@ fn task_details_status_links_keep_underlines_and_click_targets_in_both_layouts()
         let links = view.viewport.borrow().task_details_links.clone();
         for target in [
             PathBuf::from("https://example.com/pull/833"),
-            PathBuf::from("/tmp/project"),
+            crate::test_project(),
         ] {
             let rect = links.iter().find(|(_, path)| *path == target).unwrap().0;
             assert_eq!(rect.y, area.bottom());

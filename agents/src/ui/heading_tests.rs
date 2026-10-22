@@ -38,12 +38,13 @@ fn headings_center_at_wide_and_narrow_widths() {
 
 #[test]
 fn centered_project_heading_clicks_and_underline_cover_only_text() {
-    let (_parent, project) = existing_project();
+    let project = crate::test_project();
     for width in [8, 13, 20, 39, 80, 120] {
         let mut view = test_view(Grouping::Project, false);
-        let mut task = session("heading", "Task", SessionStatus::Ready, 0);
-        task.cwd = project.clone();
-        view.set_sessions(vec![task], false);
+        view.set_sessions(
+            vec![session("heading", "Task", SessionStatus::Ready, 0)],
+            false,
+        );
         let area = Rect::new(3, 2, width, 6);
         let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 10));
         view.render_center_rows(area, &mut buf, Utc::now());

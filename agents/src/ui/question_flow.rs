@@ -269,7 +269,7 @@ mod tests {
                 id: id.into(),
             },
             parent: None,
-            cwd: "/tmp/project".into(),
+            cwd: crate::test_project(),
             name: None,
             title: title.into(),
             prompt: title.into(),

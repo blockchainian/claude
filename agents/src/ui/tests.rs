@@ -1130,7 +1130,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
     Session {
         id: session_key(id),
         parent: None,
-        cwd: "/tmp/project".into(),
+        cwd: crate::test_project(),
         name: None,
         title: title.into(),
         prompt: title.into(),
@@ -2412,7 +2412,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(
         key(&mut view, KeyCode::Char('n')),
         Some(Action::NewDraft {
-            cwd: "/tmp/project".into()
+            cwd: crate::test_project()
         })
     );
 }
@@ -2432,7 +2432,7 @@ fn paging_tracks_headings_and_never_wraps() {
                     i,
                 );
                 if i >= 10 {
-                    row.cwd = "/tmp/second-project".into();
+                    row.cwd = crate::test_project().with_file_name("second-project");
                 }
                 row
             })
@@ -2538,7 +2538,7 @@ fn task_details_include_attention_and_clip_messages() {
     let folder = viewport
         .task_details_links
         .iter()
-        .find(|(_, path)| path == &PathBuf::from("/tmp/project"))
+        .find(|(_, path)| path == &crate::test_project())
         .unwrap()
         .0;
     assert_eq!(folder.y, viewport.task_details.bottom());
@@ -2558,7 +2558,10 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     assert_empty_task_list(&view);
     view.set_loading(true);
     assert_empty_task_list(&view);
-    view.set_sessions(vec![session("a", "Alpha", SessionStatus::Ready, 1)], false);
+    let mut alpha = session("a", "Alpha", SessionStatus::Ready, 1);
+    // Search also matches the directory, so it must not contain the query.
+    alpha.cwd = "/tmp/project".into();
+    view.set_sessions(vec![alpha], false);
     key(&mut view, KeyCode::Char('/'));
     key(&mut view, KeyCode::Char('z'));
     assert_empty_task_list(&view);
@@ -3169,11 +3172,11 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
         drop(viewport);
         let (folder, _) = links
             .iter()
-            .find(|(_, path)| path == &PathBuf::from("/tmp/project"))
+            .find(|(_, path)| path == &crate::test_project())
             .unwrap();
         let (pr, url) = links
             .iter()
-            .find(|(_, path)| path != &PathBuf::from("/tmp/project"))
+            .find(|(_, path)| path != &crate::test_project())
             .unwrap();
         assert_eq!(folder.y, y);
         assert_eq!(pr.y, y);
@@ -3205,7 +3208,7 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), folder.x, y)
             ),
-            Some(Action::OpenPath("/tmp/project".into()))
+            Some(Action::OpenPath(crate::test_project()))
         );
         assert_eq!(
             click_mouse(
@@ -6383,10 +6386,9 @@ fn task_event_count_follows_height() {
 mod section_scroll_tests;
 
 #[test]
-fn task_details_status_uses_the_shared_home_directory_display() {
-    let mut task = session("path", "Path task", SessionStatus::Ready, 0);
-    let directory = PathBuf::from(std::env::var_os("HOME").unwrap()).join("Code/task");
-    task.cwd = directory.clone();
+fn task_details_status_shows_only_the_directory_name() {
+    let task = session("path", "Path task", SessionStatus::Ready, 0);
+    let directory = crate::test_project();
     let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
     let rendered = screen(&view, 200, 30);
@@ -6399,8 +6401,8 @@ fn task_details_status_uses_the_shared_home_directory_display() {
     assert_eq!(rect.y, viewport.task_details.bottom());
     assert_eq!(path, &directory);
     let rule = rendered.lines().nth(rect.y as usize).unwrap();
-    assert!(rule.contains("task"), "{rule}");
-    assert!(!rule.contains("/Users/"));
+    assert!(rule.contains("project"), "{rule}");
+    assert!(!rule.contains("agents-tests"));
 }
 
 #[test]
@@ -8745,19 +8747,11 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),
-        Some(Action::OpenPath("/tmp/project".into()))
+        Some(Action::OpenPath(crate::test_project()))
     );
     // Under 90 columns the task details panel is gone and the list spans its cells.
     screen(&view, 80, 40);
     assert_eq!(click_mouse(&mut view, cwd_cell), None);
-}
-
-/// A real directory named `project`, for group headings that link only to existing folders.
-pub(super) fn existing_project() -> (tempfile::TempDir, PathBuf) {
-    let parent = tempfile::tempdir().unwrap();
-    let project = parent.path().join("project");
-    std::fs::create_dir(&project).unwrap();
-    (parent, project)
 }
 
 #[test]
@@ -8773,18 +8767,7 @@ fn project_group_header_of_a_missing_directory_is_not_a_link() {
 
 #[test]
 fn project_group_header_opens_its_directory() {
-    let (_parent, project) = existing_project();
     let mut view = fixture();
-    let sessions = view
-        .rows
-        .iter()
-        .cloned()
-        .map(|mut session| {
-            session.cwd = project.clone();
-            session
-        })
-        .collect();
-    view.set_sessions(sessions, false);
     let rendered = screen(&view, 120, 40);
     let (x, y) = rendered_cell(&rendered, " project  ");
     assert_eq!(
@@ -8796,7 +8779,7 @@ fn project_group_header_opens_its_directory() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
-        Some(Action::OpenPath(project.clone()))
+        Some(Action::OpenPath(crate::test_project()))
     );
     let selected = view.selected;
     assert_eq!(

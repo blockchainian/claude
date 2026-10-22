@@ -1026,7 +1026,10 @@ impl View {
             return;
         };
         let mut links = Vec::new();
-        if let Some(area) = folder_area {
+        // A deleted folder has nothing to open, so its name stays plain text.
+        if let Some(area) = folder_area
+            && cwd.is_dir()
+        {
             links.push((area, cwd.clone()));
         }
         if let (Some(area), Some(pr)) = (right_area, &session.pr) {
@@ -2182,7 +2185,7 @@ mod wrapped_path_tests {
                 id: "path-probe".into(),
             },
             parent: None,
-            cwd: "/tmp/project".into(),
+            cwd: crate::test_project(),
             name: None,
             title: "Path probe".into(),
             prompt: MESSAGE.into(),

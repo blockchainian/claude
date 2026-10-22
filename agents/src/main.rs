@@ -21,6 +21,14 @@ mod theme;
 mod ui;
 mod usage;
 
+/// A real project folder outside any repository, for tests whose task directory must exist.
+#[cfg(test)]
+fn test_project() -> std::path::PathBuf {
+    let project = std::env::temp_dir().join("agents-tests/project");
+    std::fs::create_dir_all(&project).unwrap();
+    project
+}
+
 fn main() {
     let result = providers::configured()
         .and_then(|(hub, preferences_dir)| app::App::new(hub, preferences_dir).run());

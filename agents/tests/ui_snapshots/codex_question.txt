@@ -3,7 +3,7 @@
                      project                      │                     Prompt
  ● Example thread 0        Needs input     6d ago │               Inspect the project
                                                   │ …
-──────────────────────────────────────────────────┴╴[4:4mp[24m[4:4mr[24m[4:4mo[24m[4:4mj[24m[4:4me[24m[4:4mc[24m[4:4mt[24m ──────── Example thr… ─ example-branch╶─
+──────────────────────────────────────────────────┴╴project ──────── Example thr… ─ example-branch╶─
   Color
 
  Pick a color?

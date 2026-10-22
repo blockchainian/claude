@@ -113,7 +113,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             let links = view.viewport.borrow().task_details_links.clone();
             let (folder, _) = links
                 .iter()
-                .find(|(_, target)| target == std::path::Path::new("/tmp/project"))
+                .find(|(_, target)| target.as_path() == crate::test_project())
                 .unwrap();
             let row = (task_details.x..task_details.right())
                 .map(|x| visible(&buf[(x, folder.y)]))
@@ -226,4 +226,25 @@ fn status_rule_names_a_worktree_task_by_its_repository_and_opens_the_worktree() 
         list.set_sessions(vec![task], false);
         assert_eq!(list.group_heading(0, 80), "repository");
     }
+}
+
+#[test]
+fn status_rule_names_a_missing_directory_without_a_link() {
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.cwd = "/nonexistent/build".into();
+    view.project_groups = view.rows.iter().map(ProjectGroup::for_session).collect();
+    let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
+    view.render(buf.area, &mut buf);
+    let viewport = view.viewport.borrow();
+    let rule = (0..buf.area.width)
+        .map(|x| visible(&buf[(x, viewport.task_details.bottom())]))
+        .collect::<String>();
+    assert!(rule.contains("build"), "{rule}");
+    assert!(
+        viewport
+            .task_details_links
+            .iter()
+            .all(|(_, target)| target != Path::new("/nonexistent/build"))
+    );
 }
