@@ -1024,9 +1024,8 @@ impl View {
                     .flatten()
             };
             if let Some(task) = background {
-                if self.defer_click(ClickTarget::Background(task.clone())) {
-                    self.open_background(task);
-                }
+                self.pending_click = None;
+                self.open_background(task);
                 return None;
             }
             if let Some(target) = self.link_at(position) {
