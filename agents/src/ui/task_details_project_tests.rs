@@ -74,6 +74,27 @@ fn prompt_cache_countdown_precedes_wall_time_and_expiry_follows_status() {
 }
 
 #[test]
+fn claude_subagent_prompt_cache_countdown_shows_only_in_its_last_minute() {
+    let now = DateTime::UNIX_EPOCH + Duration::days(20_000);
+    for (seconds, shown) in [(59, true), (60, false), (180, false)] {
+        let mut view = fixture();
+        let selected = &mut view.rows[view.selected];
+        selected.parent = Some(session_key("43"));
+        selected.started_at = Some(now - Duration::hours(2));
+        selected.cache_expires_at = Some(now + Duration::seconds(seconds));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 220, 50));
+        view.render_at(buf.area, &mut buf, now);
+        let shows = (0..buf.area.height).any(|y| {
+            (0..buf.area.width)
+                .map(|x| visible(&buf[(x, y)]))
+                .collect::<String>()
+                .contains(" · 2h 0m")
+        });
+        assert_eq!(shows, shown, "{seconds}");
+    }
+}
+
+#[test]
 fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
     for pr in [false, true] {
         for width in [80, 149, 150, 220] {

@@ -713,12 +713,19 @@ impl View {
         let cache_remaining = session
             .and_then(|session| session.cache_expires_at)
             .map(|expires| expires - now);
+        // A Claude subagent's five-minute cache counts down only in its last minute.
+        let countdown_window = if session.is_some_and(|session| {
+            session.id.provider == ProviderId::Claude && session.parent.is_some()
+        }) {
+            chrono::Duration::seconds(59)
+        } else {
+            chrono::Duration::minutes(15)
+        };
         let elapsed = elapsed.map(|elapsed| {
             let mut spans = Vec::new();
             if let Some(seconds) = cache_remaining
                 .filter(|remaining| {
-                    *remaining >= chrono::Duration::seconds(1)
-                        && *remaining <= chrono::Duration::minutes(15)
+                    *remaining >= chrono::Duration::seconds(1) && *remaining <= countdown_window
                 })
                 .map(|remaining| remaining.num_seconds())
             {
