@@ -36,7 +36,7 @@ fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
-/// The `light` and `dark` themes in `themes/`, built from GitHub's themes by `themes/build.py`.
+/// The bundled themes derive from GitHub's VS Code themes, with colors adjusted to match Nvim.
 fn bundled_theme(light_background: bool) -> Theme {
     let source: &[u8] = if light_background {
         include_bytes!("../../themes/light.tmTheme")
