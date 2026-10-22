@@ -65,7 +65,9 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
         assert_eq!(buf[(12, y as u16)].symbol(), dot.content);
         assert_eq!(buf[(12, y as u16)].fg, dot.style.fg.unwrap());
     }
-    assert!(rows[36].trim().is_empty());
+    // The tasks section sits on the panel's bottom row.
+    assert_eq!(first + 3, 39);
+    assert!(rows[find("Needs input") + 3].trim().is_empty());
 }
 
 #[test]
