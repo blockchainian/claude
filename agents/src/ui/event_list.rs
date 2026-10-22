@@ -1045,7 +1045,7 @@ impl View {
         self.refresh_transcript();
     }
 
-    /// Applies structural changes without comparing row contents.
+    /// Applies structural changes, retaining a held gesture on an unchanged event.
     pub(crate) fn apply_event_update(&mut self, update: crate::event::Update) {
         self.event_detail.transcript = None;
         if self.event_list.restoring {
@@ -1056,7 +1056,14 @@ impl View {
             self.restore_event_list();
             return;
         }
-        let following = self.following_event();
+        let detail_selection = self
+            .selecting_list(text_selection::Panel::Event)
+            .then(|| self.text_selection.borrow_mut().take())
+            .flatten();
+        let selected_detail = detail_selection
+            .as_ref()
+            .and_then(|_| self.visible_event().cloned());
+        let following = self.following_event() && detail_selection.is_none();
         let timeline_following = self.following_timeline();
         let selected_index = self
             .event_list
@@ -1186,6 +1193,9 @@ impl View {
             self.select_event(Some(index.saturating_sub(pending)));
         }
         self.refresh_transcript();
+        if detail_selection.is_some() && selected_detail.as_ref() == self.visible_event() {
+            *self.text_selection.borrow_mut() = detail_selection;
+        }
     }
 
     #[cfg(test)]
