@@ -42,7 +42,22 @@ export async function reconsiderNames({ proposals, resolve, journal, id, namer, 
       proposals.set(saved.key, journal.replies.get(`collision:${id}:${saved.key}`)[saved.key]);
       continue;
     }
-    const requests = collisionGroups(collisions).map(group => {
+    // Split replies remain reusable when the budget or remaining collision groups change.
+    const keysByText = new Map([...proposals.keys()].map(key => [String(key), key]));
+    const collidingKeys = new Set(collisions.map(collision => String(collision.key)));
+    const savedGroup = [...journal.replies].find(([request, names]) =>
+      request.startsWith(`collision-group:${id}:`) && Object.keys(names).some(key => collidingKeys.has(key))
+      && Object.keys(names).every(key => keysByText.has(key)));
+    if (savedGroup) {
+      for (const [text, name] of Object.entries(savedGroup[1])) {
+        const key = keysByText.get(text);
+        if (attempted.has(key)) continue;
+        attempted.add(key);
+        proposals.set(key, name);
+      }
+      continue;
+    }
+    function requestsFor(group) {
       const keys = group.map(collision => collision.key);
       const retryId = group.length === 1 ? `collision:${id}:${keys[0]}`
         : `collision-group:${id}:${createHash('sha256').update(JSON.stringify(keys)).digest('hex')}`;
@@ -52,10 +67,15 @@ export async function reconsiderNames({ proposals, resolve, journal, id, namer, 
         context: `Choose meaningful names for the placeholders that are distinct from one another and not in occupied names. Occupied names: ${occupied.join(', ')}.\n`
           + group.map((collision, index) => `The name ${collision.proposed} is occupied. Choose a meaningful distinct name for v${index + 1}.\nBinding context:\n${collision.context}`).join('\n\n'),
       };
-      if (!journal.replies.has(retryId) && estimateInputTokens(payload) > maxInputTokens)
-        throw new Error(`Collision batch ${retryId} cannot fit the input token budget (${maxInputTokens})`);
-      return { group, retryId, payload };
-    });
+      if (!journal.replies.has(retryId) && estimateInputTokens(payload) > maxInputTokens) {
+        if (group.length === 1)
+          throw new Error(`Collision batch ${retryId} cannot fit the input token budget (${maxInputTokens})`);
+        const middle = Math.floor(group.length / 2);
+        return [...requestsFor(group.slice(0, middle)), ...requestsFor(group.slice(middle))];
+      }
+      return [{ group, retryId, payload }];
+    }
+    const requests = collisionGroups(collisions).flatMap(requestsFor);
     // The caller's shared slot limits requests and stops queued work on AUTH/USAGE_LIMIT.
     const replies = await Promise.allSettled(requests.map(async ({ retryId, payload }) => {
       if (journal.replies.has(retryId)) return journal.replies.get(retryId);
