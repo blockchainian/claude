@@ -2,19 +2,19 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Shortcuts
 
- Tasks                   Events                                    Navigate
- Tab/⇧Tab   Filter       /                       Search            ↑           Up
- /          Search       t                       Sort              ↓           Down
- g          Group        Space                   Messages/tools    ⌃w h/j/k/l  Focus left/down/up/right
- n          New          2× click top border     Earliest          ⌃w _        Max height
- o          Open         2× click bottom border  Latest            ⌃w |        Max width
- f          Fork                                                   ⌃w =        Reset size
- r          Rename                                                 Enter       Open
- x          Stop                                                   →           Open
- a          Archive                                                PgUp        Page up
- h          Hide                                                   PgDn        Page down
- Backspace  Delete                                                 ⌃c          Quit
- p          Pin/unpin                                              Esc         Previous
+ Tasks                   Events                   Navigate
+ Tab/⇧Tab   Filter       /      Search            ↑           Up
+ /          Search       t      Sort              ↓           Down
+ g          Group        Space  Messages/tools    ⌃w h/j/k/l  Focus left/down/up/right
+ n          New                                   ⌃w _        Max height
+ o          Open                                  ⌃w |        Max width
+ f          Fork                                  ⌃w =        Reset size
+ r          Rename                                Enter       Open
+ x          Stop                                  →           Open
+ a          Archive                               PgUp        Page up
+ h          Hide                                  PgDn        Page down
+ Backspace  Delete                                ⌃c          Quit
+ p          Pin/unpin                             Esc         Previous
 
 
 

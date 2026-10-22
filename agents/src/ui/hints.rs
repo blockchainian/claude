@@ -114,8 +114,6 @@ impl View {
                     ("/", "Search"),
                     ("t", "Sort"),
                     ("space", "Messages/tools"),
-                    ("2× click top border", "Earliest"),
-                    ("2× click bottom border", "Latest"),
                 ],
             ),
             group(

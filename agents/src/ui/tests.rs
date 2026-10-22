@@ -1260,7 +1260,7 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     );
     // Both widths fit the task tabs and shortcut columns.
     let narrow = screen(&view, 60, 24);
-    let wide = screen(&view, 64, 24);
+    let wide = screen(&view, 62, 24);
     assert_eq!(
         narrow.lines().skip(3).collect::<Vec<_>>(),
         wide.lines().skip(3).collect::<Vec<_>>()
@@ -10520,20 +10520,11 @@ fn event_border_hides_missing_model_and_effort() {
 }
 
 #[test]
-fn event_border_help_entries_fit() {
+fn help_lines_fit() {
     let view = View::default();
     for width in [40, 54, 58, 100, 200] {
         let lines = view.center_help_lines(width);
         assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
-        let text = lines
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("2× click top border"));
-        assert!(text.contains("Latest"));
-        assert!(text.contains("2× click bottom border"));
-        assert!(text.contains("Earliest"));
     }
 }
 

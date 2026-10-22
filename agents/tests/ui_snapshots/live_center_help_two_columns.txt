@@ -17,8 +17,8 @@
  p          Pin/unpin
 
  Events
- /                       Search
- t                       Sort
- Space                   Messages/tools
+ /      Search
+ t      Sort
+ Space  Messages/tools
  … resize to see all
  Esc back

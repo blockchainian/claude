@@ -84,8 +84,6 @@ mod tests {
             "⌃w",
             "⌃w h/j/k/l",
             "↑/↓",
-            "2× click top border",
-            "2× click bottom border",
         ] {
             assert_eq!(display(key), key);
         }
