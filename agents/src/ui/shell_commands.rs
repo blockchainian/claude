@@ -24,11 +24,13 @@ pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
                 index += 1;
                 continue;
             }
-            Some(b'`') => {
+            Some(b'`') | Some(b'$') => {
                 if byte == b'\\' {
                     index += 2;
                 } else {
-                    if byte == b'`' {
+                    if byte == b'`' && groups.last() == Some(&b'`')
+                        || byte == b'\'' && groups.last() == Some(&b'$')
+                    {
                         groups.pop();
                     }
                     index += 1;
@@ -62,8 +64,9 @@ pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
         }
         match byte {
             b'$' if bytes.get(index + 1) == Some(&b'\'') => {
-                // ANSI-C quoting has its own escape grammar.
-                return None;
+                // ANSI-C quoting ends at an unescaped single quote.
+                groups.push(b'$');
+                index += 2;
             }
             b'\\' => {
                 if index + 1 == bytes.len() {
@@ -489,10 +492,27 @@ mod tests {
             "[[ a && b; c ]]",
             "echo ${value:-a;b}",
             "echo a\\;b",
+            "echo $'a && b; c'",
+            "echo $'a\\'&&b'",
         ] {
             let source = format!("{inner} && next");
             assert_eq!(commands(&source), vec![(inner, true), ("next", false)]);
         }
+    }
+
+    #[test]
+    fn splits_ansi_c_quoted_command() {
+        let source = r#"rm -f clip/*; t(){ tmux send-keys -t p -l "$1"; }; t $'\e[<0;162;59M'; sleep 0.1 && grep -c $'\e\[7m'"#;
+        assert_eq!(
+            commands(source),
+            vec![
+                ("rm -f clip/*", false),
+                (r#"t(){ tmux send-keys -t p -l "$1"; }"#, false),
+                (r"t $'\e[<0;162;59M'", false),
+                ("sleep 0.1", true),
+                (r"grep -c $'\e\[7m'", false),
+            ]
+        );
     }
 
     #[test]
@@ -541,7 +561,6 @@ mod tests {
             "a |",
             "a && # comment\n b",
             "X=1 if true; then a; fi",
-            "echo $'a\\'&&b' && next",
             "cat <<EOF\na && b",
             "if true; then a; fi",
             "for x in a; do b; done",
