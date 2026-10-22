@@ -195,11 +195,11 @@ fn notification_await_events_keep_order_and_errors() {
 fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
     let fixture = include_str!("../../../tests/fixtures/claude-background-notifications.jsonl");
     let expected = [
-        ("\"睡12秒再输出\" ✓", Some(0)),
-        ("\"给 a16z 视频改名\" · 1", Some(1)),
-        ("\"等右键改动\" · -1", Some(-1)),
-        ("\"三个配置依次快速启动\" · 144", Some(144)),
-        ("\"Sleep 600 seconds in background\" killed", None),
+        ("睡12秒再输出 ✓", Some(0)),
+        ("给 a16z 视频改名 · 1", Some(1)),
+        ("等右键改动 · -1", Some(-1)),
+        ("三个配置依次快速启动 · 144", Some(144)),
+        ("Sleep 600 seconds in background killed", None),
     ];
     for (line, (title, code)) in fixture.lines().zip(expected) {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -223,9 +223,9 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         .unwrap()
         .0;
     let description = summary
-        .strip_prefix("Background command ")
+        .strip_prefix("Background command \"")
         .unwrap()
-        .strip_suffix(" completed (exit code 0)")
+        .strip_suffix("\" completed (exit code 0)")
         .unwrap();
     let event = events_from(vec![row.clone()]).remove(0);
     assert_eq!(event.body, format!("{description} ✓"));
