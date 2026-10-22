@@ -2023,8 +2023,8 @@ pub(super) fn summary_line(
     }
 }
 
-/// An event's body with whitespace runs collapsed and home paths shown as
-/// `~`, and the byte ranges of its paths in that text.
+/// An event's body with whitespace runs collapsed, and the byte ranges of its
+/// paths in that text.
 fn display_paths(
     label: &str,
     paths: &[std::ops::Range<usize>],
@@ -2035,9 +2035,9 @@ fn display_paths(
     let mut end = 0;
     for range in &summary_paths(label, paths, cwd) {
         text.push_str(&collapse_whitespace(&label[end..range.start]));
-        let path = super::line_truncation::abbreviate_path(&label[range.clone()], usize::MAX, None);
+        let path = &label[range.clone()];
         ranges.push(text.len()..text.len() + path.len());
-        text.push_str(&path);
+        text.push_str(path);
         end = range.end;
     }
     text.push_str(&collapse_whitespace(&label[end..]));

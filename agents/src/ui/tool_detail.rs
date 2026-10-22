@@ -249,8 +249,7 @@ impl Part {
     ) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
         let text = crate::providers::text::printable(&self.source);
         let paths = super::paths::text_paths(&text, cwd);
-        let display =
-            super::line_truncation::abbreviate_paths_in_text(&text, &paths, usize::MAX, cwd);
+        let display = super::line_truncation::abbreviate_paths(&text, &paths, usize::MAX, cwd);
         let numbered = matches!(&self.body, Body::Code(lang) if lang.starts_with("numbered:"));
         let drawn = if numbered {
             display

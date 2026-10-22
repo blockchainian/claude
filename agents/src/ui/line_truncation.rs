@@ -163,27 +163,8 @@ fn display_path(path: &str, cwd: Option<&std::path::Path>) -> String {
     path.to_owned()
 }
 
-/// Fits paths in prose while giving the leftmost paths priority.
-pub(super) fn abbreviate_paths_in_text(
-    text: &str,
-    ranges: &[std::ops::Range<usize>],
-    max_width: usize,
-    cwd: &std::path::Path,
-) -> String {
-    fit_paths(text, ranges, max_width, cwd)
-}
-
 /// Fits paths in a row, shrinking the rightmost path fully before its left neighbor.
 pub(super) fn abbreviate_paths(
-    text: &str,
-    ranges: &[std::ops::Range<usize>],
-    max_width: usize,
-    cwd: &std::path::Path,
-) -> String {
-    fit_paths(text, ranges, max_width, cwd)
-}
-
-fn fit_paths(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
@@ -401,17 +382,19 @@ mod tests {
         let text = "/alpha/left /beta/gamma/right";
         let cwd = Path::new("/nonexistent");
         let ranges = crate::ui::paths::text_paths(text, cwd);
-        for fit in [abbreviate_paths, abbreviate_paths_in_text] {
-            for (width, expected) in [
-                (100, text),
-                (25, "/alpha/left /beta/…/right"),
-                (17, "/alpha/left right"),
-                (13, "/alpha/left …"),
-                (9, "left …"),
-                (6, "left …"),
-            ] {
-                assert_eq!(fit(text, &ranges, width, cwd), expected, "width {width}");
-            }
+        for (width, expected) in [
+            (100, text),
+            (25, "/alpha/left /beta/…/right"),
+            (17, "/alpha/left right"),
+            (13, "/alpha/left …"),
+            (9, "left …"),
+            (6, "left …"),
+        ] {
+            assert_eq!(
+                abbreviate_paths(text, &ranges, width, cwd),
+                expected,
+                "width {width}"
+            );
         }
     }
 
