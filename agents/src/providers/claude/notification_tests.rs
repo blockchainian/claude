@@ -200,6 +200,10 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         ("等右键改动 · -1", Some(-1)),
         ("三个配置依次快速启动 · 144", Some(144)),
         ("Sleep 600 seconds in background killed", None),
+        (
+            "mkdir -p /tmp/mermaid-debug/m && cd /tmp/mermaid-debug/m && npm init -y >/dev/null && npm i mermaid@11.12.2 jsdom 2>&1 | tail -3 ✓",
+            Some(0),
+        ),
     ];
     for (line, (title, code)) in fixture.lines().zip(expected) {
         let mut file = tempfile::NamedTempFile::new().unwrap();

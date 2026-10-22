@@ -1054,7 +1054,7 @@ impl EventReader {
             notification
                 .split_once(&format!("<{key}>"))
                 .and_then(|(_, text)| text.split_once(&format!("</{key}>")))
-                .map(|(value, _)| value.trim())
+                .map(|(value, _)| unescape_xml(value.trim()))
         };
         let summary = field("summary").unwrap_or_else(|| {
             notification
@@ -1062,12 +1062,14 @@ impl EventReader {
                 .map(str::trim)
                 .find(|line| !line.is_empty())
                 .unwrap_or("")
+                .to_owned()
         });
         // Split at the closing description quote, preserving embedded and escaped quotes.
+        let status = field("status");
         let background = summary
             .strip_prefix("Background command \"")
             .and_then(|text| text.rsplit_once("\" "))
-            .zip(field("status"));
+            .zip(status.as_deref());
         let exit_code = background.and_then(|((_, suffix), _)| {
             let code = suffix.split_once("exit code ")?.1;
             let end = code
@@ -1081,7 +1083,7 @@ impl EventReader {
                 Some(code) => format!("{description} · {code}"),
                 None => format!("{description} {status}"),
             },
-            None => summary.to_owned(),
+            None => summary.clone(),
         };
         let output = field("output-file").map(|path| Section::OutputFile(path.into()));
         self.push(Kind::Tool, title.clone(), at);
@@ -1098,7 +1100,7 @@ impl EventReader {
                 event_detail_left: String::new(),
                 event_detail_title: title.clone(),
                 show_event_detail: false,
-                id: field("task-id").unwrap_or("").to_owned(),
+                id: field("task-id").unwrap_or_default(),
                 title,
                 name: "task-notification".to_owned(),
                 input: Vec::new(),
@@ -1423,6 +1425,15 @@ pub(super) fn is_prompt_text(record: &serde_json::Value, text: &str) -> bool {
 /// Unwrap pasted text without changing its code blocks or whitespace.
 pub(super) fn prompt_body(text: &str) -> String {
     crate::providers::text::printable(&pasted_content(text).unwrap_or_else(|| text.to_owned()))
+}
+
+/// Decodes the entities Claude Code escapes in task notification fields.
+fn unescape_xml(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 #[cfg(test)]
