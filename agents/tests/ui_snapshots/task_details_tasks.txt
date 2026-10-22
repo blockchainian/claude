@@ -20,5 +20,5 @@
 
 
                  Tasks               1/2
-            ● Working first
-            ○ Pending first
+● Working first
+○ Pending first
