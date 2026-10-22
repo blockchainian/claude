@@ -16,9 +16,9 @@
  p          Pin/unpin
 
  Navigate
- ⌃w h/j/k/l  Focus left/down/up/right
- ⌃w _        Max width
- ⌃w |        Max height
- ⌃w =        Reset size
+ Enter       Open
+ →           Open
+ Esc         Previous
+ ⌃c          Quit
  … resize to see all
  Esc back

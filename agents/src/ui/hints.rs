@@ -109,15 +109,15 @@ impl View {
             ),
             group(
                 "Events",
-                &[
-                    ("/", "Search"),
-                    ("t", "Sort"),
-                    ("space", "Filter"),
-                ],
+                &[("/", "Search"), ("t", "Sort"), ("space", "Filter")],
             ),
             group(
                 "Navigate",
                 &[
+                    ("enter", "Open"),
+                    ("→", "Open"),
+                    ("esc", "Previous"),
+                    ("⌃c", "Quit"),
                     ("⌃w h/j/k/l", "Focus left/down/up/right"),
                     ("⌃w _", "Max width"),
                     ("⌃w |", "Max height"),
@@ -126,10 +126,6 @@ impl View {
                     ("↓", "Down"),
                     ("pgup", "Page up"),
                     ("pgdn", "Page down"),
-                    ("enter", "Open"),
-                    ("→", "Open"),
-                    ("esc", "Previous"),
-                    ("⌃c", "Quit"),
                 ],
             ),
         ];
