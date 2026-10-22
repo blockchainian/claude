@@ -5,7 +5,7 @@ import { openChunkJournal, recoverChunkJournals } from './chunk-journal.mjs';
 import { analyzeChunk, planChunk, renderChunkBatch, resolveChunkNames, applyChunkRenames, checkChunkRewrite, releaseChunkAnalysis } from './chunks.mjs';
 import { analyzeImportChunk, resolveImportChunkNames, applyImportChunkRenames, checkImportChunkRewrite, releaseImportChunk } from './import-chunks.mjs';
 import { reconsiderNames } from './collision.mjs';
-import { packBatches } from './pack.mjs';
+import { iterateBatches } from './pack.mjs';
 import { transformSyntax } from './syntax/runner.mjs';
 import { mergeExternalImports, importMergeVersion } from './merge-imports.mjs';
 import { syntaxFingerprint } from './syntax/stage.mjs';
@@ -173,32 +173,40 @@ export async function createChunkRun(root, settings, ignores) {
       let batchFailed = false;
       async function request(packed, file, prefix = '') {
         const queuedAt = Date.now(), ids = packed.parts.map(({ batch }) => prefix + batch.id);
-        return withSlot(async () => {
-          let response;
-          try { response = await namer.name(packed.payload, { file, chunk: chunk.id,
-            batch_id: ids.length === 1 ? ids[0] : null, batch_ids: ids,
-            name_count: Object.keys(packed.payload.placeholders).length, phase: 'model', queued_at: queuedAt }); }
-          catch (error) {
-            if (error.code === 'AUTH' || error.code === 'USAGE_LIMIT') throw error;
-            batchFailed = true;
-            summary.failedBatches += packed.parts.length;
-            emit({ chunk: chunk.id, file, status: 'batch-failed', reason: error.message });
-            return;
-          }
-          const keys = Object.keys(packed.payload.placeholders);
-          if (!response.names || Object.keys(response.names).length !== keys.length || keys.some(key => typeof response.names[key] !== 'string')) throw new Error(`invalid names for chunk ${chunk.id}`);
-          for (const { batch, payload } of packed.parts) {
-            journal.batch(prefix + batch.id, new Map(Object.entries(payload.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])));
-          }
-        });
+        let response;
+        try { response = await namer.name(packed.payload, { file, chunk: chunk.id,
+          batch_id: ids.length === 1 ? ids[0] : null, batch_ids: ids,
+          name_count: Object.keys(packed.payload.placeholders).length, phase: 'model', queued_at: queuedAt }); }
+        catch (error) {
+          if (error.code === 'AUTH' || error.code === 'USAGE_LIMIT') throw error;
+          batchFailed = true;
+          summary.failedBatches += packed.parts.length;
+          emit({ chunk: chunk.id, file, status: 'batch-failed', reason: error.message });
+          return;
+        }
+        const keys = Object.keys(packed.payload.placeholders);
+        if (!response.names || Object.keys(response.names).length !== keys.length || keys.some(key => typeof response.names[key] !== 'string')) throw new Error(`invalid names for chunk ${chunk.id}`);
+        for (const { batch, payload } of packed.parts) {
+          journal.batch(prefix + batch.id, new Map(Object.entries(payload.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])));
+        }
+      }
+      async function requestBatches(pending, render, file, prefix = '') {
+        const packed = iterateBatches(pending, render, settings);
+        let finished = false;
+        async function worker() {
+          while (!finished) await withSlot(async () => {
+            const next = packed.next();
+            if (next.done) { finished = true; return; }
+            await request(next.value, file, prefix);
+          });
+        }
+        try { await settle(Array.from({ length: settings.concurrency }, worker)); }
+        finally { packed.return(); }
       }
       const endModel = phase('model', chunk.id);
       let after;
       try {
-        const packed = packBatches(pending, (batch, placeholders) => renderChunkBatch(baseline, batch, replayed, placeholders), settings);
-        const results = await Promise.allSettled(packed.map(part => request(part, chunk.id)));
-        const failure = results.find(result => result.status === 'rejected');
-        if (failure) throw failure.reason;
+        await requestBatches(pending, (batch, placeholders) => renderChunkBatch(baseline, batch, replayed, placeholders), chunk.id);
         if (batchFailed) return;
         // Response arrival order never decides collision suffixes or resume output.
         proposals.clear();
@@ -219,10 +227,7 @@ export async function createChunkRun(root, settings, ignores) {
               }
               const localPending = stage.filter(batch => !journal.batches.has(prefix + batch.id));
               const replayedLocal = api.resolveNames(source, local, { fragment: true });
-              const packedLocal = packBatches(localPending, (batch, placeholders) => api.renderBatch(source, batch, replayedLocal, placeholders), settings);
-              const replies = await Promise.allSettled(packedLocal.map(part => request(part, file, prefix)));
-              const failure = replies.find(reply => reply.status === 'rejected');
-              if (failure) throw failure.reason;
+              await requestBatches(localPending, (batch, placeholders) => api.renderBatch(source, batch, replayedLocal, placeholders), file, prefix);
               if (batchFailed) return;
               for (const batch of stage) for (const [key, name] of Object.entries(journal.batches.get(prefix + batch.id))) local.set(Number(key), name);
             }
@@ -256,7 +261,11 @@ export async function createChunkRun(root, settings, ignores) {
         summary.chunkSiblingFiles = (summary.chunkSiblingFiles ?? 0) + [...after].filter(([file, source]) => !reporting.has(file) && source !== inputs.get(file)).length;
         emit({ chunk: chunk.id, status: 'renamed', files: count, batches: batches.length });
         completed.set(chunk.id, { chunk, journal, inputs: after, sources: after, pending: false, count, batches: batches.length, selected: selection, ignored, chunkSiblings: options.chunkSiblings });
-      } finally { endWrite(); }
+      } finally {
+        releaseChunkAnalysis(baseline);
+        if (after) releaseChunkAnalysis(after);
+        endWrite();
+      }
     },
     async importOptions(journals, pool) {
       const renamedExports = new Set();

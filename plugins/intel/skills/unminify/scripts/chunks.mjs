@@ -84,6 +84,7 @@ function inspect(sources) {
       ast,
       program,
       lexical,
+      lexicalByStart: lexical.map((_, index) => index).sort((a, b) => lexical[a].node.start - lexical[b].node.start),
       bindings
     });
   }
@@ -92,6 +93,7 @@ function inspect(sources) {
     files,
     declarations,
     usages,
+    placeholderNames: [...declarations.keys()].filter(name => /^v[1-9]\d*$/.test(name)),
     dynamicScope
   };
   inspections.set(sources, {
@@ -99,6 +101,22 @@ function inspect(sources) {
     analysis
   });
   return analysis;
+}
+
+function bindingRecord(name, declarations, usages) {
+  const declaration = declarations[0],
+    references = usages ?? [],
+    files = new Set(declarations.map(entry => entry.file));
+  for (const reference of references) files.add(reference.file);
+  return {
+    name,
+    file: declaration.file,
+    key: declaration.binding.identifier.start,
+    kind: declaration.binding.kind,
+    files,
+    references,
+    declarations
+  };
 }
 
 /** A manifest chunk owns only program bindings; nested bindings retain file scope. */
@@ -128,21 +146,8 @@ export function analyzeChunk(sources, {
   };
   for (const [name, declarationsForName] of declarations) {
     const declaration = declarationsForName[0],
-      references = [],
-      touched = new Set(declarationsForName.map(entry => entry.file));
-    for (const reference of usages.get(name) ?? []) {
-      references.push(reference);
-      touched.add(reference.file);
-    }
-    const record = {
-      name,
-      file: declaration.file,
-      key: declaration.binding.identifier.start,
-      kind: declaration.binding.kind,
-      files: touched,
-      references,
-      declarations: declarationsForName
-    };
+      record = bindingRecord(name, declarationsForName, usages.get(name)),
+      touched = record.files;
     bindings.set(name, record);
     let reason;
     if (dynamicScope) reason = 'dynamicScope';else if (declarationsForName.length > 1) reason = 'duplicate';else if ([...touched].some(file => ignored.has(file))) reason = 'ignored';else if (knownGlobals.has(name)) reason = 'knownGlobal';else if (!chunkSiblings && [...touched].some(file => !selected.has(file))) reason = 'outsideSelection';
@@ -394,16 +399,15 @@ export function renderChunkBatch(sources, batch, renames = new Map(), {
     placeholders[placeholder] = key;
     targets.set(key, placeholder);
   });
-  const analysis = analyzeChunk(sources, {
-    minSymbolLength: Number.MAX_SAFE_INTEGER
-  });
+  const analysis = inspect(sources);
   // Context-only collisions must not confuse the model's unique placeholders.
   let contextIndex = 0;
-  for (const name of analysis.bindings.keys()) if (!targets.has(name) && /^v[1-9]\d*$/.test(name) && Number(name.slice(1)) <= placeholderCount) targets.set(name, `_context${++contextIndex}`);
+  for (const name of analysis.placeholderNames) if (!targets.has(name) && Number(name.slice(1)) <= placeholderCount) targets.set(name, `_context${++contextIndex}`);
   const snippets = [];
   for (const key of batch.keys) {
-    const record = analysis.bindings.get(key);
-    if (!record) throw new Error(`Unknown chunk binding: ${key}`);
+    const declarations = analysis.declarations.get(key);
+    if (!declarations) throw new Error(`Unknown chunk binding: ${key}`);
+    const record = bindingRecord(key, declarations, analysis.usages.get(key));
     for (const file of record.files) {
       const centers = record.references.filter(ref => ref.file === file).map(ref => ref.path.node.start);
       if (file === record.file) centers.unshift(record.key);
@@ -419,7 +423,20 @@ export function renderChunkBatch(sources, batch, renames = new Map(), {
       end = Math.min(record.source.length, center + radius);
     let cursor = start,
       text = '';
-    for (const path of record.lexical) {
+    function lowerBound(offset) {
+      let low = 0, high = record.lexicalByStart.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (record.lexical[record.lexicalByStart[middle]].node.start < offset) low = middle + 1;
+        else high = middle;
+      }
+      return low;
+    }
+    // Preserve traversal order even for syntax whose Babel visitor order differs
+    // from source order, while visiting only identifiers inside this excerpt.
+    const indices = record.lexicalByStart.slice(lowerBound(start), lowerBound(end)).sort((a, b) => a - b);
+    for (const index of indices) {
+      const path = record.lexical[index];
       const node = path.node;
       if (node.start < cursor || node.end > end) continue;
       const binding = path.scope.getBinding(node.name);
