@@ -1325,8 +1325,6 @@ impl View {
                 .map(move |task| (task, indicator))
         })
         .collect::<Vec<_>>();
-        // The tasks body stays on the panel's left edge.
-        let mut tasks_body = None;
         let tasks_text = tasks
             .iter()
             .map(|(task, status)| {
@@ -1368,7 +1366,6 @@ impl View {
                     .into(),
                 );
             }
-            tasks_body = Some(start..items.len());
             bodies.push(start..items.len());
             keys.push(body_key("Tasks", &tasks_text));
             copies.push(Some((tasks_text.as_str(), "Copied tasks")));
@@ -1462,7 +1459,7 @@ impl View {
             }
             // Each body's rows share one left edge, centered as a block in the panel.
             let mut indents = vec![0; items.len()];
-            for body in bodies.iter().filter(|&body| Some(body) != tasks_body.as_ref()) {
+            for body in &bodies {
                 let block = items[body.clone()]
                     .iter()
                     .map(|item| match item {
