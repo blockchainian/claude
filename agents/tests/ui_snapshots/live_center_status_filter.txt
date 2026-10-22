@@ -1,12 +1,12 @@
   Active 2                  Inactive 1
-────────────────────┬──── Inactive ─────
-      project       │      Prompt
- ○ Unloaded task    │   Unloaded task
-                    │
-                    │
-                    │
-                    │
-────────────────────┴─── Unloaded … ────
+────────────────────────────────────────
+                project
+ ○ Unloaded task            Inactive
+
+─────────────── Inactive ───────────────
+                 Prompt
+             Unloaded task
+─╴project ── Unloaded task ─────────────
  Unloaded tas ❯
 ────────────────────────────────────────
  ? help

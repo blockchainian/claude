@@ -253,7 +253,7 @@ fn rendered_draft_model_click_opens_and_single_click_applies_provider_choice() {
 }
 
 #[test]
-fn event_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts() {
+fn event_border_keeps_model_and_effort_picker_controls_in_large_and_medium_layouts() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
@@ -295,11 +295,13 @@ fn event_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layout
         };
         let event_panel = view.viewport.borrow().event_panel;
         assert_eq!(text(model.x, model.y, model.width), model_name);
-        // The narrow layout starts them at the midline, under the task's folder.
+        // The medium layout starts them at the midline, under the task's folder.
         let gap = view.center_layout(area).gap;
         assert_eq!(
             model.x,
-            if width >= 150 {
+            if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 event_panel.x
             } else {
                 gap.x + 3
@@ -307,7 +309,9 @@ fn event_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layout
         );
         assert_eq!(
             model.y,
-            if width >= 150 {
+            if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 event_panel.bottom()
             } else {
                 event_panel.y - 1
@@ -373,9 +377,15 @@ fn event_model_targets_cover_only_visible_border_value_cells() {
             let frame = Rect::new(0, 0, width, 60);
             let mut buffer = Buffer::empty(frame);
             view.render_at(frame, &mut buffer, Utc::now());
+            let small = crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Small;
             let area = view.viewport.borrow().event_panel;
             let gap = view.center_layout(frame).gap;
-            let rule_left = if width >= 150 {
+            let rule_left = if small {
+                0
+            } else if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 area.x - 2
             } else if gap.is_empty() {
                 0
@@ -384,7 +394,11 @@ fn event_model_targets_cover_only_visible_border_value_cells() {
             };
             let rule = Rect::new(
                 rule_left,
-                if width >= 150 {
+                if small {
+                    view.center_layout(frame).header.y + 1
+                } else if crate::ui::render::ScreenLayout::for_width(width)
+                    == crate::ui::render::ScreenLayout::Large
+                {
                     area.bottom()
                 } else {
                     area.y - 1
@@ -393,9 +407,11 @@ fn event_model_targets_cover_only_visible_border_value_cells() {
                 1,
             );
             let total = rule.width.saturating_sub(4);
-            // A missing effort is not drawn, so the model gets the whole rule.
+            // Medium and large layouts give a missing effort's space to the model.
             let effort_width = effort.map_or(0, str::len) as u16;
-            let available = if effort.is_some() {
+            let available = if small {
+                (width / 2).saturating_sub(4)
+            } else if effort.is_some() {
                 total.saturating_sub(effort_width.min(total / 2) + 3)
             } else {
                 total
@@ -418,11 +434,18 @@ fn event_model_targets_cover_only_visible_border_value_cells() {
             assert_eq!(drawn, expected_name, "width={width}");
             let targets = view.viewport.borrow().field_targets.clone();
             let y = rule.y;
-            let effort_start = start + name_width + 3;
-            let effort_width = rule
-                .right()
-                .saturating_sub(2 + effort_start)
-                .min(effort_width);
+            let effort_width = if small {
+                effort_width.min(available)
+            } else {
+                rule.right()
+                    .saturating_sub(2 + start + name_width + 3)
+                    .min(effort_width)
+            };
+            let effort_start = if small {
+                rule.right() - 2 - effort_width
+            } else {
+                start + name_width + 3
+            };
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)

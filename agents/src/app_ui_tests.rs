@@ -405,7 +405,7 @@ fn event_selection_switching_tasks_restores_selection_through_app() {
 }
 
 #[test]
-fn selected_real_transcript_draws_event_and_prompt_at_narrow_and_wide_sizes() {
+fn selected_real_transcript_draws_event_and_prompt_at_medium_and_large_sizes() {
     let (_directory, mut app) = fixture();
     assert!(app.view.selected_id().is_none());
     key(&mut app, KeyCode::Tab);
@@ -434,7 +434,7 @@ fn selected_real_transcript_draws_event_and_prompt_at_narrow_and_wide_sizes() {
 }
 
 #[test]
-fn draft_without_transcript_draws_and_accepts_paste_in_wide_layout() {
+fn draft_without_transcript_draws_and_accepts_paste_in_large_layout() {
     let (directory, mut app) = fixture();
     for width in [150, 200] {
         app.handle_action(Some(Action::NewDraft {
@@ -636,7 +636,7 @@ fn event_detail_content(buffer: &ratatui::buffer::Buffer) -> String {
 }
 
 #[test]
-fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
+fn medium_and_large_preview_follows_real_appends_and_clicked_event_stays_open() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -698,7 +698,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
 }
 
 #[test]
-fn narrow_and_wide_event_double_click_focuses_list_and_keeps_preview_following() {
+fn medium_and_large_event_double_click_focuses_list_and_keeps_preview_following() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -732,7 +732,7 @@ fn narrow_and_wide_event_double_click_focuses_list_and_keeps_preview_following()
 }
 
 #[test]
-fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview() {
+fn medium_and_large_list_and_detail_search_route_paste_without_changing_preview() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
@@ -781,7 +781,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
 }
 
 #[test]
-fn narrow_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
+fn medium_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
     for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
@@ -821,8 +821,8 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
 }
 
 #[test]
-fn narrow_and_wide_event_panels_scroll_and_copy_independently() {
-    // The wide detail must stay one row short of its event so that the wheel has room to scroll.
+fn medium_and_large_event_panels_scroll_and_copy_independently() {
+    // The large layout detail must stay one row short of its event so that the wheel has room to scroll.
     for (width, height) in [(120, 30), (100, 30), (180, 23)] {
         let (_directory, mut app) = border_fixture();
         app.view.set_double_click_ms(20);
@@ -970,7 +970,7 @@ fn segment(buffer: &ratatui::buffer::Buffer, x: std::ops::Range<u16>, y: u16) ->
 }
 
 #[test]
-fn wide_border_labels_stay_in_their_columns() {
+fn large_border_labels_stay_in_their_columns() {
     let (_directory, mut app) = border_fixture();
     let now = app.sessions[0].started_at.unwrap() + chrono::Duration::seconds(120);
     for width in [150, 200] {
@@ -1048,7 +1048,7 @@ fn wide_border_labels_stay_in_their_columns() {
 }
 
 #[test]
-fn narrow_render_survives_wide_resize_unchanged() {
+fn medium_render_survives_large_resize_unchanged() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (_directory, mut app) = fixture();
     select_archive(&mut app);

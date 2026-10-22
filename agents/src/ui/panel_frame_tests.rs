@@ -85,12 +85,12 @@ fn frame_labels_keep_their_columns_through_every_zoom() {
                     let original = view.panel_layout(area, false);
                     let baseline = draw(&view, area, now);
                     let title = view.viewport.borrow().task_details_title;
-                    let model_y = if width >= WIDE_LAYOUT_COLUMNS {
+                    let model_y = if ScreenLayout::for_width(width) == ScreenLayout::Large {
                         original.prompt_top_rule.y
                     } else {
                         original.prompt_bottom_rule.y
                     };
-                    let filter_y = if width >= WIDE_LAYOUT_COLUMNS {
+                    let filter_y = if ScreenLayout::for_width(width) == ScreenLayout::Large {
                         original.prompt_top_rule.y
                     } else {
                         original.event_detail_top_rule.y
@@ -132,12 +132,12 @@ fn frame_labels_keep_their_columns_through_every_zoom() {
                     let actual = draw(&view, area, now);
                     let ys = [
                         layout.prompt_top_rule.y,
-                        if width >= WIDE_LAYOUT_COLUMNS {
+                        if ScreenLayout::for_width(width) == ScreenLayout::Large {
                             layout.prompt_top_rule.y
                         } else {
                             layout.prompt_bottom_rule.y
                         },
-                        if width >= WIDE_LAYOUT_COLUMNS {
+                        if ScreenLayout::for_width(width) == ScreenLayout::Large {
                             layout.prompt_top_rule.y
                         } else {
                             layout.event_detail_top_rule.y
@@ -147,7 +147,7 @@ fn frame_labels_keep_their_columns_through_every_zoom() {
                         assert!(!label.is_empty());
                         let shifted = rule == 2
                             && label.width == 9
-                            && width < WIDE_LAYOUT_COLUMNS
+                            && ScreenLayout::for_width(width) != ScreenLayout::Large
                             && ys[1] == ys[2];
                         let target_x = if shifted {
                             labels[3].0.x - label.width - 3
@@ -238,7 +238,11 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
             .collect();
         let jump = view.viewport.borrow().event_label;
         assert!(!jump.is_empty());
-        let filter_y = view.panel_layout(area, false).event_detail_top_rule.y;
+        let filter_y = if width < 80 {
+            view.panel_layout(area, false).prompt_bottom_rule.y
+        } else {
+            view.panel_layout(area, false).event_detail_top_rule.y
+        };
         label(&before, "Assistant", filter_y);
         view.height_zoom = Some(Panel::TaskList);
         let after = draw(&view, area, now);
@@ -246,6 +250,7 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
         let y = layout.prompt_bottom_rule.y;
         assert_eq!(y, layout.event_detail_top_rule.y);
         for rect in &models {
+            let y = if width < 80 { rect.y } else { y };
             for x in rect.x..rect.right() {
                 assert_eq!(
                     after[(x, y)],
@@ -256,8 +261,14 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
         }
         let model_left = models[0].x - 1;
         let moved_jump = view.viewport.borrow().event_label;
-        assert_eq!(moved_jump.right() + 1, model_left);
-        assert_eq!(after[(moved_jump.right(), y)].symbol(), "─");
+        if width < 80 {
+            assert_eq!(moved_jump.right(), jump.right());
+        } else {
+            assert_eq!(moved_jump.right() + 1, model_left);
+        }
+        if moved_jump.right() < area.right() {
+            assert_eq!(after[(moved_jump.right(), y)].symbol(), "─");
+        }
         label(&after, "duration", y);
         if width == 110 {
             let filter = label(&after, "Assistant", y);
@@ -267,7 +278,117 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
             let row = (area.x..area.right())
                 .map(|x| cell_text(after[(x, y)].symbol()))
                 .collect::<String>();
-            assert!(!row.contains("Assistant"), "{row}");
+            assert!(row.contains("Assistant"), "{row}");
         }
+    }
+}
+
+#[test]
+fn small_layout_stacks_full_width_panels_inside_medium_upper_third() {
+    let (_dir, view, _) = fixture();
+    for height in [45, 60, 61] {
+        let small = view.panel_layout(Rect::new(0, 0, 70, height), false);
+        let medium = view.panel_layout(Rect::new(0, 0, 80, height), false);
+        assert_eq!(small.top.height, medium.top.height);
+        assert_eq!(
+            small.prompt,
+            Rect {
+                width: 70,
+                ..medium.prompt
+            }
+        );
+        let rows = small.top.height - 1;
+        assert_eq!(small.list, Rect::new(1, 2, 68, rows.div_ceil(2)));
+        assert_eq!(
+            small.task_details,
+            Rect::new(1, small.list.bottom() + 1, 68, rows / 2)
+        );
+        assert_eq!(small.task_details.bottom(), small.top.bottom());
+        assert_eq!(small.gap, Rect::new(0, small.list.bottom(), 70, 1));
+        assert_eq!(small.usage_chart, small.list);
+        assert_eq!(medium.list.y, medium.task_details.y);
+        assert_eq!(medium.list.height, medium.task_details.height);
+        assert!(medium.list.right() < medium.task_details.x);
+    }
+}
+
+#[test]
+fn small_layout_labels_belong_to_the_three_task_edges() {
+    let (_dir, mut view, now) = fixture();
+    view.rows[0].started_at = Some(now - chrono::Duration::seconds(65));
+    view.set_context_usage(&view.rows[0].id.clone(), Some(12));
+    let area = Rect::new(0, 0, 70, 60);
+    let layout = view.panel_layout(area, false);
+    let buf = draw(&view, area, now);
+    let top = layout.header.bottom() - 1;
+    let middle = layout.list.bottom();
+    let bottom = layout.prompt_top_rule.y;
+    let model = label(
+        &buf,
+        &view.model_text(ProviderId::Claude, "claude-opus-4-6"),
+        top,
+    );
+    let effort = label(&buf, "medium", top);
+    assert_eq!(model.x, 2);
+    assert_eq!(effort.right(), area.right() - 2);
+    let state = label(&buf, SessionStatus::Ready.label(), middle);
+    assert!((i32::from(state.x * 2 + state.width) - 70).abs() <= 1);
+    let elapsed = label(&buf, "1m 5s", middle);
+    assert_eq!(elapsed.right(), 68);
+    let context = view.selected_context_percent().unwrap();
+    assert_eq!(label(&buf, &format!("{context}%"), middle).x, 2);
+    label(&buf, "frame-project", bottom);
+    label(&buf, "Frame labels", bottom);
+    label(&buf, "frame-labels", bottom);
+    let middle_text = (0..70)
+        .map(|x| cell_text(buf[(x, middle)].symbol()))
+        .collect::<String>();
+    assert!(
+        middle_text
+            .chars()
+            .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
+        "{middle_text}"
+    );
+    assert!(
+        !middle_text.contains("─"),
+        "timeline should span the entire edge: {middle_text}"
+    );
+    for cell in &buf.content {
+        assert!(
+            !matches!(cell.symbol(), "│" | "┬" | "┴" | "┼"),
+            "unexpected column separator: {cell:?}"
+        );
+    }
+}
+
+#[test]
+fn small_layout_event_controls_share_the_rule_above_the_event_list() {
+    for sort in [EventSort::Time, EventSort::Duration] {
+        let (_dir, mut view, now) = fixture();
+        view.event_list.sort = sort;
+        view.event_list.cursor = Some(0);
+        view.event_list.unseen.set(2);
+        let area = Rect::new(0, 0, 70, 60);
+        let buf = draw(&view, area, now);
+        let layout = view.center_layout(area);
+        assert_eq!(label(&buf, "Assistant", layout.prompt_bottom_rule.y).x, 2);
+        let jump = view.viewport.borrow().event_label;
+        assert_eq!(jump.y, layout.prompt_bottom_rule.y);
+        assert!(!jump.is_empty());
+    }
+}
+
+#[test]
+fn layout_breakpoints_select_the_three_panel_arrangements() {
+    for (width, expected) in [
+        (0, ScreenLayout::Small),
+        (70, ScreenLayout::Small),
+        (79, ScreenLayout::Small),
+        (80, ScreenLayout::Medium),
+        (149, ScreenLayout::Medium),
+        (150, ScreenLayout::Large),
+        (200, ScreenLayout::Large),
+    ] {
+        assert_eq!(ScreenLayout::for_width(width), expected);
     }
 }

@@ -15,7 +15,8 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         let area = Rect::new(0, 0, width, 50);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let wide = width >= super::super::render::WIDE_LAYOUT_COLUMNS;
+        let large = super::super::render::ScreenLayout::for_width(width)
+            == super::super::render::ScreenLayout::Large;
         assert_eq!(
             view.viewport.borrow().event_text.area.x,
             super::super::event_detail::event_detail_columns(
@@ -81,14 +82,14 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
                 .unwrap();
             (row.x + row.cells[0].0.start, row.y)
         };
-        assert!(x >= if wide { width / 4 } else { 1 });
+        assert!(x >= if large { width / 4 } else { 1 });
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y));
         view.render_at(area, &mut buf, now);
         assert_maps(&view, &buf);
         if view.viewport.borrow().event_detail_max > 0 {
             assert!(view.event_detail.scroll.borrow().offset > 0);
         }
-        let resized = Rect::new(0, 0, if wide { 120 } else { 200 }, 50);
+        let resized = Rect::new(0, 0, if large { 120 } else { 200 }, 50);
         let mut buf = Buffer::empty(resized);
         view.render_at(resized, &mut buf, now);
         assert_eq!(

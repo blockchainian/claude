@@ -60,10 +60,27 @@ pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
     buf.set_style(padded, style);
 }
 
-pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
+/// The terminal width determines how the task and event panels share the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScreenLayout {
+    Large,
+    Medium,
+    Small,
+}
+
+impl ScreenLayout {
+    pub(super) fn for_width(width: u16) -> Self {
+        match width {
+            150.. => Self::Large,
+            80..150 => Self::Medium,
+            _ => Self::Small,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct CenterLayout {
+    pub(super) kind: ScreenLayout,
     pub(super) header: Rect,
     /// The panels above the prompt, where global dialogs center.
     pub(super) top: Rect,
@@ -96,15 +113,16 @@ impl View {
         let header_height = if area.height >= 6 { 2 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        let kind = ScreenLayout::for_width(area.width);
+        let large = kind == ScreenLayout::Large;
         // The prompt or question grows with its content up to a share of the rows between
-        // the header and the footer: half in narrow mode, where the event list stacks below
-        // it, and two thirds in wide mode, where the event list sits beside the panels.
+        // the header and the footer: half in medium and small layouts, where the event list stacks below
+        // it, and two thirds in the large layout, where the event list sits beside the panels.
         let content_rows = area
             .height
             .saturating_sub(header_height + footer_height + 2)
             .max(2);
-        let prompt_cap = if wide {
+        let prompt_cap = if large {
             content_rows * 2 / 3
         } else {
             content_rows / 2
@@ -125,11 +143,11 @@ impl View {
         let event_height = bottom_height.saturating_sub(footer_height).max(10);
         let show_event =
             area.height.saturating_sub(footer_height + event_height) >= header_height + 6;
-        // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
+        // Exclude both rules around the prompt and, in medium and small layouts, the list/detail rule.
         // The output keeps its top rule inside this share and leaves one row for its bottom rule.
         let content_height = area
             .height
-            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
+            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!large));
         let (mut top_height, mut list_height, mut event_detail_height) = if !show_event {
             (
                 area.height
@@ -137,7 +155,7 @@ impl View {
                 0,
                 0,
             )
-        } else if wide {
+        } else if large {
             // Round the upper share down and give the remaining content rows below.
             let top = (u32::from(content_height) * 618 / 1000) as u16;
             (top, 0, content_height - top)
@@ -155,14 +173,14 @@ impl View {
             match panel {
                 Panel::EventDetail if show_event => {
                     (top_height, list_height, event_detail_height) =
-                        (0, 0, height + u16::from(!wide));
+                        (0, 0, height + u16::from(!large));
                 }
-                Panel::EventList if show_event && !wide => {
+                Panel::EventList if show_event && !large => {
                     (top_height, list_height, event_detail_height) = (0, height, 0);
                 }
                 Panel::TaskList | Panel::TaskDetails | Panel::EventList => {
                     (top_height, list_height, event_detail_height) =
-                        (height + u16::from(show_event && !wide), 0, 0);
+                        (height + u16::from(show_event && !large), 0, 0);
                 }
                 _ => {}
             }
@@ -184,7 +202,7 @@ impl View {
             header_height + top_height + prompt_top_gap,
             prompt_height,
         );
-        let mut event_panel = if show_event && !wide {
+        let mut event_panel = if show_event && !large {
             row(area, prompt.bottom() - area.y + 1, list_height)
                 .inner(Margin::new(HORIZONTAL_PADDING, 0))
         } else {
@@ -193,7 +211,7 @@ impl View {
         let event_detail = if show_event {
             row(
                 area,
-                prompt.bottom() - area.y + u16::from(!wide && list_height > 0) + list_height,
+                prompt.bottom() - area.y + u16::from(!large && list_height > 0) + list_height,
                 event_detail_height,
             )
         } else {
@@ -208,7 +226,7 @@ impl View {
             prompt_bottom_rule
         };
         let footer_rule = frame_rule(footer.y.saturating_sub(area.y + 1));
-        let (body, mut event_list) = if wide && show_event {
+        let (body, mut event_list) = if large && show_event {
             let column_width = (body.width - 2 * PANEL_GAP) / 4;
             let event_width = body.width - 2 * PANEL_GAP - 2 * column_width;
             (
@@ -221,7 +239,15 @@ impl View {
         } else {
             (body, Rect::default())
         };
-        let [mut list, mut gap, mut task_details] = if body.width >= 2 * PANEL_GAP + 1 {
+        let [mut list, mut gap, mut task_details] = if body.is_empty() {
+            [body, Rect::default(), Rect::default()]
+        } else if kind == ScreenLayout::Small {
+            let rows = body.height.saturating_sub(1);
+            let list = row(body, 0, rows.div_ceil(2));
+            let gap = row(area, list.bottom() - area.y, u16::from(body.height > 0));
+            let details = row(body, list.height + gap.height, rows / 2);
+            [list, gap, details]
+        } else if body.width >= 2 * PANEL_GAP + 1 {
             let content = Rect {
                 width: body.width - PANEL_GAP,
                 ..body
@@ -237,7 +263,7 @@ impl View {
         };
         if zoom && let Some(panel) = self.width_zoom {
             match panel {
-                Panel::TaskList | Panel::TaskDetails => {
+                Panel::TaskList | Panel::TaskDetails if kind != ScreenLayout::Small => {
                     list = if panel == Panel::TaskList {
                         top
                     } else {
@@ -251,7 +277,7 @@ impl View {
                     gap = Rect::default();
                     event_list = Rect::default();
                 }
-                Panel::EventList if wide && show_event => {
+                Panel::EventList if large && show_event => {
                     event_list = top;
                     list = Rect::default();
                     gap = Rect::default();
@@ -276,6 +302,7 @@ impl View {
             (list, Rect::default())
         };
         CenterLayout {
+            kind,
             header,
             top,
             list,
@@ -284,7 +311,7 @@ impl View {
             search,
             usage_chart,
             footer,
-            event_panel: if wide && show_event {
+            event_panel: if large && show_event {
                 event_list
             } else {
                 event_panel
@@ -395,7 +422,7 @@ impl View {
     fn render_footer(
         &self,
         area: Rect,
-        wide: bool,
+        large: bool,
         title: Option<(Line<'static>, super::event_detail::EventDetailColumns)>,
         buf: &mut Buffer,
     ) {
@@ -408,7 +435,7 @@ impl View {
                 .map(|(feedback, _)| feedback.line())
                 .or_else(|| self.selection_failure().map(|failure| failure.line())),
         }
-        .render(area, wide, buf);
+        .render(area, large, buf);
         self.viewport.borrow_mut().hint_targets.extend(keys);
     }
     pub(super) fn clear_overlay(&self, area: Rect, modal: bool, buf: &mut Buffer) {
@@ -545,20 +572,23 @@ impl View {
             Paragraph::new(lines).render(body, buf);
             self.render_footer(
                 inset(layout.footer),
-                area.width >= WIDE_LAYOUT_COLUMNS,
+                layout.kind == ScreenLayout::Large,
                 None,
                 buf,
             );
             return;
         }
+        if layout.kind == ScreenLayout::Small {
+            rule(layout.gap, buf);
+        }
         for y in layout.gap.y..layout.gap.bottom() {
-            if layout.gap.width > 1 {
+            if layout.kind != ScreenLayout::Small && layout.gap.width > 1 {
                 buf[(layout.gap.x + HORIZONTAL_PADDING, y)]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
         }
-        let event_separator = (area.width >= WIDE_LAYOUT_COLUMNS
+        let event_separator = (layout.kind == ScreenLayout::Large
             && !layout.event_panel.is_empty()
             && layout.event_panel.x > layout.top.x)
             .then(|| layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1));
@@ -611,13 +641,13 @@ impl View {
         let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
         self.render_footer(
             inset(layout.footer),
-            area.width >= WIDE_LAYOUT_COLUMNS,
+            layout.kind == ScreenLayout::Large,
             footer_title,
             buf,
         );
         self.render_frame_labels(navigation_layout, layout, area, buf, now);
         let mut separators = vec![];
-        if !layout.gap.is_empty() && layout.gap.width > 1 {
+        if layout.kind != ScreenLayout::Small && !layout.gap.is_empty() && layout.gap.width > 1 {
             separators.push((
                 layout.gap.x + HORIZONTAL_PADDING,
                 layout.gap.y,
@@ -643,10 +673,16 @@ impl View {
         buf: &mut Buffer,
         now: DateTime<Utc>,
     ) {
-        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        let kind = layout.kind;
+        let large = kind == ScreenLayout::Large;
         let at = |rect: Rect, y| Rect::new(rect.x, y, rect.width, 1).intersection(area);
-        let left = baseline.gap.x + HORIZONTAL_PADDING;
-        let right = if wide && !baseline.event_panel.is_empty() {
+        let small = kind == ScreenLayout::Small;
+        let left = if small {
+            area.x
+        } else {
+            baseline.gap.x + HORIZONTAL_PADDING
+        };
+        let right = if large && !baseline.event_panel.is_empty() {
             baseline.event_panel.x - HORIZONTAL_PADDING
         } else {
             area.right()
@@ -658,7 +694,11 @@ impl View {
             1,
         )
         .intersection(area);
-        let status = at(title, layout.header.y + 1).intersection(layout.header);
+        let status = if small && !layout.gap.is_empty() {
+            at(title, layout.gap.y)
+        } else {
+            at(title, layout.header.y + 1).intersection(layout.header)
+        };
         let status = if status.is_empty() {
             Rect::default()
         } else {
@@ -676,11 +716,14 @@ impl View {
             .map(|x| buf[(x, status.y)].clone())
             .collect::<Vec<_>>();
 
+        if small {
+            self.render_event_model(at(area, layout.header.y + 1), Rect::default(), true, buf);
+        }
         if !baseline.event_panel.is_empty() {
             let borders = [
                 at(
                     baseline.event_panel,
-                    if wide {
+                    if large {
                         layout.header.bottom().saturating_sub(1)
                     } else {
                         layout.prompt_bottom_rule.y
@@ -688,7 +731,7 @@ impl View {
                 ),
                 at(
                     baseline.event_panel,
-                    if wide {
+                    if large {
                         layout.prompt_top_rule.y
                     } else {
                         layout.event_detail_top_rule.y
@@ -709,12 +752,12 @@ impl View {
                     },
                 ];
             }
-            let model_y = if wide {
+            let model_y = if large {
                 layout.prompt_top_rule.y
             } else {
                 layout.prompt_bottom_rule.y
             };
-            let event_left = if wide {
+            let event_left = if large {
                 baseline
                     .event_panel
                     .x
@@ -722,7 +765,7 @@ impl View {
             } else {
                 area.x
             };
-            let jump_y = if self.event_list.sort == EventSort::Duration {
+            let jump_y = if !small && self.event_list.sort == EventSort::Duration {
                 borders[1].y
             } else {
                 model_y
@@ -736,18 +779,18 @@ impl View {
             let mut jump_buffer = Buffer::empty(jump_rule);
             self.render_event_jump(jump_rule, &mut jump_buffer);
             let jump = self.viewport.borrow().event_label;
-            let model_left = if !wide && baseline.gap.width > 0 {
+            let model_left = if !large && baseline.gap.width > 0 {
                 left
             } else {
                 event_left
             };
-            let baseline_model_y = if wide {
+            let baseline_model_y = if large {
                 baseline.prompt_top_rule.y
             } else {
                 baseline.prompt_bottom_rule.y
             };
             let baseline_jump_y = if self.event_list.sort == EventSort::Duration {
-                if wide {
+                if large {
                     baseline.prompt_top_rule.y
                 } else {
                     baseline.event_detail_top_rule.y
@@ -760,16 +803,19 @@ impl View {
             } else {
                 Rect::default()
             };
-            self.render_event_model(
-                Rect::new(
-                    model_left,
-                    model_y,
-                    area.right().saturating_sub(model_left),
-                    1,
-                ),
-                reservation,
-                buf,
-            );
+            if !small {
+                self.render_event_model(
+                    Rect::new(
+                        model_left,
+                        model_y,
+                        area.right().saturating_sub(model_left),
+                        1,
+                    ),
+                    reservation,
+                    false,
+                    buf,
+                );
+            }
             let mut occupied = self
                 .viewport
                 .borrow()
@@ -798,17 +844,28 @@ impl View {
                     Rect::default()
                 };
             }
-            let baseline_filter_y = if wide {
+            let baseline_filter_y = if large {
                 baseline.prompt_top_rule.y
             } else {
                 baseline.event_detail_top_rule.y
             };
             let merged = borders[1].y == model_y && baseline_filter_y != baseline_model_y;
-            self.render_event_filter(borders[1], merged, &occupied, buf);
-            self.render_activity_strip(at(baseline.list, layout.prompt_top_rule.y), buf, now);
+            self.render_event_filter(
+                if small { borders[0] } else { borders[1] },
+                merged && !small,
+                kind,
+                &occupied,
+                buf,
+            );
+            if !small {
+                self.render_activity_strip(at(baseline.list, layout.prompt_top_rule.y), buf, now);
+            }
         }
         if !title.is_empty() && baseline.task_details.width > 0 {
             self.render_title_rule(title, buf);
+        }
+        if small && !layout.gap.is_empty() {
+            self.render_activity_strip(layout.gap, buf, now);
         }
         // A whole status label yields on overlap, including its surrounding spaces.
         let mut x = status.x;
@@ -821,8 +878,9 @@ impl View {
             while x < status.right() && status_labels[(x, status.y)] != status_base[(x, status.y)] {
                 x += 1;
             }
-            if (start..x)
-                .all(|column| buf[(column, status.y)] == before[usize::from(column - status.x)])
+            if (small && !layout.gap.is_empty())
+                || (start..x)
+                    .all(|column| buf[(column, status.y)] == before[usize::from(column - status.x)])
             {
                 for column in start..x {
                     buf[(column, status.y)] = status_labels[(column, status.y)].clone();
@@ -1152,7 +1210,14 @@ impl View {
         viewport.task_details_links.extend(links);
     }
 
-    fn render_event_filter(&self, rule: Rect, merged: bool, occupied: &[Rect], buf: &mut Buffer) {
+    fn render_event_filter(
+        &self,
+        rule: Rect,
+        merged: bool,
+        layout: ScreenLayout,
+        occupied: &[Rect],
+        buf: &mut Buffer,
+    ) {
         let title = match self.event_list.filter {
             crate::event::EventFilter::All => return,
             crate::event::EventFilter::Message => "Assistant",
@@ -1162,7 +1227,10 @@ impl View {
         if rule.is_empty() || rule.width < width + 4 {
             return;
         }
-        let (header, label) = centered_rule_label(Line::from(title), rule);
+        let (header, mut label) = centered_rule_label(Line::from(title), rule);
+        if layout == ScreenLayout::Small {
+            label.x = rule.x;
+        }
         let label = if merged {
             let Some(label) = place_frame_label(label, rule.x, occupied) else {
                 return;
@@ -1184,8 +1252,8 @@ impl View {
         line(header, label, buf);
     }
 
-    /// Groups the model and effort on the left; each value opens its own picker.
-    fn render_event_model(&self, rule: Rect, reservation: Rect, buf: &mut Buffer) {
+    /// Places model and effort together or at opposite ends; each value opens its own picker.
+    fn render_event_model(&self, rule: Rect, reservation: Rect, ends: bool, buf: &mut Buffer) {
         let draft = self.selected_draft();
         let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
@@ -1220,6 +1288,23 @@ impl View {
                     .map(|value| (value, field))
             })
             .collect();
+        if ends {
+            let value = |field| {
+                values
+                    .iter()
+                    .find(|(_, key)| *key == field)
+                    .map(|(text, _)| Line::from(text.clone()).style(style::time_style()))
+            };
+            let (model, effort) =
+                render_rule_ends(rule, 0, value(Field::Model), value(Field::Effort), buf);
+            let mut viewport = self.viewport.borrow_mut();
+            for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
+                if let Some(rect) = rect {
+                    viewport.field_targets.push((rect, field));
+                }
+            }
+            return;
+        }
         for (index, (value, field)) in values.iter().enumerate() {
             let gap = if index == 0 {
                 0
@@ -2432,8 +2517,9 @@ mod background_title_tests {
             view.event_list.restoring = false;
             view.render(area, &mut buf);
             let viewport = view.viewport.borrow();
-            let top = viewport.event_borders[0];
-            let y = viewport.event_borders[1].y;
+            let small = ScreenLayout::for_width(width) == ScreenLayout::Small;
+            let other = viewport.event_borders[usize::from(small)];
+            let y = viewport.event_borders[usize::from(!small)].y;
             let label = Rect::new(viewport.event_panel.right() + 1 - 10, y, 10, 1);
             let text: String = (label.x..label.right())
                 .map(|x| buf[(x, y)].symbol())
@@ -2455,7 +2541,7 @@ mod background_title_tests {
             for (target, _) in &viewport.field_targets {
                 assert!(!target.intersects(label), "width {width}: {target:?}");
             }
-            let text: String = (0..width).map(|x| buf[(x, top.y)].symbol()).collect();
+            let text: String = (0..width).map(|x| buf[(x, other.y)].symbol()).collect();
             assert!(!text.contains("duration"), "width {width}: {text}");
         }
     }

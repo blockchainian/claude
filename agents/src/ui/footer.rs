@@ -1,7 +1,7 @@
 //! The footer row: key hints on the left, the scrolled-off section title in the middle and
-//! feedback, such as a copy confirmation or an error, on the right. A narrow layout has no
-//! middle, so the title takes the right whenever no feedback shows. Feedback too wide for the
-//! right grows leftward over the middle and then the hints, and is clipped to the row.
+//! feedback, such as a copy confirmation or an error, on the right. The medium and small layouts
+//! have no middle, so the title takes the right whenever no feedback shows. Feedback too wide
+//! for the right grows leftward over the middle and then the hints, and is clipped to the row.
 
 use super::event_detail::EventDetailColumns;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
@@ -45,7 +45,12 @@ pub(super) struct Footer {
 }
 
 impl Footer {
-    pub(super) fn render(self, area: Rect, wide: bool, buf: &mut Buffer) -> Vec<hints::HintTarget> {
+    pub(super) fn render(
+        self,
+        area: Rect,
+        large: bool,
+        buf: &mut Buffer,
+    ) -> Vec<hints::HintTarget> {
         let mut keys = hints::action_targets(
             &self.hints,
             area,
@@ -79,14 +84,14 @@ impl Footer {
                 }
             }
             feedback.render(Rect::new(x, area.y, width, 1), buf);
-            if !wide {
+            if !large {
                 return keys;
             }
             end = x.saturating_sub(2);
         }
         if let Some((title, columns)) = self.title {
             let span = Rect::new(start, area.y, end.saturating_sub(start), 1);
-            render_title(title, columns, span, wide, buf);
+            render_title(title, columns, span, large, buf);
         }
         keys
     }

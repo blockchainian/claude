@@ -629,16 +629,16 @@ fn event_detail_footer_shows_the_scrolled_off_title() {
             "hints stay: {scrolled}"
         );
         let x = column_of(scrolled, &title).unwrap_or_else(|| panic!("{scrolled}"));
-        if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        if super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large {
             assert_eq!(
                 x, title_x,
-                "wide layouts center the footer title: {scrolled}"
+                "large layouts center the footer title: {scrolled}"
             );
         } else {
             assert_eq!(
                 x + title.width() + 2,
                 time_x,
-                "narrow layouts end it before the time column: {scrolled}"
+                "medium and small layouts end it before the time column: {scrolled}"
             );
         }
         assert!(scrolled[..].chars().skip(time_x).all(|c| c == ' '));
@@ -653,7 +653,7 @@ fn event_detail_footer_shows_the_scrolled_off_title() {
 }
 
 #[test]
-fn footer_feedback_takes_the_right_and_a_narrow_title_yields_to_it() {
+fn footer_feedback_takes_the_right_and_a_medium_title_yields_to_it() {
     for width in [100, 160] {
         let (mut view, _) = fixture(true);
         let hints = screen_rows(&view, width, 40).last().unwrap().clone();
@@ -665,10 +665,10 @@ fn footer_feedback_takes_the_right_and_a_narrow_title_yields_to_it() {
         assert!(footer.trim_end().ends_with("Copied message"), "{footer}");
         let title = titled[hints.len()..].trim();
         assert!(!title.is_empty(), "{titled}");
-        if width >= super::render::WIDE_LAYOUT_COLUMNS {
-            assert!(footer.contains(title), "wide keeps the middle: {footer}");
+        if super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large {
+            assert!(footer.contains(title), "large keeps the middle: {footer}");
         } else {
-            assert!(!footer.contains(title), "narrow has no middle: {footer}");
+            assert!(!footer.contains(title), "medium has no middle: {footer}");
         }
     }
 }
@@ -782,7 +782,10 @@ fn recorded_tool_footer(forward: bool) {
         let centered =
             super::centering::centered_x(columns.panel, columns.text, title.width() as u16);
         let start = 1 + view.center_footer_hints().width() as u16 + 2;
-        let expected = if width >= super::render::WIDE_LAYOUT_COLUMNS && centered >= start {
+        let expected = if super::render::ScreenLayout::for_width(width)
+            == super::render::ScreenLayout::Large
+            && centered >= start
+        {
             centered
         } else {
             columns.text.right() - title.width() as u16
@@ -850,7 +853,7 @@ fn output_border_jump(bottom: bool) {
             let event_scroll = view.event_list.scroll.get();
             let output = view.viewport.borrow().event_detail;
             let y = if bottom { height - 2 } else { output.y };
-            // The narrow layout shares this rule with the event list.
+            // The medium layout shares this rule with the event list.
             let x = view.viewport.borrow().event_panel.x;
             if bottom {
                 assert_eq!(buffer[(x, y)].symbol(), "─", "missing lower rule");

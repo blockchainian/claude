@@ -101,15 +101,19 @@ fn event_border_places_model_label_and_effort_targets_in_both_layouts() {
                 .find(|(_, field)| *field == Field::Effort)
                 .unwrap()
                 .0;
-            let y = if width >= 150 {
+            let y = if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 layout.event_panel.bottom()
             } else {
                 layout.event_panel.y - 1
             };
             assert_eq!(model.y, y);
             assert_eq!(effort.y, y);
-            // The narrow layout starts them at the midline, under the task's folder.
-            let start = if width >= 150 {
+            // The medium layout starts them at the midline, under the task's folder.
+            let start = if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 layout.event_panel.x
             } else {
                 layout.gap.x + super::super::render::HORIZONTAL_PADDING + 2
@@ -153,12 +157,16 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
                 let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
                 view.render(buf.area, &mut buf);
                 let viewport = view.viewport.borrow();
-                let model_y = if width >= 150 {
+                let model_y = if crate::ui::render::ScreenLayout::for_width(width)
+                    == crate::ui::render::ScreenLayout::Large
+                {
                     viewport.event_panel.bottom()
                 } else {
                     viewport.event_panel.y - 1
                 };
-                let start = if width >= 150 {
+                let start = if crate::ui::render::ScreenLayout::for_width(width)
+                    == crate::ui::render::ScreenLayout::Large
+                {
                     viewport.event_panel.x
                 } else {
                     view.center_layout(buf.area).gap.x + 3

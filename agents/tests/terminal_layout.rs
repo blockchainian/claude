@@ -789,7 +789,7 @@ fn terminal_leaving_list_search_preserves_event_detail() {
             "search-exit-escape"
         });
         tmux.run(&["resize-window", "-t", "probe", "-x", "120", "-y", "50"]);
-        // The wide screen also has long rules; wait for the narrow panel divider
+        // The large screen also has long rules; wait for the medium panel divider
         // before deriving mouse coordinates from the rendered prompt and detail.
         tmux.wait_for(|capture| {
             capture.lines().nth(1).is_some_and(|line| {
@@ -916,11 +916,7 @@ fn terminal_dashboard_tabs_and_footer() {
         assert!(rows[0].contains("Inactive 1"), "{capture}");
         assert!(rows[1].contains("──"), "{capture}");
         assert!(!capture.contains("Agent command center"), "{capture}");
-        assert_eq!(
-            rows[44].trim(),
-            "? help",
-            "{capture}"
-        );
+        assert_eq!(rows[44].trim(), "? help", "{capture}");
         let path = std::env::temp_dir().join(format!("agents-dashboard-{width}x45.txt"));
         std::fs::write(&path, &capture).unwrap();
         println!(
@@ -3380,15 +3376,15 @@ fn terminal_filtered_event_labels_and_typed_prompts() {
         });
         let rows: Vec<_> = initial.lines().collect();
         let model_y = rows.iter().position(|row| row.contains("medium")).unwrap();
-        let wide = width >= 150;
-        let event_left = if wide {
+        let large = width >= 150;
+        let event_left = if large {
             rows[2][..rows[2].rfind('│').unwrap()].width() + 2
         } else {
             1
         };
-        let top_border_y = if wide { 1 } else { model_y };
-        let event_top = if wide { 2 } else { model_y + 1 };
-        let event_bottom = if wide {
+        let top_border_y = if large { 1 } else { model_y };
+        let event_top = if large { 2 } else { model_y + 1 };
+        let event_bottom = if large {
             model_y
         } else {
             (event_top..rows.len())

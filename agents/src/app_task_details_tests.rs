@@ -175,7 +175,7 @@ fn app_task_details_without_pr_has_only_folder_link_and_truncated_branch() {
         let separators: Vec<_> = (0..width)
             .filter(|&x| cell_text(buffer, x, 2) == "│")
             .collect();
-        let left = separators[0] + 2;
+        let left = if width < 80 { 1 } else { separators[0] + 2 };
         let end = if width >= 150 {
             separators[1] - 1
         } else {

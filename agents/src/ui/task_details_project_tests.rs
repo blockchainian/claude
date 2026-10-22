@@ -138,7 +138,14 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             if pr {
                 let (rect, _) = &links[1];
                 assert_eq!(rect.y, folder.y);
-                assert_eq!(rect.right(), task_details.right() - u16::from(width < 150));
+                assert_eq!(
+                    rect.right(),
+                    task_details.right()
+                        - u16::from(
+                            crate::ui::render::ScreenLayout::for_width(width)
+                                != crate::ui::render::ScreenLayout::Large
+                        )
+                );
                 assert_eq!(
                     (rect.x..rect.right())
                         .map(|x| visible(&buf[(x, rect.y)]))

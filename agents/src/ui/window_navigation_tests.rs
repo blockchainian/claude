@@ -9,9 +9,9 @@ fn chord(view: &mut View, direction: char) -> Option<Action> {
 }
 
 #[test]
-fn window_navigation_all_directions_in_both_layouts() {
+fn window_navigation_all_directions_in_three_layouts() {
     use Panel::*;
-    for width in [100, 200] {
+    for width in [70, 100, 200] {
         for terminal in [false, true] {
             let bottom = EventDetail;
             let expected = if width == 200 {
@@ -22,10 +22,18 @@ fn window_navigation_all_directions_in_both_layouts() {
                     (Prompt, [Prompt, bottom, TaskList, Prompt]),
                     (bottom, [bottom, bottom, Prompt, bottom]),
                 ]
-            } else {
+            } else if width >= 80 {
                 vec![
                     (TaskList, [TaskList, Prompt, TaskList, TaskDetails]),
                     (TaskDetails, [TaskList, Prompt, TaskDetails, TaskDetails]),
+                    (Prompt, [Prompt, EventList, TaskList, Prompt]),
+                    (EventList, [EventList, bottom, Prompt, EventList]),
+                    (bottom, [bottom, bottom, EventList, bottom]),
+                ]
+            } else {
+                vec![
+                    (TaskList, [TaskList, TaskDetails, TaskList, TaskList]),
+                    (TaskDetails, [TaskDetails, Prompt, TaskList, TaskDetails]),
                     (Prompt, [Prompt, EventList, TaskList, Prompt]),
                     (EventList, [EventList, bottom, Prompt, EventList]),
                     (bottom, [bottom, bottom, EventList, bottom]),
@@ -398,7 +406,7 @@ fn zoom_key(view: &mut View, key: char, modifiers: KeyModifiers) {
 }
 
 #[test]
-fn panel_zoom_narrow_detail_has_no_collapsed_frame() {
+fn panel_zoom_medium_detail_has_no_collapsed_frame() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 92, 110, now);
     view.set_active_panel(Panel::EventDetail);
@@ -510,7 +518,7 @@ fn panel_zoom_collapsed_panels_keep_frame_labels() {
 }
 
 #[test]
-fn panel_zoom_rects_and_reset_in_both_layouts() {
+fn panel_zoom_rects_and_reset_in_large_and_medium_layouts() {
     for width in [120, 200] {
         for panel in [
             Panel::TaskList,
@@ -821,12 +829,12 @@ fn prompt_up_without_zoom(width: u16) {
 }
 
 #[test]
-fn wide_prompt_up_without_zoom_keeps_task_list_destination() {
+fn large_prompt_up_without_zoom_keeps_task_list_destination() {
     prompt_up_without_zoom(200);
 }
 
 #[test]
-fn narrow_prompt_up_without_zoom_keeps_task_list_destination() {
+fn medium_prompt_up_without_zoom_keeps_task_list_destination() {
     prompt_up_without_zoom(120);
 }
 
@@ -949,4 +957,83 @@ fn hidden_focus_navigation_recovers_without_resize_notification() {
             }
         }
     }
+}
+
+#[test]
+fn small_prompt_up_without_zoom_keeps_task_list_destination() {
+    prompt_up_without_zoom(70);
+}
+
+#[test]
+fn small_task_panel_width_zoom_changes_nothing() {
+    for panel in [Panel::TaskList, Panel::TaskDetails] {
+        for height_zoom in [false, true] {
+            for modifiers in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+                let (mut view, now) = event_fixture();
+                let area = Rect::new(0, 0, 70, 60);
+                event_screen(&view, 70, 60, now);
+                view.set_active_panel(panel);
+                if height_zoom {
+                    zoom_key(&mut view, '_', modifiers);
+                }
+                let before = zoom_rects(view.center_layout(area));
+                let screen = event_screen(&view, 70, 60, now);
+                let zoom = (view.height_zoom, view.width_zoom);
+                zoom_key(&mut view, '|', modifiers);
+                assert_eq!(
+                    zoom_rects(view.center_layout(area)),
+                    before,
+                    "{panel:?} height_zoom={height_zoom}"
+                );
+                assert_eq!((view.height_zoom, view.width_zoom), zoom);
+                assert_eq!(event_screen(&view, 70, 60, now), screen);
+            }
+        }
+    }
+}
+
+#[test]
+fn small_height_zoom_keeps_medium_content_shares() {
+    for panel in [
+        Panel::TaskList,
+        Panel::TaskDetails,
+        Panel::EventList,
+        Panel::EventDetail,
+    ] {
+        let layout = |width| {
+            let (mut view, now) = event_fixture();
+            event_screen(&view, width, 60, now);
+            view.set_active_panel(panel);
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+            view.center_layout(Rect::new(0, 0, width, 60))
+        };
+        let small = layout(70);
+        let medium = layout(100);
+        for (small, medium) in [
+            (small.top, medium.top),
+            (small.prompt, medium.prompt),
+            (small.event_panel, medium.event_panel),
+            (small.event_detail, medium.event_detail),
+            (small.footer, medium.footer),
+        ] {
+            assert_eq!(
+                (small.y, small.height),
+                (medium.y, medium.height),
+                "{panel:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn small_prompt_up_after_resize_ignores_medium_width_zoom_destination() {
+    let (mut view, now) = event_fixture();
+    event_screen(&view, 100, 60, now);
+    view.set_active_panel(Panel::TaskDetails);
+    zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+    view.resize(70, 60);
+    event_screen(&view, 70, 60, now);
+    view.set_active_panel(Panel::Prompt);
+    chord(&mut view, 'k');
+    assert_eq!(view.active_panel, Panel::TaskList);
 }

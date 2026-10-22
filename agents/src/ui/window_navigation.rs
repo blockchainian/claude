@@ -262,10 +262,15 @@ impl View {
             self.recover_visible_focus();
             return;
         };
-        // Prefer the sole width-expanded top panel; otherwise keep the task list destination.
+        // Small keeps the task list destination even after a width zoom in another layout.
+        // Other layouts prefer the sole width-expanded top panel.
         if source == Panel::Prompt && direction == 'k' && !panels[0].1.is_empty() {
             let target = self
                 .width_zoom
+                .filter(|_| {
+                    super::render::ScreenLayout::for_width(v.area.width)
+                        != super::render::ScreenLayout::Small
+                })
                 .filter(|panel| {
                     [
                         (Panel::TaskList, v.list),

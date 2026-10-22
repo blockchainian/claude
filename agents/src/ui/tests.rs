@@ -3073,7 +3073,9 @@ fn removal_dialog_centers_on_the_panels_above_the_prompt() {
         let mut buf = Buffer::empty(area);
         view.render(area, &mut buf);
         let layout = view.center_layout(area);
-        let right = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        let right = if super::render::ScreenLayout::for_width(width)
+            == super::render::ScreenLayout::Large
+        {
             layout.event_panel.right()
         } else {
             layout.task_details.right()
@@ -3234,7 +3236,9 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                 let mut buf = Buffer::empty(area);
                 view.render(area, &mut buf);
                 let layout = view.center_layout(area);
-                let y = if width >= 150 {
+                let y = if crate::ui::render::ScreenLayout::for_width(width)
+                    == crate::ui::render::ScreenLayout::Large
+                {
                     layout.event_panel.bottom()
                 } else {
                     layout.event_panel.y - 1
@@ -3250,7 +3254,9 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                     assert_eq!(
                         rect.x,
                         if field == Field::Model {
-                            (if width >= 150 {
+                            (if crate::ui::render::ScreenLayout::for_width(width)
+                                == crate::ui::render::ScreenLayout::Large
+                            {
                                 layout.event_panel.x - 2
                             } else {
                                 layout.gap.x + 1
@@ -3680,13 +3686,19 @@ mod task_details_header {
     fn rule_at_width(view: &View, now: chrono::DateTime<Utc>, width: u16) -> (Buffer, Rect) {
         let area = Rect::new(0, 0, width, 25);
         let layout = view.center_layout(area);
-        let y = layout.header.y + 1;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        (
-            buf,
-            Rect::new(layout.task_details.x, y, layout.task_details.width, 1),
-        )
+        let rule = if layout.kind == render::ScreenLayout::Small {
+            Rect::new(area.x, layout.gap.y, area.width, 1)
+        } else {
+            Rect::new(
+                layout.task_details.x,
+                layout.header.y + 1,
+                layout.task_details.width,
+                1,
+            )
+        };
+        (buf, rule)
     }
 
     fn label(buf: &Buffer, rule: Rect) -> String {
@@ -3801,7 +3813,7 @@ mod task_details_header {
     }
 
     #[test]
-    fn status_is_on_top_and_the_title_below_in_wide_and_narrow_layouts() {
+    fn status_is_on_top_and_the_title_below_in_large_and_medium_layouts() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
@@ -3816,7 +3828,7 @@ mod task_details_header {
     }
 
     #[test]
-    fn narrow_and_wide_truncate_the_title_below_the_status() {
+    fn medium_and_large_truncate_the_title_below_the_status() {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut row = session(
             "header",
@@ -3965,7 +3977,14 @@ mod task_details_header {
                 let expected = " Working ";
                 // The status centers on the whole segment between the separator's joint and the
                 // event list's joint or the screen's edge, not the space left of the time.
-                let segment = top.width + if width >= 150 { 4 } else { 3 };
+                let segment = top.width
+                    + if crate::ui::render::ScreenLayout::for_width(width)
+                        == crate::ui::render::ScreenLayout::Large
+                    {
+                        4
+                    } else {
+                        3
+                    };
                 let start = top.x + (segment - expected.width() as u16) / 2 - 2;
                 for (offset, symbol) in expected.chars().enumerate() {
                     assert_eq!(
@@ -3975,7 +3994,11 @@ mod task_details_header {
                 }
                 assert!((top.x..start).all(|x| buf[(x, top.y)].symbol() == "─"));
                 // The time ends a space before the event list's joint or the screen's edge.
-                let time_end = top.right() - u16::from(width < 150);
+                let time_end = top.right()
+                    - u16::from(
+                        crate::ui::render::ScreenLayout::for_width(width)
+                            != crate::ui::render::ScreenLayout::Large,
+                    );
                 assert!(
                     (start + expected.width() as u16..time_end - " 3h 12m ".len() as u16)
                         .all(|x| buf[(x, top.y)].symbol() == "─")
@@ -4009,7 +4032,9 @@ mod task_details_header {
                             .chars()
                             .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
                     );
-                    if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
+                    if super::super::render::ScreenLayout::for_width(width)
+                        == super::super::render::ScreenLayout::Large
+                    {
                         assert_eq!(
                             view.viewport.borrow().event_jump.y,
                             layout.event_panel.bottom()
@@ -4034,6 +4059,9 @@ mod task_details_header {
                 1,
             );
             let width = rule.width;
+            let small = render::ScreenLayout::for_width(columns) == render::ScreenLayout::Small;
+            let segment_width = width + if small { 0 } else { 3 };
+            let content_offset = if small { 0 } else { 2 };
             let text = (rule.x..rule.right())
                 .map(|x| cell_text(buf[(x, rule.y)].symbol()))
                 .collect::<String>();
@@ -4044,8 +4072,9 @@ mod task_details_header {
             // The centered status keeps elapsed's width and its spaces clear on both sides, plus
             // a status cell, two spaces and two rule cells.
             let elapsed_width = " 3h 12m ".len() as u16;
-            let reserved = if width + 3 >= 2 * elapsed_width + 7 {
-                assert!(top_text.ends_with(" 3h 12m╶"), "width {width}: {top_text}");
+            let reserved = if segment_width >= 2 * elapsed_width + 7 {
+                let elapsed_end = if small { " 3h 12m╶─" } else { " 3h 12m╶" };
+                assert!(top_text.ends_with(elapsed_end), "width {width}: {top_text}");
                 2 * elapsed_width
             } else {
                 assert!(!top_text.contains("3h 12m"), "width {width}: {top_text}");
@@ -4053,7 +4082,7 @@ mod task_details_header {
             };
             // The rule runs from the separator's joint to the screen's edge or the event list's joint,
             // a cell beyond the task details panel on each side.
-            let available = usize::from(width + 3).saturating_sub(6 + usize::from(reserved));
+            let available = usize::from(segment_width).saturating_sub(6 + usize::from(reserved));
             if available >= 1 {
                 let title = "Working";
                 let expected = if title.len() > available {
@@ -4062,7 +4091,8 @@ mod task_details_header {
                     title.to_owned()
                 };
                 let expected = format!(" {expected} ");
-                let start = (usize::from(width) + 3 - expected.chars().count()) / 2 - 2;
+                let start =
+                    (usize::from(segment_width) - expected.chars().count()) / 2 - content_offset;
                 let chars: Vec<_> = top_text.chars().collect();
                 assert_eq!(
                     chars[start..start + expected.chars().count()]
@@ -4083,13 +4113,20 @@ mod task_details_header {
         let layout = view.center_layout(area);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let top = Rect::new(
-            layout.task_details.x,
-            layout.header.y + 1,
-            layout.task_details.width,
-            1,
+        let top = Rect::new(area.x, layout.gap.y, area.width, 1);
+        let text = (top.x..top.right())
+            .map(|x| cell_text(buf[(x, top.y)].symbol()))
+            .collect::<String>();
+        let expected = " Worki… ";
+        let start = (usize::from(top.width) - expected.chars().count()) / 2;
+        assert_eq!(
+            text.chars()
+                .skip(start)
+                .take(expected.chars().count())
+                .collect::<String>(),
+            expected
         );
-        assert!(label(&buf, top).contains("Working"), "{}", label(&buf, top));
+        assert!(text.ends_with(" 3h 12m╶─"), "{text}");
     }
 }
 
@@ -4842,17 +4879,17 @@ fn task_rows_start_at_left_padding_without_marker_and_click_correctly() {
 }
 
 #[test]
-fn task_metadata_narrow_100_columns() {
+fn task_metadata_medium_100_columns() {
     assert_task_metadata(100, true, true);
 }
 
 #[test]
-fn task_metadata_wide_150_columns() {
+fn task_metadata_large_150_columns() {
     assert_task_metadata(150, true, false);
 }
 
 #[test]
-fn task_metadata_wide_200_columns() {
+fn task_metadata_large_200_columns() {
     assert_task_metadata(200, true, true);
 }
 
@@ -5057,7 +5094,10 @@ fn dashboard_event_bodies_center_on_the_panel() {
                         .unwrap_or(Color::Reset)
                 );
             }
-            if width >= 150 && event.kind == crate::event::Kind::Assistant {
+            if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+                && event.kind == crate::event::Kind::Assistant
+            {
                 let detail = view.center_layout(area).event_detail;
                 let header: String = (detail.x..detail.right())
                     .map(|x| cell_text(buf[(x, detail.y + 1)].symbol()))
@@ -5116,7 +5156,9 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 usize::from(last - first + 1)
             );
             assert_eq!(view.event_count(area), usize::from(last - first + 1));
-            if width >= 150 {
+            if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 let rule_y = layout.prompt.y - 1;
                 assert_eq!(layout.list.bottom(), rule_y);
                 assert_eq!(layout.task_details.bottom(), rule_y);
@@ -5162,8 +5204,10 @@ fn dashboard_screen_padding_is_one_cell() {
         assert_eq!(view.viewport.borrow().tab_bar.x, 1);
         for x in 1..width - 1 {
             if x < layout.task_details.x || x >= layout.task_details.right() {
-                let joint =
-                    x == layout.gap.x + 1 || (width >= 150 && x == layout.event_panel.x - 2);
+                let joint = x == layout.gap.x + 1
+                    || (crate::ui::render::ScreenLayout::for_width(width)
+                        == crate::ui::render::ScreenLayout::Large
+                        && x == layout.event_panel.x - 2);
                 assert_eq!(
                     cell_text(buf[(x, 1)].symbol()),
                     if joint { "┬" } else { "─" }
@@ -5277,11 +5321,12 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
             let area = Rect::new(0, 0, width, 60);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);
-            let wide = width >= 150;
+            let large =
+                super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large;
             let separators: Vec<_> = (0..width)
                 .filter(|&x| buf[(x, 2)].symbol() == "│")
                 .collect();
-            let left = if wide { separators[1] + 2 } else { 1 };
+            let left = if large { separators[1] + 2 } else { 1 };
             let y = view.viewport.borrow().event_panel.y
                 + view
                     .viewport
@@ -5302,7 +5347,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
             );
             assert!((width - 11..width - 1).all(|x| buf[(x, y)].symbol() == " "));
             assert!(!event_panel.trim().is_empty(), "log body at {width}");
-            if wide {
+            if large {
                 assert_eq!(buf[(left - 1, y)].symbol(), " ");
             }
             let selected = {
@@ -5326,7 +5371,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
                 Some(selected),
                 "edge click at {width}"
             );
-            if wide {
+            if large {
                 let detail = view.viewport.borrow().event_text.area;
                 let columns = super::event_detail::event_detail_columns(
                     view.viewport.borrow().event_detail,
@@ -5349,7 +5394,9 @@ fn dashboard_event_search_uses_the_row_padding() {
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let left = if width >= 150 {
+        let left = if crate::ui::render::ScreenLayout::for_width(width)
+            == crate::ui::render::ScreenLayout::Large
+        {
             2 * ((width - 8) / 4) + 7
         } else {
             1
@@ -6085,7 +6132,7 @@ fn task_event_shows_only_visible_events_and_hides_without_selection() {
 }
 
 #[test]
-fn center_layout_narrow_buffer_ranges_at_120_columns() {
+fn center_layout_medium_buffer_ranges_at_120_columns() {
     let (view, now) = event_fixture();
     let area = Rect::new(0, 0, 120, 60);
     let mut buf = Buffer::empty(area);
@@ -6103,14 +6150,14 @@ fn center_layout_narrow_buffer_ranges_at_120_columns() {
 }
 
 #[test]
-fn center_layout_wide_splits_content_by_golden_ratio_across_sizes() {
+fn center_layout_large_splits_content_by_golden_ratio_across_sizes() {
     for (width, height) in [(200, 60), (200, 61), (180, 40), (160, 50), (150, 50)] {
         assert_content_shares_buffer(width, height, "");
     }
 }
 
 #[test]
-fn center_layout_wide_golden_content_buffer_at_200x45() {
+fn center_layout_large_golden_content_buffer_at_200x45() {
     assert_content_shares_buffer(200, 45, "");
 }
 
@@ -6136,14 +6183,14 @@ fn center_layout_content_shares_with_growing_input() {
 }
 
 #[test]
-fn center_layout_narrow_balances_inner_content_across_sizes() {
+fn center_layout_medium_balances_inner_content_across_sizes() {
     for (width, height) in [(120, 60), (120, 61), (100, 40), (149, 50)] {
         assert_content_shares_buffer(width, height, "");
     }
 }
 
 #[test]
-fn center_layout_narrow_equal_content_buffer_at_100x45() {
+fn center_layout_medium_equal_content_buffer_at_100x45() {
     assert_content_shares_buffer(100, 45, "");
 }
 
@@ -6157,27 +6204,27 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
     let top = (0..height)
         .filter(|&y| buf[(layout.gap.x + 1, y)].symbol() == "│")
         .count() as u16;
-    let wide = width >= super::render::WIDE_LAYOUT_COLUMNS;
+    let large = super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large;
     let available = height
         - layout.header.height
         - layout.footer.height
         - layout.prompt.height
         - 2
-        - u16::from(!wide);
+        - u16::from(!large);
     let detail = layout.event_detail.height.saturating_sub(1);
     // Count output content between its two rules.
     assert_eq!(detail, layout.footer.y - layout.event_detail.y - 2);
-    let heights = if wide {
+    let heights = if large {
         vec![top, detail]
     } else {
         vec![top, layout.event_panel.height, detail]
     };
     assert_eq!(heights.iter().sum::<u16>() + 1, available);
     assert!(heights.windows(2).all(|pair| pair[0] >= pair[1]));
-    if !wide {
+    if !large {
         assert!(heights[0] - heights[heights.len() - 1] <= 2);
     }
-    let expected = if wide {
+    let expected = if large {
         let upper = (u32::from(available) * 618 / 1000) as u16;
         (upper, upper, available - upper - 1)
     } else {
@@ -6195,7 +6242,7 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
     assert_eq!(layout.task_details.height, top);
     assert_eq!(layout.prompt.y, layout.task_details.bottom() + 1);
     let status_left = layout.gap.x + 1;
-    let status_right = if wide {
+    let status_right = if large {
         layout.event_panel.x - 1
     } else {
         area.right()
@@ -6212,7 +6259,7 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
         buf[(layout.task_details.x, layout.event_detail.y)].symbol(),
         "─"
     );
-    if wide {
+    if large {
         assert_eq!(layout.prompt.bottom(), layout.event_detail.y);
     } else {
         assert_eq!(layout.prompt.bottom() + 1, layout.event_panel.y);
@@ -6223,16 +6270,16 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
 }
 
 #[test]
-fn center_layout_wide_buffer_ranges_at_200_columns() {
-    assert_wide_buffer_ranges(200, [1..49, 52..100, 103..199]);
+fn center_layout_large_buffer_ranges_at_200_columns() {
+    assert_large_buffer_ranges(200, [1..49, 52..100, 103..199]);
 }
 
 #[test]
-fn center_layout_wide_buffer_ranges_at_151_columns() {
-    assert_wide_buffer_ranges(151, [1..36, 39..74, 77..150]);
+fn center_layout_large_buffer_ranges_at_151_columns() {
+    assert_large_buffer_ranges(151, [1..36, 39..74, 77..150]);
 }
 
-fn assert_wide_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
+fn assert_large_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
     let (view, now) = event_fixture();
     let area = Rect::new(0, 0, width, 60);
     let mut buf = Buffer::empty(area);
@@ -6272,7 +6319,9 @@ fn center_layout_golden_rects_follow_each_area() {
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 2));
         assert_eq!(layout.list, Rect::new(6, 9, list_width, body_height));
-        let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        let bottom = if super::render::ScreenLayout::for_width(width)
+            == super::render::ScreenLayout::Large
+        {
             assert_eq!(layout.event_panel.y, layout.list.y);
             assert_eq!(layout.event_panel.width, width - 8 - 2 * list_width);
             layout.event_detail
@@ -8325,9 +8374,9 @@ fn task_event_selected_tool_layout_is_cached_until_selection_or_width_changes() 
     let open = event_screen(&view, 100, 28, now);
     assert!(view.viewport.borrow().event_detail_layout.is_some());
     assert_eq!(event_screen(&view, 100, 28, now), open);
-    let narrow = event_screen(&view, 60, 28, now);
-    assert_ne!(narrow, open);
-    assert!(narrow.contains('…'));
+    let small = event_screen(&view, 60, 28, now);
+    assert_ne!(small, open);
+    assert!(small.contains('…'));
     assert!(
         view.viewport
             .borrow()
@@ -9281,7 +9330,7 @@ fn real_tabs_copy_as_displayed_spaces_and_allow_partial_selection() {
 }
 
 #[test]
-fn narrow_scrolled_tool_label_drag_stays_inside_the_buffer() {
+fn small_scrolled_tool_label_drag_stays_inside_the_buffer() {
     let (mut view, now) = open_tool_fixture();
     let mut event = view.event_panel[7].clone();
     event.calls[0].input = vec![crate::event::Section::Diff {
@@ -9651,7 +9700,9 @@ fn event_new_button_keeps_right_alignment_and_target() {
             let layout = view.center_layout(Rect::new(0, 0, width, 40));
             let viewport = view.viewport.borrow();
             let latest = viewport.event_jump;
-            let border_y = if width >= 150 {
+            let border_y = if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 layout.event_panel.bottom()
             } else {
                 layout.event_panel.y - 1
@@ -10057,7 +10108,7 @@ mod codex_exit_tests;
 mod task_details_tasks;
 
 #[test]
-fn wide_separators_join_the_rules_above_and_below() {
+fn large_separators_join_the_rules_above_and_below() {
     let (view, now) = column_padding_fixture();
     for width in [150, 200, 240] {
         let area = Rect::new(0, 0, width, 60);
@@ -10111,7 +10162,9 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
         assert_eq!(cell.symbol(), "╴", "width {width}");
         assert_eq!(cell.style(), buf[(joint, y)].style());
         assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
-        if width >= 150 {
+        if crate::ui::render::ScreenLayout::for_width(width)
+            == crate::ui::render::ScreenLayout::Large
+        {
             let joint = layout.event_panel.x - 2;
             for (x, y, symbol) in [
                 (joint - 1, layout.event_panel.y - 1, "╶"),
@@ -10389,7 +10442,7 @@ fn event_border_double_clicks_respect_shared_output_border() {
         click(&mut view, event_panel.bottom());
         assert_eq!(view.visible_event(), Some(&oldest));
         click(&mut view, event_panel.bottom());
-        if width < super::render::WIDE_LAYOUT_COLUMNS {
+        if super::render::ScreenLayout::for_width(width) != super::render::ScreenLayout::Large {
             assert_eq!(view.visible_event(), Some(&oldest));
             assert_eq!(view.event_scroll(), 0);
             assert!(view.active_panel == Panel::EventDetail);
@@ -10518,7 +10571,7 @@ fn event_border_bottom_double_click_selects_latest_only_when_not_shared() {
         );
         click_mouse(&mut view, mouse);
         click_mouse(&mut view, mouse);
-        if width < super::render::WIDE_LAYOUT_COLUMNS {
+        if super::render::ScreenLayout::for_width(width) != super::render::ScreenLayout::Large {
             assert_eq!(
                 view.visible_event(),
                 view.event_panel.first(),
@@ -10920,11 +10973,12 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
             if mode == crate::state::UsageView::Compact {
                 assert!(text.contains("Claude · Codex"), "{text}");
                 assert!(text.contains("21%") && text.contains("5%"), "{text}");
-                let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
-                    width / 2
-                } else {
-                    width * 3 / 4
-                };
+                let budget =
+                    if render::ScreenLayout::for_width(width) == render::ScreenLayout::Large {
+                        width / 2
+                    } else {
+                        width * 3 / 4
+                    };
                 assert!(target.width <= budget);
                 assert_eq!(target.x + target.width / 2, width / 2);
                 if width >= 149 {
@@ -11238,7 +11292,7 @@ fn task_details_weekly_usage_keeps_model_and_effort_targets() {
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
     let targets = &view.viewport.borrow().field_targets;
-    // The narrow layout starts them at the midline, under the task's folder.
+    // The medium layout starts them at the midline, under the task's folder.
     for (field, x, width) in [(Field::Model, 57, 11), (Field::Effort, 71, 4)] {
         let rect = targets
             .iter()

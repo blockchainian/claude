@@ -537,7 +537,16 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                 "width {width}"
             );
             assert_eq!(jump.width, label.width() as u16);
-            assert_eq!(jump.y, if width >= 150 { bottom.y } else { top.y });
+            assert_eq!(
+                jump.y,
+                if crate::ui::render::ScreenLayout::for_width(width)
+                    == crate::ui::render::ScreenLayout::Large
+                {
+                    bottom.y
+                } else {
+                    top.y
+                }
+            );
             let drawn: String = (jump.x..jump.right())
                 .map(|x| buf[(x, jump.y)].symbol())
                 .collect();
@@ -554,7 +563,11 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                     "{field:?} overlaps New at width {width}"
                 );
             }
-            assert_eq!(top.intersects(jump), width < 150);
+            assert_eq!(
+                top.intersects(jump),
+                crate::ui::render::ScreenLayout::for_width(width)
+                    != crate::ui::render::ScreenLayout::Large
+            );
             let border_click = (top.x, top.y);
             drop(viewport);
             // The plain top border selects oldest; the labeled button still selects latest.
