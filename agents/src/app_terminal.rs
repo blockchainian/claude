@@ -1019,11 +1019,6 @@ mod tests {
         restored_terminal_activation(crossterm::event::KeyCode::Enter);
     }
 
-    #[test]
-    fn restored_terminal_right_restores_last_panel() {
-        restored_terminal_activation(crossterm::event::KeyCode::Right);
-    }
-
     fn restored_terminal_activation(key: crossterm::event::KeyCode) {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 

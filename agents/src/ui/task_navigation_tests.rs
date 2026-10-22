@@ -26,10 +26,21 @@ fn tasks() -> View {
 }
 
 #[test]
+fn task_list_right_arrow_does_not_open() {
+    let mut view = tasks();
+    view.set_active_panel(Panel::TaskList);
+    let selected = view.selected_id().cloned();
+    assert_eq!(key(&mut view, KeyCode::Right), None);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert_eq!(view.selected_id(), selected.as_ref());
+    assert!(!view.task_entry_pending);
+    assert!(view.shown_terminal().is_none());
+}
+
+#[test]
 fn opening_keys_focus_prompt_and_control_l_is_inert() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
-        (KeyCode::Right, KeyModifiers::NONE),
         (KeyCode::Char('l'), KeyModifiers::CONTROL),
         (KeyCode::Char('o'), KeyModifiers::NONE),
     ] {
@@ -141,7 +152,6 @@ fn escape_returns_across_tabs() {
 fn opening_show_more_still_loads_a_page() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
-        (KeyCode::Right, KeyModifiers::NONE),
         (KeyCode::Char('l'), KeyModifiers::CONTROL),
         (KeyCode::Char('o'), KeyModifiers::NONE),
     ] {
@@ -170,9 +180,10 @@ fn open_and_history_hints_match_keys() {
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(help.contains("→") && help.contains("Open"));
+    assert!(!help.contains("→"));
+    assert!(help.contains("Enter") && help.contains("Open"));
     assert!(!help.contains("⌃l"));
-    assert!(help.contains("Previous"));
+    assert!(help.contains("Back"));
     assert_eq!(view.center_footer_hints().to_string(), "? help");
 }
 

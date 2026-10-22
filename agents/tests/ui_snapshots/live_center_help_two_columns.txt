@@ -7,6 +7,7 @@
  /          Search                       t      Sort
  g          Group                        Space  Filter
  n          New
+ Enter      Open
  o          Open
  f          Fork
  r          Rename
@@ -14,11 +15,10 @@
  a          Archive
  Backspace  Delete
  p          Pin/unpin
+ Esc        Back
+ ⌃c         Quit
 
  Navigate
- Enter       Open
- →           Open
- Esc         Previous
- ⌃c          Quit
+ ⌃w h/j/k/l  Focus left/down/up/right
  … resize to see all
  Esc back

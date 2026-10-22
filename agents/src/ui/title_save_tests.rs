@@ -404,11 +404,6 @@ fn revisited_task_o_restores_prompt() {
 }
 
 #[test]
-fn revisited_task_right_restores_prompt() {
-    assert_revisited_task_restores_prompt(KeyCode::Right);
-}
-
-#[test]
 fn revisited_task_row_click_keeps_delete() {
     let (_directory, mut view, id) = revisited_prompt_task(200);
     click_task_row(&mut view, &id);

@@ -98,6 +98,7 @@ impl View {
                     ("/", "Search"),
                     ("g", "Group"),
                     ("n", "New"),
+                    ("enter", "Open"),
                     ("o", "Open"),
                     ("f", "Fork"),
                     ("r", "Rename"),
@@ -105,6 +106,8 @@ impl View {
                     ("a", "Archive"),
                     ("backspace", "Delete"),
                     ("p", "Pin/unpin"),
+                    ("esc", "Back"),
+                    ("⌃c", "Quit"),
                 ],
             ),
             group(
@@ -114,10 +117,6 @@ impl View {
             group(
                 "Navigate",
                 &[
-                    ("enter", "Open"),
-                    ("→", "Open"),
-                    ("esc", "Previous"),
-                    ("⌃c", "Quit"),
                     ("⌃w h/j/k/l", "Focus left/down/up/right"),
                     ("⌃w _", "Max width"),
                     ("⌃w |", "Max height"),
@@ -349,7 +348,7 @@ mod tests {
                     lines[2].split_whitespace().collect::<Vec<_>>(),
                     ["Tasks", "Events", "Navigate"]
                 );
-                let tasks: Vec<_> = lines[3..14]
+                let tasks: Vec<_> = lines[3..17]
                     .iter()
                     .map(|line| line.split_whitespace().next().unwrap())
                     .collect();
@@ -360,13 +359,16 @@ mod tests {
                         "/",
                         "g",
                         "n",
+                        "Enter",
                         "o",
                         "f",
                         "r",
                         "x",
                         "a",
                         "Backspace",
-                        "p"
+                        "p",
+                        "Esc",
+                        "⌃c"
                     ]
                 );
             } else if width == 70 {
@@ -390,7 +392,7 @@ mod tests {
     fn task_help_describes_open_keys_without_control_l() {
         let view = View::default();
         let lines = view.center_help_lines(120);
-        for key in ["Enter", "→", "o"] {
+        for key in ["Enter", "o"] {
             assert!(
                 lines.iter().any(|line| {
                     let text = line.to_string();

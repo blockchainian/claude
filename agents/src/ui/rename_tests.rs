@@ -128,7 +128,6 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
 fn manager_thread_keys_match_ordinary_codex_threads() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
-        (KeyCode::Right, KeyModifiers::NONE),
         (KeyCode::Char('l'), KeyModifiers::CONTROL),
         (KeyCode::Char('o'), KeyModifiers::NONE),
         (KeyCode::Char('f'), KeyModifiers::NONE),
@@ -138,14 +137,14 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
         let session = view.selected_row().unwrap().clone();
         let expected = match code {
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l' | 'o') => None,
+            KeyCode::Enter | KeyCode::Char('l' | 'o') => None,
             KeyCode::Char('f') => Some(Action::Fork(session.id)),
             KeyCode::Char('n') => Some(Action::NewDraft { cwd: session.cwd }),
             KeyCode::Char('x') => Some(Action::Stop(session.id)),
             _ => unreachable!(),
         };
         assert_eq!(view.handle_key(KeyEvent::new(code, modifiers)), expected);
-        if matches!(code, KeyCode::Enter | KeyCode::Right | KeyCode::Char('o')) {
+        if matches!(code, KeyCode::Enter | KeyCode::Char('o')) {
             assert_eq!(view.active_panel, Panel::Prompt);
         } else if code == KeyCode::Char('l') {
             assert_eq!(view.active_panel, Panel::TaskList);

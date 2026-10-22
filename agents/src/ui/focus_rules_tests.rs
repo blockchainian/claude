@@ -78,7 +78,7 @@ fn rule_1_list_wheel_focuses_list_and_keeps_parked_focus() {
 }
 #[test]
 fn rule_2_open_keys_restore_pending_without_terminal() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = pending();
         assert_eq!(key(&mut view, code), None, "{code:?}");
         assert_eq!(view.active_panel, Panel::EventDetail);
@@ -138,7 +138,7 @@ fn rule_2_row_click_from_prompt_on_another_task_focuses_list() {
 }
 #[test]
 fn rule_3_open_keys_without_pending_enter_enabled_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = tasks();
         assert!(!view.task_entry_pending);
         assert!(view.input_disabled().is_none());
@@ -149,7 +149,7 @@ fn rule_3_open_keys_without_pending_enter_enabled_prompt() {
 }
 #[test]
 fn rule_3_open_keys_without_pending_leave_disabled_prompt_alone() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let (mut view, _) = event_fixture();
         assert!(view.input_disabled().is_some());
         assert_eq!(key(&mut view, code), None);
@@ -168,7 +168,7 @@ fn rule_3_click_unvisited_row_only_selects() {
 }
 #[test]
 fn rule_3_draft_open_keys_enter_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let directory = tempfile::tempdir().unwrap();
         let mut view = tasks();
         let id = view.add_draft(DraftSetup {
@@ -190,7 +190,7 @@ fn rule_3_draft_open_keys_enter_prompt() {
 }
 #[test]
 fn rule_3_subagent_open_keys_respect_disabled_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = tasks();
         let mut rows = view.rows.clone();
         let mut child = rows[0].clone();
@@ -212,7 +212,7 @@ fn rule_3_subagent_open_keys_respect_disabled_prompt() {
 }
 #[test]
 fn rule_4_show_more_open_keys_and_click_keep_loading_behavior() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = fixture();
         view.status_filter = 1;
         view.has_more = true;
@@ -521,7 +521,7 @@ fn confirmed_list_ctrl_l_does_nothing() {
 
 #[test]
 fn rule_2_disabled_pending_prompt_open_keys_stay_on_list() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = tasks();
         let first = view.selected;
         let other = *view
@@ -770,7 +770,7 @@ fn rule_1_list_browsing_question_does_not_activate_or_remember_it() {
 
 #[test]
 fn rule_2_pending_question_restores_despite_disabled_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = test_view(Grouping::Project, false);
         let question = question_session();
         let other = session("other", "Other task", SessionStatus::Ready, 10);

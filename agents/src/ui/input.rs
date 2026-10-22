@@ -1959,7 +1959,7 @@ impl View {
             return None;
         }
         match key.code {
-            KeyCode::Enter | KeyCode::Right => return self.activate(),
+            KeyCode::Enter => return self.activate(),
             KeyCode::Esc => self.select_previous_task(),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();

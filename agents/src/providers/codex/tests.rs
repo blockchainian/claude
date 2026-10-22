@@ -299,7 +299,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
         provider.capabilities(),
     )]));
     view.set_sessions(vec![session.clone()], false);
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut opening = View::new(Grouping::Project, false);
         opening.set_capabilities(HashMap::from([(
             ProviderId::Codex,
@@ -354,7 +354,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             None
@@ -864,7 +864,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
             .contains(Modifier::DIM)
     );
     assert!(lines[parent_row + 1].contains("Managed worker"));
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             None
@@ -1002,7 +1002,7 @@ fn spawn_children_cannot_resume_in_the_view() {
     )]));
     view.set_sessions(vec![parent, child], false);
     assert_eq!(view.selected_id(), Some(&id));
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             None

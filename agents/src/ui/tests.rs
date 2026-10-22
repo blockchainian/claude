@@ -2385,7 +2385,7 @@ fn task_list_actions() {
         key(&mut view, KeyCode::Char('f')),
         Some(Action::Fork(session_key("42")))
     );
-    assert_eq!(key(&mut view, KeyCode::Right), None);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(view.active_panel, Panel::Prompt);
     view.set_active_panel(Panel::TaskList);
     assert_eq!(
@@ -7612,7 +7612,7 @@ mod subagent_actions {
 
     #[test]
     fn open_keys_leave_disabled_subagent_on_list() {
-        for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+        for code in [KeyCode::Enter, KeyCode::Char('o')] {
             let mut view = fixture();
             assert_eq!(key(&mut view, code), None);
             assert_eq!(view.active_panel, Panel::TaskList);
@@ -7676,7 +7676,7 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
         ProviderId::Claude,
         Capabilities::default(),
     )]));
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         assert_eq!(key(&mut view, code), None);
         assert_eq!(view.active_panel, Panel::Prompt);
         view.set_active_panel(Panel::TaskList);
