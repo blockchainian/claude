@@ -2,10 +2,10 @@
 ────────────────────────────────────────────────────────────
  Shortcuts
 
- Tasks
- Tab/⇧Tab   Filter
- /          Search
- g          Group
+ Tasks                                   Events
+ Tab/⇧Tab   Filter                       /      Search
+ /          Search                       t      Sort
+ g          Group                        Space  Filter
  n          New
  o          Open
  f          Fork
@@ -16,9 +16,9 @@
  Backspace  Delete
  p          Pin/unpin
 
- Events
- /      Search
- t      Sort
- Space  Messages/tools
+ Navigate
+ ↑           Up
+ ↓           Down
+ ⌃w h/j/k/l  Focus left/down/up/right
  … resize to see all
  Esc back

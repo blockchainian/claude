@@ -113,7 +113,7 @@ impl View {
                 &[
                     ("/", "Search"),
                     ("t", "Sort"),
-                    ("space", "Messages/tools"),
+                    ("space", "Filter"),
                 ],
             ),
             group(
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn help_groups_tasks_events_and_navigation_at_existing_breakpoints() {
         let view = View::default();
-        for width in [120, 80, 40, 20] {
+        for width in [120, 70, 40, 20] {
             let lines: Vec<_> = view
                 .center_help_lines(width)
                 .iter()
@@ -375,7 +375,7 @@ mod tests {
                         "p"
                     ]
                 );
-            } else if width == 80 {
+            } else if width == 70 {
                 assert_eq!(
                     lines[2].split_whitespace().collect::<Vec<_>>(),
                     ["Tasks", "Events"]
