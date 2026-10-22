@@ -94,37 +94,38 @@ impl View {
             group(
                 "Tasks",
                 &[
-                    ("tab/⇧tab", "Filter"),
-                    ("/", "Search"),
-                    ("g", "Group"),
                     ("n", "New"),
-                    ("enter", "Open"),
-                    ("o", "Open"),
+                    ("enter, o", "Open"),
                     ("f", "Fork"),
                     ("r", "Rename"),
+                    ("p", "Pin/unpin"),
                     ("x", "Stop"),
                     ("a", "Archive"),
                     ("backspace", "Delete"),
-                    ("p", "Pin/unpin"),
                     ("esc", "Back"),
                     ("⌃c", "Quit"),
+                    ("", ""),
+                    ("tab/⇧tab", "Filter"),
+                    ("/", "Search"),
+                    ("g", "Group"),
                 ],
             ),
             group(
                 "Events",
-                &[("/", "Search"), ("t", "Sort"), ("space", "Filter")],
+                &[("space", "Filter"), ("/", "Search"), ("t", "Sort")],
             ),
             group(
                 "Navigate",
                 &[
                     ("⌃w h/j/k/l", "Focus left/down/up/right"),
-                    ("⌃w _", "Max width"),
-                    ("⌃w |", "Max height"),
-                    ("⌃w =", "Reset size"),
                     ("↑", "Up"),
                     ("↓", "Down"),
                     ("pgup", "Page up"),
                     ("pgdn", "Page down"),
+                    ("", ""),
+                    ("⌃w _", "Max width"),
+                    ("⌃w |", "Max height"),
+                    ("⌃w =", "Reset size"),
                 ],
             ),
         ];
@@ -350,25 +351,25 @@ mod tests {
                 );
                 let tasks: Vec<_> = lines[3..17]
                     .iter()
-                    .map(|line| line.split_whitespace().next().unwrap())
+                    .map(|line| line.split_whitespace().next().unwrap_or(""))
                     .collect();
                 assert_eq!(
                     tasks,
                     [
-                        "Tab/⇧Tab",
-                        "/",
-                        "g",
                         "n",
-                        "Enter",
-                        "o",
+                        "Enter,",
                         "f",
                         "r",
+                        "p",
                         "x",
                         "a",
                         "Backspace",
-                        "p",
                         "Esc",
-                        "⌃c"
+                        "⌃c",
+                        "",
+                        "Tab/⇧Tab",
+                        "/",
+                        "g"
                     ]
                 );
             } else if width == 70 {
@@ -392,18 +393,13 @@ mod tests {
     fn task_help_describes_open_keys_without_control_l() {
         let view = View::default();
         let lines = view.center_help_lines(120);
-        for key in ["Enter", "o"] {
-            assert!(
-                lines.iter().any(|line| {
-                    let text = line.to_string();
-                    text.split_whitespace()
-                        .collect::<Vec<_>>()
-                        .windows(2)
-                        .any(|words| words == [key, "Open"])
-                }),
-                "missing {key} Open"
-            );
-        }
+        assert!(lines.iter().any(|line| {
+            line.to_string()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .windows(3)
+                .any(|words| words == ["Enter,", "o", "Open"])
+        }));
         assert!(lines.iter().all(|line| !line.to_string().contains("⌃l")));
     }
 

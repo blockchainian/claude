@@ -22,6 +22,10 @@ impl Group {
             .unwrap_or(0);
         let mut lines = vec![self.title.bold().into()];
         for entry in &self.entries {
+            if entry.key.is_empty() {
+                lines.push(Line::default());
+                continue;
+            }
             let key = Span::styled(
                 super::key_name::display(&entry.key),
                 Style {

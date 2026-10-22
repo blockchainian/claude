@@ -3,20 +3,20 @@
  Shortcuts
 
  Tasks                                   Events
- Tab/⇧Tab   Filter                       /      Search
- /          Search                       t      Sort
- g          Group                        Space  Filter
- n          New
- Enter      Open
- o          Open
- f          Fork
+ n          New                          Space  Filter
+ Enter, o   Open                         /      Search
+ f          Fork                         t      Sort
  r          Rename
+ p          Pin/unpin
  x          Stop
  a          Archive
  Backspace  Delete
- p          Pin/unpin
  Esc        Back
  ⌃c         Quit
+
+ Tab/⇧Tab   Filter
+ /          Search
+ g          Group
 
  Navigate
  ⌃w h/j/k/l  Focus left/down/up/right

@@ -3,20 +3,20 @@
  Shortcuts
 
  Tasks                   Events           Navigate
- Tab/⇧Tab   Filter       /      Search    ⌃w h/j/k/l  Focus left/down/up/right
- /          Search       t      Sort      ⌃w _        Max width
- g          Group        Space  Filter    ⌃w |        Max height
- n          New                           ⌃w =        Reset size
- Enter      Open                          ↑           Up
- o          Open                          ↓           Down
- f          Fork                          PgUp        Page up
- r          Rename                        PgDn        Page down
+ n          New          Space  Filter    ⌃w h/j/k/l  Focus left/down/up/right
+ Enter, o   Open         /      Search    ↑           Up
+ f          Fork         t      Sort      ↓           Down
+ r          Rename                        PgUp        Page up
+ p          Pin/unpin                     PgDn        Page down
  x          Stop
- a          Archive
- Backspace  Delete
- p          Pin/unpin
- Esc        Back
+ a          Archive                       ⌃w _        Max width
+ Backspace  Delete                        ⌃w |        Max height
+ Esc        Back                          ⌃w =        Reset size
  ⌃c         Quit
+
+ Tab/⇧Tab   Filter
+ /          Search
+ g          Group
 
 
 
