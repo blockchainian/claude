@@ -167,11 +167,21 @@ impl View {
                 _ => {}
             }
         }
+        // With no top panels, the header already supplies the prompt's upper rule.
+        // Give the reclaimed row to the remaining panel below the prompt.
+        let prompt_top_gap = u16::from(show_event && top_height > 0);
+        if show_event && top_height == 0 {
+            if event_detail_height > 0 {
+                event_detail_height += 1;
+            } else if list_height > 0 {
+                list_height += 1;
+            }
+        }
         let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
         let top = body;
         let prompt = row(
             area,
-            header_height + top_height + u16::from(show_event),
+            header_height + top_height + prompt_top_gap,
             prompt_height,
         );
         let mut event_panel = if show_event && !wide {
@@ -183,12 +193,7 @@ impl View {
         let event_detail = if show_event {
             row(
                 area,
-                header_height
-                    + top_height
-                    + 1
-                    + prompt_height
-                    + u16::from(!wide && list_height > 0)
-                    + list_height,
+                prompt.bottom() - area.y + u16::from(!wide && list_height > 0) + list_height,
                 event_detail_height,
             )
         } else {
@@ -675,13 +680,15 @@ impl View {
                 buf,
             );
             self.render_event_filter(self.viewport.borrow().event_borders[1], buf);
-            let rule = Rect::new(
-                layout.list.x,
-                layout.prompt_top_rule.y,
-                layout.list.width,
-                1,
-            );
-            self.render_activity_strip(rule, buf, now);
+            if !layout.list.is_empty() {
+                let rule = Rect::new(
+                    layout.list.x,
+                    layout.prompt_top_rule.y,
+                    layout.list.width,
+                    1,
+                );
+                self.render_activity_strip(rule, buf, now);
+            }
         }
         if let Some(task_details_rule) = task_details_rule {
             // The title and status rules run from the separator's joint on the left to the event list's
@@ -702,7 +709,7 @@ impl View {
             self.render_title_rule(Rect::new(left, task_details_rule.y, right - left, 1), buf);
         }
         let mut separators = vec![];
-        if layout.gap.width > 1 {
+        if !layout.gap.is_empty() && layout.gap.width > 1 {
             separators.push((
                 layout.gap.x + HORIZONTAL_PADDING,
                 layout.gap.y,

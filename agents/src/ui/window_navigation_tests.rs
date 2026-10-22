@@ -398,6 +398,63 @@ fn zoom_key(view: &mut View, key: char, modifiers: KeyModifiers) {
 }
 
 #[test]
+fn panel_zoom_narrow_detail_has_no_collapsed_frame() {
+    let (mut view, now) = event_fixture();
+    event_screen(&view, 92, 110, now);
+    view.set_active_panel(Panel::EventDetail);
+    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+    let screen = event_screen(&view, 92, 110, now);
+    let rows: Vec<_> = screen.lines().collect();
+    assert!(
+        rows[2].contains("Task log example") && rows[4].contains("run tests"),
+        "expected the prompt and enlarged detail without collapsed frame rows:\n{}",
+        rows[..8].join("\n")
+    );
+}
+
+#[test]
+fn panel_zoom_collapsed_panels_leave_no_decorations() {
+    for width in [92, 149, 150, 200] {
+        for panel in [
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            for commands in ["", "_", "|", "_|", "|_"] {
+                let (mut view, now) = event_fixture();
+                view.set_activity(
+                    (0..400)
+                        .map(|age| crate::usage::bin_of(now) - age)
+                        .collect(),
+                );
+                event_screen(&view, width, 110, now);
+                view.set_active_panel(panel);
+                for command in commands.chars() {
+                    zoom_key(&mut view, command, KeyModifiers::SHIFT);
+                }
+                let layout = view.center_layout(Rect::new(0, 0, width, 110));
+                let screen = event_screen(&view, width, 110, now);
+                let rows: Vec<_> = screen.lines().collect();
+                let context = format!("{width} {panel:?} {commands}");
+                if layout.top.is_empty() {
+                    assert!(!rows[1].contains(['┬', '┴', '┼']), "{context}: {}", rows[1]);
+                    assert_eq!(layout.prompt.y, layout.header.bottom(), "{context}");
+                }
+                if layout.list.is_empty() {
+                    assert!(
+                        !screen
+                            .chars()
+                            .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
+                        "{context}: {screen}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn panel_zoom_rects_and_reset_in_both_layouts() {
     for width in [120, 200] {
         for panel in [
@@ -429,7 +486,8 @@ fn panel_zoom_rects_and_reset_in_both_layouts() {
                         1
                     } else {
                         0
-                    };
+                    }
+                    + u16::from(!in_top);
                 let rect = |l: &render::CenterLayout| match panel {
                     Panel::TaskList => l.list,
                     Panel::TaskDetails => l.task_details,
@@ -445,7 +503,6 @@ fn panel_zoom_rects_and_reset_in_both_layouts() {
                 } else {
                     original.header.bottom()
                         + original.prompt.height
-                        + 1
                         + u16::from(width < 150 && panel == Panel::EventList)
                 };
                 assert_eq!(
@@ -456,7 +513,7 @@ fn panel_zoom_rects_and_reset_in_both_layouts() {
                     tall.prompt,
                     Rect::new(
                         0,
-                        original.header.bottom() + if in_top { height + 1 } else { 1 },
+                        original.header.bottom() + if in_top { height + 1 } else { 0 },
                         width,
                         original.prompt.height
                     )
