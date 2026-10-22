@@ -31,8 +31,11 @@ fn terminal_style(style_for: fn(bool, bool, bool) -> Style) -> Style {
     }
 }
 
-#[cfg(not(test))]
 pub(super) fn selection_style() -> Style {
+    #[cfg(test)]
+    if let Some(style) = SELECTION_STYLE.get() {
+        return style;
+    }
     terminal_style(selection_style_for)
 }
 
@@ -51,25 +54,19 @@ pub(super) fn attention_title_style_for(no_color: bool, colors: bool, light: boo
 
 #[cfg(test)]
 thread_local! {
-    static SELECTION_STYLE: std::cell::Cell<Style> =
-        std::cell::Cell::new(selection_style_for(false, true, false));
-}
-
-#[cfg(test)]
-pub(super) fn selection_style() -> Style {
-    SELECTION_STYLE.get()
+    static SELECTION_STYLE: std::cell::Cell<Option<Style>> = const { std::cell::Cell::new(None) };
 }
 
 /// Supplies a terminal style for one test without changing the process environment.
 #[cfg(test)]
 pub(super) fn with_selection_style<T>(style: Style, run: impl FnOnce() -> T) -> T {
-    struct Restore(Style);
+    struct Restore(Option<Style>);
     impl Drop for Restore {
         fn drop(&mut self) {
             SELECTION_STYLE.set(self.0);
         }
     }
-    let _restore = Restore(SELECTION_STYLE.replace(style));
+    let _restore = Restore(SELECTION_STYLE.replace(Some(style)));
     run()
 }
 
@@ -77,16 +74,11 @@ pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> 
     if no_color || !colors {
         return Style::default().bold().reversed();
     }
-    if light {
-        Style::default()
+    Style {
+        bg: highlight::selection_background(),
+        ..Style::default()
             .bold()
-            .fg(crate::theme::text_accent_for(true))
-            .bg(Color::Indexed(111))
-    } else {
-        Style::default()
-            .bold()
-            .fg(crate::theme::text_accent_for(false))
-            .bg(Color::Indexed(233))
+            .fg(crate::theme::text_accent_for(light))
     }
 }
 pub(super) fn active_tab_style() -> Style {
@@ -106,8 +98,8 @@ pub(super) fn inactive_tab_style() -> Style {
         ..Style::default().bold()
     }
 }
-pub(super) fn accent_color() -> Color {
-    Color::Cyan
+pub(super) fn accent_color() -> Option<Color> {
+    highlight::accent_color()
 }
 pub(super) fn thread_color(slot: usize) -> Color {
     crate::theme::accent(slot)
@@ -136,7 +128,7 @@ pub(super) fn event_body_style(kind: &crate::event::Kind, exit_code: Option<i64>
 }
 
 pub(super) fn error_style() -> Style {
-    Style::default().fg(Color::Red)
+    highlight::scope_style("message.error")
 }
 
 pub(super) fn time_style() -> Style {

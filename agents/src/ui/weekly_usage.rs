@@ -334,7 +334,11 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(!bar.is_empty());
             for cell in bar {
-                assert_eq!(cell.fg == ratatui::style::Color::Red, red, "{used}");
+                assert_eq!(
+                    cell.fg == ratatui::style::Color::Rgb(160, 99, 93),
+                    red,
+                    "{used}"
+                );
             }
         }
     }
@@ -366,7 +370,7 @@ mod tests {
                     let start = row[..start].chars().count();
                     for cell in &buf.content[start..start + name.len()] {
                         assert_eq!(
-                            cell.fg == ratatui::style::Color::Red,
+                            cell.fg == ratatui::style::Color::Rgb(160, 99, 93),
                             red,
                             "{view:?}, {used}, {name}"
                         );

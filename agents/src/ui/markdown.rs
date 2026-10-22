@@ -113,7 +113,9 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                     Tag::Link { .. } => writer.styles.push(style),
                     Tag::BlockQuote => {
                         writer.separate();
-                        writer.styles.push(style.green());
+                        writer
+                            .styles
+                            .push(style.patch(highlight::scope_style("markup.quote")));
                     }
                     Tag::CodeBlock(kind) => {
                         writer.separate();
@@ -125,7 +127,9 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                             CodeBlockKind::Indented => None,
                         };
                         writer.kind = Kind::Preformatted;
-                        writer.styles.push(style.cyan());
+                        writer
+                            .styles
+                            .push(style.patch(highlight::scope_style("markup.raw.block")));
                     }
                     Tag::List(start) => {
                         writer.flush();
@@ -662,6 +666,8 @@ mod tests {
 
     #[test]
     fn headings_quotes_and_code() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        highlight::use_theme(false, None).unwrap();
         for (source, modifier) in [
             ("# title", Modifier::BOLD),
             ("## title", Modifier::BOLD),
@@ -676,7 +682,7 @@ mod tests {
         }
         assert_eq!(
             render("> quote", 40)[0].spans[0].style.fg,
-            Some(Color::Green)
+            Some(Color::Rgb(74, 139, 79))
         );
         for source in ["```rust\n  code\nnext\n```", "      code\n    next"] {
             assert_eq!(plain(&render(source, 40)), ["  code", "next"]);

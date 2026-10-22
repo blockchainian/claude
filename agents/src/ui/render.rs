@@ -23,7 +23,13 @@ fn input_row(prompt: &str, edit: &line_edit::LineEdit, area: Rect) -> (Line<'sta
     let (text, caret) = edit.window(usize::from(area.width).saturating_sub(prompt_width));
     (
         Line::from(vec![
-            prompt.to_owned().cyan().bold(),
+            Span::styled(
+                prompt.to_owned(),
+                Style {
+                    fg: style::accent_color(),
+                    ..Style::default().bold()
+                },
+            ),
             text.to_owned().into(),
         ]),
         (prompt_width + usize::from(caret)).min(usize::from(area.width.saturating_sub(1))) as u16,

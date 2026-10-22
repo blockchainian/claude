@@ -3,7 +3,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Highlighter, Theme, ThemeSet};
 use syntect::parsing::{Scope, SyntaxReference, SyntaxSet};
@@ -22,10 +22,20 @@ thread_local! {
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 /// The theme for the current terminal background; `None` until a background is applied.
+#[cfg(not(test))]
 static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
     theme: None,
     generation: 0,
 });
+
+// Render tests change themes independently, including between frames of the same view.
+#[cfg(test)]
+thread_local! {
+    static THEME: Mutex<HighlightTheme> = const { Mutex::new(HighlightTheme {
+        theme: None,
+        generation: 0,
+    }) };
+}
 
 struct HighlightTheme {
     theme: Option<Theme>,
@@ -51,15 +61,16 @@ fn bundled_theme(light_background: bool) -> Theme {
 /// background; returns the reason when the file cannot be used, keeping the bundled theme.
 pub fn use_theme(light_background: bool, path: Option<&Path>) -> Result<(), String> {
     let (theme, result) = theme_for(light_background, path);
-    let mut current = locked_theme();
-    current.theme = Some(theme);
-    current.generation += 1;
+    with_current_theme(|current| {
+        current.theme = Some(theme);
+        current.generation += 1;
+    });
     result
 }
 
 /// Identifies the highlight theme used by cached styled lines.
 pub(super) fn theme_generation() -> u64 {
-    locked_theme().generation
+    with_current_theme(|current| current.generation)
 }
 
 fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), String>) {
@@ -73,16 +84,21 @@ fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), 
     }
 }
 
-fn locked_theme() -> MutexGuard<'static, HighlightTheme> {
-    THEME
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn with_current_theme<T>(f: impl FnOnce(&mut HighlightTheme) -> T) -> T {
+    let apply = |theme: &Mutex<HighlightTheme>| {
+        f(&mut theme
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+    };
+    #[cfg(test)]
+    return THEME.with(apply);
+    #[cfg(not(test))]
+    apply(&THEME)
 }
 
 /// Runs `f` with the current theme, the dark bundled theme before any background is applied.
 fn with_theme<T>(f: impl FnOnce(&Theme) -> T) -> T {
-    let mut theme = locked_theme();
-    f(theme.theme.get_or_insert_with(|| bundled_theme(false)))
+    with_current_theme(|current| f(current.theme.get_or_insert_with(|| bundled_theme(false))))
 }
 
 /// Token kinds emitted by the JSON pretty-printer, in the order returned by `json_styles`.
@@ -152,6 +168,25 @@ fn json_styles_for(theme: &Theme) -> [Style; 7] {
     })
 }
 
+/// A scope's foreground, resolved by syntect just like syntax-highlighted code.
+pub(super) fn scope_style(scope: &str) -> Style {
+    with_theme(|theme| {
+        let scope = Scope::new(scope).expect("UI theme scope is valid");
+        Style {
+            fg: terminal_color(Highlighter::new(theme).style_for_stack(&[scope]).foreground),
+            ..Style::default()
+        }
+    })
+}
+
+pub(super) fn selection_background() -> Option<Color> {
+    with_theme(|theme| theme.settings.selection.and_then(terminal_color))
+}
+
+pub(super) fn accent_color() -> Option<Color> {
+    with_theme(|theme| theme.settings.accent.and_then(terminal_color))
+}
+
 /// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.
 #[cfg(test)]
 pub(super) fn json_key_foreground() -> Color {
@@ -164,7 +199,25 @@ pub(super) fn json_key_foreground() -> Color {
 /// terminal's default foreground (`None`), and any other alpha is RGB.
 fn terminal_color(color: syntect::highlighting::Color) -> Option<Color> {
     match color.a {
-        0 => Some(Color::Indexed(color.r)),
+        0 => Some(match color.r {
+            0 => Color::Black,
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Yellow,
+            4 => Color::Blue,
+            5 => Color::Magenta,
+            6 => Color::Cyan,
+            7 => Color::Gray,
+            8 => Color::DarkGray,
+            9 => Color::LightRed,
+            10 => Color::LightGreen,
+            11 => Color::LightYellow,
+            12 => Color::LightBlue,
+            13 => Color::LightMagenta,
+            14 => Color::LightCyan,
+            15 => Color::White,
+            index => Color::Indexed(index),
+        }),
         1 => None,
         _ => Some(Color::Rgb(color.r, color.g, color.b)),
     }
@@ -360,16 +413,18 @@ pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// Unified diff hunks: removed lines red, added lines green, hunk headers dim.
+/// Unified diff hunks: theme foregrounds for removed and added lines, hunk headers dim.
 pub(super) fn diff_lines(text: &str) -> Vec<Line<'static>> {
+    let deleted = scope_style("markup.deleted");
+    let inserted = scope_style("markup.inserted");
     text.lines()
         .map(|line| {
             let style = if line.starts_with("@@") {
                 Style::default().add_modifier(Modifier::DIM)
             } else if line.starts_with('-') {
-                Style::default().fg(Color::Red)
+                deleted
             } else if line.starts_with('+') {
-                Style::default().fg(Color::Green)
+                inserted
             } else {
                 Style::default()
             };
@@ -381,6 +436,124 @@ pub(super) fn diff_lines(text: &str) -> Vec<Line<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_colors_follow_theme_changes() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                use_theme(false, None).unwrap();
+            }
+        }
+        let _restore = Restore;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("custom.tmTheme");
+        // Start with the real bundled theme, preserving its scope selectors.
+        let source = std::str::from_utf8(include_bytes!("../../themes/dark.tmTheme")).unwrap();
+        for (error, quote, selection, accent) in [
+            ("#123456", "#234567", "#345678", "#456789"),
+            ("#abcdef", "#bcdef0", "#cdef01", "#def012"),
+        ] {
+            let source = source
+                .replace("#a0635d", error)
+                .replace("#4a8b4f", quote)
+                .replace("#e9000000", selection)
+                .replacen("#06000000", accent, 1)
+                .replace("#06000000", "#56789a");
+            std::fs::write(&path, source).unwrap();
+            let generation = theme_generation();
+            use_theme(false, Some(&path)).unwrap();
+            assert!(theme_generation() > generation);
+            let rgb = |hex: &str| {
+                Some(Color::Rgb(
+                    u8::from_str_radix(&hex[1..3], 16).unwrap(),
+                    u8::from_str_radix(&hex[3..5], 16).unwrap(),
+                    u8::from_str_radix(&hex[5..7], 16).unwrap(),
+                ))
+            };
+            with_theme(|theme| {
+                assert_eq!(
+                    theme.settings.selection.and_then(terminal_color),
+                    rgb(selection)
+                );
+                assert_eq!(theme.settings.accent.and_then(terminal_color), rgb(accent));
+            });
+            let diff = diff_lines("-removed\n+added");
+            let quote_lines = super::super::markdown::render("> quote", 80);
+            let code = super::super::markdown::render("```\ncode\n```", 80);
+            assert_eq!(
+                [
+                    super::super::style::error_style().fg,
+                    super::super::style::selection_style().bg,
+                    super::super::style::accent_color(),
+                    quote_lines[0].spans[0].style.fg,
+                    code[0].spans[0].style.fg,
+                    diff[0].spans[0].style.fg,
+                    diff[1].spans[0].style.fg,
+                ],
+                [
+                    rgb(error),
+                    rgb(selection),
+                    rgb(accent),
+                    rgb(quote),
+                    Some(Color::Rgb(0x56, 0x78, 0x9a)),
+                    rgb(error),
+                    rgb(quote)
+                ]
+            );
+            assert!(diff.iter().all(|line| line.spans[0].style.bg.is_none()));
+        }
+        for (light, error, quote, selection) in [
+            (true, Color::Rgb(130, 7, 30), Color::Rgb(17, 99, 41), 111),
+            (false, Color::Rgb(160, 99, 93), Color::Rgb(74, 139, 79), 233),
+        ] {
+            use_theme(light, None).unwrap();
+            assert_eq!(super::super::style::error_style().fg, Some(error));
+            assert_eq!(
+                super::super::style::selection_style().bg,
+                Some(Color::Indexed(selection))
+            );
+            assert_eq!(super::super::style::accent_color(), Some(Color::Cyan));
+            assert_eq!(scope_style("markup.quote").fg, Some(quote));
+            assert_eq!(scope_style("markup.raw.block").fg, Some(Color::Cyan));
+            let diff = diff_lines("-removed\n+added");
+            assert_eq!(diff[0].spans[0].style.fg, Some(error));
+            assert_eq!(diff[1].spans[0].style.fg, Some(quote));
+        }
+        // An external theme may omit every UI setting and scope.
+        let mut minimal = plist::Value::from_reader_xml(std::io::Cursor::new(source)).unwrap();
+        let settings = minimal
+            .as_dictionary_mut()
+            .unwrap()
+            .get_mut("settings")
+            .unwrap()
+            .as_array_mut()
+            .unwrap();
+        settings.truncate(1);
+        let globals = settings[0]
+            .as_dictionary_mut()
+            .unwrap()
+            .get_mut("settings")
+            .unwrap()
+            .as_dictionary_mut()
+            .unwrap();
+        globals.remove("selection");
+        globals.remove("accent");
+        minimal.to_file_xml(&path).unwrap();
+        use_theme(false, Some(&path)).unwrap();
+        assert_eq!(super::super::style::selection_style().bg, None);
+        assert_eq!(super::super::style::accent_color(), None);
+        for scope in [
+            "markup.quote",
+            "markup.raw.block",
+            "message.error",
+            "markup.deleted",
+            "markup.inserted",
+        ] {
+            assert_eq!(scope_style(scope).fg, Some(Color::Indexed(23)));
+        }
+    }
 
     fn text(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
@@ -670,18 +843,43 @@ mod tests {
     fn theme_colors_decode_terminal_palette_alphas() {
         use syntect::highlighting::Color as ThemeColor;
         let color = |r, a| ThemeColor { r, g: 2, b: 3, a };
-        assert_eq!(terminal_color(color(4, 0)), Some(Color::Indexed(4)));
+        for (index, expected) in [
+            Color::Black,
+            Color::Red,
+            Color::Green,
+            Color::Yellow,
+            Color::Blue,
+            Color::Magenta,
+            Color::Cyan,
+            Color::Gray,
+            Color::DarkGray,
+            Color::LightRed,
+            Color::LightGreen,
+            Color::LightYellow,
+            Color::LightBlue,
+            Color::LightMagenta,
+            Color::LightCyan,
+            Color::White,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(terminal_color(color(index as u8, 0)), Some(expected));
+        }
+        assert_eq!(terminal_color(color(111, 0)), Some(Color::Indexed(111)));
         assert_eq!(terminal_color(color(4, 1)), None);
         assert_eq!(terminal_color(color(4, 0xff)), Some(Color::Rgb(4, 2, 3)));
     }
 
     #[test]
     fn diff_lines_colour_by_marker() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        use_theme(false, None).unwrap();
         let lines = diff_lines("@@ -1 +1 @@\n-old\n+new\n same");
         assert_eq!(text(&lines), ["@@ -1 +1 @@", "-old", "+new", " same"]);
         assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Red));
-        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Green));
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Rgb(160, 99, 93)));
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Rgb(74, 139, 79)));
         assert_eq!(lines[3].spans[0].style.fg, None);
     }
 }

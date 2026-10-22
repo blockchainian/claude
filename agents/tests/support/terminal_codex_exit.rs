@@ -89,14 +89,14 @@ fn terminal_codex_exit_sections() {
             let digit = start + marker.trim_end_matches(')').width() - 1;
             assert_eq!(
                 screen.cell(row as u16, digit as u16).unwrap().fgcolor(),
-                vt100::Color::Idx(1)
+                vt100::Color::Rgb(160, 99, 93)
             );
             assert_ne!(
                 screen
                     .cell(row as u16, (digit - 2) as u16)
                     .unwrap()
                     .fgcolor(),
-                vt100::Color::Idx(1)
+                vt100::Color::Rgb(160, 99, 93)
             );
         }
     }

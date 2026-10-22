@@ -22,7 +22,13 @@ impl Group {
             .unwrap_or(0);
         let mut lines = vec![self.title.bold().into()];
         for entry in &self.entries {
-            let key = entry.key.clone().fg(accent_color());
+            let key = Span::styled(
+                entry.key.clone(),
+                Style {
+                    fg: accent_color(),
+                    ..Style::default()
+                },
+            );
             let padding = " ".repeat(key_width.saturating_sub(key.width()) + 2);
             lines.push(vec![key, padding.into(), entry.action.into()].into());
         }

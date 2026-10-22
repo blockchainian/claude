@@ -9,10 +9,23 @@
 		<dict>
 			<key>settings</key>
 			<dict>
+				<key>selection</key>
+				<string>#e9000000</string>
+				<key>accent</key>
+				<string>#06000000</string>
 				<key>background</key>
 				<string>#0d1117</string>
 				<key>foreground</key>
 				<string>#17000000</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>scope</key>
+			<string>markup.raw.block</string>
+			<key>settings</key>
+			<dict>
+				<key>foreground</key>
+				<string>#06000000</string>
 			</dict>
 		</dict>
 		<dict>

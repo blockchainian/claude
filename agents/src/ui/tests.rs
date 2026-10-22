@@ -2390,6 +2390,7 @@ fn paging_tracks_headings_and_never_wraps() {
 }
 #[test]
 fn styles_and_unicode_clipping() {
+    super::highlight::use_theme(true, None).unwrap();
     use super::style::selection_style_for;
     assert_eq!(
         selection_style_for(false, true, true),
@@ -2398,6 +2399,7 @@ fn styles_and_unicode_clipping() {
             .fg(Color::Indexed(18))
             .bg(Color::Indexed(111))
     );
+    super::highlight::use_theme(false, None).unwrap();
     assert_eq!(
         selection_style_for(false, true, false),
         Style::default()
@@ -5832,6 +5834,8 @@ fn text_and_tool_styles_follow_neovim_accent_in_both_modes() {
 
 #[test]
 fn task_event_uses_cctail_colours_and_highlights_latest_time() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    super::highlight::use_theme(false, None).unwrap();
     use crate::event::Kind;
     use ratatui::style::Modifier;
     let (mut view, now) = event_fixture();
@@ -5845,7 +5849,7 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         (0, Color::Reset),
         (1, Color::Yellow),
         (2, crate::theme::text_accent_color()),
-        (3, Color::Red),
+        (3, Color::Rgb(160, 99, 93)),
         (4, Color::Reset),
     ] {
         let y = top + offset;
@@ -5871,8 +5875,8 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         (Kind::Agent, Color::Yellow),
         (Kind::Session, Color::Yellow),
         (Kind::Tool, crate::theme::text_accent_color()),
-        (Kind::Error, Color::Red),
-        (Kind::Denied, Color::Red),
+        (Kind::Error, Color::Rgb(160, 99, 93)),
+        (Kind::Denied, Color::Rgb(160, 99, 93)),
         (Kind::QueuedUser, Color::Reset),
         (Kind::QueuedSystem, crate::theme::text_accent_color()),
     ] {

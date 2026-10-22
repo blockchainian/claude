@@ -207,7 +207,10 @@ impl PromptBox {
         let style = if matches!(self.state, SendState::Failed(_)) && self.search.is_none() {
             style::error_style()
         } else if focused {
-            Style::default().cyan()
+            Style {
+                fg: style::accent_color(),
+                ..Style::default()
+            }
         } else {
             Style::default().dim()
         };
@@ -537,9 +540,13 @@ mod tests {
         assert_eq!(screen, "Task ❮ retry me  Claude attach timed out");
         let reason = 40 - "Claude attach timed out".len() as u16;
         for column in (0..7).chain(reason..40) {
-            assert_eq!(buffer[(column, 0)].fg, Color::Red, "column {column}");
+            assert_eq!(
+                buffer[(column, 0)].fg,
+                Color::Rgb(160, 99, 93),
+                "column {column}"
+            );
         }
-        assert_ne!(buffer[(7, 0)].fg, Color::Red);
+        assert_ne!(buffer[(7, 0)].fg, Color::Rgb(160, 99, 93));
         assert_eq!(editor.cursor(area, "Task"), Some((15, 0)));
         editor.state = SendState::Ready;
         assert!(!rendered(&editor, 40, None).contains("timed out"));

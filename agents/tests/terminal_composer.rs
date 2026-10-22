@@ -102,7 +102,7 @@ fn failed_send_shows_its_reason_in_red_in_tmux() {
     for column in start..=marker {
         assert_eq!(
             screen.cell(row, column).unwrap().fgcolor(),
-            vt100::Color::Idx(1),
+            vt100::Color::Rgb(160, 99, 93),
             "column {column}: {text}"
         );
     }
