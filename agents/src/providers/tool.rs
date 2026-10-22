@@ -1080,7 +1080,7 @@ pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>)
 pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> {
     let text = text.strip_prefix("Error: ").unwrap_or(text);
     let dismissed = |reason: &str| {
-        reason.starts_with("The user dismissed these questions.")
+        reason.starts_with("The user dismissed these questions because the message you sent with them was not shown.")
     };
     let said = if let Some(reason) = text.strip_prefix("PreToolUse:AskUserQuestion hook error: ") {
         if !dismissed(reason) && !reason.starts_with("The user wants to clarify these questions.") {
