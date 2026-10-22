@@ -26,8 +26,8 @@ mod terminal_tests;
 mod tests;
 
 use super::{
-    AccountUsageJob, Capabilities, Job, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
-    SessionInput, SessionKey, Snapshot, TerminalCommand, WeeklyUsageJob,
+    AccountUsageJob, Capabilities, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
+    SessionAction, SessionInput, SessionKey, Snapshot, TerminalCommand, WeeklyUsageJob,
 };
 #[cfg(test)]
 use crate::event;
@@ -815,11 +815,11 @@ impl Provider for CodexProvider {
         }
         Some(command)
     }
-    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<Job>> {
+    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<SessionAction>> {
         terminal::cleanup(&self.home, session)
     }
 
-    fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
+    fn send(&self, session: &Session, input: SessionInput) -> Option<SessionAction> {
         if !session.can_resume() {
             return None;
         }
@@ -882,7 +882,7 @@ impl Provider for CodexProvider {
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::set_name(&mut client, &session.id.id, name)
     }
-    fn archive(&self, session: &Session) -> io::Result<Job> {
+    fn archive(&self, session: &Session) -> io::Result<SessionAction> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
@@ -918,7 +918,7 @@ impl Provider for CodexProvider {
             app_server::thread::archive(&mut client, &id)
         }))
     }
-    fn delete(&self, session: &Session) -> io::Result<Job> {
+    fn delete(&self, session: &Session) -> io::Result<SessionAction> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }

@@ -34,8 +34,8 @@ mod weekly_usage;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
-    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, TerminalCommand,
-    TerminalInput,
+    Capabilities, Provider, ProviderId, SessionAction, SessionInput, SessionKey, Snapshot,
+    TerminalCommand, TerminalInput,
 };
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -916,7 +916,7 @@ impl Provider for ClaudeProvider {
         })
     }
 
-    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<Job>> {
+    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<SessionAction>> {
         if session.process.is_some() || self.terminal_question_pending(session) {
             return Ok(None);
         }
@@ -1084,7 +1084,7 @@ impl Provider for ClaudeProvider {
         created_job(output)
     }
 
-    fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
+    fn send(&self, session: &Session, input: SessionInput) -> Option<SessionAction> {
         if let SessionInput::Answer { ask, answer, .. } = &input {
             if ask.session != session.id {
                 return Some(Box::new(|| {
@@ -1202,12 +1202,12 @@ impl Provider for ClaudeProvider {
         Some(command)
     }
 
-    fn delete(&self, session: &Session) -> io::Result<Job> {
+    fn delete(&self, session: &Session) -> io::Result<SessionAction> {
         let config_dir = self.config_dir.clone();
         let session = session.clone();
         Ok(Box::new(move || delete_session(&config_dir, &session)))
     }
-    fn archive(&self, session: &Session) -> io::Result<Job> {
+    fn archive(&self, session: &Session) -> io::Result<SessionAction> {
         let config_dir = self.config_dir.clone();
         let session = session.clone();
         Ok(Box::new(move || {

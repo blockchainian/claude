@@ -7,7 +7,7 @@ use transcript_cache::{ActivityCache, FileStamp};
 use crate::model::Action;
 use crate::model::{DraftKey, Session, SessionStatus};
 use crate::providers::Snapshot;
-use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
+use crate::providers::{ProviderId, SessionAction, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Hub;
 use crate::state::Preferences;
@@ -1150,7 +1150,7 @@ impl App {
             .closing_terminals
             .get_mut(&id)
             .and_then(session_terminal::TerminalClose::take);
-        let job: Job = match closing {
+        let job: SessionAction = match closing {
             Some(close) => Box::new(move || {
                 close
                     .join()
@@ -1170,7 +1170,7 @@ impl App {
         }
     }
 
-    fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
+    fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: SessionAction) -> bool {
         if !self.pending_inputs.insert(id.clone()) {
             return false;
         }
@@ -1357,7 +1357,7 @@ impl App {
     fn run_session_job(
         &self,
         id: SessionKey,
-        job: Job,
+        job: SessionAction,
         name: &str,
         panic_message: &'static str,
         complete: fn(SessionKey, io::Result<()>) -> Input,

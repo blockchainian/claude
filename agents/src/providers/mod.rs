@@ -213,7 +213,8 @@ pub struct ResetCreditRedemption {
 pub type AccountUsageJob = Box<dyn FnOnce() -> io::Result<AccountUsage> + Send>;
 pub type ResetCreditJob = Box<dyn FnOnce() -> io::Result<ResetCreditRedemption> + Send>;
 
-pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
+/// A slow session operation that the dashboard runs on a background thread.
+pub type SessionAction = Box<dyn FnOnce() -> io::Result<()> + Send>;
 pub type CreateJob = Box<dyn FnOnce() -> io::Result<Output> + Send>;
 
 /// The program that shows a session and the bytes that detach its client on close.
@@ -265,7 +266,7 @@ pub trait Provider: Send {
         Err("Terminal is not supported")
     }
     /// Prepares cleanup for a session woken by opening its terminal, run after detaching.
-    fn terminal_cleanup(&self, _session: &Session) -> io::Result<Option<Job>> {
+    fn terminal_cleanup(&self, _session: &Session) -> io::Result<Option<SessionAction>> {
         Ok(None)
     }
     /// Routes input through the open terminal; `None` keeps the normal provider path.
@@ -281,7 +282,7 @@ pub trait Provider: Send {
     /// Directories watched for changes; missing directories are skipped.
     fn watch_roots(&self) -> io::Result<Vec<PathBuf>>;
     fn capabilities(&self) -> Capabilities;
-    fn send(&self, _session: &Session, _input: SessionInput) -> Option<Job> {
+    fn send(&self, _session: &Session, _input: SessionInput) -> Option<SessionAction> {
         None
     }
     fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<CreateJob>> {
@@ -344,9 +345,9 @@ pub trait Provider: Send {
         Err(io::ErrorKind::Unsupported.into())
     }
     /// Returns the job that permanently deletes the session, to run off the UI thread.
-    fn delete(&self, session: &Session) -> io::Result<Job>;
+    fn delete(&self, session: &Session) -> io::Result<SessionAction>;
     /// Returns the archive job to run off the UI thread.
-    fn archive(&self, session: &Session) -> io::Result<Job>;
+    fn archive(&self, session: &Session) -> io::Result<SessionAction>;
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {

@@ -232,7 +232,7 @@ impl App {
                         }
                         driver.paste(&text)?;
                         crate::providers::ScreenInput::write(&mut driver, submit)
-                    }) as crate::providers::Job
+                    }) as crate::providers::SessionAction
                 });
                 match job {
                     Ok(job) => {
