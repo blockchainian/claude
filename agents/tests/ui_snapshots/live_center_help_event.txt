@@ -7,14 +7,14 @@
  /          Search       t      Sort      ⌃w _        Max width
  g          Group        Space  Filter    ⌃w |        Max height
  n          New                           ⌃w =        Reset size
- o          Open                          Enter       Open
- f          Fork                          →           Open
- r          Rename                        Esc         Previous
- x          Stop                          ⌃c          Quit
- a          Archive                       ↑           Up
- Backspace  Delete                        ↓           Down
- p          Pin/unpin                     PgUp        Page up
-                                          PgDn        Page down
+ o          Open                          ↑           Up
+ f          Fork                          ↓           Down
+ r          Rename                        PgUp        Page up
+ x          Stop                          PgDn        Page down
+ a          Archive                       Enter       Open
+ Backspace  Delete                        →           Open
+ p          Pin/unpin                     Esc         Previous
+                                          ⌃c          Quit
 
 
 
