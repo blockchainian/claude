@@ -176,7 +176,7 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
       }
       const chunkOptions = { ...settings, selected: selection, ignored };
       const baseline = new Map(inputs);
-      const analysis = timedAnalyzeChunk(baseline, chunkOptions);
+      let analysis = timedAnalyzeChunk(baseline, chunkOptions);
       emit({ chunk: chunk.id, status: 'planned', names: analysis.candidates.length, frozen: analysis.statistics });
       const batches = timedPlanChunk(baseline, chunkOptions);
       const proposals = new Map();
@@ -238,6 +238,8 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
         journal.batch('program-resolved', names);
         after = timedApplyChunkRenames(baseline, names);
         const files = chunk.files.filter(file => !analysis.statistics.dynamicScope && selection.has(file) && !ignored.has(file));
+        releaseChunkAnalysis(baseline);
+        analysis = null;
         const results = new Array(files.length);
         let nextFile = 0, stopped = false;
         async function localWorker() {

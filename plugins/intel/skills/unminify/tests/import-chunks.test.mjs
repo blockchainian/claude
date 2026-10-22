@@ -32,9 +32,9 @@ test('compact chunk facts preserve baseline edits and binding checks', async () 
   assert.equal(analysis.files.size, 0);
 });
 
-// Observe real objects at the old cache insertion site without changing results.
-// Each callback executes while the validator still owns before/after/local trees.
-test('cached validation exposes three live whole-chunk Babel analyses', async () => {
+// Observe real objects at the cache insertion site without changing results.
+// Validation must not add whole-chunk trees to the naming analysis.
+test('cached validation retains only one whole-chunk Babel analysis', async () => {
   const { registerHooks } = await import('node:module');
   const refs = [], key = `__importChunkObserver${process.pid}`;
   let peak = 0;
@@ -58,7 +58,7 @@ test('cached validation exposes three live whole-chunk Babel analyses', async ()
     const names = chunkApi.resolveChunkNames(sources, proposals, options);
     const after = chunkApi.applyChunkRenames(sources, names);
     assert.equal(chunkApi.checkChunkRewrite(sources, after), null);
-    assert.ok(peak >= 3, `observed ${peak} real whole-chunk analyses`);
+    assert.equal(peak, 1, `observed ${peak} real whole-chunk analyses`);
     if (process.env.UNMINIFY_IMPORT_CHUNK_BASELINE === '1') assert.ok(peak <= 1, `observed ${peak} real whole-chunk analyses`);
   } finally { hooks.deregister(); delete globalThis[key]; }
 });
