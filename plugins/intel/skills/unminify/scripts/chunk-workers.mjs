@@ -51,7 +51,12 @@ export async function runChunkWorkers(jobs, { root, settings, selected, fragment
             for (const [file, source] of message.sources) sources.set(file, source);
             recordTimings(message.cpu_ms);
             emit({ chunk: job.id, status: 'cpu-timing', cpu_ms: message.cpu_ms, threadId: message.threadId });
-            finish(message.error ? Object.assign(new Error(message.error.message), message.error) : undefined, message);
+            const error = message.error ? Object.assign(new Error(message.error.message), message.error) : undefined;
+            if (error && error.code !== 'AUTH' && error.code !== 'USAGE_LIMIT') {
+              summary.exitCode = 1;
+              emit({ chunk: job.id, status: 'failed', reason: error.message });
+              finish(undefined, message);
+            } else finish(error, message);
           } else throw new Error(`unknown chunk worker message: ${message.type}`);
         } catch (error) { finish(error); }
       });
