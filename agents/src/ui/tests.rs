@@ -2016,7 +2016,7 @@ fn live_center_search_active() {
         screen(&view, 88, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
     );
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 13)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 11)));
 }
 #[test]
 fn show_more_is_only_listed_on_inactive() {
@@ -2442,8 +2442,10 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::Home);
     screen(&view, 110, 18);
     key(&mut view, KeyCode::PageDown);
-    assert_eq!(view.selected_id(), Some(&session_key("11")));
+    assert_eq!(view.selected_id(), Some(&session_key("10")));
     key(&mut view, KeyCode::PageUp);
+    assert_eq!(view.selected_id(), Some(&session_key("1")));
+    key(&mut view, KeyCode::Home);
     assert_eq!(view.selected_id(), Some(&session_key("0")));
     for _ in 0..40 {
         key(&mut view, KeyCode::PageDown);
@@ -3043,15 +3045,15 @@ fn live_center_delete_dialog() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(
-        buf[(6, 5)]
+        buf[(6, 4)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
-    assert!(buf[(6, 7)].modifier.contains(ratatui::style::Modifier::DIM));
+    assert!(buf[(6, 6)].modifier.contains(ratatui::style::Modifier::DIM));
     // A painted cell reports unset colours as Reset, so compare against a painted default cell.
     let mut expected = ratatui::buffer::Cell::default();
     expected.set_style(super::style::selection_style());
-    assert_eq!(buf[(6, 9)].style(), expected.style());
+    assert_eq!(buf[(6, 8)].style(), expected.style());
     for width in 0..100 {
         for height in 0..16 {
             let area = Rect::new(5, 8, width, height);
@@ -10678,6 +10680,11 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
         view.search.insert("Task");
         let layout = view.center_layout(area);
         assert_eq!(layout.usage_chart, baseline);
+        if baseline.is_empty() {
+            assert!(layout.search.is_empty());
+            assert!(layout.list.is_empty());
+            continue;
+        }
         assert_eq!(layout.search.y, baseline.bottom() - 1, "{width}x{height}");
         assert_eq!(layout.search.bottom(), baseline.bottom());
         assert_eq!(layout.list.y, baseline.y);

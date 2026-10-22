@@ -8,9 +8,7 @@
 
 
 
-
 ---
-
 
 
 
@@ -28,14 +26,13 @@ Create new branch
 
 
 
-
 feature/a
 main
 
 New branch ❯ feature/probe
 ---
  ○ named task                                            New                now │
-                                                                                ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
+────────────────────────────────────────────────────────────────────────────────┴╴repository ───────────────────── named task ────────────────── feature/probe╶─
  named task ❯ unfinished task
 ---
 
@@ -48,8 +45,7 @@ New branch ❯ feature/probe
 
 
 
-
 ---
  ○ named task                                            New                now │
-                                                                                ├╴repository ───────────────────── named task ────────────────── feature/probe╶─
+────────────────────────────────────────────────────────────────────────────────┴╴repository ───────────────────── named task ────────────────── feature/probe╶─
  named task ❯

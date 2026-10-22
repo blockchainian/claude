@@ -346,11 +346,7 @@ impl View {
             format!(" ↓ {} New ", self.event_list.unseen.get())
         };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
-        let right = viewport
-            .event_panel
-            .right()
-            .saturating_add(1)
-            .min(area.right());
+        let right = area.right();
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
         Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);

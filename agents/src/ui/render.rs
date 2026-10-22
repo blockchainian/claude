@@ -133,7 +133,7 @@ impl View {
         let (mut top_height, mut list_height, mut event_detail_height) = if !show_event {
             (
                 area.height
-                    .saturating_sub(header_height + footer_height + prompt_height),
+                    .saturating_sub(header_height + footer_height + prompt_height + 2),
                 0,
                 0,
             )
@@ -169,7 +169,7 @@ impl View {
         }
         // With no top panels, the header already supplies the prompt's upper rule.
         // Give the reclaimed row to the remaining panel below the prompt.
-        let prompt_top_gap = u16::from(show_event && top_height > 0);
+        let prompt_top_gap = u16::from(top_height > 0);
         if show_event && top_height == 0 {
             if event_detail_height > 0 {
                 event_detail_height += 1;
@@ -199,16 +199,14 @@ impl View {
         } else {
             Rect::default()
         };
-        let frame_rule = |y| {
-            if show_event {
-                row(area, y, 1)
-            } else {
-                Rect::default()
-            }
-        };
+        let frame_rule = |y| row(area, y, 1);
         let prompt_top_rule = frame_rule(prompt.y.saturating_sub(area.y + 1));
         let prompt_bottom_rule = frame_rule(prompt.bottom() - area.y);
-        let event_detail_top_rule = frame_rule(event_detail.y.saturating_sub(area.y));
+        let event_detail_top_rule = if show_event {
+            frame_rule(event_detail.y.saturating_sub(area.y))
+        } else {
+            prompt_bottom_rule
+        };
         let footer_rule = frame_rule(footer.y.saturating_sub(area.y + 1));
         let (body, mut event_list) = if wide && show_event {
             let column_width = (body.width - 2 * PANEL_GAP) / 4;
@@ -455,6 +453,7 @@ impl View {
             viewport.marker = None;
             viewport.field_targets.clear();
             viewport.task_details = Rect::default();
+            viewport.task_details_text = text_selection::TextRegion::default();
             viewport.task_details_title = Rect::default();
             viewport.title_input = Rect::default();
             viewport.task_details_input = Rect::default();
@@ -572,20 +571,7 @@ impl View {
         ] {
             rule(border, buf);
         }
-        let mut task_details = layout.task_details;
-        let task_details_rule = if task_details.is_empty() {
-            None
-        } else if !layout.prompt_top_rule.is_empty() {
-            Some(Rect::new(
-                task_details.x,
-                layout.prompt_top_rule.y,
-                task_details.width,
-                1,
-            ))
-        } else {
-            task_details.height = task_details.height.saturating_sub(1);
-            Some(row(layout.task_details, task_details.height, 1))
-        };
+        let task_details = layout.task_details;
         if !task_details.is_empty() {
             self.render_task_details(task_details, buf, now);
         }
@@ -615,93 +601,7 @@ impl View {
             footer_title,
             buf,
         );
-        if !layout.event_panel.is_empty() {
-            self.viewport.borrow_mut().event_borders = [
-                Rect::new(
-                    layout.event_panel.x,
-                    if area.width >= WIDE_LAYOUT_COLUMNS {
-                        layout.header.bottom().saturating_sub(1)
-                    } else {
-                        layout.prompt_bottom_rule.y
-                    },
-                    layout.event_panel.width,
-                    1,
-                ),
-                Rect::new(
-                    layout.event_panel.x,
-                    if area.width >= WIDE_LAYOUT_COLUMNS {
-                        layout.prompt_top_rule.y
-                    } else {
-                        layout.event_detail_top_rule.y
-                    },
-                    layout.event_panel.width,
-                    1,
-                ),
-            ];
-            let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.prompt_top_rule.y
-            } else {
-                layout.prompt_bottom_rule.y
-            };
-            // The model and effort sit between the separator's joint, or the screen's left
-            // edge without a separator, and the screen's right edge.
-            let left = event_separator.unwrap_or(area.x);
-            // The duration label sits on the border between the event list and its detail in both
-            // layouts; the New button, shown only in time order, shares the model's border.
-            let jump_y = if self.event_list.sort == EventSort::Duration {
-                self.viewport.borrow().event_borders[1].y
-            } else {
-                model_y
-            };
-            self.render_event_jump(
-                Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
-                buf,
-            );
-            // The narrow layout starts them at the midline, under the task's folder on the title
-            // rule.
-            let model_left = if area.width < WIDE_LAYOUT_COLUMNS && !layout.gap.is_empty() {
-                layout.gap.x + HORIZONTAL_PADDING
-            } else {
-                left
-            };
-            self.render_event_model(
-                Rect::new(
-                    model_left,
-                    model_y,
-                    area.right().saturating_sub(model_left),
-                    1,
-                ),
-                buf,
-            );
-            self.render_event_filter(self.viewport.borrow().event_borders[1], buf);
-            if !layout.list.is_empty() {
-                let rule = Rect::new(
-                    layout.list.x,
-                    layout.prompt_top_rule.y,
-                    layout.list.width,
-                    1,
-                );
-                self.render_activity_strip(rule, buf, now);
-            }
-        }
-        if let Some(task_details_rule) = task_details_rule {
-            // The title and status rules run from the separator's joint on the left to the event list's
-            // joint or the screen's right edge.
-            let left = layout.gap.x + HORIZONTAL_PADDING;
-            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
-                layout.event_panel.x - HORIZONTAL_PADDING
-            } else {
-                area.right()
-            };
-            if layout.header.height >= 2 {
-                self.render_status_rule(
-                    Rect::new(left, layout.header.y + 1, right - left, 1),
-                    buf,
-                    now,
-                );
-            }
-            self.render_title_rule(Rect::new(left, task_details_rule.y, right - left, 1), buf);
-        }
+        self.render_frame_labels(navigation_layout, layout, area, buf, now);
         let mut separators = vec![];
         if !layout.gap.is_empty() && layout.gap.width > 1 {
             separators.push((
@@ -720,6 +620,203 @@ impl View {
             self.viewport.borrow_mut().marker = None;
         }
     }
+    /// Labels keep their unzoomed columns while their frame rules move or coincide.
+    fn render_frame_labels(
+        &self,
+        baseline: CenterLayout,
+        layout: CenterLayout,
+        area: Rect,
+        buf: &mut Buffer,
+        now: DateTime<Utc>,
+    ) {
+        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        let at = |rect: Rect, y| Rect::new(rect.x, y, rect.width, 1).intersection(area);
+        let left = baseline.gap.x + HORIZONTAL_PADDING;
+        let right = if wide && !baseline.event_panel.is_empty() {
+            baseline.event_panel.x - HORIZONTAL_PADDING
+        } else {
+            area.right()
+        };
+        let title = Rect::new(
+            left,
+            layout.prompt_top_rule.y,
+            right.saturating_sub(left),
+            1,
+        )
+        .intersection(area);
+        let status = at(title, layout.header.y + 1).intersection(layout.header);
+        let status = if status.is_empty() {
+            Rect::default()
+        } else {
+            status
+        };
+        // Save the status labels separately so an input-side label takes precedence when
+        // rules coincide, without clearing unrelated status labels on the same rule.
+        let mut status_base = Buffer::empty(status);
+        rule(status, &mut status_base);
+        let mut status_labels = status_base.clone();
+        if !status.is_empty() {
+            self.render_status_rule(status, &mut status_labels, now);
+        }
+        let before = (status.x..status.right())
+            .map(|x| buf[(x, status.y)].clone())
+            .collect::<Vec<_>>();
+
+        if !baseline.event_panel.is_empty() {
+            let borders = [
+                at(
+                    baseline.event_panel,
+                    if wide {
+                        layout.header.bottom().saturating_sub(1)
+                    } else {
+                        layout.prompt_bottom_rule.y
+                    },
+                ),
+                at(
+                    baseline.event_panel,
+                    if wide {
+                        layout.prompt_top_rule.y
+                    } else {
+                        layout.event_detail_top_rule.y
+                    },
+                ),
+            ];
+            if !layout.event_panel.is_empty() {
+                self.viewport.borrow_mut().event_borders = [
+                    Rect {
+                        x: layout.event_panel.x,
+                        width: layout.event_panel.width,
+                        ..borders[0]
+                    },
+                    Rect {
+                        x: layout.event_panel.x,
+                        width: layout.event_panel.width,
+                        ..borders[1]
+                    },
+                ];
+            }
+            let model_y = if wide {
+                layout.prompt_top_rule.y
+            } else {
+                layout.prompt_bottom_rule.y
+            };
+            let event_left = if wide {
+                baseline
+                    .event_panel
+                    .x
+                    .saturating_sub(HORIZONTAL_PADDING + 1)
+            } else {
+                area.x
+            };
+            let jump_y = if self.event_list.sort == EventSort::Duration {
+                borders[1].y
+            } else {
+                model_y
+            };
+            let jump_rule = Rect::new(
+                event_left,
+                jump_y,
+                area.right().saturating_sub(event_left),
+                1,
+            );
+            let mut jump_buffer = Buffer::empty(jump_rule);
+            self.render_event_jump(jump_rule, &mut jump_buffer);
+            let jump = self.viewport.borrow().event_label;
+            let model_left = if !wide && baseline.gap.width > 0 {
+                left
+            } else {
+                event_left
+            };
+            let baseline_model_y = if wide {
+                baseline.prompt_top_rule.y
+            } else {
+                baseline.prompt_bottom_rule.y
+            };
+            let baseline_jump_y = if self.event_list.sort == EventSort::Duration {
+                if wide {
+                    baseline.prompt_top_rule.y
+                } else {
+                    baseline.event_detail_top_rule.y
+                }
+            } else {
+                baseline_model_y
+            };
+            let reservation = if baseline_jump_y == baseline_model_y {
+                jump
+            } else {
+                Rect::default()
+            };
+            self.render_event_model(
+                Rect::new(
+                    model_left,
+                    model_y,
+                    area.right().saturating_sub(model_left),
+                    1,
+                ),
+                reservation,
+                buf,
+            );
+            let mut occupied = self
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
+                .map(|(rect, _)| *rect)
+                .reduce(|left, right| left.union(right))
+                .map(|rect| Rect::new(rect.x - 1, rect.y, rect.width + 2, 1))
+                .into_iter()
+                .collect::<Vec<_>>();
+            let placed_jump = place_frame_label(jump, event_left, &occupied);
+            if let Some(placed) = placed_jump {
+                for offset in 0..jump.width {
+                    buf[(placed.x + offset, placed.y)] =
+                        jump_buffer[(jump.x + offset, jump.y)].clone();
+                }
+                occupied.push(placed);
+            }
+            {
+                let mut viewport = self.viewport.borrow_mut();
+                viewport.event_label = placed_jump.unwrap_or_default();
+                viewport.event_jump = if self.event_list.sort == EventSort::Time {
+                    viewport.event_label
+                } else {
+                    Rect::default()
+                };
+            }
+            let baseline_filter_y = if wide {
+                baseline.prompt_top_rule.y
+            } else {
+                baseline.event_detail_top_rule.y
+            };
+            let merged = borders[1].y == model_y && baseline_filter_y != baseline_model_y;
+            self.render_event_filter(borders[1], merged, &occupied, buf);
+            self.render_activity_strip(at(baseline.list, layout.prompt_top_rule.y), buf, now);
+        }
+        if !title.is_empty() && baseline.task_details.width > 0 {
+            self.render_title_rule(title, buf);
+        }
+        // A whole status label yields on overlap, including its surrounding spaces.
+        let mut x = status.x;
+        while x < status.right() {
+            if status_labels[(x, status.y)] == status_base[(x, status.y)] {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < status.right() && status_labels[(x, status.y)] != status_base[(x, status.y)] {
+                x += 1;
+            }
+            if (start..x)
+                .all(|column| buf[(column, status.y)] == before[usize::from(column - status.x)])
+            {
+                for column in start..x {
+                    buf[(column, status.y)] = status_labels[(column, status.y)].clone();
+                }
+            }
+        }
+    }
+
     pub(super) fn render_confirm_dialog(
         &self,
         dialog: &ConfirmDialog,
@@ -1041,7 +1138,7 @@ impl View {
         viewport.task_details_links.extend(links);
     }
 
-    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) {
+    fn render_event_filter(&self, rule: Rect, merged: bool, occupied: &[Rect], buf: &mut Buffer) {
         let title = match self.event_list.filter {
             crate::event::EventFilter::All => return,
             crate::event::EventFilter::Message => "Assistant",
@@ -1052,21 +1149,29 @@ impl View {
             return;
         }
         let (header, label) = centered_rule_label(Line::from(title), rule);
-        let viewport = self.viewport.borrow();
-        if label.intersects(viewport.event_label)
-            || viewport
-                .field_targets
-                .iter()
-                .any(|(target, _)| label.intersects(*target))
-        {
-            return;
-        }
+        let label = if merged {
+            let Some(label) = place_frame_label(label, rule.x, occupied) else {
+                return;
+            };
+            label
+        } else {
+            let viewport = self.viewport.borrow();
+            if label.intersects(viewport.event_label)
+                || viewport
+                    .field_targets
+                    .iter()
+                    .any(|(target, _)| label.intersects(*target))
+            {
+                return;
+            }
+            label
+        };
         Clear.render(label, buf);
         line(header, label, buf);
     }
 
     /// Groups the model and effort on the left; each value opens its own picker.
-    fn render_event_model(&self, rule: Rect, buf: &mut Buffer) {
+    fn render_event_model(&self, rule: Rect, reservation: Rect, buf: &mut Buffer) {
         let draft = self.selected_draft();
         let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
@@ -1087,9 +1192,8 @@ impl View {
             (None, None) => return,
         };
         let separator = super::title_rule::SEPARATOR;
-        let label = self.viewport.borrow().event_label;
-        let right = if label.intersects(rule) {
-            label.x.saturating_sub(1)
+        let right = if reservation.intersects(rule) {
+            reservation.x.saturating_sub(1)
         } else {
             rule.right().saturating_sub(2)
         };
@@ -1984,6 +2088,26 @@ fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
     (header, label)
 }
 
+/// Keeps a label in its columns unless an occupied label forces it left, leaving a rule cell.
+fn place_frame_label(mut label: Rect, left: u16, occupied: &[Rect]) -> Option<Rect> {
+    if label.is_empty() {
+        return None;
+    }
+    loop {
+        if label.x < left {
+            return None;
+        }
+        let Some(obstacle) = occupied
+            .iter()
+            .filter(|rect| label.intersects(**rect))
+            .min_by_key(|rect| rect.x)
+        else {
+            return Some(label);
+        };
+        label.x = obstacle.x.checked_sub(label.width + 1)?;
+    }
+}
+
 /// Draws a dim rule across `area`'s first row.
 fn rule(area: Rect, buf: &mut Buffer) {
     line("─".repeat(usize::from(area.width)).dim(), area, buf);
@@ -2481,3 +2605,7 @@ mod title_input_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "panel_frame_tests.rs"]
+mod panel_frame_tests;

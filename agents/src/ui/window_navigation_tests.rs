@@ -426,6 +426,15 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
         assert_eq!(view.active_panel, Panel::EventList);
         view.render_at(area, &mut buf, now);
         let original = buf.clone();
+        let model_x = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0
+            .x;
         let layout = view.center_layout(area);
         let joint_x = layout.event_panel.x - render::HORIZONTAL_PADDING - 1;
         let rows = [layout.header.bottom() - 1, layout.prompt_top_rule.y];
@@ -451,7 +460,7 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
             .find(|(_, field)| *field == Field::Model)
             .map(|(target, _)| *target)
             .unwrap();
-        assert_eq!(model.x, area.x + 2);
+        assert_eq!(model.x, model_x);
         assert_eq!(model.y, rows[1]);
 
         zoom_key(&mut view, '=', KeyModifiers::NONE);
@@ -461,7 +470,7 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
 }
 
 #[test]
-fn panel_zoom_collapsed_panels_leave_no_decorations() {
+fn panel_zoom_collapsed_panels_keep_frame_labels() {
     for width in [92, 149, 150, 200] {
         for panel in [
             Panel::TaskList,
@@ -489,14 +498,12 @@ fn panel_zoom_collapsed_panels_leave_no_decorations() {
                     assert!(!rows[1].contains(['┬', '┴', '┼']), "{context}: {}", rows[1]);
                     assert_eq!(layout.prompt.y, layout.header.bottom(), "{context}");
                 }
-                if layout.list.is_empty() {
-                    assert!(
-                        !screen
-                            .chars()
-                            .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
-                        "{context}: {screen}"
-                    );
-                }
+                assert!(
+                    rows[usize::from(layout.prompt_top_rule.y)]
+                        .chars()
+                        .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
+                    "{context}: activity must remain on the frame rule: {screen}"
+                );
             }
         }
     }
