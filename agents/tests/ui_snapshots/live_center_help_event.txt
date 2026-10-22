@@ -1,24 +1,24 @@
-  Active 2                                                                              Inactive 1
-────────────────────────────────────────────────────────────────────────────────────────────────────
- Task shortcuts
+  Active 2                                                                                                  Inactive 1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Shortcuts
 
- Navigate                                Tasks
- ↑           Up                          n          New
- ↓           Down                        o          Open
- ⌃w h/j/k/l  Focus left/down/up/right    f          Fork
- ⌃w _        Max height                  r          Rename
- ⌃w |        Max width                   x          Stop
- ⌃w =        Reset size                  a          Archive
- Enter       Open                        h          Hide
- →           Open                        Backspace  Delete
- PgUp        Page up                     p          Pin/unpin
- PgDn        Page down
- ⌃c          Quit
- Esc         Previous
+ Tasks                   Events                                    Navigate
+ Tab/⇧Tab   Filter       /                       Search            ↑           Up
+ /          Search       t                       Sort              ↓           Down
+ g          Group        Space                   Messages/tools    ⌃w h/j/k/l  Focus left/down/up/right
+ n          New          2× click top border     Earliest          ⌃w _        Max height
+ o          Open         2× click bottom border  Latest            ⌃w |        Max width
+ f          Fork                                                   ⌃w =        Reset size
+ r          Rename                                                 Enter       Open
+ x          Stop                                                   →           Open
+ a          Archive                                                PgUp        Page up
+ h          Hide                                                   PgDn        Page down
+ Backspace  Delete                                                 ⌃c          Quit
+ p          Pin/unpin                                              Esc         Previous
 
- View                                    Events
- Tab/⇧Tab  Filter                        /                       Search
- /         Search                        t                       Sort
- g         Group                         Space                   Messages/tools
- … resize to see all
+
+
+
+
+
  Esc back

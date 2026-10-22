@@ -1244,6 +1244,16 @@ fn live_center_columns_without_voice_and_with_needs_input_error_delta() {
 fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     let mut view = simple_fixture();
     key(&mut view, KeyCode::Char('?'));
+    if std::env::var_os("UPDATE_HELP_SNAPSHOTS").is_some() {
+        std::fs::write(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/ui_snapshots/live_center_help_two_columns.txt"
+            ),
+            screen(&view, 60, 24),
+        )
+        .unwrap();
+    }
     assert_eq!(
         screen(&view, 60, 24),
         include_str!("../../tests/ui_snapshots/live_center_help_two_columns.txt")
@@ -6457,12 +6467,28 @@ mod event_help {
     use super::*;
 
     #[test]
-    fn help_has_event_column_right_of_view() {
+    fn help_has_tasks_events_and_navigation_columns() {
         let mut view = simple_fixture();
         key(&mut view, KeyCode::Char('?'));
-        let rendered = screen(&view, 100, 24);
-        let headings = rendered.lines().find(|line| line.contains("View")).unwrap();
-        assert!(headings.find("Events").unwrap() > headings.find("View").unwrap());
+        let rendered = screen(&view, 120, 24);
+        let headings = rendered
+            .lines()
+            .find(|line| line.contains("Tasks"))
+            .unwrap();
+        assert_eq!(
+            headings.split_whitespace().collect::<Vec<_>>(),
+            ["Tasks", "Events", "Navigate"]
+        );
+        if std::env::var_os("UPDATE_HELP_SNAPSHOTS").is_some() {
+            std::fs::write(
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/ui_snapshots/live_center_help_event.txt"
+                ),
+                &rendered,
+            )
+            .unwrap();
+        }
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/live_center_help_event.txt")

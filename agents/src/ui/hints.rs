@@ -92,6 +92,33 @@ impl View {
         };
         let groups = [
             group(
+                "Tasks",
+                &[
+                    ("tab/⇧tab", "Filter"),
+                    ("/", "Search"),
+                    ("g", "Group"),
+                    ("n", "New"),
+                    ("o", "Open"),
+                    ("f", "Fork"),
+                    ("r", "Rename"),
+                    ("x", "Stop"),
+                    ("a", "Archive"),
+                    ("h", "Hide"),
+                    ("backspace", "Delete"),
+                    ("p", "Pin/unpin"),
+                ],
+            ),
+            group(
+                "Events",
+                &[
+                    ("/", "Search"),
+                    ("t", "Sort"),
+                    ("space", "Messages/tools"),
+                    ("2× click top border", "Earliest"),
+                    ("2× click bottom border", "Latest"),
+                ],
+            ),
+            group(
                 "Navigate",
                 &[
                     ("↑", "Up"),
@@ -108,36 +135,8 @@ impl View {
                     ("esc", "Previous"),
                 ],
             ),
-            group(
-                "Tasks",
-                &[
-                    ("n", "New"),
-                    ("o", "Open"),
-                    ("f", "Fork"),
-                    ("r", "Rename"),
-                    ("x", "Stop"),
-                    ("a", "Archive"),
-                    ("h", "Hide"),
-                    ("backspace", "Delete"),
-                    ("p", "Pin/unpin"),
-                ],
-            ),
-            group(
-                "View",
-                &[("tab/⇧tab", "Filter"), ("/", "Search"), ("g", "Group")],
-            ),
-            group(
-                "Events",
-                &[
-                    ("/", "Search"),
-                    ("t", "Sort"),
-                    ("space", "Messages/tools"),
-                    ("2× click top border", "Earliest"),
-                    ("2× click bottom border", "Latest"),
-                ],
-            ),
         ];
-        let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];
+        let mut lines = vec!["Shortcuts".bold().into(), Line::default()];
         for line in super::shortcut_help::group_lines(groups, width) {
             if line.width() <= usize::from(width) {
                 lines.push(line);
@@ -229,7 +228,7 @@ mod tests {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect::<String>();
-            assert!(text.contains("Task shortcuts"), "panel {panel:?}");
+            assert!(text.contains("Shortcuts"), "panel {panel:?}");
             let target = view
                 .viewport
                 .borrow()
@@ -337,6 +336,61 @@ mod tests {
                     .add_modifier
                     .contains(ratatui::style::Modifier::DIM)
             );
+        }
+    }
+
+    #[test]
+    fn help_groups_tasks_events_and_navigation_at_existing_breakpoints() {
+        let view = View::default();
+        for width in [120, 80, 40, 20] {
+            let lines: Vec<_> = view
+                .center_help_lines(width)
+                .iter()
+                .map(Line::to_string)
+                .collect();
+            assert_eq!(lines[0], "Shortcuts");
+            assert!(!lines.iter().any(|line| line.trim() == "View"));
+            assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
+            if width == 120 {
+                assert_eq!(
+                    lines[2].split_whitespace().collect::<Vec<_>>(),
+                    ["Tasks", "Events", "Navigate"]
+                );
+                let tasks: Vec<_> = lines[3..]
+                    .iter()
+                    .map(|line| line.split_whitespace().next().unwrap())
+                    .collect();
+                assert_eq!(
+                    tasks,
+                    [
+                        "Tab/⇧Tab",
+                        "/",
+                        "g",
+                        "n",
+                        "o",
+                        "f",
+                        "r",
+                        "x",
+                        "a",
+                        "h",
+                        "Backspace",
+                        "p"
+                    ]
+                );
+            } else if width == 80 {
+                assert_eq!(
+                    lines[2].split_whitespace().collect::<Vec<_>>(),
+                    ["Tasks", "Events"]
+                );
+                assert!(lines.iter().any(|line| line.trim() == "Navigate"));
+            } else {
+                let headings: Vec<_> = lines
+                    .iter()
+                    .filter(|line| matches!(line.trim(), "Tasks" | "Events" | "Navigate"))
+                    .map(|line| line.trim())
+                    .collect();
+                assert_eq!(headings, ["Tasks", "Events", "Navigate"]);
+            }
         }
     }
 

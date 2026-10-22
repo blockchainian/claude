@@ -36,7 +36,7 @@ impl Group {
     }
 }
 
-pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> {
+pub(crate) fn group_lines(groups: [Group; 3], width: u16) -> Vec<Line<'static>> {
     let groups = groups.map(|group| group.lines());
     let widths: Vec<usize> = groups
         .iter()
@@ -46,15 +46,15 @@ pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> 
     let mut result = Vec::new();
     if widths.iter().sum::<usize>() + COLUMN_GAP * (groups.len() - 1) <= width {
         result.extend(columns(&groups, &widths));
-    } else if widths[0].max(widths[2]) + COLUMN_GAP + widths[1].max(widths[3]) <= width {
+    } else if widths[0].max(widths[2]) + COLUMN_GAP + widths[1] <= width {
         result.extend(columns(
             &groups[..2],
-            &[widths[0].max(widths[2]), widths[1].max(widths[3])],
+            &[widths[0].max(widths[2]), widths[1]],
         ));
         result.push(Line::default());
         result.extend(columns(
             &groups[2..],
-            &[widths[0].max(widths[2]), widths[1].max(widths[3])],
+            &[widths[0].max(widths[2]), widths[1]],
         ));
     } else {
         for (index, group) in groups.into_iter().enumerate() {

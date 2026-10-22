@@ -1,24 +1,24 @@
   Active 2                                      Inactive 1
 ────────────────────────────────────────────────────────────
- Task shortcuts
-
- Navigate
- ↑           Up
- ↓           Down
- ⌃w h/j/k/l  Focus left/down/up/right
- ⌃w _        Max height
- ⌃w |        Max width
- ⌃w =        Reset size
- Enter       Open
- →           Open
- PgUp        Page up
- PgDn        Page down
- ⌃c          Quit
- Esc         Previous
+ Shortcuts
 
  Tasks
+ Tab/⇧Tab   Filter
+ /          Search
+ g          Group
  n          New
  o          Open
  f          Fork
+ r          Rename
+ x          Stop
+ a          Archive
+ h          Hide
+ Backspace  Delete
+ p          Pin/unpin
+
+ Events
+ /                       Search
+ t                       Sort
+ Space                   Messages/tools
  … resize to see all
  Esc back
