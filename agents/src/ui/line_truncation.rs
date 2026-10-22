@@ -103,7 +103,9 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
     }
 }
 
-/// Keeps the longest suffix of whole components, then fits the final name.
+/// Keeps whole components around one `…` gap, then fits the final name alone.
+/// Home and relative paths keep their tail; root paths keep their head and name,
+/// since a lone `/…/` before the name says nothing.
 pub(super) fn abbreviate_path(
     path: &str,
     max_width: usize,
@@ -124,11 +126,22 @@ pub(super) fn abbreviate_path(
         .split('/')
         .filter(|part| !part.is_empty())
         .collect();
-    for start in 1..components.len() {
-        let candidate = format!("{anchor}…/{}", components[start..].join("/"));
-        if display_width(&candidate) <= max_width {
-            return candidate;
-        }
+    let candidates: Vec<String> = if anchor == "/" {
+        let name = components.last().copied().unwrap_or_default();
+        (1..components.len().saturating_sub(1))
+            .rev()
+            .map(|end| format!("/{}/…/{name}", components[..end].join("/")))
+            .collect()
+    } else {
+        (1..components.len())
+            .map(|start| format!("{anchor}…/{}", components[start..].join("/")))
+            .collect()
+    };
+    if let Some(candidate) = candidates
+        .into_iter()
+        .find(|candidate| display_width(candidate) <= max_width)
+    {
+        return candidate;
     }
     let name = components.last().copied().unwrap_or(&path);
     truncate_line_with_ellipsis_if_overflow(Line::raw(name.to_owned()), max_width).to_string()
@@ -314,10 +327,9 @@ mod tests {
                 "/alpha/beta/c/file",
                 vec![
                     (24, "/alpha/beta/c/file"),
-                    (14, "/…/beta/c/file"),
-                    (9, "/…/c/file"),
-                    (7, "/…/file"),
-                    (6, "file"),
+                    (17, "/alpha/…/file"),
+                    (13, "/alpha/…/file"),
+                    (12, "file"),
                     (3, "fi…"),
                 ],
             ),
@@ -362,7 +374,7 @@ mod tests {
             (home.join("other/beta/file"), 100, "~/other/beta/file"),
             (home.join("other/beta/file"), 8, "~/…/file"),
             (home.clone(), 1, "~"),
-            (cwd.clone(), 1, "."),
+            (cwd.clone(), 100, "project"),
         ] {
             assert_eq!(
                 abbreviate_path(path.to_str().unwrap(), width, Some(&cwd)),
@@ -392,10 +404,10 @@ mod tests {
         for fit in [abbreviate_paths, abbreviate_paths_in_text] {
             for (width, expected) in [
                 (100, text),
-                (23, "/alpha/left /…/right"),
+                (25, "/alpha/left /beta/…/right"),
                 (17, "/alpha/left right"),
                 (13, "/alpha/left …"),
-                (9, "/…/left …"),
+                (9, "left …"),
                 (6, "left …"),
             ] {
                 assert_eq!(fit(text, &ranges, width, cwd), expected, "width {width}");
@@ -410,7 +422,7 @@ mod tests {
         let ranges = crate::ui::paths::text_paths(text, cwd);
         assert_eq!(
             abbreviate_paths_for_wrap(text, &ranges, 22, cwd),
-            "报告：`/…/reports/result.md`，已发送。"
+            "报告：`/private/…/result.md`，已发送。"
         );
         assert_eq!(
             abbreviate_paths_for_wrap(text, &ranges, 5, cwd),

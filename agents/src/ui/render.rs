@@ -2313,7 +2313,7 @@ mod wrapped_path_tests {
             20,
             true,
         );
-        assert_eq!(lines[0].to_string(), "/…/reports/report.md");
+        assert_eq!(lines[0].to_string(), "/private/…/report.md");
         assert!(lines[0].spans.iter().all(|span| {
             span.style
                 .add_modifier
@@ -2373,12 +2373,11 @@ mod wrapped_path_tests {
             .collect();
         assert_eq!(
             rows.iter()
-                .filter(|row| row.contains("/…/background-research/report.md"))
+                .filter(|row| row.contains("…/report.md"))
                 .count(),
             2
         );
         assert!(rows.iter().any(|row| row.contains("Update")));
-        assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 
     #[test]
@@ -2389,8 +2388,8 @@ mod wrapped_path_tests {
             plain,
             [
                 "报告已写到",
-                "/…/background-research/report.md，并已发",
-                "给 team-lead。",
+                "/private/tmp/claude-501/…/report.md，并",
+                "已发给 team-lead。",
             ]
         );
         assert!(lines.iter().all(|line| line.width() <= 40));

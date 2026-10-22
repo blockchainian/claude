@@ -241,19 +241,22 @@ fn path_tokens(tokens: &[Token], path: &Range<usize>, display: &str) -> Option<V
                 (token.text == "/" && index + 1 < form.len()).then_some(index + 1)
             })
             .collect();
-        for &start in &starts {
-            if start <= anchor {
-                continue;
+        let heads = std::iter::once(anchor).chain(starts.iter().copied());
+        for head in heads {
+            for &start in &starts {
+                if start <= head.max(anchor) {
+                    continue;
+                }
+                let mut candidate = form[..head].to_vec();
+                let omitted_start = form[head].source.as_ref()?.start;
+                let omitted_end = form[start - 1].source.as_ref()?.start;
+                candidate.push(Token {
+                    text: "…".into(),
+                    source: Some(omitted_start..omitted_end),
+                });
+                candidate.extend_from_slice(&form[start - 1..]);
+                consider(candidate);
             }
-            let mut candidate = form[..anchor].to_vec();
-            let omitted_start = form[anchor].source.as_ref()?.start;
-            let omitted_end = form[start - 1].source.as_ref()?.start;
-            candidate.push(Token {
-                text: "…".into(),
-                source: Some(omitted_start..omitted_end),
-            });
-            candidate.extend_from_slice(&form[start - 1..]);
-            consider(candidate);
         }
         let basename = starts.last().copied().unwrap_or(0);
         let mut tail = form[basename..].to_vec();
@@ -523,8 +526,8 @@ mod tests {
                 "See /a/b/src/lib.rs:272-274 done",
                 "See src/lib.rs:272-274 done",
             ),
-            ("/a/b", "."),
-            ("/a/b/", "."),
+            ("/a/b", "b"),
+            ("/a/b/", "b"),
             (
                 "/a/b/src/lib.rs and /a/bc/other.rs",
                 "src/lib.rs and /a/bc/other.rs",
@@ -704,7 +707,7 @@ mod tests {
         assert!(
             maps.iter()
                 .flatten()
-                .any(|(_, bytes)| source[bytes.clone()].contains("private/workspace"))
+                .any(|(_, bytes)| &source[bytes.clone()] == "workspace/reports")
         );
         let last = maps.last().unwrap().last().unwrap();
         assert_eq!(&source[last.1.clone()], "r");

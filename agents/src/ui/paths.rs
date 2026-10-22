@@ -15,7 +15,7 @@ pub(super) fn text_paths(text: &str, cwd: &Path) -> Vec<Range<usize>> {
     paths
 }
 
-/// A path inside `cwd`, relative to that directory. Component boundaries matter;
+/// A path inside `cwd`, relative to that directory; `cwd` itself is its own name. Component boundaries matter;
 /// parent components stay absolute so a lexical prefix cannot hide an escape.
 pub(super) fn relative_path(path: &str, cwd: &Path) -> Option<String> {
     let expanded;
@@ -36,7 +36,7 @@ pub(super) fn relative_path(path: &str, cwd: &Path) -> Option<String> {
         return None;
     }
     Some(if relative.as_os_str().is_empty() {
-        ".".into()
+        cwd.file_name()?.to_str()?.to_owned()
     } else {
         relative.to_str()?.to_owned()
     })

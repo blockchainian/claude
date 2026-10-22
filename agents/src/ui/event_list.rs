@@ -2570,7 +2570,7 @@ pub(super) mod event_markdown {
                 "Report: /private/tmp/claude-501/report.md 1. done",
                 35,
             );
-            assert_eq!(body_text(&buffer), "      Report: /…/report.md 1. done");
+            assert_eq!(body_text(&buffer), "         Report: report.md 1. done");
         }
     }
 
@@ -2667,7 +2667,7 @@ pub(super) mod event_markdown {
     fn merged_tool_row_preserves_the_left_path_first() {
         assert_eq!(
             merged_tool_row(70),
-            "Edit /opt/work/agents/src/ui/tests.rs, Read /…/codex/tests.rs"
+            "Edit /opt/work/agents/src/ui/tests.rs, Read /opt/work/…/tests.rs"
         );
     }
 
@@ -2675,7 +2675,7 @@ pub(super) mod event_markdown {
     fn merged_tool_row_shrinks_the_right_name_before_the_left_path() {
         assert_eq!(
             merged_tool_row(40),
-            "Edit /…/agents/src/ui/tests.rs, Read …"
+            "Edit /opt/work/agents/…/tests.rs, Read …"
         );
     }
 
