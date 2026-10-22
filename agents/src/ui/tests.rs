@@ -3472,7 +3472,7 @@ fn task_details_activity_uses_tool_color() {
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Run checks".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 1)];
+        let cell = &buf[(25 + offset as u16, y + 1)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, crate::theme::text_accent_color());
         assert!(!cell.modifier.contains(Modifier::DIM));
@@ -3515,7 +3515,7 @@ fn task_details_message_uses_model_color_under_markdown() {
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Plain code bold italic".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 1)];
+        let cell = &buf[(19 + offset as u16, y + 1)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(
             cell.fg,
@@ -3534,7 +3534,7 @@ fn task_details_message_uses_model_color_under_markdown() {
         }
     }
     for (offset, character) in "Second paragraph".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 3)];
+        let cell = &buf[(19 + offset as u16, y + 3)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, Color::Yellow);
     }
@@ -4127,20 +4127,20 @@ fn task_details_queued_messages_render_all_paragraphs_and_message_style() {
     assert_eq!(
         &rows[1..11],
         &[
-            "Current prompt",
+            "             Current prompt",
             "",
-            "First queued line",
-            "Second queued line",
+            " First queued line",
+            " Second queued line",
             "",
-            "Another paragraph with words that wrap",
-            "across the panel width",
+            " Another paragraph with words that wrap",
+            " across the panel width",
             "",
-            "Next queued message",
+            "          Next queued message",
             "",
         ]
     );
     for y in [3, 4, 6, 7, 9] {
-        for x in 0..rows[y].len() {
+        for x in rows[y].len() - rows[y].trim_start().len()..rows[y].len() {
             assert_eq!(
                 buf[(x as u16, y as u16)]
                     .modifier
@@ -4153,7 +4153,7 @@ fn task_details_queued_messages_render_all_paragraphs_and_message_style() {
         }
     }
     assert!(
-        !buf[(0, 1)]
+        !buf[(13, 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
@@ -4533,21 +4533,21 @@ fn task_details_markdown_snapshot() {
         .position(|line| line.trim() == "Update")
         .unwrap() as u16;
     assert_eq!(
-        buffer[(4, prompt_y + 1)].fg,
+        buffer[(14, prompt_y + 1)].fg,
         crate::theme::inline_code_color()
     );
     assert!(
-        buffer[(14, prompt_y + 1)]
+        buffer[(24, prompt_y + 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, prompt_y + 3)]
+        buffer[(14, prompt_y + 3)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, update_y + 3)].fg, Color::Yellow);
-    assert_eq!(buffer[(0, update_y + 5)].fg, Color::Cyan);
+    assert_eq!(buffer[(19, update_y + 3)].fg, Color::Yellow);
+    assert_eq!(buffer[(13, update_y + 5)].fg, Color::Cyan);
 }
 
 #[test]
@@ -7638,7 +7638,7 @@ fn ask_user_question_details_snapshot() {
             "Needs input\n{}",
             row.pending_questions
                 .iter()
-                .map(|question| question.replace('`', ""))
+                .map(|question| format!("                {}", question.replace('`', "")))
                 .collect::<Vec<_>>()
                 .join("\n")
         )),
@@ -7652,7 +7652,7 @@ fn ask_user_question_details_snapshot() {
     row.pending_questions.clear();
     view.set_sessions(vec![row.clone()], false);
     let answered = render(&view);
-    assert!(answered.contains("Needs input\nOpen task to review.\nWaiting for your response."));
+    assert!(answered.contains("Needs input\n                                                                   Open task to review.\n                                                                   Waiting for your response."));
     assert_eq!(
         answered,
         include_str!("../../tests/ui_snapshots/task_details_questions_answered.txt")
@@ -7688,7 +7688,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
             .collect::<String>();
         if text.trim_start().starts_with("Pick a color?") {
             questions += 1;
-            assert_eq!(cells[0].fg, Color::Yellow);
+            assert_eq!(cells[43].fg, Color::Yellow);
         }
         if text.starts_with("Needs input") {
             assert_eq!(cells[0].fg, Color::LightRed);

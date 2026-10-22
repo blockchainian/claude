@@ -1,7 +1,7 @@
   Active 1                                                                                                  Inactive 0
 ────────────────────────────────────────────────────────────┬──────────────────────── Working ──────────────────────────
                         /tmp/project                        │                          Prompt
- ● Task log example                  Working         5d ago │ Task log example
+ ● Task log example                  Working         5d ago │                     Task log example
                                                             │
                                                             │
                                                             │

@@ -1411,7 +1411,7 @@ impl View {
         };
         let available = usize::from(area.height);
         let budget = budget_task_details(&items, &bodies, background, available);
-        let (scroll, body_rows, total) = {
+        let (scroll, body_rows, total, indents) = {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.task_details_scroll;
             state.content_top = content_top;
@@ -1451,6 +1451,24 @@ impl View {
                 }
                 item_links[cut].retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
             }
+            // Each body's rows share one left edge, centered as a block in the panel.
+            let mut indents = vec![0; items.len()];
+            for body in &bodies {
+                let block = items[body.clone()]
+                    .iter()
+                    .map(|item| match item {
+                        Item::Text(text) => text.width(),
+                        _ => 0,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                let indent = (width.saturating_sub(block) / 2) as u16;
+                for index in body.clone() {
+                    if matches!(items[index], Item::Text(_)) {
+                        indents[index] = indent;
+                    }
+                }
+            }
             let mut keep = vec![false; items.len()];
             for &index in &layout.kept {
                 keep[index] = true;
@@ -1463,7 +1481,9 @@ impl View {
             text_rows.retain(|_| *rows.next().unwrap());
             let mut rows = keep.iter();
             item_links.retain(|_| *rows.next().unwrap());
-            (layout.scroll, state.bodies.clone(), layout.total)
+            let mut rows = keep.iter();
+            indents.retain(|_| *rows.next().unwrap());
+            (layout.scroll, state.bodies.clone(), layout.total, indents)
         };
         self.viewport.borrow_mut().task_details_copy = body_rows
             .into_iter()
@@ -1480,16 +1500,18 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for (((item, mapped), links), id) in items
+        for ((((item, mapped), links), id), indent) in items
             .into_iter()
             .zip(text_rows)
             .zip(item_links)
             .zip(item_ids)
+            .zip(indents)
         {
             let fallback = mapped.is_none() && !matches!(item, Item::Decoration(_));
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if let Some(mut mapped) = mapped {
+                    mapped.x += indent;
                     mapped.y = y;
                     self.viewport
                         .borrow_mut()
@@ -1499,7 +1521,12 @@ impl View {
                 }
                 drawn_links.extend(links.into_iter().map(|(columns, target)| {
                     (
-                        Rect::new(area.x + columns.start, y, columns.end - columns.start, 1),
+                        Rect::new(
+                            area.x + indent + columns.start,
+                            y,
+                            columns.end - columns.start,
+                            1,
+                        ),
                         target,
                     )
                 }));
@@ -1508,7 +1535,10 @@ impl View {
             let item_area = row(content_area, offset as u16, height as u16);
             let title_columns = match item {
                 Item::Text(text) | Item::Decoration(text) => {
-                    line(text, item_area, &mut content);
+                    let mut text_area = item_area;
+                    text_area.x += indent;
+                    text_area.width = text_area.width.saturating_sub(indent);
+                    line(text, text_area, &mut content);
                     None
                 }
                 Item::Background { task, output } => {
