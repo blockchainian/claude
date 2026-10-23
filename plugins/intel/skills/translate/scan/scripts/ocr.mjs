@@ -36,6 +36,14 @@ export const PROMPTS = {
 - Italic *x*, bold **x**. Small capitals as uppercase. Footnotes at the page bottom: a paragraph starting
   "Note: " placed at the end of the page.
 - Drop running heads and page numbers.
+- A monospaced code/source listing MUST be transcribed in a triple-backtick fenced code block, preserving
+  its line breaks, indentation and literal characters. This includes TeX/LaTeX source, WEB output, macro
+  definitions, incomplete source fragments and English sentences printed as part of the listing.
+- In source code, \\input, \\], \\[5] and \\( are literal characters, not mathematical delimiters. Do not
+  balance them, render them as math, or add Markdown escapes to them.
+- A source listing printed as a figure is still code to transcribe, not a [FIGURE] crop. Keep its caption outside
+  the code fence. If the page consists of source code, fence the entire listing even though the general rule
+  below forbids a code fence around the whole answer; that rule applies to prose and captions, not source code.
 ${COMMON}`,
   slide: `Transcribe the text of this lecture slide into Markdown, word for word.
 - The slide title as "## Title"; bullets as "- " items, indented two spaces per level; other text as one
