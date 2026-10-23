@@ -682,7 +682,7 @@ impl View {
             render_section_edge(title, layout.event_detail_top_rule, buf);
         }
         if !layout.event_detail.is_empty()
-            && let Some(title) = self.next_event_section_title()
+            && let Some(title) = self.next_event_title()
         {
             render_section_edge(title, layout.footer_rule, buf);
         }

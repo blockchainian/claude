@@ -804,7 +804,7 @@ fn output_border_jump(bottom: bool) {
             // The medium layout shares this rule with the event list.
             let x = view.viewport.borrow().event_panel.x;
             if bottom {
-                assert_eq!(buffer[(x, y)].symbol(), "─", "missing lower rule");
+                assert_eq!(buffer[(0, y)].symbol(), "─", "missing lower rule");
                 assert_eq!(output.bottom(), y);
             }
             view.set_active_panel(Panel::TaskList);
@@ -883,7 +883,7 @@ fn output_border_layout_reserves_one_row_and_keeps_hit_regions_separate() {
                 assert!(viewport.event_panel.bottom() <= top.y);
                 assert!(viewport.prompt.bottom() <= top.y);
                 assert!(!viewport.event_detail.contains((bottom.x, bottom.y).into()));
-                for x in 0..width {
+                for x in [0, width - 1] {
                     assert_eq!(buffer[(x, bottom.y)].symbol(), "─");
                 }
             } else {
@@ -1115,33 +1115,171 @@ fn empty_output_file_keeps_following_across_separate_appends() {
     }
 }
 
-#[test]
-fn event_detail_bottom_edge_tracks_the_next_hidden_title() {
-    for width in [90, 120, 160] {
-        let (mut view, _) = tool_fixture();
-        let mut saw_hidden = false;
-        let mut saw_visible = false;
-        for _ in 0..45 {
-            let rows = screen_rows(&view, width, 24);
-            let viewport = view.viewport.borrow();
-            let content = &rows
-                [usize::from(viewport.event_detail.y)..usize::from(viewport.event_detail.bottom())];
-            let edge = &rows[usize::from(viewport.output_borders[1].y)];
-            let first_visible = content.iter().any(|row| row.contains("first body"));
-            let next_visible = content.iter().any(|row| row.contains("Second tool"));
-            if first_visible && !next_visible {
-                assert!(edge.contains("Second tool"), "{width}: {}", rows.join("\n"));
-                saw_hidden = true;
-            } else if next_visible {
-                assert!(!edge.contains("Second tool"));
-                saw_visible = true;
-            }
-            drop(viewport);
-            event_detail_wheel(&mut view, true);
+fn recorded_next_event_fixture(sort: EventSort) -> View {
+    let (mut view, _) = fixture(false);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let events = crate::providers::claude::event_reader::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .filter(|event| !event.calls.is_empty())
+        .take(4)
+        .collect();
+    view.event_list.sort = sort;
+    view.set_event(events);
+    let order: Vec<_> = view
+        .shown_events()
+        .map(|(_, event)| event.calls[0].name.as_str())
+        .collect();
+    assert_eq!(
+        order,
+        match sort {
+            EventSort::Time => vec!["Bash", "Read", "Edit", "Write"],
+            EventSort::Duration => vec!["Bash", "Write", "Edit", "Read"],
         }
-        assert!(
-            saw_hidden && saw_visible,
-            "{width}: hidden={saw_hidden}, visible={saw_visible}"
-        );
+    );
+    view.select_event(Some(2));
+    view
+}
+
+fn assert_next_event_edge(sort: EventSort, next_call: &str) {
+    for width in [90, 120, 160] {
+        let mut view = recorded_next_event_fixture(sort);
+        let next = view
+            .event_panel
+            .iter()
+            .find(|event| event.calls[0].name == next_call)
+            .unwrap()
+            .clone();
+        let title = next.calls[0].event_detail_title.clone();
+        // Render the next event's own title row before comparing the edge's cells.
+        view.select_fixture_event(Some(next));
+        let area = Rect::new(0, 0, width, 30);
+        let draw = |view: &View| {
+            let mut buffer = Buffer::empty(area);
+            view.render(area, &mut buffer);
+            buffer
+        };
+        let panel = draw(&view);
+        let detail = view.viewport.borrow().event_detail;
+        let expected = (detail.y..detail.bottom())
+            .find_map(|y| {
+                let row: String = (0..width).map(|x| panel[(x, y)].symbol()).collect();
+                column_of(&row, &title).map(|x| panel[(x as u16, y)].clone())
+            })
+            .expect("next event's title is visible in its panel");
+        view.select_event(Some(2));
+        draw(&view);
+        view.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let buffer = draw(&view);
+        let y = view.viewport.borrow().output_borders[1].y;
+        let row: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
+        let x =
+            column_of(&row, &title).unwrap_or_else(|| panic!("missing next title: {row}")) as u16;
+        assert_eq!(x as usize, (usize::from(width) - title.width() - 2) / 2 + 1);
+        for x in x..x + title.width() as u16 {
+            assert_eq!(buffer[(x, y)].fg, expected.fg);
+            assert_eq!(buffer[(x, y)].modifier, expected.modifier);
+        }
+        assert_eq!(view.event_list.cursor, Some(2));
     }
+}
+
+#[test]
+fn event_detail_bottom_edge_shows_the_next_event_in_time_order() {
+    assert_next_event_edge(EventSort::Time, "Write");
+}
+
+#[test]
+fn event_detail_bottom_edge_shows_the_next_event_in_duration_order() {
+    assert_next_event_edge(EventSort::Duration, "Read");
+}
+
+#[test]
+fn event_detail_bottom_edge_shows_when_the_whole_event_fits() {
+    for (sort, next) in [(EventSort::Time, "Write"), (EventSort::Duration, "Read")] {
+        let view = recorded_next_event_fixture(sort);
+        let title = &view
+            .event_panel
+            .iter()
+            .find(|event| event.calls[0].name == next)
+            .unwrap()
+            .calls[0]
+            .event_detail_title;
+        let rows = screen_rows(&view, 120, 200);
+        assert_eq!(view.viewport.borrow().event_detail_max, 0);
+        let y = view.viewport.borrow().output_borders[1].y;
+        assert!(rows[usize::from(y)].contains(title));
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_waits_for_the_last_visible_line() {
+    for (sort, next) in [(EventSort::Time, "Write"), (EventSort::Duration, "Read")] {
+        let mut view = recorded_next_event_fixture(sort);
+        let title = view
+            .event_panel
+            .iter()
+            .find(|event| event.calls[0].name == next)
+            .unwrap()
+            .calls[0]
+            .event_detail_title
+            .clone();
+        for key in [None, Some(KeyCode::Down), Some(KeyCode::End)] {
+            if let Some(key) = key {
+                view.handle_key(KeyEvent::new(key, KeyModifiers::NONE));
+            }
+            let rows = screen_rows(&view, 120, 30);
+            let offset = view.event_detail.scroll.borrow().offset;
+            let max = view.viewport.borrow().event_detail_max;
+            assert!(max > 1);
+            if key == Some(KeyCode::End) {
+                assert_eq!(offset, max);
+            } else if key.is_some() {
+                assert!(offset > 0 && offset < max);
+            } else {
+                assert_eq!(offset, 0);
+            }
+            let y = view.viewport.borrow().output_borders[1].y;
+            assert_eq!(
+                rows[usize::from(y)].contains(&title),
+                key == Some(KeyCode::End),
+                "{}",
+                rows[usize::from(y)]
+            );
+        }
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_is_empty_after_the_last_event() {
+    for sort in [EventSort::Time, EventSort::Duration] {
+        let mut view = recorded_next_event_fixture(sort);
+        view.select_event(Some(3));
+        for scrolled in [false, true] {
+            if scrolled {
+                view.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+            }
+            let rows = screen_rows(&view, 120, 30);
+            let y = view.viewport.borrow().output_borders[1].y;
+            assert!(
+                rows[usize::from(y)].chars().all(|c| c == '─'),
+                "{}",
+                rows[usize::from(y)]
+            );
+        }
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_hides_with_the_detail_panel() {
+    let mut view = recorded_next_event_fixture(EventSort::Time);
+    screen_rows(&view, 160, 40);
+    view.set_active_panel(Panel::TaskList);
+    for key in ['|', '_'] {
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
+    }
+    let rows = screen_rows(&view, 160, 40);
+    assert!(view.viewport.borrow().event_detail.is_empty());
+    assert!(!rows[38].contains("plan.md"));
 }
