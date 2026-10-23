@@ -518,7 +518,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     const unknown = await mcp.call("send", { threadId: "nope", prompt: "x" });
     assert.equal(unknown.isError, true);
     assert.match(unknown.text, /unknown thread/);
-    const noAsk = await mcp.call("reply", { threadId: "thread-A", text: "go" });
+    const noAsk = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "go" });
     assert.equal(noAsk.isError, true);
     assert.match(noAsk.text, /not waiting/);
   } finally {
@@ -623,13 +623,12 @@ test("notify_claude and ask_claude reach the Claude session that supervises the 
     assert.deepEqual({ ...ask, ts: undefined }, { ts: undefined, kind: "ask", turnId: "turn-1", callId: "call-ask", text: "tests or implementation?" });
     const listed = await mcp.call("list", {});
     assert.deepEqual(listed.json.threads[0].waiting, [{ kind: "ask", callId: "call-ask", since: listed.json.threads[0].waiting[0].since, text: "tests or implementation?" }]);
-    assert.equal(listed.json.attention.length, 1);
-    assert.match(listed.json.attention[0], /thread-A/);
+    assert.deepEqual(listed.json.attention, [{ threadId: "thread-A", kind: "ask", callId: "call-ask", text: "tests or implementation?" }]);
     const hook = await run(["pending"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
     assert.match(JSON.parse(hook.stdout).reason, /thread-A is waiting for reply .*tests or implementation\?/);
     assert.equal(answered, false);
 
-    const replied = await mcp.call("reply", { threadId: "thread-A", text: "Fix the implementation." });
+    const replied = await mcp.call("reply", { threadId: "thread-A", ask: "tests or implementation?", reply: "Fix the implementation." });
     assert.equal(replied.isError, false, replied.text);
     assert.equal(replied.json.kind, "ask");
     const answer = await asking;
@@ -638,13 +637,28 @@ test("notify_claude and ask_claude reach the Claude session that supervises the 
     const after = await mcp.call("list", {});
     assert.deepEqual(after.json.threads[0].waiting, []);
     assert.equal(after.json.attention, undefined);
-    const late = await mcp.call("reply", { threadId: "thread-A", text: "again" });
+    const late = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "again" });
     assert.equal(late.isError, true);
     assert.match(late.text, /not waiting/);
   } finally {
     await tools.close();
     await mcp.close();
     await daemon.close();
+    await home.close();
+  }
+});
+
+test("a message without its text argument is refused, not delivered empty", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const tools = new ToolsChild(home.home);
+  try {
+    for (const name of ["ask_claude", "notify_claude"]) {
+      const result = await tools.call(name, { prompt: "你最喜欢什么颜色？" }, { callId: "call-1", threadId: "thread-A" });
+      assert.equal(result.isError, true);
+      assert.match(result.text, /text/);
+    }
+  } finally {
+    await tools.close();
     await home.close();
   }
 });
@@ -739,7 +753,7 @@ test("an attached session asks the Claude session that attached it", { timeout: 
     await mcp.call("attach", { thread: "slow-requests" });
     const asking = tools.tool("ask_claude", "thread-5", "call-ask", "index or cache?");
     await waitFor(() => inboxLines(path.join(home.dir, "thread-5.jsonl")).some((line) => line.kind === "ask"));
-    await mcp.call("reply", { threadId: "thread-5", text: "The index." });
+    await mcp.call("reply", { threadId: "thread-5", ask: "the request", reply: "The index." });
     assert.equal((await asking).text, "The index.");
   } finally {
     await tools.close();
@@ -764,10 +778,10 @@ test("approval requests are forwarded to Claude and answered by decision; timeou
     assert.equal(line.reason, "outside the sandbox");
     assert.deepEqual(line.decisions, ["accept", "decline"]);
 
-    const bad = await mcp.call("reply", { threadId: "thread-A", text: "acceptForSession" });
+    const bad = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "acceptForSession" });
     assert.equal(bad.isError, true);
     assert.match(bad.text, /accept, decline/);
-    const ok = await mcp.call("reply", { threadId: "thread-A", text: "accept" });
+    const ok = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "accept" });
     assert.equal(ok.isError, false, ok.text);
     await waitFor(() => script.messages.some((message) => message.id === 930));
     assert.deepEqual(script.messages.find((message) => message.id === 930).result, { decision: "accept" });
@@ -777,7 +791,7 @@ test("approval requests are forwarded to Claude and answered by decision; timeou
     const fileChange = inboxLines(inbox).filter((line) => line.kind === "approval")[1];
     assert.equal(fileChange.grantRoot, "/etc");
     assert.deepEqual(fileChange.decisions, ["accept", "acceptForSession", "decline", "cancel"]);
-    await mcp.call("reply", { threadId: "thread-A", text: "decline" });
+    await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "decline" });
     await waitFor(() => script.messages.some((message) => message.id === 931));
     assert.deepEqual(script.messages.find((message) => message.id === 931).result, { decision: "decline" });
   } finally {
@@ -976,11 +990,11 @@ test("several waiting requests are answered by callId, and a finished turn withd
     const asking = tools.tool("ask_claude", "thread-A", "ask-1", "first?");
     send(socket, { id: 961, method: "item/commandExecution/requestApproval", params: { threadId: "thread-A", turnId: "turn-1", itemId: "cmd-1", command: "make deploy" } });
     await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).length === 2);
-    const ambiguous = await mcp.call("reply", { threadId: "thread-A", text: "yes" });
+    const ambiguous = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "yes" });
     assert.equal(ambiguous.isError, true);
     assert.match(ambiguous.text, /ask-1/);
     assert.match(ambiguous.text, /cmd-1/);
-    const answered = await mcp.call("reply", { threadId: "thread-A", callId: "cmd-1", text: "accept" });
+    const answered = await mcp.call("reply", { threadId: "thread-A", callId: "cmd-1", ask: "the request", reply: "accept" });
     assert.equal(answered.isError, false, answered.text);
     await waitFor(() => script.messages.some((message) => message.id === 961));
     assert.deepEqual(script.messages.find((message) => message.id === 961).result, { decision: "accept" });
@@ -1675,6 +1689,55 @@ test("a detached thread is not subscribed to again when the server starts or rec
       assert.equal(script.messages.length, before);
     } finally {
       await idle.close();
+    }
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("mcp starts a thread on an allowed model and effort, and refuses any other pair", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  try {
+    await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+    const tools = await mcp.request("tools/list", {});
+    const schema = tools.result.tools.find((tool) => tool.name === "start").inputSchema;
+    assert.deepEqual(schema.properties.model.enum, ["gpt-6.1-sol", "gpt-6-luna"]);
+    assert.deepEqual(schema.properties.effort.enum, ["medium", "high"]);
+    assert.deepEqual(schema.required, ["cwd", "prompt"]);
+
+    for (const [args, error] of [
+      [{ model: "gpt-6-luna", effort: "medium" }, "gpt-6-luna runs only at high effort"],
+      [{ model: "gpt-6-luna", effort: "low" }, "gpt-6-luna runs only at high effort"],
+      [{ model: "gpt-6.1-sol", effort: "high" }, "gpt-6.1-sol runs only at medium effort"],
+      [{ model: "gpt-6-luna" }, "gpt-6-luna runs only at high effort"],
+      [{ model: "gpt-6.1-sol" }, "gpt-6.1-sol runs only at medium effort"],
+      [{ effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "other", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "toString", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: null, effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
+      [{ model: "gpt-6-luna", effort: null }, "gpt-6-luna runs only at high effort"]
+    ]) {
+      const refused = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", ...args });
+      assert.equal(refused.isError, true);
+      assert.equal(refused.text, error);
+      assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
+    }
+
+    for (const [model, effort] of [["gpt-6-luna", "high"], ["gpt-6.1-sol", "medium"]]) {
+      const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", model, effort });
+      assert.equal(started.isError, false, started.text);
+      const start = script.messages.filter((message) => message.method === "thread/start").at(-1).params;
+      assert.equal(start.model, model);
+      assert.deepEqual(start.config, {
+        "sandbox_workspace_write.network_access": true,
+        "mcp_servers.claude-client": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" },
+        model_reasoning_effort: effort
+      });
     }
   } finally {
     await mcp.close();
