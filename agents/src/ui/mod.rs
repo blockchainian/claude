@@ -343,11 +343,9 @@ pub struct View {
     task_uis: HashMap<draft_controls::TaskKey, TaskUi>,
     /// The context percentage of the task the app read last.
     context_usage: Option<(SessionKey, u64)>,
-    /// The usage bins of the task the app read last.
-    usage: Option<(
-        SessionKey,
-        std::collections::BTreeMap<i64, crate::usage::Bin>,
-    )>,
+    /// Visible token bins of all participating tasks and of tasks other than the selection.
+    usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
+    other_usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
     /// How many times taller than wide one terminal cell looks.
     cell_aspect: f64,
     /// The timeline bins some task worked in.
@@ -469,7 +467,8 @@ impl View {
             title_slots: RefCell::new(HashMap::new()),
             panels_task: None,
             task_uis: HashMap::new(),
-            usage: None,
+            usage: Default::default(),
+            other_usage: Default::default(),
             context_usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
             activity: std::collections::BTreeSet::new(),

@@ -2,7 +2,7 @@
 
 #[path = "app_transcript.rs"]
 mod transcript_cache;
-use transcript_cache::{ActivityCache, FileStamp};
+use transcript_cache::{ActivityCache, FileStamp, UsageCache};
 
 use crate::model::Action;
 use crate::model::{DraftKey, Session, SessionStatus};
@@ -162,13 +162,10 @@ pub struct App {
     transcript_request: u64,
     transcript_has_older: bool,
     transcript_parsed_bytes: u64,
-    /// Token usage of each transcript the user has selected, kept up to date while selected.
-    usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
+    /// Visible token usage, refreshed independently of paints.
+    usage: UsageCache,
     /// When each recently active transcript's turns ran.
     activity: ActivityCache,
-    usage_stamps: std::collections::HashMap<PathBuf, FileStamp>,
-    #[cfg(test)]
-    usage_reads: usize,
 }
 
 #[derive(PartialEq, Eq)]
@@ -274,11 +271,8 @@ impl App {
             transcript_request: 0,
             transcript_has_older: false,
             transcript_parsed_bytes: 0,
-            usage: std::collections::HashMap::new(),
+            usage: UsageCache::default(),
             activity: ActivityCache::default(),
-            usage_stamps: std::collections::HashMap::new(),
-            #[cfg(test)]
-            usage_reads: 0,
         }
     }
 
@@ -402,7 +396,7 @@ impl App {
         terminal.draw(|frame| {
             let area = frame.area();
             self.refresh_event(self.view.event_count(area));
-            self.refresh_usage();
+            self.refresh_usage(self.view.usage_width(area), now);
             self.refresh_activity(area.width, now);
             self.view.render_at(area, frame.buffer_mut(), now);
             cursor = self.view.cursor_pos(area);
@@ -940,46 +934,18 @@ impl App {
         }
     }
 
-    /// Reads what the selected task's transcript gained and hands its usage to the view.
-    fn refresh_usage(&mut self) {
-        let Some(session) = self
-            .view
-            .selected_id()
-            .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
-        else {
-            return;
-        };
-        let Some(path) = &session.transcript else {
-            return;
-        };
-        let Ok(stamp) = FileStamp::read(path) else {
-            return;
-        };
-        let previous = self.usage_stamps.get(path);
-        if previous == Some(&stamp) && self.view.usage_session() == Some(&session.id) {
-            return;
+    /// Updates the active tasks' usage and splits out the selected task without rereading it.
+    fn refresh_usage(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
+        let selected = self.view.selected_id().cloned();
+        if let Some((total, others)) =
+            self.usage
+                .update(&self.sessions, selected.as_ref(), width, now)
+        {
+            self.view.set_usage_totals(total, others);
         }
-        let series = self.usage.entry(path.clone()).or_default();
-        let changed = if previous == Some(&stamp) {
-            false
-        } else {
-            if previous.is_some_and(|previous| !stamp.appended_to(previous)) {
-                *series = Default::default();
-            }
-            #[cfg(test)]
-            {
-                self.usage_reads += 1;
-            }
-            let Ok(changed) = series.update(path, session.id.provider) else {
-                return;
-            };
-            self.usage_stamps.insert(path.clone(), stamp);
-            changed
-        };
-        self.view
-            .set_context_usage(&session.id, series.context_percent());
-        if changed || self.view.usage_session() != Some(&session.id) {
-            self.view.set_usage(&session.id, series.bins.clone());
+        if let Some(id) = selected.as_ref() {
+            self.view
+                .set_context_usage(id, self.usage.context_percent(id));
         }
     }
 

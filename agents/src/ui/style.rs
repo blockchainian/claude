@@ -110,11 +110,16 @@ pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
     use crate::event::Kind;
     let body = match kind {
         Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
-        Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
+        Kind::Assistant | Kind::Agent | Kind::Session => assistant_style(),
         Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
         Kind::Error | Kind::Denied => error_style(),
     };
     (body.bold(), body)
+}
+
+/// The assistant event body and the selected task's token dots.
+pub(super) fn assistant_style() -> Style {
+    Style::default().fg(Color::Yellow)
 }
 
 /// Numeric command status has its own error span; the summary keeps its tool color.

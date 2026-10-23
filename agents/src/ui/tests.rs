@@ -9894,7 +9894,7 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
 }
 
 #[test]
-fn usage_chart_and_activity_strip_share_the_same_style() {
+fn usage_chart_uses_assistant_color_for_selected_usage() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     use crate::usage::{Bin, bin_of};
 
@@ -9930,9 +9930,118 @@ fn usage_chart_and_activity_strip_share_the_same_style() {
                     .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
             );
         }
-        assert_eq!(chart.fg, strip.fg, "use_colors={use_colors}");
-        assert_eq!(chart.style(), strip.style(), "use_colors={use_colors}");
+        assert_eq!(
+            chart.fg,
+            if use_colors {
+                Color::Yellow
+            } else {
+                Color::Reset
+            },
+            "use_colors={use_colors}"
+        );
+        assert_eq!(
+            strip.fg,
+            super::style::timeline_style(use_colors)
+                .fg
+                .unwrap_or(Color::Reset)
+        );
     }
+}
+
+#[test]
+fn usage_chart_stacks_heights_and_colors_each_cell_by_its_dot_majority() {
+    use crate::usage::Bin;
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (mut view, now) = event_fixture();
+    view.cell_aspect = 1.0;
+    let area = Rect::new(0, 0, 8, 2);
+    let [left, right] = super::timeline::cell_bins(area, 7, now);
+    for (lower_left, lower_right, color) in [
+        (3, 3, crate::theme::inline_code_color()),
+        (2, 2, Color::Yellow),
+        (1, 1, Color::Yellow),
+        (4, 1, crate::theme::inline_code_color()),
+    ] {
+        view.set_usage_totals(
+            [left, right]
+                .map(|bin| {
+                    (
+                        bin,
+                        Bin {
+                            input: 8,
+                            output: 0,
+                        },
+                    )
+                })
+                .into(),
+            [(left, lower_left), (right, lower_right)]
+                .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+                .into(),
+        );
+        for use_colors in [true, false] {
+            view.use_colors = use_colors;
+            let mut buf = Buffer::empty(area);
+            view.render_usage_chart(area, &mut buf, now);
+            for y in 0..2 {
+                assert_eq!(buf[(7, y)].symbol(), "⣿");
+                assert_eq!(
+                    buf[(7, y)].fg,
+                    if !use_colors {
+                        Color::Reset
+                    } else if y == 1 {
+                        color
+                    } else {
+                        Color::Yellow
+                    },
+                    "lower=({lower_left}, {lower_right}), y={y}, use_colors={use_colors}"
+                );
+            }
+        }
+    }
+    view.set_usage_totals(
+        [(left, 8), (right, 4), (left - 1, 1)]
+            .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+            .into(),
+        [(
+            right,
+            Bin {
+                input: 2,
+                output: 0,
+            },
+        )]
+        .into(),
+    );
+    let mut buf = Buffer::empty(area);
+    view.render_usage_chart(area, &mut buf, now);
+    assert_eq!(buf[(7, 0)].symbol(), "⡇");
+    assert_eq!(buf[(7, 1)].symbol(), "⣿");
+    assert_eq!(buf[(6, 1)].symbol(), "⢀");
+}
+
+#[test]
+fn usage_chart_shows_total_usage_without_a_selected_task() {
+    let (mut view, now) = event_fixture();
+    view.set_sessions(Vec::new(), false);
+    let bin = crate::usage::bin_of(now);
+    let bins = [(
+        bin,
+        crate::usage::Bin {
+            input: 1,
+            output: 0,
+        },
+    )]
+    .into();
+    view.set_usage_totals(bins, Default::default());
+    assert!(view.shows_usage());
+    let area = Rect::new(0, 0, 8, 2);
+    let mut buf = Buffer::empty(area);
+    view.render_usage_chart(area, &mut buf, now);
+    assert!(buf.content.iter().any(|cell| cell.symbol() != " "));
+    view.set_usage_totals(
+        [(bin, crate::usage::Bin::default())].into(),
+        Default::default(),
+    );
+    assert!(!view.shows_usage());
 }
 
 #[test]

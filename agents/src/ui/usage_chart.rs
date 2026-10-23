@@ -1,4 +1,4 @@
-//! The selected task's token usage, drawn in braille behind the task list: each dot column is one
+//! Active tasks' stacked token usage, drawn in braille behind the task list: each dot column is one
 //! bin, rising from the list's bottom as high as the bin's tokens, and the list's rows cover it.
 //! The chart looks at most half as tall as it is wide, so a tall list keeps it to its bottom part.
 
@@ -32,36 +32,43 @@ impl View {
         (*id == session.id).then_some(*percent)
     }
 
+    #[cfg(test)]
     pub(crate) fn set_usage(&mut self, id: &SessionKey, bins: BTreeMap<i64, Bin>) {
-        self.usage = Some((id.clone(), bins));
+        assert_eq!(self.selected_row().map(|session| &session.id), Some(id));
+        self.set_usage_totals(bins, BTreeMap::new());
     }
 
-    pub(crate) fn usage_session(&self) -> Option<&SessionKey> {
-        self.usage.as_ref().map(|(id, _)| id)
+    pub(crate) fn usage_width(&self, area: Rect) -> u16 {
+        self.center_layout(area).usage_chart.width
     }
 
-    /// The selected task's usage bins, when the view holds any.
-    fn selected_usage(&self) -> Option<&BTreeMap<i64, Bin>> {
-        let session = self.selected_row()?;
-        let (id, bins) = self.usage.as_ref()?;
-        (*id == session.id && !bins.is_empty()).then_some(bins)
+    pub(crate) fn set_usage_totals(
+        &mut self,
+        total: BTreeMap<i64, Bin>,
+        others: BTreeMap<i64, Bin>,
+    ) {
+        self.usage = total;
+        self.other_usage = others;
     }
 
     pub(super) fn shows_usage(&self) -> bool {
-        self.selected_usage().is_some()
+        self.usage.values().any(|bin| total(bin) != 0)
     }
 
-    /// Draws the selected task's usage up to now into the blank rows below the list's content in
-    /// `area`.
+    /// Draws active tasks' stacked token usage in the blank rows below the list's content.
     pub(super) fn render_usage_chart(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
-        let Some(bins) = self.selected_usage() else {
+        if !self.shows_usage() {
             return;
-        };
-        let max = chart_top(bins.values().map(total).collect());
+        }
+        let max = chart_top(self.usage.values().map(total).collect());
         let height = chart_rows(area, self.cell_aspect) * CELL_DOTS;
         let dots = |bin: i64| {
-            bins.get(&bin)
-                .map_or(0, |usage| dot_height(total(usage), max, height))
+            let all = self.usage.get(&bin).map_or(0, total);
+            let others = self.other_usage.get(&bin).map_or(0, total);
+            (
+                dot_height(all, max, height),
+                dot_height(others, max, height),
+            )
         };
         let content_bottom = (area.top()..area.bottom())
             .rev()
@@ -70,19 +77,26 @@ impl View {
         for y in content_bottom..area.bottom() {
             let floor = (area.bottom() - 1 - y) * CELL_DOTS;
             for x in area.left()..area.right() {
-                let bits = cell_bins(area, x, now)
-                    .iter()
-                    .zip(DOT_BITS)
-                    .map(|(&bin, column)| {
-                        let filled = usize::from(dots(bin).saturating_sub(floor).min(CELL_DOTS));
-                        column[..filled].iter().fold(0, |bits, bit| bits | bit)
-                    })
-                    .fold(0, |bits, column| bits | column);
+                let mut bits = 0;
+                let mut other_dots = 0;
+                let mut selected_dots = 0;
+                for (&bin, column) in cell_bins(area, x, now).iter().zip(DOT_BITS) {
+                    let (all, others) = dots(bin);
+                    let filled = usize::from(all.saturating_sub(floor).min(CELL_DOTS));
+                    let lower = usize::from(others.saturating_sub(floor).min(CELL_DOTS));
+                    bits |= column[..filled].iter().fold(0, |bits, bit| bits | bit);
+                    other_dots += lower;
+                    selected_dots += filled - lower;
+                }
                 if bits != 0 {
-                    let symbol = char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ');
-                    buf[(x, y)]
-                        .set_char(symbol)
-                        .set_style(super::style::timeline_style(self.use_colors));
+                    let symbol =
+                        char::from_u32(0x2800 + u32::from(bits)).expect("usage chart braille cell");
+                    let style = if self.use_colors && selected_dots >= other_dots {
+                        super::style::assistant_style()
+                    } else {
+                        super::style::timeline_style(self.use_colors)
+                    };
+                    buf[(x, y)].set_char(symbol).set_style(style);
                 }
             }
         }
@@ -118,6 +132,9 @@ fn chart_top(mut totals: Vec<u64>) -> u64 {
 /// Dots `tokens` rises to in a chart `height` dots tall whose top is `max`; any usage shows one.
 fn dot_height(tokens: u64, max: u64, height: u16) -> u16 {
     if tokens == 0 || max == 0 {
+        return 0;
+    }
+    if height == 0 {
         return 0;
     }
     let dots = (u128::from(tokens) * u128::from(height)).div_ceil(u128::from(max));
