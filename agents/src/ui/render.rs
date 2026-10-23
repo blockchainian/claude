@@ -638,7 +638,7 @@ impl View {
             layout.event_detail_top_rule,
             layout.footer_rule,
         ];
-        // A prompt the attention queue took over is framed in the attention color.
+        // A prompt the attention queue took over is framed by heavy rules in the attention color.
         let attention_prompt = self.attention_selection.is_some()
             && self.attention_selection.as_ref() == self.selected_id();
         for (index, border) in borders.iter().enumerate() {
@@ -649,7 +649,7 @@ impl View {
                 if attention_prompt && index < 2 {
                     line(
                         Span::styled(
-                            "─".repeat(usize::from(border.width)),
+                            "━".repeat(usize::from(border.width)),
                             style::attention_title_style(),
                         ),
                         *border,
